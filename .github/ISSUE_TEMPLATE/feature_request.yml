@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose a capability or an improvement.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and why is it hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How xPanel should behave. Link public documentation of comparable panels if useful.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options: [xPanel (account owner), xWHM (root / reseller), xMail (webmail), Installer / operations, Core libraries]
+    validations:
+      required: true

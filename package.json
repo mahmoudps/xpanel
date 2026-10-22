@@ -1,0 +1,28 @@
+{
+  "name": "xpanel",
+  "private": true,
+  "description": "Open-source web hosting control panel with per-account isolation, configuration files as the source of truth and a small footprint.",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mahmoudps/xpanel.git"
+  },
+  "homepage": "https://github.com/mahmoudps/xpanel#readme",
+  "bugs": {
+    "url": "https://github.com/mahmoudps/xpanel/issues"
+  },
+  "type": "module",
+  "packageManager": "pnpm@10.7.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "pnpm -r --parallel typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.5"
+  }
+}
