@@ -12,17 +12,29 @@
     "url": "https://github.com/mahmoudps/xpanel/issues"
   },
   "type": "module",
-  "packageManager": "pnpm@10.7.1",
+  "packageManager": "pnpm@12.15.0",
   "engines": {
-    "node": ">=24"
+    "node": ">=26.12.1 <27"
   },
   "scripts": {
-    "test": "vitest run",
+    "start": "node apps/api/src/main.ts",
+    "start:agent": "node apps/agent/src/main.ts",
+    "cli": "node apps/api/src/main.ts xpanel",
+    "test": "node scripts/test-suite.mjs portable",
+    "test:unit": "node scripts/test-suite.mjs unit",
+    "test:http": "node scripts/test-suite.mjs http",
+    "test:linux": "node scripts/test-suite.mjs linux",
+    "test:browser": "node scripts/test-suite.mjs browser",
+    "test:all": "node scripts/test-suite.mjs all",
     "typecheck": "pnpm -r --parallel typecheck"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "typescript": "~6.0.3",
-    "vitest": "^5.0.5"
+    "@playwright/test": "1.64.1",
+    "@types/node": "catalog:",
+    "@types/ws": "8.18.2",
+    "axe-core": "4.14.0",
+    "es-module-lexer": "3.0.4",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
   }
 }

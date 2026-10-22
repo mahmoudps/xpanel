@@ -146,7 +146,7 @@ describe('renderPostfixMaps', () => {
         { local: 'sales', passwordHash: ARGON, quotaMb: 100, suspendIncoming: true },
       ],
       forwarders: [
-        { local: 'team', to: ['info@example.com', 'Boss@Gmail.com'] },
+        { local: 'team', to: ['info@example.com', 'recipient-4@example.net'] },
         { local: 'info', to: ['archive@example.net'] },
       ],
       defaultAddress: { kind: 'forward', to: ['info@example.com'] },
@@ -171,7 +171,7 @@ describe('renderPostfixMaps', () => {
 
   it('renders forwarders, keeps a copy for forwarded mailboxes and guards mailboxes from the catch-all', () => {
     const aliases = file('virtual_aliases')
-    expect(aliases).toContain('team@example.com\tinfo@example.com,boss@gmail.com\n')
+    expect(aliases).toContain('team@example.com\tinfo@example.com,recipient-4@example.net\n')
     expect(aliases).toContain('info@example.com\tinfo@example.com,archive@example.net\n')
     expect(aliases).toContain('sales@example.com\tsales@example.com\n')
     expect(aliases).toContain('@example.com\tinfo@example.com\n')

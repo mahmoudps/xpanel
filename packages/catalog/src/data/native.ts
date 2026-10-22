@@ -1,11 +1,11 @@
 // xPanel-native tools: capabilities with no public cPanel/aaPanel equivalent
 // to take as-is (CSF/LFD-style detection, live monitors, health centers, CageFS-style isolation).
 // Behavior is our own design, built on per-account systemd slices, nftables and the reconciler.
-import type { CatalogTool, ToolSpec } from '../types.ts'
+import type { ToolDefinition, ToolSpec } from '../types.ts'
 import { absorbedIntoNative } from './absorbed.ts'
 
 interface NativeTool {
-  tool: Omit<CatalogTool, 'acceptanceTest' | 'status'>
+  tool: Omit<ToolDefinition, 'status'>
   behaviors: string[]
   acceptance: string
 }
@@ -498,7 +498,7 @@ const NATIVE: NativeTool[] = [
   },
 ]
 
-export const nativeTools: CatalogTool[] = NATIVE.map(n => ({ ...n.tool, acceptanceTest: null, status: 'planned' }))
+export const nativeTools: ToolDefinition[] = NATIVE.map(n => ({ ...n.tool, status: 'researched' }))
 
 export const nativeSpecs: ToolSpec[] = NATIVE.map(n => ({
   id: n.tool.id,

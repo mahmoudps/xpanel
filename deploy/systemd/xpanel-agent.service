@@ -1,0 +1,27 @@
+[Unit]
+Description=xPanel Privileged Host Reconciler & Isolation Agent
+After=network-online.target systemd-sysctl.service systemd-tmpfiles-setup.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=xpanel-agent
+SupplementaryGroups=xpanel
+RuntimeDirectory=xpanel
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=no
+WorkingDirectory=/opt/xpanel
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/xpanel/runtime.env
+Environment=XPANEL_GENERATIONS_DIR=/var/lib/xpanel/generations
+Environment=XPANEL_LOG_DIR=/var/log/xpanel
+Environment=XPANEL_RUN_DIR=/run/xpanel
+ExecStartPre=/usr/bin/test -f /var/lib/xpanel/control.db
+ExecStart=/usr/bin/node --max-old-space-size=64 /opt/xpanel/apps/agent/src/main.ts
+Restart=always
+RestartSec=2
+UMask=0007
+
+[Install]
+WantedBy=multi-user.target

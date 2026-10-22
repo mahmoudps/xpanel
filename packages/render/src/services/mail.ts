@@ -61,21 +61,24 @@ export const MAX_MAILBOX_QUOTA_MB = 16 * 1024 * 1024
 const B64 = '[A-Za-z0-9+/]'
 const CRYPT = '[./A-Za-z0-9]'
 const HASH_RES: Record<string, RegExp> = {
-  ARGON2ID: new RegExp(`^\\$argon2id\\$v=19\\$m=\\d{1,7},t=\\d{1,3},p=\\d{1,3}\\$${B64}{11,64}\\$${B64}{16,128}$`),
-  ARGON2I: new RegExp(`^\\$argon2i\\$v=19\\$m=\\d{1,7},t=\\d{1,3},p=\\d{1,3}\\$${B64}{11,64}\\$${B64}{16,128}$`),
+  ARGON2ID: new RegExp(`^\\$argon2id\\$v=19\\$m=(\\d{1,7}),t=\\d{1,3},p=\\d{1,3}\\$${B64}{11,64}\\$${B64}{16,128}$`),
   'SHA512-CRYPT': new RegExp(`^\\$6\\$(?:rounds=\\d{1,9}\\$)?${CRYPT}{1,16}\\$${CRYPT}{86}$`),
   'BLF-CRYPT': new RegExp(`^\\$2[aby]\\$\\d{2}\\$${CRYPT}{53}$`),
 }
 
 export const DOVECOT_HASH_SCHEMES = Object.keys(HASH_RES)
 
-/** Accepts only known schemes with a strict body, so ':' or whitespace can never reach the file. */
+/** Accepts only known schemes with a strict body, refuses argon2i, and enforces m >= 65536 on ARGON2ID. */
 export const assertDovecotHash = (v: unknown): string => {
   const s = assertString('password hash', v, 512)
   const m = /^\{([A-Z0-9-]+)\}(.+)$/.exec(s)
   const re = m ? HASH_RES[m[1] as string] : undefined
   if (!m || !re) return invalid('password hash', '[redacted]', `must be {${DOVECOT_HASH_SCHEMES.join('|')}}<hash>`)
-  if (!re.test(m[2] as string)) return invalid('password hash', '[redacted]', `is not a well-formed ${m[1]} hash`)
+  const bodyMatch = re.exec(m[2] as string)
+  if (!bodyMatch) return invalid('password hash', '[redacted]', `is not a well-formed ${m[1]} hash`)
+  if (m[1] === 'ARGON2ID' && Number(bodyMatch[1]) < 65_536) {
+    return invalid('password hash', '[redacted]', 'ARGON2ID memory cost m must be at least 65536 KiB (64 MiB)')
+  }
   return s
 }
 

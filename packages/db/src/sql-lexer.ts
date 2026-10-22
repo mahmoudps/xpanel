@@ -101,10 +101,24 @@ export const stripComments = (sql: string): string =>
     .map((s) => (s.kind === 'comment' ? ' ' : s.text))
     .join('')
 
-/** Top-level statements (split on ';' outside literals), comments removed, trimmed, non-empty. */
+const CREATE_TRIGGER_RE = /^\s*CREATE\s+(?:TEMP(?:ORARY)?\s+)?TRIGGER\b/i
+
+const triggerBlockDepth = (codeFragments: readonly string[]): number => {
+  const joined = codeFragments.join(' ')
+  let depth = 0
+  for (const m of joined.matchAll(/\b(BEGIN|CASE|END)\b/gi)) {
+    const word = (m[1] as string).toUpperCase()
+    if (word === 'BEGIN' || word === 'CASE') depth++
+    else if (word === 'END' && depth > 0) depth--
+  }
+  return depth
+}
+
+/** Top-level statements (split on ';' outside literals and trigger bodies), comments removed, trimmed, non-empty. */
 export const splitStatements = (sql: string): string[] => {
   const statements: string[] = []
   let current = ''
+  let codeParts: string[] = []
   for (const s of lexSql(sql)) {
     if (s.kind === 'comment') {
       current += ' '
@@ -116,9 +130,16 @@ export const splitStatements = (sql: string): string[] => {
     }
     const parts = s.text.split(';')
     current += parts[0]
+    codeParts.push(parts[0] as string)
     for (const part of parts.slice(1)) {
-      statements.push(current)
-      current = part
+      if (CREATE_TRIGGER_RE.test(current) && triggerBlockDepth(codeParts) > 0) {
+        current += `;${part}`
+        codeParts.push(part)
+      } else {
+        statements.push(current)
+        current = part
+        codeParts = [part]
+      }
     }
   }
   statements.push(current)

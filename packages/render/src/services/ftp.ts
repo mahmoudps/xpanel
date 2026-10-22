@@ -43,7 +43,14 @@ const FTP_HASH_RES = [
 
 export const assertFtpHash = (v: unknown): string => {
   const s = assertString('FTP password hash', v, 512)
-  return FTP_HASH_RES.some((re) => re.test(s)) ? s : invalid('FTP password hash', '[redacted]', 'must be a SHA-512, bcrypt or argon2id crypt hash')
+  if (!FTP_HASH_RES.some((re) => re.test(s))) {
+    return invalid('FTP password hash', '[redacted]', 'must be a SHA-512, bcrypt or argon2id crypt hash')
+  }
+  const mCost = /^\$argon2id\$v=19\$m=(\d+),/.exec(s)
+  if (mCost && Number(mCost[1]) < 65_536) {
+    return invalid('FTP password hash', '[redacted]', 'argon2id memory cost m must be at least 65536 KiB (64 MiB)')
+  }
+  return s
 }
 
 export const normalizeFtpLogin = (v: unknown, username: string): string => {

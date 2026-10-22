@@ -42,7 +42,7 @@ export const DEFAULT_LAYOUT: UpgradeLayout = {
 
 export interface ReleaseInfo {
   version: string
-  /** control-DB schema number this release expects */
+  /** SQLite index schema number this release expects */
   schemaVersion: number
   /** the downloaded release tarball, directly inside layout.downloadsDir */
   archivePath: string
@@ -60,7 +60,8 @@ export interface UpgradePlan {
   canary: string | null
   /** the panel's own units: restarted to load new code. Shared services are only reloaded. */
   panelUnits?: string[]
-  controlDb?: { name: string; osUser: string }
+  /** OS account owning /var/lib/xpanel/state and snapshots, default 'xpanel' */
+  panelUser?: string
   health?: { attempts: number; intervalMs: number }
   layout?: Partial<UpgradeLayout>
 }
@@ -97,7 +98,7 @@ interface NormalizedPlan {
   release: ReleaseInfo
   canary: string | null
   panelUnits: string[]
-  controlDb: { name: string; osUser: string }
+  panelUser: string
   health: { attempts: number; intervalMs: number }
   layout: UpgradeLayout
 }
@@ -106,18 +107,17 @@ export const DEFAULT_PANEL_UNITS: readonly string[] = ['xpanel-api.service', 'xp
 /** The flow itself runs in this oneshot unit, so restarting the API and agent does not kill it. */
 export const UPGRADE_UNIT = 'xpanel-upgrade.service'
 
-const PG_IDENT = /^[a-z_][a-z0-9_]{0,62}$/
 const SYS_USER = /^[a-z_][a-z0-9_-]{0,31}$/
 
 /** Paths an upgrade may never write or pass to a command: homes, mail stores, customer databases. */
 export const isCustomerDataPath = (p: string): boolean =>
   isUnderHomes(p) || ['/var/mail', '/var/vmail', '/var/spool/mail', '/var/lib/mysql', '/var/lib/mariadb'].some((r) => isUnder(p, r))
 
-const pgDumpArgv = (t: LifecycleTools, db: string, file: string): string[] =>
-  [t.pgDump, '--no-password', '--format=custom', `--file=${file}`, `--dbname=${db}`]
+const stateSnapshotArgv = (t: LifecycleTools, stateDir: string, file: string): string[] =>
+  [t.tar, '--create', '--gzip', `--file=${file}`, `--directory=${stateDir}`, 'state']
 
-const pgRestoreArgv = (t: LifecycleTools, db: string, file: string): string[] =>
-  [t.pgRestore, '--no-password', '--clean', '--if-exists', '--single-transaction', '--exit-on-error', `--dbname=${db}`, file]
+const stateRestoreArgv = (t: LifecycleTools, stateDir: string, file: string): string[] =>
+  [t.tar, '--extract', '--gzip', `--file=${file}`, `--directory=${stateDir}`, '--no-same-owner']
 
 const releaseUnpackArgv = (t: LifecycleTools, archive: string, dir: string): string[] =>
   [t.tar, '--extract', '--gzip', `--file=${archive}`, `--directory=${dir}`, '--no-same-owner', '--no-overwrite-dir']
@@ -165,16 +165,15 @@ export const normalizeUpgradePlan = (p: UpgradePlan): NormalizedPlan => {
   if (posix.dirname(r.archivePath) !== layout.downloadsDir) fail('VALIDATION', `release archive must be inside ${layout.downloadsDir}`)
   if (!isSha256(r.sha256)) fail('VALIDATION', 'release sha256 must be 64 lowercase hex characters')
   if (!isNonNegInt(r.bytes) || r.bytes === 0) fail('VALIDATION', 'release bytes must be a positive integer')
-  const controlDb = p.controlDb ?? { name: 'xpanel', osUser: 'postgres' }
-  if (!PG_IDENT.test(controlDb.name)) fail('VALIDATION', 'invalid control database name')
-  if (!SYS_USER.test(controlDb.osUser)) fail('VALIDATION', 'invalid control database os user')
+  const panelUser = p.panelUser ?? 'xpanel'
+  if (!SYS_USER.test(panelUser)) fail('VALIDATION', 'invalid panel os user')
   return {
     actor,
     tools: lifecycleTools(p.os),
     release: { version: r.version, schemaVersion: r.schemaVersion, archivePath: r.archivePath, sha256: r.sha256, bytes: r.bytes },
     canary: p.canary === null ? null : assertUsername(p.canary, 'canary account'),
     panelUnits: normalizePanelUnits(p.panelUnits ?? DEFAULT_PANEL_UNITS),
-    controlDb: { name: controlDb.name, osUser: controlDb.osUser },
+    panelUser,
     health: normalizeHealth(p.health),
     layout,
   }
@@ -421,13 +420,11 @@ const finish = async (c: Ctx, outcome: FinalOutcome, reason: string | null): Pro
   if (c.recordId) {
     const id = c.recordId
     await bestEffort(c, 'history', async () => {
-      // a snapshot restore rewinds the row to the phase it had when the dump was taken
       if (outcome === 'rolled_back' || outcome === 'rollback_failed') await c.ports.history.setPhase(id, 'rollback')
       await c.ports.history.finish(id, {
         status: outcome === 'succeeded' ? 'succeeded' : outcome === 'rolled_back' ? 'rolled_back' : 'failed',
         healthReport: report(c),
         error: outcome === 'succeeded' ? null : [reason, ...c.rollbackErrors].filter(Boolean).join('; '),
-        // a pre-switch failure may leave some expand-only migrations applied; the row does not guess
         toSchemaVersion: outcome === 'succeeded' ? c.plan.release.schemaVersion : outcome === 'rolled_back' ? c.fromSchema : null,
       })
     }, false)
@@ -456,11 +453,16 @@ const rollback = async (c: Ctx, cause: unknown, releaseDir: string): Promise<Upg
   const prevTarget = c.previousTarget as string
   const prevGen = c.previousGeneration as GenerationId
   const snapshot = c.snapshot as string
-  const db = c.plan.controlDb
+  const panelUser = c.plan.panelUser
   await bestEffort(c, 'rollback:phase', () => c.ports.history.setPhase(c.recordId as string, 'rollback'), false)
   await bestEffort(c, 'rollback:link', () => pointCurrentAt(c, prevTarget, '-rollback'), true)
   await bestEffort(c, 'rollback:stop-panel', () => panelUnits(c, 'rollback:stop-panel', 'stop'), true)
-  await bestEffort(c, 'rollback:database', () => run(c, 'rollback:database', { kind: 'exec', argv: pgRestoreArgv(c.plan.tools, db.name, snapshot), runAsUser: db.osUser }), true)
+  await bestEffort(
+    c,
+    'rollback:state',
+    () => run(c, 'rollback:state', { kind: 'exec', argv: stateRestoreArgv(c.plan.tools, c.plan.layout.stateDir, snapshot), runAsUser: panelUser }),
+    true,
+  )
   await bestEffort(c, 'rollback:start-panel', () => panelUnits(c, 'rollback:start-panel', 'start'), true)
   await bestEffort(c, 'rollback:generation', async () => {
     const r = await c.ports.reconciler.activate(prevGen)
@@ -478,13 +480,13 @@ const rollback = async (c: Ctx, cause: unknown, releaseDir: string): Promise<Upg
 
 const snapshotStep = async (c: Ctx): Promise<void> => {
   const l = c.plan.layout
-  const file = posix.join(l.snapshotsDir, `${c.stamp}.dump`)
-  const db = c.plan.controlDb
+  const file = posix.join(l.snapshotsDir, `${c.stamp}.tar.gz`)
+  const panelUser = c.plan.panelUser
   await enterPhase(c, 'snapshot', { snapshotPath: file })
-  await run(c, 'snapshot:dir', { kind: 'ensure-dir', path: l.snapshotsDir, mode: 0o700, owner: db.osUser, group: db.osUser })
+  await run(c, 'snapshot:dir', { kind: 'ensure-dir', path: l.snapshotsDir, mode: 0o700, owner: panelUser, group: panelUser })
   if (await c.fs.exists(file)) throw new Error(`snapshot ${file} already exists`)
-  await run(c, 'snapshot', { kind: 'exec', argv: pgDumpArgv(c.plan.tools, db.name, file), runAsUser: db.osUser })
-  if (!(await c.fs.exists(file))) throw new Error(`pg_dump did not produce ${file}`)
+  await run(c, 'snapshot', { kind: 'exec', argv: stateSnapshotArgv(c.plan.tools, l.stateDir, file), runAsUser: panelUser })
+  if (!(await c.fs.exists(file))) throw new Error(`tar snapshot did not produce ${file}`)
   c.snapshot = file
   c.previousGeneration = await c.ports.reconciler.currentGeneration()
   log(c, 'generation', true, `previous generation ${c.previousGeneration}`)
@@ -677,9 +679,9 @@ export const readLock = async (fs: FsPort, path: string): Promise<LockInfo | nul
 }
 
 /**
- * Side-by-side upgrade: preflight, snapshot, unpack next to the running release,
+ * Side-by-side upgrade: preflight, state snapshot, unpack next to the running release,
  * expand-only migrations, atomic link switch, reconcile with reloads, health gate.
- * Any failure after the switch rolls the link, the control DB and the generation back.
+ * Any failure after the switch rolls the link, the state tree and the generation back.
  */
 export const runUpgrade = async (ports: UpgradePorts, input: UpgradePlan): Promise<UpgradeResult> => {
   const c = newCtx(ports, normalizeUpgradePlan(input))

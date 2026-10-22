@@ -1,9 +1,11 @@
 import { defineConfig } from 'vitest/config'
+import { testLayerConfig } from './scripts/test-layers.mjs'
 
 export default defineConfig({
   test: {
-    include: ['packages/*/src/**/*.test.ts'],
-    exclude: ['**/node_modules/**'],
+    ...testLayerConfig(process.env.XPANEL_TEST_LAYER),
     environment: 'node',
+    maxWorkers: 4,
+    testTimeout: 30_000,
   },
 })

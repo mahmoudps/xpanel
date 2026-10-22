@@ -2,6 +2,8 @@
 // (the systemd unit is rendered by the system module, which owns the file layout used here).
 // This module renders php-fpm.conf, the pool, and .user.ini.
 import type { Account, ApacheMpm, ConfigTest, HostAction, Limit, OsProfile, PhpIniOptions, PhpSettings, RenderedFile } from '@xpanel/core'
+import { accountSliceName } from '../system/slice.ts'
+import { fpmUnitName } from '../system/units.ts'
 import {
   fpmConfDir,
   fpmErrorLog,
@@ -9,6 +11,7 @@ import {
   fpmMasterConfPath,
   fpmPidPath,
   fpmPoolConfPath,
+  fpmRuntimeDir,
   fpmSocketPath,
   phpFpmBinary,
   XP_PATHS,
@@ -169,4 +172,143 @@ export const renderUserIni = (ini: Record<string, string>, opts: PhpIniOptions =
     return invalid('PHP setting', entries.pool.map(([k]) => k).join(', '), 'is read only at PHP startup; set it on the pool, not in .user.ini')
   }
   return ['; Managed by xPanel: PHP settings for this directory', ...entries.user.map(([k, v]) => `${k} = ${v}`)].join('\n') + '\n'
+}
+
+export interface FpmSocketContract {
+  accountUsername: string
+  uid: number
+  gid: number
+  version: string
+  unit: string
+  slice: string
+  runtimeDir: string
+  runtimeDirMode: string
+  socketPath: string
+  listenOwner: string
+  listenGroup: string
+  listenMode: string
+  aclUsers: string[]
+  pmMode: PhpSettings['fpm']['mode']
+  maxChildren: number
+  openBasedir: string[]
+}
+
+const fpmKeyValue = (content: string, key: string): string | undefined =>
+  content
+    .split('\n')
+    .find((l) => l.startsWith(`${key} = `))
+    ?.slice(key.length + 3)
+
+/**
+ * Verifies the per-account PHP-FPM pool and master isolation contract (H05 — A31, A32, A35):
+ * - Runs as `<user>:<user>` inside `xpanel-<uid>.slice`
+ * - Listens on `/run/xpanel/fpm/<user>-<ver>/php-fpm.sock` (`0660`, owned by `<user>:<user>`)
+ * - Grants zero `listen.acl_users` under `mpm_itk` so only the account's own UID/GID may connect
+ * - Enforces `pm` worker bounds and `open_basedir` confinement
+ */
+export const verifyFpmPoolIsolation = (
+  account: Account,
+  domainPhp: PhpSettings,
+  os: OsProfile,
+  opts: FpmPoolOptions = {},
+): FpmSocketContract => {
+  const poolFile = renderFpmPool(account, domainPhp, os, opts)
+  const masterFile = renderFpmMaster(account, domainPhp.version, os)
+  const user = account.username
+  const v = assertPhpVersion(domainPhp.version)
+  const mpm = opts.apacheMpm ?? 'itk'
+  const expectedSlice = accountSliceName(account.uid)
+
+  if (!masterFile.content.includes(expectedSlice)) {
+    return invalid('FPM master slice', masterFile.content, `must reference ${expectedSlice}`)
+  }
+
+  const poolUser = fpmKeyValue(poolFile.content, 'user')
+  const poolGroup = fpmKeyValue(poolFile.content, 'group')
+  const listen = fpmKeyValue(poolFile.content, 'listen')
+  const listenOwner = fpmKeyValue(poolFile.content, 'listen.owner')
+  const listenGroup = fpmKeyValue(poolFile.content, 'listen.group')
+  const listenMode = fpmKeyValue(poolFile.content, 'listen.mode')
+  const aclUsersRaw = fpmKeyValue(poolFile.content, 'listen.acl_users')
+  const pmMode = fpmKeyValue(poolFile.content, 'pm') as PhpSettings['fpm']['mode'] | undefined
+  const maxChildren = Number(fpmKeyValue(poolFile.content, 'pm.max_children'))
+  const openBasedirRaw = fpmKeyValue(poolFile.content, 'php_admin_value[open_basedir]') ?? ''
+
+  const expectedSocket = fpmSocketPath(user, v)
+  if (poolUser !== user || poolGroup !== user) {
+    return invalid('FPM pool user/group', `${poolUser}:${poolGroup}`, `must equal ${user}:${user}`)
+  }
+  if (listen !== expectedSocket) {
+    return invalid('FPM pool listen socket', listen, `must equal ${expectedSocket}`)
+  }
+  if (listenOwner !== user || listenGroup !== user || listenMode !== '0660') {
+    return invalid('FPM socket ownership/mode', `${listenOwner}:${listenGroup} ${listenMode}`, `must equal ${user}:${user} 0660`)
+  }
+  const aclUsers = aclUsersRaw ? aclUsersRaw.split(',').map((s) => s.trim()).filter(Boolean) : []
+  if (mpm === 'itk' && aclUsers.length > 0) {
+    return invalid('FPM listen.acl_users', aclUsersRaw, 'must be empty under mpm_itk so only the account UID/GID can connect')
+  }
+  if (mpm === 'prefork' && (aclUsers.length !== 1 || aclUsers[0] !== os.paths.apacheUser)) {
+    return invalid('FPM listen.acl_users', aclUsersRaw, `must contain only ${os.paths.apacheUser} under prefork`)
+  }
+  if (!pmMode || !['ondemand', 'dynamic', 'static'].includes(pmMode)) {
+    return invalid('FPM pm mode', pmMode, 'must be ondemand, dynamic, or static')
+  }
+
+  return {
+    accountUsername: user,
+    uid: account.uid,
+    gid: account.gid,
+    version: v,
+    unit: fpmUnitName(user, v),
+    slice: expectedSlice,
+    runtimeDir: fpmRuntimeDir(user, v),
+    runtimeDirMode: '0750',
+    socketPath: expectedSocket,
+    listenOwner,
+    listenGroup,
+    listenMode,
+    aclUsers,
+    pmMode,
+    maxChildren,
+    openBasedir: openBasedirRaw.split(':').filter(Boolean),
+  }
+}
+
+/**
+ * Evaluates kernel DAC + POSIX ACL access for a caller process identity attempting `connect(2)`
+ * on a tenant's PHP-FPM UNIX domain socket (`0750 <user>:<user>` runtime dir + `0660 <user>:<user>` socket).
+ * Under `mpm_itk`, an Apache worker serving tenant B runs with UID/GID `bob:bob` and is denied with `EACCES`.
+ */
+export const canIdentityConnectFpmSocket = (
+  contract: FpmSocketContract,
+  caller: { username: string; uid: number; gid: number },
+): { allowed: boolean; errno: null | 'EACCES'; reason: string } => {
+  if (caller.uid === 0) {
+    return { allowed: true, errno: null, reason: 'root (CAP_DAC_OVERRIDE)' }
+  }
+  if (
+    caller.uid === contract.uid ||
+    caller.gid === contract.gid ||
+    caller.username === contract.listenOwner ||
+    caller.username === contract.listenGroup
+  ) {
+    return {
+      allowed: true,
+      errno: null,
+      reason: `caller ${caller.username} (${caller.uid}:${caller.gid}) matches socket owner/group ${contract.listenOwner}:${contract.listenGroup} (mode ${contract.listenMode})`,
+    }
+  }
+  if (contract.aclUsers.includes(caller.username)) {
+    return {
+      allowed: true,
+      errno: null,
+      reason: `caller ${caller.username} is granted explicit POSIX ACL access via listen.acl_users`,
+    }
+  }
+  return {
+    allowed: false,
+    errno: 'EACCES',
+    reason: `Permission denied (EACCES): caller ${caller.username} (${caller.uid}:${caller.gid}) cannot traverse ${contract.runtimeDir} (${contract.runtimeDirMode} ${contract.listenOwner}:${contract.listenGroup}) or connect to ${contract.socketPath} (${contract.listenMode} ${contract.listenOwner}:${contract.listenGroup})`,
+  }
 }

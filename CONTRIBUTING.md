@@ -1,40 +1,47 @@
 # Contributing to xPanel
 
-Thank you for helping build xPanel. This guide covers how to set up, what a good change looks like, and how it gets merged.
+Thank you for helping build xPanel. The project is prelaunch; contributions must preserve accurate delivery claims as well as working code.
 
 ## Before you start
 
-- Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the system works and [docs/STANDARDS.md](docs/STANDARDS.md) for the rules every change follows.
+- Read [architecture](docs/ARCHITECTURE.md), [engineering standards](docs/STANDARDS.md) and [current status](docs/STATUS.md).
 - For anything larger than a small fix, open an issue first so the approach can be agreed before you write code.
-- Security problems are never reported in public issues — see [SECURITY.md](SECURITY.md).
+- Report security problems privately through [SECURITY.md](SECURITY.md).
 
-## Setup
+## Setup and verification
 
-Requirements: Node.js 24 and pnpm 10.
+Install and activate Node 26.12.1 and pnpm 12.15.0. Their authoritative pins are [.node-version](.node-version) and [package.json](package.json).
 
 ```bash
-pnpm install
-pnpm test        # all unit and integration tests
-pnpm typecheck   # TypeScript in every workspace package
+node scripts/toolchain.mjs --check
+node scripts/toolchain.mjs pnpm install --frozen-lockfile
+node scripts/toolchain.mjs pnpm typecheck
+node scripts/toolchain.mjs pnpm test
 ```
 
-Packages are TypeScript source run by Node's type stripping. Relative imports end in `.ts`; enums, namespaces and constructor parameter properties are not used.
+Run these commands from the repository root. The launcher validates existing pinned tools and does not install a runtime or change global tools. TypeScript source uses native type stripping, explicit `.ts` imports and `import type`; avoid enums, namespaces and constructor parameter properties.
+
+Follow [TESTING.md](docs/TESTING.md) for Chromium, synthetic UI and native Linux commands. Missing browser or Linux prerequisites are blocked checks, never passing results. Native tests require a deliberately disposable VM; do not run them on a workstation or a server containing useful workloads.
 
 ## What a good change looks like
 
-- **Complete.** xPanel has not launched, so a change replaces old code outright and updates every caller. No compatibility shims, deprecated paths, `TODO`s or dead code.
-- **In the right layer.** Domain rules and renderers stay pure; only the agent touches the host, through the host-action contract.
-- **One source of truth.** Import types, constants, schemas and validation rules from where they are defined; never copy them.
-- **Tested.** New behavior comes with tests next to the code (`*.test.ts`), including invalid input, limits and failure paths.
-- **Secure.** Validate input at the boundary and again where it becomes a path, unit name, config line or SQL identifier. Use argv arrays, never shell strings.
-- **Light.** Prefer the platform and existing dependencies. A new dependency needs a reason, a permissive license and an active upstream.
-- **English.** Code, comments, commits and docs are in English; user-facing text goes through translation catalogs.
+- **Complete:** update callers, validation, errors, tests and documentation together. Remove replaced code rather than leaving competing implementations or dormant compatibility branches.
+- **In the right layer:** keep rules and renderers pure. The API must not execute privileged host commands; the agent owns host side effects through explicit contracts.
+- **Authoritative:** import types, schemas, constants and rules from their defining module. Preserve the distinction between desired configuration and identity/security authority.
+- **Tested:** cover observable behavior, invalid input, authorization, limits and relevant failure paths. Add positive controls so denial tests cannot pass because all operations are disabled.
+- **Secure:** validate boundary inputs and their use as paths, identifiers, unit names or configuration. Use argv arrays and timeouts for external commands. Never commit credentials, state databases or customer data.
+- **Bounded:** stream large content, constrain concurrency and response size, and measure changes that affect resource budgets.
+- **Accessible:** use translated user-facing text, ASCII digits, keyboard access and correct field alignment in English and Arabic. Verify geometry in a real browser.
+- **Honest:** distinguish fixtures, portable execution, real browsers, native Linux and live services. Do not mark a catalog capability verified from a test name or rendered page.
+
+Code, comments, commits and technical documentation use English. User-facing translations may use their target language.
 
 ## Commits and pull requests
 
-- Use [Conventional Commits](https://www.conventionalcommits.org/): `feat(render): add OpenLiteSpeed vhost`, `fix(core): reject wildcard primary domains`.
-- Keep pull requests focused. Describe what changed, why, and how it was tested.
-- `pnpm test` and `pnpm typecheck` must pass.
+- Use [Conventional Commits](https://www.conventionalcommits.org/), for example `fix(core): reject wildcard primary domains`.
+- Keep pull requests focused. Explain the concrete behavior change, why it is needed, the verification performed and remaining limits.
+- Portable tests and all workspace typechecks must pass. Run additional browser, native or service checks where the change affects their contracts.
+- Review dependency changes against the [runtime policy](docs/decisions/runtime.md), including exact pins, lockfile integrity and production exclusions.
 
 ## Contributor License Agreement
 

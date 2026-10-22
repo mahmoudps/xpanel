@@ -5,8 +5,7 @@ import { catalogKeys } from './i18n.ts'
 import arCatalog from './locales/ar.json' with { type: 'json' }
 
 const ar: Record<string, string> = arCatalog
-import { readyTools } from './data/ready.ts'
-import { isVisible } from './visibility.ts'
+import { isVisible, visibleTools } from './visibility.ts'
 import type { CatalogTool } from './types.ts'
 
 const ACLS = new Set([
@@ -19,9 +18,9 @@ const root: Principal = { kind: 'root', id: 'r', username: 'root' }
 const reseller: Principal = { kind: 'reseller', id: 'rs1', username: 'reseller1' }
 const user: Principal = { kind: 'user', id: 'u1', username: 'alice', accountId: 'a1' }
 
-const ready = (over: Partial<CatalogTool>): CatalogTool => ({
+const verified = (over: Partial<CatalogTool>): CatalogTool => ({
   id: 't', surface: 'xpanel', groupId: 'files', name: 'T', summary: '', featureKey: 'filemanager',
-  resellerAcl: null, rootOnly: false, entity: 'file', acceptanceTest: 'test', status: 'ready', ...over,
+  resellerAcl: null, rootOnly: false, entity: 'file', status: 'verified', delivery: { status: 'verified', reason: 'Synthetic visibility fixture.', evidence: [] }, ...over,
 })
 
 describe('catalog data', () => {
@@ -60,34 +59,70 @@ describe('catalog data', () => {
     expect(missing).toEqual([])
   })
 
-  it('only declares readiness for existing, in-scope tools', () => {
-    const byId = new Map(tools.map(t => [t.id, t]))
-    for (const id of Object.keys(readyTools)) expect(byId.get(id)?.status, id).toBe('ready')
+  it('reviews every definition without promoting declarations to verified delivery', () => {
+    expect(tools).toHaveLength(593)
+    expect(tools.filter(tool => tool.status === 'researched')).toHaveLength(530)
+    expect(tools.filter(tool => tool.status === 'out-of-scope')).toHaveLength(63)
+    expect(tools.filter(tool => tool.status === 'verified')).toEqual([])
+    for (const tool of tools) {
+      expect(tool.status).toBe(tool.delivery.status)
+      expect(tool.delivery.reason.trim(), tool.id).not.toBe('')
+      expect(tool.delivery.evidence, tool.id).toEqual([])
+    }
   })
 })
 
 describe('visibility', () => {
-  it('never shows planned or out-of-scope tools', () => {
-    expect(isVisible(ready({ status: 'planned' }), { principal: root })).toBe(false)
-    expect(isVisible(ready({ status: 'out-of-scope' }), { principal: user })).toBe(false)
+  it('never shows unverified or out-of-scope tools', () => {
+    expect(isVisible(verified({ status: 'researched' }), { principal: root })).toBe(false)
+    expect(isVisible(verified({ status: 'out-of-scope' }), { principal: user, disabledFeatures: new Set() })).toBe(false)
+  })
+
+  it('denies feature-gated verified tools when feature authority is missing', () => {
+    expect(isVisible(verified({}), { principal: user })).toBe(false)
+    expect(isVisible(verified({}), { principal: user, disabledFeatures: new Set() })).toBe(true)
+    expect(isVisible(verified({ featureKey: null }), { principal: user })).toBe(true)
   })
 
   it('hides xPanel tools disabled by the feature list', () => {
-    const t = ready({})
-    expect(isVisible(t, { principal: user })).toBe(true)
+    const t = verified({})
+    expect(isVisible(t, { principal: user, disabledFeatures: new Set() })).toBe(true)
     expect(isVisible(t, { principal: user, disabledFeatures: new Set(['filemanager']) })).toBe(false)
   })
 
   it('shows account tools only to account owners and server tools only to root/resellers', () => {
-    expect(isVisible(ready({}), { principal: root })).toBe(false)
-    expect(isVisible(ready({ surface: 'xwhm', featureKey: null }), { principal: user })).toBe(false)
+    expect(isVisible(verified({}), { principal: root })).toBe(false)
+    expect(isVisible(verified({ surface: 'xwhm', featureKey: null }), { principal: user, disabledFeatures: new Set() })).toBe(false)
   })
 
   it('gates xWHM tools by reseller ACL and hides root-only tools from resellers', () => {
-    const dns = ready({ surface: 'xwhm', featureKey: null, resellerAcl: 'manage-dns' })
+    const dns = verified({ surface: 'xwhm', featureKey: null, resellerAcl: 'manage-dns' })
     expect(isVisible(dns, { principal: reseller, reseller: { acl: [] } })).toBe(false)
     expect(isVisible(dns, { principal: reseller, reseller: { acl: ['manage-dns'] } })).toBe(true)
-    expect(isVisible(ready({ surface: 'xwhm', featureKey: null, rootOnly: true }), { principal: reseller, reseller: { acl: ['manage-dns'] } })).toBe(false)
-    expect(isVisible(ready({ surface: 'aapanel', featureKey: null, rootOnly: true }), { principal: root })).toBe(true)
+    expect(isVisible(verified({ surface: 'xwhm', featureKey: null, rootOnly: true }), { principal: reseller, reseller: { acl: ['manage-dns'] } })).toBe(false)
+    expect(isVisible(verified({ surface: 'aapanel', featureKey: null, rootOnly: true }), { principal: root })).toBe(true)
+  })
+
+  it('does not display the unverified production catalog', () => {
+    expect(visibleTools(tools, { principal: root })).toEqual([])
+    expect(visibleTools(tools, { principal: reseller, reseller: { acl: ['manage-dns'] } })).toEqual([])
+    expect(visibleTools(tools, { principal: user, disabledFeatures: new Set() })).toEqual([])
+  })
+
+  it('filters verified fixtures by role, ACL and feature state', () => {
+    const fixtures = [
+      verified({ id: 'file-manager' }),
+      verified({ id: 'dns', surface: 'xwhm', featureKey: null, resellerAcl: 'manage-dns' }),
+      verified({ id: 'root', surface: 'xwhm', featureKey: null, rootOnly: true }),
+    ]
+    expect(visibleTools(fixtures, { principal: root }).map(tool => tool.id)).toEqual(['dns', 'root'])
+    expect(visibleTools(fixtures, { principal: reseller, reseller: { acl: [] } })).toEqual([])
+    expect(visibleTools(fixtures, { principal: reseller, reseller: { acl: ['manage-dns'] } }).map(tool => tool.id)).toEqual(['dns'])
+    expect(visibleTools(fixtures, { principal: user, disabledFeatures: new Set() }).map(tool => tool.id)).toEqual(['file-manager'])
+    expect(visibleTools(fixtures, { principal: user, disabledFeatures: new Set(['filemanager']) })).toEqual([])
+  })
+
+  it('does not accept a status label that disagrees with delivery evidence', () => {
+    expect(isVisible(verified({ delivery: { status: 'researched', reason: 'No evidence.', evidence: [] } }), { principal: user, disabledFeatures: new Set() })).toBe(false)
   })
 })

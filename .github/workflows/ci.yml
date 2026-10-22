@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,9 +14,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  portable-tests:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        layer: [unit, http]
+    name: Portable ${{ matrix.layer }} tests (no browser or Linux service proof)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -23,8 +29,71 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/test-suite.mjs ${{ matrix.layer }}
+
+  typecheck:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm test
+
+  browser-acceptance:
+    name: Chromium authentication acceptance (no hosting-service proof)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.tools/playwright-browsers
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install the pinned Playwright Chromium and runner dependencies
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Exercise actual browser authentication and Arabic layout
+        run: node scripts/toolchain.mjs pnpm test:browser
+      - name: Exercise 18 synthetic UI states (no hosting-service proof)
+        run: node scripts/toolchain.mjs node tests/browser/phase1-acceptance.mjs --output=test-results/phase1-ui-${{ github.run_id }}-${{ github.run_attempt }}
+
+  qualification-prerequisites:
+    if: github.event_name == 'workflow_dispatch'
+    name: Read-only Linux prerequisite report (qualification not run)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .node-version
+      - name: Report prerequisites without running native qualification
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs'
+          import { linuxProofPreflight } from './scripts/test-linux-preflight.mjs'
+          const state = linuxProofPreflight()
+          const result = { ...state, proof_executed: false, qualification: 'not_run' }
+          console.log(`XPANEL_TEST_LAYER=${JSON.stringify(result)}`)
+          console.log(`::notice::Native Linux qualification was not run. Prerequisite status: ${state.status}. A disposable root/systemd VM is required for qualification.`)
+          if (process.env.GITHUB_STEP_SUMMARY) {
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Native Linux qualification: **NOT RUN**.\n\nPrerequisite status: **${state.status}**.\n\nThis job reports availability only; a successful report is not a passed Linux qualification.\n`)
+          }
+          NODE

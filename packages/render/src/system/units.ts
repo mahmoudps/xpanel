@@ -440,3 +440,112 @@ export const renderLoginSliceDropin = (
     ...lines,
   ])
 }
+
+export interface FpmUnitIsolationProof {
+  unit: string
+  slice: string
+  user: string
+  group: string
+  runtimeDirectory: string
+  runtimeDirectoryMode: string
+  socketPath: string
+  bindPaths: string[]
+  noNewPrivileges: boolean
+  privateTmp: boolean
+  protectHome: string
+  protectSystem: string
+  tcpListenDenied: boolean
+}
+
+const unitKeyValues = (content: string, key: string): string[] =>
+  content
+    .split('\n')
+    .filter((l) => l.startsWith(`${key}=`))
+    .map((l) => l.slice(key.length + 1))
+
+/**
+ * Verifies that a rendered PHP-FPM systemd unit strictly binds the master and all worker
+ * processes to `xpanel-<uid>.slice`, `<user>:<user>`, an account-owned `0750` RuntimeDirectory,
+ * and a mount namespace that hides other accounts' homes while forbidding TCP port squatting.
+ */
+export const verifyFpmUnitIsolation = (
+  account: AccountRef,
+  version: string,
+  unit: RenderedFile,
+  os?: OsProfile,
+  opts: UnitOptions = {},
+): FpmUnitIsolationProof => {
+  const ctx = os
+    ? context(account, os, opts)
+    : (() => {
+        const id = assertAccountIdentity(account)
+        const { home } = assertAccountHome(account.home, id.username, opts.homeBases)
+        return {
+          ...id,
+          home,
+          hiddenBases: [],
+          slice: accountSliceName(id.uid),
+          systemdDir: assertAbsPath('systemdDir', opts.systemdDir ?? SYSTEMD_UNIT_DIR),
+        }
+      })()
+  const v = assertPhpVersion(version)
+  const p = fpmPaths(ctx.username, v)
+  const c = unit.content
+
+  const user = unitKeyValues(c, 'User')[0]
+  const group = unitKeyValues(c, 'Group')[0]
+  const slice = unitKeyValues(c, 'Slice')[0]
+  const runtimeDirectory = unitKeyValues(c, 'RuntimeDirectory')[0]
+  const runtimeDirectoryMode = unitKeyValues(c, 'RuntimeDirectoryMode')[0]
+  const protectHome = unitKeyValues(c, 'ProtectHome')[0]
+  const protectSystem = unitKeyValues(c, 'ProtectSystem')[0]
+  const noNewPrivileges = unitKeyValues(c, 'NoNewPrivileges')[0] === 'yes'
+  const privateTmp = unitKeyValues(c, 'PrivateTmp')[0] === 'yes'
+  const bindPaths = unitKeyValues(c, 'BindPaths')
+  const socketBindAllow = unitKeyValues(c, 'SocketBindAllow')
+  const socketBindDeny = unitKeyValues(c, 'SocketBindDeny')
+
+  if (user !== ctx.username || group !== ctx.username) {
+    return invalid('PHP-FPM unit User/Group must match the account identity', { user, group, expected: ctx.username })
+  }
+  if (slice !== ctx.slice) {
+    return invalid('PHP-FPM unit Slice must match the account slice', { slice, expected: ctx.slice })
+  }
+  if (runtimeDirectory !== p.runtimeDirectory || runtimeDirectoryMode !== '0750') {
+    return invalid('PHP-FPM unit RuntimeDirectory must be account-scoped mode 0750', {
+      runtimeDirectory,
+      runtimeDirectoryMode,
+    })
+  }
+  if (!noNewPrivileges || !privateTmp || protectHome !== 'tmpfs' || protectSystem !== 'strict') {
+    return invalid('PHP-FPM unit is missing mandatory systemd sandboxing directives', {
+      noNewPrivileges,
+      privateTmp,
+      protectHome,
+      protectSystem,
+    })
+  }
+  if (!bindPaths.includes(ctx.home)) {
+    return invalid('PHP-FPM unit BindPaths must mount the account home', { bindPaths, expected: ctx.home })
+  }
+  const tcpListenDenied = socketBindAllow.includes('udp') && !socketBindAllow.some((a) => a.startsWith('tcp')) && socketBindDeny.includes('any')
+  if (!tcpListenDenied) {
+    return invalid('PHP-FPM unit must deny TCP port binding', { socketBindAllow, socketBindDeny })
+  }
+
+  return {
+    unit: p.unit,
+    slice,
+    user,
+    group,
+    runtimeDirectory,
+    runtimeDirectoryMode,
+    socketPath: p.socket,
+    bindPaths,
+    noNewPrivileges,
+    privateTmp,
+    protectHome,
+    protectSystem,
+    tcpListenDenied,
+  }
+}

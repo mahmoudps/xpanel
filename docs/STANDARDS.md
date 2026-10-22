@@ -1,146 +1,104 @@
 # xPanel engineering standards
 
-The binding quality bar for every change, human or agent. The design lives in [ARCHITECTURE.md](ARCHITECTURE.md); this file says how it is built. When the two disagree, raise it — do not pick silently.
+These standards define the quality bar for changes. [Architecture](ARCHITECTURE.md) explains the system structure; [status](STATUS.md) distinguishes implemented code from qualified product behavior. Requirements below are not claims that every existing path already meets them.
 
-## Prelaunch policy (standing order)
+## Prelaunch changes
 
-xPanel has not launched. All code is first-version code with no released versions to stay compatible with. Every change is a complete cutover: replace the old code outright and update every caller in the same change. No shims, compatibility adapters, deprecated paths, old/new feature flags, dual implementations, versioned API prefixes or patch-style fixes. The single init migration is edited in place. This policy ends with the first public release.
+xPanel has not launched. Replace superseded code and update its callers in one coherent change. Do not retain dormant compatibility shims, competing implementations or versioned API branches without a demonstrated need. Unreleased schema changes must account for existing installations and recovery; prelaunch status does not authorize silent data loss.
 
-The product's own upgrade-with-rollback capability is still built: it serves future customers, it is not a licence to keep compatibility code in this repository.
+The product's upgrade and rollback functions require their own acceptance. Repository cleanup is not a substitute for safe customer migration behavior.
 
-## Resource budget (hard requirement)
+## Architecture and authority
 
-xPanel must install and run well on low-spec servers (1 vCPU, 1 GB RAM) and reserve as little as possible for itself. Every choice is weighed against this budget.
+- Domain rules in `packages/core` and renderers in `packages/render` remain pure. Keep platform names and distribution behavior in `packages/os`.
+- The API validates requests, enforces authority and orchestrates desired state. Privileged host execution belongs to `apps/agent` through explicit contracts; no local executor fallback in the API.
+- Use `packages/state` for desired hosting configuration and `packages/db` for authoritative identity/security, durable operational data and derived indexes. Reindexing must never pretend to restore credentials, MFA or revocations.
+- Lifecycle orchestration uses injected ports. Every production entry point must supply real implementations and report unavailable execution explicitly.
+- Import the authoritative schema, type, constant or rule. Do not copy validation logic or derive trust from client-supplied ownership, role, path or identifier fields.
+- Make cross-process claims, leases, UID allocation and state/identity changes durable and crash-safe. A process-local mutex or single-file rename does not prove a complete transaction.
 
-| Panel component | Idle budget |
+The [authorization matrix](planning/authorization-route-matrix.json) and [acceptance matrix](planning/ACCEPTANCE-MATRIX.md) must remain consistent with actual callers and tests.
+
+## Resource targets
+
+The control plane targets a 1 vCPU / 1 GB server. These are acceptance budgets, not current measured guarantees:
+
+| Component | Target |
 |---|---|
-| API (Node, one process) | ≤ 60 MB RSS, < 0.5% CPU |
-| Agent / reconciler (Node, one process) | ≤ 50 MB RSS, < 0.5% CPU; work is event-driven, no busy polling |
-| Index database | SQLite built into Node (`node:sqlite`), one file, WAL mode — no database server, ~0 MB idle |
-| Web UI | static files served by Nginx; no SSR process; initial JS ≤ 200 KB gzip, each route chunk ≤ 60 KB gzip |
-| Install size | panel itself ≤ 200 MB on disk (excluding distro services) |
+| API | At most 60 MB idle RSS and less than 0.5% idle CPU |
+| Agent | At most 50 MB idle RSS and less than 0.5% idle CPU |
+| Browser | At most 200 KB gzip initial JavaScript and 60 KB gzip per route chunk |
+| Panel installation | At most 200 MB, excluding distribution hosting services |
 
-Rules that follow from it:
-- Only enabled services are installed and running (mail, DNS, FTP, OpenLiteSpeed, ModSecurity, Redis are opt-in). PowerDNS runs its BIND backend on rendered zone files, so DNS needs no database server.
-- PHP-FPM pools default to `pm = ondemand` with an idle timeout, so idle sites cost no workers. Apache/itk and Nginx worker counts are sized from cores and memory by the setup wizard.
-- Monitors sample cheap kernel counters (cgroup `*.stat`, `/proc`) at a modest interval and store rolled-up history; logs are read incrementally, never re-scanned.
-- Node processes run with bounded heaps (`--max-old-space-size`) and stream large data (archives, logs, uploads) instead of buffering.
-- No dependency is added when the platform or an existing dependency covers the need.
+SQLite memory belongs to the processes that use it and must be included in their measurements. The current UI is server-rendered inside the API, with inline assets and browser clients; measure the actual document and assets rather than assuming a static frontend or existing route splitting.
 
-## State storage (decided 2026-10-22)
+- Bound concurrency, queues, list sizes, cache entries, command runtime and WebSocket buffering.
+- Stream archives, logs, uploads and downloads; prove peak memory and cancellation for large inputs.
+- Use indexed filters and cursor pagination with representative data. Avoid full snapshots or directory walks on authenticated hot paths unless bounded and measured.
+- Specify retention and archive behavior for metrics, sessions, jobs, audit and event history.
+- Record hardware, OS, dataset, warm-up, duration, throughput, p50/p95/p99, failures, RSS, CPU and source/artifact identity. Test 10/100/500 load levels on declared profiles; do not imply 500 active users fit the minimum profile.
+- Keep optional services opt-in and idle workers bounded. Measure before changing the architecture or adding a dependency.
 
-Configuration files are the source of truth, the way cPanel keeps `/var/cpanel/users` and `userdata`. A broken database must never lose or corrupt a customer's setup.
+## Code and dependencies
 
-- **Why SQLite:** with desired state in files the database only holds rebuildable data, so a server process is pure cost. SQLite ships inside Node 24, needs no dependency, runs in-process for the API and the agent, and is the most widely deployed database engine. The API wakes the agent over a local unix socket (`/run/xpanel/agent.sock`), which also carries synchronous jobs such as file-manager operations.
-- **Desired state = files.** One file per entity under `/var/lib/xpanel/state/` (`server`, `plans/<name>`, `resellers/<name>`, `accounts/<user>`, `accounts/<user>/domains/<domain>`, `firewall`, …). Written atomically (temp file → fsync → rename → fsync dir), validated by the same schemas as the API, owned by the `xpanel` user, mode 0640, read by the root agent which re-validates everything.
-- **Every change is a state generation.** The agent renders host config from the state tree, tests it, then switches; the state tree of each applied generation is kept for rollback.
-- **The index database is derived and operational only.** It is SQLite (`node:sqlite`, WAL, `/var/lib/xpanel/index.db`) and holds the search/list index of the state files, sessions, login attempts, jobs, metrics history and an index of the audit log. `xpanel reindex` rebuilds it from the files; on any mismatch the file wins. Losing the database costs sessions and history, never configuration.
-- **The audit log is an append-only JSON-lines file** (`/var/log/xpanel/audit.log`) first and indexed into SQLite second.
-- **Isolation from service databases.** The index database is a private file of the panel (mode 0600, owner `xpanel`); there is no database server for the panel at all, so nothing else can connect to it. Customer databases live only in MariaDB. PowerDNS uses the BIND backend reading zone files rendered by the agent, so DNS has no database at all.
+- Use the exact versions in [.node-version](../.node-version), [package.json](../package.json) and [pnpm-lock.yaml](../pnpm-lock.yaml). Follow the [runtime policy](decisions/runtime.md).
+- TypeScript runs through Node native type stripping. Use explicit `.ts` imports and `import type`; avoid unsupported emit-dependent syntax.
+- Use English identifiers, comments, technical documentation and source strings. Translate user-facing text through shared catalogs.
+- Keep errors stable and typed. Preserve denial and failure distinctions without exposing internal paths, commands, secrets or raw backend errors.
+- Prefer small functions and existing platform features. Explain non-obvious constraints and tradeoffs in comments.
+- Ship complete behavior and remove dead or replaced paths. Do not substitute placeholder data, fake success or swallowed errors for a missing implementation.
+- Pin direct dependencies, review licenses and integrity, and update manifests and lockfile together. Keep runtime dependencies permissively licensed and development-only exceptions isolated as documented in the runtime decision.
 
-## Architecture
+## Security requirements
 
-Clean architecture, dependencies point inward:
+- Validate at request boundaries and again where input becomes a path, SQL identifier, unit name, configuration line or host action. Reject invalid input; do not silently transform it into a different authorized target.
+- Use argv arrays, explicit executable paths and timeouts. Never interpolate untrusted data into shell strings.
+- Authenticate principals from authoritative state. Enforce scope, ownership, reseller ACL, feature policy and suspension on every read, mutation and event channel, including before HTML hydration.
+- Keep the API unprivileged, service credentials protected and kernel peer identity verified. A valid shared credential alone does not authorize an arbitrary process.
+- Confine tenant file operations with the account identity and kernel path controls. Require real helper availability, cgroup/quota enforcement and race/failure tests; no unrestricted root fallback.
+- Preserve Argon2id, session lifetime controls, CSRF, persistent lockout, MFA and atomic credential/session/token revocation. Production root authentication must meet its accepted MFA policy.
+- Never place secrets in source, URLs, browser assets, logs or audit details. Redaction must cover nested structures and failure paths.
+- Treat proxy headers as untrusted unless the immediate peer is explicitly configured. Qualify origin, TLS, backend exposure and renewal behavior on the actual deployment.
+- Audit intent and outcome durably. Prove failure behavior under disk exhaustion, crash and recovery; an optional log path or successful DB insert is not an end-to-end append-only guarantee.
 
-```
-packages/core        domain types, errors, limits, pure rules     ← imports nothing internal
-packages/catalog     tool catalog + visibility                    ← core
-packages/os          OS profiles, install plans (pure)             ← core
-packages/render      config renderers (pure, string in → out)      ← core
-packages/state       desired-state files: schemas, atomic store     ← core
-packages/db          index + operational tables, migrations        ← core
-packages/lifecycle   upgrade / backup / transfer / cPanel import   ← core, render, os, state (ports injected)
-apps/api             HTTP adapter: auth, validation, use cases      ← core, catalog, state, db, render, lifecycle
-apps/agent           reconciler: state files → host                 ← core, state, db, os, render, lifecycle
-apps/web             UI                                             ← core (types only), catalog
-```
+## Protocol and quality targets
 
-- Renderers and rules are pure. Side effects happen only in `apps/agent` executors, through the `HostAction` contract in `packages/core/src/system.ts`.
-- The API never executes system commands. It writes desired-state files and jobs; the agent applies them.
-- No layer imports a layer above it. The web app never imports server code except types.
-
-## Single source of truth
-
-| Truth | Lives in |
+| Area | Target reference |
 |---|---|
-| Domain types, error codes, limits | `packages/core/src/{types,errors,limits}.ts` |
-| Host side-effect contract, OS profile shape | `packages/core/src/system.ts` |
-| Business rules (caps, ACLs, naming, handlers, firewall lockout) | `packages/core/src/rules/` |
-| Tools, groups, feature keys, ACL gates | `packages/catalog/src/data/` |
-| Distribution package/service/path names | `packages/os/src/` |
-| Desired state (accounts, domains, plans, resellers, server, firewall…) | files under `/var/lib/xpanel/state/`, shaped by `packages/state` schemas |
-| Index and operational data shape | `packages/db/src/migrations/*.sql` (Drizzle schema mirrors it) |
-| Translations | English source strings in code/catalog; `locales/<bcp47>.json` per language (catalog) and Lingui catalogs (web) |
-| API request/response schemas | zod schemas in `apps/api`, exported for web forms and OpenAPI |
-| Design tokens and components | the xPanel design system → `apps/web` theme |
-
-Never copy a constant, enum or validation rule; import it.
-
-## Code
-
-- TypeScript 6, ESM, Node 24 native type stripping: relative imports end in `.ts`; no enums, namespaces or parameter properties; `import type` for types.
-- English everywhere: identifiers, comments, commit messages, docs, UI source strings. User-facing text goes through i18n (English source, Arabic translation).
-- Small functions with intent-revealing names. Comments explain *why*, not *what*.
-- Errors are `XpanelError` with a stable `ErrorCode`; never swallow, never leak internals.
-- No `TODO`, `FIXME`, dead code, unused exports, shims or "temporary" paths. Ship complete cutovers.
-- No premature abstraction: one implementation, no plugin layer until a second real case exists.
-
-## Standards conformance
-
-| Area | Standard |
-|---|---|
-| HTTP semantics, status codes | RFC 9110 |
-| API errors | RFC 9457 problem details (`application/problem+json`) |
-| API description | OpenAPI 3.1 generated from the same zod schemas |
-| Timestamps | RFC 3339 / ISO 8601, UTC in storage and APIs |
-| Language tags | BCP 47 (`en`, `ar`) |
-| TOTP | RFC 6238 (RFC 4226 HOTP base) |
-| Password hashing | Argon2id (RFC 9106) |
-| Cookies | RFC 6265bis: `Secure; HttpOnly; SameSite=Strict` |
-| Bearer tokens | RFC 6750 |
-| ACME | RFC 8555 (HTTP-01, DNS-01; wildcards via DNS-01) |
-| DNS names and records | RFC 1035, RFC 5890–5891 (IDNA), RFC 8659 (CAA) |
-| Mail | RFC 5321 / 5322, SPF RFC 7208, DKIM RFC 6376, DMARC RFC 7489 |
-| TLS | RFC 8446 (TLS 1.3), TLS 1.2 minimum |
-| Versioning | SemVer 2.0.0; control-DB schema numbered separately |
+| HTTP and problem details | RFC 9110 and RFC 9457 |
+| Time and locales | RFC 3339 timestamps, UTC storage, BCP 47 language tags |
+| Passwords and second factors | Argon2id, RFC 9106; TOTP, RFC 6238 |
+| Sessions and API tokens | Secure/HttpOnly/SameSite cookie policy, CSRF defenses and RFC 6750 bearer-token handling |
+| ACME and DNS | RFC 8555, DNS/IDNA/CAA rules appropriate to the feature |
+| Mail | SMTP/IMAP and SPF/DKIM/DMARC standards appropriate to the feature |
 | Accessibility | WCAG 2.2 AA |
-| Usability | ISO 9241-110 dialogue principles, ISO 9241-11 |
-| Product quality model | ISO/IEC 25010 (security, reliability, maintainability) |
-| Security controls | OWASP ASVS 4 level 2; audit trail in the spirit of ISO/IEC 27001 A.8.15 |
+| Product quality | Security, reliability, performance, usability and maintainability acceptance |
 
-## Security baseline
+References are implementation targets, not certification. Protocol support requires interoperability and negative testing against actual services. Keep generated API descriptions aligned with executable schemas; do not claim complete OpenAPI coverage without verifying it.
 
-- Validate every input at the boundary with a schema; validate again where a value becomes a path, unit name, config line or SQL identifier (strict allow-list, reject — never silently sanitize).
-- argv arrays only; never a shell string. Timeouts on every external command.
-- Least privilege: API runs as an unprivileged user; the agent is the only root process; account workloads run as their own UID inside `xpanel-<uid>.slice`.
-- Secrets never in code, logs, audit details or URLs. Audit entries redact keys matching `pass|secret|token|key`.
-- Sessions: rotating IDs, idle and absolute timeouts, CSRF protection on state-changing requests, login lockout by username and by IP, 2FA for root.
-- API tokens stored as hashes, scoped, expiring, optionally IP-bound.
-- Firewall changes are refused if they would lock out the current session.
-- Supply chain: permissive licenses only (MIT, Apache-2.0, BSD, ISC); lockfile committed; install scripts allow-listed; `pnpm audit` clean of high/critical.
+## Testing and evidence
 
-## Testing
+- Test observable behavior, boundaries, authorization, failure recovery and resource limits. Use independent positive and negative controls.
+- Keep portable, HTTP, browser, native Linux and external-service evidence separate. Fakes are useful when clearly identified; they cannot establish real host behavior.
+- A missing prerequisite, skipped test, absent harness or failed cleanup leaves the relevant gate open. Do not rewrite earlier failures as successful runs.
+- Bind evidence to source and artifact hashes, command, runtime, environment, timestamp, observed effects and cleanup. Verify the exact release rather than a nearby source revision.
+- Keep catalog stages evidence-based: `researched`, `implemented`, `integrated`, `verified`, `out-of-scope`. Production navigation admits only qualifying verified capabilities.
+- Check actual data, effective identities, service responses and failure outcomes. A dashboard status, successful render, HTTP 200 or command string is not a sufficient oracle.
 
-- Every rule, renderer and repository has unit tests next to it (`*.test.ts`, vitest). Test behavior, edge cases and failure paths — injection attempts, unlimited values, boundary caps.
-- API: request-level tests for 2xx, 4xx validation, 401/403 auth, 409/422 domain errors.
-- Agent: fake executor tests for every reconcile path; Linux integration proofs in a systemd container for isolation claims (see [ARCHITECTURE.md](ARCHITECTURE.md), Proofs).
-- UI: component tests for logic; Playwright walk-throughs with axe checks for every ready tool.
-- A catalog tool is `ready` only when its acceptance test exists and passes.
+See [TESTING.md](TESTING.md) for executable commands.
 
-## UI / UX
+## UI and internationalization
 
-The xPanel design system is the reference; `apps/web` implements it.
+- Support English and Arabic with appropriate direction, logical layout and shared translation catalogs. Keep all displayed digits ASCII `0-9`, including dates, references and percentages.
+- Align values directly beneath their labels on the same field edge. Isolate LTR values inside Arabic fields without moving them to the opposite edge. Measure actual browser geometry on desktop and mobile; extend the same contract to print and exported documents.
+- Use meaningful labels, accessible names, visible focus, keyboard navigation, contrast and touch targets of at least 44 px where required by the interface contract.
+- Dialogs and modal navigation must manage focus, Escape, Tab/Shift+Tab loops, background interaction and focus return. Test native disclosure controls and collapsed content.
+- Show loading, empty, unavailable, error and no-permission states truthfully. Confirm consequential actions and display server-reported outcomes.
+- Never invent account context, generation numbers, references or successful service outcomes in the browser. User-facing public references must come from their authoritative persisted allocator.
+- Do not claim offline readiness while required fonts or assets remain external. Observe loaded font faces and network failures during acceptance.
 
-- English first, LTR; Arabic is a complete RTL locale via logical CSS properties and `dir`.
-- WCAG 2.2 AA: contrast ≥ 4.5:1, visible focus, labels bound to inputs, no color-only meaning, keyboard reachable everything.
-- ISO 9241-110: suitability for the task, self-descriptiveness, conformity with expectations, error tolerance, controllability, learnability.
-- Proportion: main : aside = 1.618 : 1; paragraph line-height 1.6; spacing steps 16 → 26 → 42 at field → card → section level.
-- Ergonomics: targets ≥ 44 px (Fitts), ≤ 7 choices per menu (Hick), forms chunked into sections of ≤ 7 fields (Miller), prose ≤ 68ch.
-- Every data view has loading (skeleton), empty, error and no-permission states. Every consequential action confirms and gives feedback ("Reconciling… → applied in generation #143").
+## Release acceptance
 
-## Governance
+Changes require appropriate tests, workspace typechecks, updated documentation and delivery evidence. Feature exposure additionally requires its acceptance gate; package-level green tests alone are insufficient.
 
-- Conventional Commits. SemVer releases with a changelog start at launch; until then the prelaunch policy applies. The product's upgrade engine enforces expand-only migrations for customer servers.
-- Every administrative action is written to the append-only audit log.
-- Behavior is taken from public documentation and rebuilt; no proprietary cPanel, WHM or aaPanel code, layouts or assets are copied.
-- Definition of done: code + tests + typecheck + lint green, catalog status updated, docs touched where behavior changed, no gate open.
+Releases require verified artifacts, protected runtime paths, reproducible dependencies/native builds, a supported-environment matrix, consistent backups, tested failure/rollback procedures and measured service health. Review [runbooks](operations/runbooks.md) against actual commands before execution. Production approval also requires authenticated performance, security/recovery qualification and a measured pilot, as tracked in [STATUS.md](STATUS.md).

@@ -1,0 +1,138 @@
+import type { Locale } from './i18n.ts'
+import { escapeHtml, renderStatusBadge } from './tokens.ts'
+import arCatalog from '../../../packages/catalog/src/locales/ar.json' with { type: 'json' }
+
+type SurfaceKind = SurfaceShellProps['surface']
+type LocalizedTitle = readonly [english: string, arabic: string]
+
+const surfacePageTitles: Record<SurfaceKind, Readonly<Record<string, LocalizedTitle>>> = {
+  xpanel: {
+    overview: ['Dashboard', 'لوحة التحكم'], resources: ['Resources & quotas', 'الموارد والحصص'],
+    domains: ['Domains', 'النطاقات'], config: ['Site settings', 'إعدادات الموقع'],
+    analytics: ['Website traffic', 'زيارات الموقع'], files: ['Files', 'الملفات'],
+    terminal: ['Terminal', 'الطرفية'], databases: ['Databases', 'قواعد البيانات'],
+    users: ['Email accounts', 'حسابات البريد'], dns: ['DNS zone editor', 'محرر منطقة DNS'],
+  },
+  xwhm: {
+    overview: ['Dashboard', 'لوحة التحكم'], io: ['Disk I/O', 'عمليات القرص'],
+    services: ['Services', 'الخدمات'], accounts: ['Accounts', 'الحسابات'],
+    'create-account': ['Create account', 'إنشاء حساب'], plans: ['Hosting plans', 'خطط الاستضافة'],
+    resellers: ['Resellers', 'الموزعون'], ips: ['IP addresses', 'عناوين IP'],
+    'mail-ips': ['Outbound mail routing', 'توجيه البريد الصادر'], firewall: ['Firewall', 'جدار الحماية'],
+    audit: ['Audit log', 'سجل التدقيق'], generations: ['Configuration history', 'سجل الإعدادات'],
+    upgrade: ['Panel upgrade', 'ترقية المنصة'], transfer: ['Account transfers', 'نقل الحسابات'],
+  },
+  xmail: {
+    inbox: ['Inbox', 'البريد الوارد'], compose: ['Compose message', 'إنشاء رسالة'],
+    filters: ['Mail filters', 'مرشحات البريد'], autoresponder: ['Auto-responder', 'الرد التلقائي'],
+    overview: ['Mail overview', 'نظرة عامة على البريد'],
+  },
+}
+
+const routePageTitles: Readonly<Record<string, LocalizedTitle>> = {
+  '/files/trash': ['Trash', 'المهملات'], '/files/ftp': ['FTP accounts', 'حسابات FTP'],
+  '/whm/plans/features': ['Feature lists', 'قوائم الميزات'],
+  '/whm/resellers/privileges': ['Reseller privileges', 'صلاحيات الموزعين'],
+  '/mail/folders': ['Folders', 'المجلدات'],
+}
+
+export const getSurfacePageTitle = (surface: SurfaceKind, section: string | undefined, locale: Locale, activeRoute: string): string => {
+  const title = routePageTitles[activeRoute] ?? surfacePageTitles[surface][section ?? ''] ?? ['Page unavailable', 'الصفحة غير متاحة']
+  return title[locale === 'ar' ? 1 : 0]
+}
+
+export const getSurfaceNavigationLabel = (surface: SurfaceKind, kind: 'section' | 'page', item: { id: string; name: string }, locale: Locale): string =>
+  locale === 'ar' ? (arCatalog as Readonly<Record<string, string>>)[`nav.${kind}.${surface}.${item.id}.name`] ?? item.name : item.name
+
+export const normalizeSurfaceRoute = (surface: SurfaceKind, activeRoute: string): string =>
+  surface === 'xpanel' && activeRoute === '/panel' ? '/home' : surface === 'xmail' && activeRoute === '/mail' ? '/mail/inbox' : activeRoute
+
+export const renderLiveUpdatesIndicator = (locale: Locale, realtimeEnabled: boolean): string => {
+  const label = realtimeEnabled
+    ? (locale === 'ar' ? 'جار الاتصال' : 'Connecting')
+    : (locale === 'ar' ? 'التحديثات المباشرة غير متاحة' : 'Live updates unavailable')
+  return `<span data-ws-indicator="${realtimeEnabled ? 'disconnected' : 'unavailable'}">${renderStatusBadge('suspended', label)}</span>`
+}
+
+const surfaceSections: Record<SurfaceShellProps['surface'], Readonly<Record<string, string>>> = {
+  xpanel: {
+    '/home': 'overview', '/panel': 'overview', '/resources': 'resources',
+    '/domains': 'domains', '/domains/site-settings': 'config',
+    '/metrics/traffic': 'analytics', '/metrics/web-stats': 'analytics',
+    '/files/manager': 'files', '/files/trash': 'files', '/advanced/terminal': 'terminal',
+    '/databases/mariadb': 'databases', '/email/accounts': 'users', '/files/ftp': 'users',
+    '/domains/zone-editor': 'dns',
+  },
+  xwhm: {
+    '/whm': 'overview', '/whm/monitoring/io': 'io', '/whm/services': 'services',
+    '/whm/services/health': 'services', '/whm/accounts': 'accounts', '/whm/accounts/new': 'create-account',
+    '/whm/plans': 'plans', '/whm/plans/features': 'plans', '/whm/resellers': 'resellers',
+    '/whm/resellers/privileges': 'resellers', '/whm/server/ips': 'ips', '/whm/email/outbound': 'mail-ips',
+    '/whm/security/firewall': 'firewall', '/whm/audit': 'audit', '/whm/panel/data': 'generations',
+    '/whm/server/upgrade': 'upgrade', '/whm/transfers': 'transfer',
+  },
+  xmail: {
+    '/mail': 'inbox', '/mail/inbox': 'inbox', '/mail/folders': 'inbox', '/mail/compose': 'compose',
+    '/mail/settings/filters': 'filters', '/mail/settings/autoresponder': 'autoresponder',
+    '/mail/overview': 'overview',
+  },
+}
+
+/** Select only an implemented screen; catalog visibility and route authorization remain separate gates. */
+export const resolveSurfaceSection = (surface: SurfaceShellProps['surface'], activeRoute: string): string | undefined =>
+  surfaceSections[surface][activeRoute]
+
+export const renderMobileNavToggle = (locale: Locale): string => `
+<button type="button" class="xp-btn xp-mobile-nav-toggle" data-action="toggle-mobile-nav" aria-controls="xp-sidebar" aria-expanded="false">
+  <span aria-hidden="true">☰</span><span>${locale === 'ar' ? 'القائمة' : 'Menu'}</span>
+</button>`
+
+export const renderMobileNavBackdrop = (locale: Locale): string => `
+<button type="button" class="xp-nav-backdrop" data-action="close-mobile-nav" data-xp-nav-backdrop hidden tabindex="-1" aria-label="${locale === 'ar' ? 'إغلاق القائمة' : 'Close navigation'}"></button>`
+
+export const renderMobileNavClose = (locale: Locale): string => `
+<button type="button" class="xp-btn xp-mobile-nav-close" data-action="close-mobile-nav" aria-controls="xp-sidebar">${locale === 'ar' ? 'إغلاق القائمة' : 'Close navigation'}</button>`
+
+export interface SurfaceShellProps {
+  surface: 'xpanel' | 'xwhm' | 'xmail'
+  locale: Locale
+  attributes?: string
+  sidebar: string
+  topbar: string
+  content: string
+}
+
+export const renderSurfaceShell = (props: SurfaceShellProps): string => `
+<div class="xp-shell" data-surface="${props.surface}" ${props.attributes ?? ''}>
+  <a class="xp-skip-link" href="#main-content">${props.locale === 'ar' ? 'انتقل إلى المحتوى' : 'Skip to content'}</a>
+  <aside class="xp-sidebar" id="xp-sidebar" data-xp-sidebar tabindex="-1" aria-label="${props.surface === 'xwhm' ? 'xWHM' : props.surface === 'xmail' ? 'xMail' : 'xPanel'} ${props.locale === 'ar' ? 'التنقل' : 'navigation'}">
+    ${renderMobileNavClose(props.locale)}
+    ${props.sidebar}
+  </aside>
+  ${renderMobileNavBackdrop(props.locale)}
+  <div class="xp-workspace" data-xp-shell-content>
+    <header class="xp-topbar" role="banner">
+      ${renderMobileNavToggle(props.locale)}
+      <strong class="xp-mobile-brand">${props.surface === 'xwhm' ? 'xWHM' : props.surface === 'xmail' ? 'xMail' : 'xPanel'}</strong>
+      <details class="xp-toolbar-options" open data-xp-toolbar-options>
+        <summary class="xp-btn">${props.locale === 'ar' ? 'البحث والحساب' : 'Search & account'}</summary>
+        <div class="xp-toolbar-options__content">${props.topbar}</div>
+      </details>
+    </header>
+    <main id="main-content" class="xp-main" role="main" tabindex="-1">${props.content}</main>
+  </div>
+</div>`
+
+export const renderSurfaceUnavailable = (locale: Locale, homeRoute: string): string => `
+<section class="xp-card xp-screen-state" data-screen="unavailable" role="status">
+  <h1 class="xp-page-title">${locale === 'ar' ? 'هذه الصفحة غير متاحة' : 'This page is unavailable'}</h1>
+  <p class="xp-prose">${locale === 'ar' ? 'لم تتوفر واجهة مؤهلة لهذه المهمة بعد. يمكنك العودة إلى نظرة عامة.' : 'A qualified screen for this task is not available yet. You can return to the overview.'}</p>
+  <a class="xp-btn" href="${escapeHtml(homeRoute)}">${locale === 'ar' ? 'العودة إلى النظرة العامة' : 'Back to overview'}</a>
+</section>`
+
+export const renderUnavailableSurfaceShell = (surface: SurfaceShellProps['surface'], locale: Locale): string => renderSurfaceShell({
+  surface, locale,
+  sidebar: `<div class="xp-sidebar__brand"><strong>${surface === 'xwhm' ? 'xWHM' : surface === 'xmail' ? 'xMail' : 'xPanel'}</strong></div><nav><p role="status" data-navigation-empty="true">${locale === 'ar' ? 'لا توجد أدوات مثبتة الجاهزية ومتاحة لحسابك.' : 'No verified tools are available for your account.'}</p></nav>`,
+  topbar: '',
+  content: renderSurfaceUnavailable(locale, surface === 'xwhm' ? '/whm' : surface === 'xmail' ? '/mail/inbox' : '/home'),
+})

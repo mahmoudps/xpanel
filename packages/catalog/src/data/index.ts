@@ -1,16 +1,17 @@
 import type { CatalogTool, ToolSpec } from '../types.ts'
 import { groups } from './groups.ts'
 import { nativeSpecs, nativeTools } from './native.ts'
-import { readyTools } from './ready.ts'
+import { assessDelivery } from '../delivery.ts'
+import { deliveryEvidence, deliveryTarget } from './delivery.ts'
 import { specs as researchedSpecs } from './specs.ts'
 import { tools as researchedTools } from './tools.ts'
 
-const withReadiness = (tool: CatalogTool): CatalogTool => {
-  const test = readyTools[tool.id]
-  if (tool.status === 'out-of-scope' || test === undefined) return tool
-  return { ...tool, status: 'ready', acceptanceTest: test }
-}
-
 export { groups }
-export const tools: readonly CatalogTool[] = [...researchedTools, ...nativeTools].map(withReadiness)
 export const specs: readonly ToolSpec[] = [...researchedSpecs, ...nativeSpecs]
+const specsById = new Map(specs.map(spec => [spec.id, spec]))
+export const tools: readonly CatalogTool[] = [...researchedTools, ...nativeTools].map(tool => {
+  const spec = specsById.get(tool.id)
+  if (spec === undefined) throw new Error(`Missing specification for catalog tool ${tool.id}`)
+  const delivery = assessDelivery(tool, spec, deliveryEvidence, deliveryTarget)
+  return { ...tool, status: delivery.status, delivery }
+})

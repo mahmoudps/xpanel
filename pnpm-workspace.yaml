@@ -1,3 +1,36 @@
 packages:
   - apps/*
   - packages/*
+
+engineStrict: true
+saveExact: true
+verifyDepsBeforeRun: error
+allowBuilds:
+  esbuild@0.28.2: true
+
+# Keep pnpm's release cooldown except for this reviewed stable release family.
+minimumReleaseAge: 1440
+minimumReleaseAgeExcludePrune: true
+minimumReleaseAgeExclude:
+  - rolldown@1.2.15
+  - '@rolldown/binding-android-arm-eabi@1.2.15'
+  - '@rolldown/binding-android-arm64@1.2.15'
+  - '@rolldown/binding-darwin-arm64@1.2.15'
+  - '@rolldown/binding-darwin-x64@1.2.15'
+  - '@rolldown/binding-freebsd-x64@1.2.15'
+  - '@rolldown/binding-linux-arm-gnueabihf@1.2.15'
+  - '@rolldown/binding-linux-arm64-gnu@1.2.15'
+  - '@rolldown/binding-linux-arm64-musl@1.2.15'
+  - '@rolldown/binding-linux-ppc64-gnu@1.2.15'
+  - '@rolldown/binding-linux-s390x-gnu@1.2.15'
+  - '@rolldown/binding-linux-x64-gnu@1.2.15'
+  - '@rolldown/binding-linux-x64-musl@1.2.15'
+  - '@rolldown/binding-openharmony-arm64@1.2.15'
+  - '@rolldown/binding-win32-arm64-msvc@1.2.15'
+  - '@rolldown/binding-win32-x64-msvc@1.2.15'
+
+# One exact runtime-aligned type version for the root and tar-stream's permissive wildcard.
+catalog:
+  '@types/node': 26.6.5
+overrides:
+  '@types/tar-stream>@types/node': 'catalog:'

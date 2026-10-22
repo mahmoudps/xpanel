@@ -1,0 +1,476 @@
+// Bilingual (English LTR + Arabic RTL) localization dictionary and translation helpers for xPanel, xWHM, and xMail.
+// Follows BCP 47 ('en', 'ar') and docs/STANDARDS.md.
+
+import {
+  formatAsciiBytes,
+  formatAsciiDate,
+  formatAsciiNumber,
+  formatAsciiPercent,
+  normalizeAsciiDigits,
+  renderLtrValue,
+} from './tokens.ts'
+
+export {
+  formatAsciiBytes,
+  formatAsciiDate,
+  formatAsciiNumber,
+  formatAsciiPercent,
+  normalizeAsciiDigits,
+  renderLtrValue,
+}
+
+export type Locale = 'en' | 'ar'
+export const SUPPORTED_LOCALES: readonly Locale[] = ['en', 'ar'] as const
+
+const EN_MESSAGES: Record<string, string> = {
+  // Brand & Surfaces
+  'app.title': 'xPanel Control Plane',
+  'surface.xwhm': 'xWHM Server & Reseller Administration',
+  'surface.xpanel': 'xPanel Hosting Control Panel',
+  'surface.xmail': 'xMail Webmail & Collaboration',
+  'surface.login': 'xPanel Sign In',
+
+  // Common Chrome, Theme, Density, Quick-bar
+  'common.search.placeholder': 'Find a tool, domain, account, or IP (Cmd/Ctrl+K)...',
+  'common.filter.placeholder': 'Press / to filter rows...',
+  'common.theme.dark': 'Dark mode',
+  'common.theme.light': 'Light mode',
+  'common.density.comfortable': 'Comfortable rows',
+  'common.density.compact': 'Compact rows',
+  'common.locale.en': 'English',
+  'common.locale.ar': 'العربية',
+  'common.status.ok': 'Healthy',
+  'common.status.active': 'Active',
+  'common.status.warn': 'Warning ≥80%',
+  'common.status.critical': 'Critical ≥95%',
+  'common.status.reconciling': 'Reconciling',
+  'common.status.suspended': 'Suspended',
+  'common.unlimited': 'unlimited',
+  'common.notEnforced': 'Not enforced on host',
+  'common.reviewAndApply': 'Review changes',
+  'common.save': 'Save changes',
+  'common.cancel': 'Cancel',
+  'common.close': 'Close (Esc)',
+  'common.refresh': 'Refresh',
+  'common.loading': 'Loading live state...',
+  'common.empty': 'No records match the current filter.',
+  'common.noPermission': 'You do not have permission to view or modify this resource.',
+  'common.ws.connected': 'Live stream connected',
+  'common.ws.reconnecting': 'Reconnecting live stream...',
+  'common.ws.offline': 'Live stream offline',
+
+  // Login & Authentication
+  'login.heading': 'Sign in to your hosting control plane',
+  'login.subheading': 'Choose your surface or enter your account credentials.',
+  'login.username': 'Username or email address',
+  'login.password': 'Password',
+  'login.totp': 'Two-factor authentication code (RFC 6238 TOTP)',
+  'login.surface': 'Target surface',
+  'login.submit': 'Sign in securely',
+  'login.lockoutNotice': 'Protected by Argon2id, per-IP & per-username lockout, and strict HttpOnly session cookies.',
+  'login.root2faRequired': '2FA is enforced for root and privileged operators.',
+
+  // Navigation Sections (xWHM, xPanel, xMail)
+  'nav.section.general': 'General & Overview',
+  'nav.section.accounts': 'Accounts & Quotas',
+  'nav.section.plans': 'Plans, Feature Lists & Resellers',
+  'nav.section.networking': 'Multi-IP Pool & Mail Routing',
+  'nav.section.webEngine': 'Web Engine, PHP-FPM & Userdata',
+  'nav.section.dns': 'DNS Zones & PowerDNS',
+  'nav.section.security': 'Security, WAF & Firewall',
+  'nav.section.ioMonitor': 'Real-Time IO & cgroup Monitor',
+  'nav.section.analytics': 'Website Traffic & Cache Analytics',
+  'nav.section.files': 'Jailed File Manager & Backups',
+  'nav.section.databases': 'MariaDB Databases & Users',
+  'nav.section.domains': 'Domains, SSL/TLS & Redirects',
+  'nav.section.email': 'Email Accounts, SPF/DKIM & Filters',
+  'nav.section.terminal': 'Jailed Shell Terminal',
+  'nav.section.operations': 'Transfers, Backups & Upgrades',
+  'nav.section.webmail': 'Inbox, Folders & Sieve Filters',
+  'nav.section.calendar': 'Calendars & Contacts (CalDAV/CardDAV)',
+
+  // Reconcile Pipeline & Generations
+  'reconcile.banner.title': 'Declarative State Reconciler Pipeline',
+  'reconcile.stage.render': '1. Render config',
+  'reconcile.stage.test': '2. Config test',
+  'reconcile.stage.switch': '3. Atomic switch',
+  'reconcile.stage.reload': '4. Service reload',
+  'reconcile.stage.verify': '5. Health verify',
+  'reconcile.status.idle': 'State synchronized',
+  'reconcile.status.running': 'Reconciling generation #{generationId}...',
+  'reconcile.status.applied': 'Applied in generation #{generationId}',
+  'reconcile.status.rolledBack': 'Rolled back from generation #{generationId}',
+  'reconcile.meta.summary': '{filesCount} files · {durationMs} ms · sha256 {checksum}',
+  'reconcile.error.failedTest': 'Failed validation test: {failedTest}',
+  'reconcile.error.rawDetails': 'Expand raw verifier & configtest stderr output',
+
+  // Real-Time Server IO & cgroup v2 Monitor
+  'io.title': 'Real-Time Disk IO, Linux PSI & Per-Account cgroup v2 Monitor',
+  'io.subtitle': 'Sampled from kernel cgroup v2 (io.stat, io.pressure, memory.current, pids.current) across xpanel-<uid>.slice units.',
+  'io.kpi.readRate': 'Read Throughput',
+  'io.kpi.writeRate': 'Write Throughput',
+  'io.kpi.iops': 'Total IOPS (R/W)',
+  'io.kpi.await': 'Disk Await Latency',
+  'io.kpi.psi': 'Linux IO PSI (some / full avg10)',
+  'io.kpi.cpuMemory': 'Host CPU & Memory',
+  'io.chart.title': 'Real-Time Read vs Write Throughput (MB/s), Await (ms) & PSI Pressure',
+  'io.chart.readSeries': 'Read MB/s',
+  'io.chart.writeSeries': 'Write MB/s',
+  'io.chart.psiSome': 'PSI some avg10 %',
+  'io.chart.psiFull': 'PSI full avg10 %',
+  'io.chart.awaitMs': 'Await Latency (ms)',
+  'io.table.title': 'Per-Account cgroup v2 Slice Ranking (xpanel-<uid>.slice)',
+  'io.table.account': 'Account / Slice Unit',
+  'io.table.readWrite': 'Read / Write Rate',
+  'io.table.iops': 'IOPS (R / W)',
+  'io.table.memory': 'Memory (memory.current / MemoryMax)',
+  'io.table.cpu': 'CPU Quota Usage',
+  'io.table.pids': 'Processes (pids.current / TasksMax)',
+  'io.table.status': 'Slice Status',
+  'io.table.empty': 'No active account slices sampled yet.',
+
+  // Website Traffic & Performance Analytics
+  'analytics.title': 'Real-Time Website Traffic, Cache & Upstream Analytics',
+  'analytics.subtitle': 'Derived incrementally from Nginx edge access logs without external tracking scripts.',
+  'analytics.kpi.requests': 'Total Requests',
+  'analytics.kpi.bandwidth': 'Edge Bandwidth',
+  'analytics.kpi.visitors': 'Unique Visitors',
+  'analytics.kpi.cacheHit': 'Cache Hit Ratio',
+  'analytics.kpi.errorRate': '5xx Error Rate',
+  'analytics.kpi.latency': 'Avg / P95 Latency',
+  'analytics.chart.title': 'HTTP Status Breakdown (2xx / 3xx / 4xx / 5xx), Cache Ratio & P95 Response Time',
+  'analytics.status.2xx': '2xx OK',
+  'analytics.status.3xx': '3xx Redirect',
+  'analytics.status.4xx': '4xx Client Error',
+  'analytics.status.5xx': '5xx Server Error',
+  'analytics.cache.hit': 'Cache Hit',
+  'analytics.cache.miss': 'Cache Miss',
+  'analytics.cache.bypass': 'Cache Bypass',
+  'analytics.topPaths': 'Top Requested Paths',
+  'analytics.topReferrers': 'Top Referrers',
+  'analytics.topClientIps': 'Top Client IP Addresses',
+  'analytics.col.key': 'Resource / Identifier',
+  'analytics.col.requests': 'Requests',
+  'analytics.col.bytes': 'Bandwidth',
+  'analytics.col.errors5xx': '5xx Faults',
+
+  // Multi-IP Pool & Outbound Mail IP Manager
+  'ip.title': 'Multi-IPv4 / Multi-IPv6 Address Pool & Delegation',
+  'ip.addAddress': 'Add IPv4 / IPv6 Address',
+  'ip.col.address': 'IP Address / Prefix',
+  'ip.col.interface': 'Interface',
+  'ip.col.role': 'Role (shared / dedicated / mail)',
+  'ip.col.owner': 'Delegated Owner',
+  'ip.col.ptr': 'Reverse DNS (PTR / HELO)',
+  'ip.col.primary': 'Primary',
+  'mailIp.title': 'Postfix Outbound Mail IP & HELO Transport Map',
+  'mailIp.mode.server-default': 'Server Default IP',
+  'mailIp.mode.account-ip': 'Per-Account Dedicated IP',
+  'mailIp.mode.domain-ip': 'Per-Domain Dedicated IP',
+  'mailIp.mode.custom-map': 'Explicit Per-Domain Custom Map',
+  'mailIp.defaultHelo': 'Default EHLO / HELO Hostname',
+  'mailIp.overrides': 'Per-Domain Outbound IPv4/IPv6 & HELO Overrides',
+
+  // Dynamic Custom Configuration (userdata) Editor
+  'userdata.title': 'Dynamic Per-Domain Custom Configuration (userdata)',
+  'userdata.subtitle': 'Stored in /var/lib/xpanel/state/ and rendered into /etc/xpanel/userdata/<user>/<domain>/ + .user.ini. Verified by nginx -t and apachectl configtest before reload.',
+  'userdata.nginxInclude': 'Custom Nginx server {} directives',
+  'userdata.apacheInclude': 'Custom Apache <VirtualHost> directives',
+  'userdata.userIni': 'Per-directory PHP .user.ini overrides',
+  'userdata.customHeaders': 'Structured HTTP response headers',
+  'userdata.cacheBypassPaths': 'Nginx proxy cache bypass URI prefixes',
+  'userdata.testAndApply': 'Test & Apply Userdata Generation',
+
+  // Jailed File Manager
+  'files.title': 'Jailed Home File Manager',
+  'files.jailNotice': 'Chroot enforced inside account home directory (0750 home, 0640 files, symlink traversal blocked).',
+  'files.upload': 'Upload File',
+  'files.newFile': 'New File',
+  'files.newFolder': 'New Folder',
+  'files.chmod': 'Permissions (chmod)',
+  'files.compress': 'Compress Archive',
+  'files.extract': 'Extract Archive',
+  'files.trash': 'Trash & Recovery',
+  'files.editor': 'Code & Config Editor',
+
+  // Jailed Shell Terminal
+  'terminal.title': 'Jailed Interactive Shell Terminal',
+  'terminal.sliceNotice': 'Running as UID {uid} inside systemd cgroup v2 unit xpanel-{uid}.slice with private /tmp and open_basedir isolation.',
+  'terminal.promptPlaceholder': 'Enter command to execute inside jailed slice...',
+  'terminal.run': 'Run Command',
+  'terminal.clear': 'Clear Output',
+  'terminal.reconnect': 'Reconnect Session',
+
+  // Firewall & Dead-Man's Switch
+  'firewall.title': 'nftables Firewall & Session Lockout Guard',
+  'firewall.deadManSwitch': 'Dead-Man’s Switch Active: any rule change that drops your active session IP or panel/SSH port is automatically refused or rolled back.',
+  'firewall.addRule': 'Add Firewall Rule',
+
+  // Accounts, Plans, Domains, Databases, Webmail
+  'accounts.title': 'Hosting Accounts & Isolation Slices',
+  'accounts.create': 'Create Account',
+  'accounts.suspend': 'Suspend Account',
+  'accounts.terminate': 'Terminate Account',
+  'plans.title': 'Hosting Plans & Resource Caps',
+  'plans.create': 'Create Plan',
+  'domains.title': 'Domains, Subdomains, Aliases & SSL',
+  'domains.add': 'Add Domain',
+  'databases.title': 'MariaDB Databases & Scoped Users',
+  'databases.create': 'Create Database',
+  'webmail.inbox': 'Inbox',
+  'webmail.compose': 'Compose Message',
+  'webmail.quarantine': 'Spam Quarantine',
+  'webmail.filters': 'Sieve Mail Filters',
+
+  // Explicit Async Action & Availability States
+  'common.state.loading': 'Loading live state...',
+  'common.state.pending': 'Operation accepted — pending host verification',
+  'common.state.succeeded': 'Verified and applied on host',
+  'common.state.denied': 'Permission denied for this action',
+  'common.state.failed': 'Verification failed — previous generation preserved',
+  'common.state.unavailable': 'Service or runtime dependency unavailable',
+  'common.state.conflict': 'Concurrent modification conflict (HTTP 409)',
+}
+
+const AR_MESSAGES: Record<string, string> = {
+  // Brand & Surfaces
+  'app.title': 'منصة تحكم xPanel',
+  'surface.xwhm': 'إدارة الخادم والموزعين xWHM',
+  'surface.xpanel': 'لوحة تحكم الاستضافة xPanel',
+  'surface.xmail': 'البريد الإلكتروني والتعاون xMail',
+  'surface.login': 'تسجيل الدخول إلى xPanel',
+
+  // Common Chrome, Theme, Density, Quick-bar
+  'common.search.placeholder': 'ابحث عن أداة أو نطاق أو حساب أو عنوان IP (Cmd/Ctrl+K)...',
+  'common.filter.placeholder': 'اضغط / لتصفية النتائج...',
+  'common.theme.dark': 'الوضع الداكن',
+  'common.theme.light': 'الوضع الفاتح',
+  'common.density.comfortable': 'تباعد مريح',
+  'common.density.compact': 'تباعد مضغوط',
+  'common.locale.en': 'English',
+  'common.locale.ar': 'العربية',
+  'common.status.ok': 'سليم',
+  'common.status.active': 'نشط',
+  'common.status.warn': 'تحذير ≥80%',
+  'common.status.critical': 'حرج ≥95%',
+  'common.status.reconciling': 'جارٍ المطابقة',
+  'common.status.suspended': 'معلّق',
+  'common.unlimited': 'غير محدود',
+  'common.notEnforced': 'غير مفروض على الخادم',
+  'common.reviewAndApply': 'مراجعة التغييرات وتطبيقها',
+  'common.save': 'حفظ التغييرات',
+  'common.cancel': 'إلغاء',
+  'common.close': 'إغلاق (Esc)',
+  'common.refresh': 'تحديث',
+  'common.loading': 'جارٍ تحميل الحالة المباشرة...',
+  'common.empty': 'لا توجد سجلات تطابق عامل التصفية الحالي.',
+  'common.noPermission': 'ليست لديك صلاحية لعرض هذا المورد أو تعديله.',
+  'common.ws.connected': 'البث المباشر متصل',
+  'common.ws.reconnecting': 'جارٍ إعادة الاتصال بالبث المباشر...',
+  'common.ws.offline': 'البث المباشر غير متصل',
+
+  // Login & Authentication
+  'login.heading': 'تسجيل الدخول إلى منصة إدارة الاستضافة',
+  'login.subheading': 'اختر الواجهة المطلوبة أو أدخل بيانات الاعتماد الخاصة بك.',
+  'login.username': 'اسم المستخدم أو البريد الإلكتروني',
+  'login.password': 'كلمة المرور',
+  'login.totp': 'رمز المصادقة الثنائية (RFC 6238 TOTP)',
+  'login.surface': 'الواجهة المستهدفة',
+  'login.submit': 'تسجيل الدخول بأمان',
+  'login.lockoutNotice': 'محمي بواسطة Argon2id، وحظر المحاولات المتكررة لكل IP واسم مستخدم، وملفات تعريف ارتباط HttpOnly صارمة.',
+  'login.root2faRequired': 'المصادقة الثنائية إلزامية لحساب الجذر والمشغلين ذوي الصلاحيات.',
+
+  // Navigation Sections (xWHM, xPanel, xMail)
+  'nav.section.general': 'نظرة عامة ومعلومات الخادم',
+  'nav.section.accounts': 'الحسابات والحصص',
+  'nav.section.plans': 'الخطط وقوائم الميزات والموزعون',
+  'nav.section.networking': 'تجمع عناوين IP وتوجيه البريد',
+  'nav.section.webEngine': 'محرك الويب وPHP-FPM والإعدادات المخصصة',
+  'nav.section.dns': 'مناطق DNS وPowerDNS',
+  'nav.section.security': 'الأمان وجدار الحماية WAF',
+  'nav.section.ioMonitor': 'مراقب القرص IO وشرائح cgroup المباشر',
+  'nav.section.analytics': 'تحليلات زيارات المواقع والتخزين المؤقت',
+  'nav.section.files': 'مدير الملفات المعزول والنسخ الاحتياطي',
+  'nav.section.databases': 'قواعد بيانات MariaDB والمستخدمون',
+  'nav.section.domains': 'النطاقات وشهادات SSL/TLS والتحويلات',
+  'nav.section.email': 'حسابات البريد وSPF/DKIM والمرشحات',
+  'nav.section.terminal': 'الطرفية التفاعلية المعزولة (Jailed Shell)',
+  'nav.section.operations': 'النقل والنسخ الاحتياطي والترقيات',
+  'nav.section.webmail': 'البريد الوارد والمجلدات ومرشحات Sieve',
+  'nav.section.calendar': 'التقويم وجهات الاتصال (CalDAV/CardDAV)',
+
+  // Reconcile Pipeline & Generations
+  'reconcile.banner.title': 'خط أنابيب مطابقة الحالة التصريحية',
+  'reconcile.stage.render': '1. توليد الإعدادات',
+  'reconcile.stage.test': '2. فحص الصلاحية',
+  'reconcile.stage.switch': '3. التبديل الذرّي',
+  'reconcile.stage.reload': '4. إعادة تحميل الخدمات',
+  'reconcile.stage.verify': '5. التحقق من الصحة',
+  'reconcile.status.idle': 'الحالة متزامنة',
+  'reconcile.status.running': 'جارٍ مطابقة الجيل #{generationId}...',
+  'reconcile.status.applied': 'تم التطبيق في الجيل #{generationId}',
+  'reconcile.status.rolledBack': 'تم التراجع إلى الجيل السابق من #{generationId}',
+  'reconcile.meta.summary': '{filesCount} ملف · {durationMs} مللي ثانية · بصمة {checksum}',
+  'reconcile.error.failedTest': 'فشل اختبار التحقق: {failedTest}',
+  'reconcile.error.rawDetails': 'عرض التفاصيل الكاملة لخطأ الفحص',
+
+  // Real-Time Server IO & cgroup v2 Monitor
+  'io.title': 'مراقب عمليات القرص IO وضغط النواة PSI وشرائح الحسابات cgroup v2',
+  'io.subtitle': 'قراءات حية من نواة لينكس cgroup v2 (io.stat وio.pressure وmemory.current وpids.current) لوحدات xpanel-<uid>.slice.',
+  'io.kpi.readRate': 'معدل القراءة',
+  'io.kpi.writeRate': 'معدل الكتابة',
+  'io.kpi.iops': 'إجمالي IOPS (قراءة/كتابة)',
+  'io.kpi.await': 'زمن انتظار القرص (await)',
+  'io.kpi.psi': 'ضغط القرص PSI (some / full avg10)',
+  'io.kpi.cpuMemory': 'المعالج والذاكرة للخادم',
+  'io.chart.title': 'معدل القراءة والكتابة المباشر (MB/s) وزمن الانتظار (ms) وضغط النواة PSI',
+  'io.chart.readSeries': 'قراءة MB/s',
+  'io.chart.writeSeries': 'كتابة MB/s',
+  'io.chart.psiSome': 'ضغط PSI الجزئي avg10 %',
+  'io.chart.psiFull': 'ضغط PSI الكامل avg10 %',
+  'io.chart.awaitMs': 'زمن الانتظار (مللي ثانية)',
+  'io.table.title': 'ترتيب استهلاك الحسابات حسب شرائح cgroup v2 (xpanel-<uid>.slice)',
+  'io.table.account': 'الحساب / شريحة النظام',
+  'io.table.readWrite': 'سرعة القراءة / الكتابة',
+  'io.table.iops': 'العمليات في الثانية IOPS',
+  'io.table.memory': 'الذاكرة (memory.current / MemoryMax)',
+  'io.table.cpu': 'استهلاك حصة المعالج CPU',
+  'io.table.pids': 'العمليات (pids.current / TasksMax)',
+  'io.table.status': 'حالة الشريحة',
+  'io.table.empty': 'لا توجد شرائح حسابات نشطة حالياً.',
+
+  // Website Traffic & Performance Analytics
+  'analytics.title': 'تحليلات زيارات المواقع والتخزين المؤقت والأداء الفوري',
+  'analytics.subtitle': 'تُستخرج تزايدياً من سجلات Nginx دون الحاجة إلى أي سكربتات تتبع خارجية.',
+  'analytics.kpi.requests': 'إجمالي الطلبات',
+  'analytics.kpi.bandwidth': 'حركة البيانات',
+  'analytics.kpi.visitors': 'الزوار الفريدون',
+  'analytics.kpi.cacheHit': 'نسبة إصابة التخزين المؤقت',
+  'analytics.kpi.errorRate': 'معدل أخطاء 5xx',
+  'analytics.kpi.latency': 'متوسط / P95 زمن الاستجابة',
+  'analytics.chart.title': 'توزيع رموز الحالة (2xx / 3xx / 4xx / 5xx) والتخزين المؤقت وزمن استجابة P95',
+  'analytics.status.2xx': '2xx نجاح',
+  'analytics.status.3xx': '3xx تحويل',
+  'analytics.status.4xx': '4xx خطأ عميل',
+  'analytics.status.5xx': '5xx خطأ خادم',
+  'analytics.cache.hit': 'إصابة التخزين المؤقت',
+  'analytics.cache.miss': 'فقدان التخزين المؤقت',
+  'analytics.cache.bypass': 'تجاوز التخزين المؤقت',
+  'analytics.topPaths': 'أكثر المسارات طلباً',
+  'analytics.topReferrers': 'أبرز مصادر الإحالة',
+  'analytics.topClientIps': 'أكثر عناوين IP للعملاء نشاطاً',
+  'analytics.col.key': 'المسار / المعرّف',
+  'analytics.col.requests': 'الطلبات',
+  'analytics.col.bytes': 'حجم البيانات',
+  'analytics.col.errors5xx': 'أخطاء 5xx',
+
+  // Multi-IP Pool & Outbound Mail IP Manager
+  'ip.title': 'إدارة عناوين IPv4 / IPv6 المتعددة وتفويض الموزعين',
+  'ip.addAddress': 'إضافة عنوان IPv4 / IPv6',
+  'ip.col.address': 'عنوان IP / البادئة',
+  'ip.col.interface': 'واجهة الشبكة',
+  'ip.col.role': 'الدور (مشترك / مخصص / بريد)',
+  'ip.col.owner': 'المالك المفوّض',
+  'ip.col.ptr': 'النطاق العكسي (PTR / HELO)',
+  'ip.col.primary': 'أساسي',
+  'mailIp.title': 'توجيه عناوين IP للبريد الصادر Postfix وهوية HELO',
+  'mailIp.mode.server-default': 'عنوان IP الافتراضي للخادم',
+  'mailIp.mode.account-ip': 'عنوان IP المخصص لكل حساب',
+  'mailIp.mode.domain-ip': 'عنوان IP المخصص لكل نطاق',
+  'mailIp.mode.custom-map': 'جدول توجيه مخصص لكل نطاق',
+  'mailIp.defaultHelo': 'اسم مضيف EHLO / HELO الافتراضي',
+  'mailIp.overrides': 'تخصيصات IPv4/IPv6 وهوية HELO لكل نطاق',
+
+  // Dynamic Custom Configuration (userdata) Editor
+  'userdata.title': 'الإعدادات المخصصة الديناميكية لكل نطاق (userdata)',
+  'userdata.subtitle': 'تُحفظ في ملفات الحالة وتُولَّد داخل /etc/xpanel/userdata/<user>/<domain>/ وملف .user.ini مع فحص nginx -t وapachectl configtest قبل التطبيق.',
+  'userdata.nginxInclude': 'توجيهات Nginx المخصصة داخل server {}',
+  'userdata.apacheInclude': 'توجيهات Apache المخصصة داخل <VirtualHost>',
+  'userdata.userIni': 'إعدادات PHP المخصصة في .user.ini',
+  'userdata.customHeaders': 'ترويسات استجابة HTTP المخصصة',
+  'userdata.cacheBypassPaths': 'مسارات استثناء التخزين المؤقت لـ Nginx',
+  'userdata.testAndApply': 'فحص وتطبيق إعدادات النطاق',
+
+  // Jailed File Manager
+  'files.title': 'مدير الملفات المعزول داخل مجلد الحساب',
+  'files.jailNotice': 'عزل chroot مفروض داخل المجلد الرئيسي للحساب (صلاحيات 0750 للمجلد الرئيسي و0640 للملفات ومنع تجاوز الروابط الرمزية).',
+  'files.upload': 'رفع ملف',
+  'files.newFile': 'ملف جديد',
+  'files.newFolder': 'مجلد جديد',
+  'files.chmod': 'الصلاحيات (chmod)',
+  'files.compress': 'ضغط أرشيف',
+  'files.extract': 'فك الضغط',
+  'files.trash': 'سلة المحذوفات والاستعادة',
+  'files.editor': 'محرر الشفرات والإعدادات',
+
+  // Jailed Shell Terminal
+  'terminal.title': 'الطرفية التفاعلية المعزولة (Jailed Shell)',
+  'terminal.sliceNotice': 'تعمل بمعرّف المستخدم UID {uid} داخل شريحة systemd cgroup v2 باسم xpanel-{uid}.slice مع مجلد /tmp خاص وعزل open_basedir.',
+  'terminal.promptPlaceholder': 'أدخل أمراً لتنفيذه داخل الشريحة المعزولة...',
+  'terminal.run': 'تنفيذ الأمر',
+  'terminal.clear': 'مسح المخرجات',
+  'terminal.reconnect': 'إعادة اتصال الجلسة',
+
+  // Firewall & Dead-Man's Switch
+  'firewall.title': 'جدار الحماية nftables وحماية الجلسة من الحظر الذاتي',
+  'firewall.deadManSwitch': 'حماية منع الحظر الذاتي نشطة: يتم رفض أي قاعدة تحظر عنوان IP لجلستك الحالية أو منفذ اللوحة/SSH تلقائياً.',
+  'firewall.addRule': 'إضافة قاعدة جدار حماية',
+
+  // Accounts, Plans, Domains, Databases, Webmail
+  'accounts.title': 'حسابات الاستضافة وشرائح العزل',
+  'accounts.create': 'إنشاء حساب',
+  'accounts.suspend': 'تعليق الحساب',
+  'accounts.terminate': 'حذف الحساب نهائياً',
+  'plans.title': 'خطط الاستضافة وحدود الموارد',
+  'plans.create': 'إنشاء خطة',
+  'domains.title': 'النطاقات والنطاقات الفرعية وشهادات SSL',
+  'domains.add': 'إضافة نطاق',
+  'databases.title': 'قواعد بيانات MariaDB والمستخدمون المعزولون',
+  'databases.create': 'إنشاء قاعدة بيانات',
+  'webmail.inbox': 'البريد الوارد',
+  'webmail.compose': 'إنشاء رسالة',
+  'webmail.quarantine': 'حجر البريد العشوائي',
+  'webmail.filters': 'مرشحات البريد Sieve',
+
+  // Explicit Async Action & Availability States
+  'common.state.loading': 'جارٍ تحميل الحالة المباشرة...',
+  'common.state.pending': 'تم استلام العملية — بانتظار التحقق على الخادم',
+  'common.state.succeeded': 'تم التحقق والتطبيق على الخادم',
+  'common.state.denied': 'ليست لديك صلاحية لتنفيذ هذا الإجراء',
+  'common.state.failed': 'فشل التحقق — تم الحفاظ على الجيل النشط السابق',
+  'common.state.unavailable': 'الخدمة أو الأداة المطلوبة غير متاحة حالياً',
+  'common.state.conflict': 'تعارض في تعديل الحالة (HTTP 409)',
+}
+
+export const DICTIONARY: Record<Locale, Record<string, string>> = {
+  en: EN_MESSAGES,
+  ar: AR_MESSAGES,
+}
+
+/**
+ * Returns the HTML document direction ('ltr' or 'rtl') for the given BCP 47 locale.
+ */
+export function dirForLocale(locale: Locale): 'ltr' | 'rtl' {
+  return locale === 'ar' ? 'rtl' : 'ltr'
+}
+
+/**
+ * Translates a message key into the requested locale (`en` or `ar`) with `{var}` interpolation.
+ * Falls back to the English source string if a key is missing in the target locale.
+ * Always normalizes numerals to Western ASCII digits (`0-9`).
+ */
+export function t(
+  locale: Locale,
+  key: string,
+  vars?: Record<string, string | number>,
+): string {
+  const catalog = DICTIONARY[locale] ?? DICTIONARY.en
+  const template = catalog[key] ?? DICTIONARY.en[key] ?? key
+  if (!vars) return normalizeAsciiDigits(template)
+  return normalizeAsciiDigits(
+    template.replace(/\{(\w+)\}/g, (_match, name: string) => {
+      const val = vars[name]
+      return val !== undefined ? normalizeAsciiDigits(val) : `{${name}}`
+    }),
+  )
+}

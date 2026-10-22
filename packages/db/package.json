@@ -11,13 +11,7 @@
   },
   "dependencies": {
     "@xpanel/core": "workspace:*",
-    "drizzle-orm": "^0.45.4",
-    "pg": "8.23.1"
-  },
-  "devDependencies": {
-    "@electric-sql/pglite": "^0.5.11",
-    "@electric-sql/pglite-socket": "0.2.14",
-    "@types/pg": "8.23.1"
+    "@xpanel/state": "workspace:*"
   },
   "license": "AGPL-3.0-only"
 }

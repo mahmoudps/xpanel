@@ -3,12 +3,38 @@ import type { ResellerAcl } from '@xpanel/core'
 /** xpanel = account owner, xwhm = root/reseller, xmail = webmail, aapanel = aaPanel-derived server surfaces (shown inside xWHM). */
 export type Surface = 'xpanel' | 'xwhm' | 'xmail' | 'aapanel'
 
-/**
- * planned: in the catalog, no screen yet.
- * ready: has a screen AND a passing acceptance test; only ready tools are shown.
- * out-of-scope: listed for coverage, never shown (Sitejet, WP Toolkit, CloudLinux...).
- */
-export type ToolStatus = 'planned' | 'ready' | 'out-of-scope'
+/** Delivery tiers require observations; a test name is only a declaration. */
+export type DeliveryStage = 'implemented' | 'integrated' | 'verified'
+export type ToolStatus = 'researched' | DeliveryStage | 'out-of-scope'
+export type EvidenceEnvironment = 'unit' | 'http' | 'browser' | 'linux' | 'external'
+
+export interface CapabilityEvidence {
+  toolId: string
+  stage: DeliveryStage
+  acceptance: string
+  result: 'passed' | 'failed' | 'blocked' | 'not_run'
+  sourceFingerprint: string
+  artifactSha256: string | null
+  environment: EvidenceEnvironment
+  profile: string
+  executor: 'real' | 'fake'
+  runArtifact: string
+  runArtifactSha256: string
+  observedAt: string
+}
+
+export interface VerificationTarget {
+  sourceFingerprint: string
+  artifactSha256: string | null
+  supportedProfiles: readonly string[]
+}
+
+export interface CapabilityDelivery {
+  status: ToolStatus
+  reason: string
+  /** Only observations matching the target and the full acceptance criterion are retained. */
+  evidence: readonly CapabilityEvidence[]
+}
 
 /** Display text is the English source string; translations live in `locales/<lang>.json` under `catalogKeys`. */
 export interface CatalogGroup {
@@ -18,7 +44,7 @@ export interface CatalogGroup {
   order: number
 }
 
-export interface CatalogTool {
+export interface ToolDefinition {
   id: string
   surface: Surface
   groupId: string
@@ -31,10 +57,13 @@ export interface CatalogTool {
   rootOnly: boolean
   /** main entity the screen manages */
   entity: string
-  /** vitest name or file that proves the tool's acceptance criterion; required for 'ready' */
-  acceptanceTest: string | null
-  status: ToolStatus
+  status: 'researched' | 'out-of-scope'
   outOfScopeReason?: string
+}
+
+export interface CatalogTool extends Omit<ToolDefinition, 'status'> {
+  status: ToolStatus
+  delivery: CapabilityDelivery
 }
 
 /** A duplicate tool folded into its canonical tool during the navigation design; its behaviors still apply. */

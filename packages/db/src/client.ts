@@ -1,70 +1,75 @@
-import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core'
-import { drizzle as drizzleNodePg } from 'drizzle-orm/node-postgres'
-import pg from 'pg'
+import { DatabaseSync } from 'node:sqlite'
 import { fail } from '@xpanel/core'
 import { migrate, type MigrateResult } from './migrate.ts'
-import { toXpanelError } from './pg-errors.ts'
-import { schema, type Schema } from './schema.ts'
-import { pgliteRunner, pgRunner, type Row, type SqlRunner } from './sql-runner.ts'
+import { sqliteRunner, type Row, type SqlRunner } from './sql-runner.ts'
 
-/** Drizzle database (or transaction) over either driver. Repos take this. */
-export type Db = PgDatabase<PgQueryResultHKT, Schema>
+/** SQL runner (or transaction runner) passed to repository functions. */
+export type Db = SqlRunner
 
 export interface DbHandle {
   db: Db
-  /** raw parameterised query; values are driver-native */
+  sqlite: DatabaseSync
   query: <T extends Row = Row>(text: string, params?: readonly unknown[]) => Promise<T[]>
   runner: SqlRunner
   close: () => Promise<void>
 }
 
 export interface CreateDbOptions {
-  /** pool size, default 4: the control Postgres runs with max_connections = 20 (STANDARDS resource budget) */
-  max?: number
-  /** application_name reported to Postgres */
-  applicationName?: string
-  /** default 10 s */
-  connectionTimeoutMs?: number
-  /** server-side statement_timeout, default 30 s; 0 disables */
-  statementTimeoutMs?: number
-  /**
-   * An idle pooled connection failed (server restart, network cut). The pool already
-   * discarded it and the next query opens a new one; the error carries no query text.
-   */
-  onIdleError?: (e: unknown) => void
+  /** SQLite busy timeout in milliseconds, default 5000 (0..600000). */
+  busyTimeoutMs?: number
+  /** Enable WAL journal mode (default true for file databases). */
+  wal?: boolean
 }
 
-export const DB_URL_RE = /^postgres(?:ql)?:\/\/[^\s]+$/
-
-const positiveInt = (v: number | undefined, def: number, min: number, max: number, what: string): number => {
-  if (v === undefined) return def
-  return Number.isSafeInteger(v) && v >= min && v <= max ? v : fail('VALIDATION', `${what} must be an integer in ${min}..${max}`)
+const resolveSqlitePath = (pathOrUrl: string): string => {
+  if (typeof pathOrUrl !== 'string' || pathOrUrl.trim().length === 0 || pathOrUrl.includes('\0')) {
+    return fail('VALIDATION', 'database path must be a non-empty file path or :memory:')
+  }
+  if (/^(postgres(?:ql)?|mysql|mariadb|http|https):\/\//i.test(pathOrUrl)) {
+    return fail('VALIDATION', 'database path must be a SQLite file path or :memory:')
+  }
+  if (pathOrUrl.startsWith('sqlite://')) {
+    const rest = pathOrUrl.slice('sqlite://'.length)
+    return rest.length > 0 ? rest : fail('VALIDATION', 'invalid sqlite:// URL')
+  }
+  return pathOrUrl
 }
 
-const APP_NAME_RE = /^[A-Za-z0-9._-]{1,63}$/
+const checkBusyTimeout = (ms: number | undefined): number => {
+  if (ms === undefined) return 5000
+  if (!Number.isSafeInteger(ms) || ms < 0 || ms > 600_000) {
+    return fail('VALIDATION', 'busyTimeoutMs must be an integer in 0..600000')
+  }
+  return ms
+}
 
-/** Production client (node-postgres pool). Connects lazily and does not migrate: call `migrate(handle.runner)` at startup. */
-export const createDb = (url: string, opts: CreateDbOptions = {}): DbHandle => {
-  // never echo the URL: it carries the password
-  if (typeof url !== 'string' || !DB_URL_RE.test(url)) return fail('VALIDATION', 'database url must be postgres://...')
-  const applicationName = opts.applicationName ?? 'xpanel'
-  if (!APP_NAME_RE.test(applicationName)) fail('VALIDATION', 'applicationName must be 1-63 of A-Z a-z 0-9 . _ -')
-  const pool = new pg.Pool({
-    connectionString: url,
-    max: positiveInt(opts.max, 4, 1, 20, 'max'),
-    application_name: applicationName,
-    connectionTimeoutMillis: positiveInt(opts.connectionTimeoutMs, 10_000, 1, 600_000, 'connectionTimeoutMs'),
-    statement_timeout: positiveInt(opts.statementTimeoutMs, 30_000, 0, 3_600_000, 'statementTimeoutMs'),
-    idleTimeoutMillis: 30_000,
-  })
-  // without a listener an idle-client error would crash the process
-  pool.on('error', (e) => opts.onIdleError?.(toXpanelError(e)))
-  const runner = pgRunner(pool)
+/**
+ * Opens a Node `node:sqlite` (`DatabaseSync`) database with `foreign_keys = ON`
+ * and `journal_mode = WAL`. Call `migrate(handle.runner)` at startup.
+ */
+export const createDb = (pathOrUrl: string, opts: CreateDbOptions = {}): DbHandle => {
+  const filename = resolveSqlitePath(pathOrUrl)
+  const busyTimeoutMs = checkBusyTimeout(opts.busyTimeoutMs)
+  const sqlite = new DatabaseSync(filename)
+  sqlite.exec('PRAGMA foreign_keys = ON')
+  sqlite.exec(`PRAGMA busy_timeout = ${busyTimeoutMs}`)
+  if (filename !== ':memory:' && opts.wal !== false) {
+    sqlite.exec('PRAGMA journal_mode = WAL')
+    sqlite.exec('PRAGMA synchronous = NORMAL')
+  }
+  const runner = sqliteRunner(sqlite)
+  let closed = false
   return {
-    db: drizzleNodePg({ client: pool, schema }),
+    db: runner,
+    sqlite,
     query: (text, params) => runner.query(text, params),
     runner,
-    close: () => pool.end(),
+    async close(): Promise<void> {
+      if (!closed) {
+        closed = true
+        sqlite.close()
+      }
+    },
   }
 }
 
@@ -72,25 +77,15 @@ export interface TestDbHandle extends DbHandle {
   migration: MigrateResult
 }
 
-/**
- * In-memory PGlite with all migrations applied. Test/dev only: PGlite is a dev
- * dependency and is loaded lazily so production never imports it.
- */
+/** In-memory SQLite database with all migrations applied. */
 export const createTestDb = async (opts: { migrate?: boolean } = {}): Promise<TestDbHandle> => {
-  const [{ PGlite }, { drizzle: drizzlePglite }] = await Promise.all([
-    import('@electric-sql/pglite'),
-    import('drizzle-orm/pglite'),
-  ])
-  const pglite = new PGlite()
-  await pglite.waitReady
-  const runner = pgliteRunner(pglite)
+  const handle = createDb(':memory:')
   const migration =
-    opts.migrate === false ? { applied: [], alreadyApplied: [], unknownApplied: [], version: 0 } : await migrate(runner)
+    opts.migrate === false
+      ? { applied: [], alreadyApplied: [], unknownApplied: [], version: 0 }
+      : await migrate(handle.runner)
   return {
-    db: drizzlePglite({ client: pglite, schema }),
-    query: (text, params) => runner.query(text, params),
-    runner,
+    ...handle,
     migration,
-    close: () => pglite.close(),
   }
 }

@@ -5,6 +5,7 @@ export * from './units.ts'
 export * from './nftables.ts'
 export * from './ssh.ts'
 export * from './compiler.ts'
+export * from './security-hardening.ts'
 export {
   ACCOUNT_ID_MAX,
   ACCOUNT_ID_MIN,

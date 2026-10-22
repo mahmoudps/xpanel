@@ -1,0 +1,32 @@
+[Unit]
+Description=xPanel Control Plane API & Web Panel (:2087)
+After=network-online.target xpanel-agent.service
+Requires=xpanel-agent.service
+
+[Service]
+Type=simple
+User=xpanel
+Group=xpanel
+SupplementaryGroups=xpanel-agent
+WorkingDirectory=/opt/xpanel
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/xpanel/runtime.env
+EnvironmentFile=/etc/xpanel/api.env
+ExecStart=/usr/bin/node --max-old-space-size=96 /opt/xpanel/apps/api/src/main.ts
+Restart=always
+RestartSec=2
+UMask=0007
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/xpanel /var/log/xpanel
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

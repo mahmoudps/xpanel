@@ -1,0 +1,21 @@
+{
+  "name": "@xpanel/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@xpanel/core": "workspace:*",
+    "@xpanel/db": "workspace:*",
+    "@xpanel/lifecycle": "workspace:*",
+    "@xpanel/os": "workspace:*",
+    "@xpanel/render": "workspace:*",
+    "@xpanel/state": "workspace:*"
+  },
+  "license": "AGPL-3.0-only"
+}

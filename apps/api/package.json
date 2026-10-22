@@ -1,0 +1,24 @@
+{
+  "name": "@xpanel/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@xpanel/agent": "workspace:*",
+    "@xpanel/catalog": "workspace:*",
+    "@xpanel/core": "workspace:*",
+    "@xpanel/db": "workspace:*",
+    "@xpanel/lifecycle": "workspace:*",
+    "@xpanel/os": "workspace:*",
+    "@xpanel/render": "workspace:*",
+    "@xpanel/state": "workspace:*",
+    "ws": "8.22.0"
+  },
+  "license": "AGPL-3.0-only"
+}

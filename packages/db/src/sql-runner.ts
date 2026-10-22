@@ -1,87 +1,139 @@
-import type { PGlite, Transaction } from '@electric-sql/pglite'
-import type { Pool, PoolClient } from 'pg'
+import type { DatabaseSync, SQLInputValue } from 'node:sqlite'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { lexSql } from './sql-lexer.ts'
 
 export type Row = Record<string, unknown>
 
 /**
- * Minimal raw SQL surface shared by node-postgres and PGlite.
- * Used by the migration runner and for ad-hoc queries; repos use Drizzle.
- * Raw values are driver-native (e.g. int8 arrives as a string on node-postgres).
+ * Minimal SQL surface over Node's built-in `node:sqlite` (`DatabaseSync`).
+ * Supports both `?` (`?1, ?2`) and `$1, $2` positional placeholders.
  */
 export interface SqlRunner {
-  /** one parameterised statement ($1, $2, ...) */
+  /** One parameterised statement, serialized with public scripts and transactions. */
   query<T extends Row = Row>(text: string, params?: readonly unknown[]): Promise<T[]>
-  /** a multi-statement script without parameters (migrations) */
+  /** A multi-statement script without parameters (migrations). */
   exec(script: string): Promise<void>
-  /** runs fn in one transaction; rolls back when fn throws */
+  /** Runs fn in one `BEGIN IMMEDIATE`; use its runner, not the outer runner, inside fn. */
   transaction<T>(fn: (tx: SqlRunner) => Promise<T>): Promise<T>
 }
 
 const nested = (): Promise<never> => Promise.reject(new Error('nested transactions are not supported'))
 
-type PgliteTx = Pick<Transaction, 'query' | 'exec'>
+interface TransactionScope {
+  active: boolean
+}
 
-const pgliteTxRunner = (tx: PgliteTx): SqlRunner => ({
-  async query<T extends Row = Row>(text: string, params: readonly unknown[] = []): Promise<T[]> {
-    return (await tx.query<T>(text, [...params])).rows
-  },
-  async exec(script: string): Promise<void> {
-    await tx.exec(script)
-  },
-  transaction: nested,
-})
+const transactionScopes = new AsyncLocalStorage<ReadonlyMap<symbol, TransactionScope>>()
 
-export const pgliteRunner = (pg: Pick<PGlite, 'query' | 'exec' | 'transaction'>): SqlRunner => ({
-  async query<T extends Row = Row>(text: string, params: readonly unknown[] = []): Promise<T[]> {
-    return (await pg.query<T>(text, [...params])).rows
-  },
-  async exec(script: string): Promise<void> {
-    await pg.exec(script)
-  },
-  transaction<T>(fn: (tx: SqlRunner) => Promise<T>): Promise<T> {
-    return pg.transaction((tx) => fn(pgliteTxRunner(tx)))
-  },
-})
+/** Converts `$1, $2` in code segments to `?1, ?2` so positional binding works for both styles. */
+const toPositionalSql = (sql: string): string => {
+  if (!sql.includes('$')) return sql
+  try {
+    return lexSql(sql)
+      .map((s) => (s.kind === 'code' ? s.text.replace(/\$(\d+)\b/g, '?$1') : s.text))
+      .join('')
+  } catch {
+    return sql
+  }
+}
 
-type Queryable = Pick<PoolClient, 'query'>
+const bindParam = (v: unknown): SQLInputValue => {
+  if (v === undefined || v === null) return null
+  if (typeof v === 'boolean') return v ? 1 : 0
+  if (v instanceof Date) return v.toISOString()
+  if (typeof v === 'number' || typeof v === 'bigint' || typeof v === 'string') return v
+  if (v instanceof Uint8Array) return v
+  return JSON.stringify(v)
+}
 
-const clientRunner = (client: Queryable): SqlRunner => ({
-  async query<T extends Row = Row>(text: string, params: readonly unknown[] = []): Promise<T[]> {
-    return (await client.query<T>(text, [...params])).rows
-  },
-  async exec(script: string): Promise<void> {
-    // no parameters: node-postgres uses the simple protocol, which runs several statements
-    await client.query(script)
-  },
-  transaction: nested,
-})
+const runQuery = <T extends Row = Row>(db: DatabaseSync, text: string, params: readonly unknown[] = []): T[] => {
+  const sql = toPositionalSql(text)
+  const stmt = db.prepare(sql)
+  const bound = params.map(bindParam)
+  if (stmt.columns().length > 0) {
+    const rows = stmt.all(...bound) as Record<string, unknown>[]
+    return rows.map((r) => ({ ...r }) as T)
+  }
+  stmt.run(...bound)
+  return []
+}
 
-/** node-postgres pool. A transaction holds one pooled client from BEGIN to COMMIT/ROLLBACK. */
-export const pgRunner = (pool: Pick<Pool, 'query' | 'connect'>): SqlRunner => ({
-  async query<T extends Row = Row>(text: string, params: readonly unknown[] = []): Promise<T[]> {
-    return (await pool.query<T>(text, [...params])).rows
-  },
-  async exec(script: string): Promise<void> {
-    await pool.query(script)
-  },
-  async transaction<T>(fn: (tx: SqlRunner) => Promise<T>): Promise<T> {
-    const client = await pool.connect()
-    let broken: Error | undefined
-    try {
-      await client.query('BEGIN')
-      const result = await fn(clientRunner(client))
-      await client.query('COMMIT')
-      return result
-    } catch (e) {
-      try {
-        await client.query('ROLLBACK')
-      } catch (rollbackError) {
-        // the connection is unusable; destroy it instead of returning it to the pool
-        broken = rollbackError as Error
-      }
-      throw e
-    } finally {
-      client.release(broken)
+export const sqliteRunner = (db: DatabaseSync): SqlRunner => {
+  let tail: Promise<void> = Promise.resolve()
+  const owner = Symbol('SQLite connection')
+
+  const assertPublicAccess = (): void => {
+    if (transactionScopes.getStore()?.get(owner)?.active) {
+      throw new Error('use the provided transaction runner inside a transaction')
     }
-  },
-})
+  }
+
+  const withLock = async <T>(fn: () => Promise<T>): Promise<T> => {
+    let release!: () => void
+    const next = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const prev = tail
+    tail = prev.then(() => next)
+    await prev
+    try {
+      return await fn()
+    } finally {
+      release()
+    }
+  }
+
+  const createTransactionRunner = (scope: TransactionScope): SqlRunner => {
+    const assertActive = (): void => {
+      if (!scope.active || transactionScopes.getStore()?.get(owner) !== scope) {
+        throw new Error('transaction runner is not active in this transaction')
+      }
+    }
+    return {
+      async query<T extends Row = Row>(text: string, params: readonly unknown[] = []): Promise<T[]> {
+        assertActive()
+        return runQuery<T>(db, text, params)
+      },
+      async exec(script: string): Promise<void> {
+        assertActive()
+        db.exec(script)
+      },
+      transaction: nested,
+    }
+  }
+
+  return {
+    async query<T extends Row = Row>(text: string, params: readonly unknown[] = []): Promise<T[]> {
+      assertPublicAccess()
+      return withLock(async () => runQuery<T>(db, text, params))
+    },
+    async exec(script: string): Promise<void> {
+      assertPublicAccess()
+      return withLock(async () => { db.exec(script) })
+    },
+    transaction<T>(fn: (tx: SqlRunner) => Promise<T>): Promise<T> {
+      if (transactionScopes.getStore()?.get(owner)?.active) return nested()
+      return withLock(async () => {
+        db.exec('BEGIN IMMEDIATE')
+        const scope: TransactionScope = { active: true }
+        const scopes = new Map(transactionScopes.getStore())
+        scopes.set(owner, scope)
+        const txRunner = createTransactionRunner(scope)
+        try {
+          const result = await transactionScopes.run(scopes, () => fn(txRunner))
+          db.exec('COMMIT')
+          return result
+        } catch (e) {
+          try {
+            db.exec('ROLLBACK')
+          } catch {
+            // transaction may have already been aborted by SQLite
+          }
+          throw e
+        } finally {
+          scope.active = false
+        }
+      })
+    },
+  }
+}

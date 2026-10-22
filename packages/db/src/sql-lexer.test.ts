@@ -29,6 +29,11 @@ describe('sql lexer', () => {
       "INSERT INTO t VALUES ('a;b')",
       'SELECT 2',
     ])
+    const triggerSql = `CREATE TRIGGER t_guard BEFORE UPDATE ON t BEGIN SELECT RAISE(ABORT, 'FORBIDDEN'); END; SELECT 3;`
+    expect(splitStatements(triggerSql)).toEqual([
+      "CREATE TRIGGER t_guard BEFORE UPDATE ON t BEGIN SELECT RAISE(ABORT, 'FORBIDDEN'); END",
+      'SELECT 3',
+    ])
   })
 
   it.each([`SELECT 'open`, 'SELECT "open', 'SELECT $$ open', '/* open'])('throws on unterminated %s', (sql) => {

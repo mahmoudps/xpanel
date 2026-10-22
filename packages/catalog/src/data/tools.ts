@@ -1,8 +1,8 @@
 // Origin: public-docs research pass of 2026-10-22 (docs.cpanel.net, api.docs.cpanel.net, aapanel.com/docs),
 // described in our own words. Maintained by hand from here on.
-import type { CatalogTool } from '../types.ts'
+import type { ToolDefinition } from '../types.ts'
 
-export const tools: CatalogTool[] = [
+export const tools: ToolDefinition[] = [
   {
     "id": "file-manager",
     "surface": "xpanel",
@@ -13,8 +13,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "file",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "file-trash",
@@ -26,8 +25,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "trash-item",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "file-text-editor",
@@ -39,8 +37,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "file",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "html-editor",
@@ -52,8 +49,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "file",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "images",
@@ -65,8 +61,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "image",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "directory-privacy",
@@ -78,8 +73,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "protected-directory",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "disk-usage",
@@ -91,8 +85,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "disk-usage",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "web-disk",
@@ -104,8 +97,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "webdisk-account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ftp-accounts",
@@ -117,8 +109,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "ftp-account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ftp-connections",
@@ -130,8 +121,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "ftp-session",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "anonymous-ftp",
@@ -143,8 +133,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "anonymous-ftp",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "backup",
@@ -156,8 +145,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "backup",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "website-backups",
@@ -169,8 +157,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "backup",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "git-version-control",
@@ -182,8 +169,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "git-repository",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "gitweb",
@@ -195,8 +181,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "git-repository",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "file-restoration",
@@ -208,8 +193,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "file-restore",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "phpmyadmin",
@@ -221,8 +205,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "database",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "mysql-databases",
@@ -234,8 +217,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "database",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "mysql-users",
@@ -247,8 +229,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "db-user",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "database-wizard",
@@ -260,8 +241,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "database",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "remote-database-access",
@@ -273,8 +253,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "remote-db-host",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "postgresql-databases",
@@ -286,8 +265,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "database",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "postgresql-database-wizard",
@@ -299,8 +277,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "database",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "phppgadmin",
@@ -312,8 +289,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "database",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "mysql-manager",
@@ -325,7 +301,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "database",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Experimental and removed upstream in version 122; duplicated by Manage My Databases."
   },
@@ -339,8 +314,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "domain",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "force-https-redirect",
@@ -352,8 +326,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "domain",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "create-domain",
@@ -365,8 +338,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "domain",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "manage-domain",
@@ -378,8 +350,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "domain",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "redirects",
@@ -391,8 +362,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "redirect",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "zone-editor",
@@ -404,8 +374,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-dns",
     "rootOnly": false,
     "entity": "dns-zone",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "dnssec",
@@ -417,8 +386,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-dns",
     "rootOnly": false,
     "entity": "dnssec-key",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "dynamic-dns",
@@ -430,8 +398,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "ddns-domain",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "site-publisher",
@@ -443,8 +410,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "site-template",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "sitejet-builder",
@@ -456,7 +422,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "site-template",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Sitejet is a vendor product excluded by project rules."
   },
@@ -470,7 +435,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "site-template",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "WP Toolkit is a vendor plugin excluded by project rules."
   },
@@ -484,7 +448,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "domain",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Branded external analytics/audit service tied to a vendor account."
   },
@@ -498,7 +461,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "domain",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Third-party paid SaaS (trial then license), not hosting functionality."
   },
@@ -512,7 +474,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "domain",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Marketplace/store purchase flow excluded by project rules."
   },
@@ -526,8 +487,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mailbox",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "email-account-create",
@@ -539,8 +499,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mailbox",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "email-account-manage",
@@ -552,8 +511,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mailbox",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "connect-devices",
@@ -565,8 +523,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mailbox",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "forwarders",
@@ -578,8 +535,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "forwarder",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "domain-forwarders",
@@ -591,8 +547,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "domain-forwarder",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "email-routing",
@@ -604,8 +559,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mail-routing",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "autoresponders",
@@ -617,8 +571,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "autoresponder",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "default-address",
@@ -630,8 +583,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "default-address",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "mailing-lists",
@@ -643,8 +595,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mailing-list",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "track-delivery",
@@ -656,8 +607,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mail-delivery-log",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "global-email-filters",
@@ -669,8 +619,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "email-filter",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "email-filters",
@@ -682,8 +631,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "email-filter",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "email-deliverability",
@@ -695,8 +643,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "dns-zone",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "address-importer",
@@ -708,8 +655,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mailbox",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "spam-filters",
@@ -721,8 +667,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "spam-settings",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "email-encryption",
@@ -734,8 +679,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "gpg-key",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "sender-verification",
@@ -747,8 +691,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "sender-verification-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "greylisting",
@@ -760,8 +703,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "greylist-domain",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "email-archive",
@@ -773,8 +715,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mail-archive",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "calendars-contacts-config",
@@ -786,8 +727,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "dav-collection",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "calendars-contacts-management",
@@ -799,8 +739,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "dav-collection",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "calendars-contacts-sharing",
@@ -812,8 +751,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "dav-share",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "email-disk-usage",
@@ -825,8 +763,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mailbox-folder",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "visitors",
@@ -838,8 +775,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "access-log",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "errors",
@@ -851,8 +787,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "error-log",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "bandwidth",
@@ -864,8 +799,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "bandwidth-sample",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "raw-access",
@@ -877,8 +811,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "access-log-archive",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "web-stats-awstats",
@@ -890,8 +823,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "stats-report",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "web-stats-analog",
@@ -903,8 +835,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "stats-report",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "web-stats-webalizer",
@@ -916,8 +847,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "stats-report",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "web-stats-ftp",
@@ -929,8 +859,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "stats-report",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "metrics-editor",
@@ -942,8 +871,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "stats-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "account-usage-stats",
@@ -955,8 +883,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "resource-usage",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "resource-usage",
@@ -968,8 +895,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "resource-usage",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "cpu-concurrent-connections",
@@ -981,7 +907,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "resource-usage",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "CloudLinux/LVE dependent and deprecated upstream."
   },
@@ -995,7 +920,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "site-monitor",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Branded paid analytics vendor integration excluded by project rules."
   },
@@ -1009,8 +933,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "ssh-key",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ip-blocker",
@@ -1022,8 +945,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "ip-block-rule",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ssl-private-keys",
@@ -1035,8 +957,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "ssl-key",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ssl-csrs",
@@ -1048,8 +969,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "ssl-csr",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ssl-certificates",
@@ -1061,8 +981,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "ssl-cert",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ssl-install",
@@ -1074,8 +993,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "ssl-vhost",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ssl-tls-status",
@@ -1087,8 +1005,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "ssl-cert",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ssl-tls-wizard",
@@ -1100,7 +1017,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "ssl-order",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Depends on the cPanel Store/Market purchase flow, excluded by project rules."
   },
@@ -1114,8 +1030,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "api-token",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "hotlink-protection",
@@ -1127,8 +1042,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "hotlink-rule",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "leech-protection",
@@ -1140,8 +1054,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "leech-rule",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "security-policy",
@@ -1153,8 +1066,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "security-question",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "modsecurity",
@@ -1166,8 +1078,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "waf-domain",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "two-factor-auth",
@@ -1179,8 +1090,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "tfa-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "imunify360",
@@ -1192,7 +1102,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "security-plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Imunify360 is explicitly excluded by project rules."
   },
@@ -1206,8 +1115,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "language-module",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "perl-modules",
@@ -1219,8 +1127,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "language-module",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "optimize-website",
@@ -1232,8 +1139,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "compression-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "multiphp-ini-editor",
@@ -1245,8 +1151,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "php-ini",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "application-manager",
@@ -1258,8 +1163,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "passenger-app",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "web-apps",
@@ -1271,8 +1175,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "web-app",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "site-software",
@@ -1284,7 +1187,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "app-installer-instance",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Removed by cPanel in version 126; one-click script installers (Softaculous/Installatron) are out of scope. Can come back later as an original app catalog."
   },
@@ -1298,7 +1200,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "language-module",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Removed by cPanel in version 136; Application Manager/Web Apps handle Ruby dependencies."
   },
@@ -1312,7 +1213,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "passenger-app",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Removed by cPanel in version 136 and replaced by Application Manager."
   },
@@ -1326,8 +1226,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "php-version",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "nodejs-apps",
@@ -1339,8 +1238,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "passenger-app",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "python-apps",
@@ -1352,8 +1250,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "passenger-app",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ruby-apps",
@@ -1365,8 +1262,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "passenger-app",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "cloudlinux-acceleratewp-xray",
@@ -1378,7 +1274,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "service",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "CloudLinux-specific."
   },
@@ -1392,7 +1287,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "app-installer-instance",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Third-party commercial installer (Softaculous) is explicitly out of scope."
   },
@@ -1406,7 +1300,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "app-installer-instance",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Third-party commercial installer (Installatron) is explicitly out of scope."
   },
@@ -1420,8 +1313,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "shell-session",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "cron-jobs",
@@ -1433,8 +1325,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "cron-job",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "track-dns",
@@ -1446,8 +1337,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "dns-lookup",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "indexes",
@@ -1459,8 +1349,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "directory-index",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "error-pages",
@@ -1472,8 +1361,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "error-page",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "apache-handlers",
@@ -1485,8 +1373,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "apache-handler",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "mime-types",
@@ -1498,8 +1385,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mime-type",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "virus-scanner",
@@ -1511,8 +1397,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "virus-scan",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "api-shell",
@@ -1524,8 +1409,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "api-call",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "account-preferences",
@@ -1537,8 +1421,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "account-settings",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "password-security",
@@ -1550,8 +1433,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "password",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "change-language",
@@ -1563,8 +1445,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "locale",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "user-manager",
@@ -1576,8 +1457,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "subaccount",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "manage-team",
@@ -1589,8 +1469,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "team-user",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "team-audit-log",
@@ -1602,8 +1481,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "audit-log-entry",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "change-style",
@@ -1615,8 +1493,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "theme",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "interface-analytics-consent",
@@ -1628,7 +1505,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "consent",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Vendor-branded interface analytics are out of scope."
   },
@@ -1642,8 +1518,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "list-accounts",
     "rootOnly": false,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "list-parked-domains",
@@ -1655,8 +1530,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "domain",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "list-subdomains",
@@ -1668,8 +1542,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "subdomain",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "list-suspended-accounts",
@@ -1681,8 +1554,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "suspend-account",
     "rootOnly": false,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "show-accounts-over-quota",
@@ -1694,8 +1566,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "edit-account",
     "rootOnly": false,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "view-bandwidth-usage",
@@ -1707,8 +1578,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "list-accounts",
     "rootOnly": false,
     "entity": "bandwidth-usage",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "create-account",
@@ -1720,8 +1590,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "create-account",
     "rootOnly": false,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "modify-account",
@@ -1733,8 +1602,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "edit-account",
     "rootOnly": false,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "change-site-ip",
@@ -1746,8 +1614,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "password-modification",
@@ -1759,8 +1626,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "change-password",
     "rootOnly": false,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "quota-modification",
@@ -1772,8 +1638,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "edit-account",
     "rootOnly": false,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "limit-bandwidth-usage",
@@ -1785,8 +1650,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "edit-account",
     "rootOnly": false,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "reset-account-bandwidth-limit",
@@ -1798,8 +1662,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "unsuspend-bandwidth-exceeders",
@@ -1811,8 +1674,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "upgrade-downgrade-account",
@@ -1824,8 +1686,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "change-plan",
     "rootOnly": false,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "manage-account-suspension",
@@ -1837,8 +1698,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "suspend-account",
     "rootOnly": false,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "terminate-accounts",
@@ -1850,8 +1710,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "terminate-account",
     "rootOnly": false,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "force-password-change",
@@ -1863,8 +1722,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "change-password",
     "rootOnly": false,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "rearrange-account",
@@ -1876,8 +1734,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "raw-apache-log-download",
@@ -1889,8 +1746,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "log-file",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "raw-ftp-log-download",
@@ -1902,8 +1758,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "log-file",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "raw-nginx-log-download",
@@ -1915,8 +1770,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "log-file",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "skeleton-directory",
@@ -1928,8 +1782,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "file",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "email-all-users",
@@ -1941,8 +1794,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "broadcast-message",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "manage-demo-mode",
@@ -1954,8 +1806,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "manage-shell-access",
@@ -1967,8 +1818,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "web-log-retention",
@@ -1980,8 +1830,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "log-retention",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "web-template-editor",
@@ -1993,8 +1842,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "web-template",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "account-enhancements",
@@ -2006,8 +1854,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "account-enhancement",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "change-multiple-sites-ip",
@@ -2019,8 +1866,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "modify-upgrade-multiple-accounts",
@@ -2032,8 +1878,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "edit-account",
     "rootOnly": false,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "add-package",
@@ -2045,8 +1890,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-plans",
     "rootOnly": false,
     "entity": "plan",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "edit-package",
@@ -2058,8 +1902,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-plans",
     "rootOnly": false,
     "entity": "plan",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "delete-package",
@@ -2071,8 +1914,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-plans",
     "rootOnly": false,
     "entity": "plan",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "feature-manager",
@@ -2084,8 +1926,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-plans",
     "rootOnly": false,
     "entity": "feature-list",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "vendor-feature-entries",
@@ -2097,7 +1938,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "feature-list",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Vendor products explicitly excluded (Sitejet, Nova, WP Toolkit, Imunify360, cPanel Market, CloudLinux)."
   },
@@ -2111,8 +1951,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "reseller",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "reseller-privileges",
@@ -2124,8 +1963,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "reseller-acl",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "reseller-acl-lists",
@@ -2137,8 +1975,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "acl-list",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "reseller-nameservers",
@@ -2150,8 +1987,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-dns",
     "rootOnly": false,
     "entity": "reseller",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "reseller-account-limits",
@@ -2163,8 +1999,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "reseller",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "reseller-package-limits",
@@ -2176,8 +2011,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "reseller",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "change-ownership-multiple-accounts",
@@ -2189,8 +2023,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "email-all-resellers",
@@ -2202,8 +2035,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "broadcast-message",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "manage-reseller-ip-delegation",
@@ -2215,8 +2047,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ip-address",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "manage-reseller-shared-ip",
@@ -2228,8 +2059,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ip-address",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "reset-resellers",
@@ -2241,8 +2071,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "reseller",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "show-reseller-accounts",
@@ -2254,8 +2083,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "reseller",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "view-reseller-usage-and-account-status",
@@ -2267,8 +2095,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "reseller",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "transfer-tool",
@@ -2280,8 +2107,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "transfer-session",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "transfer-tool-selection",
@@ -2293,8 +2119,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "transfer-item",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "live-transfer",
@@ -2306,8 +2131,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "transfer-item",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "account-transfer-progress",
@@ -2319,8 +2143,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "transfer-session",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "transfer-or-restore-account",
@@ -2332,8 +2155,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "backup",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "account-restore-progress",
@@ -2345,8 +2167,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "backup",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "convert-addon-to-account",
@@ -2358,8 +2179,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "review-transfers-and-restores",
@@ -2371,8 +2191,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "transfer-session",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "only-transfer-ip-address",
@@ -2384,7 +2203,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ip-address",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Depends on cPanel license transfer via cPanel Store/Manage2, which is excluded."
   },
@@ -2398,8 +2216,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "server-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "initial-setup-wizard",
@@ -2411,8 +2228,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "server-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "change-root-password",
@@ -2424,8 +2240,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "system-user",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "system-maintenance-schedule",
@@ -2437,8 +2252,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "cron-job",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "disk-quota-setup",
@@ -2450,8 +2264,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "disk-quota",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "virtuozzo-quotas",
@@ -2463,7 +2276,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "disk-quota",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Hypervisor-specific manual runbook, not a panel tool."
   },
@@ -2477,8 +2289,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "server-node",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "server-role-profile",
@@ -2490,8 +2301,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "server-profile",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "web-stats-engines",
@@ -2503,8 +2313,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "stats-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "root-web-terminal",
@@ -2516,8 +2325,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "terminal-session",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "update-preferences",
@@ -2529,8 +2337,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "update-policy",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "panel-upgrade",
@@ -2542,8 +2349,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "update-policy",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "vendor-marketplace",
@@ -2555,7 +2361,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Store/Marketplace is excluded by project rules."
   },
@@ -2569,7 +2374,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Vendor-branded analytics is excluded by project rules."
   },
@@ -2583,8 +2387,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-system",
@@ -2596,8 +2399,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-security",
@@ -2609,8 +2411,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-panel-php",
@@ -2622,8 +2423,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-domains",
@@ -2635,8 +2435,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-mail",
@@ -2648,8 +2447,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-redirection",
@@ -2661,8 +2459,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-stats-logs",
@@ -2674,8 +2471,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-sql",
@@ -2687,8 +2483,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-compression",
@@ -2700,8 +2495,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-notifications",
@@ -2713,8 +2507,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-software",
@@ -2726,8 +2519,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-logging",
@@ -2739,8 +2531,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-display",
@@ -2752,8 +2543,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-status",
@@ -2765,8 +2555,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-packages",
@@ -2778,8 +2567,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plan",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-development",
@@ -2791,8 +2579,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-support",
@@ -2804,8 +2591,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "tweak-site-software",
@@ -2817,7 +2603,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "App-installer catalogs (same class as Softaculous/Installatron) are excluded."
   },
@@ -2831,8 +2616,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "daily-process-log",
@@ -2844,8 +2628,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "process",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "server-information",
@@ -2857,8 +2640,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "task-queue-monitor",
@@ -2870,8 +2652,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "task",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "change-hostname",
@@ -2883,8 +2664,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "hostname",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "resolver-configuration",
@@ -2896,8 +2676,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "resolver",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "userdir-protection",
@@ -2909,8 +2688,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "apache-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "compiler-access",
@@ -2922,8 +2700,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "system-group",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "security-policies",
@@ -2935,8 +2712,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "password-policy",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "host-access-control",
@@ -2948,8 +2724,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "firewall-rule",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "external-authentication",
@@ -2961,8 +2736,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "auth-provider",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "root-ssh-keys",
@@ -2974,8 +2748,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ssh-key",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "wheel-group-users",
@@ -2987,8 +2760,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "system-group",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "sudo-group-users",
@@ -3000,8 +2772,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "system-group",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "waf-settings",
@@ -3013,8 +2784,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "waf-rule",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "waf-rules",
@@ -3026,8 +2796,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "waf-rule",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "waf-vendors",
@@ -3039,8 +2808,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "waf-vendor",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "password-strength",
@@ -3052,8 +2820,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "password-policy",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "security-advisor",
@@ -3065,8 +2832,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "security-advisory",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "security-questions",
@@ -3078,8 +2844,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "security-question",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "fork-bomb-protection",
@@ -3091,8 +2856,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "smtp-restrictions",
@@ -3104,8 +2868,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "firewall-rule",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "traceroute-toggle",
@@ -3117,8 +2880,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "xwhm-two-factor-auth",
@@ -3130,8 +2892,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "xwhm-imunify360",
@@ -3143,7 +2904,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Imunify360 is excluded by project rules."
   },
@@ -3157,8 +2917,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "notification-channel",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "system-mail-forwarding",
@@ -3170,8 +2929,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "forwarder",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "restart-dns",
@@ -3183,8 +2941,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "restart-ftp",
@@ -3196,8 +2953,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "restart-web",
@@ -3209,8 +2965,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "restart-imap",
@@ -3222,8 +2977,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "restart-mta",
@@ -3235,8 +2989,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "restart-mailing-lists",
@@ -3248,8 +3001,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "restart-php-fpm",
@@ -3261,8 +3013,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "restart-mysql",
@@ -3274,8 +3025,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "restart-postgresql",
@@ -3287,8 +3037,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "restart-ssh",
@@ -3300,8 +3049,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "add-dns-zone",
@@ -3313,8 +3061,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-dns",
     "rootOnly": false,
     "entity": "dns-zone",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "hostname-a-record",
@@ -3326,8 +3073,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "dns-zone",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "delete-dns-zone",
@@ -3339,8 +3085,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-dns",
     "rootOnly": false,
     "entity": "dns-zone",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "dns-zone-manager",
@@ -3352,8 +3097,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-dns",
     "rootOnly": false,
     "entity": "dns-zone",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "zone-templates",
@@ -3365,8 +3109,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "dns-template",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "email-dns-records",
@@ -3378,8 +3121,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "dns-zone",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "xwhm-email-routing",
@@ -3391,8 +3133,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-dns",
     "rootOnly": false,
     "entity": "domain",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "dkim-spf-bulk",
@@ -3404,8 +3145,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "dns-zone",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "nameserver-report",
@@ -3417,8 +3157,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "dns-zone",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "park-domain",
@@ -3430,8 +3169,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-dns",
     "rootOnly": false,
     "entity": "domain",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "dns-config-cleanup",
@@ -3443,8 +3181,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "dns-zone",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "zone-ttl-bulk",
@@ -3456,8 +3193,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-dns",
     "rootOnly": false,
     "entity": "dns-zone",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "domain-forwarding",
@@ -3469,8 +3205,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "domain",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "dns-cluster-sync",
@@ -3482,8 +3217,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "dns-zone",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "db-access-hosts",
@@ -3495,8 +3229,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "db-user",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "postgresql-setup",
@@ -3508,8 +3241,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "database",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "db-ownership-map",
@@ -3521,8 +3253,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "database",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "db-users-admin",
@@ -3534,8 +3265,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "db-user",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "databases-admin",
@@ -3547,8 +3277,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "database",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "db-server-profiles",
@@ -3560,8 +3289,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "db-profile",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "db-root-password",
@@ -3573,8 +3301,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "db-user",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "db-engine-upgrade",
@@ -3586,8 +3313,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "db-server-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "db-repair",
@@ -3599,8 +3325,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "database",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "db-process-list",
@@ -3612,8 +3337,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "process",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "add-ip",
@@ -3625,8 +3349,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ip-address",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "assign-ipv6",
@@ -3638,8 +3361,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ip-address",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "remote-service-ips",
@@ -3651,8 +3373,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ip-address",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ip-migration-wizard",
@@ -3664,8 +3385,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ip-address",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ipv6-ranges",
@@ -3677,8 +3397,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ipv6-range",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "rebuild-ip-pool",
@@ -3690,8 +3409,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ip-address",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ip-usage-report",
@@ -3703,8 +3421,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ip-address",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ip-addresses-list",
@@ -3716,8 +3433,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ip-address",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "reserved-ips",
@@ -3729,8 +3445,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ip-address",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "web-stack-builder",
@@ -3742,8 +3457,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "web-stack-profile",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "module-installers",
@@ -3755,8 +3469,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "os-package",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "xwhm-perl-modules",
@@ -3768,8 +3481,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "os-package",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "pear-packages",
@@ -3781,8 +3493,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "os-package",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "pecl-extensions",
@@ -3794,8 +3505,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "php-version",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ruby-gems",
@@ -3807,7 +3517,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "os-package",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Deprecated upstream; Ruby apps are handled by the app-server packages of the web stack builder."
   },
@@ -3821,8 +3530,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "os-package",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "php-ini-editor",
@@ -3834,8 +3542,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "php-version",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "php-manager-system",
@@ -3847,8 +3554,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "php-version",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "php-manager-domains",
@@ -3860,8 +3566,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "php-fpm-pool",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "nginx-proxy-manager",
@@ -3873,8 +3578,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "nginx-cache",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "package-db-rebuild",
@@ -3886,8 +3590,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "os-package",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "os-update",
@@ -3899,8 +3602,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "os-package",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "server-software-update",
@@ -3912,8 +3614,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "os-package",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "xwhm-wp-toolkit",
@@ -3925,7 +3626,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "WP Toolkit is excluded by project rules."
   },
@@ -3939,7 +3639,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Softaculous is excluded by project rules."
   },
@@ -3953,7 +3652,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Installatron is excluded by project rules."
   },
@@ -3967,8 +3665,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "apache-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "directory-index-priority",
@@ -3980,8 +3677,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "apache-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "web-config-includes",
@@ -3993,8 +3689,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "apache-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "process-memory-limit",
@@ -4006,8 +3701,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "apache-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "web-log-rotation",
@@ -4019,8 +3713,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "log-rotation",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "piped-logging",
@@ -4032,8 +3725,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "apache-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "panel-log-rotation",
@@ -4045,8 +3737,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "log-rotation",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webdisk-tls",
@@ -4058,8 +3749,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "panel-web-tls",
@@ -4071,8 +3761,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "mta-basic-editor",
@@ -4084,8 +3773,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "mta-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "mta-config-manager",
@@ -4097,8 +3785,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "mta-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ftp-server-config",
@@ -4110,8 +3797,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ftp-account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ftp-server-selection",
@@ -4123,8 +3809,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "mailbox-server-config",
@@ -4136,8 +3821,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "mail-server-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "service-ssl-certificates",
@@ -4149,8 +3833,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ssl-cert",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "nameserver-selection",
@@ -4162,8 +3845,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "service-manager",
@@ -4175,8 +3857,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "php-fpm-service",
@@ -4188,8 +3869,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "php-fpm-pool",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "generate-csr",
@@ -4201,8 +3881,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-ssl",
     "rootOnly": false,
     "entity": "ssl-cert",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "install-ssl",
@@ -4214,8 +3893,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-ssl",
     "rootOnly": false,
     "entity": "ssl-cert",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "auto-ssl",
@@ -4227,8 +3905,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ssl-cert",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ssl-hosts",
@@ -4240,8 +3917,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-ssl",
     "rootOnly": false,
     "entity": "ssl-cert",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "ssl-storage",
@@ -4253,8 +3929,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": "manage-ssl",
     "rootOnly": false,
     "entity": "ssl-cert",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "default-key-type",
@@ -4266,8 +3941,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ssl-cert",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "purchase-ssl",
@@ -4279,7 +3953,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ssl-cert",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "cPanel Store purchases are excluded by project rules."
   },
@@ -4293,8 +3966,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "backup",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "backup-destinations",
@@ -4306,8 +3978,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "backup-destination",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "backup-restoration",
@@ -4319,8 +3990,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "restore-task",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "backup-user-selection",
@@ -4332,8 +4002,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "backup",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "file-restore",
@@ -4345,8 +4014,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "backup",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "backup-legacy-migration",
@@ -4358,7 +4026,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "backup",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "xPanel has a single backup system with no legacy format to migrate."
   },
@@ -4372,8 +4039,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "api-token",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "xwhm-api-shell",
@@ -4385,8 +4051,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "api-token",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "registered-apps",
@@ -4398,8 +4063,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "plugin-generator",
@@ -4411,8 +4075,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "hooks-manager",
@@ -4424,8 +4087,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "hook",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-signin",
@@ -4437,8 +4099,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "session",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-home",
@@ -4450,8 +4111,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mailbox",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-folders",
@@ -4463,8 +4123,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mail-folder",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-message-list",
@@ -4476,8 +4135,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "message",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-message-read",
@@ -4489,8 +4147,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "message",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-compose",
@@ -4502,8 +4159,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "message",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-reply-forward",
@@ -4515,8 +4171,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "message",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-attachments",
@@ -4528,8 +4183,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "attachment",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-search",
@@ -4541,8 +4195,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "message",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-search-index",
@@ -4554,8 +4207,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mailbox",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-spam-marking",
@@ -4567,8 +4219,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "message",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-preferences",
@@ -4580,8 +4231,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "user-preference",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-address-book",
@@ -4593,8 +4243,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "contact",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-dav-collections",
@@ -4606,8 +4255,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "dav-collection",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-dav-config",
@@ -4619,8 +4267,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "dav-collection",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-dav-sharing",
@@ -4632,8 +4279,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "dav-share",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-calendar",
@@ -4645,8 +4291,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "calendar-event",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-email-filters",
@@ -4658,8 +4303,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mail-filter",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-filter-test",
@@ -4671,8 +4315,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mail-filter",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-autoresponder",
@@ -4684,8 +4327,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "autoresponder",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-forwarders",
@@ -4697,8 +4339,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "forwarder",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-plus-addressing",
@@ -4710,8 +4351,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mailbox",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-password",
@@ -4723,8 +4363,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mailbox",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-identities",
@@ -4736,8 +4375,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "identity",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-contact-info",
@@ -4749,8 +4387,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "contact-preference",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-two-factor",
@@ -4762,8 +4399,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mailbox",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-external-auth",
@@ -4775,8 +4411,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "external-identity",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-analytics-consent",
@@ -4788,7 +4423,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "user-preference",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Tied to a cPanel-branded analytics vendor; xMail ships no vendor telemetry."
   },
@@ -4802,8 +4436,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "spam-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-spam-box",
@@ -4815,8 +4448,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "spam-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-boxtrapper",
@@ -4828,8 +4460,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "spam-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-quota",
@@ -4841,8 +4472,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mailbox",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-disk-cleanup",
@@ -4854,8 +4484,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mail-folder",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-mail-client-setup",
@@ -4867,8 +4496,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mailbox",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-track-delivery",
@@ -4880,8 +4508,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "delivery-event",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "webmail-mailing-lists",
@@ -4893,8 +4520,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "mailing-list",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-firewall-switch",
@@ -4906,8 +4532,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "firewall-rule",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-icmp-block",
@@ -4919,8 +4544,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "firewall-rule",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-port-rules",
@@ -4932,8 +4556,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "firewall-rule",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-ip-rules",
@@ -4945,8 +4568,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "firewall-rule",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-port-forward",
@@ -4958,8 +4580,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "port-forward",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-region-rules",
@@ -4971,8 +4592,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "firewall-rule",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-firewall-import-export",
@@ -4984,8 +4604,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "firewall-rule",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-ssh-service",
@@ -4997,8 +4616,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-ssh-settings",
@@ -5010,8 +4628,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ssh-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-ssh-login-alarm",
@@ -5023,8 +4640,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "alarm-task",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-ssh-login-logs",
@@ -5036,8 +4652,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "log-entry",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-anti-intrusion",
@@ -5049,7 +4664,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "os-user",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional module."
   },
@@ -5063,7 +4677,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional module."
   },
@@ -5077,8 +4690,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-site-bulk-actions",
@@ -5090,8 +4702,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-site-start-stop",
@@ -5103,8 +4714,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-site-expiry",
@@ -5116,8 +4726,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-site-quota",
@@ -5129,8 +4738,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-default-site",
@@ -5142,8 +4750,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-site-directory",
@@ -5155,8 +4762,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-deny-access",
@@ -5168,8 +4774,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "access-rule",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-traffic-control",
@@ -5181,8 +4786,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-url-rewrite",
@@ -5194,8 +4798,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "rewrite-rule",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-default-index",
@@ -5207,8 +4810,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-site-config-editor",
@@ -5220,8 +4822,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "vhost",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-composer",
@@ -5233,8 +4834,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-site-reverse-proxy",
@@ -5246,8 +4846,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "reverse-proxy",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-proxy-project",
@@ -5259,8 +4858,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "reverse-proxy",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-https-protection",
@@ -5272,8 +4870,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "vhost",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-one-click-deploy",
@@ -5285,8 +4882,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-site-waf",
@@ -5298,7 +4894,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional module (Nginx/Apache WAF)."
   },
@@ -5312,7 +4907,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional module."
   },
@@ -5326,7 +4920,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional module."
   },
@@ -5340,7 +4933,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ssl-cert",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Vendor certificate sales."
   },
@@ -5354,7 +4946,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "WP Toolkit is excluded by project rules."
   },
@@ -5368,8 +4959,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "panel-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-security-entrance",
@@ -5381,8 +4971,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "panel-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-unauth-response",
@@ -5394,8 +4983,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "panel-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-panel-domain",
@@ -5407,8 +4995,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "panel-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-basic-auth",
@@ -5420,8 +5007,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "panel-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-temporary-login",
@@ -5433,8 +5019,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "temp-access",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-recovery-cli",
@@ -5446,8 +5031,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "panel-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-panel-logs",
@@ -5459,8 +5043,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "log-entry",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-bind-account",
@@ -5472,7 +5055,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "panel-setting",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Vendor licensing/store link."
   },
@@ -5486,8 +5068,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "ui-preference",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "xpanel-global-search",
@@ -5499,8 +5080,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "ui-navigation",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "xpanel-notifications",
@@ -5512,8 +5092,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "notification",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "xpanel-general-info",
@@ -5525,8 +5104,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "xpanel-usage-stats-panel",
@@ -5538,8 +5116,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "resource-usage",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "xpanel-server-information",
@@ -5551,8 +5128,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "xpanel-onboarding-assistant",
@@ -5564,8 +5140,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "ui-preference",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "nginx-cache-control",
@@ -5577,8 +5152,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "cache",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "whm-home-favorites",
@@ -5590,8 +5164,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ui-preference",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "whm-global-search",
@@ -5603,8 +5176,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "account",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "whm-notifications",
@@ -5616,8 +5188,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "notification",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "incoming-mail-country-filter",
@@ -5629,8 +5200,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "mail-filter",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "incoming-mail-domain-filter",
@@ -5642,8 +5212,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "mail-filter",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "whm-greylisting",
@@ -5655,8 +5224,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "mail-filter",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "mail-delivery-reports",
@@ -5668,8 +5236,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "mail-log-event",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "mail-queue-manager",
@@ -5681,8 +5248,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "mail-queue-item",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "mail-troubleshooter",
@@ -5694,8 +5260,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "mail-route",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "mailbox-format-conversion",
@@ -5707,8 +5272,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "mailbox",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "repair-mailbox-permissions",
@@ -5720,8 +5284,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "mailbox",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "spam-daemon-startup",
@@ -5733,8 +5296,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "view-relayers",
@@ -5746,8 +5308,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "mail-log-event",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "view-sent-summary",
@@ -5759,8 +5320,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "mail-log-event",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "configuration-cluster",
@@ -5772,8 +5332,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "cluster-member",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "dns-cluster",
@@ -5785,8 +5344,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "cluster-member",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "remote-access-key",
@@ -5798,7 +5356,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "api-token",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Deprecated upstream in favor of scoped API tokens; xWHM supports API tokens only."
   },
@@ -5812,8 +5369,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "branding",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "panel-change-log",
@@ -5825,8 +5381,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "release",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "site-software-catalog",
@@ -5838,8 +5393,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site-software",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "site-software-instances",
@@ -5851,8 +5405,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "site-software",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "panel-news",
@@ -5864,8 +5417,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "announcement",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "mailing-list-password-reset",
@@ -5877,8 +5429,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "mailing-list",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "theme-manager",
@@ -5890,8 +5441,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "theme",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "application-locales",
@@ -5903,8 +5453,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "locale",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "locale-list",
@@ -5916,8 +5465,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "locale",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "locale-copy",
@@ -5929,8 +5477,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "locale",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "locale-edit",
@@ -5942,8 +5489,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "locale",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "locale-delete",
@@ -5955,8 +5501,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "locale",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "locale-xml-export",
@@ -5968,8 +5513,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "locale",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "locale-xml-import",
@@ -5981,8 +5525,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "locale",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "process-manager",
@@ -5994,8 +5537,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "process",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "background-process-killer",
@@ -6007,8 +5549,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "process",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "current-disk-usage",
@@ -6020,8 +5561,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "filesystem",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "system-reboot",
@@ -6033,8 +5573,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "server",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "antivirus-scanner-config",
@@ -6046,8 +5585,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "scanner-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "comet-backup",
@@ -6059,7 +5597,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Commercial third-party backup vendor integration."
   },
@@ -6073,7 +5610,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "cPanel-branded third-party monitoring and analytics vendor."
   },
@@ -6087,7 +5623,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Vendor-branded product dashboard."
   },
@@ -6101,7 +5636,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "market-provider",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "cPanel Store/Marketplace."
   },
@@ -6115,8 +5649,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "support-link",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "create-support-ticket",
@@ -6128,7 +5661,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "support-ticket",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Tied to cPanel's own ticket system."
   },
@@ -6142,7 +5674,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "support-access",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Vendor-specific support channel and key distribution."
   },
@@ -6156,8 +5687,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "runtime-version",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-go-project",
@@ -6169,8 +5699,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "app-project",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-go-sdk",
@@ -6182,8 +5711,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "runtime-version",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-python-versions",
@@ -6195,8 +5723,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "runtime-version",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-java-project",
@@ -6208,8 +5735,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "app-project",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-dashboard",
@@ -6221,8 +5747,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "server-metrics",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-task-messages",
@@ -6234,8 +5759,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "task",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-language-theme",
@@ -6247,8 +5771,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ui-preference",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-ftp-logs",
@@ -6260,8 +5783,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "log",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-db-quota",
@@ -6273,8 +5795,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "database",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-phpmyadmin-access",
@@ -6286,8 +5807,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-mysql-service",
@@ -6299,8 +5819,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-sqlserver-remote",
@@ -6312,7 +5831,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "database",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Customer databases run on MariaDB (and PostgreSQL when enabled) on Linux; remote Microsoft SQL Server is outside the product."
   },
@@ -6326,8 +5844,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "database",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-redis-keys",
@@ -6339,8 +5856,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "cache-key",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-redis-service",
@@ -6352,8 +5868,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-postgresql-service",
@@ -6365,8 +5880,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-docker-apps",
@@ -6378,8 +5892,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "container-app",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-docker-overview",
@@ -6391,8 +5904,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "container",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-docker-containers",
@@ -6404,8 +5916,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "container",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-docker-container-detail",
@@ -6417,8 +5928,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "container",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-docker-images",
@@ -6430,8 +5940,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "container-image",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-docker-compose",
@@ -6443,8 +5952,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "compose-stack",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-docker-networks",
@@ -6456,8 +5964,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "container-network",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-docker-volumes",
@@ -6469,8 +5976,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "container-volume",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-docker-registries",
@@ -6482,8 +5988,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "registry",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-docker-settings",
@@ -6495,8 +6000,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-system-monitor",
@@ -6508,8 +6012,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "server-metrics",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-mail-bcc",
@@ -6521,8 +6024,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "mail-rule",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-mail-campaigns",
@@ -6534,8 +6036,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "mail-campaign",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-mail-subscribers",
@@ -6547,8 +6048,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "subscriber",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-mail-automation",
@@ -6560,8 +6060,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "automation",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-anti-spam-gateway",
@@ -6573,7 +6072,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Deprecated upstream and replaced by the mail server's integrated spam filter."
   },
@@ -6587,8 +6085,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "share-link",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-log-security-analysis",
@@ -6600,8 +6097,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "log",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-os-log-audit",
@@ -6613,8 +6109,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "log",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-software-logs",
@@ -6626,8 +6121,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "log",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-node-management",
@@ -6639,8 +6133,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "server-node",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-node-file-transfer",
@@ -6652,8 +6145,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "file",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-dns-provider-accounts",
@@ -6665,8 +6157,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "dns-provider",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-provider-domains",
@@ -6678,8 +6169,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "domain",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-provider-dns-records",
@@ -6691,8 +6181,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "dns-record",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-auto-dns-on-site-create",
@@ -6704,8 +6193,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "dns-record",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-ddns",
@@ -6717,8 +6205,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "dns-record",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-subpanel-service",
@@ -6730,8 +6217,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service-config",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-web-terminal",
@@ -6743,8 +6229,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ssh-host",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-saved-commands",
@@ -6756,8 +6241,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "command-snippet",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-cron-tasks",
@@ -6769,8 +6253,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "cron-job",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-task-chaining",
@@ -6782,8 +6265,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "cron-job",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-event-triggers",
@@ -6795,8 +6277,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "trigger",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-script-library",
@@ -6808,8 +6289,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "script",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-app-catalog",
@@ -6821,8 +6301,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "software-package",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-third-party-plugin-import",
@@ -6834,8 +6313,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-openlitespeed-manager",
@@ -6847,8 +6325,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-memcached-manager",
@@ -6860,8 +6337,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-elasticsearch-manager",
@@ -6873,8 +6349,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-rabbitmq-manager",
@@ -6886,8 +6361,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-mongodb-service",
@@ -6899,8 +6373,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-clamav",
@@ -6912,8 +6385,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "scan-job",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-frp-manager",
@@ -6925,8 +6397,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-boot-items",
@@ -6938,8 +6409,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-performance-test",
@@ -6951,8 +6421,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "benchmark",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-linux-tools",
@@ -6964,8 +6433,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "os-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-supervisor",
@@ -6977,8 +6445,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "daemon",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-log-cleanup",
@@ -6990,8 +6457,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "log",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-webhook",
@@ -7003,8 +6469,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "webhook",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-php-guardian",
@@ -7016,8 +6481,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "service",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-panel-general",
@@ -7029,8 +6493,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "panel-setting",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-panel-backup-restore",
@@ -7042,8 +6505,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "backup",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-server-migrate",
@@ -7055,8 +6517,7 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "migration-job",
-    "acceptanceTest": null,
-    "status": "planned"
+    "status": "researched"
   },
   {
     "id": "aapanel-ai-assistant",
@@ -7068,7 +6529,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ai-session",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Depends on a vendor-hosted AI service with purchased usage quota, so it is not part of control-panel parity."
   },
@@ -7082,7 +6542,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "ai-channel",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Part of the vendor AI service with paid quota."
   },
@@ -7096,7 +6555,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional plugin."
   },
@@ -7110,7 +6568,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional plugin."
   },
@@ -7124,7 +6581,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional plugin."
   },
@@ -7138,7 +6594,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional plugin."
   },
@@ -7152,7 +6607,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional plugin."
   },
@@ -7166,7 +6620,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional plugin."
   },
@@ -7180,7 +6633,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional plugin."
   },
@@ -7194,7 +6646,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional plugin."
   },
@@ -7208,7 +6659,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional plugin and vendor mobile app."
   },
@@ -7222,7 +6672,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional plugin."
   },
@@ -7236,7 +6685,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional plugin."
   },
@@ -7250,7 +6698,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "plugin",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "Paid aaPanel Professional plugin."
   },
@@ -7264,7 +6711,6 @@ export const tools: CatalogTool[] = [
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "license",
-    "acceptanceTest": null,
     "status": "out-of-scope",
     "outOfScopeReason": "License purchase and transfer."
   }

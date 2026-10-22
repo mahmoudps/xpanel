@@ -1,0 +1,2005 @@
+// xPanel Design System tokens, CSS stylesheet, and accessible status/meter primitives.
+// Follows docs/STANDARDS.md: OKLCH light & dark themes (no pure #000), logical RTL/LTR properties,
+// 1.618:1 main:aside golden ratio, 16 -> 26 -> 42 spacing scale, >= 44px ergonomic hit targets,
+// tabular numerals on all metrics/IPs/IDs, and icon + text on every status badge and threshold meter.
+
+import type { Limit } from '@xpanel/core'
+
+export type StatusBadgeKind = 'ok' | 'warn' | 'critical' | 'suspended' | 'reconciling'
+export type ThresholdLevel = 'ok' | 'warn' | 'critical'
+export type AsyncActionStateKind =
+  | 'idle'
+  | 'loading'
+  | 'pending'
+  | 'succeeded'
+  | 'denied'
+  | 'failed'
+  | 'unavailable'
+  | 'conflict'
+
+export interface AsyncActionBannerProps {
+  state: AsyncActionStateKind
+  locale?: 'en' | 'ar'
+  title?: string
+  message?: string
+  jobId?: string
+  generationId?: number
+  retryable?: boolean
+  preserveDraft?: boolean
+  httpStatus?: number
+  errorCode?: string
+}
+
+const HTML_ESCAPE_MAP: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+}
+
+const EASTERN_ARABIC_ZERO = 0x0660
+const EXTENDED_ARABIC_ZERO = 0x06f0
+
+/**
+ * Converts Eastern Arabic (U+0660-U+0669) and Extended Arabic-Indic (U+06F0-U+06F9) numerals to ASCII (0-9).
+ */
+export function normalizeAsciiDigits(input: string | number): string {
+  const raw = typeof input === 'number' ? String(input) : input
+  if (raw.length === 0) return ''
+  let out = ''
+  for (let i = 0; i < raw.length; i++) {
+    const code = raw.charCodeAt(i)
+    if (code >= EASTERN_ARABIC_ZERO && code <= EASTERN_ARABIC_ZERO + 9) {
+      out += String(code - EASTERN_ARABIC_ZERO)
+    } else if (code >= EXTENDED_ARABIC_ZERO && code <= EXTENDED_ARABIC_ZERO + 9) {
+      out += String(code - EXTENDED_ARABIC_ZERO)
+    } else if (code === 0x066b) {
+      out += '.'
+    } else if (code === 0x066c) {
+      out += ','
+    } else {
+      out += raw[i]!
+    }
+  }
+  return out
+}
+
+/**
+ * Formats a number deterministically using Western ASCII digits (`0-9`) regardless of active locale.
+ */
+export function formatAsciiNumber(
+  value: number,
+  opts: { decimals?: number; useGrouping?: boolean } = {},
+): string {
+  if (!Number.isFinite(value)) return '0'
+  const decimals = opts.decimals
+  const useGrouping = opts.useGrouping ?? true
+  const fixed = decimals !== undefined ? value.toFixed(decimals) : String(value)
+  const [intPartRaw, fracPart] = fixed.split('.')
+  const sign = intPartRaw?.startsWith('-') ? '-' : ''
+  const digits = (sign ? intPartRaw!.slice(1) : intPartRaw) ?? '0'
+  const grouped = useGrouping ? digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : digits
+  return fracPart !== undefined && fracPart.length > 0 ? `${sign}${grouped}.${fracPart}` : `${sign}${grouped}`
+}
+
+/**
+ * Formats a percentage using Western ASCII digits (`0-9`).
+ */
+export function formatAsciiPercent(value: number, decimals = 1): string {
+  if (!Number.isFinite(value)) return '0%'
+  const rounded = Number(value.toFixed(decimals))
+  const text = rounded % 1 === 0 ? String(Math.trunc(rounded)) : rounded.toFixed(decimals)
+  return `${text}%`
+}
+
+/**
+ * Formats an ISO timestamp or Date into `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS UTC` with ASCII digits (`0-9`).
+ */
+export function formatAsciiDate(
+  isoOrDate: string | Date,
+  opts: { includeTime?: boolean } = {},
+): string {
+  const d = typeof isoOrDate === 'string' ? new Date(isoOrDate) : isoOrDate
+  if (Number.isNaN(d.getTime())) {
+    return normalizeAsciiDigits(typeof isoOrDate === 'string' ? isoOrDate : '')
+  }
+  const iso = d.toISOString()
+  if (opts.includeTime) {
+    return `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`
+  }
+  return iso.slice(0, 10)
+}
+
+/**
+ * Escapes arbitrary strings for safe interpolation into HTML text and attributes.
+ */
+export function escapeHtml(str: string): string {
+  if (str.length === 0) return ''
+  return str.replace(/[&<>"']/g, (ch) => HTML_ESCAPE_MAP[ch] ?? ch)
+}
+
+/**
+ * Wraps a technical LTR identifier (domain, path, IP, email, port, unit, digest, job ID)
+ * in `<bdi dir="ltr">` with normalized ASCII digits so RTL context never scrambles token order.
+ */
+export function renderLtrValue(value: string | number, className?: string): string {
+  const safe = escapeHtml(normalizeAsciiDigits(value))
+  const cls = className ? ` class="${escapeHtml(className)}"` : ''
+  return `<bdi dir="ltr"${cls}>${safe}</bdi>`
+}
+
+/**
+ * Determines the unified threshold severity level:
+ * - normal (`ok`): < 80%
+ * - warning (`warn`): >= 80% and < 95%
+ * - critical (`critical`): >= 95%
+ */
+export function getThresholdLevel(percent: number): ThresholdLevel {
+  if (!Number.isFinite(percent) || percent < 80) return 'ok'
+  if (percent < 95) return 'warn'
+  return 'critical'
+}
+
+/**
+ * Formats byte counts into human-readable units with tabular ASCII (`0-9`) precision.
+ */
+export function formatAsciiBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let val = bytes
+  let unitIdx = 0
+  while (val >= 1024 && unitIdx < units.length - 1) {
+    val /= 1024
+    unitIdx++
+  }
+  const decimals = unitIdx === 0 ? 0 : val >= 100 ? 0 : val >= 10 ? 1 : 2
+  return `${ normalizeAsciiDigits(val.toFixed(decimals)) } ${units[unitIdx]}`
+}
+
+export function formatBytes(bytes: number): string {
+  return formatAsciiBytes(bytes)
+}
+
+/**
+ * Inline SVG icons for status badges and threshold meters so meaning is never conveyed by color alone.
+ */
+function renderStatusSvg(status: StatusBadgeKind): string {
+  switch (status) {
+    case 'ok':
+      // Checkmark circle icon
+      return `<svg class="xp-status-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.5"/><path d="M5.2 8.2L7.1 10.1L10.8 6.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+    case 'warn':
+      // Warning triangle icon
+      return `<svg class="xp-status-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2.2L14.4 13.5H1.6L8 2.2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6.5V9.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.6" r="0.85" fill="currentColor"/></svg>`
+    case 'critical':
+      // Octagon alert icon
+      return `<svg class="xp-status-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5.3 1.8H10.7L14.2 5.3V10.7L10.7 14.2H5.3L1.8 10.7V5.3L5.3 1.8Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 5.2V8.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.1" r="0.85" fill="currentColor"/></svg>`
+    case 'reconciling':
+      // Animated spinner icon
+      return `<svg class="xp-status-icon xp-status-icon--spin" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.2" stroke="currentColor" stroke-opacity="0.28" stroke-width="1.6"/><path d="M14.2 8A6.2 6.2 0 0 0 8 1.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`
+    case 'suspended':
+      // Pause icon
+      return `<svg class="xp-status-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.5"/><path d="M6.4 5.6V10.4M9.6 5.6V10.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`
+  }
+}
+
+const DEFAULT_STATUS_LABELS: Record<StatusBadgeKind, string> = {
+  ok: 'Healthy',
+  warn: 'Warning',
+  critical: 'Critical',
+  suspended: 'Suspended',
+  reconciling: 'Reconciling',
+}
+
+/**
+ * Renders an accessible status badge that pairs a semantic SVG icon with an explicit label word.
+ * Never relies on colour alone (WCAG 2.2 AA 1.4.1).
+ */
+export function renderStatusBadge(status: StatusBadgeKind, label: string): string {
+  const text = label.trim().length > 0 ? label.trim() : DEFAULT_STATUS_LABELS[status]
+  const safeText = escapeHtml(text)
+  const svg = renderStatusSvg(status)
+  return `<span class="xp-badge xp-badge--${status}" data-status="${status}" role="status">${svg}<span class="xp-badge__label">${safeText}</span></span>`
+}
+
+/**
+ * Renders a unified threshold meter (`<80%` ok, `>=80%` warn, `>=95%` critical)
+ * with an inline status icon, tabular numbers, and ARIA progressbar attributes.
+ */
+export function renderThresholdMeter(
+  used: number,
+  limit: Limit,
+  unit?: string,
+): string {
+  const safeUsed = Number.isFinite(used) && used >= 0 ? used : 0
+  const unitSuffix = unit ? ` ${escapeHtml(unit.trim())}` : ''
+  const formattedUsed = Number.isInteger(safeUsed) ? String(safeUsed) : safeUsed.toFixed(1)
+
+  if (limit === 'unlimited') {
+    const svg = renderStatusSvg('ok')
+    return (
+      `<div class="xp-meter xp-meter--ok" data-threshold="ok">` +
+      `<div class="xp-meter__header">` +
+      `<span class="xp-meter__status">${svg}<span class="xp-meter__word">OK</span></span>` +
+      `<span class="xp-meter__values xp-tabular">${escapeHtml(formattedUsed)}${unitSuffix} / <span class="xp-meter__unlimited">unlimited</span></span>` +
+      `</div>` +
+      `<div class="xp-meter__track" role="progressbar" aria-valuenow="8" aria-valuemin="0" aria-valuemax="100" aria-label="Unlimited quota">` +
+      `<div class="xp-meter__fill xp-meter__fill--ok" style="inline-size: 8%"></div>` +
+      `</div>` +
+      `</div>`
+    )
+  }
+
+  const safeLimit = Number.isFinite(limit) && limit > 0 ? limit : 1
+  const rawPct = (safeUsed / safeLimit) * 100
+  const clampedPct = Math.max(0, Math.min(100, rawPct))
+  const displayPct = Math.round(rawPct * 10) / 10
+  const level = getThresholdLevel(rawPct)
+  const formattedLimit = Number.isInteger(safeLimit) ? String(safeLimit) : safeLimit.toFixed(1)
+  const levelWord = level === 'ok' ? 'OK' : level === 'warn' ? 'Warning >=80%' : 'Critical >=95%'
+  const svg = renderStatusSvg(level)
+
+  return (
+    `<div class="xp-meter xp-meter--${level}" data-threshold="${level}">` +
+    `<div class="xp-meter__header">` +
+    `<span class="xp-meter__status">${svg}<span class="xp-meter__word">${escapeHtml(levelWord)}</span></span>` +
+    `<span class="xp-meter__values xp-tabular">${escapeHtml(formattedUsed)} / ${escapeHtml(formattedLimit)}${unitSuffix} <strong class="xp-meter__pct">(${displayPct.toFixed(displayPct % 1 === 0 ? 0 : 1)}%)</strong></span>` +
+    `</div>` +
+    `<div class="xp-meter__track" role="progressbar" aria-valuenow="${Math.round(clampedPct)}" aria-valuemin="0" aria-valuemax="100">` +
+    `<div class="xp-meter__fill xp-meter__fill--${level}" style="inline-size: ${clampedPct.toFixed(1)}%"></div>` +
+    `</div>` +
+    `</div>`
+  )
+}
+
+/**
+ * Classifies an HTTP / job / reconcile outcome into an explicit non-deceptive UI state.
+ * Crucially, HTTP 202 (Accepted) or `status: 'queued' | 'running' | 'pending'` or `observed: false`
+ * ALWAYS maps to `'pending'` (never `'succeeded'`), preventing false "Applied" banners before
+ * privileged agent reconciliation or background job execution completes.
+ */
+export function classifyHttpActionState(input: {
+  httpStatus: number
+  status?: string
+  observed?: boolean
+  errorCode?: string
+}): AsyncActionStateKind {
+  const code = (input.errorCode ?? '').toUpperCase()
+  const st = (input.status ?? '').toLowerCase()
+  if (
+    input.httpStatus === 202 ||
+    st === 'queued' ||
+    st === 'running' ||
+    st === 'pending' ||
+    input.observed === false
+  ) {
+    return 'pending'
+  }
+  if (
+    input.httpStatus === 401 ||
+    input.httpStatus === 403 ||
+    code === 'FORBIDDEN' ||
+    code === 'UNAUTHENTICATED'
+  ) {
+    return 'denied'
+  }
+  if (input.httpStatus === 409 || code === 'CONFLICT') {
+    return 'conflict'
+  }
+  if (
+    input.httpStatus === 412 ||
+    input.httpStatus === 503 ||
+    code === 'PRECONDITION_FAILED' ||
+    code === 'UNAVAILABLE' ||
+    st === 'unavailable'
+  ) {
+    return 'unavailable'
+  }
+  if (input.httpStatus >= 400 || st === 'failed' || st === 'rolled_back') {
+    return 'failed'
+  }
+  if (input.httpStatus >= 200 && input.httpStatus < 300) {
+    return 'succeeded'
+  }
+  return 'failed'
+}
+
+const ACTION_STATE_COPY: Record<
+  'en' | 'ar',
+  Record<AsyncActionStateKind, { badge: StatusBadgeKind; badgeText: string; title: string; message: string }>
+> = {
+  en: {
+    idle: {
+      badge: 'ok',
+      badgeText: 'Ready',
+      title: 'Workspace ready',
+      message: 'All verified controls are synchronized with the current generation.',
+    },
+    loading: {
+      badge: 'reconciling',
+      badgeText: 'Loading',
+      title: 'Loading live state...',
+      message: 'Fetching verified host and account state from the control plane.',
+    },
+    pending: {
+      badge: 'reconciling',
+      badgeText: 'Queued / Reconciling',
+      title: 'Operation accepted and pending host verification',
+      message:
+        'Desired state has been recorded, or a background job is queued. Host changes are not yet active until reconciliation and health verification complete.',
+    },
+    succeeded: {
+      badge: 'ok',
+      badgeText: 'Verified & Applied',
+      title: 'Operation verified on host',
+      message: 'Configuration passed syntax and health checks and is now active.',
+    },
+    denied: {
+      badge: 'critical',
+      badgeText: 'Access Denied',
+      title: 'Permission denied for this operation',
+      message: 'Your current role or account scope is not authorized to perform this action.',
+    },
+    failed: {
+      badge: 'critical',
+      badgeText: 'Failed',
+      title: 'Operation failed verification',
+      message:
+        'The host verifier rejected the change and automatically preserved the previous active generation. Your form draft has been retained.',
+    },
+    unavailable: {
+      badge: 'warn',
+      badgeText: 'Unavailable',
+      title: 'Service or runtime dependency unavailable',
+      message:
+        'A required host tool, socket, or backend dependency is currently unverified or unreachable. No changes were applied.',
+    },
+    conflict: {
+      badge: 'warn',
+      badgeText: 'Conflict (HTTP 409)',
+      title: 'Concurrent state modification or lock conflict',
+      message:
+        'Another reconciliation or resource update is currently in progress. Please review the latest state and retry; your draft input is preserved.',
+    },
+  },
+  ar: {
+    idle: {
+      badge: 'ok',
+      badgeText: 'جاهز',
+      title: 'مساحة العمل جاهزة',
+      message: 'جميع الأدوات الموثقة متزامنة مع الجيل النشط حالياً.',
+    },
+    loading: {
+      badge: 'reconciling',
+      badgeText: 'جارٍ التحميل',
+      title: 'جارٍ تحميل الحالة المباشرة...',
+      message: 'يتم جلب الحالة الموثقة للخادم والحساب من منصة التحكم.',
+    },
+    pending: {
+      badge: 'reconciling',
+      badgeText: 'قيد الانتظار والمطابقة',
+      title: 'تم استلام العملية وهي بانتظار التحقق على الخادم',
+      message:
+        'تم تسجيل الحالة المطلوبة أو جدولة المهمة في الخلفية. لن تصبح التغييرات فعالة على الخادم حتى تكتمل المطابقة وفحوصات الصحة.',
+    },
+    succeeded: {
+      badge: 'ok',
+      badgeText: 'مطبّق ومؤكد',
+      title: 'تم التحقق من العملية وتطبيقها على الخادم',
+      message: 'اجتازت الإعدادات فحوصات الصلاحية والصحة وأصبحت نشطة الآن.',
+    },
+    denied: {
+      badge: 'critical',
+      badgeText: 'مرفوض الصلاحية',
+      title: 'ليست لديك صلاحية لتنفيذ هذه العملية',
+      message: 'الدور الحالي أو نطاق الحساب غير مخوّل لتنفيذ هذا الإجراء.',
+    },
+    failed: {
+      badge: 'critical',
+      badgeText: 'فشل التنفيذ',
+      title: 'فشل التحقق من العملية',
+      message:
+        'رفض مدقق الخادم التغيير وحافظ تلقائياً على الجيل النشط السابق. تم الاحتفاظ بمسودة النموذج الخاصة بك.',
+    },
+    unavailable: {
+      badge: 'warn',
+      badgeText: 'غير متاح',
+      title: 'الخدمة أو الأداة المطلوبة غير متاحة حالياً',
+      message:
+        'إحدى أدوات النظام أو قنوات الاتصال المطلوبة غير موثقة أو غير متاحة حالياً. لم يتم تطبيق أي تغيير.',
+    },
+    conflict: {
+      badge: 'warn',
+      badgeText: 'تعارض (HTTP 409)',
+      title: 'تعارض في تعديل الحالة أو قفل المطابقة',
+      message:
+        'توجد عملية مطابقة أو تحديث آخر قيد التنفيذ حالياً. يرجى مراجعة أحدث حالة وإعادة المحاولة؛ تم الاحتفاظ بمدخلاتك.',
+    },
+  },
+}
+
+/**
+ * Renders an explicit, accessible async action / availability status banner (`loading`, `pending`,
+ * `succeeded`, `denied`, `failed`, `unavailable`, `conflict`) with `<bdi dir="ltr">` isolation on
+ * technical job/generation references and draft-preservation metadata.
+ */
+export function renderAsyncActionState(props: AsyncActionBannerProps): string {
+  const locale = props.locale === 'ar' ? 'ar' : 'en'
+  const copy = ACTION_STATE_COPY[locale][props.state] ?? ACTION_STATE_COPY[locale].failed
+  const isAlert =
+    props.state === 'denied' ||
+    props.state === 'failed' ||
+    props.state === 'unavailable' ||
+    props.state === 'conflict'
+  const isBusy = props.state === 'loading' || props.state === 'pending'
+  const role = isAlert ? 'alert' : 'status'
+  const preserveDraft =
+    props.preserveDraft ??
+    (props.state !== 'succeeded' && props.state !== 'idle')
+  const title = normalizeAsciiDigits(props.title ?? copy.title)
+  const message = normalizeAsciiDigits(props.message ?? copy.message)
+
+  const metaParts: string[] = []
+  if (props.jobId) {
+    const label = locale === 'ar' ? 'معرّف المهمة' : 'Job Ref'
+    metaParts.push(
+      `<span>${escapeHtml(label)}: <code class="xp-mono">${renderLtrValue(props.jobId)}</code></span>`,
+    )
+  }
+  if (props.generationId !== undefined && props.generationId > 0) {
+    const label = locale === 'ar' ? 'الجيل' : 'Generation'
+    metaParts.push(
+      `<span>${escapeHtml(label)}: <code class="xp-mono">${renderLtrValue(`#${formatAsciiNumber(props.generationId, { useGrouping: false })}`)}</code></span>`,
+    )
+  }
+  if (props.httpStatus !== undefined) {
+    metaParts.push(
+      `<span class="xp-tabular"><code class="xp-mono">${renderLtrValue(`HTTP ${formatAsciiNumber(props.httpStatus, { useGrouping: false })}`)}</code></span>`,
+    )
+  }
+  if (props.errorCode) {
+    metaParts.push(`<code class="xp-mono">${renderLtrValue(props.errorCode)}</code>`)
+  }
+
+  return (
+    `<section class="xp-action-state xp-action-state--${props.state}" role="${role}" aria-live="${isAlert ? 'assertive' : 'polite'}" aria-busy="${isBusy ? 'true' : 'false'}" data-action-state="${props.state}" data-preserve-draft="${preserveDraft ? 'true' : 'false'}" data-deceptive-success="false">` +
+    `<div class="xp-action-state__header">` +
+    renderStatusBadge(copy.badge, normalizeAsciiDigits(copy.badgeText)) +
+    `<strong class="xp-action-state__title">${escapeHtml(title)}</strong>` +
+    (metaParts.length > 0 ? `<div class="xp-action-state__meta">${metaParts.join(' · ')}</div>` : '') +
+    `</div>` +
+    `<p class="xp-prose xp-action-state__message" style="margin: 6px 0 0;">${escapeHtml(message)}</p>` +
+    `</section>`
+  )
+}
+
+/**
+ * Post-processes rendered surface HTML to guarantee:
+ * 1. Every `.xp-table-wrap` scrollable table container is keyboard-focusable (`role="region" tabindex="0" aria-label="..."`).
+ * 2. Every `<th>` inside data tables has `scope="col"` for screen readers.
+ * 3. Every numeral across text and attributes uses Western ASCII digits (`0-9`).
+ */
+export function ensureAccessibleSurfaceHtml(html: string, locale: 'en' | 'ar' = 'en'): string {
+  const defaultRegionLabel =
+    locale === 'ar' ? 'جدول بيانات قابل للتمرير الأفقي' : 'Scrollable data table'
+  let regionIndex = 0
+
+  const withRegions = html.replace(/<div\s+class="xp-table-wrap"([^>]*)>/g, (full, attrs: string) => {
+    regionIndex++
+    let nextAttrs = attrs
+    if (!/\brole=/.test(nextAttrs)) {
+      nextAttrs += ` role="region"`
+    }
+    if (!/\btabindex=/.test(nextAttrs)) {
+      nextAttrs += ` tabindex="0"`
+    }
+    if (!/\baria-label=/.test(nextAttrs) && !/\baria-labelledby=/.test(nextAttrs)) {
+      nextAttrs += ` aria-label="${escapeHtml(`${defaultRegionLabel} ${regionIndex}`)}"`
+    }
+    return `<div class="xp-table-wrap"${nextAttrs}>`
+  })
+
+  const withScopedHeaders = withRegions.replace(/<th(\s+[^>]*|\s*)>/g, (full, attrs: string) => {
+    if (/\bscope=/.test(attrs)) return full
+    return `<th scope="col"${attrs}>`
+  })
+
+  return normalizeAsciiDigits(withScopedHeaders)
+}
+
+/**
+ * Complete production-grade CSS stylesheet for xPanel, xWHM, and xMail.
+ * Uses OKLCH perceptual color tokens for both dark and light modes, never pure #000,
+ * full CSS logical properties for native LTR/RTL layout mirroring, and strict tabular numerals.
+ */
+export const DESIGN_TOKENS_CSS = /* css */ `
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surface hierarchy (OKLCH, deep slate-obsidian — never pure #000) */
+  --xp-bg-canvas: oklch(0.145 0.014 255);
+  --xp-bg-surface: oklch(0.182 0.016 255);
+  --xp-bg-elevated: oklch(0.218 0.018 255);
+  --xp-bg-overlay: oklch(0.248 0.020 255 / 0.94);
+  --xp-bg-subtle: oklch(0.164 0.015 255);
+  --xp-bg-code: oklch(0.132 0.014 255);
+
+  /* Text hierarchy (WCAG 2.2 AA >= 4.5:1 verified) */
+  --xp-text-primary: oklch(0.955 0.008 255);
+  --xp-text-secondary: oklch(0.795 0.014 255);
+  --xp-text-muted: oklch(0.665 0.016 255);
+  --xp-text-on-accent: oklch(0.145 0.014 255);
+
+  /* Borders & dividers */
+  --xp-border: oklch(0.285 0.018 255);
+  --xp-border-strong: oklch(0.365 0.022 255);
+  --xp-border-focus: oklch(0.700 0.165 250);
+
+  /* Brand & interactive accents */
+  --xp-accent: oklch(0.640 0.175 252);
+  --xp-accent-hover: oklch(0.690 0.175 252);
+  --xp-accent-soft: oklch(0.640 0.175 252 / 0.16);
+
+  /* Semantic status & threshold tokens (<80% ok, >=80% warn, >=95% critical) */
+  --xp-status-ok-fg: oklch(0.815 0.155 152);
+  --xp-status-ok-bg: oklch(0.550 0.150 152 / 0.18);
+  --xp-status-ok-border: oklch(0.680 0.155 152 / 0.45);
+  --xp-status-ok-bar: oklch(0.700 0.165 152);
+
+  --xp-status-warn-fg: oklch(0.855 0.155 78);
+  --xp-status-warn-bg: oklch(0.620 0.155 78 / 0.20);
+  --xp-status-warn-border: oklch(0.750 0.155 78 / 0.48);
+  --xp-status-warn-bar: oklch(0.770 0.165 78);
+
+  --xp-status-critical-fg: oklch(0.825 0.175 25);
+  --xp-status-critical-bg: oklch(0.560 0.185 25 / 0.22);
+  --xp-status-critical-border: oklch(0.690 0.185 25 / 0.50);
+  --xp-status-critical-bar: oklch(0.680 0.195 25);
+
+  --xp-status-reconciling-fg: oklch(0.815 0.145 245);
+  --xp-status-reconciling-bg: oklch(0.560 0.160 245 / 0.20);
+  --xp-status-reconciling-border: oklch(0.680 0.160 245 / 0.45);
+
+  --xp-status-suspended-fg: oklch(0.790 0.030 255);
+  --xp-status-suspended-bg: oklch(0.420 0.025 255 / 0.25);
+  --xp-status-suspended-border: oklch(0.550 0.030 255 / 0.45);
+
+  /* Chart series palette */
+  --xp-chart-read: oklch(0.720 0.160 235);
+  --xp-chart-write: oklch(0.740 0.165 160);
+  --xp-chart-psi: oklch(0.780 0.155 80);
+  --xp-chart-latency: oklch(0.730 0.175 310);
+  --xp-chart-2xx: oklch(0.710 0.165 152);
+  --xp-chart-3xx: oklch(0.720 0.155 240);
+  --xp-chart-4xx: oklch(0.770 0.160 78);
+  --xp-chart-5xx: oklch(0.680 0.195 25);
+  --xp-chart-grid: oklch(0.265 0.015 255);
+
+  /* Shadows */
+  --xp-shadow-sm: 0 1px 2px oklch(0.08 0.01 255 / 0.36);
+  --xp-shadow-md: 0 8px 24px oklch(0.08 0.01 255 / 0.48);
+  --xp-shadow-lg: 0 20px 48px oklch(0.06 0.01 255 / 0.64);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Light mode surface hierarchy. */
+  --xp-bg-canvas: #f5f6f8;
+  --xp-bg-surface: #ffffff;
+  --xp-bg-elevated: #f8f9fb;
+  --xp-bg-overlay: rgba(255, 255, 255, 0.96);
+  --xp-bg-subtle: #f1f3f7;
+  --xp-bg-code: #f1f3f7;
+
+  /* Light mode text hierarchy; contrast acceptance is measured per rendered state. */
+  --xp-text-primary: #101828;
+  --xp-text-secondary: #344054;
+  --xp-text-muted: #556275;
+  --xp-text-on-accent: #ffffff;
+
+  /* Borders & dividers */
+  --xp-border: #e2e6ec;
+  --xp-border-strong: #d0d5dd;
+  --xp-border-focus: #1d5bd6;
+
+  /* Brand and interactive accents. */
+  --xp-accent: #1d5bd6;
+  --xp-accent-hover: #1546a8;
+  --xp-accent-soft: #e8effd;
+  --xp-accent-border: #c7d7f8;
+
+  /* Semantic status & threshold tokens */
+  --xp-status-ok-fg: #0e7a4e;
+  --xp-status-ok-bg: #e7f5ee;
+  --xp-status-ok-border: #a9dfc8;
+  --xp-status-ok-bar: #0e7a4e;
+
+  --xp-status-warn-fg: #9a3b06;
+  --xp-status-warn-bg: #fef0e6;
+  --xp-status-warn-border: #f7c697;
+  --xp-status-warn-bar: #b54708;
+
+  --xp-status-critical-fg: #b42318;
+  --xp-status-critical-bg: #fdecea;
+  --xp-status-critical-border: #f5b7b1;
+  --xp-status-critical-bar: #b42318;
+
+  --xp-status-reconciling-fg: #1546a8;
+  --xp-status-reconciling-bg: #e8effd;
+  --xp-status-reconciling-border: #c7d7f8;
+
+  --xp-status-suspended-fg: #344054;
+  --xp-status-suspended-bg: #eef1f6;
+  --xp-status-suspended-border: #d0d5dd;
+
+  /* Chart series palette */
+  --xp-chart-read: #1d5bd6;
+  --xp-chart-write: #0e7a4e;
+  --xp-chart-psi: #b54708;
+  --xp-chart-latency: #6938ef;
+  --xp-chart-2xx: #0e7a4e;
+  --xp-chart-3xx: #1d5bd6;
+  --xp-chart-4xx: #b54708;
+  --xp-chart-5xx: #b42318;
+  --xp-chart-grid: #e2e6ec;
+
+  /* Shadows */
+  --xp-shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --xp-shadow-md: 0 6px 18px rgba(16, 24, 40, 0.08);
+  --xp-shadow-lg: 0 20px 44px rgba(16, 24, 40, 0.14);
+}
+
+/* Structural layout and spacing tokens; see docs/STANDARDS.md. */
+:root {
+  --xp-font-sans-ltr: 'IBM Plex Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --xp-font-sans-rtl: 'IBM Plex Sans Arabic', 'IBM Plex Sans', 'Inter', Tahoma, sans-serif;
+  --xp-font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Spacing steps: 16 -> 26 -> 42 (Fibonacci / Golden ratio progression) */
+  --xp-space-xs: 6px;
+  --xp-space-sm: 10px;
+  --xp-space-field: 16px;
+  --xp-space-card: 26px;
+  --xp-space-section: 42px;
+
+  /* Layout dimensions */
+  --xp-sidebar-width: 248px;
+  --xp-sidebar-collapsed-width: 64px;
+  --xp-topbar-height: 56px;
+  --xp-mobile-topbar-height: 64px;
+  --xp-hit-target: 44px;
+  --xp-mobile-sheet-max: 320px;
+  --xp-mobile-sheet-gutter: 16px;
+  --xp-toolbar-panel-max: 560px;
+  --xp-nav-backdrop: oklch(0.10 0.01 255 / 0.68);
+  --xp-focus-width: 2px;
+  --xp-focus-offset: 2px;
+  --xp-radius-sm: 8px;
+  --xp-radius-md: 12px;
+  --xp-radius-lg: 14px;
+  --xp-golden-main: 1.618fr;
+  --xp-golden-aside: 1fr;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--xp-bg-canvas);
+  color: var(--xp-text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+html[dir="ltr"], [dir="ltr"] {
+  font-family: var(--xp-font-sans-ltr);
+  text-align: start;
+}
+
+html[dir="rtl"], [dir="rtl"] {
+  font-family: var(--xp-font-sans-rtl);
+  text-align: start;
+}
+
+/* Enforce tabular numerals on every counter, rate, quota, IP, port, UID, PID, and timestamp */
+.xp-tabular,
+.xp-kpi__value,
+.xp-meter__values,
+.xp-table td[data-numeric="true"],
+.xp-mono,
+code,
+pre,
+kbd,
+time {
+  font-variant-numeric: tabular-nums;
+}
+
+.xp-mono,
+code,
+pre,
+kbd {
+  font-family: var(--xp-font-mono);
+}
+
+p, .xp-prose {
+  max-inline-size: 68ch;
+  line-height: 1.6;
+}
+
+/* Visible keyboard focus (WCAG 2.2 AA 2.4.7 / 2.4.11) */
+:focus-visible {
+  outline: var(--xp-focus-width) solid var(--xp-border-focus);
+  outline-offset: var(--xp-focus-offset);
+}
+
+.xp-skip-link {
+  position: fixed;
+  inset-block-start: var(--xp-space-field);
+  inset-inline-start: var(--xp-space-field);
+  z-index: 100;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  background-color: var(--xp-bg-surface);
+  color: var(--xp-text-primary);
+  border-radius: var(--xp-radius-sm);
+  font: inherit;
+}
+
+.xp-skip-link:focus {
+  display: inline-flex;
+  align-items: center;
+  inline-size: fit-content;
+  max-inline-size: calc(100% - var(--xp-space-field) - var(--xp-space-field));
+  block-size: auto;
+  min-block-size: var(--xp-hit-target);
+  padding-block: var(--xp-space-xs);
+  padding-inline: 14px;
+  overflow: visible;
+  clip-path: none;
+  white-space: normal;
+  outline: var(--xp-focus-width) solid var(--xp-border-focus);
+  outline-offset: var(--xp-focus-offset);
+}
+
+/* App shell: 248px desktop rail, compact header and a mobile navigation sheet. */
+.xp-shell {
+  display: grid;
+  grid-template-columns: var(--xp-sidebar-width) minmax(0, 1fr);
+  min-block-size: 100dvh;
+}
+
+[data-xp-shell-content] {
+  min-inline-size: 0;
+}
+
+.xp-shell [data-action="toggle-mobile-nav"],
+.xp-shell .xp-mobile-nav-close,
+.xp-nav-backdrop,
+[data-xp-nav-backdrop] {
+  display: none;
+}
+
+.xp-shell[data-sidebar="collapsed"] {
+  grid-template-columns: var(--xp-sidebar-collapsed-width) minmax(0, 1fr);
+}
+
+.xp-sidebar {
+  background-color: var(--xp-bg-surface);
+  border-inline-end: 1px solid var(--xp-border);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  inline-size: var(--xp-sidebar-width);
+  position: sticky;
+  inset-block-start: 0;
+  block-size: 100dvh;
+  overflow-y: auto;
+  padding-block: var(--xp-space-field);
+  padding-inline: 14px;
+}
+
+/* Dark xWHM navigation rail. */
+html[data-surface="xwhm"] .xp-sidebar {
+  background-color: #0e1726;
+  border-inline-end-color: #1f2c40;
+  color: #c9d3e1;
+  --xp-bg-surface: #0e1726;
+  --xp-bg-elevated: #162235;
+  --xp-bg-subtle: #131e30;
+  --xp-text-primary: #f8fafc;
+  --xp-text-secondary: #c9d3e1;
+  --xp-text-muted: #94a3b8;
+  --xp-border: #1f2c40;
+  --xp-border-strong: #2d3f59;
+  --xp-accent-soft: #1d2b40;
+  --xp-accent: #6ea0ff;
+  --xp-border-focus: var(--xp-accent);
+}
+
+.xp-sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-block-end: 14px;
+  border-block-end: 1px solid var(--xp-border);
+}
+
+.xp-sidebar__favorites,
+.xp-sidebar__quota {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-block-end: 12px;
+  border-block-end: 1px solid var(--xp-border);
+}
+
+.xp-nav-section {
+  margin-block-end: 6px;
+}
+
+.xp-nav-section__title {
+  display: flex;
+  min-block-size: var(--xp-hit-target);
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--xp-text-muted);
+  cursor: pointer;
+  border-radius: 6px;
+  user-select: none;
+}
+
+.xp-nav-section__title:hover {
+  color: var(--xp-text-primary);
+  background-color: var(--xp-bg-elevated);
+}
+
+.xp-nav-section__items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-block-start: 4px;
+}
+
+.xp-shell[data-sidebar="collapsed"] .xp-sidebar {
+  inline-size: var(--xp-sidebar-collapsed-width);
+}
+
+.xp-nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--xp-space-sm);
+  min-block-size: var(--xp-hit-target);
+  padding-inline: 10px;
+  border-radius: var(--xp-radius-sm);
+  color: var(--xp-text-secondary);
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-inline-start: 3px solid transparent;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.xp-nav-item:hover {
+  background-color: var(--xp-bg-elevated);
+  color: var(--xp-text-primary);
+}
+
+.xp-nav-item[aria-current="page"],
+.xp-nav-item--active {
+  background-color: var(--xp-accent-soft);
+  color: var(--xp-text-primary);
+  font-weight: 600;
+  border-inline-start-color: var(--xp-accent);
+}
+
+.xp-workspace {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  min-block-size: 100dvh;
+}
+
+.xp-topbar {
+  min-block-size: var(--xp-topbar-height);
+  background-color: var(--xp-bg-surface);
+  border-block-end: 1px solid var(--xp-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--xp-space-field);
+  padding-block: 8px;
+  padding-inline: var(--xp-space-card);
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 30;
+}
+
+.xp-topbar__start,
+.xp-topbar__end,
+.xp-topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-inline-size: 0;
+  gap: 8px;
+}
+
+.xp-toolbar-options {
+  display: block;
+  flex: 1 1 auto;
+  min-inline-size: 0;
+}
+
+/* Keep an explicit row inside native details content; its UA wrapper need not flatten. */
+.xp-toolbar-options__content {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  min-inline-size: 0;
+  gap: var(--xp-space-field);
+}
+
+@media (width >= 960px) {
+  .xp-toolbar-options__content > .xp-topbar__start {
+    flex: 0 0 auto;
+  }
+
+  .xp-toolbar-options__content > .xp-topbar__end {
+    flex: 1 1 0;
+    min-inline-size: 0;
+    justify-content: flex-end;
+  }
+}
+
+.xp-toolbar-options > summary,
+.xp-mobile-brand {
+  display: none;
+}
+
+.xp-main {
+  min-inline-size: 0;
+  padding-block: var(--xp-space-card);
+  padding-inline: var(--xp-space-card);
+  display: flex;
+  flex-direction: column;
+  gap: var(--xp-space-card);
+}
+
+/* Login shell and two-column layout. */
+.xp-login-shell {
+  min-block-size: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background-color: var(--xp-bg-canvas);
+  color: var(--xp-text-primary);
+}
+
+.xp-login-topbar {
+  inline-size: 100%;
+  max-inline-size: 1000px;
+  margin-inline: auto;
+  padding-block: 20px 0;
+  padding-inline: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.xp-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.xp-brand__mark {
+  inline-size: 40px;
+  block-size: 40px;
+  border-radius: 10px;
+  background-color: var(--xp-accent);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--xp-font-mono);
+  font-weight: 700;
+  font-size: 18px;
+  flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.14);
+}
+
+.xp-brand__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.xp-brand__name {
+  font-family: var(--xp-font-mono);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--xp-text-primary);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.xp-brand__sub {
+  font-size: 12px;
+  color: var(--xp-text-muted);
+  line-height: 1.3;
+}
+
+.xp-login-main {
+  inline-size: 100%;
+  max-inline-size: 1000px;
+  margin-inline: auto;
+  padding-block: 32px 42px;
+  padding-inline: 32px;
+  display: flex;
+  gap: 26px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.xp-login-card {
+  flex: 1.618 1 400px;
+  min-inline-size: min(100%, 320px);
+  background-color: var(--xp-bg-surface);
+  border: 1px solid var(--xp-border);
+  border-radius: 12px;
+  padding: 28px;
+  box-shadow: var(--xp-shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.xp-login-step {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--xp-accent);
+  letter-spacing: 0.01em;
+}
+
+.xp-page-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--xp-text-primary);
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.xp-subtitle {
+  margin: 0;
+  font-size: 14px;
+  color: var(--xp-text-secondary);
+  line-height: 1.5;
+}
+
+.xp-help {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--xp-text-muted);
+  line-height: 1.45;
+}
+
+.xp-help:empty {
+  display: none;
+}
+
+.xp-alert {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--xp-border-strong);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.xp-alert[hidden] {
+  display: none !important;
+}
+
+.xp-alert--critical {
+  background-color: var(--xp-status-critical-bg);
+  border-color: var(--xp-status-critical-border);
+  color: var(--xp-status-critical-fg);
+}
+
+.xp-alert--warn {
+  background-color: var(--xp-status-warn-bg);
+  border-color: var(--xp-status-warn-border);
+  color: var(--xp-status-warn-fg);
+}
+
+.xp-alert--ok {
+  background-color: var(--xp-status-ok-bg);
+  border-color: var(--xp-status-ok-border);
+  color: var(--xp-status-ok-fg);
+}
+
+.xp-form,
+.xp-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  inline-size: 100%;
+}
+
+.xp-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 6px;
+  inline-size: 100%;
+  min-inline-size: 0;
+  text-align: start;
+}
+
+.xp-field > * {
+  min-inline-size: 0;
+}
+
+.xp-field-value {
+  display: block;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+
+.xp-field-value > bdi[dir="ltr"] {
+  display: block;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+  text-align: match-parent;
+}
+
+.xp-label {
+  display: block;
+  inline-size: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--xp-text-primary);
+  line-height: 1.4;
+}
+
+.xp-fieldset {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--xp-border);
+  border-radius: 10px;
+  background-color: var(--xp-bg-elevated);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.xp-fieldset[hidden] {
+  display: none !important;
+}
+
+.xp-login-aside {
+  flex: 1 1 260px;
+  min-inline-size: min(100%, 260px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.xp-login-aside-card {
+  background-color: var(--xp-bg-surface);
+  border: 1px solid var(--xp-border);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: var(--xp-shadow-sm);
+}
+
+.xp-login-aside-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--xp-text-primary);
+}
+
+.xp-login-dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  font-size: 12.5px;
+  text-align: start;
+}
+
+.xp-login-dl dt {
+  min-inline-size: 0;
+  color: var(--xp-text-muted);
+  font-weight: 500;
+}
+
+.xp-login-dl dd + dt {
+  margin-block-start: 8px;
+}
+
+.xp-login-dl dd {
+  margin: 0;
+  min-inline-size: 0;
+  color: var(--xp-text-primary);
+  font-weight: 500;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.xp-login-surface-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.xp-login-surface-link {
+  display: flex;
+  min-block-size: var(--xp-hit-target);
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--xp-border);
+  background-color: var(--xp-bg-elevated);
+  color: var(--xp-text-primary);
+  text-decoration: none;
+  font-size: 13px;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.xp-login-surface-link:hover {
+  border-color: var(--xp-border-strong);
+  background-color: var(--xp-bg-subtle);
+}
+
+.xp-login-surface-link[aria-current="page"] {
+  background-color: var(--xp-accent-soft);
+  border-color: var(--xp-accent);
+  font-weight: 600;
+}
+
+.xp-cli-recovery {
+  margin-block-start: 4px;
+  padding-block-start: 14px;
+  border-block-start: 1px solid var(--xp-border);
+  font-size: 12.5px;
+  color: var(--xp-text-secondary);
+}
+
+.xp-cli-recovery summary {
+  min-block-size: var(--xp-hit-target);
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--xp-text-secondary);
+}
+
+.xp-code-block {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background-color: var(--xp-bg-code);
+  border: 1px solid var(--xp-border);
+  color: var(--xp-text-primary);
+  font-family: var(--xp-font-mono);
+  font-size: 12px;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+
+.xp-login-footer {
+  inline-size: 100%;
+  max-inline-size: 1000px;
+  margin-inline: auto;
+  padding-block: 16px 24px;
+  padding-inline: 32px;
+  border-block-start: 1px solid var(--xp-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--xp-text-muted);
+}
+
+/* Golden ratio 1.618 : 1 split layout for primary workspace + live inspector aside */
+.xp-golden-grid {
+  display: grid;
+  grid-template-columns: var(--xp-golden-main) var(--xp-golden-aside);
+  gap: var(--xp-space-card);
+  align-items: start;
+}
+
+.xp-golden-grid > * {
+  min-inline-size: 0;
+}
+
+.xp-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: var(--xp-space-field);
+}
+
+.xp-card {
+  background-color: var(--xp-bg-surface);
+  border: 1px solid var(--xp-border);
+  border-radius: var(--xp-radius-md);
+  padding: var(--xp-space-card);
+  box-shadow: var(--xp-shadow-sm);
+}
+
+.xp-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--xp-space-field);
+  margin-block-end: var(--xp-space-field);
+}
+
+/* Ergonomic buttons & inputs */
+.xp-btn,
+.xp-input,
+.xp-select,
+.xp-textarea {
+  min-block-size: var(--xp-hit-target);
+  padding-inline: 14px;
+  border-radius: var(--xp-radius-sm);
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.xp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: var(--xp-hit-target);
+  gap: 8px;
+  cursor: pointer;
+  border: 1px solid var(--xp-border-strong);
+  background-color: var(--xp-bg-surface);
+  color: var(--xp-text-primary);
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.xp-btn:hover {
+  background-color: var(--xp-bg-elevated);
+}
+
+.xp-btn--ghost {
+  background-color: var(--xp-bg-surface);
+  border-color: var(--xp-border-strong);
+  color: var(--xp-text-secondary);
+  min-block-size: var(--xp-hit-target);
+  padding-inline: 12px;
+  font-size: 0.8125rem;
+}
+
+.xp-btn--inline {
+  align-self: start;
+  justify-self: start;
+  min-block-size: var(--xp-hit-target);
+  padding-inline: 10px;
+  font-size: 0.78rem;
+  background-color: var(--xp-bg-elevated);
+}
+
+.xp-btn--primary {
+  background-color: var(--xp-accent);
+  border-color: var(--xp-accent);
+  color: var(--xp-text-on-accent);
+  font-weight: 600;
+}
+
+.xp-btn--primary:hover {
+  background-color: var(--xp-accent-hover);
+}
+
+.xp-btn--primary:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.xp-input,
+.xp-select,
+.xp-textarea {
+  inline-size: 100%;
+  background-color: var(--xp-bg-surface);
+  border: 1px solid var(--xp-border-strong);
+  color: var(--xp-text-primary);
+}
+
+.xp-input:focus,
+.xp-select:focus,
+.xp-textarea:focus {
+  border-color: var(--xp-border-focus);
+  outline: var(--xp-focus-width) solid var(--xp-border-focus);
+  outline-offset: var(--xp-focus-offset);
+}
+
+/* Match the field's label edge while preserving each value's text direction. */
+bdi[dir="ltr"],
+.xp-ltr-value {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+html[dir="rtl"] .xp-login-shell .xp-input,
+html[dir="rtl"] .xp-input[dir="ltr"],
+html[dir="rtl"] .xp-select[dir="ltr"],
+html[dir="rtl"] .xp-textarea[dir="ltr"],
+html[dir="rtl"] .xp-field-value[dir="ltr"] {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: right;
+}
+
+/* Form chunking (Miller: <= 7 fields per group, 16px field gap) */
+.xp-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--xp-space-field);
+}
+
+/* Dense admin data tables with compact / comfortable density switcher */
+.xp-table-wrap {
+  overflow-x: auto;
+  max-inline-size: 100%;
+  border: 1px solid var(--xp-border);
+  border-radius: var(--xp-radius-md);
+  background-color: var(--xp-bg-surface);
+}
+
+.xp-table-wrap[role="region"][tabindex="0"]:focus-visible {
+  outline: var(--xp-focus-width) solid var(--xp-border-focus);
+  outline-offset: var(--xp-focus-offset);
+}
+
+.xp-table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  text-align: start;
+  font-size: 0.9rem;
+}
+
+.xp-table th,
+.xp-table td {
+  padding-block: 12px;
+  padding-inline: var(--xp-space-field);
+  border-block-end: 1px solid var(--xp-border);
+  vertical-align: middle;
+}
+
+[data-density="compact"] .xp-table th,
+[data-density="compact"] .xp-table td,
+.xp-table--compact th,
+.xp-table--compact td {
+  padding-block: 6px;
+  padding-inline: 12px;
+  font-size: 0.84rem;
+}
+
+.xp-table th {
+  background-color: var(--xp-bg-subtle);
+  color: var(--xp-text-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Status pills with mandatory SVG icon + text label */
+.xp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-block: 3px;
+  padding-inline: 10px;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.3;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.xp-badge--ok {
+  color: var(--xp-status-ok-fg);
+  background-color: var(--xp-status-ok-bg);
+  border-color: var(--xp-status-ok-border);
+}
+
+.xp-badge--warn {
+  color: var(--xp-status-warn-fg);
+  background-color: var(--xp-status-warn-bg);
+  border-color: var(--xp-status-warn-border);
+}
+
+.xp-badge--critical {
+  color: var(--xp-status-critical-fg);
+  background-color: var(--xp-status-critical-bg);
+  border-color: var(--xp-status-critical-border);
+}
+
+.xp-badge--reconciling {
+  color: var(--xp-status-reconciling-fg);
+  background-color: var(--xp-status-reconciling-bg);
+  border-color: var(--xp-status-reconciling-border);
+}
+
+.xp-badge--suspended {
+  color: var(--xp-status-suspended-fg);
+  background-color: var(--xp-status-suspended-bg);
+  border-color: var(--xp-status-suspended-border);
+}
+
+@keyframes xp-spin {
+  to { transform: rotate(360deg); }
+}
+
+.xp-status-icon--spin {
+  animation: xp-spin 1s linear infinite;
+}
+
+/* 80% / 95% Threshold meters */
+.xp-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-inline-size: 160px;
+}
+
+.xp-meter__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.8125rem;
+}
+
+.xp-meter__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+}
+
+.xp-meter--ok .xp-meter__status { color: var(--xp-status-ok-fg); }
+.xp-meter--warn .xp-meter__status { color: var(--xp-status-warn-fg); }
+.xp-meter--critical .xp-meter__status { color: var(--xp-status-critical-fg); }
+
+.xp-meter__track {
+  inline-size: 100%;
+  block-size: 8px;
+  border-radius: 999px;
+  background-color: var(--xp-bg-subtle);
+  border: 1px solid var(--xp-border);
+  overflow: hidden;
+}
+
+.xp-meter__fill {
+  block-size: 100%;
+  border-radius: 999px;
+  transition: inline-size 220ms ease;
+}
+
+.xp-meter__fill--ok { background-color: var(--xp-status-ok-bar); }
+.xp-meter__fill--warn { background-color: var(--xp-status-warn-bar); }
+.xp-meter__fill--critical { background-color: var(--xp-status-critical-bar); }
+
+/* Reconcile Pipeline Stepper Banner (render -> test -> switch -> reload -> verify) */
+.xp-reconcile-banner {
+  background-color: var(--xp-bg-surface);
+  border: 1px solid var(--xp-border-strong);
+  border-radius: var(--xp-radius-md);
+  padding: var(--xp-space-field) var(--xp-space-card);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.xp-reconcile-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.xp-reconcile-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding-block: 6px;
+  padding-inline: 12px;
+  border-radius: var(--xp-radius-sm);
+  border: 1px solid var(--xp-border);
+  background-color: var(--xp-bg-subtle);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.xp-reconcile-step[data-step-status="passed"] {
+  border-color: var(--xp-status-ok-border);
+  color: var(--xp-status-ok-fg);
+  background-color: var(--xp-status-ok-bg);
+}
+
+.xp-reconcile-step[data-step-status="running"] {
+  border-color: var(--xp-status-reconciling-border);
+  color: var(--xp-status-reconciling-fg);
+  background-color: var(--xp-status-reconciling-bg);
+}
+
+.xp-reconcile-step[data-step-status="failed"] {
+  border-color: var(--xp-status-critical-border);
+  color: var(--xp-status-critical-fg);
+  background-color: var(--xp-status-critical-bg);
+}
+
+/* Command Palette Modal (Cmd/Ctrl+K) & Slide-Over Drawers */
+.xp-modal-backdrop,
+.xp-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: oklch(0.10 0.01 255 / 0.68);
+  backdrop-filter: blur(4px);
+  z-index: 80;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-block-start: 10vh;
+}
+
+.xp-modal-backdrop[hidden],
+.xp-drawer-backdrop[hidden] {
+  display: none !important;
+}
+
+.xp-cmdk-dialog {
+  inline-size: min(640px, 92vw);
+  background-color: var(--xp-bg-surface);
+  border: 1px solid var(--xp-border-strong);
+  border-radius: var(--xp-radius-lg);
+  box-shadow: var(--xp-shadow-lg);
+  overflow: hidden;
+}
+
+.xp-drawer {
+  position: fixed;
+  inset-block: 0;
+  inset-inline-end: 0;
+  inline-size: min(540px, 94vw);
+  background-color: var(--xp-bg-surface);
+  border-inline-start: 1px solid var(--xp-border-strong);
+  box-shadow: var(--xp-shadow-lg);
+  padding: var(--xp-space-card);
+  overflow-y: auto;
+  z-index: 85;
+}
+
+/* Interactive SVG Charts & Tooltips */
+.xp-chart-container {
+  position: relative;
+  inline-size: 100%;
+}
+
+.xp-chart-svg {
+  inline-size: 100%;
+  block-size: auto;
+  display: block;
+  overflow: visible;
+}
+
+.xp-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--xp-space-field);
+  font-size: 0.85rem;
+  color: var(--xp-text-secondary);
+}
+
+.xp-chart-swatch {
+  display: inline-block;
+  inline-size: 10px;
+  block-size: 10px;
+  border-radius: 2px;
+  margin-inline-end: 6px;
+}
+
+/* Explicit Async Action & Availability State Banners */
+.xp-action-state {
+  background-color: var(--xp-bg-surface);
+  border: 1px solid var(--xp-border-strong);
+  border-inline-start-width: 4px;
+  border-radius: var(--xp-radius-md);
+  padding: var(--xp-space-field) var(--xp-space-card);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.xp-action-state__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.xp-action-state__meta {
+  margin-inline-start: auto;
+  font-size: 0.82rem;
+  color: var(--xp-text-secondary);
+}
+
+.xp-action-state--loading,
+.xp-action-state--pending {
+  border-inline-start-color: var(--xp-border-focus);
+  background-color: var(--xp-status-reconciling-bg);
+}
+
+.xp-action-state--succeeded {
+  border-inline-start-color: var(--xp-status-ok-bar);
+  background-color: var(--xp-status-ok-bg);
+}
+
+.xp-action-state--denied,
+.xp-action-state--failed {
+  border-inline-start-color: var(--xp-status-critical-bar);
+  background-color: var(--xp-status-critical-bg);
+}
+
+.xp-action-state--unavailable,
+.xp-action-state--conflict {
+  border-inline-start-color: var(--xp-status-warn-bar);
+  background-color: var(--xp-status-warn-bg);
+}
+
+/* Jailed Terminal & Code Editor */
+.xp-terminal {
+  background-color: var(--xp-bg-code);
+  border: 1px solid var(--xp-border-strong);
+  border-radius: var(--xp-radius-md);
+  font-family: var(--xp-font-mono);
+  font-size: 0.85rem;
+  padding: var(--xp-space-field);
+  color: var(--xp-text-primary);
+  overflow-x: auto;
+}
+
+@media (max-width: 960px) {
+  .xp-golden-grid,
+  .xp-mail-tri-pane {
+    grid-template-columns: 1fr !important;
+  }
+  .xp-topbar {
+    block-size: auto;
+    min-block-size: var(--xp-topbar-height);
+    flex-wrap: wrap;
+    padding-block: 8px;
+    padding-inline: var(--xp-space-field);
+  }
+  .xp-main {
+    padding-inline: var(--xp-space-field);
+  }
+}
+
+@media (width < 960px) {
+  .xp-shell,
+  .xp-shell[data-sidebar="collapsed"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .xp-topbar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    block-size: var(--xp-mobile-topbar-height);
+    min-block-size: var(--xp-mobile-topbar-height);
+    gap: var(--xp-space-xs);
+    padding-block: 8px;
+    padding-inline: var(--xp-space-field);
+  }
+
+  .xp-mobile-brand {
+    display: block;
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--xp-text-primary);
+    font-family: var(--xp-font-mono);
+    font-size: 1rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .xp-toolbar-options {
+    display: block;
+    position: static;
+    min-inline-size: 0;
+  }
+
+  .xp-toolbar-options > summary {
+    display: inline-flex;
+    list-style: none;
+    white-space: nowrap;
+  }
+
+  .xp-toolbar-options > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .xp-toolbar-options > .xp-toolbar-options__content {
+    display: none;
+  }
+
+  .xp-toolbar-options[data-mobile-ready][open] > .xp-toolbar-options__content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--xp-space-field);
+    position: absolute;
+    inset-block-start: 100%;
+    inset-inline: var(--xp-space-field);
+    max-block-size: min(70dvh, var(--xp-toolbar-panel-max));
+    padding: var(--xp-space-field);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background-color: var(--xp-bg-surface);
+    color: var(--xp-text-primary);
+    border: 1px solid var(--xp-border-strong);
+    border-radius: var(--xp-radius-sm);
+    box-shadow: var(--xp-shadow-md);
+    z-index: 1;
+  }
+
+  .xp-toolbar-options__content .xp-topbar__start,
+  .xp-toolbar-options__content .xp-topbar__end {
+    flex-direction: column;
+    align-items: stretch;
+    inline-size: 100%;
+    gap: var(--xp-space-sm);
+  }
+
+  .xp-toolbar-options__content .xp-topbar__start > *,
+  .xp-toolbar-options__content .xp-topbar__end > * {
+    max-inline-size: 100%;
+  }
+
+  .xp-shell [data-action="toggle-mobile-nav"],
+  .xp-shell .xp-mobile-nav-close {
+    display: inline-flex;
+  }
+
+  .xp-mobile-nav-close {
+    align-self: flex-end;
+  }
+
+  .xp-shell .xp-sidebar,
+  .xp-shell[data-sidebar="collapsed"] .xp-sidebar {
+    position: fixed;
+    inset-block: 0;
+    inset-inline-start: 0;
+    inline-size: min(var(--xp-mobile-sheet-max), calc(100vw - var(--xp-mobile-sheet-gutter) - var(--xp-mobile-sheet-gutter)));
+    block-size: 100dvh;
+    max-block-size: 100dvh;
+    z-index: 70;
+    visibility: hidden;
+    pointer-events: none;
+    overscroll-behavior: contain;
+    box-shadow: var(--xp-shadow-lg);
+  }
+
+  .xp-shell[data-mobile-nav="open"] .xp-sidebar {
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  .xp-nav-backdrop,
+  [data-xp-nav-backdrop] {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background-color: var(--xp-nav-backdrop);
+    border: 0;
+    padding: 0;
+  }
+
+  .xp-topbar__start {
+    flex: 1 1 auto;
+  }
+
+  .xp-topbar .xp-page-title {
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 640px) {
+  .xp-login-topbar,
+  .xp-login-main,
+  .xp-login-footer {
+    padding-inline: 16px;
+  }
+  .xp-login-card,
+  .xp-login-aside-card {
+    padding: 18px;
+  }
+
+  /* File metadata and policy badges follow readable headings on narrow screens. */
+  #xpanel-file-manager .xp-card__header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  #xpanel-file-manager .xp-card__header > * {
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  #xpanel-file-manager .xp-card__header .xp-badge {
+    align-self: flex-start;
+    max-inline-size: 100%;
+    white-space: normal;
+  }
+
+  #xpanel-file-manager .xp-card__header .xp-badge__label {
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+  }
+
+  #xpanel-file-manager .xp-card__header .xp-status-icon {
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .xp-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+  .xp-card {
+    padding: var(--xp-space-field);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+`

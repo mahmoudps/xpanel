@@ -1,5 +1,5 @@
-// Domain model shared by api, agent, render, lifecycle and web.
-// Desired state lives in Postgres; these types are its pure, framework-free shape.
+// Domain model shared by api, agent, render, state, db, lifecycle and web.
+// Desired state lives in files under /var/lib/xpanel/state/; these types are its pure, framework-free shape.
 
 /** A capped quantity. `'unlimited'` is always explicit, never a magic number. */
 export type Limit = number | 'unlimited'
@@ -88,6 +88,10 @@ export interface Account {
   suspendReason: string | null
   contactEmail: string
   ipv4: string
+  /** Optional primary IPv6 address assigned to this account */
+  ipv6?: string | null
+  /** Additional dedicated/delegated IPv4 or IPv6 addresses assigned to this account */
+  extraIps?: string[]
   shell: ShellAccess
   createdAt: string
 }
@@ -157,6 +161,10 @@ export interface Domain {
   expiresAt: string | null
   /** per-path quota inside the account quota, MB */
   pathQuotaMb: Limit
+  /** Optional domain-specific IPv4 override (defaults to account.ipv4 when null/omitted) */
+  ipv4?: string | null
+  /** Optional domain-specific IPv6 override (defaults to account.ipv6 when null/omitted) */
+  ipv6?: string | null
 }
 
 export interface ServiceUser {
@@ -267,3 +275,320 @@ export interface AuditEntry {
   detail: Record<string, unknown>
   outcome: 'ok' | 'denied' | 'failed'
 }
+
+/**
+ * Dynamic per-domain custom configuration (cPanel `userdata` / vhost drop-in model).
+ * Stored in desired-state files and rendered into `/etc/xpanel/userdata/<user>/<domain>/`
+ * plus `<docRoot>/.user.ini`, tested with `nginx -t` and `apachectl configtest` before reload.
+ */
+export interface DomainCustomConfig {
+  domainId: Id
+  accountId: Id
+  domainName: string
+  /** Custom Nginx directives included inside the site's server {} block */
+  nginxInclude: string
+  /** Custom Apache directives included inside the site's <VirtualHost> block */
+  apacheInclude: string
+  /** Per-directory PHP INI directives written to <docRoot>/.user.ini */
+  userIni: Record<string, string>
+  /** Structured custom HTTP response headers (name -> value) */
+  customHeaders: Record<string, string>
+  /** URI prefixes that bypass the Nginx proxy cache (e.g. ['/cart', '/checkout']) */
+  cacheBypassPaths: string[]
+  updatedAt: string
+  updatedBy: 'root' | 'reseller' | 'user'
+}
+
+/**
+ * Dynamic per-account custom configuration (`accounts/<user>/userdata.json`).
+ */
+export interface AccountCustomConfig {
+  accountId: Id
+  username: string
+  /** Global PHP INI overrides applied across all pools/wrappers of this account */
+  phpIniOverrides: Record<string, string>
+  /** Default environment variables injected into account units and shells */
+  environmentVars: Record<string, string>
+  updatedAt: string
+}
+
+export type IpRole = 'shared' | 'dedicated' | 'mail'
+export type IpOwnerKind = 'root' | 'reseller' | 'account'
+
+/**
+ * Multi-IPv4 / Multi-IPv6 address entry in the server IP pool.
+ * Supports root-owned shared/dedicated IPs, reseller-delegated IPs, account-dedicated IPs,
+ * and dedicated outbound mail server IPs.
+ */
+export interface ServerIpEntry {
+  id: Id
+  /** Canonical IPv4 or IPv6 address */
+  address: string
+  version: 4 | 6
+  /** Subnet prefix length (1..32 for IPv4, 1..128 for IPv6) */
+  prefixLength: number
+  /** Network interface name, e.g. eth0, ens3 */
+  interfaceName: string
+  role: IpRole
+  ownerKind: IpOwnerKind
+  /** null for root, reseller.id for reseller, account.id for account */
+  ownerId: Id | null
+  /** Reverse DNS (PTR) hostname used for HELO and rDNS checks */
+  ptrHostname: string | null
+  isPrimary: boolean
+  notes: string
+}
+
+export type MailOutboundMode = 'server-default' | 'account-ip' | 'domain-ip' | 'custom-map'
+
+export interface DomainMailIpOverride {
+  domainName: string
+  ipv4: string | null
+  ipv6: string | null
+  heloHostname: string | null
+}
+
+/**
+ * Outbound mail IP & HELO configuration for Postfix (`sender_dependent_default_transport_maps`).
+ * Allows routing outbound mail through the server default IP, each account's own IP, each
+ * domain's own IP, or an explicit per-domain custom IPv4/IPv6 + HELO map.
+ */
+export interface MailIpConfig {
+  mode: MailOutboundMode
+  defaultIpv4: string | null
+  defaultIpv6: string | null
+  defaultHelo: string | null
+  domainOverrides: DomainMailIpOverride[]
+}
+
+export interface IoAnalyticsPoint {
+  at: string
+  readBytesPerSec: number
+  writeBytesPerSec: number
+  readIops: number
+  writeIops: number
+  awaitMs: number
+  psiSomeAvg10: number
+  psiFullAvg10: number
+  cpuPercent: number
+  memoryUsedBytes: number
+  memoryTotalBytes: number
+  loadAvg1m: number
+}
+
+export interface AccountIoRank {
+  accountId: Id
+  username: string
+  uid: number
+  readBytesPerSec: number
+  writeBytesPerSec: number
+  readIops: number
+  writeIops: number
+  memoryCurrentBytes: number
+  memoryLimitMb: Limit
+  pidsCurrent: number
+  pidsLimit: Limit
+  cpuPercent: number
+  statusLevel: 'ok' | 'warn' | 'critical'
+}
+
+export interface IoAnalyticsSnapshot {
+  at: string
+  current: IoAnalyticsPoint
+  history: IoAnalyticsPoint[]
+  accounts: AccountIoRank[]
+}
+
+export interface WebsiteTrafficBucket {
+  at: string
+  requests: number
+  bytes: number
+  status2xx: number
+  status3xx: number
+  status4xx: number
+  status5xx: number
+  cacheHit: number
+  cacheMiss: number
+  cacheBypass: number
+  avgRequestTimeMs: number
+  p95RequestTimeMs: number
+  avgUpstreamTimeMs: number
+}
+
+export interface WebsiteTopEntry {
+  key: string
+  requests: number
+  bytes: number
+  errors5xx?: number
+}
+
+export interface WebsiteAnalyticsSnapshot {
+  domain: string
+  accountId: Id | null
+  at: string
+  totals: {
+    requests: number
+    bytes: number
+    uniqueVisitors: number
+    cacheHitRatioPercent: number
+    errorRatePercent: number
+    avgRequestTimeMs: number
+    p95RequestTimeMs: number
+    avgUpstreamTimeMs: number
+    status2xx: number
+    status3xx: number
+    status4xx: number
+    status5xx: number
+  }
+  series: WebsiteTrafficBucket[]
+  topPaths: WebsiteTopEntry[]
+  topReferrers: WebsiteTopEntry[]
+  topClientIps: WebsiteTopEntry[]
+}
+
+export type ReconcileStage = 'render' | 'test' | 'switch' | 'reload' | 'verify'
+
+export interface LiveEventScope {
+  /** null = server-wide (root only); otherwise visible to root, owning reseller, and the account owner */
+  accountId?: Id | null
+  resellerId?: Id | null
+  /** for xMail mailbox events */
+  mailboxLogin?: string | null
+}
+
+export type LiveEvent =
+  | {
+      id: string
+      at: string
+      kind: 'reconcile.stage'
+      scope: LiveEventScope
+      data: {
+        generationId: number
+        stage: ReconcileStage
+        status: 'running' | 'passed' | 'failed'
+        detail?: string
+      }
+    }
+  | {
+      id: string
+      at: string
+      kind: 'reconcile.applied'
+      scope: LiveEventScope
+      data: {
+        generationId: number
+        stateChecksum: string
+        filesCount: number
+        durationMs: number
+      }
+    }
+  | {
+      id: string
+      at: string
+      kind: 'reconcile.failed'
+      scope: LiveEventScope
+      data: {
+        generationId: number
+        failedTest: string
+        error: string
+      }
+    }
+  | {
+      id: string
+      at: string
+      kind: 'metrics.tick'
+      scope: LiveEventScope
+      data: {
+        uid: number | null
+        cpuUsageUsec: number
+        memoryCurrentBytes: number
+        ioReadBytes: number
+        ioWriteBytes: number
+        pidsCurrent: number
+        loadAvg1m?: number
+      }
+    }
+  | {
+      id: string
+      at: string
+      kind: 'service.health'
+      scope: LiveEventScope
+      data: {
+        services: { name: string; active: boolean; enabled: boolean }[]
+      }
+    }
+  | {
+      id: string
+      at: string
+      kind: 'job.updated'
+      scope: LiveEventScope
+      data: {
+        jobId: Id
+        kind: string
+        status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+        progress: number
+        logChunk?: string
+        error?: string | null
+      }
+    }
+  | {
+      id: string
+      at: string
+      kind: 'mail.received'
+      scope: LiveEventScope
+      data: {
+        mailbox: string
+        folder: string
+        uid: number
+        from: string
+        subject: string
+        sizeBytes: number
+        unreadCount: number
+      }
+    }
+  | {
+      id: string
+      at: string
+      kind: 'security.ban'
+      scope: LiveEventScope
+      data: {
+        ip: string
+        reason: string
+        expiresAt: string
+      }
+    }
+  | {
+      id: string
+      at: string
+      kind: 'io.analytics'
+      scope: LiveEventScope
+      data: IoAnalyticsSnapshot
+    }
+  | {
+      id: string
+      at: string
+      kind: 'website.analytics'
+      scope: LiveEventScope
+      data: WebsiteAnalyticsSnapshot
+    }
+  | {
+      id: string
+      at: string
+      kind: 'terminal.output'
+      scope: LiveEventScope
+      data: {
+        sessionId: string
+        username: string
+        stream: 'stdout' | 'stderr' | 'exit'
+        chunk: string
+        exitCode?: number
+      }
+    }
+  | {
+      id: string
+      at: string
+      kind: 'audit.entry'
+      scope: LiveEventScope
+      data: AuditEntry
+    }
+
+export type LiveEventKind = LiveEvent['kind']

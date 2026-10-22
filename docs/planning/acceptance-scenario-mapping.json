@@ -1,0 +1,1668 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-22T15:18:00Z",
+  "ownerPackages": [
+    "Q03",
+    "Q04"
+  ],
+  "sourceDocument": "docs/planning/ACCEPTANCE-MATRIX.md",
+  "statusTaxonomy": {
+    "primitive_verified": "Legacy label for intended unit-level primitive evidence (U); this mapping does not establish that evidence or independent acceptance.",
+    "portable_verified": "Legacy label for intended portable evidence (U, H, B); retained for schema compatibility, not proof that mapped harnesses exist or were executed.",
+    "pending_live_service_proof": "Linux VM (V) and/or external observer (E) evidence remains required; this label does not establish that preceding portable evidence exists or passes.",
+    "pending_pilot": "A60 requires a documented 30-60 day pilot and acceptance review; this mapping does not establish pilot execution or acceptance."
+  },
+  "gates": [
+    {
+      "id": "G0",
+      "name": "Toolchain & Workspace Integrity",
+      "releaseBlocking": true,
+      "scenarios": [
+        "A01",
+        "A02",
+        "A03"
+      ]
+    },
+    {
+      "id": "G1",
+      "name": "Security & Privilege Boundaries",
+      "releaseBlocking": true,
+      "scenarios": [
+        "A04",
+        "A05",
+        "A06",
+        "A07",
+        "A08",
+        "A09",
+        "A10",
+        "A11",
+        "A12",
+        "A13",
+        "A14",
+        "A15",
+        "A16",
+        "A17"
+      ]
+    },
+    {
+      "id": "G2",
+      "name": "State, Transactions & Crash Recovery",
+      "releaseBlocking": true,
+      "scenarios": [
+        "A18",
+        "A19",
+        "A20",
+        "A21",
+        "A22",
+        "A23",
+        "A24",
+        "A25"
+      ]
+    },
+    {
+      "id": "G3",
+      "name": "Installer, Hosting Lifecycle & Isolation",
+      "releaseBlocking": true,
+      "scenarios": [
+        "A26",
+        "A27",
+        "A28",
+        "A29",
+        "A30",
+        "A31",
+        "A32",
+        "A33",
+        "A34",
+        "A35"
+      ]
+    },
+    {
+      "id": "G4",
+      "name": "Web, Domains, DNS, TLS & Databases",
+      "releaseBlocking": true,
+      "scenarios": [
+        "A36",
+        "A37",
+        "A38",
+        "A39",
+        "A40",
+        "A41"
+      ]
+    },
+    {
+      "id": "G5",
+      "name": "Mail, FTP & File Operations",
+      "releaseBlocking": true,
+      "scenarios": [
+        "A42",
+        "A43",
+        "A44",
+        "A45",
+        "A46"
+      ]
+    },
+    {
+      "id": "G6",
+      "name": "Backups, Restore, Migration, Observability & Upgrades",
+      "releaseBlocking": true,
+      "scenarios": [
+        "A47",
+        "A48",
+        "A49",
+        "A50",
+        "A51",
+        "A52",
+        "A53"
+      ]
+    },
+    {
+      "id": "G7",
+      "name": "Performance, Accessibility, Parity, Docs & Pilot",
+      "releaseBlocking": true,
+      "scenarios": [
+        "A54",
+        "A55",
+        "A56",
+        "A57",
+        "A58",
+        "A59",
+        "A60"
+      ]
+    }
+  ],
+  "faultMatrix": [
+    {
+      "id": "F01",
+      "name": "Power loss / process crash mid-reconcile",
+      "injectionMechanism": "Kill xpanel-agent with SIGKILL (or phase hook crash) during each stage: render, stage, test, activate, reload, verify.",
+      "expectedRecovery": "On restart, journal recovery either finishes or rolls back to the previous active generation; zero half-written configs or orphaned systemd units.",
+      "coveredScenarios": [
+        "A20",
+        "A21"
+      ],
+      "portableHarness": "apps/agent/src/r02-r03-reconciler-journal.test.ts"
+    },
+    {
+      "id": "F02",
+      "name": "Disk exhaustion (ENOSPC)",
+      "injectionMechanism": "Mount a small loopback filesystem or inject ENOSPC on /var/lib/xpanel, /var/backups, or /tmp during state write, backup creation, or upgrade staging.",
+      "expectedRecovery": "Operation aborts cleanly with a clear error code, cleans up its staging directory, and leaves the active generation and state intact.",
+      "coveredScenarios": [
+        "A21",
+        "A48",
+        "A53"
+      ],
+      "portableHarness": "packages/lifecycle/src/l01-l05-lifecycle-ops.test.ts"
+    },
+    {
+      "id": "F03",
+      "name": "Corrupt or invalid config generation",
+      "injectionMechanism": "Inject an invalid directive into a staged Nginx, Apache/OLS, PHP-FPM, PowerDNS, or Postfix/Dovecot file before the stage test phase.",
+      "expectedRecovery": "Staged syntax validator (nginx -t, apache2ctl -t, php-fpm -t, pdnsutil check-all-zones, postconf, dovecot -n) rejects the candidate; live service is never reloaded.",
+      "coveredScenarios": [
+        "A19",
+        "A20"
+      ],
+      "portableHarness": "apps/agent/src/r02-r03-reconciler-journal.test.ts"
+    },
+    {
+      "id": "F04",
+      "name": "Service reload failure or post-reload health check timeout",
+      "injectionMechanism": "Simulate a port bind conflict or systemd reload failure during the reload/verify phase.",
+      "expectedRecovery": "Reconciler automatically restores previous generation files and reloads affected services back to a healthy state, marking the candidate generation rolled_back.",
+      "coveredScenarios": [
+        "A20",
+        "A53"
+      ],
+      "portableHarness": "apps/agent/src/r02-r03-reconciler-journal.test.ts"
+    },
+    {
+      "id": "F05",
+      "name": "Upstream dependency failure",
+      "injectionMechanism": "Simulate Let's Encrypt rate-limit/HTTP-01 challenge failure, MariaDB/PostgreSQL connection rejection, or Rspamd unavailability.",
+      "expectedRecovery": "Existing TLS certificate remains active; database and mail operations fail gracefully with actionable diagnostics and retryable job state.",
+      "coveredScenarios": [
+        "A39",
+        "A40",
+        "A42",
+        "A44"
+      ],
+      "portableHarness": "apps/agent/src/d02-d03-dns-tls-automation.test.ts"
+    },
+    {
+      "id": "F06",
+      "name": "Backup destination failure",
+      "injectionMechanism": "Drop S3/SFTP connection mid-upload, flip a byte in a backup chunk, or supply an invalid decryption passphrase.",
+      "expectedRecovery": "Upload retries with exponential backoff; restore halts during pre-restore SHA-256/AEAD verification before touching any live account file or database.",
+      "coveredScenarios": [
+        "A48",
+        "A50",
+        "A51"
+      ],
+      "portableHarness": "packages/lifecycle/src/l01-l02-backup-restore.test.ts"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "A01",
+      "gate": "G0",
+      "packages": [
+        "B01",
+        "B03"
+      ],
+      "priority": "P1",
+      "environments": [
+        "U",
+        "H"
+      ],
+      "title": "Clean build, typecheck, and deterministic portable test suite",
+      "independentOracle": "node scripts/toolchain.mjs build, typecheck, and portable test suite exit 0 with zero workspace drift.",
+      "harnesses": [
+        "scripts/test-b03-suite-governance.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "portable_verified",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A02",
+      "gate": "G0",
+      "packages": [
+        "B03",
+        "Q03"
+      ],
+      "priority": "P1",
+      "environments": [
+        "U",
+        "V"
+      ],
+      "title": "Zero-mock test harness enforcement and real SQLite/filesystem execution",
+      "independentOracle": "Governance scanner verifies zero mock/stub libraries in dependencies and every scenario A01-A60 is mapped to an executable harness.",
+      "harnesses": [
+        "scripts/test-b03-suite-governance.test.ts",
+        "scripts/test-q03-q04-governance.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A03",
+      "gate": "G0",
+      "packages": [
+        "B02"
+      ],
+      "priority": "P1",
+      "environments": [
+        "U"
+      ],
+      "title": "Core domain invariants and validation error codes",
+      "independentOracle": "Direct invocation of @xpanel/core validators returns deterministic ErrorCode values (VALIDATION, CONFLICT, FORBIDDEN, LIMIT_EXCEEDED) on boundary inputs.",
+      "harnesses": [
+        "packages/core/src/b02-core-invariants.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "portable_verified",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A04",
+      "gate": "G1",
+      "packages": [
+        "S02"
+      ],
+      "priority": "P0",
+      "environments": [
+        "U",
+        "H"
+      ],
+      "title": "Agent command validation & shell injection rejection",
+      "independentOracle": "Every adversarial payload (;, &&, |, $(), backticks, .., NUL) is rejected with VALIDATION before child_process.execFile is reached; sentinel path on disk is never created.",
+      "harnesses": [
+        "apps/agent/src/s02-privilege-boundary.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "portable_verified",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A05",
+      "gate": "G1",
+      "packages": [
+        "S01"
+      ],
+      "priority": "P0",
+      "environments": [
+        "H",
+        "V"
+      ],
+      "title": "API runs unprivileged and cannot write to root-owned host paths directly",
+      "independentOracle": "Process UID inspection shows xpanel-api running as non-root user xpanel-api; direct filesystem write to /etc/nginx or /etc/shadow fails with EACCES.",
+      "harnesses": [
+        "apps/api/src/s01-s05-security-auth.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A06",
+      "gate": "G1",
+      "packages": [
+        "S01",
+        "H03"
+      ],
+      "priority": "P0",
+      "environments": [
+        "H",
+        "B"
+      ],
+      "title": "Root first-login password change and MFA enrollment gate",
+      "independentOracle": "With forcePasswordChange=true or root MFA unenrolled, all mutating endpoints return 403 PRECONDITION_FAILED until password change and TOTP enrollment complete.",
+      "harnesses": [
+        "apps/api/src/s01-s05-security-auth.test.ts",
+        "apps/api/src/h03-onboarding.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "portable_verified",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A07",
+      "gate": "G1",
+      "packages": [
+        "S01",
+        "H04"
+      ],
+      "priority": "P0",
+      "environments": [
+        "U",
+        "H"
+      ],
+      "title": "RBAC and multi-tenant isolation across root, reseller, and user principals",
+      "independentOracle": "Cross-tenant API and lifecycle calls (User A -> User B, Reseller A -> Reseller B, User -> Root) return 403 FORBIDDEN with zero state mutation or data leakage.",
+      "harnesses": [
+        "apps/api/src/use-cases/h04-account-lifecycle.test.ts",
+        "apps/api/src/s01-s05-security-auth.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "portable_verified",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A08",
+      "gate": "G1",
+      "packages": [
+        "S01",
+        "M02"
+      ],
+      "priority": "P0",
+      "environments": [
+        "H",
+        "B",
+        "V"
+      ],
+      "title": "Webmail SSO one-time ticket (30s TTL, single-use, mailbox-scoped)",
+      "independentOracle": "Ticket redeems exactly once within 30s for the target mailbox; second redemption, expired ticket, or different mailbox returns 401 UNAUTHORIZED.",
+      "harnesses": [
+        "apps/api/src/m01-m05-mail-ftp-files.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A09",
+      "gate": "G1",
+      "packages": [
+        "S02",
+        "S05"
+      ],
+      "priority": "P0",
+      "environments": [
+        "U",
+        "H",
+        "B"
+      ],
+      "title": "Self-lockout firewall prevention for current admin IP and SSH port",
+      "independentOracle": "Submitting a drop rule matching the admin session IP or active SSH port is rejected with 412 PRECONDITION_FAILED before firewall.json or nftables is modified.",
+      "harnesses": [
+        "apps/api/src/s01-s05-security-auth.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "portable_verified",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A10",
+      "gate": "G1",
+      "packages": [
+        "S02",
+        "H02"
+      ],
+      "priority": "P0",
+      "environments": [
+        "H",
+        "V"
+      ],
+      "title": "Unix socket permissions and peer credential validation on agent.sock",
+      "independentOracle": "Connections to /run/xpanel/agent.sock from UIDs outside xpanel-api/root are rejected by OS socket mode 0660 and SO_PEERCRED verification.",
+      "harnesses": [
+        "apps/agent/src/s02-privilege-boundary.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A11",
+      "gate": "G1",
+      "packages": [
+        "S05",
+        "H03"
+      ],
+      "priority": "P0",
+      "environments": [
+        "H",
+        "B"
+      ],
+      "title": "SSH port change safety sequence (open new port before closing old port)",
+      "independentOracle": "Rendered firewall + sshd action sequence opens the new SSH port in nftables and verifies sshd config before removing the old SSH port allowance.",
+      "harnesses": [
+        "apps/api/src/h03-onboarding.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "portable_verified",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A12",
+      "gate": "G1",
+      "packages": [
+        "S01",
+        "S05"
+      ],
+      "priority": "P0",
+      "environments": [
+        "H",
+        "V"
+      ],
+      "title": "Brute-force lockout across panel login and TOTP verification",
+      "independentOracle": "Exceeding failed attempt thresholds records a lockout in SQLite lockouts table and returns 429 RATE_LIMITED until the window expires or root clears the lockout.",
+      "harnesses": [
+        "apps/api/src/s01-s05-security-auth.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A13",
+      "gate": "G1",
+      "packages": [
+        "S05",
+        "R04"
+      ],
+      "priority": "P0",
+      "environments": [
+        "H",
+        "B",
+        "V"
+      ],
+      "title": "WebSocket live event tenant scoping and redaction",
+      "independentOracle": "Connected WebSocket clients for User A and Reseller A never receive events scoped to User B or root-only system secrets.",
+      "harnesses": [
+        "apps/api/src/s01-s05-security-auth.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A14",
+      "gate": "G1",
+      "packages": [
+        "S03"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V"
+      ],
+      "title": "Tenant symlink/hardlink race containment in file manager and archive extract",
+      "independentOracle": "Symlink/hardlink pointing to /etc/shadow or another tenant's home directory is rejected by O_NOFOLLOW / confined tenant UID runner without reading or overwriting target.",
+      "harnesses": [
+        "apps/agent/src/s03-tenant-fs-confinement.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A15",
+      "gate": "G1",
+      "packages": [
+        "S04"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V"
+      ],
+      "title": "Secrets encryption at rest (0400 master.key) and zero plaintext secrets in logs/state",
+      "independentOracle": "Scanning /var/lib/xpanel/state, SQLite tables, and structured logs finds zero plaintext passwords, TOTP secrets, DKIM private keys, or backup credentials.",
+      "harnesses": [
+        "packages/db/src/s04-secret-vault.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A16",
+      "gate": "G1",
+      "packages": [
+        "S04"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V"
+      ],
+      "title": "Master key rotation re-encrypts all vault entries atomically",
+      "independentOracle": "After key rotation, decrypting with the old key fails and decrypting all vault records with the new key succeeds without service interruption.",
+      "harnesses": [
+        "packages/db/src/s04-secret-vault.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A17",
+      "gate": "G1",
+      "packages": [
+        "S04",
+        "D04"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V",
+        "B"
+      ],
+      "title": "Per-domain environment variables stored in 0600 root:user files outside document root",
+      "independentOracle": "Rendered app-env file resides at /home/<user>/etc/apps/<domain>.env with mode 0600, excluded from public_html and masked in API responses.",
+      "harnesses": [
+        "packages/db/src/s04-secret-vault.test.ts",
+        "apps/api/src/d01-d04-domains-apps.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A18",
+      "gate": "G2",
+      "packages": [
+        "R01",
+        "R02"
+      ],
+      "priority": "P0",
+      "environments": [
+        "U",
+        "V"
+      ],
+      "title": "Concurrent mutations serialize cleanly with lease fencing and optimistic revision checks",
+      "independentOracle": "Parallel conflicting mutations increment revision monotonically, reject stale expectedRevision/fencingToken with CONFLICT, and produce valid JSON with matching SHA-256 tree checksum.",
+      "harnesses": [
+        "packages/state/src/r01-state-concurrency.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A19",
+      "gate": "G2",
+      "packages": [
+        "R02",
+        "R03",
+        "D02"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V",
+        "E"
+      ],
+      "title": "Pre-activation syntax gate blocks invalid Nginx/Apache/OLS/PHP-FPM/PowerDNS configs",
+      "independentOracle": "Injected syntax error fails in staging directory; live /etc/* files retain previous SHA-256 checksums and external HTTP/DNS probes see zero downtime.",
+      "harnesses": [
+        "apps/agent/src/r02-r03-reconciler-journal.test.ts"
+      ],
+      "faultClassIds": [
+        "F03"
+      ],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A20",
+      "gate": "G2",
+      "packages": [
+        "R03"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V",
+        "E"
+      ],
+      "title": "Automatic rollback on post-activation reload or health check failure",
+      "independentOracle": "Simulated reload/health failure restores previous generation files and units, marks candidate generation rolled_back, and keeps active generation serving.",
+      "harnesses": [
+        "apps/agent/src/r02-r03-reconciler-journal.test.ts"
+      ],
+      "faultClassIds": [
+        "F01",
+        "F03",
+        "F04"
+      ],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A21",
+      "gate": "G2",
+      "packages": [
+        "R03",
+        "R04"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V"
+      ],
+      "title": "Crash recovery from interrupted reconciliation journal and durable job leases",
+      "independentOracle": "Restarting reconciler after simulated crash at any phase (render, stage, test, activate, reload, verify) recovers deterministically and expires stale job leases.",
+      "harnesses": [
+        "apps/agent/src/r02-r03-reconciler-journal.test.ts",
+        "packages/db/src/r04-durable-jobs.test.ts"
+      ],
+      "faultClassIds": [
+        "F01",
+        "F02"
+      ],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A22",
+      "gate": "G2",
+      "packages": [
+        "R02",
+        "H04",
+        "D04",
+        "D05",
+        "M01"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V",
+        "E"
+      ],
+      "title": "Orphaned resource cleanup on domain, database, mailbox, or account deletion",
+      "independentOracle": "Manifest diff removes only owned obsolete vhosts, FPM pools, systemd timers, Dovecot/Pure-FTPd entries, and DNS zones while preserving neighbor accounts.",
+      "harnesses": [
+        "apps/api/src/use-cases/h04-account-lifecycle.test.ts",
+        "apps/agent/src/r02-r03-reconciler-journal.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A23",
+      "gate": "G2",
+      "packages": [
+        "R04"
+      ],
+      "priority": "P1",
+      "environments": [
+        "H",
+        "V"
+      ],
+      "title": "Durable job idempotency, progress checkpoints, and cooperative cancellation",
+      "independentOracle": "Duplicate job submission with identical idempotencyKey returns existing job; cancellation transitions job to cancelled and cleans up partial artifacts.",
+      "harnesses": [
+        "packages/db/src/r04-durable-jobs.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A24",
+      "gate": "G2",
+      "packages": [
+        "R05"
+      ],
+      "priority": "P0",
+      "environments": [
+        "H",
+        "V"
+      ],
+      "title": "SQLite corruption/deletion recovery via xpanel-ctl reindex from desired state",
+      "independentOracle": "Rebuilding index from /var/lib/xpanel/state restores 100% of accounts, domains, databases, and service users in SQLite search tables.",
+      "harnesses": [
+        "packages/db/src/r05-reindex-recovery.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A25",
+      "gate": "G2",
+      "packages": [
+        "R01",
+        "S02"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V"
+      ],
+      "title": "Host configuration drift detection and automatic repair",
+      "independentOracle": "Manual modification or deletion of a managed vhost or systemd unit on disk is detected by detectHostDrift and repaired on the next reconcile cycle.",
+      "harnesses": [
+        "apps/agent/src/r02-r03-reconciler-journal.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A26",
+      "gate": "G3",
+      "packages": [
+        "H01",
+        "H02"
+      ],
+      "priority": "P1",
+      "environments": [
+        "V"
+      ],
+      "title": "Clean-OS bootstrap installer on Ubuntu 24.04 LTS and AlmaLinux 9",
+      "independentOracle": "Installer completes in <= 10 minutes on clean VM, enables all core systemd units, and prints one-time bootstrap URL.",
+      "harnesses": [
+        "packages/os/src/h01-h02-installer-os.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A27",
+      "gate": "G3",
+      "packages": [
+        "H02"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V"
+      ],
+      "title": "Installer idempotency on re-execution after partial interruption",
+      "independentOracle": "Running installer a second time converges cleanly with zero duplicate entries, zero broken units, and preserved state.",
+      "harnesses": [
+        "packages/os/src/h01-h02-installer-os.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A28",
+      "gate": "G3",
+      "packages": [
+        "H01",
+        "H02"
+      ],
+      "priority": "P1",
+      "environments": [
+        "V",
+        "E"
+      ],
+      "title": "Distro-specific paths, binaries, and package profiles across Ubuntu/Debian/Alma/Rocky",
+      "independentOracle": "Every rendered path and service unit matches the target distro profile (apt vs dnf, www-data vs nginx/apache, socket paths) and passes native syntax checks.",
+      "harnesses": [
+        "packages/os/src/h01-h02-installer-os.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A29",
+      "gate": "G3",
+      "packages": [
+        "H03"
+      ],
+      "priority": "P1",
+      "environments": [
+        "B",
+        "V"
+      ],
+      "title": "First-login wizard configures hostname, engine, PHP versions, DNS role, and default plan",
+      "independentOracle": "Completing onboarding writes server.json, applies initial host generation, and transitions panel to normal operational mode.",
+      "harnesses": [
+        "apps/api/src/h03-onboarding.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A30",
+      "gate": "G3",
+      "packages": [
+        "S01",
+        "H03"
+      ],
+      "priority": "P0",
+      "environments": [
+        "H",
+        "B"
+      ],
+      "title": "One-time bootstrap token expiry and single-use invalidation",
+      "independentOracle": "Bootstrap token cannot be reused after initial redemption or after its 30-minute TTL expires.",
+      "harnesses": [
+        "apps/api/src/h03-onboarding.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "portable_verified",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A31",
+      "gate": "G3",
+      "packages": [
+        "H05"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V",
+        "E"
+      ],
+      "title": "Cross-tenant filesystem isolation (0750 home dirs) and PHP open_basedir/FPM pool separation",
+      "independentOracle": "Process running as Account A (UID 20000) receives EACCES when attempting to read, list, or traverse /home/account_b (UID 20001).",
+      "harnesses": [
+        "packages/render/src/h05-isolation-slices.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A32",
+      "gate": "G3",
+      "packages": [
+        "H05",
+        "D05",
+        "D04",
+        "M01"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V"
+      ],
+      "title": "Filesystem quota and per-mailbox Dovecot quota enforcement",
+      "independentOracle": "Writing beyond blockHardKb fails with EDQUOT; delivering mail to a full mailbox returns 452/552 quota exceeded without affecting other mailboxes.",
+      "harnesses": [
+        "packages/render/src/h05-isolation-slices.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A33",
+      "gate": "G3",
+      "packages": [
+        "H05",
+        "Q01"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V",
+        "E"
+      ],
+      "title": "Noisy-neighbor cgroup v2 slice containment (CPUQuota, MemoryMax, TasksMax, IOBandwidthMax)",
+      "independentOracle": "Fork-bomb and memory-hog inside xpanel-20000.slice are throttled/OOM-killed inside the tenant slice while neighbor account latency remains within SLO.",
+      "harnesses": [
+        "packages/render/src/h05-isolation-slices.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A34",
+      "gate": "G3",
+      "packages": [
+        "H04",
+        "S01",
+        "D01",
+        "D05",
+        "M01",
+        "L02"
+      ],
+      "priority": "P1",
+      "environments": [
+        "B",
+        "V",
+        "E"
+      ],
+      "title": "Multi-surface account suspension and unsuspension across HTTP, panel, SSH, FTP, mail, DB, and cron",
+      "independentOracle": "Suspending account revokes active sessions/tokens, switches shell to nologin, serves HTTP 503 suspended page, stops FPM/cron/slice, denies Dovecot/FTP login, and locks MariaDB users; unsuspending restores all surfaces.",
+      "harnesses": [
+        "apps/api/src/use-cases/h04-account-lifecycle.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A35",
+      "gate": "G3",
+      "packages": [
+        "H04",
+        "D05"
+      ],
+      "priority": "P1",
+      "environments": [
+        "B",
+        "V",
+        "E"
+      ],
+      "title": "Complete account termination without orphaned artifacts or UID reuse",
+      "independentOracle": "Termination removes Linux user, /home/<user>, vhosts, FPM pools, slices, cron timers, DNS zones, and MariaDB DBs/users while keeping the burnt UID permanently reserved in uid-allocator.json.",
+      "harnesses": [
+        "apps/api/src/use-cases/h04-account-lifecycle.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A36",
+      "gate": "G4",
+      "packages": [
+        "D01"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V"
+      ],
+      "title": "Live web engine switch (Apache <-> OpenLiteSpeed) and multi-PHP FPM routing",
+      "independentOracle": "Switching engine re-renders all active domains and passes HTTP 200 verification with zero downtime or PHP version mismatch.",
+      "harnesses": [
+        "apps/api/src/d01-d04-domains-apps.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A37",
+      "gate": "G4",
+      "packages": [
+        "D01",
+        "L02"
+      ],
+      "priority": "P1",
+      "environments": [
+        "V"
+      ],
+      "title": "Per-domain custom vhost includes, .user.ini directives, and multi-IP bindings",
+      "independentOracle": "Custom configuration drop-ins are syntax-tested before activation and preserved across generation rollbacks and account restores.",
+      "harnesses": [
+        "apps/api/src/d01-d04-domains-apps.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A38",
+      "gate": "G4",
+      "packages": [
+        "D02"
+      ],
+      "priority": "P1",
+      "environments": [
+        "V",
+        "E"
+      ],
+      "title": "Authoritative PowerDNS zone rendering, SOA serial monotonicity, and DNSSEC/CAA/SPF/DMARC",
+      "independentOracle": "dig @server queries return expected A/AAAA/MX/TXT/CAA records with monotonically incremented SOA serial.",
+      "harnesses": [
+        "apps/agent/src/d02-d03-dns-tls-automation.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A39",
+      "gate": "G4",
+      "packages": [
+        "D03"
+      ],
+      "priority": "P1",
+      "environments": [
+        "V",
+        "E"
+      ],
+      "title": "Automated ACME HTTP-01 and DNS-01 certificate issuance, renewal, and failure fallback",
+      "independentOracle": "Valid TLS certificate is installed with 0600 key permissions; simulated renewal failure keeps existing valid certificate active without breaking Nginx/Postfix/Dovecot.",
+      "harnesses": [
+        "apps/agent/src/d02-d03-dns-tls-automation.test.ts"
+      ],
+      "faultClassIds": [
+        "F05"
+      ],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A40",
+      "gate": "G4",
+      "packages": [
+        "D04",
+        "S04"
+      ],
+      "priority": "P0",
+      "environments": [
+        "B",
+        "V",
+        "E"
+      ],
+      "title": "One-click app installer (WordPress) and Node/Python runtime supervisor inside tenant slice",
+      "independentOracle": "Installed app responds HTTP 200 with CSPRNG database credentials stored in vault and runtime process confined to xpanel-<uid>.slice.",
+      "harnesses": [
+        "apps/api/src/d01-d04-domains-apps.test.ts"
+      ],
+      "faultClassIds": [
+        "F05"
+      ],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A41",
+      "gate": "G4",
+      "packages": [
+        "D05",
+        "H05"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V",
+        "B"
+      ],
+      "title": "MariaDB/PostgreSQL tenant prefix enforcement, privilege matrix, and soft-trash restore/purge",
+      "independentOracle": "Account A user cannot query Account B database; trashed database revokes grants immediately and restores cleanly before retention cutoff.",
+      "harnesses": [
+        "apps/api/src/d05-databases-cron.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A42",
+      "gate": "G5",
+      "packages": [
+        "M01",
+        "M02"
+      ],
+      "priority": "P1",
+      "environments": [
+        "B",
+        "V",
+        "E"
+      ],
+      "title": "Postfix + Dovecot + Rspamd mailbox provisioning, DKIM signing, and Sieve filtering",
+      "independentOracle": "Authenticated SMTP submission signs outbound message with 2048-bit DKIM key, passes SPF/DMARC, and delivers to Maildir via Dovecot LMTP.",
+      "harnesses": [
+        "apps/api/src/m01-m05-mail-ftp-files.test.ts"
+      ],
+      "faultClassIds": [
+        "F05"
+      ],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A43",
+      "gate": "G5",
+      "packages": [
+        "M03"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V",
+        "E"
+      ],
+      "title": "Mail server is not an open relay and enforces per-domain outbound rate limits",
+      "independentOracle": "Unauthenticated external relay attempt is rejected with 554 5.7.1; outbound messages exceeding rate limit are deferred/throttled.",
+      "harnesses": [
+        "apps/api/src/m01-m05-mail-ftp-files.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A44",
+      "gate": "G5",
+      "packages": [
+        "M02",
+        "M03"
+      ],
+      "priority": "P0",
+      "environments": [
+        "B",
+        "V"
+      ],
+      "title": "Safe Postfix queue inspection, flush, and targeted message deletion",
+      "independentOracle": "Queue operations validate queue IDs strictly against /^[0-9A-F]{6,20}$/ and never invoke a shell.",
+      "harnesses": [
+        "apps/api/src/m01-m05-mail-ftp-files.test.ts"
+      ],
+      "faultClassIds": [
+        "F05"
+      ],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A45",
+      "gate": "G5",
+      "packages": [
+        "M04"
+      ],
+      "priority": "P1",
+      "environments": [
+        "B",
+        "V",
+        "E"
+      ],
+      "title": "Pure-FTPd TLS virtual users chrooted to configured directory inside account home",
+      "independentOracle": "FTPS login succeeds for active virtual user, confines traversal to configured ftpDir inside /home/<user>, and denies login immediately when suspended.",
+      "harnesses": [
+        "apps/api/src/m01-m05-mail-ftp-files.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A46",
+      "gate": "G5",
+      "packages": [
+        "M05",
+        "S01"
+      ],
+      "priority": "P0",
+      "environments": [
+        "H",
+        "B"
+      ],
+      "title": "File manager zip-slip/tar-slip prevention, upload limits, and confined extraction",
+      "independentOracle": "Archive containing ../ or absolute paths is rejected with VALIDATION before any byte is written outside the target directory.",
+      "harnesses": [
+        "apps/agent/src/s03-tenant-fs-confinement.test.ts",
+        "apps/api/src/m01-m05-mail-ftp-files.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "portable_verified",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A47",
+      "gate": "G6",
+      "packages": [
+        "L01"
+      ],
+      "priority": "P1",
+      "environments": [
+        "V"
+      ],
+      "title": "Consistent encrypted account and server backup generation (zstd + AES-256-GCM)",
+      "independentOracle": "Generated backup archive contains signed manifest.json with per-component SHA-256 digests and passes standalone integrity verification.",
+      "harnesses": [
+        "packages/lifecycle/src/l01-l02-backup-restore.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A48",
+      "gate": "G6",
+      "packages": [
+        "L01",
+        "R04"
+      ],
+      "priority": "P1",
+      "environments": [
+        "V",
+        "E"
+      ],
+      "title": "Backup retention rotation and resilient S3/SFTP upload with disk space preflight",
+      "independentOracle": "Insufficient free space aborts before staging; interrupted remote upload resumes/retries and retention pruning preserves minimum healthy snapshots.",
+      "harnesses": [
+        "packages/lifecycle/src/l01-l02-backup-restore.test.ts"
+      ],
+      "faultClassIds": [
+        "F02",
+        "F06"
+      ],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A49",
+      "gate": "G6",
+      "packages": [
+        "L02",
+        "S04"
+      ],
+      "priority": "P0",
+      "environments": [
+        "B",
+        "V"
+      ],
+      "title": "Granular and full account restore with UID/ownership remapping and secret re-binding",
+      "independentOracle": "Restoring files-only, DB-only, mail-only, or full account verifies manifest checksums first and remaps UID/GID ownership to the target account.",
+      "harnesses": [
+        "packages/lifecycle/src/l01-l02-backup-restore.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A50",
+      "gate": "G6",
+      "packages": [
+        "L02",
+        "R01"
+      ],
+      "priority": "P1",
+      "environments": [
+        "V",
+        "E"
+      ],
+      "title": "Clean-server disaster recovery from full server backup archive",
+      "independentOracle": "Restoring server backup onto a fresh host reconstructs desired state, vault secrets, accounts, databases, mailboxes, and zones with matching checksums.",
+      "harnesses": [
+        "packages/lifecycle/src/l01-l02-backup-restore.test.ts"
+      ],
+      "faultClassIds": [
+        "F06"
+      ],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A51",
+      "gate": "G6",
+      "packages": [
+        "L03"
+      ],
+      "priority": "P1",
+      "environments": [
+        "V",
+        "E"
+      ],
+      "title": "cPanel (cpmove) and DirectAdmin archive dry-run analysis and full import",
+      "independentOracle": "Importer translates domains, document roots, databases, mailboxes, and DNS zones into xPanel desired state with a complete compatibility report.",
+      "harnesses": [
+        "packages/lifecycle/src/l03-L05-migration-metrics-upgrade.test.ts"
+      ],
+      "faultClassIds": [
+        "F06"
+      ],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A52",
+      "gate": "G6",
+      "packages": [
+        "L04",
+        "R04"
+      ],
+      "priority": "P1",
+      "environments": [
+        "V",
+        "E"
+      ],
+      "title": "Live server-to-server account migration with final rsync/DB delta sync and DNS cutover",
+      "independentOracle": "Migrated account passes HTTP/DB/Mail verification on target host before source account is suspended and DNS TTL/A records are switched.",
+      "harnesses": [
+        "packages/lifecycle/src/l03-L05-migration-metrics-upgrade.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A53",
+      "gate": "G6",
+      "packages": [
+        "L05",
+        "R03"
+      ],
+      "priority": "P0",
+      "environments": [
+        "V",
+        "E"
+      ],
+      "title": "Signed release upgrade with pre-upgrade snapshot and automatic rollback on health failure",
+      "independentOracle": "Tampered signature is rejected before unpacking; post-upgrade health probe failure automatically switches symlink and SQLite/state back to previous release.",
+      "harnesses": [
+        "packages/lifecycle/src/l03-L05-migration-metrics-upgrade.test.ts"
+      ],
+      "faultClassIds": [
+        "F02",
+        "F04"
+      ],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A54",
+      "gate": "G7",
+      "packages": [
+        "Q01"
+      ],
+      "priority": "P1",
+      "environments": [
+        "U",
+        "V"
+      ],
+      "title": "Control-plane idle memory footprint, API latency (p95 < 80ms), and reconcile throughput",
+      "independentOracle": "Benchmark harness measures API read p95 < 80ms, write enqueue p95 < 150ms, and 500-account compilation within memory and latency budgets.",
+      "harnesses": [
+        "scripts/test-q01-scale-benchmarks.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A55",
+      "gate": "G7",
+      "packages": [
+        "Q01"
+      ],
+      "priority": "P1",
+      "environments": [
+        "B",
+        "V",
+        "E"
+      ],
+      "title": "High-density 500-account / 1000-domain reconciliation and search pagination",
+      "independentOracle": "Indexed search and pagination over 500 accounts / 1000 domains complete in < 50ms with deterministic ordering and zero UI freeze.",
+      "harnesses": [
+        "scripts/test-q01-scale-benchmarks.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A56",
+      "gate": "G7",
+      "packages": [
+        "Q02"
+      ],
+      "priority": "P1",
+      "environments": [
+        "B"
+      ],
+      "title": "Bilingual Arabic (RTL) and English (LTR) localization and logical layout parity",
+      "independentOracle": "Every translation key exists in both ar and en catalogs with matching placeholders, dir='rtl' logical layout, and Western numerals for technical identifiers.",
+      "harnesses": [
+        "apps/web/src/q02-ui-parity-a11y-rtl.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "portable_verified",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A57",
+      "gate": "G7",
+      "packages": [
+        "Q02",
+        "Q03"
+      ],
+      "priority": "P1",
+      "environments": [
+        "B"
+      ],
+      "title": "WCAG 2.2 AA accessibility, keyboard navigation, and destructive confirmation dialogs",
+      "independentOracle": "All views pass WCAG 2.2 AA contrast/ARIA/keyboard checks and destructive actions require explicit typed confirmation.",
+      "harnesses": [
+        "apps/web/src/q02-ui-parity-a11y-rtl.test.ts",
+        "scripts/test-q03-q04-governance.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "portable_verified",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A58",
+      "gate": "G7",
+      "packages": [
+        "Q02",
+        "R01"
+      ],
+      "priority": "P1",
+      "environments": [
+        "H",
+        "B"
+      ],
+      "title": "100% UI-to-API-to-Host wiring parity with zero mock data or dead buttons",
+      "independentOracle": "Every UI route and action dispatches a real typed API request backed by StateStore/SQLite/HostReconciler with zero hardcoded mock fixtures.",
+      "harnesses": [
+        "apps/web/src/q02-ui-parity-a11y-rtl.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "portable_verified",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A59",
+      "gate": "G7",
+      "packages": [
+        "Q04",
+        "H01"
+      ],
+      "priority": "P1",
+      "environments": [
+        "U",
+        "V"
+      ],
+      "title": "Operational runbooks, release governance checklist, and secret-free documentation",
+      "independentOracle": "Governance test verifies all 10 required operational runbooks exist with executable steps, rollback procedures, and zero embedded secrets.",
+      "harnesses": [
+        "scripts/test-q03-q04-governance.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_live_service_proof",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    },
+    {
+      "id": "A60",
+      "gate": "G7",
+      "packages": [
+        "Q05"
+      ],
+      "priority": "P1",
+      "environments": [
+        "B",
+        "V",
+        "E"
+      ],
+      "title": "30-60 day internal production pilot with daily restore drills and zero P0/P1 incidents",
+      "independentOracle": "Pilot telemetry and incident log confirm 30-60 consecutive days of operation, weekly upgrade drills, and daily restore drills with zero P0/P1 regressions.",
+      "harnesses": [
+        "scripts/test-q03-q04-governance.test.ts"
+      ],
+      "faultClassIds": [],
+      "portablePrimitiveVerified": true,
+      "verificationStatus": "pending_pilot",
+      "evidenceAssessment": "declarative_unaccepted",
+      "independentAcceptance": false,
+      "evidenceAssessmentExplanation": "Declared requirement and legacy mapping only. Harness paths and verification fields are not execution evidence; acceptance requires a reviewed result tied to the exact source, artifact, environment, independent oracle, and failure cases."
+    }
+  ],
+  "evidenceAssessment": "declarative_unaccepted",
+  "independentAcceptance": false,
+  "evidenceAssessmentExplanation": "This is a declarative traceability contract, not an execution receipt. Legacy portablePrimitiveVerified and verificationStatus values are retained for schema compatibility and do not assert independent acceptance. Structural consistency does not prove mapped harness presence, execution, service integration, or release qualification. Each requirement needs current source/artifact/environment-bound evidence."
+}

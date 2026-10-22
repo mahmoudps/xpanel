@@ -445,8 +445,7 @@ export const navigation: NavSurface[] = [
               "file-manager",
               "file-text-editor",
               "html-editor",
-              "images",
-              "aapanel-file-share"
+              "images"
             ],
             "keywords": [
               "File Manager",
@@ -465,8 +464,6 @@ export const navigation: NavSurface[] = [
               "Extract",
               "Search file contents",
               "Favorites",
-              "Share link",
-              "File Sharing Links",
               "إدارة الملفات",
               "File Browser",
               "Upload and Remote Download",
@@ -476,7 +473,7 @@ export const navigation: NavSurface[] = [
               "Path Favorites",
               "Online File Editor"
             ],
-            "summary": "Browse, upload, fetch from a URL, edit, search inside, compress, extract, share and set permissions on files in your home folder, and resize or convert images."
+            "summary": "Browse, upload, fetch from a URL, edit, search inside, compress, extract and set permissions on files in your home folder, and resize or convert images."
           },
           {
             "id": "trash",
@@ -4190,6 +4187,27 @@ export const navigation: NavSurface[] = [
               "Remote SSH hosts"
             ],
             "summary": "Browser root shell on this server, saved remote SSH hosts and a library of one-click commands."
+          },
+          {
+            "id": "file-sharing",
+            "name": "File sharing links",
+            "route": "/whm/server/file-sharing",
+            "template": "list",
+            "artboard": "TemplateList",
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-file-share"
+            ],
+            "keywords": [
+              "Share link",
+              "File Sharing Links",
+              "Directory sharing",
+              "مشاركة الملفات"
+            ],
+            "summary": "Server administrator management of file and directory sharing links; unavailable until the capability and its task screen are qualified."
           },
           {
             "id": "setup",

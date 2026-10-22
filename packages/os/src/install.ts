@@ -36,7 +36,10 @@ const SYSTEM_USER = /^[a-z_][a-z0-9_-]{0,31}$/
 const BASE_ROLES: readonly PackageRole[] = ['mariadb', 'postgresql', 'redis', 'sshd', 'nftables', 'quota', 'acme']
 /** started right away: the panel needs its databases before the first reconcile */
 const DATA_SERVICES: readonly ServiceRole[] = ['mariadb', 'postgresql', 'redis']
-const OPTION_KEYS = new Set(['engine', 'phpVersions', 'withMail', 'withDns', 'withFtp', 'apacheMpm', 'withModSecurity'])
+const OPTION_KEYS = new Set(['engine', 'phpVersions', 'withMail', 'withDns', 'withFtp', 'apacheMpm', 'withModSecurity', 'withMariaDb'])
+
+type ExtendedInstallOptions = InstallOptions & { withMariaDb?: boolean }
+type ExtendedResolvedInstallOptions = ResolvedInstallOptions & { withMariaDb?: boolean }
 
 export const itkAvailable = (profile: OsProfile): boolean => profile.packages['apache-itk'].length > 0
 
@@ -55,7 +58,7 @@ const flag = (o: Record<string, unknown>, key: string, fallback?: boolean): bool
 }
 
 /** Strict validation of hostile input: unknown keys, wrong types and bad versions are rejected. */
-export const resolveInstallOptions = (raw: unknown): ResolvedInstallOptions => {
+export const resolveInstallOptions = (raw: unknown): ExtendedResolvedInstallOptions => {
   if (!isPlainObject(raw)) return fail('VALIDATION', 'install options must be a plain object')
   const extra = Object.keys(raw).filter(k => !OPTION_KEYS.has(k))
   if (extra.length > 0) return fail('VALIDATION', 'unknown install options', { fields: extra.slice(0, 8).map(preview) })
@@ -66,6 +69,7 @@ export const resolveInstallOptions = (raw: unknown): ResolvedInstallOptions => {
   const apacheMpm: ApacheMpm = mpm === 'itk' || mpm === 'prefork'
     ? mpm
     : fail('VALIDATION', 'apacheMpm must be itk or prefork', { apacheMpm: preview(mpm) })
+  const withMariaDb = raw.withMariaDb !== undefined ? flag(raw, 'withMariaDb', true) : undefined
   return {
     engine,
     phpVersions: assertPhpVersionList(raw.phpVersions),
@@ -74,6 +78,7 @@ export const resolveInstallOptions = (raw: unknown): ResolvedInstallOptions => {
     withFtp: flag(raw, 'withFtp'),
     apacheMpm,
     withModSecurity: flag(raw, 'withModSecurity', false),
+    ...(withMariaDb !== undefined ? { withMariaDb } : {}),
   }
 }
 
@@ -105,7 +110,7 @@ const assertEngineAvailable = (p: XpanelOsProfile, o: ResolvedInstallOptions): v
   assertMpmAvailable(p, o.apacheMpm)
 }
 
-const prepare = (profile: XpanelOsProfile, options: InstallOptions): ResolvedInstallOptions => {
+const prepare = (profile: XpanelOsProfile, options: ExtendedInstallOptions): ExtendedResolvedInstallOptions => {
   assertProfile(profile)
   const o = resolveInstallOptions(options)
   assertEngineAvailable(profile, o)
@@ -225,12 +230,18 @@ const optionalRoles = (o: ResolvedInstallOptions): ServiceRole[] => {
   return roles
 }
 
+const baseRoles = (o: ExtendedResolvedInstallOptions): readonly PackageRole[] =>
+  o.withMariaDb === false ? BASE_ROLES.filter(r => r !== 'mariadb') : BASE_ROLES
+
+const dataServices = (o: ExtendedResolvedInstallOptions): readonly ServiceRole[] =>
+  o.withMariaDb === false ? DATA_SERVICES.filter(r => r !== 'mariadb') : DATA_SERVICES
+
 /** sshd is never touched: the installer itself usually runs over SSH. nftables is enabled, not started, until xPanel's ruleset exists. */
-const serviceActions = (p: XpanelOsProfile, o: ResolvedInstallOptions): InstallAction[] => {
-  const enabled: ServiceRole[] = ['nginx', 'apache', 'mariadb', 'postgresql', 'redis', 'nftables', ...optionalRoles(o)]
+const serviceActions = (p: XpanelOsProfile, o: ExtendedResolvedInstallOptions): InstallAction[] => {
+  const enabled: ServiceRole[] = ['nginx', 'apache', ...dataServices(o), 'nftables', ...optionalRoles(o)]
   return [
     ...enabled.map(r => systemd('enable', p.services[r])),
-    ...DATA_SERVICES.map(r => systemd('start', p.services[r])),
+    ...dataServices(o).map(r => systemd('start', p.services[r])),
   ]
 }
 
@@ -290,12 +301,12 @@ const systemUserActions = (p: XpanelOsProfile): InstallAction[] => {
   ]))
 }
 
-const debianPlan = (p: XpanelOsProfile, o: ResolvedInstallOptions): InstallAction[] => {
+const debianPlan = (p: XpanelOsProfile, o: ExtendedResolvedInstallOptions): InstallAction[] => {
   const apt = aptGet(p)
   const nginx = unique(rolePackages(p, ['nginx']))
   const engine = without(unique(rolePackages(p, engineRoles(o))), nginx)
   const rest = without(
-    unique([...rolePackages(p, [...BASE_ROLES, ...optionalRoles(o)]), ...phpPackages(p, o.phpVersions)]),
+    unique([...rolePackages(p, [...baseRoles(o), ...optionalRoles(o)]), ...phpPackages(p, o.phpVersions)]),
     [...nginx, ...engine],
   )
   // Debian starts a service on install. nginx and apache2 both want :80, so each is installed
@@ -318,9 +329,9 @@ const debianPlan = (p: XpanelOsProfile, o: ResolvedInstallOptions): InstallActio
   ]
 }
 
-const rhelPlan = (p: XpanelOsProfile, o: ResolvedInstallOptions): InstallAction[] => {
+const rhelPlan = (p: XpanelOsProfile, o: ExtendedResolvedInstallOptions): InstallAction[] => {
   const all = unique([
-    ...rolePackages(p, ['nginx', ...engineRoles(o), ...BASE_ROLES, ...optionalRoles(o)]),
+    ...rolePackages(p, ['nginx', ...engineRoles(o), ...baseRoles(o), ...optionalRoles(o)]),
     ...phpPackages(p, o.phpVersions),
   ])
   const initdb = exec([requireBin(p.bin.postgresqlSetup, 'postgresql-setup'), '--initdb'], `${p.paths.postgresqlDataDir}/PG_VERSION`)
@@ -341,7 +352,7 @@ const rhelPlan = (p: XpanelOsProfile, o: ResolvedInstallOptions): InstallAction[
  * Throws VALIDATION for bad options and ENGINE_UNAVAILABLE when the engine cannot be built on this OS.
  * Files from installFiles() are written after these actions; the reconciler starts the web servers.
  */
-export const installPlan = (profile: XpanelOsProfile, options: InstallOptions): InstallAction[] => {
+export const installPlan = (profile: XpanelOsProfile, options: ExtendedInstallOptions): InstallAction[] => {
   const o = prepare(profile, options)
   return profile.family === 'debian' ? debianPlan(profile, o) : rhelPlan(profile, o)
 }
@@ -433,7 +444,7 @@ const suexecFile = (p: XpanelOsProfile): RenderedFile[] =>
  * the web servers. The distribution's `Listen 80/443` lines are removed here (the edge renderer
  * relies on it): otherwise Apache cannot bind next to Nginx.
  */
-export const installFiles = (profile: XpanelOsProfile, options: InstallOptions): RenderedFile[] => {
+export const installFiles = (profile: XpanelOsProfile, options: ExtendedInstallOptions): RenderedFile[] => {
   const o = prepare(profile, options)
   if (profile.family === 'rhel') {
     return [
@@ -447,7 +458,7 @@ export const installFiles = (profile: XpanelOsProfile, options: InstallOptions):
   return [debianPortsFile(profile), ...suexecFile(profile)]
 }
 
-export const installWarnings = (profile: XpanelOsProfile, options: InstallOptions): InstallWarning[] => {
+export const installWarnings = (profile: XpanelOsProfile, options: ExtendedInstallOptions): InstallWarning[] => {
   const o = prepare(profile, options)
   const w: InstallWarning[] = [{
     code: 'EDGE_NOT_STARTED',
@@ -482,7 +493,7 @@ export const installWarnings = (profile: XpanelOsProfile, options: InstallOption
   return w
 }
 
-export const installBundle = (profile: XpanelOsProfile, options: InstallOptions): InstallBundle => ({
+export const installBundle = (profile: XpanelOsProfile, options: ExtendedInstallOptions): InstallBundle => ({
   actions: installPlan(profile, options),
   files: installFiles(profile, options),
   warnings: installWarnings(profile, options),
@@ -499,3 +510,5 @@ export const phpInstallPlan = (profile: XpanelOsProfile, versions: string[]): In
     : [...rhelRepos(profile, true), ...dnf(profile).install(packages)]
   return [...install, ...distroFpmOff(profile, vs)]
 }
+
+export * from './install-runner.ts'

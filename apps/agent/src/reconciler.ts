@@ -1,0 +1,1370 @@
+import { randomUUID } from 'node:crypto'
+import { chmod, mkdir, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { fail, suspensionEffects } from '@xpanel/core'
+import type {
+  ConfigTest,
+  HostAction,
+  Id,
+  LiveEvent,
+  LiveEventScope,
+  OsProfile,
+  PhpSettings,
+  ReconcileStage,
+  RenderedFile,
+} from '@xpanel/core'
+import {
+  activate,
+  appendAudit,
+  createGeneration,
+  getGeneration,
+  latestActive,
+  markFailed,
+  markGenerationRolledBack,
+  markTested,
+  recordMetricsSample,
+  reindexFromState,
+} from '@xpanel/db'
+import type { ConfigGeneration, Db } from '@xpanel/db'
+import { edge, services, system } from '@xpanel/render'
+import type { StateSnapshot, StateStore } from '@xpanel/state'
+import type { AgentExecutor } from './executor.ts'
+import {
+  buildGenerationManifest,
+  computeFilesChecksum,
+  detectHostDrift,
+  diffManifests,
+  ReconcilerJournal,
+  sha256Text,
+  validateStagedCandidateSyntax,
+} from './reconciler-journal.ts'
+import type {
+  DriftReport,
+  PreviousFileBackup,
+  ReconcileJournalPhase,
+  ReconcileJournalRecord,
+} from './reconciler-journal.ts'
+
+export * from './reconciler-journal.ts'
+
+export interface CompiledGeneration {
+  stateChecksum: string
+  files: RenderedFile[]
+  tests: ConfigTest[]
+  preActions: HostAction[]
+  postActions: HostAction[]
+  terminatingAccounts: { id: Id; username: string }[]
+}
+
+export interface CompileOptions {
+  os: OsProfile
+  quotaFilesystem?: string | null
+  ioDevices?: string[]
+  zoneDir?: string
+  now?: Date
+}
+
+const DEFAULT_ZONE_DIR = '/var/lib/powerdns/zones'
+
+/**
+ * Pure compiler: turns a validated `StateSnapshot` and `OsProfile` into the complete set
+ * of rendered configuration files, preflight config tests, and host reconciliation actions.
+ */
+export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileOptions): CompiledGeneration => {
+  const { os } = opts
+  const quotaFilesystem = opts.quotaFilesystem ?? null
+  const ioDevices = opts.ioDevices ?? []
+  const zoneDir = opts.zoneDir ?? DEFAULT_ZONE_DIR
+  const now = opts.now ?? new Date()
+
+  const files: RenderedFile[] = []
+  const tests: ConfigTest[] = []
+  const preActions: HostAction[] = []
+  const postActions: HostAction[] = []
+  const terminatingAccounts: { id: Id; username: string }[] = []
+
+  const seenTests = new Set<string>()
+  const addTest = (t: ConfigTest): void => {
+    if (!seenTests.has(t.name)) {
+      seenTests.add(t.name)
+      tests.push(t)
+    }
+  }
+
+  const plansById = new Map(snapshot.plans.map((p) => [p.id, p]))
+  const certs = snapshot.certificates
+
+  // 1. Server-level edge, backend, SSH, symlink protection, jailed shell, and firewall
+  if (snapshot.server) {
+    const settings = snapshot.server.settings
+    preActions.push(...system.homeBaseProtectionActions(['/home']))
+    files.push(system.renderJailShellBinary())
+    const symlinkSysctl = system.renderSymlinkProtectionSysctl()
+    files.push(symlinkSysctl)
+    postActions.push(...system.symlinkProtectionActions())
+
+    preActions.push(...edge.nginxEdgeDirs(os))
+    files.push(edge.renderNginxMain(settings, os))
+    files.push(edge.defaultSiteFile(os, { settings }))
+    addTest(edge.nginxConfigTest(os))
+
+    if (settings.engine === 'apache') {
+      preActions.push(...edge.apacheLogDirs())
+      files.push(
+        edge.apacheMpmFile(settings, os, {
+          uidRange: [system.ACCOUNT_ID_MIN, system.ACCOUNT_ID_MAX],
+          gidRange: [system.ACCOUNT_ID_MIN, system.ACCOUNT_ID_MAX],
+        }),
+      )
+      files.push(edge.renderApacheBase(settings, os))
+      addTest(edge.apacheConfigTest(os))
+    }
+
+    // Firewall (only rendered when rules include an enabled panel rule)
+    if (snapshot.firewall.rules.length > 0) {
+      const prefixLists = Object.fromEntries(snapshot.firewall.prefixLists.map((l) => [l.name, l.entries]))
+      const nftSettings = system.nftSettingsFromServer(settings, {
+        prefixLists,
+        banTimeoutSec: 3600,
+      })
+      const nftFile = system.renderNftables(snapshot.firewall.rules, nftSettings, os)
+      files.push(nftFile)
+      addTest(system.nftConfigTest(nftFile.path))
+      postActions.push(...system.nftApplyActions(os))
+
+      const sysctlFile = system.renderForwardingSysctl(snapshot.firewall.rules)
+      if (sysctlFile) {
+        files.push(sysctlFile)
+        postActions.push(...system.sysctlApplyActions(sysctlFile))
+      }
+    }
+
+    // SSHD drop-in
+    const sshFile = system.renderSshdDropin(
+      {
+        port: settings.sshPort,
+        passwordAuth: false,
+        rootLogin: 'prohibit-password',
+      },
+      os,
+    )
+    files.push(sshFile)
+    addTest(system.sshdConfigTest(os))
+  }
+
+  // 2. Accounts, slices, domains, PHP-FPM pools, cron timers, MariaDB, Mail, FTP
+  const olsAccountRenders: edge.OlsAccountRender[] = []
+  const ftpUsers: services.FtpUserInput[] = []
+  const sqlStatements: string[] = []
+  let needsDaemonReload = false
+
+  for (const account of snapshot.accounts) {
+    const accountDomains = snapshot.domains.filter((d) => d.accountId === account.id)
+    const accountUsers = snapshot.serviceUsers.filter((u) => u.accountId === account.id)
+    const accountDbs = snapshot.databases.filter((d) => d.accountId === account.id)
+    const accountDbUsers = snapshot.databaseUsers.filter((u) => u.accountId === account.id)
+    const accountCrons = snapshot.cronJobs.filter((c) => c.accountId === account.id)
+
+    if (account.status === 'terminating') {
+      const fpmVersions = [
+        ...new Set(
+          accountDomains
+            .filter((d) => d.siteType === 'php' && d.php.handler === 'fpm')
+            .map((d) => d.php.version),
+        ),
+      ]
+      const units = [
+        ...fpmVersions.map((v) => system.fpmUnitName(account.username, v)),
+        ...accountCrons.flatMap((c) => {
+          const names = system.cronUnitNames(account.username, c.id.slice(0, 16))
+          return [names.timer, names.service]
+        }),
+      ]
+      postActions.push(
+        ...system.accountTerminateActions(account, os, {
+          confirmUsername: account.username,
+          units,
+          quotaFilesystem,
+        }),
+      )
+      for (const db of accountDbs) {
+        sqlStatements.push(...services.dropDatabase(db.name, account.username))
+      }
+      for (const dbu of accountDbUsers) {
+        sqlStatements.push(...services.dropUser(dbu.name, account.username, ['localhost']))
+      }
+      terminatingAccounts.push({ id: account.id, username: account.username })
+      continue
+    }
+
+    const plan =
+      plansById.get(account.planId) ??
+      fail('NOT_FOUND', `plan ${account.planId} not found for account ${account.username}`)
+
+    // Provision Linux group, user, 0750 home dirs, and filesystem quota
+    preActions.push(...system.accountProvisionActions(account, plan, os, { quotaFilesystem }))
+
+    // Account systemd slice & logind user slice drop-in
+    files.push(system.renderAccountSlice(account, plan.resources, ioDevices, { systemdDir: os.paths.systemdDir }))
+    files.push(system.renderLoginSliceDropin(account, plan.resources, ioDevices, { systemdDir: os.paths.systemdDir }))
+    postActions.push(
+      ...system.sliceUpdateActions(account, plan.resources, ioDevices, { systemdDir: os.paths.systemdDir }),
+    )
+    needsDaemonReload = true
+
+    const effects = suspensionEffects(account)
+    const cronEnabled = effects.some((e) => e.subsystem === 'cron' && e.state === 'enabled')
+    const mailLogin: 'allowed' | 'denied' = effects.some((e) => e.subsystem === 'mail-login' && e.state === 'denied')
+      ? 'denied'
+      : 'allowed'
+    const mailDelivery: 'accept' | 'defer' = effects.some((e) => e.subsystem === 'mail-delivery' && e.state === 'defer')
+      ? 'defer'
+      : 'accept'
+    const ftpSuspended = effects.some((e) => e.subsystem === 'ftp-login' && e.state === 'denied')
+
+    // Edge & backend vhosts + PHP-FPM pools
+    if (snapshot.server && accountDomains.length > 0) {
+      const settings = snapshot.server.settings
+      files.push(edge.nginxSiteFile(account, accountDomains, settings, os, certs, { now }))
+
+      // Per-domain custom configuration drop-in files (cPanel userdata style) + .user.ini
+      if (snapshot.domainCustomConfigs && snapshot.domainCustomConfigs.length > 0) {
+        const customByDomain = new Map(
+          snapshot.domainCustomConfigs
+            .filter((c) => c.accountId === account.id)
+            .map((c) => [c.domainId, c]),
+        )
+        for (const dom of accountDomains) {
+          const customCfg = customByDomain.get(dom.id)
+          if (customCfg) {
+            files.push(...system.renderDomainCustomIncludes(account, dom.docRoot, customCfg, os))
+          }
+        }
+      }
+
+      if (settings.engine === 'apache') {
+        files.push(...edge.renderApacheVhosts(account, accountDomains, settings, os, { now }))
+        for (const dom of accountDomains) {
+          if (dom.siteType === 'php' && dom.php.handler !== 'fpm') {
+            preActions.push(...edge.cgiWrapperDirs(account, settings, os))
+            files.push(edge.renderPhpCgiWrapper(account, dom, settings, os))
+          }
+        }
+      } else {
+        const olsAcc = edge.renderOlsAccount(account, accountDomains, settings, os, {
+          workerCap: plan.caps.phpWorkers,
+          now,
+        })
+        olsAccountRenders.push(olsAcc)
+        files.push(...olsAcc.vhconfs)
+      }
+
+      // Render one PHP-FPM master + pool + systemd unit per distinct PHP version used by FPM domains
+      const fpmByVersion = new Map<string, PhpSettings>()
+      for (const dom of accountDomains) {
+        if (dom.siteType === 'php' && dom.php.handler === 'fpm' && !fpmByVersion.has(dom.php.version)) {
+          fpmByVersion.set(dom.php.version, dom.php)
+        }
+      }
+      for (const [version, phpSettings] of fpmByVersion) {
+        preActions.push(...edge.fpmInstanceDirs(account, version))
+        files.push(
+          edge.renderFpmPool(account, phpSettings, os, {
+            workerCap: plan.caps.phpWorkers,
+            maxMemoryMb: plan.resources.memoryMb,
+            apacheMpm: settings.apacheMpm,
+          }),
+        )
+        files.push(edge.renderFpmMaster(account, version, os))
+        files.push(system.renderFpmUnit(account, version, os))
+        addTest(edge.fpmConfigTest(account, version, os))
+        const unit = system.fpmUnitName(account.username, version)
+        if (account.status === 'active') {
+          postActions.push({ kind: 'systemd', verb: 'enable', unit }, { kind: 'systemd', verb: 'restart', unit })
+        } else {
+          postActions.push({ kind: 'systemd', verb: 'stop', unit }, { kind: 'systemd', verb: 'disable', unit })
+        }
+      }
+    }
+
+    // Cron jobs as systemd timers inside xpanel-<uid>.slice
+    for (const cron of accountCrons) {
+      const shortId = cron.id.replace(/[^a-z0-9]/gi, '').slice(0, 16) || 'job'
+      const rendered = system.renderCronUnits(
+        account,
+        { id: shortId, schedule: cron.schedule, command: cron.command },
+        os,
+      )
+      files.push(rendered.service, rendered.timer)
+      if (cron.enabled && cronEnabled) {
+        postActions.push(
+          { kind: 'systemd', verb: 'enable', unit: rendered.timerName },
+          { kind: 'systemd', verb: 'start', unit: rendered.timerName },
+        )
+      } else {
+        postActions.push(
+          { kind: 'systemd', verb: 'stop', unit: rendered.timerName },
+          { kind: 'systemd', verb: 'disable', unit: rendered.timerName },
+        )
+      }
+    }
+
+    // Mail (Dovecot per-domain passwd files)
+    for (const dom of accountDomains) {
+      const mailUsers = accountUsers.filter((u) => u.domainId === dom.id && u.services.email)
+      if (mailUsers.length > 0) {
+        files.push(
+          services.dovecotPasswdFile(os, {
+            domain: dom.name,
+            account,
+            login: mailLogin,
+            delivery: mailDelivery,
+            mailboxes: mailUsers.map((u) => ({
+              local: u.localPart,
+              passwordHash: u.passwordHash,
+              quotaMb: u.mailboxQuotaMb,
+              suspendLogin: mailLogin === 'denied',
+            })),
+          }),
+        )
+      }
+    }
+
+    // FTP virtual users
+    for (const u of accountUsers) {
+      if (u.services.ftp) {
+        const cleanHash = u.passwordHash.replace(/^\{[A-Z0-9-]+\}/, '')
+        ftpUsers.push({
+          login: u.login,
+          passwordHash: cleanHash,
+          account,
+          dir: u.ftpDir,
+          suspended: ftpSuspended,
+        })
+      }
+    }
+
+    // MariaDB databases, users, grants, and trash
+    for (const db of accountDbs) {
+      sqlStatements.push(...services.createDatabase(db.name, account.username))
+    }
+    const dbsById = new Map(accountDbs.map((d) => [d.id, d]))
+    for (const dbu of accountDbUsers) {
+      sqlStatements.push(
+        ...services.createUser(dbu.name, account.username, ['localhost'], {
+          plugin: dbu.authPlugin,
+          hash: dbu.authString,
+        }),
+      )
+      for (const grant of dbu.grants) {
+        const targetDb = dbsById.get(grant.databaseId)
+        if (targetDb && targetDb.trashedAt === null) {
+          sqlStatements.push(
+            ...services.grantPrivileges(dbu.name, account.username, ['localhost'], targetDb.name, grant.privileges),
+          )
+        }
+      }
+    }
+    for (const db of accountDbs) {
+      if (db.trashedAt !== null) {
+        const dbGrants: services.DbGrant[] = accountDbUsers
+          .filter((u) => u.grants.some((g) => g.databaseId === db.id))
+          .map((u) => ({
+            user: u.name,
+            hosts: ['localhost'],
+            privileges: u.grants.find((g) => g.databaseId === db.id)?.privileges ?? ['ALL'],
+          }))
+        sqlStatements.push(...services.trashDatabase(db.name, account.username, dbGrants, db.trashedAt))
+      }
+    }
+  }
+
+  // OpenLiteSpeed server-level httpd_config.conf when OLS is the engine
+  if (snapshot.server && snapshot.server.settings.engine === 'openlitespeed') {
+    const settings = snapshot.server.settings
+    const maps = olsAccountRenders.flatMap((r) => r.maps)
+    const content = [
+      edge.renderOlsServerBase(settings).trimEnd(),
+      ...(maps.length > 0 ? [edge.renderOlsListener(settings, maps).trimEnd()] : []),
+      ...olsAccountRenders.map((r) => r.server.trimEnd()),
+      '',
+    ].join('\n\n')
+    files.push({
+      path: `${os.paths.olsRoot}/conf/httpd_config.conf`,
+      content,
+      mode: 0o644,
+      owner: 'root',
+      group: 'root',
+    })
+  }
+
+  // Pure-FTPd passwd + mkdb
+  if (ftpUsers.length > 0) {
+    const ftpRendered = services.renderFtpPasswd(ftpUsers)
+    files.push(ftpRendered.file)
+    postActions.push(...ftpRendered.actions)
+  }
+
+  // Postfix outbound multi-IPv4/IPv6 transport maps & master.cf transports
+  if (snapshot.mailIpConfig) {
+    const accountsById = new Map(snapshot.accounts.map((a) => [a.id, a]))
+    const primaryIpv4 =
+      snapshot.ipPool?.find((ip) => ip.version === 4 && ip.isPrimary)?.address ??
+      snapshot.ipPool?.find((ip) => ip.version === 4)?.address ??
+      snapshot.accounts[0]?.ipv4 ??
+      '127.0.0.1'
+    const primaryIpv6 =
+      snapshot.ipPool?.find((ip) => ip.version === 6 && ip.isPrimary)?.address ??
+      snapshot.ipPool?.find((ip) => ip.version === 6)?.address ??
+      null
+    const outbound = system.renderPostfixOutboundIpTransports(
+      snapshot.domains,
+      accountsById,
+      snapshot.mailIpConfig,
+      {
+        ipv4: primaryIpv4,
+        ipv6: primaryIpv6,
+        hostname: snapshot.server?.settings.hostname ?? 'localhost.localdomain',
+        postfixDir: os.paths.postfixDir,
+      },
+    )
+    files.push(...outbound.files)
+    postActions.push(...outbound.actions)
+  }
+
+  // PowerDNS BIND zone files
+  for (const zone of snapshot.zones) {
+    const primaryNs = snapshot.server?.settings.nameservers[0] ?? `ns1.${zone.name}`
+    const rname = `hostmaster.${zone.name}.`
+    const soaContent = `${primaryNs.replace(/\.$/, '')}. ${rname} ${zone.serial} 3600 1800 1209600 3600`
+    const content = services.renderBindZone([
+      {
+        zone: zone.name,
+        name: '@',
+        type: 'SOA',
+        ttl: 3600,
+        content: soaContent,
+        priority: null,
+      },
+      ...zone.records.map((r) => ({
+        zone: zone.name,
+        name: r.name,
+        type: r.type,
+        ttl: r.ttl,
+        content: r.content,
+        priority: r.priority,
+      })),
+    ])
+    files.push({
+      path: `${zoneDir}/${zone.name}.zone`,
+      content,
+      mode: 0o644,
+      owner: 'root',
+      group: 'root',
+    })
+  }
+  if (snapshot.zones.length > 0) {
+    const namedConfLines = [
+      '// Managed by xPanel: PowerDNS BIND zone catalog',
+      ...snapshot.zones.map(
+        (zone) => `zone "${zone.name}" {\n  type master;\n  file "${zoneDir}/${zone.name}.zone";\n};`,
+      ),
+      '',
+    ]
+    files.push({
+      path: '/etc/powerdns/named.conf.xpanel-zones',
+      content: namedConfLines.join('\n'),
+      mode: 0o644,
+      owner: 'root',
+      group: 'root',
+    })
+    postActions.push(
+      { kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] },
+      { kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] },
+    )
+  }
+
+  if (needsDaemonReload) {
+    postActions.unshift({ kind: 'systemd-daemon-reload' })
+  }
+
+  if (snapshot.server) {
+    const settings = snapshot.server.settings
+    const backendUnit = settings.engine === 'apache' ? os.services.apache : os.services.openlitespeed
+    postActions.push(
+      { kind: 'systemd', verb: 'reload', unit: backendUnit },
+      { kind: 'systemd', verb: 'reload', unit: os.services.nginx },
+    )
+  }
+
+  if (sqlStatements.length > 0) {
+    postActions.push(services.sqlAction(sqlStatements))
+  }
+
+  files.sort((a, b) => a.path.localeCompare(b.path))
+  return {
+    stateChecksum: snapshot.checksum,
+    files,
+    tests,
+    preActions,
+    postActions,
+    terminatingAccounts,
+  }
+}
+
+export type ReconcileResult =
+  | { status: 'noop'; generation: ConfigGeneration | null; stateChecksum: string }
+  | {
+      status: 'applied'
+      generation: ConfigGeneration
+      filesCount: number
+      durationMs: number
+      removedFilesCount?: number
+      repairedDriftCount?: number
+    }
+  | {
+      status: 'failed'
+      generation: ConfigGeneration
+      failedTest: string
+      error: string
+      rolledBack?: boolean
+      restoredGenerationId?: number | null
+    }
+
+export interface ReconciliationRecoveryResult {
+  recovered: boolean
+  outcome: 'none' | 'rolled_back' | 'failed' | 'needs_attention'
+  generationId: number | null
+  restoredGenerationId: number | null
+  interruptedPhase: ReconcileJournalPhase | null
+  restoredFiles: string[]
+  reloadedUnits: string[]
+  error: string | null
+}
+
+export interface ReconcilerDeps {
+  store: StateStore
+  db: Db
+  executor: AgentExecutor
+  os: OsProfile
+  quotaFilesystem?: string | null
+  ioDevices?: string[]
+  zoneDir?: string
+  onEvent?: (event: LiveEvent) => void
+  /** Optional health verification probe run against each service unit after reload and after rollback. */
+  healthProbe?: (unit: string, generationId: number) => Promise<{ ok: boolean; error?: string }>
+  /** Optional deterministic hook invoked at each journal phase boundary (used for crash-injection tests). */
+  onPhaseHook?: (phase: ReconcileJournalPhase, journal: ReconcileJournalRecord) => Promise<void> | void
+}
+
+class SimulatedProcessCrashWrapper extends Error {
+  readonly originalError: unknown
+  constructor(originalError: unknown) {
+    super(originalError instanceof Error ? originalError.message : String(originalError))
+    this.name = 'SimulatedProcessCrashWrapper'
+    this.originalError = originalError
+  }
+}
+
+class StageFailureError extends Error {
+  readonly failedUnit: string
+  constructor(failedUnit: string, message: string) {
+    super(message)
+    this.name = 'StageFailureError'
+    this.failedUnit = failedUnit
+  }
+}
+
+export class HostReconciler {
+  private readonly deps: ReconcilerDeps
+  private readonly listeners = new Set<(event: LiveEvent) => void>()
+  private lastAppliedStateChecksum: string | null = null
+  readonly journal: ReconcilerJournal
+
+  constructor(deps: ReconcilerDeps) {
+    this.deps = deps
+    this.journal = new ReconcilerJournal(deps.store.rootDir)
+    if (deps.onEvent) this.listeners.add(deps.onEvent)
+  }
+
+  subscribe(fn: (event: LiveEvent) => void): () => void {
+    this.listeners.add(fn)
+    return () => this.listeners.delete(fn)
+  }
+
+  emit(event: LiveEvent): void {
+    for (const fn of this.listeners) {
+      fn(event)
+    }
+  }
+
+  private emitStage(
+    generationId: number,
+    stage: ReconcileStage,
+    status: 'running' | 'passed' | 'failed',
+    scope: LiveEventScope,
+    detail?: string,
+  ): void {
+    this.emit({
+      id: randomUUID(),
+      at: new Date().toISOString(),
+      kind: 'reconcile.stage',
+      scope,
+      data: {
+        generationId,
+        stage,
+        status,
+        ...(detail !== undefined && { detail }),
+      },
+    })
+  }
+
+  private async invokePhaseHook(phase: ReconcileJournalPhase, record: ReconcileJournalRecord): Promise<void> {
+    if (!this.deps.onPhaseHook) return
+    try {
+      await this.deps.onPhaseHook(phase, record)
+    } catch (err) {
+      throw new SimulatedProcessCrashWrapper(err)
+    }
+  }
+
+  private async verifyUnitHealth(unit: string, generationId: number): Promise<{ ok: boolean; error?: string }> {
+    if (this.deps.healthProbe) {
+      return this.deps.healthProbe(unit, generationId)
+    }
+    const fakeUnits = (this.deps.executor as unknown as {
+      units?: Map<string, { enabled: boolean; active: boolean; properties: Record<string, string> }>
+    }).units
+    if (fakeUnits instanceof Map) {
+      const state = fakeUnits.get(unit)
+      if (state && !state.active) {
+        return { ok: false, error: `service unit ${unit} is not active after reload` }
+      }
+    }
+    return { ok: true }
+  }
+
+  /**
+   * Inspects the active generation's owned-file manifest against the live host files.
+   */
+  async checkDrift(): Promise<DriftReport> {
+    const currentGen = await latestActive(this.deps.db)
+    if (!currentGen) {
+      return { hasDrift: false, manifestMissing: false, generationId: null, items: [] }
+    }
+    const manifest = await this.journal.readManifest(currentGen.id)
+    return detectHostDrift(this.deps.executor, manifest)
+  }
+
+  /**
+   * Captures a durable backup of all live host files that will be modified, added, or removed
+   * before any host mutation occurs.
+   */
+  private async capturePreviousFilesBackup(
+    candidateFiles: readonly RenderedFile[],
+    removedPaths: readonly { path: string; mode: number; owner: string; group: string }[],
+    previousManifest: ReconcileJournalRecord['previousManifest'],
+  ): Promise<PreviousFileBackup[]> {
+    const prevByPath = new Map((previousManifest?.files ?? []).map((f) => [f.path, f]))
+    const fakeFilesMap = (this.deps.executor as unknown as { files?: Map<string, RenderedFile> }).files
+
+    const targets = new Map<string, { mode: number; owner: string; group: string }>()
+    for (const f of candidateFiles) {
+      targets.set(f.path, {
+        mode: f.mode,
+        owner: f.owner ?? 'root',
+        group: f.group ?? 'root',
+      })
+    }
+    for (const r of removedPaths) {
+      targets.set(r.path, {
+        mode: r.mode,
+        owner: r.owner,
+        group: r.group,
+      })
+    }
+
+    const backups: PreviousFileBackup[] = []
+    for (const [path, fallbackMeta] of targets) {
+      const content = await this.deps.executor.readFile(path)
+      const prevEntry = prevByPath.get(path)
+      const fakeEntry = fakeFilesMap instanceof Map ? fakeFilesMap.get(path) : undefined
+      const mode = fakeEntry?.mode ?? prevEntry?.mode ?? fallbackMeta.mode
+      const owner = fakeEntry?.owner ?? prevEntry?.owner ?? fallbackMeta.owner
+      const group = fakeEntry?.group ?? prevEntry?.group ?? fallbackMeta.group
+
+      backups.push({
+        path,
+        existed: content !== null,
+        content,
+        sha256: content !== null ? sha256Text(content) : null,
+        mode,
+        owner,
+        group,
+      })
+    }
+    return backups
+  }
+
+  /**
+   * Restores previous file bytes/mode/owner/group from the persisted journal backup,
+   * reloads affected services in reverse dependency order, verifies restored service health,
+   * and transitions the generation to `rolled_back` in SQLite.
+   */
+  private async rollbackLiveHostAndRecord(
+    journalRecord: ReconcileJournalRecord,
+    failedUnitOrStage: string,
+    errorMsg: string,
+    scope: LiveEventScope,
+  ): Promise<{
+    rolledBackGen: ConfigGeneration
+    restoredActiveGen: ConfigGeneration | null
+    restoredFiles: string[]
+    reloadedUnits: string[]
+  }> {
+    const restoredFiles: string[] = []
+    const reloadedUnits: string[] = []
+
+    try {
+      for (const backup of journalRecord.previousFilesBackup) {
+        if (!backup.existed || backup.content === null) {
+          await this.deps.executor.removePath(backup.path)
+          restoredFiles.push(backup.path)
+        } else {
+          await this.deps.executor.writeFile({
+            path: backup.path,
+            content: backup.content,
+            mode: backup.mode,
+            owner: backup.owner,
+            group: backup.group,
+          })
+          restoredFiles.push(backup.path)
+        }
+      }
+
+      for (const unit of [...journalRecord.stoppedObsoleteUnits].reverse()) {
+        await this.deps.executor.runAction({ kind: 'systemd', verb: 'enable', unit })
+        const verb = unit.endsWith('.timer') ? 'start' : 'restart'
+        await this.deps.executor.runAction({ kind: 'systemd', verb, unit })
+        reloadedUnits.push(unit)
+      }
+
+      const unitsToReload =
+        journalRecord.reloadedUnits.length > 0
+          ? [...journalRecord.reloadedUnits].reverse()
+          : [...new Set(journalRecord.previousManifest?.files.flatMap((f) => f.dependentUnits) ?? [])].reverse()
+
+      for (const unit of unitsToReload) {
+        if (reloadedUnits.includes(unit)) continue
+        const verb = unit.startsWith('xpanel-php-fpm-') ? 'restart' : unit.endsWith('.timer') ? 'start' : 'reload'
+        await this.deps.executor.runAction({ kind: 'systemd', verb, unit })
+        reloadedUnits.push(unit)
+      }
+
+      for (const unit of reloadedUnits) {
+        const health = await this.verifyUnitHealth(
+          unit,
+          journalRecord.previousActiveGenerationId ?? 0,
+        )
+        if (!health.ok) {
+          throw new Error(
+            `post-rollback health verification failed for ${unit}: ${health.error ?? 'unhealthy'}`,
+          )
+        }
+      }
+    } catch (rollbackErr) {
+      journalRecord.phase = 'needs_attention'
+      journalRecord.error = `rollback failed after ${errorMsg}: ${(rollbackErr as Error).message}`
+      await this.journal.saveJournal(journalRecord)
+      throw rollbackErr
+    }
+
+    const { rolledBack, active } = await markGenerationRolledBack(
+      this.deps.db,
+      journalRecord.generationId,
+      journalRecord.previousActiveGenerationId,
+      errorMsg,
+    )
+
+    journalRecord.phase = 'rolled_back'
+    journalRecord.error = errorMsg
+    await this.journal.saveJournal(journalRecord)
+    await this.journal.cleanupStagingDir(journalRecord.generationId)
+
+    const audit = await appendAudit(this.deps.db, {
+      actor: journalRecord.actor,
+      action: 'reconcile.rolled_back',
+      target: `generation:${journalRecord.generationId}`,
+      detail: {
+        failedUnitOrStage,
+        error: errorMsg,
+        restoredGenerationId: active?.id ?? null,
+        restoredFilesCount: restoredFiles.length,
+        reloadedUnits,
+      },
+      outcome: 'failed',
+    })
+    this.emit({
+      id: randomUUID(),
+      at: new Date().toISOString(),
+      kind: 'reconcile.failed',
+      scope,
+      data: {
+        generationId: journalRecord.generationId,
+        failedTest: failedUnitOrStage,
+        error: errorMsg,
+      },
+    })
+    this.emit({ id: randomUUID(), at: audit.at, kind: 'audit.entry', scope, data: audit })
+
+    return {
+      rolledBackGen: rolledBack,
+      restoredActiveGen: active,
+      restoredFiles,
+      reloadedUnits,
+    }
+  }
+
+  /**
+   * Reads the persisted on-disk journal after a process crash/kill at any phase
+   * (`stage`, `test`, `activate`, `reload`, `verify`) and deterministically recovers
+   * the host and SQLite generation state so no partial files or false `active` rows remain.
+   */
+  async recoverInterruptedReconciliation(
+    scope: LiveEventScope = { accountId: null, resellerId: null },
+  ): Promise<ReconciliationRecoveryResult> {
+    const activeJournal = await this.journal.readActiveJournal()
+    if (!activeJournal) {
+      return {
+        recovered: false,
+        outcome: 'none',
+        generationId: null,
+        restoredGenerationId: null,
+        interruptedPhase: null,
+        restoredFiles: [],
+        reloadedUnits: [],
+        error: null,
+      }
+    }
+
+    const interruptedPhase = activeJournal.phase
+    if (interruptedPhase === 'needs_attention') {
+      return {
+        recovered: false,
+        outcome: 'needs_attention',
+        generationId: activeJournal.generationId,
+        restoredGenerationId: activeJournal.previousActiveGenerationId,
+        interruptedPhase,
+        restoredFiles: [],
+        reloadedUnits: [],
+        error: activeJournal.error,
+      }
+    }
+
+    const reason = `recovered from interrupted reconciliation at phase '${interruptedPhase}'`
+
+    // Crashed before live host activation (`render`, `stage`, `test`): live files were untouched.
+    if (interruptedPhase === 'render' || interruptedPhase === 'stage' || interruptedPhase === 'test') {
+      await this.journal.cleanupStagingDir(activeJournal.generationId)
+      const gen = await getGeneration(this.deps.db, activeJournal.generationId)
+      if (gen && (gen.status === 'pending' || gen.status === 'tested')) {
+        await markFailed(this.deps.db, activeJournal.generationId, reason)
+      }
+      activeJournal.phase = 'failed'
+      activeJournal.error = reason
+      await this.journal.saveJournal(activeJournal)
+
+      await appendAudit(this.deps.db, {
+        actor: activeJournal.actor,
+        action: 'reconcile.recovered',
+        target: `generation:${activeJournal.generationId}`,
+        detail: {
+          interruptedPhase,
+          outcome: 'failed',
+          restoredGenerationId: activeJournal.previousActiveGenerationId,
+        },
+        outcome: 'failed',
+      })
+
+      return {
+        recovered: true,
+        outcome: 'failed',
+        generationId: activeJournal.generationId,
+        restoredGenerationId: activeJournal.previousActiveGenerationId,
+        interruptedPhase,
+        restoredFiles: [],
+        reloadedUnits: [],
+        error: reason,
+      }
+    }
+
+    // Crashed during or after live host mutation (`activate`, `reload`, `verify`):
+    // restore previous files + metadata, reload services in reverse order, verify health, and mark rolled_back.
+    const rb = await this.rollbackLiveHostAndRecord(
+      activeJournal,
+      `crash:${interruptedPhase}`,
+      reason,
+      scope,
+    )
+
+    return {
+      recovered: true,
+      outcome: 'rolled_back',
+      generationId: activeJournal.generationId,
+      restoredGenerationId: rb.restoredActiveGen?.id ?? null,
+      interruptedPhase,
+      restoredFiles: rb.restoredFiles,
+      reloadedUnits: rb.reloadedUnits,
+      error: reason,
+    }
+  }
+
+  /**
+   * Reconciles the host to the desired state in `/var/lib/xpanel/state/`.
+   * Stages candidate files, runs every service's config test before touching live paths,
+   * removes only owned obsolete files, rolls back on reload/health failure, or activates
+   * atomically and updates the SQLite index.
+   */
+  async reconcile(opts: { force?: boolean; scope?: LiveEventScope; actor?: string } = {}): Promise<ReconcileResult> {
+    const startMs = Date.now()
+    const scope: LiveEventScope = opts.scope ?? { accountId: null, resellerId: null }
+    const actor = opts.actor ?? 'agent'
+
+    const existingJournal = await this.journal.readActiveJournal()
+    if (existingJournal) {
+      if (existingJournal.phase === 'needs_attention') {
+        fail('PRECONDITION_FAILED', 'previous reconciliation rollback failed and requires operator attention', {
+          generationId: existingJournal.generationId,
+          error: existingJournal.error,
+        })
+      }
+      await this.recoverInterruptedReconciliation(scope)
+    }
+
+    const snapshot = await this.deps.store.readSnapshot()
+    const currentGen = await latestActive(this.deps.db)
+
+    const compiled = compileDesiredGeneration(snapshot, {
+      os: this.deps.os,
+      quotaFilesystem: this.deps.quotaFilesystem ?? null,
+      ...(this.deps.ioDevices && { ioDevices: this.deps.ioDevices }),
+      ...(this.deps.zoneDir && { zoneDir: this.deps.zoneDir }),
+    })
+
+    const previousManifest = currentGen ? await this.journal.readManifest(currentGen.id) : null
+    const filesChecksum = computeFilesChecksum(compiled.files)
+    const previewCandidate = buildGenerationManifest({
+      generationId: (currentGen?.id ?? 0) + 1,
+      stateChecksum: snapshot.checksum,
+      filesChecksum,
+      actor,
+      files: compiled.files,
+      postActions: compiled.postActions,
+      os: this.deps.os,
+    })
+    const previewDiff = diffManifests(previousManifest, previewCandidate)
+
+    // Preflight MUST run before any executor read/write/action or DB/snapshot creation.
+    const preflightPlan = {
+      files: compiled.files,
+      preActions: compiled.preActions,
+      postActions: [
+        ...compiled.postActions,
+        ...previewDiff.removed.map((r) => ({ kind: 'remove-path' as const, path: r.path })),
+      ],
+    }
+    await this.deps.executor.preflight(preflightPlan)
+
+    let repairedDriftCount = 0
+    if (
+      !opts.force &&
+      currentGen &&
+      (this.lastAppliedStateChecksum === snapshot.checksum || currentGen.checksum === filesChecksum)
+    ) {
+      const drift = await detectHostDrift(this.deps.executor, previousManifest)
+      if (!drift.hasDrift && !drift.manifestMissing) {
+        return { status: 'noop', generation: currentGen, stateChecksum: snapshot.checksum }
+      }
+      repairedDriftCount = drift.items.length
+    }
+
+    const pendingGen = await createGeneration(this.deps.db, {
+      checksum: filesChecksum,
+      actor,
+    })
+
+    const candidateManifest = buildGenerationManifest({
+      generationId: pendingGen.id,
+      stateChecksum: snapshot.checksum,
+      filesChecksum,
+      actor,
+      files: compiled.files,
+      postActions: compiled.postActions,
+      os: this.deps.os,
+    })
+    const manifestDiff = diffManifests(previousManifest, candidateManifest)
+
+    // Stage 1: Render, capture previous file backups, and stage candidate files in isolated directory
+    this.emitStage(pendingGen.id, 'render', 'running', scope, `Rendering ${compiled.files.length} files`)
+    await this.deps.store.saveGenerationSnapshot(pendingGen.id)
+
+    const previousFilesBackup = await this.capturePreviousFilesBackup(
+      compiled.files,
+      manifestDiff.removed,
+      previousManifest,
+    )
+
+    const now = new Date().toISOString()
+    const journalRecord: ReconcileJournalRecord = {
+      schemaVersion: 1,
+      journalId: randomUUID(),
+      generationId: pendingGen.id,
+      previousActiveGenerationId: currentGen?.id ?? null,
+      actor,
+      stateChecksum: snapshot.checksum,
+      filesChecksum,
+      phase: 'stage',
+      startedAt: now,
+      updatedAt: now,
+      candidateManifest,
+      previousManifest,
+      diff: manifestDiff,
+      previousFilesBackup,
+      completedPreActions: 0,
+      switchedFilePaths: [],
+      removedFilePaths: [],
+      stoppedObsoleteUnits: [],
+      completedPostActions: 0,
+      reloadedUnits: [],
+      verifiedUnits: [],
+      error: null,
+    }
+
+    try {
+      await this.journal.saveJournal(journalRecord)
+      await this.journal.stageCandidateFiles(pendingGen.id, compiled.files, candidateManifest)
+      this.emitStage(pendingGen.id, 'render', 'passed', scope)
+      await this.invokePhaseHook('stage', journalRecord)
+
+      // Stage 2: Staged config syntax tests BEFORE touching any live host path (A19)
+      journalRecord.phase = 'test'
+      await this.journal.saveJournal(journalRecord)
+      this.emitStage(pendingGen.id, 'test', 'running', scope, `Running ${compiled.tests.length} config tests`)
+      const stagedFiles = await this.journal.verifyStagedCandidateIntegrity(pendingGen.id, candidateManifest)
+      await this.invokePhaseHook('test', journalRecord)
+
+      const isRealLinuxExecutor = process.platform === 'linux' && !('files' in this.deps.executor)
+      let preActionsExecutedDuringTest = false
+
+      for (const test of compiled.tests) {
+        const stagedSyntax = validateStagedCandidateSyntax(test, stagedFiles)
+        let res: { ok: boolean; code: number; stdout: string; stderr: string }
+        if (!stagedSyntax.ok) {
+          res = { ok: false, code: 1, stdout: '', stderr: stagedSyntax.stderr }
+        } else {
+          if (isRealLinuxExecutor && !preActionsExecutedDuringTest) {
+            for (const action of compiled.preActions) {
+              await this.deps.executor.runAction(action)
+              journalRecord.completedPreActions++
+            }
+            preActionsExecutedDuringTest = true
+          }
+          const fpmConfigIdx = isRealLinuxExecutor ? test.argv.indexOf('--fpm-config') : -1
+          if (fpmConfigIdx !== -1 && test.argv[fpmConfigIdx + 1]) {
+            const masterPath = test.argv[fpmConfigIdx + 1]!
+            const poolPath = masterPath.replace(/\.conf$/, '.pool.conf')
+            const stagedMaster = stagedFiles.find((f) => f.path === masterPath)
+            const stagedPool = stagedFiles.find((f) => f.path === poolPath)
+            if (stagedMaster && stagedPool) {
+              const tmpFpmDir = `/tmp/xpanel-fpm-stage-${pendingGen.id}-${randomUUID().slice(0, 8)}`
+              await mkdir(tmpFpmDir, { recursive: true, mode: 0o755 })
+              await chmod(tmpFpmDir, 0o755)
+              try {
+                const tmpPoolPath = join(tmpFpmDir, 'pool.conf')
+                const tmpMasterPath = join(tmpFpmDir, 'master.conf')
+                await writeFile(tmpPoolPath, stagedPool.content, { mode: 0o644 })
+                await chmod(tmpPoolPath, 0o644)
+                const rewrittenMaster = stagedMaster.content.replace(
+                  `include = ${poolPath}`,
+                  `include = ${tmpPoolPath}`,
+                )
+                await writeFile(tmpMasterPath, rewrittenMaster, { mode: 0o644 })
+                await chmod(tmpMasterPath, 0o644)
+                const testArgv = [...test.argv]
+                testArgv[fpmConfigIdx + 1] = tmpMasterPath
+                res = await this.deps.executor.runTest({ name: test.name, argv: testArgv })
+              } finally {
+                await rm(tmpFpmDir, { recursive: true, force: true })
+              }
+            } else {
+              res = await this.deps.executor.runTest(test)
+            }
+          } else {
+            res = await this.deps.executor.runTest(test)
+          }
+        }
+
+        candidateManifest.testResults.push({
+          name: test.name,
+          argv: [...test.argv],
+          ok: res.ok,
+          code: res.code,
+          testedConfigChecksum: filesChecksum,
+          at: new Date().toISOString(),
+        })
+
+        if (!res.ok) {
+          const errorMsg = `${test.name} failed (exit ${res.code}): ${res.stderr || res.stdout}`.slice(0, 2000)
+          await this.journal.cleanupStagingDir(pendingGen.id)
+          journalRecord.phase = 'failed'
+          journalRecord.error = errorMsg
+          await this.journal.saveJournal(journalRecord)
+
+          this.emitStage(pendingGen.id, 'test', 'failed', scope, errorMsg)
+          const failedGen = await markFailed(this.deps.db, pendingGen.id, errorMsg)
+          const audit = await appendAudit(this.deps.db, {
+            actor,
+            action: 'reconcile.failed',
+            target: `generation:${pendingGen.id}`,
+            detail: { failedTest: test.name, error: errorMsg },
+            outcome: 'failed',
+          })
+          this.emit({
+            id: randomUUID(),
+            at: new Date().toISOString(),
+            kind: 'reconcile.failed',
+            scope,
+            data: { generationId: pendingGen.id, failedTest: test.name, error: errorMsg },
+          })
+          this.emit({ id: randomUUID(), at: audit.at, kind: 'audit.entry', scope, data: audit })
+          return { status: 'failed', generation: failedGen, failedTest: test.name, error: errorMsg }
+        }
+      }
+
+      // Freeze & re-verify staged candidate integrity before switching live paths (R02.8)
+      const verifiedStagedFiles = await this.journal.verifyStagedCandidateIntegrity(
+        pendingGen.id,
+        candidateManifest,
+      )
+      await markTested(this.deps.db, pendingGen.id)
+      this.emitStage(pendingGen.id, 'test', 'passed', scope)
+
+      // Stage 3, 4 & 5: Activate (Switch live files & remove obsolete owned files), Reload, and Verify Health
+      let currentStageLabel: 'switch' | 'reload' | 'verify' = 'switch'
+      try {
+        journalRecord.phase = 'activate'
+        await this.journal.saveJournal(journalRecord)
+        this.emitStage(pendingGen.id, 'switch', 'running', scope)
+
+        if (!preActionsExecutedDuringTest) {
+          for (const action of compiled.preActions) {
+            await this.deps.executor.runAction(action)
+            journalRecord.completedPreActions++
+          }
+        }
+
+        for (const file of verifiedStagedFiles) {
+          await this.deps.executor.writeFile(file)
+          journalRecord.switchedFilePaths.push(file.path)
+        }
+
+        for (const unit of manifestDiff.removedUnits) {
+          await this.deps.executor.runAction({ kind: 'systemd', verb: 'stop', unit })
+          await this.deps.executor.runAction({ kind: 'systemd', verb: 'disable', unit })
+          journalRecord.stoppedObsoleteUnits.push(unit)
+        }
+
+        for (const obsolete of manifestDiff.removed) {
+          await this.deps.executor.removePath(obsolete.path)
+          journalRecord.removedFilePaths.push(obsolete.path)
+        }
+
+        await this.journal.saveJournal(journalRecord)
+        await this.invokePhaseHook('activate', journalRecord)
+        this.emitStage(pendingGen.id, 'switch', 'passed', scope)
+
+        // Stage 4: Reload affected services
+        currentStageLabel = 'reload'
+        journalRecord.phase = 'reload'
+        await this.journal.saveJournal(journalRecord)
+        this.emitStage(pendingGen.id, 'reload', 'running', scope)
+
+        if (
+          manifestDiff.removedUnits.length > 0 &&
+          !compiled.postActions.some((a) => a.kind === 'systemd-daemon-reload')
+        ) {
+          await this.deps.executor.runAction({ kind: 'systemd-daemon-reload' })
+        }
+
+        for (const action of compiled.postActions) {
+          try {
+            await this.deps.executor.runAction(action)
+          } catch (actionErr) {
+            const unitLabel =
+              action.kind === 'systemd'
+                ? action.unit
+                : action.kind === 'exec'
+                  ? (action.argv[0] ?? 'exec')
+                  : action.kind
+            throw new StageFailureError(unitLabel, (actionErr as Error).message)
+          }
+          journalRecord.completedPostActions++
+          if (
+            action.kind === 'systemd' &&
+            (action.verb === 'reload' || action.verb === 'restart' || action.verb === 'start')
+          ) {
+            journalRecord.reloadedUnits.push(action.unit)
+          }
+        }
+
+        await this.journal.saveJournal(journalRecord)
+        await this.invokePhaseHook('reload', journalRecord)
+        this.emitStage(pendingGen.id, 'reload', 'passed', scope)
+
+        // Stage 5: Post-reload service health probes & final commit
+        currentStageLabel = 'verify'
+        journalRecord.phase = 'verify'
+        await this.journal.saveJournal(journalRecord)
+        this.emitStage(pendingGen.id, 'verify', 'running', scope)
+
+        for (const unit of journalRecord.reloadedUnits) {
+          const probe = await this.verifyUnitHealth(unit, pendingGen.id)
+          if (!probe.ok) {
+            throw new StageFailureError(
+              unit,
+              `post-reload health probe failed for ${unit}: ${probe.error ?? 'service unhealthy'}`,
+            )
+          }
+          journalRecord.verifiedUnits.push(unit)
+        }
+
+        await this.journal.saveJournal(journalRecord)
+        await this.invokePhaseHook('verify', journalRecord)
+      } catch (stageErr) {
+        if (stageErr instanceof SimulatedProcessCrashWrapper) {
+          throw stageErr
+        }
+        const failedUnit =
+          stageErr instanceof StageFailureError ? stageErr.failedUnit : currentStageLabel
+        const errorMsg = (stageErr as Error).message.slice(0, 2000)
+        this.emitStage(pendingGen.id, currentStageLabel, 'failed', scope, errorMsg)
+
+        const rb = await this.rollbackLiveHostAndRecord(journalRecord, failedUnit, errorMsg, scope)
+        return {
+          status: 'failed',
+          rolledBack: true,
+          restoredGenerationId: rb.restoredActiveGen?.id ?? null,
+          generation: rb.rolledBackGen,
+          failedTest: failedUnit,
+          error: errorMsg,
+        }
+      }
+
+      // Remove terminated accounts from desired state now that their host resources are gone and verified
+      for (const term of compiled.terminatingAccounts) {
+        await this.deps.store.deleteAccount(term.id)
+      }
+
+      const appliedGen = await activate(this.deps.db, pendingGen.id)
+      await this.journal.writeManifest(candidateManifest)
+
+      const finalSnapshot =
+        compiled.terminatingAccounts.length > 0 ? await this.deps.store.readSnapshot() : snapshot
+      await reindexFromState(this.deps.db, finalSnapshot)
+
+      journalRecord.phase = 'committed'
+      await this.journal.saveJournal(journalRecord)
+      await this.journal.cleanupStagingDir(pendingGen.id)
+
+      this.lastAppliedStateChecksum = finalSnapshot.checksum
+      this.emitStage(pendingGen.id, 'verify', 'passed', scope)
+
+      const durationMs = Date.now() - startMs
+      const audit = await appendAudit(this.deps.db, {
+        actor,
+        action: 'reconcile.applied',
+        target: `generation:${appliedGen.id}`,
+        detail: {
+          stateChecksum: finalSnapshot.checksum,
+          filesCount: compiled.files.length,
+          removedFilesCount: manifestDiff.removed.length,
+          repairedDriftCount,
+          durationMs,
+        },
+        outcome: 'ok',
+      })
+      this.emit({
+        id: randomUUID(),
+        at: new Date().toISOString(),
+        kind: 'reconcile.applied',
+        scope,
+        data: {
+          generationId: appliedGen.id,
+          stateChecksum: finalSnapshot.checksum,
+          filesCount: compiled.files.length,
+          durationMs,
+        },
+      })
+      this.emit({ id: randomUUID(), at: audit.at, kind: 'audit.entry', scope, data: audit })
+      return {
+        status: 'applied',
+        generation: appliedGen,
+        filesCount: compiled.files.length,
+        durationMs,
+        removedFilesCount: manifestDiff.removed.length,
+        repairedDriftCount,
+      }
+    } catch (err) {
+      if (err instanceof SimulatedProcessCrashWrapper) {
+        throw err.originalError
+      }
+      throw err
+    }
+  }
+
+  /**
+   * Restores the desired-state tree of a previous generation and reconciles the host to it.
+   */
+  async rollbackToGeneration(genId: number, actor = 'root'): Promise<ReconcileResult> {
+    await this.deps.store.restoreGenerationSnapshot(genId)
+    return this.reconcile({ force: true, actor })
+  }
+
+  /**
+   * Samples cheap cgroup v2 slice counters for every active account, stores them in SQLite
+   * `metrics_history`, and broadcasts `metrics.tick` live events for WebSocket subscribers.
+   */
+  async collectMetrics(): Promise<number> {
+    const accounts = await this.deps.store.listAccounts({ status: 'active' })
+    let count = 0
+    for (const acc of accounts) {
+      const m = await this.deps.executor.readSliceMetrics(acc.uid)
+      if (!m) continue
+      await recordMetricsSample(this.deps.db, {
+        scope: 'account',
+        accountId: acc.id,
+        cpuPercent: Number((m.cpuUsageUsec / 1_000_000).toFixed(2)),
+        memoryMb: Math.max(0, Math.round(m.memoryCurrentBytes / (1024 * 1024))),
+        ioReadBps: Math.max(0, Math.round(m.ioReadBytes)),
+        ioWriteBps: Math.max(0, Math.round(m.ioWriteBytes)),
+        processes: Math.max(0, Math.round(m.pidsCurrent)),
+      })
+      count++
+      this.emit({
+        id: randomUUID(),
+        at: new Date().toISOString(),
+        kind: 'metrics.tick',
+        scope: { accountId: acc.id, resellerId: acc.ownerId },
+        data: {
+          uid: acc.uid,
+          cpuUsageUsec: m.cpuUsageUsec,
+          memoryCurrentBytes: m.memoryCurrentBytes,
+          ioReadBytes: m.ioReadBytes,
+          ioWriteBytes: m.ioWriteBytes,
+          pidsCurrent: m.pidsCurrent,
+        },
+      })
+    }
+    return count
+  }
+}

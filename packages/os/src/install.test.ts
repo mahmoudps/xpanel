@@ -3,16 +3,24 @@ import { XpanelError } from '@xpanel/core'
 import type { ApacheMpm } from '@xpanel/core'
 import { profileFor } from './detect.ts'
 import {
+  INSTALL_PHASES,
   ONDREJ_PHP_PPA,
+  REQUIRED_CGROUP_CONTROLLERS,
+  REQUIRED_QUOTA_TOOLS,
   apacheMpmActions,
   apacheMpmFiles,
   installBundle,
   installFiles,
+  installPhaseJournal,
   installPlan,
   installWarnings,
   phpInstallPlan,
   resolveInstallOptions,
+  resolveOptInServices,
+  runUnifiedInstaller,
+  verifyInstallPreflight,
 } from './install.ts'
+import type { InstallerExecutionHost, PreflightHostProbe, VirtualFileEntry } from './install-runner.ts'
 import type { InstallAction, InstallOptions, XpanelOsProfile } from './types.ts'
 import { SAFE_ARG, assertUnitName } from './validate.ts'
 import { ALMA_10, ALMA_9, CENTOS_STREAM_10, CENTOS_STREAM_9, ROCKY_10, ROCKY_9, SUPPORTED_FIXTURES, UBUNTU_2204, UBUNTU_2404 } from './fixtures.ts'
@@ -575,5 +583,305 @@ describe('phpInstallPlan', () => {
   it('validates versions', () => {
     expect(phpInstallPlan(ubuntu24, [])).toEqual([])
     expect(error(() => phpInstallPlan(ubuntu24, ['8.3; rm -rf'])).code).toBe('VALIDATION')
+  })
+})
+
+describe('H02 unified preflight, opt-in services & durable install phase journal (A10, A26, A27, A28)', () => {
+  const cleanProbe = (overrides: Partial<PreflightHostProbe> = {}): PreflightHostProbe => ({
+    osReleaseText: UBUNTU_2404,
+    detectedProfile: ubuntu24,
+    cgroupControllers: [...REQUIRED_CGROUP_CONTROLLERS],
+    quotaToolsAvailable: [...REQUIRED_QUOTA_TOOLS],
+    listeningPorts: [],
+    activeUnits: [],
+    expectedNodeVersion: '26.12.1',
+    actualNodeVersion: 'v26.12.1',
+    statPath: () => ({
+      exists: true,
+      isSymbolicLink: false,
+      isDirectory: true,
+      isFile: false,
+      uid: 0,
+      gid: 0,
+      owner: 'root',
+      group: 'root',
+      mode: 0o755,
+    }),
+    ...overrides,
+  })
+
+  it('passes unified preflight on Ubuntu 24.04 with mpm_itk and enforces strict opt-in services by default', () => {
+    const report = verifyInstallPreflight(cleanProbe())
+    expect(report.ok).toBe(true)
+    expect(report.profile.id).toBe('ubuntu')
+    expect(report.profile.versionId).toBe('24.04')
+    expect(report.services).toEqual({
+      engine: 'apache',
+      apacheMpm: 'itk',
+      phpVersions: ['8.3'],
+      withMail: false,
+      withDns: false,
+      withFtp: false,
+      withMariaDb: false,
+      withModSecurity: false,
+    })
+    expect(report.requiredPorts).toEqual([80, 443, 2087])
+    expect(report.closedOptInPorts).toEqual([21, 25, 53, 110, 143, 465, 587, 993, 995, 3306, 4190])
+
+    // Verify installPlan with withMariaDb: false omits mariadb-server and does not enable/start mariadb
+    const optOutDbPlan = installPlan(ubuntu24, {
+      engine: 'apache',
+      phpVersions: ['8.3'],
+      withMail: false,
+      withDns: false,
+      withFtp: false,
+      withMariaDb: false,
+    })
+    expect(installed(optOutDbPlan)).not.toContain('mariadb-server')
+    expect(unitsFor(optOutDbPlan, 'enable')).not.toContain('mariadb')
+    expect(unitsFor(optOutDbPlan, 'start')).not.toContain('mariadb')
+  })
+
+  it('rejects unsupported OS, /etc/os-release mismatch, missing mpm_itk, or shared-identity prefork fallback', () => {
+    // Unsupported OS (Debian 12)
+    expect(
+      error(() =>
+        verifyInstallPreflight(cleanProbe({ osReleaseText: 'ID=debian\nVERSION_ID="12"\nPRETTY_NAME="Debian 12"\n', detectedProfile: undefined })),
+      ).code,
+    ).toBe('UNSUPPORTED_OS')
+
+    // Mismatch between /etc/os-release and detectedProfile
+    expect(
+      error(() => verifyInstallPreflight(cleanProbe({ osReleaseText: UBUNTU_2404, detectedProfile: ubuntu22 }))).code,
+    ).toBe('UNSUPPORTED_OS')
+
+    // Missing mpm_itk on AlmaLinux 9 / Rocky Linux 9 / CentOS Stream 9
+    for (const elText of [ALMA_9, ROCKY_9, CENTOS_STREAM_9]) {
+      const e = error(() => verifyInstallPreflight(cleanProbe({ osReleaseText: elText, detectedProfile: undefined })))
+      expect(e.code).toBe('ENGINE_UNAVAILABLE')
+      expect(e.message).toContain('refusing shared-identity fallback')
+    }
+
+    // Attempted prefork fallback on Ubuntu
+    const preforkErr = error(() => verifyInstallPreflight(cleanProbe(), { apacheMpm: 'prefork' }))
+    expect(preforkErr.code).toBe('ENGINE_UNAVAILABLE')
+    expect(preforkErr.message).toContain('shared-identity prefork fallback is refused')
+  })
+
+  it('rejects active xpanel services, missing cgroup v2 controllers, missing quota tools, port conflicts, and writable parent paths', () => {
+    // Active xpanel-api / xpanel-agent services -> CONFLICT directing to upgrade
+    const activeErr = error(() => verifyInstallPreflight(cleanProbe({ activeUnits: ['xpanel-api.service'] })))
+    expect(activeErr.code).toBe('CONFLICT')
+    expect(activeErr.detail.remedy).toBe('upgrade')
+
+    // Missing cgroup v2 io controller
+    const cgroupErr = error(() => verifyInstallPreflight(cleanProbe({ cgroupControllers: ['cpu', 'memory', 'pids'] })))
+    expect(cgroupErr.code).toBe('PRECONDITION_FAILED')
+    expect(cgroupErr.detail.missing).toEqual(['io'])
+
+    // Missing quota tool (setquota)
+    const quotaErr = error(() => verifyInstallPreflight(cleanProbe({ quotaToolsAvailable: ['quotacheck', 'quotaon', 'repquota'] })))
+    expect(quotaErr.code).toBe('PRECONDITION_FAILED')
+    expect(quotaErr.detail.missing).toEqual(['setquota'])
+
+    // Port 53 occupied does NOT block when withDns is false, but DOES block when withDns is true
+    expect(verifyInstallPreflight(cleanProbe({ listeningPorts: [53, 25, 21, 3306] })).ok).toBe(true)
+    const dnsPortErr = error(() => verifyInstallPreflight(cleanProbe({ listeningPorts: [53] }), { withDns: true }))
+    expect(dnsPortErr.code).toBe('CONFLICT')
+    expect(dnsPortErr.detail.conflictingPorts).toEqual([53])
+
+    // World-writable /etc/xpanel parent directory
+    const writableParentErr = error(() =>
+      verifyInstallPreflight(
+        cleanProbe({
+          statPath: (p) => ({
+            exists: true,
+            isSymbolicLink: false,
+            isDirectory: true,
+            isFile: false,
+            uid: 0,
+            gid: 0,
+            owner: 'root',
+            group: 'root',
+            mode: p === '/etc/xpanel' ? 0o777 : 0o755,
+          }),
+        }),
+      ),
+    )
+    expect(writableParentErr.code).toBe('PRECONDITION_FAILED')
+
+    // Non-root /opt/xpanel parent directory
+    const nonRootParentErr = error(() =>
+      verifyInstallPreflight(
+        cleanProbe({
+          statPath: (p) => ({
+            exists: true,
+            isSymbolicLink: false,
+            isDirectory: true,
+            isFile: false,
+            uid: p === '/opt/xpanel' ? 1000 : 0,
+            gid: 0,
+            owner: p === '/opt/xpanel' ? 'ubuntu' : 'root',
+            group: 'root',
+            mode: 0o755,
+          }),
+        }),
+      ),
+    )
+    expect(nonRootParentErr.code).toBe('PRECONDITION_FAILED')
+  })
+
+  it('recovers idempotently from mid-install interruption while preserving 0640 secrets and .bak.<timestamp> config backups', () => {
+    const files = new Map<string, VirtualFileEntry>()
+    const dirs = new Map<string, { mode: number; owner: string; group: string }>()
+    const groups = new Map<string, number>()
+    const users = new Map<string, { primaryGroup: string; supplementaryGroups: string[]; home: string; shell: string }>()
+    let journalRaw: string | null = null
+    let failOnPackageAction = true
+    let secretCounter = 0
+
+    // Pre-populate an existing stock /etc/apache2/ports.conf before installation
+    files.set('/etc/apache2/ports.conf', {
+      content: 'Listen 80\n<IfModule ssl_module>\n\tListen 443\n</IfModule>\n',
+      mode: 0o644,
+      owner: 'root',
+      group: 'root',
+    })
+
+    const host: InstallerExecutionHost = {
+      probe: cleanProbe({
+        statPath: (p) => {
+          const d = dirs.get(p)
+          if (!d) {
+            return {
+              exists: false,
+              isSymbolicLink: false,
+              isDirectory: false,
+              isFile: false,
+              uid: 0,
+              gid: 0,
+              owner: 'root',
+              group: 'root',
+              mode: 0o755,
+            }
+          }
+          return {
+            exists: true,
+            isSymbolicLink: false,
+            isDirectory: true,
+            isFile: false,
+            uid: d.owner === 'root' ? 0 : 991,
+            gid: d.group === 'root' ? 0 : 991,
+            owner: d.owner,
+            group: d.group,
+            mode: d.mode,
+          }
+        },
+      }),
+      journalStorage: {
+        read: () => journalRaw,
+        write: (c) => {
+          journalRaw = c
+        },
+      },
+      backupStamp: '20261022T120500Z.42',
+      readFile: (p) => files.get(p) ?? null,
+      writeFile: (p, entry) => {
+        files.set(p, { ...entry })
+      },
+      ensureDir: (p, entry) => {
+        dirs.set(p, { ...entry })
+      },
+      ensureGroup: (name) => {
+        if (!groups.has(name)) {
+          groups.set(name, name === 'xpanel' ? 991 : 992)
+        }
+        return groups.get(name)!
+      },
+      ensureUser: (u) => {
+        users.set(u.name, {
+          primaryGroup: u.primaryGroup,
+          supplementaryGroups: [...u.supplementaryGroups],
+          home: u.home,
+          shell: u.shell,
+        })
+      },
+      runAction: (action) => {
+        if (failOnPackageAction && action.kind === 'exec' && action.argv.includes('apache2')) {
+          throw new Error('simulated apt-get network interruption during apache2 download')
+        }
+      },
+      initSchemaAsXpanelUser: (dbPath) => {
+        files.set(dbPath, {
+          content: 'SQLite format 3',
+          mode: 0o660,
+          owner: 'xpanel',
+          group: 'xpanel',
+        })
+      },
+      generateSecretHex: () => {
+        secretCounter++
+        return secretCounter.toString(16).padStart(64, 'a')
+      },
+    }
+
+    // Attempt 1: interrupted during 'packages' phase
+    expect(() => runUnifiedInstaller(host, { phpVersions: ['8.3'] })).toThrow(/simulated apt-get network interruption/)
+
+    const journalAfterInterrupt = installPhaseJournal(host.journalStorage).getState()
+    expect(journalAfterInterrupt.completedPhases).toEqual(['preflight', 'users-and-dirs', 'secrets'])
+    expect(journalAfterInterrupt.lastFailedPhase).toBe('packages')
+
+    // Capture the secrets created during Attempt 1
+    const firstAgentToken = files.get('/etc/xpanel/agent.token')?.content
+    const firstServerSecret = files.get('/etc/xpanel/server.secret')?.content
+    expect(firstAgentToken).toMatch(/^[a-f0-9]{64}\n$/)
+    expect(firstServerSecret).toMatch(/^[a-f0-9]{64}\n$/)
+    expect(firstAgentToken).not.toBe(firstServerSecret)
+
+    // Attempt 2: re-run after fixing network interruption
+    failOnPackageAction = false
+    const secondRun = runUnifiedInstaller(host, { phpVersions: ['8.3'] })
+
+    expect(secondRun.journal.lastFailedPhase).toBeNull()
+    expect(secondRun.journal.completedPhases).toEqual([...INSTALL_PHASES])
+
+    // Verify existing valid 0640 root:xpanel secrets were preserved, NOT rotated or clobbered
+    expect(files.get('/etc/xpanel/agent.token')?.content).toBe(firstAgentToken)
+    expect(files.get('/etc/xpanel/server.secret')?.content).toBe(firstServerSecret)
+    expect(secondRun.journal.secrets).toEqual([
+      { path: '/etc/xpanel/agent.token', action: 'preserved', mode: 0o640, owner: 'root', group: 'xpanel' },
+      { path: '/etc/xpanel/server.secret', action: 'preserved', mode: 0o640, owner: 'root', group: 'xpanel' },
+    ])
+
+    // Verify pre-existing /etc/apache2/ports.conf was backed up to .bak.<stamp> before overwriting
+    const portsBackup = files.get('/etc/apache2/ports.conf.bak.20261022T120500Z.42')
+    expect(portsBackup).toBeDefined()
+    expect(portsBackup?.content).toContain('Listen 80')
+    expect(files.get('/etc/apache2/ports.conf')?.content).toContain('Managed by xPanel')
+    expect(files.get('/etc/apache2/ports.conf')?.content).not.toContain('Listen 80')
+
+    // Verify Attempt 3 (idempotent re-run on completed host) preserves the original backup and secrets
+    const thirdRun = runUnifiedInstaller(host, { phpVersions: ['8.3'] })
+    expect(thirdRun.journal.completedPhases).toEqual([...INSTALL_PHASES])
+    expect(files.get('/etc/apache2/ports.conf.bak.20261022T120500Z.42')?.content).toContain('Listen 80')
+    expect(files.get('/etc/xpanel/agent.token')?.content).toBe(firstAgentToken)
+    expect(users.size).toBe(1)
+
+    // Verify malformed or wrong-mode existing secret fails closed instead of being silently overwritten
+    files.set('/etc/xpanel/agent.token', {
+      content: firstAgentToken!,
+      mode: 0o666,
+      owner: 'root',
+      group: 'xpanel',
+    })
+    expect(error(() => runUnifiedInstaller(host, { phpVersions: ['8.3'] })).code).toBe('PRECONDITION_FAILED')
+  })
+
+  it('validates resolveOptInServices against hostile input', () => {
+    expect(error(() => resolveOptInServices(null as never)).code).toBe('VALIDATION')
+    expect(error(() => resolveOptInServices({ withMail: 'yes' as never })).code).toBe('VALIDATION')
+    expect(error(() => resolveOptInServices({ engine: 'nginx' as never })).code).toBe('VALIDATION')
+    expect(error(() => resolveOptInServices({ apacheMpm: 'worker' as never })).code).toBe('VALIDATION')
   })
 })

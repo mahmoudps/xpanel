@@ -14,7 +14,7 @@ import {
 import { phpIsolation, iniEntries, type PhpIsolationOptions } from './php.ts'
 import { apacheQuote, iniValue, shQuote } from './quote.ts'
 import { groupSites, siteMode, type RenderTime, type SiteGroup } from './sites.ts'
-import { assertBackendPort, assertDomainName, assertInt, assertSafeAbsPath, assertSystemUser, invalid } from './validate.ts'
+import { assertAccount, assertBackendPort, assertDomainName, assertInt, assertSafeAbsPath, assertSystemUser, invalid } from './validate.ts'
 
 const indent = (lines: string[], n = 1): string[] => lines.map((l) => (l === '' ? l : `${'    '.repeat(n)}${l}`))
 const section = (open: string, close: string, body: string[]): string[] => [`<${open}>`, ...indent(body), `</${close}>`]
@@ -38,6 +38,8 @@ export interface ApacheMpmOptions {
   /** mpm-itk >= 2.4.7 seccomp limit on the UIDs a child may switch to */
   uidRange?: [number, number]
   gidRange?: [number, number]
+  /** optional mpm-itk default MaxClientsVHost cap across vhosts */
+  maxClientsVHost?: number
 }
 
 const idRange = (what: string, r: [number, number] | undefined): string | null => {
@@ -87,8 +89,13 @@ export const renderApacheMpm = (settings: ServerSettings, opts: ApacheMpmOptions
     const gid = idRange('LimitGIDRange', opts.gidRange)
     if (uid) lines.push(`LimitUIDRange ${uid}`)
     if (gid) lines.push(`LimitGIDRange ${gid}`)
+    if (opts.maxClientsVHost !== undefined) {
+      lines.push(`MaxClientsVHost ${assertInt('MaxClientsVHost', opts.maxClientsVHost, 1, a.maxRequestWorkers)}`)
+    }
   } else if (opts.uidRange || opts.gidRange) {
     invalid('LimitUIDRange', opts.uidRange, 'only applies to mpm_itk')
+  } else if (opts.maxClientsVHost !== undefined) {
+    invalid('MaxClientsVHost', opts.maxClientsVHost, 'only applies to mpm_itk')
   }
   return `${lines.join('\n')}\n`
 }
@@ -203,6 +210,8 @@ export interface ApacheVhostOptions {
   aliases?: Domain[]
   /** time used to stop expired sites (default: the time of rendering) */
   now?: RenderTime
+  /** optional mpm-itk per-vhost concurrency limit (MaxClientsVHost) */
+  maxClientsVHost?: number
 }
 
 /** Apache reads config lines of at most 8 KiB (MAX_STRING_LEN); keep each ServerAlias well below. */
@@ -223,13 +232,29 @@ const docDirectory = (docRoot: string, extra: string[], execCgi: boolean): strin
     ...extra,
   ])
 
-const vhostBody = (account: Account, g: SiteGroup, os: OsProfile, mpm: ApacheMpm, now?: RenderTime): string[] => {
+const vhostBody = (
+  account: Account,
+  g: SiteGroup,
+  os: OsProfile,
+  mpm: ApacheMpm,
+  settings: ServerSettings,
+  opts: { now?: RenderTime; maxClientsVHost?: number } = {},
+): string[] => {
   const d = g.main
   const user = account.username
   const names = serverNameLines(g)
-  const identity = mpm === 'itk' ? [`AssignUserId ${user} ${user}`] : []
+  const identity: string[] = []
+  if (mpm === 'itk') {
+    identity.push(`AssignUserId ${user} ${user}`)
+    if (opts.maxClientsVHost !== undefined) {
+      const a = assertApacheTuning(settings)
+      identity.push(`MaxClientsVHost ${assertInt('MaxClientsVHost', opts.maxClientsVHost, 1, a.maxRequestWorkers)}`)
+    }
+  } else if (opts.maxClientsVHost !== undefined) {
+    return invalid('MaxClientsVHost', opts.maxClientsVHost, 'only applies to mpm_itk')
+  }
   const wiring = d.siteType === 'php' ? phpWiring(d.php.handler, mpm) : null
-  const mode = siteMode(account, d, now)
+  const mode = siteMode(account, d, opts.now)
 
   if (mode === 'suspended') {
     return [
@@ -285,12 +310,18 @@ export const apacheVhostFileName = (g: SiteGroup): string => {
   return `xpanel-wild-${String(WILDCARD_ORDER_BASE - depth).padStart(3, '0')}-${g.main.name}.conf`
 }
 
-const renderGroupVhost = (account: Account, g: SiteGroup, settings: ServerSettings, os: OsProfile, now?: RenderTime): RenderedFile => {
+const renderGroupVhost = (
+  account: Account,
+  g: SiteGroup,
+  settings: ServerSettings,
+  os: OsProfile,
+  opts: { now?: RenderTime; maxClientsVHost?: number } = {},
+): RenderedFile => {
   const mpm = assertApacheEngine(settings)
   const addr = `127.0.0.1:${assertBackendPort(settings)}`
   const lines = [
     `# Managed by xPanel: ${g.main.name} (account ${account.username})`,
-    ...section(`VirtualHost ${addr}`, 'VirtualHost', vhostBody(account, g, os, mpm, now)),
+    ...section(`VirtualHost ${addr}`, 'VirtualHost', vhostBody(account, g, os, mpm, settings, opts)),
   ]
   return {
     path: `${vhostDir(os)}/${apacheVhostFileName(g)}`,
@@ -313,7 +344,10 @@ export const renderApacheVhost = (
   const groups = groupSites(account, [domain, ...(opts.aliases ?? [])])
   const g = groups.find((x) => x.main.id === domain?.id)
   if (!g || groups.length !== 1) return invalid('aliases', opts.aliases?.map((a) => a.name), `must all be plain aliases of ${domain?.name}`)
-  return renderGroupVhost(account, g, settings, os, opts.now)
+  return renderGroupVhost(account, g, settings, os, {
+    ...(opts.now !== undefined && { now: opts.now }),
+    ...(opts.maxClientsVHost !== undefined && { maxClientsVHost: opts.maxClientsVHost }),
+  })
 }
 
 /** Every vhost of one account, grouped exactly like the Nginx sites. */
@@ -322,10 +356,10 @@ export const renderApacheVhosts = (
   domains: Domain[],
   settings: ServerSettings,
   os: OsProfile,
-  opts: { now?: RenderTime } = {},
+  opts: { now?: RenderTime; maxClientsVHost?: number } = {},
 ): RenderedFile[] => {
   assertApacheEngine(settings)
-  return groupSites(account, domains).map((g) => renderGroupVhost(account, g, settings, os, opts.now))
+  return groupSites(account, domains).map((g) => renderGroupVhost(account, g, settings, os, opts))
 }
 
 // ---- CGI wrappers -------------------------------------------------------------------------
@@ -431,4 +465,212 @@ export const requiredApacheModules = (settings: ServerSettings, domains: Domain[
     if (w === 'suphp-action') ['actions', 'cgi', 'suexec'].forEach((m) => mods.add(m))
   }
   return [...mods]
+}
+
+// ---- H05 isolation & backend bypass validators --------------------------------------------
+
+export interface HtaccessIsolationViolation {
+  line: number
+  directive: string
+  reason: string
+}
+
+const joinApacheLogicalLines = (content: string): { line: number; text: string }[] => {
+  const raw = content.split(/\r?\n/)
+  const out: { line: number; text: string }[] = []
+  for (let i = 0; i < raw.length; i++) {
+    const startLine = i + 1
+    let text = raw[i] ?? ''
+    while (text.endsWith('\\') && i + 1 < raw.length) {
+      i++
+      text = `${text.slice(0, -1)}${raw[i] ?? ''}`
+    }
+    out.push({ line: startLine, text: text.trim() })
+  }
+  return out
+}
+
+const HTACCESS_IDENTITY_RE = /^\s*(AssignUserId|AssignUserID|SuexecUserGroup|MaxClientsVHost|LimitUIDRange|LimitGIDRange)\b/i
+const HTACCESS_PROXY_HANDLER_RE = /^\s*(SetHandler|AddHandler|AddType|ForceType|Action|ProxyPass|ProxyPassMatch|FcgidWrapper|ScriptAlias)\b(.*)$/i
+const HTACCESS_REWRITE_PROXY_RE = /^\s*RewriteRule\b.*\s\[[^\]]*\bP\b[^\]]*\]/i
+
+/**
+ * Inspects tenant `.htaccess` content for directives that attempt to:
+ * - Reference a FastCGI / UNIX socket (`proxy:unix:`, `.sock`, `fcgi://`) or another tenant's PHP-FPM pool
+ * - Proxy to internal loopback ports via `ProxyPass`, `ProxyPassMatch`, or `RewriteRule ... [P]`
+ * - Override process identity or handler wrappers (`AssignUserId`, `SuexecUserGroup`, `FcgidWrapper`, `Action`)
+ */
+export const inspectHtaccessIsolation = (account: Account, htaccessContent: string): HtaccessIsolationViolation[] => {
+  assertAccount(account)
+  if (typeof htaccessContent !== 'string') return invalid('.htaccess', htaccessContent, 'must be a string')
+  if (htaccessContent.includes('\u0000')) return invalid('.htaccess', htaccessContent.slice(0, 64), 'contains NUL bytes')
+
+  const violations: HtaccessIsolationViolation[] = []
+  const user = account.username
+
+  for (const { line, text } of joinApacheLogicalLines(htaccessContent)) {
+    if (!text || text.startsWith('#')) continue
+
+    const idMatch = HTACCESS_IDENTITY_RE.exec(text)
+    if (idMatch) {
+      violations.push({
+        line,
+        directive: idMatch[1] ?? text,
+        reason: `identity/MPM directive ${idMatch[1]} is forbidden in tenant .htaccess`,
+      })
+      continue
+    }
+
+    if (HTACCESS_REWRITE_PROXY_RE.test(text)) {
+      violations.push({
+        line,
+        directive: 'RewriteRule [P]',
+        reason: 'RewriteRule proxy flag [P] is forbidden in tenant .htaccess to prevent backend/socket bypass',
+      })
+      continue
+    }
+
+    const handlerMatch = HTACCESS_PROXY_HANDLER_RE.exec(text)
+    if (handlerMatch) {
+      const directive = handlerMatch[1] ?? ''
+      const args = (handlerMatch[2] ?? '').trim()
+      const lowerArgs = args.toLowerCase()
+
+      if (
+        /^(ProxyPass|ProxyPassMatch|FcgidWrapper|ScriptAlias|Action)$/i.test(directive) ||
+        lowerArgs.includes('proxy:') ||
+        lowerArgs.includes('fcgi://') ||
+        lowerArgs.includes('unix:') ||
+        lowerArgs.includes('.sock') ||
+        lowerArgs.includes('/run/')
+      ) {
+        const foreignSocket =
+          lowerArgs.includes('/run/xpanel/fpm/') && !lowerArgs.includes(`/run/xpanel/fpm/${user.toLowerCase()}-`)
+        violations.push({
+          line,
+          directive: `${directive} ${args}`.trim(),
+          reason: foreignSocket
+            ? `cross-tenant PHP-FPM socket reference in ${directive} is forbidden (account ${user})`
+            : `custom proxy/socket/handler binding via ${directive} is forbidden in tenant .htaccess`,
+        })
+      }
+    }
+  }
+
+  return violations
+}
+
+/**
+ * Throws a VALIDATION error if `.htaccess` attempts to bind `proxy:unix:` / `fcgi://`, reference
+ * another tenant's PHP-FPM socket, proxy via `RewriteRule [P]`, or alter worker UID/GID.
+ */
+export const assertHtaccessIsolation = (account: Account, htaccessContent: string): string => {
+  const violations = inspectHtaccessIsolation(account, htaccessContent)
+  if (violations.length > 0) {
+    const first = violations[0]!
+    return invalid('.htaccess', first.directive, `${first.reason} (line ${first.line})`)
+  }
+  return htaccessContent
+}
+
+export interface ApacheBackendIsolationProof {
+  listenAddress: string
+  mpm: ApacheMpm
+  refusesMissingItk: boolean
+  keepAliveOff: boolean
+  defaultCatchallVhost: {
+    file: string
+    documentRoot: string
+    allowOverrideNone: boolean
+    phpHandlerAbsent: boolean
+  }
+  tenantVhost: {
+    file: string
+    accountUsername: string
+    assignUserId: string | null
+    maxClientsVHost: number | null
+    documentRoot: string
+    fpmSocketPath: string | null
+  }
+}
+
+/**
+ * Verifies the complete Apache loopback backend contract for an account domain (H05 — A31, A32, A33, A35):
+ * 1. Binds exclusively to `127.0.0.1:<backendPort>` with `KeepAlive Off`
+ * 2. Refuses startup if `mpm_itk` is selected but not loaded (`<IfModule !mpm_itk_module>` Error)
+ * 3. Places `000-xpanel-base.conf` first with a catch-all default `<VirtualHost>` that serves
+ *    `/usr/share/xpanel/default` (`AllowOverride None`, `Options None`, no PHP handler) so forged
+ *    `Host` headers sent directly to `127.0.0.1:<backendPort>` never fall into a tenant vhost
+ * 4. Binds the tenant `<VirtualHost>` to `AssignUserId <user> <user>` and the account's own
+ *    PHP-FPM UNIX socket `/run/xpanel/fpm/<user>-<ver>/php-fpm.sock`
+ */
+export const verifyApacheBackendIsolation = (
+  account: Account,
+  domain: Domain,
+  settings: ServerSettings,
+  os: OsProfile,
+  opts: ApacheVhostOptions = {},
+): ApacheBackendIsolationProof => {
+  const mpm = assertApacheEngine(settings)
+  const mpmRendered = apacheMpmFile(settings, os, {
+    ...(opts.maxClientsVHost !== undefined && { maxClientsVHost: opts.maxClientsVHost }),
+  })
+  const baseRendered = renderApacheBase(settings, os)
+  const vhostRendered = renderApacheVhost(account, domain, settings, os, opts)
+
+  const addr = `127.0.0.1:${assertBackendPort(settings)}`
+  const refusesMissingItk =
+    mpm === 'itk' &&
+    mpmRendered.content.includes('<IfModule !mpm_itk_module>') &&
+    mpmRendered.content.includes('Error "xPanel: mpm_itk is selected but not loaded')
+
+  if (mpm === 'itk' && !refusesMissingItk) {
+    return invalid('Apache MPM config', mpmRendered.path, 'must refuse startup when mpm_itk is missing')
+  }
+
+  const listens = baseRendered.content.split('\n').filter((l) => /^\s*Listen\b/.test(l))
+  if (listens.length !== 1 || listens[0]?.trim() !== `Listen ${addr}`) {
+    return invalid('Apache Listen', listens.join(', '), `must listen exclusively on ${addr}`)
+  }
+
+  const keepAliveOff = baseRendered.content.includes('KeepAlive Off')
+  const defaultVhostMatch = /<VirtualHost\s+[^>]+>([\s\S]*?)<\/VirtualHost>/.exec(baseRendered.content)
+  const defaultVhostBody = defaultVhostMatch?.[1] ?? ''
+  const allowOverrideNone = defaultVhostBody.includes('AllowOverride None') && defaultVhostBody.includes('Options None')
+  const phpHandlerAbsent = !defaultVhostBody.includes('SetHandler') && !defaultVhostBody.includes('AssignUserId')
+
+  const expectedAssign = `AssignUserId ${account.username} ${account.username}`
+  const hasAssign = vhostRendered.content.includes(expectedAssign)
+  if (mpm === 'itk' && !hasAssign) {
+    return invalid('Apache tenant vhost', vhostRendered.path, `missing ${expectedAssign}`)
+  }
+
+  const expectedSocket =
+    domain.siteType === 'php' && domain.php.handler === 'fpm' && account.status === 'active' && !domain.suspended && !domain.redirect
+      ? fpmSocketPath(account.username, domain.php.version)
+      : null
+  if (expectedSocket && !vhostRendered.content.includes(`proxy:unix:${expectedSocket}|fcgi://localhost`)) {
+    return invalid('Apache tenant vhost FPM socket', vhostRendered.path, `must bind exclusivamente to ${expectedSocket}`)
+  }
+
+  return {
+    listenAddress: addr,
+    mpm,
+    refusesMissingItk,
+    keepAliveOff,
+    defaultCatchallVhost: {
+      file: baseRendered.path,
+      documentRoot: XP_PATHS.defaultSiteDir,
+      allowOverrideNone,
+      phpHandlerAbsent,
+    },
+    tenantVhost: {
+      file: vhostRendered.path,
+      accountUsername: account.username,
+      assignUserId: mpm === 'itk' ? `${account.username} ${account.username}` : null,
+      maxClientsVHost: opts.maxClientsVHost ?? null,
+      documentRoot: domain.docRoot,
+      fpmSocketPath: expectedSocket,
+    },
+  }
 }

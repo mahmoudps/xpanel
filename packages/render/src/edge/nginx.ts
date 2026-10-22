@@ -433,3 +433,125 @@ export const defaultSiteFile = (os: OsProfile, opts: DefaultSiteOptions = {}): R
   owner: 'root',
   group: 'root',
 })
+
+// ---- H05 edge isolation & header sanitization validators ----------------------------------
+
+const ALLOWED_NGINX_ROOTS = new Set<string>([
+  `${XP_PATHS.acmeDir}/`,
+  XP_PATHS.acmeDir,
+  XP_PATHS.suspendedDir,
+  XP_PATHS.defaultSiteDir,
+])
+
+/**
+ * Verifies that a rendered Nginx config contains zero `root` or `alias` directives pointing
+ * into `/home` or any tenant home directory, ensuring the shared Nginx worker (`www-data`/`nginx`)
+ * never opens tenant files directly (H05 — A31).
+ */
+export const assertNginxZeroHomeAccess = (
+  nginxConfigContent: string,
+  homeBases: readonly string[] = ['/home'],
+): void => {
+  if (typeof nginxConfigContent !== 'string') return invalid('nginx config', nginxConfigContent, 'must be a string')
+  for (const base of homeBases) {
+    const cleanBase = base.replace(/\/+$/, '')
+    if (nginxConfigContent.includes(`${cleanBase}/`) || new RegExp(`\\b(?:root|alias)\\s+${cleanBase}\\b`).test(nginxConfigContent)) {
+      invalid('nginx home access', cleanBase, `Nginx configuration must never reference tenant home base ${cleanBase}`)
+    }
+  }
+  for (const match of nginxConfigContent.matchAll(/\b(root|alias)\s+([^;\s]+)\s*;/g)) {
+    const directive = match[1] ?? 'root'
+    const target = match[2] ?? ''
+    if (!ALLOWED_NGINX_ROOTS.has(target)) {
+      invalid(`nginx ${directive}`, target, `only xPanel system directories (${[...ALLOWED_NGINX_ROOTS].join(', ')}) are permitted in Nginx`)
+    }
+  }
+}
+
+const REQUIRED_PROXY_HEADERS = [
+  'proxy_set_header Host $host;',
+  'proxy_set_header X-Real-IP $remote_addr;',
+  'proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;',
+  'proxy_set_header X-Forwarded-Proto $scheme;',
+  'proxy_set_header X-Forwarded-Host $host;',
+  'proxy_set_header X-Forwarded-Port $server_port;',
+  'proxy_set_header Proxy "";',
+] as const
+
+/**
+ * Verifies that every `proxy_pass` block in a rendered Nginx site config strips/overwrites
+ * untrusted client forwarded headers and clears `Proxy` (CVE-2016-5385 httpoxy).
+ */
+export const assertNginxEdgeHeaderSanitization = (nginxSiteContent: string): void => {
+  if (typeof nginxSiteContent !== 'string') return invalid('nginx site config', nginxSiteContent, 'must be a string')
+  if (!nginxSiteContent.includes('proxy_pass ')) return
+  for (const required of REQUIRED_PROXY_HEADERS) {
+    if (!nginxSiteContent.includes(required)) {
+      invalid('nginx proxy header sanitization', required, `missing mandatory edge header sanitization directive: ${required}`)
+    }
+  }
+}
+
+export interface NginxEdgeIsolationProof {
+  nginxUser: string
+  trustedProxiesConfigured: boolean
+  zeroHomeAccess: boolean
+  headersSanitized: boolean
+  cacheKeyIncludesHost: boolean
+  defaultCatchall: {
+    file: string
+    defaultServer80: boolean
+    defaultServer443: boolean
+    returns404: boolean
+    noProxyPass: boolean
+  }
+}
+
+/**
+ * Verifies the complete Nginx public edge isolation contract (H05 — A31, A35):
+ * 1. Nginx never opens `/home` or any account home (`assertNginxZeroHomeAccess`).
+ * 2. Untrusted client `X-Real-IP`, `X-Forwarded-*`, and `Proxy` headers are overwritten/stripped at the edge.
+ * 3. `set_real_ip_from` is absent unless explicit `trustedProxies` are configured.
+ * 4. Default catch-all server (`000-xpanel-default.conf`) answers unbound `Host`/SNI with 404 (or `ssl_reject_handshake`) without proxying to Apache.
+ */
+export const verifyNginxEdgeIsolation = (
+  account: Account,
+  domains: Domain[],
+  settings: ServerSettings,
+  os: OsProfile,
+  cert?: Certificate | Certificate[] | null,
+  opts: NginxSiteOptions = {},
+): NginxEdgeIsolationProof => {
+  const main = renderNginxMain(settings, os)
+  const def = defaultSiteFile(os, { settings })
+  const site = renderNginxSite(account, domains, settings, cert, opts)
+
+  const homeBase = account.home.slice(0, account.home.lastIndexOf('/')) || '/home'
+  assertNginxZeroHomeAccess(main.content, ['/home', homeBase])
+  assertNginxZeroHomeAccess(def.content, ['/home', homeBase])
+  assertNginxZeroHomeAccess(site, ['/home', homeBase])
+  assertNginxEdgeHeaderSanitization(site)
+
+  const defaultServer80 = def.content.includes('listen 80 default_server;')
+  const defaultServer443 = /listen 443 ssl(?: http2)? default_server;/.test(def.content)
+  const returns404 = def.content.includes('return 404;')
+  const noProxyPass = !def.content.includes('proxy_pass')
+  if (!defaultServer80 || !defaultServer443 || !returns404 || !noProxyPass) {
+    return invalid('nginx default catch-all site', def.path, 'must be default_server on 80/443 returning 404 without proxy_pass')
+  }
+
+  return {
+    nginxUser: os.paths.nginxUser,
+    trustedProxiesConfigured: main.content.includes('set_real_ip_from '),
+    zeroHomeAccess: true,
+    headersSanitized: true,
+    cacheKeyIncludesHost: site.includes('proxy_cache_key $scheme$host$request_uri;') || opts.cache === false,
+    defaultCatchall: {
+      file: def.path,
+      defaultServer80,
+      defaultServer443,
+      returns404,
+      noProxyPass,
+    },
+  }
+}

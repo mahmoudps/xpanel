@@ -1,0 +1,17 @@
+{
+  "name": "@xpanel/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@xpanel/catalog": "workspace:*",
+    "@xpanel/core": "workspace:*"
+  },
+  "license": "AGPL-3.0-only"
+}

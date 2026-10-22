@@ -1,6 +1,9 @@
 node_modules/
+.pnpm-store/
+.tools/
 dist/
 coverage/
+*.tsbuildinfo
 .secrets/
 *.log
 .env

@@ -3,14 +3,12 @@ import { readdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fail } from '@xpanel/core'
-import { LOCKS } from './locks.ts'
 import { splitStatements, stripComments } from './sql-lexer.ts'
 import type { SqlRunner } from './sql-runner.ts'
 
 export const MIGRATIONS_DIR = join(import.meta.dirname ?? dirname(fileURLToPath(import.meta.url)), 'migrations')
 
 export const MIGRATIONS_TABLE = 'xpanel_schema_migrations'
-
 
 const FILE_NAME = /^(\d{4})_([a-z0-9]+(?:_[a-z0-9]+)*)\.sql$/
 
@@ -48,7 +46,13 @@ export const parseMigration = (name: string, sql: string): Migration => {
   if (!m) return fail('VALIDATION', `migration file name must look like 0001_name.sql: ${name}`)
   const version = Number(m[1])
   if (version < 1) return fail('VALIDATION', `migration numbers start at 0001: ${name}`)
-  return { version, name, sql: normalise(sql), checksum: checksumOf(sql), contract: (m[2] as string).endsWith('_contract') || m[2] === 'contract' }
+  return {
+    version,
+    name,
+    sql: normalise(sql),
+    checksum: checksumOf(sql),
+    contract: (m[2] as string).endsWith('_contract') || m[2] === 'contract',
+  }
 }
 
 /** Versions must be 1..n without gaps or duplicates. */
@@ -79,14 +83,14 @@ const EXPAND_ONLY_RULES: { what: string; re: RegExp }[] = [
     re: /\bALTER\s+(?:COLUMN\s+)?(?:"(?:[^"]|"")+"|[A-Za-z_][\w$]*)\s+(?:SET\s+DATA\s+)?TYPE\b/i,
   },
   { what: 'RENAME', re: /\bRENAME\b/i },
-  // data and objects the running (older) version may still read
-  { what: 'DROP <view|sequence|type|domain|extension|database|owned>', re: /\bDROP\s+(?:MATERIALIZED\s+VIEW|VIEW|SEQUENCE|TYPE|DOMAIN|EXTENSION|DATABASE|OWNED)\b/i },
-  // the running version may still insert rows without the column
+  {
+    what: 'DROP <view|sequence|type|domain|extension|database|owned>',
+    re: /\bDROP\s+(?:MATERIALIZED\s+VIEW|VIEW|SEQUENCE|TYPE|DOMAIN|EXTENSION|DATABASE|OWNED)\b/i,
+  },
   { what: 'SET NOT NULL', re: /\bSET\s+NOT\s+NULL\b/i },
 ]
 
 const ALTER_TABLE = /^ALTER\s+TABLE\b/i
-// ALTER TABLE t DROP c (COLUMN is optional in the grammar)
 const IMPLICIT_DROP_COLUMN = /\bDROP\s+(?!CONSTRAINT\b|DEFAULT\b|NOT\b|IDENTITY\b|EXPRESSION\b|COLUMN\b)\S/i
 const TRANSACTION_CONTROL = /^(BEGIN|COMMIT|ROLLBACK|START\s+TRANSACTION|SAVEPOINT|RELEASE|END|ABORT)\b/i
 
@@ -133,12 +137,12 @@ export const assertMigrationAllowed = (m: Migration): void => {
 
 const BOOTSTRAP = `
 CREATE TABLE IF NOT EXISTS ${MIGRATIONS_TABLE} (
-  version integer PRIMARY KEY CHECK (version > 0),
-  name text NOT NULL UNIQUE,
-  checksum text NOT NULL CHECK (checksum ~ '^[0-9a-f]{64}$'),
-  applied_at timestamptz NOT NULL DEFAULT now(),
-  execution_ms integer NOT NULL DEFAULT 0 CHECK (execution_ms >= 0)
-)`
+  version INTEGER PRIMARY KEY CHECK (version > 0),
+  name TEXT NOT NULL UNIQUE,
+  checksum TEXT NOT NULL CHECK (length(checksum) = 64 AND checksum NOT GLOB '*[^0-9a-f]*'),
+  applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  execution_ms INTEGER NOT NULL DEFAULT 0 CHECK (execution_ms >= 0)
+) STRICT`
 
 interface AppliedRow {
   version: number
@@ -146,9 +150,6 @@ interface AppliedRow {
   checksum: string
   [k: string]: unknown
 }
-
-/** Serialises concurrent runners (API and agent starting together). */
-const lock = (tx: SqlRunner) => tx.query(`SELECT pg_advisory_xact_lock(${LOCKS.migrations}::bigint)`)
 
 const readApplied = (tx: SqlRunner): Promise<AppliedRow[]> =>
   tx.query<AppliedRow>(`SELECT version, name, checksum FROM ${MIGRATIONS_TABLE} ORDER BY version`)
@@ -179,7 +180,6 @@ export const migrate = async (runner: SqlRunner, opts: MigrateOptions = {}): Pro
   assertSequence(migrations)
 
   await runner.transaction(async (tx) => {
-    await lock(tx)
     await tx.exec(BOOTSTRAP)
   })
 
@@ -194,20 +194,20 @@ export const migrate = async (runner: SqlRunner, opts: MigrateOptions = {}): Pro
   const applied: string[] = []
   for (const m of pending) {
     const ran = await runner.transaction(async (tx) => {
-      await lock(tx)
-      const [existing] = await tx.query<AppliedRow>(`SELECT version, name, checksum FROM ${MIGRATIONS_TABLE} WHERE version = $1`, [m.version])
+      const [existing] = await tx.query<AppliedRow>(
+        `SELECT version, name, checksum FROM ${MIGRATIONS_TABLE} WHERE version = $1`,
+        [m.version],
+      )
       if (existing) {
         assertUnchanged(existing, m)
         return false
       }
       const started = performance.now()
       await tx.exec(m.sql)
-      await tx.query(`INSERT INTO ${MIGRATIONS_TABLE} (version, name, checksum, execution_ms) VALUES ($1, $2, $3, $4)`, [
-        m.version,
-        m.name,
-        m.checksum,
-        Math.round(performance.now() - started),
-      ])
+      await tx.query(
+        `INSERT INTO ${MIGRATIONS_TABLE} (version, name, checksum, execution_ms) VALUES ($1, $2, $3, $4)`,
+        [m.version, m.name, m.checksum, Math.round(performance.now() - started)],
+      )
       return true
     })
     if (ran) applied.push(m.name)
@@ -224,8 +224,11 @@ export const migrate = async (runner: SqlRunner, opts: MigrateOptions = {}): Pro
 
 /** Highest applied migration number; 0 for an empty database. */
 export const currentSchemaVersion = async (runner: SqlRunner): Promise<number> => {
-  const [reg] = await runner.query<{ t: string | null }>(`SELECT to_regclass('${MIGRATIONS_TABLE}')::text AS t`)
-  if (!reg?.t) return 0
+  const [reg] = await runner.query<{ name: string | null }>(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = $1`,
+    [MIGRATIONS_TABLE],
+  )
+  if (!reg?.name) return 0
   const [row] = await runner.query<{ v: number | string }>(`SELECT coalesce(max(version), 0) AS v FROM ${MIGRATIONS_TABLE}`)
   return Number(row?.v ?? 0)
 }

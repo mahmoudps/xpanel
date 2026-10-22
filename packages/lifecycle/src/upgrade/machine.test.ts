@@ -12,7 +12,7 @@ const ARCHIVE = '/opt/xpanel/downloads/xpanel-1.1.0.tar.gz'
 const ARCHIVE_BYTES = 'release-1.1.0'
 const LOCK = '/var/lib/xpanel/upgrade.lock'
 const MAINTENANCE = '/var/lib/xpanel/maintenance.json'
-const SNAPSHOT = '/var/lib/xpanel/snapshots/20261022T013500Z.dump'
+const SNAPSHOT = '/var/lib/xpanel/snapshots/20261022T013500Z.tar.gz'
 const sha = (s: string): string => createHash('sha256').update(s).digest('hex')
 
 const alice: AccountIdentity = { username: 'alice', uid: 1001, gid: 1001, slice: 'xpanel-1001.slice', quotas: { diskMb: 5000, ioWriteBps: 10_000_000, memoryMb: 'unlimited' } }
@@ -35,8 +35,7 @@ interface Row {
   error: string | null
 }
 
-/** The control DB: schema, desired state and the upgrades table all live in it (and in its dumps). */
-interface ControlDb {
+interface ControlState {
   schema: number
   applied: string[]
   data: string
@@ -49,8 +48,8 @@ interface World {
   host: FakeHost
   clock: FakeClock
   audit: MemoryAudit
-  db: ControlDb
-  dumps: Map<string, ControlDb>
+  db: ControlState
+  dumps: Map<string, ControlState>
   gen: { current: number; activated: number[]; reconciled: number }
   identities: AccountIdentity[]
   served: Map<string, number | null>
@@ -65,6 +64,15 @@ interface World {
   maintenanceSeenAtDump: boolean | null
 }
 
+const isStateSnapshotTar = (argv: string[]): boolean =>
+  argv[0] === '/usr/bin/tar' && argv.includes('--create') && argv.includes('state')
+
+const isStateRestoreTar = (argv: string[]): boolean =>
+  argv[0] === '/usr/bin/tar' && argv.includes('--extract') && argv.includes('--directory=/var/lib/xpanel')
+
+const isReleaseUnpackTar = (argv: string[]): boolean =>
+  argv[0] === '/usr/bin/tar' && argv.includes('--extract') && !argv.includes('--directory=/var/lib/xpanel')
+
 const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {}): World => {
   const fs = new FakeFs({
     '/opt/xpanel/releases/1.0.0': { type: 'dir', mode: 0o755 },
@@ -72,6 +80,7 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
     '/opt/xpanel/current': { type: 'symlink', target: '/opt/xpanel/releases/1.0.0' },
     '/opt/xpanel/staging': { type: 'dir', mode: 0o755 },
     '/var/lib/xpanel': { type: 'dir', mode: 0o755 },
+    '/var/lib/xpanel/state': { type: 'dir', mode: 0o700 },
     [ARCHIVE]: { type: 'file', content: ARCHIVE_BYTES, mode: 0o600 },
     '/home/alice/public_html/index.php': { type: 'file', content: '<?php echo 1;', mode: 0o640 },
     '/home/alice/mail/alice.example/info/cur/1': { type: 'file', content: 'mail', mode: 0o600 },
@@ -107,23 +116,23 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
     if (a.kind === 'systemd') { w.events.push(`${a.verb} ${a.unit}`); return undefined }
     if (a.kind !== 'exec') return undefined
     const [cmd] = a.argv
-    if (cmd === '/usr/bin/pg_dump') {
+    if (isStateSnapshotTar(a.argv)) {
       const file = argValue(a.argv, '--file') as string
       w.maintenanceSeenAtDump = fs.nodes.has(MAINTENANCE)
-      fs.file(file, 'dump')
+      fs.file(file, 'state-tarball')
       w.dumps.set(file, structuredClone(w.db))
-    }
-    if (cmd === '/usr/bin/pg_restore') {
-      const snap = w.dumps.get(a.argv[a.argv.length - 1] as string)
-      if (!snap) return { code: 1, stdout: '', stderr: 'no such dump' }
+    } else if (isStateRestoreTar(a.argv)) {
+      const file = argValue(a.argv, '--file') as string
+      const snap = w.dumps.get(file)
+      if (!snap) return { code: 1, stdout: '', stderr: 'no such snapshot archive' }
       w.db = structuredClone(snap)
-    }
-    if (cmd === '/usr/bin/tar') {
+    } else if (isReleaseUnpackTar(a.argv)) {
       const dir = argValue(a.argv, '--directory') as string
       fs.file(`${dir}/VERSION`, '1.1.0\n')
       fs.file(`${dir}/bin/xpanel-api`, 'bin')
+    } else if (cmd === '/usr/bin/systemctl' && a.argv[1] === 'is-active') {
+      return { code: w.upgradeUnitActive ? 0 : 3, stdout: '', stderr: '' }
     }
-    if (cmd === '/usr/bin/systemctl' && a.argv[1] === 'is-active') return { code: w.upgradeUnitActive ? 0 : 3, stdout: '', stderr: '' }
     return undefined
   }
   const row = (id: string): Row => w.db.rows.find((r) => r.id === id) ?? fail('NOT_FOUND', `no upgrade ${id}`)
@@ -235,14 +244,23 @@ describe('runUpgrade: success', () => {
     expect(w.identities).toEqual([alice, bob])
 
     expect(r.snapshot).toBe(SNAPSHOT)
-    const dump = w.host.actions.find((a) => a.kind === 'exec' && a.argv[0] === '/usr/bin/pg_dump')
-    expect(dump).toEqual({ kind: 'exec', argv: ['/usr/bin/pg_dump', '--no-password', '--format=custom', `--file=${SNAPSHOT}`, '--dbname=xpanel'], runAsUser: 'postgres' })
-    expect(w.host.actions.find((a) => a.kind === 'ensure-dir')).toEqual({ kind: 'ensure-dir', path: '/var/lib/xpanel/snapshots', mode: 0o700, owner: 'postgres', group: 'postgres' })
+    const dump = w.host.actions.find((a) => a.kind === 'exec' && isStateSnapshotTar(a.argv))
+    expect(dump).toEqual({
+      kind: 'exec',
+      argv: ['/usr/bin/tar', '--create', '--gzip', `--file=${SNAPSHOT}`, '--directory=/var/lib/xpanel', 'state'],
+      runAsUser: 'xpanel',
+    })
+    expect(w.host.actions.find((a) => a.kind === 'ensure-dir')).toEqual({
+      kind: 'ensure-dir',
+      path: '/var/lib/xpanel/snapshots',
+      mode: 0o700,
+      owner: 'xpanel',
+      group: 'xpanel',
+    })
     expect(r.previousGeneration).toBe(41)
     expect(r.newGeneration).toBe(42)
 
     expect(shared(w)).toEqual([{ verb: 'reload', unit: 'nginx.service' }, { verb: 'reload', unit: 'apache2.service' }])
-    // new code is loaded first, so the new agent builds the generation
     expect(w.events).toEqual(['restart xpanel-api.service', 'restart xpanel-agent.service', 'reconcile', 'reload nginx.service', 'reload apache2.service'])
 
     const linkWrites = w.fs.writes.filter((p) => p.startsWith('/opt/xpanel/.current-') || p === '/opt/xpanel/current')
@@ -304,15 +322,18 @@ describe('runUpgrade: rollback after the switch', () => {
     expect(await w.fs.exists('/opt/xpanel/releases/1.1.0')).toBe(false)
     expect(w.clock.sleeps).toEqual([1000, 1000])
 
-    const restore = w.host.actions.find((a) => a.kind === 'exec' && a.argv[0] === '/usr/bin/pg_restore')
-    expect(restore).toEqual({ kind: 'exec', argv: ['/usr/bin/pg_restore', '--no-password', '--clean', '--if-exists', '--single-transaction', '--exit-on-error', '--dbname=xpanel', SNAPSHOT], runAsUser: 'postgres' })
+    const restore = w.host.actions.find((a) => a.kind === 'exec' && isStateRestoreTar(a.argv))
+    expect(restore).toEqual({
+      kind: 'exec',
+      argv: ['/usr/bin/tar', '--extract', '--gzip', `--file=${SNAPSHOT}`, '--directory=/var/lib/xpanel', '--no-same-owner'],
+      runAsUser: 'xpanel',
+    })
     expect(shared(w).every((s) => s.verb === 'reload')).toBe(true)
     expect(w.events.slice(5)).toEqual([
       'stop xpanel-api.service', 'stop xpanel-agent.service', 'start xpanel-api.service', 'start xpanel-agent.service',
       'activate 41', 'reload nginx.service', 'reload apache2.service',
     ])
 
-    // the row lives in the control DB: it is settled after the restore, so it survives it
     expect(w.db.rows).toHaveLength(1)
     expect(w.db.rows[0]).toMatchObject({ status: 'rolled_back', phase: 'rollback', actor: 'root', fromVersion: '1.0.0', toVersion: '1.1.0', toSchemaVersion: 4 })
     expect(w.db.rows[0]?.error).toMatch(/canary/)
@@ -321,7 +342,6 @@ describe('runUpgrade: rollback after the switch', () => {
     expect(await w.fs.exists(LOCK)).toBe(false)
     await untouchedCustomerData(w)
 
-    // the next attempt starts again from the stable state
     w.served.set('alice', 1001)
     expect((await runUpgrade(w.ports, plan())).outcome).toBe('succeeded')
   })
@@ -368,10 +388,10 @@ describe('runUpgrade: rollback after the switch', () => {
     const w = world()
     w.login.ok = false
     const orig = w.host.handler
-    w.host.handler = (a) => (a.kind === 'exec' && a.argv[0] === '/usr/bin/pg_restore' ? { code: 1, stdout: '', stderr: 'disk full' } : orig?.(a))
+    w.host.handler = (a) => (a.kind === 'exec' && isStateRestoreTar(a.argv) ? { code: 1, stdout: '', stderr: 'disk full' } : orig?.(a))
     const r = await runUpgrade(w.ports, plan())
     expect(r.outcome).toBe('rollback_failed')
-    expect(r.rollbackErrors.join()).toMatch(/pg_restore .* exited 1: disk full/)
+    expect(r.rollbackErrors.join()).toMatch(/tar .* exited 1: disk full/)
     expect(await w.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
     expect(w.db.rows[0]).toMatchObject({ status: 'failed', phase: 'rollback' })
     expect(w.db.rows[0]?.error).toMatch(/disk full/)
@@ -384,7 +404,7 @@ describe('runUpgrade: rollback after the switch', () => {
     expect(again).toMatchObject({ outcome: 'refused', code: 'CONFLICT' })
     expect(again.reason).toMatch(/failed to roll back; recover it first/)
 
-    const input = { actor: ROOT, os: { family: 'debian' as const }, note: 'restored the control DB by hand', canary: 'alice' }
+    const input = { actor: ROOT, os: { family: 'debian' as const }, note: 'restored the state directory by hand', canary: 'alice' }
     await expect(recoverUpgrade(w.ports, { ...input, note: '' })).rejects.toThrow(XpanelError)
     await expect(recoverUpgrade(w.ports, { ...input, actor: RESELLER })).rejects.toThrow(/only root/)
     await expect(recoverUpgrade(w.ports, input)).rejects.toThrow(/panel login failed/)
@@ -397,7 +417,7 @@ describe('runUpgrade: rollback after the switch', () => {
     expect(rec).toEqual({ version: '1.0.0', closedRecordId: null, problems: [] })
     expect(await w.fs.exists(LOCK)).toBe(false)
     expect(await w.fs.exists(MAINTENANCE)).toBe(false)
-    expect(w.audit.entries.at(-1)).toMatchObject({ action: 'upgrade.recovered', outcome: 'ok', detail: { note: 'restored the control DB by hand' } })
+    expect(w.audit.entries.at(-1)).toMatchObject({ action: 'upgrade.recovered', outcome: 'ok', detail: { note: 'restored the state directory by hand' } })
 
     expect((await runUpgrade(w.ports, plan())).code).toBe('CONFLICT')
     await w.fs.remove('/opt/xpanel/releases/1.1.0')
@@ -415,9 +435,8 @@ describe('runUpgrade: failures before the switch', () => {
     expect(r.reason).toMatch(/0006_backfill_note.sql failed/)
     expect(w.fs.writes).not.toContain('/opt/xpanel/current')
     expect(await w.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
-    // the expand-only step that succeeded stays; the running release ignores it
     expect(w.db.schema).toBe(5)
-    expect(w.host.argv0()).not.toContain('/usr/bin/pg_restore')
+    expect(w.host.actions.some((a) => a.kind === 'exec' && isStateRestoreTar(a.argv))).toBe(false)
     expect(w.gen.reconciled).toBe(0)
     expect(w.host.systemd()).toEqual([])
     expect(await w.fs.exists('/opt/xpanel/releases/1.1.0')).toBe(false)
@@ -452,11 +471,11 @@ describe('runUpgrade: failures before the switch', () => {
 
   it('a failing snapshot stops before unpacking', async () => {
     const w = world()
-    w.host.handler = (a) => (a.kind === 'exec' && a.argv[0] === '/usr/bin/pg_dump' ? { code: 1, stdout: '', stderr: 'peer auth failed' } : undefined)
+    w.host.handler = (a) => (a.kind === 'exec' && isStateSnapshotTar(a.argv) ? { code: 1, stdout: '', stderr: 'state archive failed' } : undefined)
     const r = await runUpgrade(w.ports, plan())
     expect(r.outcome).toBe('failed')
-    expect(r.reason).toMatch(/peer auth failed/)
-    expect(w.host.argv0()).toEqual(['/usr/bin/pg_dump'])
+    expect(r.reason).toMatch(/state archive failed/)
+    expect(w.host.actions.filter((a) => a.kind === 'exec' && isReleaseUnpackTar(a.argv))).toEqual([])
     expect(w.db.rows[0]).toMatchObject({ status: 'failed', phase: 'snapshot' })
   })
 
@@ -465,7 +484,7 @@ describe('runUpgrade: failures before the switch', () => {
     const orig = w.host.handler
     w.host.handler = async (a) => {
       const res = await orig?.(a)
-      if (a.kind === 'exec' && a.argv[0] === '/usr/bin/tar') w.fs.file(`${argValue(a.argv, '--directory')}/VERSION`, '9.9.9')
+      if (a.kind === 'exec' && isReleaseUnpackTar(a.argv)) w.fs.file(`${argValue(a.argv, '--directory')}/VERSION`, '9.9.9')
       return res
     }
     const r = await runUpgrade(w.ports, plan())
@@ -478,7 +497,7 @@ describe('runUpgrade: failures before the switch', () => {
   it('unpacks with argv only into staging, never over the running release', async () => {
     const w = world()
     await runUpgrade(w.ports, plan())
-    const tar = w.host.actions.find((a) => a.kind === 'exec' && a.argv[0] === '/usr/bin/tar')
+    const tar = w.host.actions.find((a) => a.kind === 'exec' && isReleaseUnpackTar(a.argv))
     expect(tar).toEqual({ kind: 'exec', argv: ['/usr/bin/tar', '--extract', '--gzip', `--file=${ARCHIVE}`, '--directory=/opt/xpanel/staging/1.1.0-20261022T013500Z', '--no-same-owner', '--no-overwrite-dir'] })
     expect(w.fs.writes.filter((p) => p.startsWith('/opt/xpanel/releases/1.0.0'))).toEqual([])
   })
@@ -487,14 +506,13 @@ describe('runUpgrade: failures before the switch', () => {
     const w = world()
     const orig = w.host.handler
     w.host.handler = async (a) => {
-      // the tarball is replaced between the preflight checksum and the unpack
-      if (a.kind === 'exec' && a.argv[0] === '/usr/bin/pg_dump') w.fs.file(ARCHIVE, 'swapped release')
+      if (a.kind === 'exec' && isStateSnapshotTar(a.argv)) w.fs.file(ARCHIVE, 'swapped release')
       return orig?.(a)
     }
     const r = await runUpgrade(w.ports, plan())
     expect(r.outcome).toBe('failed')
     expect(r.reason).toMatch(/changed after the preflight checksum/)
-    expect(w.host.argv0()).not.toContain('/usr/bin/tar')
+    expect(w.host.actions.some((a) => a.kind === 'exec' && isReleaseUnpackTar(a.argv))).toBe(false)
     expect(await w.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
     expect(w.fs.children('/opt/xpanel/staging')).toEqual([])
   })
@@ -504,7 +522,7 @@ describe('runUpgrade: failures before the switch', () => {
     let mode: number | null = null
     const orig = w.host.handler
     w.host.handler = async (a) => {
-      if (a.kind === 'exec' && a.argv[0] === '/usr/bin/pg_dump') {
+      if (a.kind === 'exec' && isStateSnapshotTar(a.argv)) {
         const n = w.fs.nodes.get(MAINTENANCE)
         mode = n?.type === 'file' ? n.mode : null
       }
@@ -577,7 +595,7 @@ describe('runUpgrade: refusals', () => {
     const g = gate()
     const orig = w.host.handler
     w.host.handler = async (a) => {
-      if (a.kind === 'exec' && a.argv[0] === '/usr/bin/pg_dump') await g.promise
+      if (a.kind === 'exec' && isStateSnapshotTar(a.argv)) await g.promise
       return orig?.(a)
     }
     const first = runUpgrade(w.ports, plan())
@@ -615,7 +633,6 @@ describe('upgrade plan validation', () => {
     expect(() => normalizeUpgradePlan({ ...p, release: { ...p.release, archivePath: '/tmp/a b.tar.gz' } })).toThrow(XpanelError)
     expect(() => normalizeUpgradePlan({ ...p, release: { ...p.release, archivePath: 'relative.tar.gz' } })).toThrow(XpanelError)
     expect(() => normalizeUpgradePlan({ ...p, release: { ...p.release, archivePath: '/home/alice/x.tar.gz' } })).toThrow(/must be inside \/opt\/xpanel\/downloads/)
-    // anything an unprivileged process can write could be swapped between the checksum and the unpack
     for (const writable of ['/tmp/xpanel-1.1.0.tar.gz', '/var/lib/xpanel/downloads/xpanel-1.1.0.tar.gz', '/opt/xpanel/downloads/sub/x.tar.gz', '/opt/xpanel/x.tar.gz']) {
       expect(() => normalizeUpgradePlan({ ...p, release: { ...p.release, archivePath: writable } }), writable).toThrow(/must be inside/)
     }
@@ -627,8 +644,7 @@ describe('upgrade plan validation', () => {
     expect(() => normalizeUpgradePlan({ ...p, panelUnits: ['nginx; reboot'] })).toThrow(XpanelError)
     expect(() => normalizeUpgradePlan({ ...p, panelUnits: ['xpanel-api.service', 'xpanel-upgrade.service'] })).toThrow(/runs the upgrade/)
     expect(() => normalizeUpgradePlan({ ...p, panelUnits: [] })).toThrow(/at least one panel unit/)
-    expect(() => normalizeUpgradePlan({ ...p, controlDb: { name: 'xpanel; drop', osUser: 'postgres' } })).toThrow(XpanelError)
-    expect(() => normalizeUpgradePlan({ ...p, controlDb: { name: 'xpanel', osUser: '-oProxyCommand' } })).toThrow(XpanelError)
+    expect(() => normalizeUpgradePlan({ ...p, panelUser: '-oProxyCommand' })).toThrow(XpanelError)
     expect(() => normalizeUpgradePlan({ ...p, health: { attempts: 0, intervalMs: 1 } })).toThrow(XpanelError)
     expect(() => normalizeUpgradePlan({ ...p, health: { attempts: 3, intervalMs: -1 } })).toThrow(XpanelError)
     expect(() => normalizeUpgradePlan({ ...p, layout: { snapshotsDir: '/home/backups' } })).toThrow(/customer data/)
@@ -640,6 +656,6 @@ describe('upgrade plan validation', () => {
 
   it('classifies customer data paths', () => {
     for (const p of ['/home/alice', '/home2/bob/x', '/var/vmail/a', '/var/lib/mysql/alice_db', '/var/mail/alice']) expect(isCustomerDataPath(p), p).toBe(true)
-    for (const p of ['/opt/xpanel/current', '/var/lib/xpanel/snapshots/x.dump', '/homework']) expect(isCustomerDataPath(p), p).toBe(false)
+    for (const p of ['/opt/xpanel/current', '/var/lib/xpanel/snapshots/x.tar.gz', '/homework']) expect(isCustomerDataPath(p), p).toBe(false)
   })
 })
