@@ -13,6 +13,7 @@ const surfacePageTitles: Record<SurfaceKind, Readonly<Record<string, LocalizedTi
     analytics: ['Website traffic', 'زيارات الموقع'], files: ['Files', 'الملفات'],
     terminal: ['Terminal', 'الطرفية'], databases: ['Databases', 'قواعد البيانات'],
     users: ['Email accounts', 'حسابات البريد'], dns: ['DNS zone editor', 'محرر منطقة DNS'],
+    ssl: ['Certificates', 'الشهادات'],
   },
   xwhm: {
     overview: ['Dashboard', 'لوحة التحكم'], io: ['Disk I/O', 'عمليات القرص'],
@@ -72,6 +73,7 @@ const surfaceSections: Record<SurfaceShellProps['surface'], Readonly<Record<stri
     '/metrics/traffic': 'analytics', '/metrics/web-stats': 'analytics',
     '/files/manager': 'files', '/files/trash': 'files', '/advanced/terminal': 'terminal',
     '/databases/mariadb': 'databases', '/email/accounts': 'users', '/files/ftp': 'users',
+    '/security/ssl': 'ssl',
     '/domains/zone-editor': 'dns',
   },
   xwhm: {

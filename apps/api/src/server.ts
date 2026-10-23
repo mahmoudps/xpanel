@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { chmod, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import type { IncomingMessage, Server } from 'node:http'
@@ -61,6 +61,8 @@ import {
   reindexFromState,
   revokeSession,
   revokeAccountSessionsAndTokens,
+  setPasswordHash,
+  syncAccountContactIndex,
   searchIndex,
   recordLoginFailure,
 } from '@xpanel/db'
@@ -754,6 +756,34 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   }
 
   const accountExecution = () => ({ status: 'configuration_applied', scope: 'global_configuration', targetVerified: false, verificationRequired: true } as const)
+
+  const observeAccountExecution = async (caller: AuthenticatedCaller, ipv4: string) => {
+    const pending = accountExecution()
+    try {
+      const response = await callAgent('/host/addresses', { caller })
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined)
+        return pending
+      }
+      const body = await response.json() as { addresses?: unknown }
+      const seen = Array.isArray(body.addresses) && body.addresses.includes(ipv4)
+      if (!seen) return pending
+      return { status: 'configuration_applied' as const, scope: 'global_configuration' as const, targetVerified: true, verificationRequired: false, hostBinding: 'observed' as const, observedAddress: ipv4 }
+    } catch {
+      return pending
+    }
+  }
+
+  const ownedDatabaseName = (username: string, raw: unknown): string => {
+    if (typeof raw !== 'string' || raw.trim().length === 0) return fail('VALIDATION', 'database name is required')
+    const name = raw.trim().toLowerCase()
+    return name.startsWith(`${username}_`) ? name : `${username}_${name}`
+  }
+
+  const mysqlNativePasswordHash = (password: string): string => {
+    if (password.length < 8 || password.length > 256) return fail('VALIDATION', 'database password must be 8 to 256 characters')
+    return `*${createHash('sha1').update(createHash('sha1').update(password).digest()).digest('hex').toUpperCase()}`
+  }
 
   const recordFailedLoginAndMaybeLock = async (
     username: string,
@@ -1581,7 +1611,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           detail: { accountId: account.id, primaryDomain: account.primaryDomain, planId: account.planId, execution: accountExecution() }, outcome: 'ok', principalId: caller.principal.id,
         }, { accountId: account.id, resellerId: account.ownerId })
         const primaryDomains = await deps.store.listDomains({ accountId: account.id })
-        return jsonResponse({ account, primaryDomain: primaryDomains[0] ?? null, reconcile, execution: accountExecution() }, 201)
+        return jsonResponse({ account, primaryDomain: primaryDomains[0] ?? null, reconcile, execution: await observeAccountExecution(caller, account.ipv4) }, 201)
       }
 
       const accountSuspendMatch = /^\/api\/accounts\/([^/]+)\/(suspend|unsuspend)$/.exec(pathname)
@@ -1626,7 +1656,20 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           const patch = await readJsonBody<{ planId?: Id; ownerId?: Id | null; contactEmail?: string; ipv4?: string; ipv6?: string | null; shell?: 'none' | 'jailed' }>(req)
           if (Object.keys(patch).some(key => !['planId', 'ownerId', 'contactEmail', 'ipv4', 'ipv6', 'shell'].includes(key))) return fail('VALIDATION', 'unsupported account setting')
           const metadataOnly = Object.keys(patch).length === 1 && Object.hasOwn(patch, 'contactEmail')
-          if (metadataOnly) return fail('PRECONDITION_FAILED', 'account contact metadata update requires a qualified index writer', { reason: 'metadata_index_update_unqualified', verificationRequired: true, stateChanged: false })
+          if (metadataOnly) {
+            const updated = await deps.store.updateAccount(target.id, { contactEmail: patch.contactEmail })
+            try {
+              await syncAccountContactIndex(deps.db, updated)
+            } catch {
+              let reverted = true
+              try { await deps.store.updateAccount(updated.id, { contactEmail: target.contactEmail }) } catch { reverted = false }
+              return fail('SERVICE_UNAVAILABLE', 'account contact index could not be updated', { reason: 'contact_index_failed', verificationRequired: true, stateChanged: !reverted })
+            }
+            await emitAudit({ actor: caller.principal.username, action: 'account.contact.updated', target: 'account:' + updated.username,
+              detail: { contactEmail: updated.contactEmail }, outcome: 'ok', principalId: caller.principal.id,
+            }, { accountId: updated.id, resellerId: updated.ownerId })
+            return jsonResponse({ account: updated, stateChanged: true })
+          }
           requireAccountHostAgent()
           const captured = await captureAccountMutation(caller, target.id, 'account.update', async account => {
             if (patch.planId && patch.planId !== account.planId && caller.principal.kind === 'reseller') assertAcl(caller.principal, await resolveResellerForCaller(caller), 'change-plan')
@@ -1656,11 +1699,55 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           if (!current) return fail('NOT_FOUND', 'account not found')
           await assertCanAccessAccount(caller, current, 'account.delete', { allowUserSelf: false })
           if (body.confirmUsername !== current.username) return fail('CONFLICT', 'account confirmation is no longer current')
-          // Global reconciliation does not prove a target-bound purge and can perform irreversible partial deletion.
-          return fail('PRECONDITION_FAILED', 'account termination requires a verified target-bound purge operation', {
+          const unavailable = () => fail('PRECONDITION_FAILED', 'account termination requires a verified target-bound purge operation', {
             verificationRequired: true, reason: 'target_bound_purge_unavailable', stateChanged: false,
           })
+          let probe: Response
+          try { probe = await callAgent(`/accounts/${current.username}/purge`, { method: 'GET', caller }) }
+          catch { return unavailable() }
+          if (!probe.ok) {
+            await probe.body?.cancel().catch(() => undefined)
+            return unavailable()
+          }
+          const probeBody = await probe.json().catch(() => null) as { available?: unknown; contract?: unknown } | null
+          if (probeBody?.available !== true || probeBody.contract !== 'target-bound-userdel') return unavailable()
+          const marked = await deps.store.markTerminating(current.id)
+          const purge = await callAgent(`/accounts/${marked.username}/purge`, {
+            method: 'POST', caller, body: { confirmUsername: marked.username, uid: marked.uid, home: marked.home },
+          })
+          const purgeBody = await purge.json().catch(() => null) as { purged?: unknown; reason?: unknown } | null
+          if (!purge.ok || purgeBody?.purged !== true) {
+            return fail('SERVICE_UNAVAILABLE', 'account purge did not complete', {
+              verificationRequired: true, reason: typeof purgeBody?.reason === 'string' ? purgeBody.reason : 'purge_failed', stateChanged: true,
+            })
+          }
+          await revokeAccountSessionsAndTokens(deps.db, marked.id)
+          const identities = await deps.db.query<{ id: string }>('SELECT id FROM principals WHERE account_id = $1 ORDER BY id', [marked.id])
+          for (const identity of identities) await deletePrincipal(deps.db, identity.id)
+          await deps.store.deleteAccount(marked.id)
+          await reindexFromState(deps.db, await deps.store.readSnapshot())
+          await emitAudit({ actor: caller.principal.username, action: 'account.terminated', target: 'account:' + marked.username,
+            detail: { purged: true }, outcome: 'ok', principalId: caller.principal.id,
+          }, { accountId: marked.id, resellerId: marked.ownerId })
+          return jsonResponse({ ok: true, purged: true })
         }
+      }
+
+      const accountPasswordMatch = /^\/api\/accounts\/([^/]+)\/password$/.exec(pathname)
+      if (method === 'POST' && accountPasswordMatch) {
+        const caller = await requireCaller(req)
+        const target = await resolveAccountParam(accountPasswordMatch[1]!)
+        await assertCanAccessAccount(caller, target, 'account.password', { allowUserSelf: false })
+        if (caller.principal.kind === 'reseller') assertAcl(caller.principal, await resolveResellerForCaller(caller), 'change-password')
+        const body = await readJsonBody<{ password?: string }>(req)
+        const passwordHash = await passwordHashFromInput({ password: body.password })
+        const identities = await deps.db.query<{ id: string }>('SELECT id FROM principals WHERE account_id = $1 ORDER BY id', [target.id])
+        if (identities.length === 0) return fail('PRECONDITION_FAILED', 'account has no login identity', { stateChanged: false })
+        for (const identity of identities) await setPasswordHash(deps.db, identity.id, passwordHash)
+        await emitAudit({ actor: caller.principal.username, action: 'account.password.changed', target: 'account:' + target.username,
+          detail: { principals: identities.length }, outcome: 'ok', principalId: caller.principal.id,
+        }, { accountId: target.id, resellerId: target.ownerId })
+        return jsonResponse({ ok: true, accountId: target.id, principals: identities.length })
       }
 
       // ---- Multi-IPv4 / IPv6 Pool Management -----------------------------------------
@@ -2107,6 +2194,72 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           },
           { accountId: account.id, resellerId: account.ownerId },
         )
+        return jsonResponse({ ok: true, reconcile: reconcile?.body ?? null })
+      }
+
+      if (method === 'GET' && pathname === '/api/databases/users') {
+        const caller = await requireCaller(req)
+        const accountId = caller.principal.kind === 'user' ? caller.principal.accountId : (url.searchParams.get('accountId') ?? '')
+        if (!accountId) return fail('VALIDATION', 'accountId is required')
+        const account = await deps.store.getAccount(accountId)
+        if (!account) return fail('NOT_FOUND', 'account not found')
+        await assertCanAccessAccount(caller, account, 'database_user.list')
+        const users = (await deps.store.listDatabaseUsers(account.id)).map(user => ({ id: user.id, name: user.name, grants: user.grants }))
+        return jsonResponse({ users })
+      }
+
+      if (method === 'POST' && pathname === '/api/databases/users') {
+        const caller = await requireCaller(req)
+        const body = await readJsonBody<{ accountId?: Id; name?: string; password?: string; databaseId?: Id; privileges?: string[] }>(req)
+        const accountId = caller.principal.kind === 'user' ? caller.principal.accountId : (body.accountId ?? '')
+        if (!accountId) return fail('VALIDATION', 'accountId is required')
+        const account = await deps.store.getAccount(accountId)
+        if (!account) return fail('NOT_FOUND', 'account not found')
+        await assertCanAccessAccount(caller, account, 'database_user.create')
+        const user = await deps.store.createDatabaseUser({
+          accountId: account.id,
+          name: ownedDatabaseName(account.username, body.name),
+          authPlugin: 'mysql_native_password',
+          authString: mysqlNativePasswordHash(body.password ?? ''),
+        })
+        const granted = body.databaseId
+          ? await deps.store.setGrant({ databaseUserId: user.id, databaseId: body.databaseId, privileges: body.privileges ?? ['SELECT', 'INSERT', 'UPDATE', 'DELETE'] })
+          : user
+        const reconcile = await triggerReconcile(caller, { scope: { accountId: account.id, resellerId: account.ownerId } })
+        await emitAudit({ actor: caller.principal.username, action: 'database_user.created', target: `database-user:${granted.name}`,
+          outcome: 'ok', principalId: caller.principal.id }, { accountId: account.id, resellerId: account.ownerId })
+        return jsonResponse({ user: { id: granted.id, name: granted.name, grants: granted.grants }, reconcile: reconcile?.body ?? null }, 201)
+      }
+
+      const databaseUserGrantMatch = /^\/api\/databases\/users\/([0-9a-f-]{36})\/grants$/i.exec(pathname)
+      if (method === 'POST' && databaseUserGrantMatch) {
+        const caller = await requireCaller(req)
+        const userId = databaseUserGrantMatch[1]!.toLowerCase()
+        const existing = await deps.store.getDatabaseUser(userId)
+        if (!existing) return fail('NOT_FOUND', 'database user not found')
+        const account = await deps.store.getAccount(existing.accountId)
+        if (!account) return fail('NOT_FOUND', 'account not found')
+        await assertCanAccessAccount(caller, account, 'database_user.grant')
+        const body = await readJsonBody<{ databaseId?: Id; privileges?: string[] }>(req)
+        if (!body.databaseId) return fail('VALIDATION', 'databaseId is required')
+        const user = await deps.store.setGrant({ databaseUserId: existing.id, databaseId: body.databaseId, privileges: body.privileges ?? ['SELECT'] })
+        const reconcile = await triggerReconcile(caller, { scope: { accountId: account.id, resellerId: account.ownerId } })
+        return jsonResponse({ user: { id: user.id, name: user.name, grants: user.grants }, reconcile: reconcile?.body ?? null })
+      }
+
+      const databaseUserMatch = /^\/api\/databases\/users\/([0-9a-f-]{36})$/i.exec(pathname)
+      if (method === 'DELETE' && databaseUserMatch) {
+        const caller = await requireCaller(req)
+        const userId = databaseUserMatch[1]!.toLowerCase()
+        const existing = await deps.store.getDatabaseUser(userId)
+        if (!existing) return fail('NOT_FOUND', 'database user not found')
+        const account = await deps.store.getAccount(existing.accountId)
+        if (!account) return fail('NOT_FOUND', 'account not found')
+        await assertCanAccessAccount(caller, account, 'database_user.delete')
+        await deps.store.deleteDatabaseUser(existing.id)
+        const reconcile = await triggerReconcile(caller, { scope: { accountId: account.id, resellerId: account.ownerId } })
+        await emitAudit({ actor: caller.principal.username, action: 'database_user.deleted', target: `database-user:${existing.name}`,
+          outcome: 'ok', principalId: caller.principal.id }, { accountId: account.id, resellerId: account.ownerId })
         return jsonResponse({ ok: true, reconcile: reconcile?.body ?? null })
       }
 

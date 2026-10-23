@@ -1728,6 +1728,16 @@ html[dir="rtl"] .xp-workspace-summary .xp-field-value > bdi[dir="ltr"] { text-al
   line-height: var(--xp-leading-label);
   font-weight: var(--xp-weight-medium);
 }
+.xp-nav-ready { display: flex; flex-direction: column; gap: 2px; margin-block: 8px 2px; }
+.xp-nav-ready__name {
+  padding-inline: 12px;
+  color: var(--xp-text-secondary);
+  font-size: var(--xp-type-label);
+  line-height: var(--xp-leading-label);
+  font-weight: var(--xp-weight-medium);
+}
+.xp-nav-ready__pages { display: flex; flex-direction: column; gap: 2px; }
+.xp-nav-ready__pages .xp-nav-item { min-block-size: 44px; }
 .xp-user-menu { position: relative; margin-inline-start: auto; }
 .xp-user-menu__summary {
   display: flex;

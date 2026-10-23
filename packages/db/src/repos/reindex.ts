@@ -804,3 +804,32 @@ export const listIndexedPlans = async (
     shell: r.shell,
   }))
 }
+
+/** Updates one account's contact address in the derived index. The caller reverts state if this throws. */
+export const syncAccountContactIndex = (db: Db, account: Account & { suspendedAt?: string | null }): Promise<void> =>
+  withSqliteErrors(() => db.transaction(async (tx) => {
+    const now = nowIso()
+    const updated = await tx.query<{ id: string }>(
+      `UPDATE idx_accounts SET contact_email = $1, updated_at = $2 WHERE id = $3 RETURNING id`,
+      [account.contactEmail, now, account.id],
+    )
+    if (updated.length === 0) {
+      await tx.query(
+        `INSERT INTO idx_accounts (
+          id, username, uid, gid, home, primary_domain, plan_id, owner_id,
+          status, suspend_reason, suspended_at, contact_email, ipv4, shell, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+        [
+          account.id, account.username, account.uid, account.gid, account.home, account.primaryDomain,
+          account.planId, account.ownerId, account.status, account.suspendReason, account.suspendedAt ?? null,
+          account.contactEmail, account.ipv4, account.shell, account.createdAt, now,
+        ],
+      )
+    }
+    await tx.query(`DELETE FROM search_fts WHERE kind = 'account' AND entity_id = $1`, [account.id])
+    await tx.query(
+      `INSERT INTO search_fts (kind, entity_id, account_id, owner_id, title, subtitle, keywords)
+       VALUES ('account', $1, $1, $2, $3, $4, $5)`,
+      [account.id, account.ownerId ?? '', account.username, account.primaryDomain, `${account.contactEmail} ${account.ipv4} uid:${account.uid} ${account.status}`],
+    )
+  }))

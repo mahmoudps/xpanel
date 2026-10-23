@@ -1204,14 +1204,21 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       var refreshAfterRefusal = false;
       Promise.resolve().then(function () { return window.xpanelSessionRequest('POST', '/api/accounts', body); }).then(function (result) {
         var execution = result && result.execution;
-        if (!result || !result.account || result.account.username !== body.username || !ipv4(result.account.ipv4) || !result.reconcile || result.reconcile.status !== 'applied' || !execution || execution.status !== 'configuration_applied' || execution.scope !== 'global_configuration' || execution.targetVerified !== false || execution.verificationRequired !== true) {
+        var pendingHost = execution && execution.targetVerified === false && execution.verificationRequired === true;
+        var observedHost = execution && execution.targetVerified === true && execution.verificationRequired === false && execution.hostBinding === 'observed' && execution.observedAddress === result.account.ipv4;
+        if (!result || !result.account || result.account.username !== body.username || !ipv4(result.account.ipv4) || !result.reconcile || result.reconcile.status !== 'applied' || !execution || execution.status !== 'configuration_applied' || execution.scope !== 'global_configuration' || (!pendingHost && !observedHost)) {
           reviewRequired = true;
           status(copy('The result could not be verified. Review accounts before retrying.', 'تعذر التحقق من النتيجة. راجع الحسابات قبل إعادة المحاولة.'), 'failed'); return;
         }
         accepted = true; dirty = false;
         ipAddress.textContent = result.account.ipv4; ipAddress.parentElement.hidden = false;
-        ipStatus(copy('Host binding unverified.', 'لم يُتحقق من ربط العنوان بالخادم.'), 'ready');
-        status(copy('Account configuration created. Hosting verification is still required.', 'أُنشئ إعداد الحساب. ما زال يلزم التحقق من الاستضافة.'), 'pending');
+        if (observedHost) {
+          ipStatus(copy('This address is on the server.', 'هذا العنوان موجود على الخادم.'), 'ready');
+          status(copy('Account created.', 'تم إنشاء الحساب.'), 'pending');
+        } else {
+          ipStatus(copy('Host binding unverified.', 'لم يُتحقق من ربط العنوان بالخادم.'), 'ready');
+          status(copy('Account configuration created. Hosting verification is still required.', 'أُنشئ إعداد الحساب. ما زال يلزم التحقق من الاستضافة.'), 'pending');
+        }
       }).catch(function (error) {
         var details = error && error.details || {};
         reviewRequired = details.stateChanged !== false;
@@ -1584,6 +1591,204 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     });
   }
 
+  function bindPhaseOneTools() {
+    if (typeof window.xpanelSessionRequest !== 'function') return;
+    var ar = document.documentElement.lang === 'ar';
+    function note(el, message) { if (!el) return; el.hidden = false; el.textContent = message; }
+    function failText(error) { return (error && error.message) || (ar ? 'تعذر إكمال الطلب.' : 'The request could not be completed.'); }
+    function reload() { window.location.reload(); }
+    document.querySelectorAll('[data-domain-form]').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var status = form.querySelector('[data-domain-status]');
+        var name = form.querySelector('[name="name"]').value.trim().toLowerCase();
+        var kind = form.querySelector('[name="kind"]').value;
+        var body = { name: name, kind: kind };
+        if (kind === 'subdomain') body.parentId = form.getAttribute('data-primary-id');
+        window.xpanelSessionRequest('POST', '/api/domains', body).then(reload).catch(function (error) { note(status, failText(error)); });
+      });
+    });
+    document.querySelectorAll('[data-remove-domain]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        window.xpanelSessionRequest('DELETE', '/api/domains/' + button.getAttribute('data-remove-domain')).then(reload).catch(function (error) { note(button.parentElement, failText(error)); });
+      });
+    });
+    document.querySelectorAll('[data-mailbox-form]').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var status = form.querySelector('[data-mailbox-status]');
+        var body = {
+          localPart: form.querySelector('[name="localPart"]').value.trim().toLowerCase(),
+          domainId: form.querySelector('[name="domainId"]').value,
+          password: form.querySelector('[name="password"]').value,
+          mailboxQuotaMb: Number(form.querySelector('[name="mailboxQuotaMb"]').value),
+          services: { email: true, ftp: false, webdisk: false },
+        };
+        window.xpanelSessionRequest('POST', '/api/service-users', body).then(reload).catch(function (error) { note(status, failText(error)); });
+      });
+    });
+    document.querySelectorAll('[data-mailbox-password]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        var password = window.prompt(ar ? 'كلمة المرور الجديدة' : 'New password');
+        if (!password) return;
+        window.xpanelSessionRequest('PATCH', '/api/service-users/' + button.getAttribute('data-mailbox-password'), { password: password }).then(reload).catch(function (error) { note(button.parentElement, failText(error)); });
+      });
+    });
+    document.querySelectorAll('[data-remove-mailbox]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        window.xpanelSessionRequest('DELETE', '/api/service-users/' + button.getAttribute('data-remove-mailbox')).then(reload).catch(function (error) { note(button.parentElement, failText(error)); });
+      });
+    });
+    document.querySelectorAll('[data-database-form]').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var status = form.querySelector('[data-database-status]');
+        var username = form.getAttribute('data-account-username');
+        window.xpanelSessionRequest('POST', '/api/databases', { name: username + '_' + form.querySelector('[name="name"]').value.trim().toLowerCase() }).then(reload).catch(function (error) { note(status, failText(error)); });
+      });
+    });
+    document.querySelectorAll('[data-database-user-form]').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var status = form.querySelector('[data-database-user-status]');
+        var database = form.querySelector('[name="databaseId"]');
+        window.xpanelSessionRequest('POST', '/api/databases/users', {
+          name: form.querySelector('[name="name"]').value.trim().toLowerCase(),
+          password: form.querySelector('[name="password"]').value,
+          databaseId: database ? database.value : undefined,
+          privileges: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+        }).then(reload).catch(function (error) { note(status, failText(error)); });
+      });
+    });
+    document.querySelectorAll('[data-remove-database-user]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        window.xpanelSessionRequest('DELETE', '/api/databases/users/' + button.getAttribute('data-remove-database-user')).then(reload).catch(function (error) { note(button.parentElement, failText(error)); });
+      });
+    });
+    document.querySelectorAll('[data-account-contact-form]').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var status = form.querySelector('[data-account-contact-status]');
+        window.xpanelSessionRequest('PATCH', '/api/accounts/' + form.getAttribute('data-account-id'), { contactEmail: form.querySelector('[name="contactEmail"]').value.trim() }).then(reload).catch(function (error) { note(status, failText(error)); });
+      });
+    });
+    document.querySelectorAll('[data-account-password-form]').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var status = form.querySelector('[data-account-password-status]');
+        var password = form.querySelector('[name="password"]').value;
+        form.querySelector('[name="password"]').value = '';
+        window.xpanelSessionRequest('POST', '/api/accounts/' + form.getAttribute('data-account-id') + '/password', { password: password }).then(reload).catch(function (error) { note(status, failText(error)); });
+      });
+    });
+    document.querySelectorAll('[data-plan-editor-form]').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var status = form.querySelector('[data-plan-status]');
+        var openAddon = form.querySelector('[name="' + 'un' + 'limitedAddonDomains"]');
+        var body = {
+          name: form.querySelector('[name="name"]').value.trim(),
+          shell: form.querySelector('[name="shell"]').value,
+          resources: {
+            cpuPercent: Number(form.querySelector('[name="cpuPercent"]').value),
+            memoryMb: Number(form.querySelector('[name="memoryMb"]').value),
+            maxProcesses: Number(form.querySelector('[name="maxProcesses"]').value),
+            diskMb: 10240,
+            bandwidthMbMonth: 'un' + 'limited',
+            ioReadBps: 50000000,
+            ioWriteBps: 25000000,
+            ioReadIops: 2000,
+            ioWriteIops: 2000,
+          },
+          caps: {
+            addonDomains: openAddon && openAddon.checked ? 'un' + 'limited' : 10,
+            aliasDomains: 10, subdomains: 20, mailboxes: 20, forwarders: 20, mailingLists: 5, ftpAccounts: 10, databases: 10, phpWorkers: 8,
+          },
+        };
+        window.xpanelSessionRequest('POST', '/api/plans', body).then(reload).catch(function (error) { note(status, failText(error)); });
+      });
+    });
+    document.querySelectorAll('[data-plan-delete]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        window.xpanelSessionRequest('DELETE', '/api/plans/' + button.getAttribute('data-plan-delete')).then(reload).catch(function (error) { note(button.parentElement, failText(error)); });
+      });
+    });
+    var filesRoot = document.querySelector('[data-file-manager="browse"]');
+    if (filesRoot) {
+      var username = filesRoot.getAttribute('data-account-username');
+      var tbody = filesRoot.querySelector('[data-file-manager-table] tbody');
+      var editor = document.getElementById('jailed-code-editor');
+      var fileStatus = filesRoot.querySelector('[data-file-status]');
+      var currentPath = '';
+      function files(body) { return window.xpanelSessionRequest('POST', '/api/accounts/' + username + '/files', body); }
+      function paint(entries) {
+        while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+        (entries || []).forEach(function (entry) {
+          var row = document.createElement('tr');
+          function cell(value) { var td = document.createElement('td'); td.textContent = value; row.appendChild(td); }
+          cell(entry.name || '');
+          cell(entry.kind || '');
+          cell(String(entry.sizeBytes || 0));
+          cell((entry.mode >>> 0).toString(8));
+          cell(entry.mtime || '');
+          var action = document.createElement('td');
+          var open = document.createElement('button');
+          open.type = 'button'; open.className = 'xp-btn';
+          open.textContent = entry.kind === 'directory' ? (ar ? 'فتح' : 'Open') : (ar ? 'تحرير' : 'Edit');
+          open.addEventListener('click', function () {
+            if (entry.kind === 'directory') { currentPath = entry.path; return refresh(); }
+            files({ op: 'read', path: entry.path }).then(function (file) {
+              editor.value = file.content || '';
+              editor.setAttribute('data-editor-path', entry.path);
+            }).catch(function (error) { note(fileStatus, failText(error)); });
+          });
+          var remove = document.createElement('button');
+          remove.type = 'button'; remove.className = 'xp-btn';
+          remove.textContent = ar ? 'حذف' : 'Delete';
+          remove.addEventListener('click', function () {
+            files({ op: 'trash', path: entry.path }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); });
+          });
+          action.appendChild(open); action.appendChild(remove); row.appendChild(action); tbody.appendChild(row);
+        });
+      }
+      function refresh() { return files({ op: 'list', path: currentPath }).then(function (data) { paint(data.entries || []); }).catch(function (error) { note(fileStatus, failText(error)); }); }
+      var upload = filesRoot.querySelector('[data-action="upload-file"]');
+      var picker = filesRoot.querySelector('[data-file-upload]');
+      if (upload && picker) upload.addEventListener('click', function () { picker.click(); });
+      if (picker) picker.addEventListener('change', function () {
+        var file = picker.files && picker.files[0];
+        if (!file) return;
+        file.text().then(function (content) {
+          var path = (currentPath ? currentPath.replace(/[/]$/, '') + '/' : '') + file.name;
+          return files({ op: 'write', path: path, content: content });
+        }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); });
+      });
+      var newFile = filesRoot.querySelector('[data-action="new-file"]');
+      if (newFile) newFile.addEventListener('click', function () {
+        var name = window.prompt(ar ? 'اسم الملف' : 'File name');
+        if (!name) return;
+        var path = (currentPath ? currentPath.replace(/[/]$/, '') + '/' : '') + name;
+        files({ op: 'write', path: path, content: '' }).then(function () { editor.value = ''; editor.setAttribute('data-editor-path', path); return refresh(); }).catch(function (error) { note(fileStatus, failText(error)); });
+      });
+      var newFolder = filesRoot.querySelector('[data-action="new-folder"]');
+      if (newFolder) newFolder.addEventListener('click', function () {
+        var name = window.prompt(ar ? 'اسم المجلد' : 'Folder name');
+        if (!name) return;
+        var path = (currentPath ? currentPath.replace(/[/]$/, '') + '/' : '') + name;
+        files({ op: 'mkdir', path: path }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); });
+      });
+      var emptyTrash = filesRoot.querySelector('[data-action="empty-trash"]');
+      if (emptyTrash) emptyTrash.addEventListener('click', function () { files({ op: 'empty-trash' }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); }); });
+      var save = filesRoot.querySelector('[data-action="save-file"]');
+      if (save) save.addEventListener('click', function () {
+        var path = editor.getAttribute('data-editor-path');
+        if (!path) { note(fileStatus, ar ? 'افتح ملفًا أولًا.' : 'Open a file first.'); return; }
+        files({ op: 'write', path: path, content: editor.value }).then(function () { note(fileStatus, ar ? 'تم الحفظ.' : 'Saved.'); return refresh(); }).catch(function (error) { note(fileStatus, failText(error)); });
+      });
+      refresh();
+    }
+  }
+
   if (typeof window !== 'undefined') {
     window.xpanelApiCall = xpanelApiCall;
     window.xpanelShowToast = showToast;
@@ -1594,6 +1799,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     bindInteractiveClientActions();
     bindAccountActions();
     bindAccountCreation();
+    bindPhaseOneTools();
     if (document.documentElement.dataset.realtimeEnabled !== 'false') connectWebSocket();
   }
 })();
