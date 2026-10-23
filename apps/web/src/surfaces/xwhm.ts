@@ -502,6 +502,19 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           </table>
         </div>
 
+        <dialog class="xp-account-dialog" data-plan-delete-dialog aria-labelledby="plan-delete-title">
+          <form method="dialog">
+            <div class="xp-account-dialog__header">
+              <h2 id="plan-delete-title">${isAr ? 'حذف الخطة' : 'Delete plan'}</h2>
+              <p>${isAr ? 'لا يمكن التراجع عن حذف الخطة.' : 'Deleting a plan cannot be undone.'}</p>
+            </div>
+            <p class="xp-account-dialog__status" data-dialog-status role="status" hidden></p>
+            <div class="xp-account-dialog__footer">
+              <button type="button" class="xp-btn" data-dialog-cancel>${isAr ? 'إلغاء' : 'Cancel'}</button>
+              <button type="submit" class="xp-btn xp-btn--primary">${isAr ? 'حذف' : 'Delete'}</button>
+            </div>
+          </form>
+        </dialog>
         <!-- Create / Edit Plan Drawer Form with Explicit Unlimited Checkboxes -->
         <form class="xp-card xp-form-group" style="margin-block-start: var(--xp-space-card);" action="/api/plans" method="post" data-plan-editor-form="true">
           <div class="xp-card__header">

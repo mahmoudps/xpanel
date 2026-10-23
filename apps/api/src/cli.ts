@@ -88,6 +88,7 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
           '  init-root --password-stdin           Provision root once from standard input; requires a password change',
           '  reset-password <username> --password-stdin  Read one password from standard input',
           '  disable-2fa <username>               Disable TOTP 2FA for a principal',
+          '  repair-state-ownership               Root-only: give the xpanel user the state tree',
         ].join('\n'),
       )
       return { code: 0, stdout: outLines.join('\n'), stderr: errLines.join('\n') }

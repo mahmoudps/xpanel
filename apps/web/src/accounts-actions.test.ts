@@ -60,6 +60,55 @@ describe('account configuration acknowledgements', () => {
     expect(el('[data-account-create-status]').textContent).not.toContain('private-output')
   })
 })
+describe('phase-1 write responses', () => {
+  const applied = { status: 'applied', generation: { id: 4, status: 'active', checksum: 'a'.repeat(64) }, filesCount: 2, durationMs: 3 }
+  const execution = { status: 'configuration_applied', scope: 'global_configuration', targetVerified: false, verificationRequired: true }
+  it('shows a server error for an internal failure and leaves the form editable when nothing was saved', async () => {
+    document.body.innerHTML = renderWhmSurface({ activeRoute: '/whm/accounts/new', principal: { kind: 'root', id: 'fixture-root', username: 'operator' }, plans: [plan], accounts: [] })
+    ;(window as any).xpanelSessionRequest = vi.fn().mockRejectedValue(Object.assign(new Error('Internal server error'), { status: 500, code: 'INTERNAL_ERROR' }))
+    new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document)
+    el<HTMLInputElement>('#new-acc-username').value = 'newowner'
+    el<HTMLInputElement>('#new-acc-domain').value = 'newowner.example.test'
+    el<HTMLInputElement>('#new-acc-password').value = 'fixture-' + 'x'.repeat(16)
+    el<HTMLFormElement>('[data-create-account-form]').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    const text = el('[data-account-create-status]').textContent ?? ''
+    expect(text).toContain('could not complete this request')
+    expect(text).not.toMatch(/could not be verified/i)
+    expect(el<HTMLButtonElement>('button[type="submit"]').disabled).toBe(false)
+    expect(BROWSER_REALTIME_SCRIPT).toContain('Checked on the server after creation.')
+    expect(BROWSER_REALTIME_SCRIPT).toContain('يُفحص على الخادم بعد الإنشاء.')
+  })
+  it('accepts the API create, suspend and terminate bodies', async () => {
+    document.body.innerHTML = renderWhmSurface({ activeRoute: '/whm/accounts/new', principal: { kind: 'root', id: 'fixture-root', username: 'operator' }, plans: [plan], accounts: [] })
+    ;(window as any).xpanelSessionRequest = vi.fn().mockResolvedValue({ account: { ...account, username: 'submitted', ipv4: '192.0.2.10' }, reconcile: applied, execution })
+    new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document)
+    el<HTMLInputElement>('#new-acc-username').value = 'submitted'
+    el<HTMLInputElement>('#new-acc-domain').value = 'submitted.example.test'
+    el<HTMLInputElement>('#new-acc-password').value = 'synthetic-' + 'x'.repeat(16)
+    el<HTMLFormElement>('[data-create-account-form]').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    expect(el('[data-account-create-status]').textContent).toContain('Account configuration created')
+    document.body.innerHTML = render()
+    const dialog = boot()
+    ;(window as any).xpanelSessionRequest = vi.fn().mockResolvedValue({ ok: true, purged: true })
+    el('[data-account-row="alpha"] [data-action="terminate-account"]').click()
+    const input = el<HTMLInputElement>('[data-type-to-confirm]')
+    input.value = 'alpha'
+    input.dispatchEvent(new Event('input'))
+    el('[data-account-action-form]').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    expect(el('[data-account-action-status]').textContent).toContain('Account removed')
+    expect(dialog.open).toBe(true)
+    document.body.innerHTML = render()
+    boot()
+    ;(window as any).xpanelSessionRequest = vi.fn().mockResolvedValue({ account: { ...account, status: 'suspended' }, reconcile: applied, execution })
+    el('[data-account-row="alpha"] [data-action="suspend-account"]').click()
+    el('[data-account-action-form]').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    expect(el('[data-account-action-status]').textContent).toContain('Account suspended')
+  })
+})
 describe('creation request identity and uncertain outcomes', () => {
   function prepare() {
     document.body.innerHTML = renderWhmSurface({ activeRoute: '/whm/accounts/new', principal: { kind: 'root', id: 'fixture-root', username: 'operator' }, plans: [plan], accounts: [] })

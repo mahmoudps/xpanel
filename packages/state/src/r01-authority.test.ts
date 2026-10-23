@@ -404,7 +404,7 @@ describe('R01 — state, identity & recovery authority (A18, A25, A58)', () => {
       }),
     ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' })
 
-    // Partial domain file was rolled back, so 'aborted.example.test' is free, but UIDs 20000, 20001, and host UID 20002 are burned!
+    // The failed reservation is released. Host UIDs 20000 and 20002 are burned on the next allocation.
     failBeforeCommit = false
     const created = await hookedStore.createAccount({
       username: 'goodacct',
@@ -417,7 +417,7 @@ describe('R01 — state, identity & recovery authority (A18, A25, A58)', () => {
       shell: 'jailed',
       php: defaultPhp(),
     })
-    expect(created.uid).toBe(20003)
+    expect(created.uid).toBe(20001)
 
     // Terminate and delete 'goodacct', then create another account — UID 20003 is never reused
     await hookedStore.markTerminating(created.id)
@@ -434,7 +434,7 @@ describe('R01 — state, identity & recovery authority (A18, A25, A58)', () => {
       shell: 'jailed',
       php: defaultPhp(),
     })
-    expect(afterDelete.uid).toBe(20004)
+    expect(afterDelete.uid).toBe(20003)
   })
 
   it('prevents compile-vs-save TOCTOU drift by verifying immutable StateSnapshot handoff in saveGenerationSnapshot', async () => {

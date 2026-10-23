@@ -1085,9 +1085,24 @@ export class StateStore {
       const { ipv4, ipv6, extraIps } = resolveAccountIpAssignment(input, { accountId, ownerId, planDedicatedIp: plan.dedicatedIp,
         reseller: ownerId === null ? null : resellers.find(reseller => reseller.id === ownerId) ?? null, pool, allAccounts: accounts, domains, mailIpConfig })
 
-      // Allocate UID now: if the username clashes with an existing account or reseller login,
-      // the UID remains burnt in uid-allocator.json and the rest is rolled back.
-      const uid = await this.allocateUidUnlocked(lease, username)
+      // Journal the allocator preimage before reserving a UID. A failed create rolls that
+      // reservation back. A crash whose journal has no preimage still keeps the burn.
+      const allocatorRel = 'uid-allocator.json'
+      let allocatorBackup: { relPath: string; existed: boolean; contentBase64?: string }
+      try {
+        allocatorBackup = { relPath: allocatorRel, existed: true, contentBase64: (await readFile(this.path(allocatorRel))).toString('base64') }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        allocatorBackup = { relPath: allocatorRel, existed: false }
+      }
+      await lease.recordIntent({
+        op: 'createAccount',
+        createdRelPaths: [`accounts/${username}`],
+        backups: [allocatorBackup],
+      })
+      let uid = 0
+      try {
+      uid = await this.allocateUidUnlocked(lease, username)
       if (
         accounts.some((a) => a.username.toLowerCase() === username.toLowerCase()) ||
         resellers.some((r) => r.username.toLowerCase() === username.toLowerCase())
@@ -1132,32 +1147,25 @@ export class StateStore {
         pathQuotaMb: 'unlimited',
       }
 
-      await lease.recordIntent({
-        op: 'createAccount',
-        createdRelPaths: [`accounts/${username}`],
-        backups: [],
-      })
-
       if (this.hooks.onCreateUserPrincipal) {
         await this.hooks.onCreateUserPrincipal({ accountId: account.id, username, passwordHash, forcePasswordChange })
       }
-      try {
-        await this.writeStateJson(lease, join(this.accountDir(username), 'domains', `${primaryDomain}.json`), domain)
-        if (this.hooks.onBeforeAccountCommit) {
-          await this.hooks.onBeforeAccountCommit({
-            accountId: account.id,
-            username,
-            uid,
-            fencingToken: lease.fencingToken,
-          })
-        }
-        await this.writeStateJson(lease, join(this.accountDir(username), 'account.json'), account)
-      } catch (e) {
-        await this.removeStatePath(lease, this.accountDir(username)).catch(() => undefined)
-        if (this.hooks.onDeleteAccount) await this.hooks.onDeleteAccount(account.id)
-        throw e
+      await this.writeStateJson(lease, join(this.accountDir(username), 'domains', `${primaryDomain}.json`), domain)
+      if (this.hooks.onBeforeAccountCommit) {
+        await this.hooks.onBeforeAccountCommit({
+          accountId: account.id,
+          username,
+          uid,
+          fencingToken: lease.fencingToken,
+        })
       }
+      await this.writeStateJson(lease, join(this.accountDir(username), 'account.json'), account)
       return toPublicAccount(account)
+      } catch (error) {
+        await lease.rollbackIntent().catch(() => undefined)
+        if (this.hooks.onDeleteAccount) await Promise.resolve(this.hooks.onDeleteAccount(accountId)).catch(() => undefined)
+        throw error
+      }
     })
   }
 

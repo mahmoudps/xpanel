@@ -98,6 +98,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
         var problem = data.error || data;
         var error = new Error(problem.message || problem.detail || copy.failed);
         error.status = response.status;
+        error.code = problem.code;
         error.details = problem.details || {};
         throw error;
       }

@@ -521,7 +521,7 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
                       ${
                         db.trashedAt
                           ? `${renderStatusBadge('warn', `Trashed (${db.trashedAt})`)} <button type="button" class="xp-btn" data-action="restore-db" data-db="${escapeHtml(db.name)}">${isAr ? 'استعادة' : 'Restore'}</button>`
-                          : renderStatusBadge('ok', t(locale, 'common.status.active'))
+                          : `${renderStatusBadge('ok', t(locale, 'common.status.active'))} <button type="button" class="xp-btn" data-remove-database="${escapeHtml(db.id)}" data-database-name="${escapeHtml(db.name)}">${isAr ? 'حذف' : 'Delete'}</button>`
                       }
                     </td>
                   </tr>
@@ -539,6 +539,20 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
           <p class="xp-help" data-database-status role="status" hidden></p>
           <button type="submit" class="xp-btn xp-btn--primary">${isAr ? 'إنشاء قاعدة البيانات' : 'Create database'}</button>
         </form>
+        <dialog class="xp-account-dialog" data-database-delete-dialog aria-labelledby="database-delete-title">
+          <form method="dialog">
+            <div class="xp-account-dialog__header">
+              <h2 id="database-delete-title">${isAr ? 'حذف قاعدة البيانات' : 'Delete database'}</h2>
+              <p data-database-delete-copy>${isAr ? 'يحذف قاعدة البيانات نهائيا.' : 'Permanently deletes this database.'}</p>
+            </div>
+            <p class="xp-mono"><bdi dir="ltr" data-database-delete-name></bdi></p>
+            <p class="xp-account-dialog__status" data-dialog-status role="status" hidden></p>
+            <div class="xp-account-dialog__footer">
+              <button type="button" class="xp-btn" data-dialog-cancel>${isAr ? 'إلغاء' : 'Cancel'}</button>
+              <button type="submit" class="xp-btn xp-btn--primary">${isAr ? 'حذف' : 'Delete'}</button>
+            </div>
+          </form>
+        </dialog>
         <div class="xp-table-wrap">
           <table class="xp-table">
             <thead><tr><th>${isAr ? 'مستخدم قاعدة البيانات' : 'Database user'}</th><th>${isAr ? 'الصلاحيات' : 'Grants'}</th><th></th></tr></thead>
@@ -593,6 +607,7 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
                       <td class="xp-mono xp-tabular">${String(u.mailboxQuotaMb)} MB</td>
                       <td>
                         <button type="button" class="xp-btn" data-mailbox-password="${escapeHtml(u.id)}">${isAr ? 'كلمة المرور' : 'Password'}</button>
+                        <button type="button" class="xp-btn" data-mailbox-quota="${escapeHtml(u.id)}" data-mailbox-quota-value="${escapeHtml(String(u.mailboxQuotaMb))}">${isAr ? 'الحصة' : 'Quota'}</button>
                         <button type="button" class="xp-btn" data-remove-mailbox="${escapeHtml(u.id)}">${isAr ? 'حذف' : 'Delete'}</button>
                       </td>
                     </tr>
@@ -622,6 +637,39 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
               <p class="xp-help" data-mailbox-status role="status" hidden></p>
               <button type="submit" class="xp-btn xp-btn--primary">${isAr ? 'إنشاء صندوق البريد' : 'Create mailbox'}</button>
             </form>` : ''}
+            <dialog class="xp-account-dialog" data-mailbox-password-dialog aria-labelledby="mailbox-password-title">
+              <form method="dialog">
+                <div class="xp-account-dialog__header">
+                  <h2 id="mailbox-password-title">${isAr ? 'كلمة مرور صندوق البريد' : 'Mailbox password'}</h2>
+                  <p>${isAr ? 'تُحفظ كلمة المرور الجديدة بعد التأكيد.' : 'The new password is saved after you confirm.'}</p>
+                </div>
+                <div class="xp-field">
+                  <label class="xp-label" for="mailbox-password-next">${isAr ? 'كلمة المرور الجديدة' : 'New password'}</label>
+                  <input id="mailbox-password-next" name="password" type="password" class="xp-input" minlength="8" required autocomplete="new-password" />
+                </div>
+                <p class="xp-account-dialog__status" data-dialog-status role="status" hidden></p>
+                <div class="xp-account-dialog__footer">
+                  <button type="button" class="xp-btn" data-dialog-cancel>${isAr ? 'إلغاء' : 'Cancel'}</button>
+                  <button type="submit" class="xp-btn xp-btn--primary">${isAr ? 'حفظ' : 'Save'}</button>
+                </div>
+              </form>
+            </dialog>
+            <dialog class="xp-account-dialog" data-mailbox-quota-dialog aria-labelledby="mailbox-quota-title">
+              <form method="dialog">
+                <div class="xp-account-dialog__header">
+                  <h2 id="mailbox-quota-title">${isAr ? 'حصة صندوق البريد' : 'Mailbox quota'}</h2>
+                </div>
+                <div class="xp-field">
+                  <label class="xp-label" for="mailbox-quota-next">${isAr ? 'الحصة (MB)' : 'Quota (MB)'}</label>
+                  <input id="mailbox-quota-next" name="mailboxQuotaMb" type="number" class="xp-input xp-mono" min="1" required />
+                </div>
+                <p class="xp-account-dialog__status" data-dialog-status role="status" hidden></p>
+                <div class="xp-account-dialog__footer">
+                  <button type="button" class="xp-btn" data-dialog-cancel>${isAr ? 'إلغاء' : 'Cancel'}</button>
+                  <button type="submit" class="xp-btn xp-btn--primary">${isAr ? 'حفظ' : 'Save'}</button>
+                </div>
+              </form>
+            </dialog>
           </section>
 
 ` : ''}

@@ -5,7 +5,7 @@ import { join, relative } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createApiToken, createResellerPrincipal, createRootPrincipal, createSession, createTestDb,
-  createUserPrincipal, findPrincipalByUsername, listAudit, setTotpSecret,
+  createUserPrincipal, deletePrincipal, findPrincipalByUsername, listAudit, setTotpSecret,
 } from '@xpanel/db'
 import { StateStore, createTestStateStore } from '@xpanel/state'
 import { WRITER_MUTEX_FILE } from '../../../packages/state/src/writer-mutex.ts'
@@ -471,6 +471,34 @@ describe('account mutation outcomes and race boundaries', () => {
     expect(await f.identities()).toEqual(beforeIdentity)
     expect(await f.accountSuccess()).toEqual([])
     expect(f.calls()).toBe(1)
+  })
+
+  it('gives a new account a panel login and password change can create a missing identity', async () => {
+    const created = await f.request('POST', '/api/accounts', {
+      username: 'loginowner', primaryDomain: 'loginowner.example.test', planId: f.plan.id, password: 'SyntheticLogin!2026', ipv4: '192.0.2.42',
+    })
+    expect(created.status).toBe(201)
+    const body = await created.json() as { account: { id: string; username: string }; reconcile: { status: string }; execution: { status: string; scope: string } }
+    expect(body.account.username).toBe('loginowner')
+    expect(body.reconcile.status).toBe('applied')
+    expect(body.execution).toMatchObject({ status: 'configuration_applied', scope: 'global_configuration' })
+    const principal = await findPrincipalByUsername(f.database.db, 'loginowner')
+    expect(principal?.accountId).toBe(body.account.id)
+    await deletePrincipal(f.database.db, principal!.id)
+    const changed = await f.request('POST', '/api/accounts/' + body.account.id + '/password', { password: 'SyntheticLogin!2027' })
+    expect(changed.status).toBe(200)
+    const panelOrigin = 'https://panel.example.test:2083'
+    const panel = createApiApp({
+      db: f.database.db, store: f.state.store, serverSecret: SECRET, entryPoint: 'xpanel', publicOrigin: panelOrigin,
+      allowedOrigins: [panelOrigin], ingressSecret: INGRESS, requireSecureCookies: true, requireOriginHeader: true,
+    })
+    const login = await panel.fetch(new Request(panelOrigin + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: panelOrigin, 'x-forwarded-proto': 'https' },
+      body: JSON.stringify({ username: 'loginowner', password: 'SyntheticLogin!2027' }),
+    }), { remoteAddress: '192.0.2.20', tls: true })
+    expect(login.status, await login.clone().text()).toBe(200)
+    expect(await login.json()).toMatchObject({ principal: { username: 'loginowner', kind: 'user' } })
   })
 
   it('reports identity-establishment failure after host apply without claiming rollback or issuing login', async () => {
