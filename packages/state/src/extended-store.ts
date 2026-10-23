@@ -16,6 +16,8 @@ import {
   validateUsername,
 } from '@xpanel/core'
 import { AsyncMutex, atomicRemove, atomicWriteJson, listJsonFiles, listSubdirs, readJsonIfExists } from './atomic.ts'
+import { StateStore } from './store.ts'
+import type { WriterLease } from './writer-lock.ts'
 
 // ---------------------------------------------------------------------------
 // Types — 1. First-Run Setup Wizard, Hostname & Quota Initialization
@@ -626,6 +628,17 @@ export class ExtendedFeaturesStore {
     return join(this.rootDir, 'extended', ...segments)
   }
 
+  private withSetupWizardMutation<T>(mutate: (lease: WriterLease) => Promise<T>): Promise<T> {
+    return this.mutex.run(async () => {
+      const lease = await new StateStore(this.rootDir).getWriterLock().acquire()
+      try {
+        const result = await mutate(lease)
+        await lease.commitAuthority({ incrementRevision: false })
+        return result
+      } finally { await lease.release() }
+    })
+  }
+
   // =========================================================================
   // 1. First-Run Setup Wizard, Hostname & Quota Initialization
   // =========================================================================
@@ -652,7 +665,7 @@ export class ExtendedFeaturesStore {
   saveSetupWizardStep(
     step: number | ({ step: number } & Partial<SetupWizardCompletionInput>),
   ): Promise<SetupWizardState> {
-    return this.mutex.run(async () => {
+    return this.withSetupWizardMutation(async lease => {
       const current = await this.getSetupWizardState()
       const stepNum = typeof step === 'number' ? step : step.step
       assertInt(stepNum, 1, 10, 'step')
@@ -680,13 +693,13 @@ export class ExtendedFeaturesStore {
         currentStep: stepNum,
         updatedAt: new Date().toISOString(),
       }
-      await atomicWriteJson(this.extPath('setup-wizard.json'), next)
+      await atomicWriteJson(this.extPath('setup-wizard.json'), next, 0o640, () => lease.assertFencingToken())
       return next
     })
   }
 
   completeSetupWizard(input: SetupWizardCompletionInput): Promise<SetupWizardState> {
-    return this.mutex.run(async () => {
+    return this.withSetupWizardMutation(async lease => {
       if (typeof input !== 'object' || input === null) fail('VALIDATION', 'setup wizard input must be an object')
       const hostname = validateDomainName(input.hostname)
       if (!Array.isArray(input.nameservers) || input.nameservers.length === 0) {
@@ -720,38 +733,24 @@ export class ExtendedFeaturesStore {
         completedAt: now,
         updatedAt: now,
       }
-      await atomicWriteJson(this.extPath('setup-wizard.json'), next)
+      await atomicWriteJson(this.extPath('setup-wizard.json'), next, 0o640, () => lease.assertFencingToken())
       return next
     })
   }
 
   changeHostname(hostname: string): Promise<SetupWizardState> {
-    return this.mutex.run(async () => {
-      const canonical = validateDomainName(hostname)
-      const current = await this.getSetupWizardState()
-      const now = new Date().toISOString()
-      const next: SetupWizardState = {
-        ...current,
+    return this.mutex.run(() => new StateStore(this.rootDir).commitHostname(
+      hostname,
+      async (canonical, now): Promise<SetupWizardState> => ({
+        ...await this.getSetupWizardState(),
         hostname: canonical,
         updatedAt: now,
-      }
-      await atomicWriteJson(this.extPath('setup-wizard.json'), next)
-      // Also keep <rootDir>/server.json in sync if present
-      const serverPath = join(this.rootDir, 'server.json')
-      const serverFile = await readJsonIfExists<Record<string, unknown>>(serverPath)
-      if (serverFile && typeof serverFile.settings === 'object' && serverFile.settings !== null) {
-        await atomicWriteJson(serverPath, {
-          ...serverFile,
-          settings: { ...(serverFile.settings as Record<string, unknown>), hostname: canonical },
-          updatedAt: now,
-        })
-      }
-      return next
-    })
+      }),
+    ))
   }
 
   initializeFilesystemQuota(filesystem: string): Promise<FilesystemQuotaState> {
-    return this.mutex.run(async () => {
+    return this.withSetupWizardMutation(async lease => {
       const fsPath = assertLine(filesystem, 256, 'filesystem', { allowEmpty: false })
       if (!fsPath.startsWith('/')) {
         fail('VALIDATION', 'filesystem mount must start with "/"')
@@ -763,14 +762,14 @@ export class ExtendedFeaturesStore {
         status: 'enabled',
         initializedAt: now,
       }
-      await atomicWriteJson(this.extPath('quota-state.json'), quotaState)
+      await atomicWriteJson(this.extPath('quota-state.json'), quotaState, 0o640, () => lease.assertFencingToken())
       const wiz = await this.getSetupWizardState()
       await atomicWriteJson(this.extPath('setup-wizard.json'), {
         ...wiz,
         quotaFilesystem: fsPath,
         quotaInitialized: true,
         updatedAt: now,
-      })
+      }, 0o640, () => lease.assertFencingToken())
       return quotaState
     })
   }
@@ -1558,15 +1557,18 @@ export class ExtendedFeaturesStore {
       const activeSet = new Set(activeDomainNames.map((d) => validateDomainName(d)))
       const removedZones: string[] = []
 
-      // Check both <rootDir>/zones and <rootDir>/extended/dns/zones
+      const state = new StateStore(this.rootDir)
+      // Canonical zones use the shared writer protocol; extension records remain local.
       const dirsToCheck = [join(this.rootDir, 'zones'), this.extPath('dns', 'zones')]
       for (const dir of dirsToCheck) {
         const files = await listJsonFiles(dir)
         for (const file of files) {
           const zoneName = basename(file, '.json').toLowerCase()
           if (!activeSet.has(zoneName)) {
-            await atomicRemove(file)
-            if (!removedZones.includes(zoneName)) {
+            const removed = dir === dirsToCheck[0]
+              ? await state.deleteDnsZone(zoneName)
+              : await atomicRemove(file)
+            if (removed && !removedZones.includes(zoneName)) {
               removedZones.push(zoneName)
             }
           }

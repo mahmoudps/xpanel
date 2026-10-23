@@ -8,6 +8,7 @@ import {
   createUserPrincipal, findPrincipalByUsername, listAudit, setTotpSecret,
 } from '@xpanel/db'
 import { StateStore, createTestStateStore } from '@xpanel/state'
+import { WRITER_MUTEX_FILE } from '../../../packages/state/src/writer-mutex.ts'
 import * as dbApi from '@xpanel/db'
 import type { AgentApp } from '@xpanel/agent'
 import { deriveCsrfToken } from './auth.ts'
@@ -118,7 +119,16 @@ const fixture = async () => {
   })
   const fingerprints = async () => {
     const entries: [string, string][] = []
-    const visit = async (dir: string): Promise<void> => { for (const entry of await readdir(dir, { withFileTypes: true })) { const path = join(dir, entry.name); if (entry.isDirectory()) await visit(path); else if (entry.isFile()) entries.push([relative(state.rootDir, path), createHash('sha256').update(await readFile(path)).digest('hex')]) } }
+    const operationalFiles = new Set(['', '-journal', '-wal', '-shm'].map(suffix => WRITER_MUTEX_FILE + suffix))
+    const visit = async (dir: string): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        // A raw close can cancel a process's POSIX SQLite locks; skip before opening.
+        if (dir === state.rootDir && operationalFiles.has(entry.name)) continue
+        const path = join(dir, entry.name)
+        if (entry.isDirectory()) await visit(path)
+        else if (entry.isFile()) entries.push([relative(state.rootDir, path), createHash('sha256').update(await readFile(path)).digest('hex')])
+      }
+    }
     await visit(state.rootDir)
     return entries.sort(([a], [b]) => a.localeCompare(b))
   }

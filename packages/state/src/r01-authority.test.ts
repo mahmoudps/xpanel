@@ -283,9 +283,12 @@ describe('R01 — state, identity & recovery authority (A18, A25, A58)', () => {
     ).rejects.toMatchObject({ code: 'CONFLICT' })
     expect((await h.store.getAccount(acc.id))?.status).toBe('active')
 
-    // Pause a writer lease, force-recover with a higher fencing token, and prove the stale lease cannot commit
+    // A paused live owner keeps the OS mutex: recovery must await termination or release.
     const rawLock = h.store.getWriterLock()
     const staleLease = await rawLock.acquire()
+    await expect(new WriterLock(h.rootDir, { acquireTimeoutMs: 80, retryIntervalMs: 5 }).forceRecoverLease()).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(staleLease.assertFencingToken()).resolves.toMatchObject({ fencingToken: staleLease.fencingToken })
+    await staleLease.release()
     const recoveredMeta = await rawLock.forceRecoverLease()
     expect(recoveredMeta.fencingToken).toBeGreaterThan(staleLease.fencingToken)
     const newerLease = await rawLock.acquire()
@@ -325,6 +328,9 @@ describe('R01 — state, identity & recovery authority (A18, A25, A58)', () => {
         allocated: [{ uid: 20000, username: 'crasheduser', allocatedAt: new Date().toISOString() }],
       }),
     )
+    // Real legacy journal and authority epochs must agree before recovery.
+    const authority = await h.store.getWriterLock().readAuthority()
+    await writeFile(join(h.rootDir, 'authority.json'), JSON.stringify({ ...authority, fencingToken: 99 }))
     const lockDir = join(h.rootDir, '.lock')
     await mkdir(lockDir, { recursive: true })
     await writeFile(

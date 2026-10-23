@@ -7,7 +7,7 @@ import type { TestStateStoreHandle } from './store.ts'
 import type { StateSnapshot } from './types.ts'
 import { checksumStateTree } from './validate-state.ts'
 
-const fault = vi.hoisted(() => ({ mode: '', match: '', remaining: 0 }))
+const fault = vi.hoisted(() => ({ mode: '', match: '', remaining: 0, baseRevision: 0, artifactsAtCommit: [] as string[] }))
 vi.mock('node:fs/promises', async (importOriginal) => {
   const fs = await importOriginal<typeof import('node:fs/promises')>()
   const ioError = () => Object.assign(new Error('injected restore I/O failure'), { code: 'EIO' })
@@ -30,10 +30,17 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     },
     rename: async (...args: Parameters<typeof fs.rename>) => {
       const from = pathText(args[0])
+      const to = pathText(args[1])
+      const authorityCommit = fault.mode.startsWith('authority-') && to.endsWith('/authority.json')
+        && Number(JSON.parse(await fs.readFile(args[0], 'utf8')).revision) > fault.baseRevision
+      if (authorityCommit) {
+        fault.artifactsAtCommit = (await fs.readdir(to.slice(0, to.lastIndexOf('/')))).filter(name => name.startsWith('.restore-'))
+        if (fault.mode === 'authority-before') throw ioError()
+      }
       if ((fault.mode === 'activate' || fault.mode === 'rollback') && from.includes('/.restore-stage-') && from.endsWith(`/${fault.match}`)) throw ioError()
       if (fault.mode === 'rollback' && from.includes('/.restore-backup-') && from.endsWith(`/${fault.match}`)) throw ioError()
       await fs.rename(...args)
-      const to = pathText(args[1])
+      if (authorityCommit && fault.mode === 'authority-after') throw ioError()
       const corruptTarget = fault.match === 'feature-lists' ? to.includes('/feature-lists/') : to.endsWith('/uid-allocator.json')
       if (fault.mode === 'stage-corrupt' && to.includes('/.restore-stage-') && corruptTarget && fault.remaining-- > 0) {
         const value = JSON.parse(await fs.readFile(args[1], 'utf8')) as Record<string, unknown>
@@ -48,7 +55,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 const treeBytes = async (root: string, prefix = ''): Promise<Record<string, string>> => {
   const files: Record<string, string> = {}
   for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (entry.name === 'generations') continue
+    if (['generations', 'authority.json', '.writer-mutex.sqlite', '.writer-mutex.sqlite-journal', '.writer-mutex.sqlite-wal', '.writer-mutex.sqlite-shm'].includes(entry.name)) continue
     const rel = prefix ? `${prefix}/${entry.name}` : entry.name
     if (entry.isDirectory()) Object.assign(files, await treeBytes(join(root, entry.name), rel))
     else files[rel] = (await readFile(join(root, entry.name))).toString('base64')
@@ -67,6 +74,8 @@ describe('generation restore preserves live desired state on refusal', () => {
     fault.mode = ''
     fault.match = ''
     fault.remaining = 0
+    fault.baseRevision = 0
+    fault.artifactsAtCommit = []
     state = await createTestStateStore()
     const feature = await state.store.createFeatureList({ name: 'Snapshot features', ownerId: null, disabled: [] })
     const plan = await state.store.createPlan({
@@ -99,8 +108,15 @@ describe('generation restore preserves live desired state on refusal', () => {
 
   const expectRefusalWithoutLiveChange = async (): Promise<void> => {
     const before = await treeBytes(state.rootDir)
+    const authority = await state.store.getAuthorityMetadata()
     const error = await state.store.restoreGenerationSnapshot(1).then(() => null, (reason: unknown) => reason)
     expect(await treeBytes(state.rootDir)).toEqual(before)
+    const afterAuthority = await state.store.getAuthorityMetadata()
+    expect(afterAuthority.revision).toBe(authority.revision)
+    expect(afterAuthority.fencingToken).toBeGreaterThan(authority.fencingToken)
+    expect(afterAuthority.references).toEqual(authority.references)
+    expect(afterAuthority.allocatedReferences).toEqual(authority.allocatedReferences)
+    expect(afterAuthority.committedLeaseId).toBe(authority.committedLeaseId)
     expect(error).toBeInstanceOf(Error)
     expect((await readdir(state.rootDir)).filter((name) => name.startsWith('.restore-'))).toEqual([])
   }
@@ -190,6 +206,25 @@ describe('generation restore preserves live desired state on refusal', () => {
     expect(entries.some((name) => name.startsWith('.restore-stage-'))).toBe(true)
     const preserved = await treeBytes(join(state.rootDir, backup!))
     expect(preserved).toEqual(Object.fromEntries(Object.entries(before).filter(([name]) => name.startsWith('feature-lists/'))))
+  })
+
+  it('rolls back published directories if the outer authority commit fails before publication', async () => {
+    fault.mode = 'authority-before'
+    fault.baseRevision = await state.store.getRevision()
+    await expectRefusalWithoutLiveChange()
+    expect(fault.artifactsAtCommit.some(name => name.startsWith('.restore-backup-'))).toBe(true)
+    expect(fault.artifactsAtCommit.some(name => name.startsWith('.restore-stage-'))).toBe(true)
+  })
+
+  it.each(['authority-observe', 'authority-after'])('retains rollback material until the committed lease is proven (%s)', async mode => {
+    fault.mode = mode
+    fault.baseRevision = await state.store.getRevision()
+    const restored = await state.store.restoreGenerationSnapshot(1)
+    expect(restored.accounts[0]?.username).toBe('restoreuser')
+    expect((await state.store.getAuthorityMetadata()).revision).toBe(fault.baseRevision + 1)
+    expect(fault.artifactsAtCommit.some(name => name.startsWith('.restore-backup-'))).toBe(true)
+    expect(fault.artifactsAtCommit.some(name => name.startsWith('.restore-stage-'))).toBe(true)
+    expect((await readdir(state.rootDir)).filter(name => name.startsWith('.restore-'))).toEqual([])
   })
 
   it('normalizes validated data before publication and removes restore artifacts after success', async () => {

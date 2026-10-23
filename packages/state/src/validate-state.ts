@@ -590,6 +590,8 @@ export const validateStateAuthority = (v: unknown): StateAuthorityMetadata => {
     return fail('VALIDATION', 'state authority metadata must be an object')
   }
   const o = v as Record<string, unknown>
+  const committedLeaseId = o.committedLeaseId
+  if (committedLeaseId !== undefined && (typeof committedLeaseId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(committedLeaseId))) fail('VALIDATION', 'committedLeaseId must be a UUID')
   const revision = assertInt(o.revision, 0, Number.MAX_SAFE_INTEGER, 'revision')
   const fencingToken = assertInt(o.fencingToken, 0, Number.MAX_SAFE_INTEGER, 'fencingToken')
   const updatedAt = assertIsoDate(o.updatedAt, 'updatedAt').toISOString()
@@ -633,6 +635,7 @@ export const validateStateAuthority = (v: unknown): StateAuthorityMetadata => {
   }
 
   return {
+    ...(committedLeaseId !== undefined ? { committedLeaseId: committedLeaseId as string } : {}),
     revision,
     fencingToken,
     updatedAt,

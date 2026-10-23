@@ -1,7 +1,8 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomUUID } from 'node:crypto'
-import { lstat, mkdtemp, rename, rm } from 'node:fs/promises'
+import { lstat, mkdtemp, readFile, rename, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import {
   assertAliasTarget,
   assertArgon2Hash,
@@ -200,7 +201,7 @@ export class StateStore {
   readonly writerLock: WriterLock
   private readonly mutex = new AsyncMutex()
   private hooks: StateStoreHooks
-  private activeLease: WriterLease | null = null
+  private readonly operationContext = new AsyncLocalStorage<{ active: boolean }>()
 
   constructor(rootDir: string, hooks: StateStoreHooks = {}, lockOptions: WriterLockOptions = {}) {
     this.rootDir = rootDir
@@ -244,11 +245,12 @@ export class StateStore {
    * Allocates a server-side short ASCII reference (`JOB-000001`, `BKP-000001`, `MIG-000001`, `GEN-000001`)
    * persisted on disk in `authority.json` under the cross-process writer lock (A58).
    */
-  allocateReference(
+  async allocateReference(
     kind: ReferenceKind,
     opts: { entityId?: string; expectedRevision?: number; fencingToken?: number } = {},
   ): Promise<string> {
-    return this.mutex.run(() => this.writerLock.allocateReference(kind, opts))
+    this.assertNotReentrant()
+    return this.mutex.run(() => this.runOperation(() => this.writerLock.allocateReference(kind, opts)))
   }
 
   /**
@@ -259,68 +261,79 @@ export class StateStore {
     return this.writerLock.getAllocatedReference(kind, entityId)
   }
 
-  private async writeStateJson(filePath: string, data: unknown, mode = 0o640): Promise<void> {
-    const lease = this.activeLease
-    await atomicWriteJson(filePath, data, mode, lease ? () => lease.assertFencingToken() : undefined)
+  private assertNotReentrant(): void {
+    if (this.operationContext.getStore()?.active) {
+      fail('PRECONDITION_FAILED', 'a state operation cannot reenter a public snapshot, workspace or mutation')
+    }
   }
 
-  private async removeStatePath(targetPath: string): Promise<boolean> {
-    const lease = this.activeLease
-    return atomicRemove(targetPath, lease ? () => lease.assertFencingToken() : undefined)
+  private runOperation<T>(fn: () => Promise<T>): Promise<T> {
+    const context = { active: true }
+    return this.operationContext.run(context, async () => {
+      try { return await fn() } finally { context.active = false }
+    })
   }
 
-  private withMutationLock<T>(
+  private async writeStateJson(lease: WriterLease, filePath: string, data: unknown, mode = 0o640): Promise<void> {
+    await atomicWriteJson(filePath, data, mode, () => lease.assertFencingToken())
+  }
+
+  private async removeStatePath(lease: WriterLease, targetPath: string): Promise<boolean> {
+    return atomicRemove(targetPath, () => lease.assertFencingToken())
+  }
+
+  private async withMutationLock<T>(
     opts: MutationOptions | undefined,
     fn: (lease: WriterLease) => Promise<T>,
-    internalOpts: { incrementRevision?: boolean; restoreAuthorityOnAbort?: boolean } = {},
+    internalOpts: {
+      incrementRevision?: boolean
+      restoreAuthorityOnAbort?: boolean
+      onAbort?: (lease: WriterLease) => Promise<void>
+      onCommit?: (lease: WriterLease, result: T, authority: StateAuthorityMetadata) => Promise<void>
+    } = {},
   ): Promise<T> {
-    return this.mutex.run(async () => {
+    this.assertNotReentrant()
+    return this.mutex.run(() => this.runOperation(async () => {
       const lease = await this.writerLock.acquire()
-      this.activeLease = lease
       let shouldCommit = true
-      try {
-        if (opts?.fencingToken !== undefined) {
-          await lease.assertFencingToken(opts.fencingToken)
+      let hasResult = false
+      let result!: T
+      const complete = async (authority: StateAuthorityMetadata): Promise<T> => {
+        if (result && typeof result === 'object' && 'checksum' in result && 'uidAllocator' in result && internalOpts.incrementRevision !== false) {
+          ;(result as unknown as StateSnapshot).revision = authority.revision
         }
+        await internalOpts.onCommit?.(lease, result, authority)
+        return result
+      }
+      try {
+        if (opts?.fencingToken !== undefined) await lease.assertFencingToken(opts.fencingToken)
         if (opts?.expectedRevision !== undefined) {
           const expected = assertInt(opts.expectedRevision, 0, Number.MAX_SAFE_INTEGER, 'expectedRevision')
           if (lease.initialAuthority.revision !== expected) {
-            return fail(
-              'CONFLICT',
-              `revision conflict: expected revision ${expected}, current revision is ${lease.initialAuthority.revision}`,
-              { expectedRevision: expected, currentRevision: lease.initialAuthority.revision },
-            )
+            return fail('CONFLICT', 'revision conflict: expected revision ' + expected + ', current revision is ' + lease.initialAuthority.revision,
+              { expectedRevision: expected, currentRevision: lease.initialAuthority.revision })
           }
         }
-        const result = await fn(lease)
-        if (result === false) {
-          shouldCommit = false
-        }
-        if (shouldCommit) {
-          const committedAuth = await lease.commitAuthority({ incrementRevision: internalOpts.incrementRevision !== false })
-          if (
-            result &&
-            typeof result === 'object' &&
-            'checksum' in result &&
-            'uidAllocator' in result &&
-            internalOpts.incrementRevision !== false
-          ) {
-            ;(result as unknown as StateSnapshot).revision = committedAuth.revision
-          }
-        } else if (internalOpts.restoreAuthorityOnAbort) {
-          await lease.restorePreAcquireAuthorityIfUncommitted()
-        }
+        result = await fn(lease)
+        hasResult = true
+        if (result === false) shouldCommit = false
+        if (shouldCommit) return await complete(await lease.commitAuthority({ incrementRevision: internalOpts.incrementRevision !== false }))
+        if (internalOpts.restoreAuthorityOnAbort) await lease.restorePreAcquireAuthorityIfUncommitted()
         return result
-      } catch (err) {
-        if (internalOpts.restoreAuthorityOnAbort) {
-          await lease.restorePreAcquireAuthorityIfUncommitted()
+      } catch (error) {
+        const authority = await lease.assertFencingToken().catch(() => null)
+        if (hasResult && shouldCommit && authority?.committedLeaseId === lease.leaseId) return await complete(authority)
+        if (internalOpts.onAbort) {
+          if (!authority || authority.revision !== lease.initialAuthority.revision) {
+            throw new AggregateError([error], 'state mutation requires recovery; source commit could not be disproved')
+          }
+          try { await internalOpts.onAbort(lease) }
+          catch (failure) { throw new AggregateError([error, failure], 'state mutation rollback requires recovery') }
         }
-        throw err
-      } finally {
-        this.activeLease = null
-        await lease.release()
-      }
-    })
+        if (internalOpts.restoreAuthorityOnAbort) await lease.restorePreAcquireAuthorityIfUncommitted()
+        throw error
+      } finally { await lease.release() }
+    }))
   }
 
   private path(...segments: string[]): string {
@@ -510,26 +523,71 @@ export class StateStore {
    * invariants under a consistent revision boundary. Used by the root agent before rendering
    * and by `xpanel reindex`.
    */
+  private async readSnapshotUnderLease(lease: WriterLease, revision = lease.initialAuthority.revision): Promise<StateSnapshot> {
+    await lease.assertFencingToken()
+    const snapshot = await this.readSnapshotUnlocked(revision)
+    await lease.assertFencingToken()
+    return snapshot
+  }
+
   async readSnapshot(): Promise<StateSnapshot> {
-    if (this.activeLease !== null) {
-      return this.readSnapshotUnlocked(this.activeLease.initialAuthority.revision)
-    }
-    for (let attempt = 0; attempt < 5; attempt++) {
-      await this.writerLock.waitForUnlocked()
-      const beforeAuth = await this.writerLock.readAuthority()
-      const snap = await this.readSnapshotUnlocked(beforeAuth.revision)
-      const holder = await this.writerLock.readLockHolder().catch(() => null)
-      const afterAuth = await this.writerLock.readAuthority()
-      if (
-        holder === null &&
-        afterAuth.revision === beforeAuth.revision &&
-        afterAuth.fencingToken === beforeAuth.fencingToken
-      ) {
-        return snap
+    this.assertNotReentrant()
+    return this.runOperation(async () => {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const before = await this.writerLock.readAuthorityAtBarrier()
+        let outcome: { snapshot: StateSnapshot } | { error: unknown }
+        try { outcome = { snapshot: await this.readSnapshotUnlocked(before.revision) } }
+        catch (error) { outcome = { error } }
+        const after = await this.writerLock.readAuthorityAtBarrier()
+        if (before.revision === after.revision && before.fencingToken === after.fencingToken) {
+          if ('error' in outcome) throw outcome.error
+          return outcome.snapshot
+        }
       }
-    }
-    await this.writerLock.waitForUnlocked()
-    return this.readSnapshotUnlocked()
+      return this.mutex.run(async () => {
+        const lease = await this.writerLock.acquire()
+        try { return await this.readSnapshotUnderLease(lease) }
+        finally { await lease.release() }
+      })
+    })
+  }
+
+  /** Changes the canonical hostname and its wizard projection under one explicit source lease. */
+  commitHostname<T extends { hostname: string; updatedAt: string }>(
+    hostname: string,
+    prepareWizard: (canonical: string, now: string) => Promise<T>,
+  ): Promise<T> {
+    let preimages: { relPath: string; existed: boolean; contentBase64?: string }[] = []
+    let intentRecorded = false
+    return this.withMutationLock(undefined, async lease => {
+      const canonical = validateDomainName(hostname)
+      const serverPath = this.path('server.json')
+      const serverRaw = await readJsonIfExists<unknown>(serverPath)
+      const server = serverRaw === null ? null : validateStoredServer(serverRaw)
+      const now = new Date().toISOString()
+      const prepared = await prepareWizard(canonical, now)
+      if (!prepared || typeof prepared !== 'object' || Array.isArray(prepared)) fail('VALIDATION', 'hostname wizard projection must be an object')
+      const next = { ...prepared, hostname: canonical, updatedAt: now }
+      const paths = ['extended/setup-wizard.json', ...(server ? ['server.json'] : [])]
+      preimages = await Promise.all(paths.map(async relPath => {
+        try { return { relPath, existed: true, contentBase64: (await readFile(this.path(relPath))).toString('base64') } }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { relPath, existed: false }
+          throw error
+        }
+      }))
+      await lease.recordIntent({ op: 'changeHostname', createdRelPaths: [], backups: preimages })
+      intentRecorded = true
+      await this.writeStateJson(lease, this.path('extended/setup-wizard.json'), next)
+      if (server) await this.writeStateJson(lease, serverPath, { ...server, settings: { ...server.settings, hostname: canonical }, updatedAt: now })
+      return next
+    }, {
+      restoreAuthorityOnAbort: true,
+      onAbort: async lease => {
+        if (intentRecorded) await lease.rollbackIntent()
+
+      },
+    })
   }
 
   // ---------------------------------------------------------------- server settings
@@ -540,7 +598,7 @@ export class StateStore {
   }
 
   saveServerSettings(s: ServerSettings, opts?: MutationOptions): Promise<ServerSettings> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const validated = validateServerSettings(s)
       const current = await this.readServerFile()
       const next: StoredServerSettings = {
@@ -548,7 +606,7 @@ export class StateStore {
         setupCompletedAt: current?.setupCompletedAt ?? null,
         updatedAt: new Date().toISOString(),
       }
-      await this.writeStateJson(this.path('server.json'), next)
+      await this.writeStateJson(lease, this.path('server.json'), next)
       return validated
     })
   }
@@ -559,7 +617,7 @@ export class StateStore {
   }
 
   markSetupComplete(opts?: MutationOptions): Promise<void> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const current = await this.readServerFile()
       if (!current) return fail('PRECONDITION_FAILED', 'save the server settings before completing setup')
       const next: StoredServerSettings = {
@@ -567,14 +625,14 @@ export class StateStore {
         setupCompletedAt: current.setupCompletedAt ?? new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       }
-      await this.writeStateJson(this.path('server.json'), next)
+      await this.writeStateJson(lease, this.path('server.json'), next)
     })
   }
 
   // ---------------------------------------------------------------- feature lists
 
   createFeatureList(input: Omit<FeatureList, 'id'>, opts?: MutationOptions): Promise<FeatureList> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (typeof input !== 'object' || input === null) fail('VALIDATION', 'feature list must be an object')
       const fl: FeatureList = {
         id: randomUUID(),
@@ -587,7 +645,7 @@ export class StateStore {
       if (existing.some((x) => x.ownerId === fl.ownerId && x.name.toLowerCase() === fl.name.toLowerCase())) {
         fail('CONFLICT', `feature list "${fl.name}" already exists`, { name: fl.name })
       }
-      await this.writeStateJson(this.path('feature-lists', `${fl.id}.json`), fl)
+      await this.writeStateJson(lease, this.path('feature-lists', `${fl.id}.json`), fl)
       return fl
     })
   }
@@ -605,7 +663,7 @@ export class StateStore {
   }
 
   updateFeatureList(id: Id, patch: Partial<Pick<FeatureList, 'name' | 'disabled'>>, opts?: MutationOptions): Promise<FeatureList> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const fid = assertId(id, 'id')
       const current = mustExist(await this.getFeatureList(fid), 'feature list', id)
       const next: FeatureList = {
@@ -619,13 +677,13 @@ export class StateStore {
           fail('CONFLICT', `feature list "${next.name}" already exists`, { name: next.name })
         }
       }
-      await this.writeStateJson(this.path('feature-lists', `${current.id}.json`), next)
+      await this.writeStateJson(lease, this.path('feature-lists', `${current.id}.json`), next)
       return next
     })
   }
 
   deleteFeatureList(id: Id, opts?: MutationOptions): Promise<boolean> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (!isUuid(id)) return false
       const fid = id.toLowerCase()
       const current = await this.getFeatureList(fid)
@@ -634,7 +692,7 @@ export class StateStore {
       if (plans.some((p) => p.featureListId === fid)) {
         fail('CONFLICT', 'feature list is in use by a plan', { id: fid })
       }
-      return this.removeStatePath(this.path('feature-lists', `${fid}.json`))
+      return this.removeStatePath(lease, this.path('feature-lists', `${fid}.json`))
     })
   }
 
@@ -646,7 +704,7 @@ export class StateStore {
   }
 
   createPlan(input: NewPlan, opts?: MutationOptions): Promise<Plan> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const plan = validatePlanFile({ ...input, id: randomUUID() })
       if (plan.ownerId !== null) mustExist(await this.getResellerUnlocked(plan.ownerId), 'reseller', plan.ownerId)
       await this.assertFeatureListUsable(plan)
@@ -654,7 +712,7 @@ export class StateStore {
       if (all.some((x) => x.ownerId === plan.ownerId && x.name.toLowerCase() === plan.name.toLowerCase())) {
         fail('CONFLICT', `plan "${plan.name}" already exists`, { name: plan.name })
       }
-      await this.writeStateJson(this.path('plans', `${plan.id}.json`), plan)
+      await this.writeStateJson(lease, this.path('plans', `${plan.id}.json`), plan)
       return plan
     })
   }
@@ -672,7 +730,7 @@ export class StateStore {
   }
 
   updatePlan(id: Id, patch: PlanPatch, opts?: MutationOptions): Promise<Plan> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const pid = assertId(id, 'id')
       const current = mustExist(await this.getPlan(pid), 'plan', id)
       if (typeof patch !== 'object' || patch === null) fail('VALIDATION', 'plan patch must be an object')
@@ -694,7 +752,7 @@ export class StateStore {
       }
       if (next.featureListId !== current.featureListId) await this.assertFeatureListUsable(next)
       await this.assertResellersStillFit(next)
-      await this.writeStateJson(this.path('plans', `${current.id}.json`), next)
+      await this.writeStateJson(lease, this.path('plans', `${current.id}.json`), next)
       return next
     })
   }
@@ -706,7 +764,7 @@ export class StateStore {
   }
 
   deletePlan(id: Id, opts?: MutationOptions): Promise<boolean> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (!isUuid(id)) return false
       const pid = id.toLowerCase()
       const current = await this.getPlan(pid)
@@ -715,7 +773,7 @@ export class StateStore {
       if (accounts.some((a) => a.planId === pid)) {
         fail('CONFLICT', 'plan is in use by an account', { id: pid })
       }
-      return this.removeStatePath(this.path('plans', `${pid}.json`))
+      return this.removeStatePath(lease, this.path('plans', `${pid}.json`))
     })
   }
 
@@ -728,7 +786,7 @@ export class StateStore {
   }
 
   createReseller(input: NewReseller, opts?: MutationOptions): Promise<Reseller> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const username = validateUsername(input.username)
       const passwordHash = assertArgon2Hash(input.passwordHash)
       const forcePasswordChange = input.forcePasswordChange === undefined ? false : assertBool(input.forcePasswordChange, 'forcePasswordChange')
@@ -752,7 +810,7 @@ export class StateStore {
       if (this.hooks.onCreateResellerPrincipal) {
         await this.hooks.onCreateResellerPrincipal({ id, username, passwordHash, forcePasswordChange })
       }
-      await this.writeStateJson(this.path('resellers', `${reseller.id}.json`), reseller)
+      await this.writeStateJson(lease, this.path('resellers', `${reseller.id}.json`), reseller)
       return reseller
     })
   }
@@ -773,7 +831,7 @@ export class StateStore {
   }
 
   updateReseller(id: Id, patch: ResellerPatch, opts?: MutationOptions): Promise<Reseller> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const current = mustExist(await this.getResellerUnlocked(id), 'reseller', id)
       const next = validateResellerFile({
         ...current,
@@ -785,13 +843,13 @@ export class StateStore {
         delegatedIps: patch.delegatedIps === undefined ? current.delegatedIps : assertDelegatedIps(patch.delegatedIps),
         oversell: patch.oversell === undefined ? current.oversell : assertBool(patch.oversell, 'oversell'),
       })
-      await this.writeStateJson(this.path('resellers', `${current.id}.json`), next)
+      await this.writeStateJson(lease, this.path('resellers', `${current.id}.json`), next)
       return next
     })
   }
 
   deleteReseller(id: Id, opts?: MutationOptions): Promise<boolean> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (!isUuid(id)) return false
       const rid = id.toLowerCase()
       const current = await this.getResellerUnlocked(rid)
@@ -802,13 +860,13 @@ export class StateStore {
       }
       const plans = await this.readPlanFiles()
       for (const p of plans.filter((x) => x.ownerId === rid)) {
-        await this.removeStatePath(this.path('plans', `${p.id}.json`))
+        await this.removeStatePath(lease, this.path('plans', `${p.id}.json`))
       }
       const lists = await this.readFeatureListFiles()
       for (const fl of lists.filter((x) => x.ownerId === rid)) {
-        await this.removeStatePath(this.path('feature-lists', `${fl.id}.json`))
+        await this.removeStatePath(lease, this.path('feature-lists', `${fl.id}.json`))
       }
-      await this.removeStatePath(this.path('resellers', `${rid}.json`))
+      await this.removeStatePath(lease, this.path('resellers', `${rid}.json`))
       if (this.hooks.onDeleteReseller) await this.hooks.onDeleteReseller(rid)
       return true
     })
@@ -883,7 +941,7 @@ export class StateStore {
     return false
   }
 
-  private async allocateUidUnlocked(username: string): Promise<number> {
+  private async allocateUidUnlocked(lease: WriterLease, username: string): Promise<number> {
     const validUser = validateUsername(username)
     const [state, existingAccounts] = await Promise.all([
       this.readUidAllocatorFile(),
@@ -920,12 +978,12 @@ export class StateStore {
       nextUid: uid + 1,
       allocated: [...newlyAllocated, { uid, username: validUser, allocatedAt: now }],
     }
-    await this.writeStateJson(this.path('uid-allocator.json'), next)
+    await this.writeStateJson(lease, this.path('uid-allocator.json'), next)
     return uid
   }
 
   allocateUid(username: string, opts?: MutationOptions): Promise<number> {
-    return this.withMutationLock(opts, () => this.allocateUidUnlocked(username), { incrementRevision: false })
+    return this.withMutationLock(opts, (lease) => this.allocateUidUnlocked(lease, username), { incrementRevision: false })
   }
 
   async maxAllocatedUid(): Promise<number | null> {
@@ -1017,7 +1075,7 @@ export class StateStore {
 
       // Allocate UID now: if the username clashes with an existing account or reseller login,
       // the UID remains burnt in uid-allocator.json and the rest is rolled back.
-      const uid = await this.allocateUidUnlocked(username)
+      const uid = await this.allocateUidUnlocked(lease, username)
       const [accounts, resellers] = await Promise.all([this.readAllAccountsUnlocked(), this.readResellerFiles()])
       if (
         accounts.some((a) => a.username.toLowerCase() === username.toLowerCase()) ||
@@ -1073,7 +1131,7 @@ export class StateStore {
         await this.hooks.onCreateUserPrincipal({ accountId: account.id, username, passwordHash, forcePasswordChange })
       }
       try {
-        await this.writeStateJson(join(this.accountDir(username), 'domains', `${primaryDomain}.json`), domain)
+        await this.writeStateJson(lease, join(this.accountDir(username), 'domains', `${primaryDomain}.json`), domain)
         if (this.hooks.onBeforeAccountCommit) {
           await this.hooks.onBeforeAccountCommit({
             accountId: account.id,
@@ -1082,9 +1140,9 @@ export class StateStore {
             fencingToken: lease.fencingToken,
           })
         }
-        await this.writeStateJson(join(this.accountDir(username), 'account.json'), account)
+        await this.writeStateJson(lease, join(this.accountDir(username), 'account.json'), account)
       } catch (e) {
-        await atomicRemove(this.accountDir(username)).catch(() => undefined)
+        await this.removeStatePath(lease, this.accountDir(username)).catch(() => undefined)
         if (this.hooks.onDeleteAccount) await this.hooks.onDeleteAccount(account.id)
         throw e
       }
@@ -1123,12 +1181,13 @@ export class StateStore {
    * This bounded projection neither caches authorization nor scans unrelated service state.
    * A real lease also avoids authority ABA during an aborted state restore.
    */
-  readAccountWorkspace(id: Id, hint?: { username: string }): Promise<{
+  async readAccountWorkspace(id: Id, hint?: { username: string }): Promise<{
     account: Account | null
     plan: Plan | null
     featureList: FeatureList | null
   }> {
-    return this.mutex.run(async () => {
+    this.assertNotReentrant()
+    return this.mutex.run(() => this.runOperation(async () => {
       const lease = await this.writerLock.acquire()
       try {
         await lease.assertFencingToken()
@@ -1142,7 +1201,7 @@ export class StateStore {
       } finally {
         await lease.release()
       }
-    })
+    }))
   }
 
   async getAccountByUsername(username: string): Promise<Account | null> {
@@ -1174,7 +1233,7 @@ export class StateStore {
   }
 
   suspendAccount(id: Id, reason: string, opts?: MutationOptions): Promise<Account> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const aid = assertId(id, 'id')
       const r = assertLine(reason, 512, 'suspend reason', { allowEmpty: false })
       const current = mustExist(await this.findStoredAccountById(aid), 'account', id)
@@ -1182,36 +1241,36 @@ export class StateStore {
         fail('PRECONDITION_FAILED', `cannot suspend an account that is ${current.status}`, { id, status: current.status })
       }
       const next: StoredAccount = { ...current, status: 'suspended', suspendReason: r, suspendedAt: new Date().toISOString() }
-      await this.writeStateJson(join(this.accountDir(current.username), 'account.json'), next)
+      await this.writeStateJson(lease, join(this.accountDir(current.username), 'account.json'), next)
       return toPublicAccount(next)
     })
   }
 
   unsuspendAccount(id: Id, opts?: MutationOptions): Promise<Account> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const aid = assertId(id, 'id')
       const current = mustExist(await this.findStoredAccountById(aid), 'account', id)
       if (current.status !== 'suspended') {
         fail('PRECONDITION_FAILED', `cannot unsuspend an account that is ${current.status}`, { id, status: current.status })
       }
       const next: StoredAccount = { ...current, status: 'active', suspendReason: null, suspendedAt: null }
-      await this.writeStateJson(join(this.accountDir(current.username), 'account.json'), next)
+      await this.writeStateJson(lease, join(this.accountDir(current.username), 'account.json'), next)
       return toPublicAccount(next)
     })
   }
 
   markTerminating(id: Id, opts?: MutationOptions): Promise<Account> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const aid = assertId(id, 'id')
       const current = mustExist(await this.findStoredAccountById(aid), 'account', id)
       const next: StoredAccount = { ...current, status: 'terminating', suspendReason: null, suspendedAt: null }
-      await this.writeStateJson(join(this.accountDir(current.username), 'account.json'), next)
+      await this.writeStateJson(lease, join(this.accountDir(current.username), 'account.json'), next)
       return toPublicAccount(next)
     })
   }
 
   deleteAccount(id: Id, opts?: MutationOptions): Promise<boolean> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (!isUuid(id)) return false
       const current = await this.findStoredAccountById(id)
       if (!current) return false
@@ -1221,20 +1280,20 @@ export class StateStore {
       // Remove account certificates and zones
       const certs = await this.readCertificateFiles()
       for (const c of certs.filter((x) => x.accountId === current.id)) {
-        await this.removeStatePath(this.path('certificates', `${c.id}.json`))
+        await this.removeStatePath(lease, this.path('certificates', `${c.id}.json`))
       }
       const zones = await this.readZoneFiles()
       for (const z of zones.filter((x) => x.accountId === current.id)) {
-        await this.removeStatePath(this.path('zones', `${z.name}.json`))
+        await this.removeStatePath(lease, this.path('zones', `${z.name}.json`))
       }
-      await this.removeStatePath(this.accountDir(current.username))
+      await this.removeStatePath(lease, this.accountDir(current.username))
       if (this.hooks.onDeleteAccount) await this.hooks.onDeleteAccount(current.id)
       return true
     })
   }
 
   changePlan(id: Id, planId: Id, opts?: MutationOptions): Promise<Account> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const account = await this.lockStoredAccount(id)
       const plan = mustExist(await this.getPlan(assertId(planId, 'planId')), 'plan', planId)
       if (plan.id === account.planId) return toPublicAccount(account)
@@ -1247,13 +1306,13 @@ export class StateStore {
         await this.assertResellerHasRoom(account.ownerId, plan, { isNewAccount: false, exceptAccountId: account.id })
       }
       const next: StoredAccount = { ...account, planId: plan.id }
-      await this.writeStateJson(join(this.accountDir(account.username), 'account.json'), next)
+      await this.writeStateJson(lease, join(this.accountDir(account.username), 'account.json'), next)
       return toPublicAccount(next)
     })
   }
 
   changeOwner(id: Id, ownerId: Id | null, opts?: MutationOptions): Promise<Account> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const account = await this.lockStoredAccount(id)
       const nextOwner = assertIdOrNull(ownerId, 'ownerId')
       if (nextOwner === account.ownerId) return toPublicAccount(account)
@@ -1263,7 +1322,7 @@ export class StateStore {
         await this.assertResellerHasRoom(nextOwner, plan, { isNewAccount: true, exceptAccountId: account.id })
       }
       const next: StoredAccount = { ...account, ownerId: nextOwner }
-      await this.writeStateJson(join(this.accountDir(account.username), 'account.json'), next)
+      await this.writeStateJson(lease, join(this.accountDir(account.username), 'account.json'), next)
       return toPublicAccount(next)
     })
   }
@@ -1273,7 +1332,7 @@ export class StateStore {
     patch: { contactEmail?: string; ipv4?: string; ipv6?: string | null; extraIps?: string[]; shell?: ShellAccess },
     opts?: MutationOptions,
   ): Promise<Account> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const aid = assertId(id, 'id')
       const current = mustExist(await this.findStoredAccountById(aid), 'account', id)
       const next: StoredAccount = {
@@ -1284,7 +1343,7 @@ export class StateStore {
         ...(patch.extraIps !== undefined && { extraIps: validateIpList(patch.extraIps, 'extraIps') }),
         ...(patch.shell !== undefined && { shell: oneOf(patch.shell, SHELLS, 'shell') }),
       }
-      await this.writeStateJson(join(this.accountDir(current.username), 'account.json'), next)
+      await this.writeStateJson(lease, join(this.accountDir(current.username), 'account.json'), next)
       return toPublicAccount(next)
     })
   }
@@ -1310,7 +1369,7 @@ export class StateStore {
   }
 
   createDomain(input: NewDomain, opts?: MutationOptions): Promise<Domain> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (typeof input !== 'object' || input === null) fail('VALIDATION', 'domain must be an object')
       const kind = oneOf(input.kind, KINDS, 'kind')
       if (kind === 'primary') fail('VALIDATION', 'the primary domain is created with the account; rename it instead')
@@ -1363,7 +1422,7 @@ export class StateStore {
         },
         { account, plan, reservedLoopbackPorts: reserved },
       )
-      await this.writeStateJson(join(this.accountDir(account.username), 'domains', `${domain.name}.json`), domain)
+      await this.writeStateJson(lease, join(this.accountDir(account.username), 'domains', `${domain.name}.json`), domain)
       return domain
     })
   }
@@ -1389,7 +1448,7 @@ export class StateStore {
   }
 
   updateDomain(id: Id, patch: DomainPatch, opts?: MutationOptions): Promise<Domain> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (typeof patch !== 'object' || patch === null) fail('VALIDATION', 'domain patch must be an object')
       const did = assertId(id, 'id')
       const allDomains = await this.readAllDomainsUnlocked()
@@ -1418,11 +1477,11 @@ export class StateStore {
         },
         { account, plan, reservedLoopbackPorts: reserved },
       )
-      await this.writeStateJson(join(this.accountDir(account.username), 'domains', `${next.name}.json`), next)
+      await this.writeStateJson(lease, join(this.accountDir(account.username), 'domains', `${next.name}.json`), next)
       if (patch.docRoot !== undefined && next.docRoot !== current.docRoot) {
         for (const alias of allDomains.filter((d) => d.parentId === current.id && d.kind === 'alias')) {
           const updatedAlias: Domain = { ...alias, docRoot: next.docRoot }
-          await this.writeStateJson(join(this.accountDir(account.username), 'domains', `${alias.name}.json`), updatedAlias)
+          await this.writeStateJson(lease, join(this.accountDir(account.username), 'domains', `${alias.name}.json`), updatedAlias)
         }
       }
       return next
@@ -1430,7 +1489,7 @@ export class StateStore {
   }
 
   renameDomain(id: Id, newName: string, opts?: MutationOptions): Promise<Domain> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const name = validateDomainName(newName)
       const did = assertId(id, 'id')
       const allDomains = await this.readAllDomainsUnlocked()
@@ -1471,13 +1530,13 @@ export class StateStore {
       for (const m of moves) {
         toRemove.delete(m.to)
         const dom = mustExist(byId.get(m.id), 'domain', m.id)
-        await this.writeStateJson(join(domDir, `${m.to}.json`), { ...dom, name: m.to })
+        await this.writeStateJson(lease, join(domDir, `${m.to}.json`), { ...dom, name: m.to })
       }
       for (const oldFile of toRemove) {
-        await this.removeStatePath(join(domDir, `${oldFile}.json`))
+        await this.removeStatePath(lease, join(domDir, `${oldFile}.json`))
       }
       if (current.kind === 'primary') {
-        await this.writeStateJson(join(this.accountDir(account.username), 'account.json'), { ...account, primaryDomain: name })
+        await this.writeStateJson(lease, join(this.accountDir(account.username), 'account.json'), { ...account, primaryDomain: name })
       }
       // Update any service users whose domain was renamed
       const domainsById = new Map(
@@ -1490,14 +1549,14 @@ export class StateStore {
       const userFiles = await listJsonFiles(join(this.accountDir(account.username), 'users'))
       for (const uf of userFiles) {
         const u = validateServiceUserFile(await readJsonIfExists(uf), { account, plan, domainsById })
-        await this.writeStateJson(uf, u)
+        await this.writeStateJson(lease, uf, u)
       }
       return { ...current, name }
     })
   }
 
   deleteDomain(id: Id, opts?: MutationOptions): Promise<boolean> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (!isUuid(id)) return false
       const did = id.toLowerCase()
       const allDomains = await this.readAllDomainsUnlocked()
@@ -1517,14 +1576,14 @@ export class StateStore {
         }
       }
       for (const d of allDomains.filter((x) => toDelete.has(x.id))) {
-        await this.removeStatePath(join(this.accountDir(account.username), 'domains', `${d.name}.json`))
-        await this.removeStatePath(join(this.accountDir(account.username), 'userdata', `${d.id}.json`)).catch(() => false)
+        await this.removeStatePath(lease, join(this.accountDir(account.username), 'domains', `${d.name}.json`))
+        await this.removeStatePath(lease, join(this.accountDir(account.username), 'userdata', `${d.id}.json`)).catch(() => false)
       }
       // Cascade service users on deleted domains
       const userFiles = await listJsonFiles(join(this.accountDir(account.username), 'users'))
       for (const uf of userFiles) {
         const raw = await readJsonIfExists<{ domainId?: string }>(uf)
-        if (raw?.domainId && toDelete.has(raw.domainId)) await this.removeStatePath(uf)
+        if (raw?.domainId && toDelete.has(raw.domainId)) await this.removeStatePath(lease, uf)
       }
       return true
     })
@@ -1569,7 +1628,7 @@ export class StateStore {
   }
 
   createServiceUser(input: NewServiceUser, opts?: MutationOptions): Promise<ServiceUser> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (typeof input !== 'object' || input === null) fail('VALIDATION', 'service user must be an object')
       const { local, domain: domainName } = parseServiceLogin(input.login)
       const passwordHash = assertServiceHash(input.passwordHash)
@@ -1600,7 +1659,7 @@ export class StateStore {
         { account, plan, domainsById },
       )
       this.assertServiceCaps(existing, plan, stored.services, null)
-      await this.writeStateJson(join(this.accountDir(account.username), 'users', `${stored.id}.json`), stored)
+      await this.writeStateJson(lease, join(this.accountDir(account.username), 'users', `${stored.id}.json`), stored)
       return toPublicServiceUser(stored)
     })
   }
@@ -1638,7 +1697,7 @@ export class StateStore {
   }
 
   updateServiceUser(id: Id, patch: ServiceUserPatch, opts?: MutationOptions): Promise<ServiceUser> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (typeof patch !== 'object' || patch === null) fail('VALIDATION', 'service user patch must be an object')
       const uid = assertId(id, 'id')
       const allUsers = await this.readAllServiceUsersUnlocked()
@@ -1661,19 +1720,19 @@ export class StateStore {
         const accountUsers = allUsers.filter((u) => u.accountId === account.id)
         this.assertServiceCaps(accountUsers, plan, next.services, current.services)
       }
-      await this.writeStateJson(join(this.accountDir(account.username), 'users', `${current.id}.json`), next)
+      await this.writeStateJson(lease, join(this.accountDir(account.username), 'users', `${current.id}.json`), next)
       return toPublicServiceUser(next)
     })
   }
 
   deleteServiceUser(id: Id, opts?: MutationOptions): Promise<boolean> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (!isUuid(id)) return false
       const uid = id.toLowerCase()
       const current = (await this.readAllServiceUsersUnlocked()).find((u) => u.id === uid)
       if (!current) return false
       const account = mustExist(await this.findStoredAccountById(current.accountId), 'account', current.accountId)
-      return this.removeStatePath(join(this.accountDir(account.username), 'users', `${current.id}.json`))
+      return this.removeStatePath(lease, join(this.accountDir(account.username), 'users', `${current.id}.json`))
     })
   }
 
@@ -1708,7 +1767,7 @@ export class StateStore {
   }
 
   createDatabase(input: { accountId: Id; name: string }, opts?: MutationOptions): Promise<Database> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const account = await this.lockStoredAccount(input.accountId)
       const name = assertDbNameOwned(account.username, input.name)
       const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
@@ -1725,7 +1784,7 @@ export class StateStore {
         name,
         trashedAt: null,
       }
-      await this.writeStateJson(join(this.accountDir(account.username), 'databases', `${db.name}.json`), db)
+      await this.writeStateJson(lease, join(this.accountDir(account.username), 'databases', `${db.name}.json`), db)
       return db
     })
   }
@@ -1745,18 +1804,18 @@ export class StateStore {
   }
 
   trashDatabase(id: Id, opts?: MutationOptions): Promise<Database> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const did = assertId(id, 'id')
       const entry = mustExist((await this.readAllDatabasesUnlocked()).find((x) => x.db.id === did), 'database', id)
       if (entry.db.trashedAt !== null) return entry.db
       const next: Database = { ...entry.db, trashedAt: new Date().toISOString() }
-      await this.writeStateJson(join(this.accountDir(entry.username), 'databases', `${next.name}.json`), next)
+      await this.writeStateJson(lease, join(this.accountDir(entry.username), 'databases', `${next.name}.json`), next)
       return next
     })
   }
 
   restoreDatabase(id: Id, opts?: MutationOptions): Promise<Database> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const did = assertId(id, 'id')
       const allDbs = await this.readAllDatabasesUnlocked()
       const entry = mustExist(allDbs.find((x) => x.db.id === did), 'database', id)
@@ -1766,7 +1825,7 @@ export class StateStore {
       const liveCount = allDbs.filter((x) => x.db.accountId === account.id && x.db.trashedAt === null).length
       assertCapAvailable(plan, { databases: liveCount }, 'databases')
       const next: Database = { ...entry.db, trashedAt: null }
-      await this.writeStateJson(join(this.accountDir(entry.username), 'databases', `${next.name}.json`), next)
+      await this.writeStateJson(lease, join(this.accountDir(entry.username), 'databases', `${next.name}.json`), next)
       return next
     })
   }
@@ -1779,7 +1838,7 @@ export class StateStore {
   }
 
   purgeDatabase(id: Id, opts?: MutationOptions): Promise<boolean> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (!isUuid(id)) return false
       const did = id.toLowerCase()
       const entry = (await this.readAllDatabasesUnlocked()).find((x) => x.db.id === did)
@@ -1793,15 +1852,15 @@ export class StateStore {
             ...u.user,
             grants: u.user.grants.filter((g) => g.databaseId !== did),
           }
-          await this.writeStateJson(join(this.accountDir(u.username), 'db-users', `${u.user.name}.json`), updated)
+          await this.writeStateJson(lease, join(this.accountDir(u.username), 'db-users', `${u.user.name}.json`), updated)
         }
       }
-      return this.removeStatePath(join(this.accountDir(entry.username), 'databases', `${entry.db.name}.json`))
+      return this.removeStatePath(lease, join(this.accountDir(entry.username), 'databases', `${entry.db.name}.json`))
     })
   }
 
   createDatabaseUser(input: NewDatabaseUser, opts?: MutationOptions): Promise<DatabaseUser> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const account = await this.lockStoredAccount(input.accountId)
       const owned = assertDbNameOwned(account.username, input.name)
       const name = dbUserName(account.username, owned.slice(account.username.length + 1))
@@ -1817,7 +1876,7 @@ export class StateStore {
         ...auth,
         grants: [],
       }
-      await this.writeStateJson(join(this.accountDir(account.username), 'db-users', `${stored.name}.json`), stored)
+      await this.writeStateJson(lease, join(this.accountDir(account.username), 'db-users', `${stored.name}.json`), stored)
       return toPublicDatabaseUser(stored)
     })
   }
@@ -1843,17 +1902,17 @@ export class StateStore {
     authPlugin?: 'mysql_native_password' | 'ed25519',
     opts?: MutationOptions,
   ): Promise<void> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const uid = assertId(id, 'id')
       const auth = assertDbAuth(authPlugin, authString)
       const entry = mustExist((await this.readAllDatabaseUsersUnlocked()).find((x) => x.user.id === uid), 'database user', id)
       const next: StoredDatabaseUser = { ...entry.user, ...auth }
-      await this.writeStateJson(join(this.accountDir(entry.username), 'db-users', `${next.name}.json`), next)
+      await this.writeStateJson(lease, join(this.accountDir(entry.username), 'db-users', `${next.name}.json`), next)
     })
   }
 
   setGrant(input: { databaseUserId: Id; databaseId: Id; privileges: string[] }, opts?: MutationOptions): Promise<DatabaseUser> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const userId = assertId(input.databaseUserId, 'databaseUserId')
       const databaseId = assertId(input.databaseId, 'databaseId')
       const privileges = assertDbPrivileges(input.privileges)
@@ -1866,13 +1925,13 @@ export class StateStore {
         { databaseId, privileges },
       ].sort((a, b) => a.databaseId.localeCompare(b.databaseId))
       const next: StoredDatabaseUser = { ...userEntry.user, grants }
-      await this.writeStateJson(join(this.accountDir(userEntry.username), 'db-users', `${next.name}.json`), next)
+      await this.writeStateJson(lease, join(this.accountDir(userEntry.username), 'db-users', `${next.name}.json`), next)
       return toPublicDatabaseUser(next)
     })
   }
 
   revokeGrant(databaseUserId: Id, databaseId: Id, opts?: MutationOptions): Promise<boolean> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (!isUuid(databaseUserId) || !isUuid(databaseId)) return false
       const uid = databaseUserId.toLowerCase()
       const did = databaseId.toLowerCase()
@@ -1882,25 +1941,25 @@ export class StateStore {
         ...userEntry.user,
         grants: userEntry.user.grants.filter((g) => g.databaseId !== did),
       }
-      await this.writeStateJson(join(this.accountDir(userEntry.username), 'db-users', `${next.name}.json`), next)
+      await this.writeStateJson(lease, join(this.accountDir(userEntry.username), 'db-users', `${next.name}.json`), next)
       return true
     })
   }
 
   deleteDatabaseUser(id: Id, opts?: MutationOptions): Promise<boolean> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (!isUuid(id)) return false
       const uid = id.toLowerCase()
       const entry = (await this.readAllDatabaseUsersUnlocked()).find((x) => x.user.id === uid)
       if (!entry) return false
-      return this.removeStatePath(join(this.accountDir(entry.username), 'db-users', `${entry.user.name}.json`))
+      return this.removeStatePath(lease, join(this.accountDir(entry.username), 'db-users', `${entry.user.name}.json`))
     })
   }
 
   // ---------------------------------------------------------------- certificates, DNS zones & cron jobs
 
   createCertificate(input: NewCertificate, opts?: MutationOptions): Promise<StoredCertificate> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const cert = validateCertificateFile({
         ...input,
         id: input.id ?? randomUUID(),
@@ -1913,7 +1972,7 @@ export class StateStore {
         renewedAt: null,
       })
       if (cert.accountId !== null) mustExist(await this.findStoredAccountById(cert.accountId), 'account', cert.accountId)
-      await this.writeStateJson(this.path('certificates', `${cert.id}.json`), cert)
+      await this.writeStateJson(lease, this.path('certificates', `${cert.id}.json`), cert)
       return cert
     })
   }
@@ -1931,7 +1990,7 @@ export class StateStore {
   }
 
   deleteCertificate(id: Id, opts?: MutationOptions): Promise<boolean> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (!isUuid(id)) return false
       const cid = id.toLowerCase()
       // Unset certificateId on any domain using it
@@ -1940,18 +1999,18 @@ export class StateStore {
       for (const d of domains.filter((x) => x.certificateId === cid)) {
         const acc = accById.get(d.accountId)
         if (acc) {
-          await this.writeStateJson(join(this.accountDir(acc.username), 'domains', `${d.name}.json`), { ...d, certificateId: null })
+          await this.writeStateJson(lease, join(this.accountDir(acc.username), 'domains', `${d.name}.json`), { ...d, certificateId: null })
         }
       }
-      return this.removeStatePath(this.path('certificates', `${cid}.json`))
+      return this.removeStatePath(lease, this.path('certificates', `${cid}.json`))
     })
   }
 
   saveDnsZone(zone: DnsZoneState, opts?: MutationOptions): Promise<DnsZoneState> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const validated = validateDnsZoneFile(zone)
       if (validated.accountId !== null) mustExist(await this.findStoredAccountById(validated.accountId), 'account', validated.accountId)
-      await this.writeStateJson(this.path('zones', `${validated.name}.json`), validated)
+      await this.writeStateJson(lease, this.path('zones', `${validated.name}.json`), validated)
       return validated
     })
   }
@@ -1974,23 +2033,23 @@ export class StateStore {
   }
 
   deleteDnsZone(name: string, opts?: MutationOptions): Promise<boolean> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       let canonical: string
       try {
         canonical = validateDomainName(name)
       } catch {
         return false
       }
-      return this.removeStatePath(this.path('zones', `${canonical}.json`))
+      return this.removeStatePath(lease, this.path('zones', `${canonical}.json`))
     })
   }
 
   saveCronJobs(accountId: Id, jobs: CronJobState[], opts?: MutationOptions): Promise<CronJobState[]> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const account = await this.lockStoredAccount(accountId)
       if (!Array.isArray(jobs)) fail('VALIDATION', 'jobs must be an array')
       const validated = jobs.map((j) => validateCronJob({ ...j, accountId: account.id }, account.id))
-      await this.writeStateJson(join(this.accountDir(account.username), 'cron.json'), validated)
+      await this.writeStateJson(lease, join(this.accountDir(account.username), 'cron.json'), validated)
       return validated
     })
   }
@@ -2013,7 +2072,7 @@ export class StateStore {
     },
     opts?: MutationOptions,
   ): Promise<DomainCustomConfig> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (typeof input !== 'object' || input === null) fail('VALIDATION', 'custom config must be an object')
       const did = assertId(input.domainId, 'domainId')
       const allDomains = await this.readAllDomainsUnlocked()
@@ -2032,7 +2091,7 @@ export class StateStore {
         },
         { account, domainsById },
       )
-      await this.writeStateJson(join(this.accountDir(account.username), 'userdata', `${domain.id}.json`), validated)
+      await this.writeStateJson(lease, join(this.accountDir(account.username), 'userdata', `${domain.id}.json`), validated)
       return validated
     })
   }
@@ -2067,7 +2126,7 @@ export class StateStore {
   }
 
   deleteDomainCustomConfig(domainId: Id, opts?: MutationOptions): Promise<boolean> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (!isUuid(domainId)) return false
       const did = domainId.toLowerCase()
       const allDomains = await this.readAllDomainsUnlocked()
@@ -2075,7 +2134,7 @@ export class StateStore {
       if (!domain) return false
       const account = await this.findStoredAccountById(domain.accountId)
       if (!account) return false
-      return this.removeStatePath(join(this.accountDir(account.username), 'userdata', `${domain.id}.json`))
+      return this.removeStatePath(lease, join(this.accountDir(account.username), 'userdata', `${domain.id}.json`))
     })
   }
 
@@ -2086,7 +2145,7 @@ export class StateStore {
   }
 
   saveServerIp(input: Omit<ServerIpEntry, 'id'> & { id?: Id }, opts?: MutationOptions): Promise<ServerIpEntry> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (typeof input !== 'object' || input === null) fail('VALIDATION', 'server IP entry must be an object')
       const current = await this.readIpPoolFile()
       const entry = validateServerIpEntry({
@@ -2098,19 +2157,19 @@ export class StateStore {
         fail('CONFLICT', `IP address "${entry.address}" is already in the pool`, { address: entry.address })
       }
       const next = [...current.filter((e) => e.id !== entry.id), entry].sort((a, b) => a.address.localeCompare(b.address))
-      await this.writeStateJson(this.path('ip-pool.json'), next)
+      await this.writeStateJson(lease, this.path('ip-pool.json'), next)
       return entry
     })
   }
 
   deleteServerIp(id: Id, opts?: MutationOptions): Promise<boolean> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       if (!isUuid(id)) return false
       const targetId = id.toLowerCase()
       const current = await this.readIpPoolFile()
       if (!current.some((e) => e.id === targetId)) return false
       const next = current.filter((e) => e.id !== targetId)
-      await this.writeStateJson(this.path('ip-pool.json'), next)
+      await this.writeStateJson(lease, this.path('ip-pool.json'), next)
       return true
     })
   }
@@ -2120,9 +2179,9 @@ export class StateStore {
   }
 
   saveMailIpConfig(input: MailIpConfig, opts?: MutationOptions): Promise<MailIpConfig> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const validated = validateMailIpConfig(input)
-      await this.writeStateJson(this.path('mail-ips.json'), validated)
+      await this.writeStateJson(lease, this.path('mail-ips.json'), validated)
       return validated
     })
   }
@@ -2170,12 +2229,12 @@ export class StateStore {
     fn: (state: FirewallState, g: FirewallGuard) => Promise<{ next: FirewallState; result: T }>,
     opts?: MutationOptions,
   ): Promise<T> {
-    return this.withMutationLock(opts, async () => {
+    return this.withMutationLock(opts, async (lease) => {
       const g = this.assertGuard(guard)
       const current = await this.readFirewallFile()
       const { next, result } = await fn(current, g)
       if (result !== false) {
-        await this.writeStateJson(this.path('firewall.json'), { ...next, updatedAt: new Date().toISOString() })
+        await this.writeStateJson(lease, this.path('firewall.json'), { ...next, updatedAt: new Date().toISOString() })
       }
       return result
     })
@@ -2340,9 +2399,9 @@ export class StateStore {
             snap.revision = lease.initialAuthority.revision
           }
         } else {
-          snap = await this.readSnapshotUnlocked(lease.initialAuthority.revision)
+          snap = await this.readSnapshotUnderLease(lease)
         }
-        await this.writeStateJson(this.path('generations', `${id}.json`), snap)
+        await this.writeStateJson(lease, this.path('generations', `${id}.json`), snap)
         return snap
       },
       { incrementRevision: false, restoreAuthorityOnAbort: true },
@@ -2452,30 +2511,30 @@ export class StateStore {
     return { ...normalized, checksum: checksumStateTree(normalized) }
   }
 
-  private async writeRestoreTree(root: string, snap: StateSnapshot): Promise<void> {
+  private async writeRestoreTree(lease: WriterLease, root: string, snap: StateSnapshot): Promise<void> {
     const path = (...parts: string[]) => join(root, ...parts)
-    if (snap.server) await this.writeStateJson(path('server.json'), snap.server)
-    await this.writeStateJson(path('firewall.json'), snap.firewall)
-    await this.writeStateJson(path('uid-allocator.json'), snap.uidAllocator)
-    for (const feature of snap.featureLists) await this.writeStateJson(path('feature-lists', `${feature.id}.json`), feature)
-    for (const plan of snap.plans) await this.writeStateJson(path('plans', `${plan.id}.json`), plan)
-    for (const reseller of snap.resellers) await this.writeStateJson(path('resellers', `${reseller.id}.json`), reseller)
-    for (const certificate of snap.certificates) await this.writeStateJson(path('certificates', `${certificate.id}.json`), certificate)
-    for (const zone of snap.zones) await this.writeStateJson(path('zones', `${zone.name}.json`), zone)
+    if (snap.server) await this.writeStateJson(lease, path('server.json'), snap.server)
+    await this.writeStateJson(lease, path('firewall.json'), snap.firewall)
+    await this.writeStateJson(lease, path('uid-allocator.json'), snap.uidAllocator)
+    for (const feature of snap.featureLists) await this.writeStateJson(lease, path('feature-lists', `${feature.id}.json`), feature)
+    for (const plan of snap.plans) await this.writeStateJson(lease, path('plans', `${plan.id}.json`), plan)
+    for (const reseller of snap.resellers) await this.writeStateJson(lease, path('resellers', `${reseller.id}.json`), reseller)
+    for (const certificate of snap.certificates) await this.writeStateJson(lease, path('certificates', `${certificate.id}.json`), certificate)
+    for (const zone of snap.zones) await this.writeStateJson(lease, path('zones', `${zone.name}.json`), zone)
     const accounts = new Map(snap.accounts.map((account) => [account.id, account]))
     const accountPath = (id: string, ...parts: string[]) => path('accounts', mustExist(accounts.get(id), 'account', id).username, ...parts)
-    for (const account of snap.accounts) await this.writeStateJson(accountPath(account.id, 'account.json'), account)
-    for (const domain of snap.domains) await this.writeStateJson(accountPath(domain.accountId, 'domains', `${domain.name}.json`), domain)
-    for (const user of snap.serviceUsers) await this.writeStateJson(accountPath(user.accountId, 'users', `${user.id}.json`), user)
-    for (const database of snap.databases) await this.writeStateJson(accountPath(database.accountId, 'databases', `${database.name}.json`), database)
-    for (const user of snap.databaseUsers) await this.writeStateJson(accountPath(user.accountId, 'db-users', `${user.name}.json`), user)
+    for (const account of snap.accounts) await this.writeStateJson(lease, accountPath(account.id, 'account.json'), account)
+    for (const domain of snap.domains) await this.writeStateJson(lease, accountPath(domain.accountId, 'domains', `${domain.name}.json`), domain)
+    for (const user of snap.serviceUsers) await this.writeStateJson(lease, accountPath(user.accountId, 'users', `${user.id}.json`), user)
+    for (const database of snap.databases) await this.writeStateJson(lease, accountPath(database.accountId, 'databases', `${database.name}.json`), database)
+    for (const user of snap.databaseUsers) await this.writeStateJson(lease, accountPath(user.accountId, 'db-users', `${user.name}.json`), user)
     for (const account of snap.accounts) {
       const jobs = snap.cronJobs.filter((job) => job.accountId === account.id)
-      if (jobs.length) await this.writeStateJson(accountPath(account.id, 'cron.json'), jobs)
+      if (jobs.length) await this.writeStateJson(lease, accountPath(account.id, 'cron.json'), jobs)
     }
-    for (const config of snap.domainCustomConfigs ?? []) await this.writeStateJson(accountPath(config.accountId, 'userdata', `${config.domainId}.json`), config)
-    if (snap.ipPool?.length) await this.writeStateJson(path('ip-pool.json'), snap.ipPool)
-    if (snap.mailIpConfig) await this.writeStateJson(path('mail-ips.json'), snap.mailIpConfig)
+    for (const config of snap.domainCustomConfigs ?? []) await this.writeStateJson(lease, accountPath(config.accountId, 'userdata', `${config.domainId}.json`), config)
+    if (snap.ipPool?.length) await this.writeStateJson(lease, path('ip-pool.json'), snap.ipPool)
+    if (snap.mailIpConfig) await this.writeStateJson(lease, path('mail-ips.json'), snap.mailIpConfig)
   }
 
   private async cleanupRestoreArtifacts(paths: readonly string[]): Promise<void> {
@@ -2487,49 +2546,23 @@ export class StateStore {
     }
   }
 
-  private async publishRestoreTree(stage: string, lease: WriterLease): Promise<StateSnapshot> {
-    let backup: string
-    try { backup = await mkdtemp(this.path('.restore-backup-')) } catch (error) {
-      await this.cleanupRestoreArtifacts([stage])
-      throw error
-    }
-    const moves: { name: string; previous: boolean; installed: boolean }[] = []
-    let restored: StateSnapshot
-    try {
+  private async publishRestoreTree(stage: string, lease: WriterLease, artifacts: string[]): Promise<StateSnapshot> {
+    const backup = await mkdtemp(this.path('.restore-backup-'))
+    artifacts.push(backup)
+    await lease.recordRestoreIntent({ stageName: basename(stage), backupName: basename(backup), entries: restoreEntries })
+    for (const name of restoreEntries) {
       await lease.assertFencingToken()
-      for (const name of restoreEntries) {
-        const move = { name, previous: false, installed: false }
-        moves.push(move)
-        if (await restorePathExists(this.path(name))) {
-          await rename(this.path(name), join(backup, name))
-          move.previous = true
-        }
-        if (await restorePathExists(join(stage, name))) {
-          await rename(join(stage, name), this.path(name))
-          move.installed = true
-        }
-      }
-      restored = await this.readSnapshotUnlocked(lease.initialAuthority.revision + 1)
-    } catch (error) {
-      const failures: unknown[] = []
-      for (const move of moves.toReversed()) {
-        try {
-          if (move.installed) await rm(this.path(move.name), { recursive: true, force: true })
-          if (move.previous) await rename(join(backup, move.name), this.path(move.name))
-        } catch (failure) { failures.push(failure) }
-      }
-      if (failures.length) {
-        throw new AggregateError([error, ...failures], `generation restore needs recovery; previous state retained at ${backup}; prepared state at ${stage}`)
-      }
-      await this.cleanupRestoreArtifacts([backup, stage])
-      throw error
+      if (await restorePathExists(this.path(name))) await rename(this.path(name), join(backup, name))
+      if (await restorePathExists(join(stage, name))) await rename(join(stage, name), this.path(name))
     }
-    await this.cleanupRestoreArtifacts([backup, stage])
-    return restored
+    // The restore journal, stage and backup survive until the outer authority commit is proven.
+    // WriterLease.release performs validated committed cleanup under the same writer guard.
+    return this.readSnapshotUnderLease(lease, lease.initialAuthority.revision + 1)
   }
 
   /** Validates before mutation and rolls back ordinary publication failures under the cross-process writer lock. */
   restoreGenerationSnapshot(genId: number, opts?: MutationOptions): Promise<StateSnapshot> {
+    const artifacts: string[] = []
     return this.withMutationLock(
       opts,
       async (lease) => {
@@ -2544,8 +2577,9 @@ export class StateStore {
         }
         snap.uidAllocator = validateUidAllocator({ nextUid: Math.max(currentUids.nextUid, snap.uidAllocator.nextUid), allocated: [...allocated.values()].sort((a, b) => a.uid - b.uid) })
         const stage = await mkdtemp(this.path('.restore-stage-'))
+        artifacts.push(stage)
         try {
-          await this.writeRestoreTree(stage, snap)
+          await this.writeRestoreTree(lease, stage, snap)
           const prepared = await new StateStore(stage).readSnapshot()
           if (prepared.checksum !== snap.checksum || JSON.stringify(prepared.uidAllocator) !== JSON.stringify(snap.uidAllocator)) {
             fail('VALIDATION', 'prepared generation tree does not match the validated snapshot')
@@ -2554,9 +2588,15 @@ export class StateStore {
           await this.cleanupRestoreArtifacts([stage])
           throw error
         }
-        return this.publishRestoreTree(stage, lease)
+        return this.publishRestoreTree(stage, lease, artifacts)
       },
-      { restoreAuthorityOnAbort: true },
+      {
+        restoreAuthorityOnAbort: true,
+        onAbort: async lease => {
+          await lease.rollbackRestoreIntent()
+          await this.cleanupRestoreArtifacts(artifacts)
+        },
+      },
     )
   }
 }

@@ -69,6 +69,8 @@ export interface AllocatedReferenceRecord {
 }
 
 export interface StateAuthorityMetadata {
+  /** Atomic commit identity, including writes that do not increment business revision. */
+  committedLeaseId?: string
   revision: number
   fencingToken: number
   updatedAt: string

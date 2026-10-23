@@ -1,70 +1,38 @@
-import { randomUUID } from 'node:crypto'
-import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
+import { chmod, chown, lstat, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises'
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { assertInt, assertLine, fail } from '@xpanel/core'
 import { atomicRemove, atomicWriteJson, readJsonIfExists } from './atomic.ts'
-import type {
-  AllocatedReferenceRecord,
-  ReferenceKind,
-  StateAuthorityMetadata,
-  WriterLockHolder,
-} from './types.ts'
-import {
-  formatShortReference,
-  normalizeReferenceKind,
-  validateStateAuthority,
-} from './validate-state.ts'
+import { acquireWriterMutex, WRITER_MUTEX_FILE, type WriterMutexGuard } from './writer-mutex.ts'
+import type { AllocatedReferenceRecord, ReferenceKind, StateAuthorityMetadata, WriterLockHolder } from './types.ts'
+import { formatShortReference, normalizeReferenceKind, validateStateAuthority, validateUidAllocator } from './validate-state.ts'
 
 export const AUTHORITY_FILE = 'authority.json'
 export const LOCK_DIR = '.lock'
 export const LOCK_OWNER_FILE = 'owner.json'
 export const LOCK_INTENT_FILE = 'intent.json'
+const PROTOCOL = 'sqlite-v1'
+const RESTORE_ENTRIES = ['feature-lists', 'plans', 'resellers', 'accounts', 'certificates', 'zones', 'server.json', 'firewall.json', 'uid-allocator.json', 'ip-pool.json', 'mail-ips.json'] as const
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-const DEFAULT_ACQUIRE_TIMEOUT_MS = 15_000
-const DEFAULT_RETRY_INTERVAL_MS = 15
-const DEFAULT_DEAD_OWNER_GRACE_MS = 1_500
-
-const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
-
-/**
- * Checks whether an OS process with `pid` is currently alive.
- * Uses `process.kill(pid, 0)` which performs existence check without sending a signal.
- */
 export const isProcessAlive = (pid: number): boolean => {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false
-  if (pid === process.pid) return true
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException | null)?.code
-    if (code === 'EPERM') return true
-    return false
-  }
+  try { process.kill(pid, 0); return true } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM' }
 }
-
-export interface WriteIntentBackup {
-  relPath: string
-  existed: boolean
-  contentBase64?: string
-}
-
+export interface WriteIntentBackup { relPath: string; existed: boolean; contentBase64?: string }
+export interface RestoreIntentInput { stageName: string; backupName: string; entries: readonly string[] }
+export interface RestoreIntentPlan { cleanup?: { canonicalHashes: (string | null)[] }; stageName: string; backupName: string; entries: { name: string; originalHash: string | null; stagedHash: string | null }[] }
 export interface WriteIntentRecord {
+  restore?: RestoreIntentPlan
   op: string
+  leaseId?: string
   fencingToken: number
   baseRevision: number
   createdRelPaths: string[]
   backups: WriteIntentBackup[]
   recordedAt: string
 }
-
-export interface WriterLockOptions {
-  acquireTimeoutMs?: number
-  retryIntervalMs?: number
-  deadOwnerGraceMs?: number
-  isPidAlive?: (pid: number) => boolean
-}
-
+export interface WriterLockOptions { acquireTimeoutMs?: number; retryIntervalMs?: number; deadOwnerGraceMs?: number; isPidAlive?: (pid: number) => boolean }
 export interface WriterLease {
   readonly pid: number
   readonly fencingToken: number
@@ -73,392 +41,391 @@ export interface WriterLease {
   readonly initialAuthority: StateAuthorityMetadata
   readonly preAcquireAuthorityRaw: string | null
   assertFencingToken(expectedToken?: number): Promise<StateAuthorityMetadata>
-  recordIntent(intent: Omit<WriteIntentRecord, 'fencingToken' | 'baseRevision' | 'recordedAt'>): Promise<void>
+  recordIntent(intent: Omit<WriteIntentRecord, 'leaseId' | 'fencingToken' | 'baseRevision' | 'recordedAt'>): Promise<void>
+  recordRestoreIntent(input: RestoreIntentInput): Promise<void>
+  rollbackRestoreIntent(): Promise<void>
+  rollbackIntent(): Promise<void>
   clearIntent(): Promise<void>
-  commitAuthority(patch?: {
-    incrementRevision?: boolean
-    revision?: number
-    references?: Record<string, number>
-    allocatedReferences?: Record<string, AllocatedReferenceRecord>
-  }): Promise<StateAuthorityMetadata>
+  commitAuthority(patch?: { incrementRevision?: boolean; revision?: number; references?: Record<string, number>; allocatedReferences?: Record<string, AllocatedReferenceRecord> }): Promise<StateAuthorityMetadata>
   restorePreAcquireAuthorityIfUncommitted(): Promise<void>
   release(): Promise<void>
 }
-
-const defaultAuthority = (): StateAuthorityMetadata => ({
-  revision: 0,
-  fencingToken: 0,
-  updatedAt: new Date(0).toISOString(),
-  references: {},
-})
+type Holder = WriterLockHolder & { protocol?: string; mutexIdentity?: string }
+const defaultAuthority = (): StateAuthorityMetadata => ({ revision: 0, fencingToken: 0, updatedAt: new Date(0).toISOString(), references: {} })
 
 export class WriterLock {
   readonly stateDir: string
   private readonly acquireTimeoutMs: number
   private readonly retryIntervalMs: number
-  private readonly deadOwnerGraceMs: number
   private readonly isPidAlive: (pid: number) => boolean
-
   constructor(stateDir: string, opts: WriterLockOptions = {}) {
-    this.stateDir = stateDir
-    this.acquireTimeoutMs = opts.acquireTimeoutMs ?? DEFAULT_ACQUIRE_TIMEOUT_MS
-    this.retryIntervalMs = opts.retryIntervalMs ?? DEFAULT_RETRY_INTERVAL_MS
-    this.deadOwnerGraceMs = opts.deadOwnerGraceMs ?? DEFAULT_DEAD_OWNER_GRACE_MS
+    this.stateDir = resolve(stateDir)
+    this.acquireTimeoutMs = assertInt(opts.acquireTimeoutMs ?? 15_000, 0, 600_000, 'acquireTimeoutMs')
+    this.retryIntervalMs = assertInt(opts.retryIntervalMs ?? 15, 1, 60_000, 'retryIntervalMs')
     this.isPidAlive = opts.isPidAlive ?? isProcessAlive
   }
-
-  get lockDirPath(): string {
-    return join(this.stateDir, LOCK_DIR)
-  }
-
-  get ownerFilePath(): string {
-    return join(this.lockDirPath, LOCK_OWNER_FILE)
-  }
-
-  get intentFilePath(): string {
-    return join(this.lockDirPath, LOCK_INTENT_FILE)
-  }
-
-  get authorityFilePath(): string {
-    return join(this.stateDir, AUTHORITY_FILE)
-  }
-
-  async readAuthority(): Promise<StateAuthorityMetadata> {
-    const raw = await readJsonIfExists<unknown>(this.authorityFilePath)
-    if (raw === null) return defaultAuthority()
-    return validateStateAuthority(raw)
-  }
-
-  async readLockHolder(): Promise<WriterLockHolder | null> {
+  get lockDirPath(): string { return join(this.stateDir, LOCK_DIR) }
+  get ownerFilePath(): string { return join(this.lockDirPath, LOCK_OWNER_FILE) }
+  get intentFilePath(): string { return join(this.lockDirPath, LOCK_INTENT_FILE) }
+  get authorityFilePath(): string { return join(this.stateDir, AUTHORITY_FILE) }
+  get mutexFilePath(): string { return join(this.stateDir, WRITER_MUTEX_FILE) }
+  async readAuthority(): Promise<StateAuthorityMetadata> { const raw = await readJsonIfExists<unknown>(this.authorityFilePath); return raw === null ? defaultAuthority() : validateStateAuthority(raw) }
+  async readLockHolder(): Promise<Holder | null> {
     const raw = await readJsonIfExists<unknown>(this.ownerFilePath)
-    if (raw === null || typeof raw !== 'object') return null
-    const o = raw as Record<string, unknown>
-    if (
-      typeof o.pid !== 'number' ||
-      !Number.isSafeInteger(o.pid) ||
-      typeof o.fencingToken !== 'number' ||
-      !Number.isSafeInteger(o.fencingToken) ||
-      typeof o.acquiredAt !== 'string' ||
-      typeof o.leaseId !== 'string'
-    ) {
-      return null
-    }
-    return {
-      pid: o.pid,
-      fencingToken: o.fencingToken,
-      acquiredAt: o.acquiredAt,
-      leaseId: o.leaseId,
-    }
+    if (raw === null) return null
+    if (typeof raw !== 'object' || Array.isArray(raw)) return fail('VALIDATION', 'invalid state writer owner')
+    const value = raw as Record<string, unknown>
+    if (!Number.isSafeInteger(value.pid) || Number(value.pid) < 1 || !Number.isSafeInteger(value.fencingToken) || Number(value.fencingToken) < 1
+      || typeof value.leaseId !== 'string' || !UUID.test(value.leaseId) || typeof value.acquiredAt !== 'string' || !Number.isFinite(Date.parse(value.acquiredAt))
+      || (value.protocol !== undefined && value.protocol !== PROTOCOL) || value.protocol === PROTOCOL && (typeof value.mutexIdentity !== 'string' || !/^[0-9]+:[0-9]+$/.test(value.mutexIdentity))) return fail('VALIDATION', 'invalid state writer owner')
+    return { pid: Number(value.pid), fencingToken: Number(value.fencingToken), leaseId: value.leaseId, acquiredAt: value.acquiredAt, ...(value.protocol ? { protocol: PROTOCOL, mutexIdentity: String(value.mutexIdentity) } : {}) }
   }
-
-  /**
-   * Verifies that `expectedToken` is still the active fencing token in both
-   * `<stateDir>/authority.json` and `<stateDir>/.lock/owner.json`.
-   * Throws `CONFLICT` if a newer writer has acquired the lock or superseded the token.
-   */
   async assertFencingToken(expectedToken: number, expectedLeaseId?: string): Promise<StateAuthorityMetadata> {
-    if (typeof expectedToken !== 'number' || !Number.isSafeInteger(expectedToken) || expectedToken < 1) {
-      return fail('VALIDATION', 'fencingToken must be a positive safe integer', { fencingToken: expectedToken })
-    }
+    assertInt(expectedToken, 1, Number.MAX_SAFE_INTEGER, 'fencingToken')
     const [authority, holder] = await Promise.all([this.readAuthority(), this.readLockHolder()])
-    if (authority.fencingToken !== expectedToken) {
-      return fail(
-        'CONFLICT',
-        `stale writer fencing token ${expectedToken} rejected; current authority token is ${authority.fencingToken}`,
-        { expectedFencingToken: expectedToken, currentFencingToken: authority.fencingToken },
-      )
-    }
-    if (!holder || holder.fencingToken !== expectedToken) {
-      return fail(
-        'CONFLICT',
-        `writer lock for fencing token ${expectedToken} is no longer held`,
-        { expectedFencingToken: expectedToken, activeFencingToken: holder?.fencingToken ?? null },
-      )
-    }
-    if (expectedLeaseId !== undefined && holder.leaseId !== expectedLeaseId) {
-      return fail(
-        'CONFLICT',
-        `writer lease ${expectedLeaseId} was superseded by ${holder.leaseId}`,
-        { expectedFencingToken: expectedToken },
-      )
+    if (authority.fencingToken !== expectedToken || !holder || holder.fencingToken !== expectedToken || (expectedLeaseId !== undefined && holder.leaseId !== expectedLeaseId)) {
+      return fail('CONFLICT', 'state writer lease is no longer current', { expectedFencingToken: expectedToken, currentFencingToken: authority.fencingToken })
     }
     return authority
   }
-
-  /**
-   * Recovers any uncommitted write intent left behind by a crashed/terminated writer process.
-   * Never rolls back `uid-allocator.json` so burned UIDs remain permanently reserved.
-   */
-  private async recoverUncommittedIntentIfNeeded(): Promise<void> {
-    const intent = await readJsonIfExists<WriteIntentRecord>(this.intentFilePath).catch(() => null)
-    if (!intent || typeof intent !== 'object') return
-    const authority = await this.readAuthority().catch(() => defaultAuthority())
-    // If authority.revision is still at baseRevision, the crashed writer never committed.
-    if (authority.revision <= intent.baseRevision) {
-      for (const relPath of intent.createdRelPaths ?? []) {
-        if (!relPath || relPath === 'uid-allocator.json' || relPath === AUTHORITY_FILE) continue
-        await atomicRemove(join(this.stateDir, relPath)).catch(() => undefined)
-      }
-      for (const backup of intent.backups ?? []) {
-        if (!backup.relPath || backup.relPath === 'uid-allocator.json' || backup.relPath === AUTHORITY_FILE) continue
-        const target = join(this.stateDir, backup.relPath)
-        if (!backup.existed) {
-          await atomicRemove(target).catch(() => undefined)
-        } else if (typeof backup.contentBase64 === 'string') {
-          const parsed = JSON.parse(Buffer.from(backup.contentBase64, 'base64').toString('utf8')) as unknown
-          await atomicWriteJson(target, parsed).catch(() => undefined)
-        }
-      }
-    }
-    await rm(this.intentFilePath, { force: true }).catch(() => undefined)
-  }
-
-  /**
-   * Atomically reclaims `<stateDir>/.lock` ONLY after verifying the lock owner PID is dead
-   * (or when explicitly invoked via `forceRecoverLease`).
-   */
-  private async reclaimLockDir(): Promise<boolean> {
-    await this.recoverUncommittedIntentIfNeeded()
-    const reclaimPath = join(this.stateDir, `.lock-reclaim-${process.pid}-${randomUUID()}`)
-    try {
-      await rename(this.lockDirPath, reclaimPath)
-    } catch {
-      return false
-    }
-    await rm(reclaimPath, { recursive: true, force: true }).catch(() => undefined)
-    return true
-  }
-
-  /**
-   * Explicitly revokes the current lease and bumps the monotonic fencing token in `authority.json`.
-   * Used when an operator or supervisor fences a paused/unresponsive writer so any delayed write
-   * from the old lease is deterministically rejected by `assertFencingToken`.
-   */
-  async forceRecoverLease(): Promise<StateAuthorityMetadata> {
+  private async guard(timeoutMs = this.acquireTimeoutMs): Promise<WriterMutexGuard> {
     await mkdir(this.stateDir, { recursive: true, mode: 0o750 })
-    await this.reclaimLockDir()
-    const current = await this.readAuthority()
-    const next: StateAuthorityMetadata = {
-      ...current,
-      fencingToken: current.fencingToken + 1,
-      updatedAt: new Date().toISOString(),
-    }
-    await atomicWriteJson(this.authorityFilePath, next)
-    return next
+    return acquireWriterMutex(this.mutexFilePath, timeoutMs, this.retryIntervalMs)
   }
-
-  /**
-   * Waits until no live external process holds `.lock`. If `.lock` belongs to a dead process,
-   * recovers its uncommitted intent and cleans up the dead lock.
-   */
+  private async confinedPath(relPath: unknown): Promise<string> {
+    if (typeof relPath !== 'string' || relPath.length < 1 || relPath.length > 4096 || isAbsolute(relPath) || /[\\:\0~]/.test(relPath)) return fail('VALIDATION', 'invalid recovery relative path')
+    const parts = relPath.split('/')
+    if (parts.some(part => !part || part === '.' || part === '..' || part.startsWith('.') || /[ .]$/.test(part) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part)) || [AUTHORITY_FILE, WRITER_MUTEX_FILE].includes(parts[0]!.toLowerCase()) || parts[0]!.startsWith(WRITER_MUTEX_FILE + '-')) return fail('VALIDATION', 'protected or noncanonical recovery path')
+    const target = resolve(this.stateDir, ...parts)
+    if (!target.startsWith(this.stateDir + sep)) return fail('VALIDATION', 'recovery path escapes state directory')
+    let path = this.stateDir
+    for (let index = 0; index < parts.length; index++) {
+      path = join(path, parts[index]!)
+      const info = await lstat(path).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
+      if (info?.isSymbolicLink() || (info && index < parts.length - 1 && !info.isDirectory())) return fail('VALIDATION', 'recovery path crosses a link or non-directory')
+    }
+    return target
+  }
+  private async treeHash(path: string): Promise<string | null> {
+    const info = await lstat(path).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
+    if (!info) return null
+    if (info.isSymbolicLink()) return fail('VALIDATION', 'restore artifact crosses a symbolic link')
+    const hash = createHash('sha256')
+    if (info.isFile()) {
+      if (info.nlink !== 1) return fail('VALIDATION', 'restore artifact has multiple links')
+      return hash.update('file\0').update(await readFile(path)).digest('hex')
+    }
+    if (!info.isDirectory()) return fail('VALIDATION', 'unsupported restore artifact')
+    for (const name of (await readdir(path)).sort()) {
+      if (name === WRITER_MUTEX_FILE || name.startsWith(WRITER_MUTEX_FILE + '-')) return fail('VALIDATION', 'operational mutex cannot be read as a restore payload')
+      hash.update(JSON.stringify(name)).update(':').update((await this.treeHash(join(path, name)))!).update('\0')
+    }
+    return hash.update('directory').digest('hex')
+  }
+  private async validateRestorePlan(raw: unknown): Promise<RestoreIntentPlan> {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail('VALIDATION', 'invalid restore recovery plan')
+    const plan = raw as RestoreIntentPlan
+    if (typeof plan.stageName !== 'string' || !/^\.restore-stage-[a-zA-Z0-9-]+$/.test(plan.stageName) || typeof plan.backupName !== 'string' || !/^\.restore-backup-[a-zA-Z0-9-]+$/.test(plan.backupName)
+      || !Array.isArray(plan.entries) || plan.entries.length !== RESTORE_ENTRIES.length) return fail('VALIDATION', 'invalid restore artifact names or entries')
+    for (const name of [plan.stageName, plan.backupName]) {
+      const info = await lstat(join(this.stateDir, name)).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
+      if (info && (!info.isDirectory() || info.isSymbolicLink())) return fail('VALIDATION', 'restore artifact root must be a real directory')
+    }
+    for (let index = 0; index < RESTORE_ENTRIES.length; index++) {
+      const entry = plan.entries[index]
+      if (!entry || entry.name !== RESTORE_ENTRIES[index] || ![entry.originalHash, entry.stagedHash].every(value => value === null || typeof value === 'string' && /^[a-f0-9]{64}$/.test(value))) return fail('VALIDATION', 'invalid restore entry identity')
+    }
+    if (plan.cleanup !== undefined && (!plan.cleanup || !Array.isArray(plan.cleanup.canonicalHashes) || plan.cleanup.canonicalHashes.length !== RESTORE_ENTRIES.length || !plan.cleanup.canonicalHashes.every(value => value === null || typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)))) return fail('VALIDATION', 'invalid restore cleanup proof')
+    return plan
+  }
+  private async recoverRestore(plan: RestoreIntentPlan, committed: boolean, journal: WriteIntentRecord): Promise<void> {
+    const stage = join(this.stateDir, plan.stageName), backup = join(this.stateDir, plan.backupName)
+    if (plan.cleanup) {
+      // The complete canonical result was proved before garbage collection began; artifact trees may now be partial.
+      for (let index = 0; index < plan.entries.length; index++) if (await this.treeHash(join(this.stateDir, plan.entries[index]!.name)) !== plan.cleanup.canonicalHashes[index]) return fail('VALIDATION', 'restore cleanup canonical proof no longer matches')
+      validateUidAllocator(await readJsonIfExists(join(this.stateDir, 'uid-allocator.json')))
+      await rm(stage, { recursive: true, force: true }); await rm(backup, { recursive: true, force: true })
+      return
+    }
+    // Validate all phases before removing or replacing a single canonical entry.
+    const phases = []
+    for (const entry of plan.entries) {
+      const currentHash = await this.treeHash(join(this.stateDir, entry.name))
+      const backupHash = await this.treeHash(join(backup, entry.name))
+      const stageHash = await this.treeHash(join(stage, entry.name))
+      if (backupHash !== null && backupHash !== entry.originalHash || stageHash !== null && stageHash !== entry.stagedHash) return fail('VALIDATION', 'restore artifact does not match its recovery manifest')
+      if (entry.name !== 'uid-allocator.json') {
+        if (committed) {
+          if (currentHash !== entry.stagedHash) return fail('VALIDATION', 'committed restore tree does not match its manifest')
+        } else if (backupHash !== null) {
+          if (currentHash !== null && currentHash !== entry.originalHash && currentHash !== entry.stagedHash) return fail('VALIDATION', 'restore canonical entry has an unknown value')
+        } else if (entry.originalHash !== null ? currentHash !== entry.originalHash : currentHash !== null && currentHash !== entry.stagedHash) return fail('VALIDATION', 'restore original entry is unavailable')
+      }
+      phases.push({ entry, currentHash, backupHash })
+    }
+    const allocatorPaths = [join(this.stateDir, 'uid-allocator.json'), join(backup, 'uid-allocator.json'), join(stage, 'uid-allocator.json')]
+    const allocators = []
+    for (const path of allocatorPaths) {
+      const raw = await readJsonIfExists(path)
+      if (raw !== null) allocators.push(validateUidAllocator(raw))
+    }
+    if (!allocators.length) return fail('VALIDATION', 'restore recovery has no surviving UID allocator; evidence retained')
+    const allocations = new Map<number, (typeof allocators)[number]['allocated'][number]>()
+    for (const allocator of allocators) for (const allocation of allocator.allocated) {
+      const old = allocations.get(allocation.uid)
+      if (old && old.username !== allocation.username) return fail('VALIDATION', 'restore recovery conflicts with a burned UID allocation')
+      if (!old) allocations.set(allocation.uid, allocation)
+    }
+    const merged = validateUidAllocator({ nextUid: Math.max(...allocators.map(value => value.nextUid)), allocated: [...allocations.values()].sort((a, b) => a.uid - b.uid) })
+    await atomicWriteJson(join(this.stateDir, 'uid-allocator.json'), merged)
+    if (!committed) for (const { entry, backupHash } of phases.toReversed()) {
+      if (entry.name === 'uid-allocator.json') continue
+      const live = join(this.stateDir, entry.name)
+      if (backupHash !== null) {
+        await atomicRemove(live)
+        await rename(join(backup, entry.name), live)
+      } else if (entry.originalHash === null) await atomicRemove(live)
+    }
+    // Persist canonical proof before recursive cleanup can partially erase artifact manifests.
+    const canonicalHashes = []
+    for (const entry of plan.entries) {
+      const hash = await this.treeHash(join(this.stateDir, entry.name))
+      if (entry.name !== 'uid-allocator.json' && hash !== (committed ? entry.stagedHash : entry.originalHash)) return fail('VALIDATION', 'restored canonical result could not be proved')
+      canonicalHashes.push(hash)
+    }
+    await atomicWriteJson(this.intentFilePath, { ...journal, restore: { ...plan, cleanup: { canonicalHashes } } }, 0o640)
+    await rm(stage, { recursive: true, force: true })
+    await rm(backup, { recursive: true, force: true })
+  }
+  private async validatedIntent(holder: Holder, prospective?: unknown): Promise<WriteIntentRecord | null> {
+    const raw = prospective === undefined ? await readJsonIfExists<unknown>(this.intentFilePath) : prospective
+    if (raw === null) return null
+    if (typeof raw !== 'object' || Array.isArray(raw)) return fail('VALIDATION', 'invalid state write intent')
+    const value = raw as Record<string, unknown>
+    if (typeof value.op !== 'string' || !value.op || value.op.length > 256 || !Number.isSafeInteger(value.fencingToken) || value.fencingToken !== holder.fencingToken
+      || !Number.isSafeInteger(value.baseRevision) || Number(value.baseRevision) < 0 || typeof value.recordedAt !== 'string' || !Number.isFinite(Date.parse(value.recordedAt))
+      || !Array.isArray(value.createdRelPaths) || !Array.isArray(value.backups) || value.createdRelPaths.length + value.backups.length > 100_000
+      || (value.leaseId !== undefined && (typeof value.leaseId !== 'string' || value.leaseId !== holder.leaseId || !UUID.test(value.leaseId)))
+      || (holder.protocol === PROTOCOL && value.leaseId !== holder.leaseId)) return fail('VALIDATION', 'invalid state write intent identity')
+    if (value.restore !== undefined) {
+      if (value.createdRelPaths.length || value.backups.length) return fail('VALIDATION', 'restore plan cannot mix generic rollback paths')
+      await this.validateRestorePlan(value.restore)
+    }
+    const seen = new Set<string>()
+    const pathKey = (value: string) => process.platform === 'win32' ? value.toLowerCase() : value
+    const overlaps = (value: string) => [...seen].some(old => old === value || old.startsWith(value + '/') || value.startsWith(old + '/'))
+    for (const rel of value.createdRelPaths) {
+      await this.confinedPath(rel)
+      if (overlaps(pathKey(rel))) return fail('VALIDATION', 'duplicate recovery path')
+      seen.add(pathKey(rel))
+    }
+    for (const item of value.backups) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return fail('VALIDATION', 'invalid recovery backup')
+      const backup = item as Record<string, unknown>
+      await this.confinedPath(backup.relPath)
+      if (overlaps(pathKey(String(backup.relPath))) || typeof backup.existed !== 'boolean') return fail('VALIDATION', 'invalid or duplicate recovery backup')
+      seen.add(pathKey(String(backup.relPath)))
+      if (backup.existed) {
+        if (typeof backup.contentBase64 !== 'string' || Buffer.from(backup.contentBase64, 'base64').toString('base64') !== backup.contentBase64) return fail('VALIDATION', 'invalid recovery backup encoding')
+        try { JSON.parse(Buffer.from(backup.contentBase64, 'base64').toString('utf8')) } catch { return fail('VALIDATION', 'invalid recovery JSON backup') }
+      } else if (backup.contentBase64 !== undefined) return fail('VALIDATION', 'unexpected content for absent recovery backup')
+    }
+    return value as unknown as WriteIntentRecord
+  }
+  private async writeBackupBytes(path: string, contentBase64: string): Promise<void> {
+    const temp = join(dirname(path), '.rollback-' + process.pid + '-' + randomUUID() + '.tmp')
+    await mkdir(dirname(path), { recursive: true, mode: 0o750 })
+    let handle
+    try {
+      handle = await open(temp, 'wx', 0o640)
+      await handle.writeFile(Buffer.from(contentBase64, 'base64'))
+      await handle.sync()
+      await handle.close(); handle = undefined
+      await rename(temp, path)
+      let directory
+      try { directory = await open(dirname(path), 'r'); await directory.sync() } catch { /* Directory fsync is unavailable on some platforms. */ }
+      finally { await directory?.close() }
+    } catch (error) { await handle?.close().catch(() => undefined); await rm(temp, { force: true }).catch(() => undefined); throw error }
+  }
+  private async recoverGeneric(journal: WriteIntentRecord): Promise<void> {
+    for (const rel of journal.createdRelPaths) if (rel.toLowerCase() !== 'uid-allocator.json') await atomicRemove(await this.confinedPath(rel))
+    for (const backup of journal.backups) {
+      if (backup.relPath.toLowerCase() === 'uid-allocator.json') continue
+      const target = await this.confinedPath(backup.relPath)
+      if (!backup.existed) await atomicRemove(target)
+      else await this.writeBackupBytes(target, backup.contentBase64!)
+    }
+    for (const rel of journal.createdRelPaths) if (rel.toLowerCase() !== 'uid-allocator.json' && await lstat(await this.confinedPath(rel)).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })) return fail('CONFLICT', 'rollback removal could not be verified')
+    for (const backup of journal.backups) {
+      if (backup.relPath.toLowerCase() === 'uid-allocator.json') continue
+      const target = await this.confinedPath(backup.relPath)
+      if (backup.existed) { if (!(await readFile(target)).equals(Buffer.from(backup.contentBase64!, 'base64'))) return fail('CONFLICT', 'rollback preimage could not be verified') }
+      else if (await lstat(target).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })) return fail('CONFLICT', 'rollback absence could not be verified')
+    }
+  }
+  /** Must be called only while holding the OS guard, before ANY rollback or owner cleanup. */
+  private async recoverOrphan(guard: WriterMutexGuard): Promise<void> {
+    await guard.assertStable()
+    const info = await lstat(this.lockDirPath).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
+    if (!info) return
+    if (!info.isDirectory() || info.isSymbolicLink()) return fail('VALIDATION', 'state writer lock must be a real directory')
+    const holder = await this.readLockHolder()
+    if (!holder) return fail('CONFLICT', 'state writer owner is unknown; stopped-writer inspection is required')
+    if (holder.protocol === PROTOCOL && holder.mutexIdentity !== guard.identity) return fail('CONFLICT', 'orphan owner is bound to another mutex inode; evidence retained')
+    // Legacy processes do not take the new kernel guard. Upgrade requires all such writers stopped.
+    if (holder.protocol !== PROTOCOL && this.isPidAlive(holder.pid)) return fail('CONFLICT', 'legacy state writer is alive; coordinated stopped-writer upgrade is required')
+    const authority = await this.readAuthority()
+    const journal = await this.validatedIntent(holder)
+    if (journal) {
+      if (authority.fencingToken !== journal.fencingToken) return fail('VALIDATION', 'recovery intent epoch does not match state authority')
+      const committed = journal.leaseId !== undefined && authority.committedLeaseId === journal.leaseId
+      if (!committed && authority.revision !== journal.baseRevision) return fail('VALIDATION', 'recovery intent commit status is inconsistent; evidence retained')
+      if (committed && authority.revision < journal.baseRevision) return fail('VALIDATION', 'committed recovery revision is inconsistent')
+      if (journal.restore) await this.recoverRestore(journal.restore, committed, journal)
+      else if (!committed) await this.recoverGeneric(journal)
+      // Retain the complete intent if any validation/rollback write above fails.
+      await rm(this.intentFilePath)
+    } else if (holder.fencingToken < authority.fencingToken) {
+      return fail('VALIDATION', 'orphan owner epoch is older than state authority; evidence retained')
+    } else if (holder.fencingToken > authority.fencingToken) {
+      if (holder.protocol !== PROTOCOL || holder.fencingToken !== authority.fencingToken + 1) return fail('VALIDATION', 'orphan owner epoch is inconsistent')
+      await atomicWriteJson(this.authorityFilePath, { ...authority, fencingToken: holder.fencingToken, updatedAt: new Date().toISOString() }, 0o640)
+    }
+    await rm(this.lockDirPath, { recursive: true })
+  }
+  /** Stable barrier: clean reads never allocate a revision, epoch, UID or public reference. */
+  async readAuthorityAtBarrier(): Promise<StateAuthorityMetadata> {
+    const guard = await this.guard()
+    try { await this.recoverOrphan(guard); return await this.readAuthority() } finally { await guard.release() }
+  }
   async waitForUnlocked(timeoutMs = this.acquireTimeoutMs): Promise<void> {
-    const startMs = Date.now()
-    while (true) {
-      let lockStat
-      try {
-        lockStat = await stat(this.lockDirPath)
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
-        throw err
-      }
-      const holder = await this.readLockHolder().catch(() => null)
-      if (holder) {
-        if (!this.isPidAlive(holder.pid)) {
-          await this.reclaimLockDir()
-          return
-        }
-      } else if (Date.now() - lockStat.mtimeMs > this.deadOwnerGraceMs) {
-        await this.reclaimLockDir()
-        return
-      }
-      if (Date.now() - startMs >= timeoutMs) {
-        return fail('CONFLICT', 'timed out waiting for active state writer lock to finish', {
-          holderPid: holder?.pid ?? null,
-          fencingToken: holder?.fencingToken ?? null,
-        })
-      }
-      await sleepMs(this.retryIntervalMs)
-    }
+    const guard = await this.guard(timeoutMs)
+    try { await this.recoverOrphan(guard) } finally { await guard.release() }
   }
-
-  /**
-   * Acquires the cross-process state writer lock using atomic `mkdir(<stateDir>/.lock)`,
-   * issues a strictly increasing `fencingToken` persisted in `authority.json` and `.lock/owner.json`,
-   * and never steals a lock while the owner PID is alive.
-   */
-  async acquire(opts?: { acquireTimeoutMs?: number }): Promise<WriterLease> {
-    const timeoutMs = opts?.acquireTimeoutMs ?? this.acquireTimeoutMs
-    const startMs = Date.now()
-    await mkdir(this.stateDir, { recursive: true, mode: 0o750 })
-
-    while (true) {
-      try {
-        await mkdir(this.lockDirPath, { mode: 0o700 })
-        break
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException | null)?.code
-        if (code !== 'EEXIST' && code !== 'EACCES' && code !== 'EPERM' && code !== 'EBUSY') {
-          throw err
-        }
-
-        const holder = await this.readLockHolder().catch(() => null)
-        if (holder !== null) {
-          // Never steal a lock based on wall-clock timeout while the owner PID is alive.
-          if (!this.isPidAlive(holder.pid)) {
-            await this.reclaimLockDir()
-            continue
-          }
-        } else {
-          // Owner file not yet written or process died immediately after mkdir('.lock')
-          const lockStat = await stat(this.lockDirPath).catch(() => null)
-          if (lockStat && Date.now() - lockStat.mtimeMs > this.deadOwnerGraceMs) {
-            await this.reclaimLockDir()
-            continue
-          }
-        }
-
-        if (Date.now() - startMs >= timeoutMs) {
-          return fail('CONFLICT', 'timed out waiting for cross-process state writer lock', {
-            holderPid: holder?.pid ?? null,
-            fencingToken: holder?.fencingToken ?? null,
-            timeoutMs,
-          })
-        }
-
-        const jitter = Math.floor(Math.random() * 8)
-        await sleepMs(this.retryIntervalMs + jitter)
-      }
-    }
-
-    // We now exclusively own `.lock`. Recover any leftover uncommitted intent if present.
-    await this.recoverUncommittedIntentIfNeeded()
-
-    const preAcquireAuthorityRaw = await readFile(this.authorityFilePath, 'utf8').catch((err) => {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
-      throw err
-    })
-    const currentAuthority =
-      preAcquireAuthorityRaw === null ? defaultAuthority() : validateStateAuthority(JSON.parse(preAcquireAuthorityRaw))
-
-    const fencingToken = currentAuthority.fencingToken + 1
-    const acquiredAt = new Date().toISOString()
-    const leaseId = randomUUID()
-    const holder: WriterLockHolder = {
-      pid: process.pid,
-      fencingToken,
-      acquiredAt,
-      leaseId,
-    }
-    const nextAuthority: StateAuthorityMetadata = {
-      ...currentAuthority,
-      fencingToken,
-      updatedAt: acquiredAt,
-    }
-
+  /** Explicit recovery cannot revoke a live/paused kernel owner. Terminate it and await OS release first. */
+  async forceRecoverLease(): Promise<StateAuthorityMetadata> {
+    const guard = await this.guard()
     try {
-      await atomicWriteJson(this.ownerFilePath, holder, 0o600)
-      await atomicWriteJson(this.authorityFilePath, nextAuthority, 0o640)
-    } catch (err) {
-      await rm(this.lockDirPath, { recursive: true, force: true }).catch(() => undefined)
-      throw err
-    }
-
-    let released = false
-    let committed = false
-
-    const assertLeaseToken = async (expectedToken = fencingToken): Promise<StateAuthorityMetadata> => {
-      if (expectedToken !== fencingToken) {
-        return fail(
-          'CONFLICT',
-          `fencing token mismatch: caller expected ${expectedToken}, active lease token is ${fencingToken}`,
-          { expectedFencingToken: expectedToken, currentFencingToken: fencingToken },
-        )
+      await this.recoverOrphan(guard)
+      const current = await this.readAuthority()
+      const next = { ...current, fencingToken: assertInt(current.fencingToken + 1, 1, Number.MAX_SAFE_INTEGER, 'fencingToken'), updatedAt: new Date().toISOString() }
+      await atomicWriteJson(this.authorityFilePath, next, 0o640)
+      return next
+    } finally { await guard.release() }
+  }
+  async acquire(opts?: { acquireTimeoutMs?: number }): Promise<WriterLease> {
+    const guard = await this.guard(opts?.acquireTimeoutMs)
+    let leaseOwnsGuard = false
+    let prepared: string | undefined
+    let publishedLease: string | undefined
+    try {
+      await this.recoverOrphan(guard)
+      const preAcquireAuthorityRaw = await readFile(this.authorityFilePath, 'utf8').catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
+      const current = preAcquireAuthorityRaw === null ? defaultAuthority() : validateStateAuthority(JSON.parse(preAcquireAuthorityRaw))
+      const fencingToken = assertInt(current.fencingToken + 1, 1, Number.MAX_SAFE_INTEGER, 'fencingToken')
+      const leaseId = randomUUID(), acquiredAt = new Date().toISOString()
+      const holder: Holder = { protocol: PROTOCOL, mutexIdentity: guard.identity, pid: process.pid, fencingToken, leaseId, acquiredAt }
+      prepared = join(this.stateDir, '.lock-prepared-' + process.pid + '-' + leaseId)
+      await mkdir(prepared, { mode: 0o700 })
+      if (process.platform !== 'win32') { const parent = await lstat(this.stateDir); await chown(prepared, -1, parent.gid); await chmod(prepared, 0o2770) }
+      await atomicWriteJson(join(prepared, LOCK_OWNER_FILE), holder, 0o640)
+      await rename(prepared, this.lockDirPath)
+      prepared = undefined
+      publishedLease = leaseId
+      await atomicWriteJson(this.authorityFilePath, { ...current, fencingToken, updatedAt: acquiredAt }, 0o640)
+      let committed = false, closing = false, released = false
+      let tail: Promise<unknown> = Promise.resolve()
+      let releasePromise: Promise<void> | undefined
+      const assertCurrent = async (expected = fencingToken): Promise<StateAuthorityMetadata> => {
+        await guard.assertStable()
+        if (released || expected !== fencingToken) return fail('CONFLICT', 'state writer lease is closed or fencing token mismatched')
+        return this.assertFencingToken(fencingToken, leaseId)
       }
-      return this.assertFencingToken(fencingToken, leaseId)
-    }
-
-    const lease: WriterLease = {
-      pid: process.pid,
-      fencingToken,
-      leaseId,
-      acquiredAt,
-      initialAuthority: currentAuthority,
-      preAcquireAuthorityRaw,
-      assertFencingToken: assertLeaseToken,
-      recordIntent: async (intent) => {
-        await assertLeaseToken()
-        const record: WriteIntentRecord = {
-          ...intent,
-          fencingToken,
-          baseRevision: currentAuthority.revision,
-          recordedAt: new Date().toISOString(),
-        }
-        await atomicWriteJson(this.intentFilePath, record, 0o600)
-      },
-      clearIntent: async () => {
-        await rm(this.intentFilePath, { force: true }).catch(() => undefined)
-      },
-      commitAuthority: async (patch = {}) => {
-        const latest = await assertLeaseToken()
-        const nextRevision =
-          patch.revision !== undefined
-            ? assertInt(patch.revision, latest.revision, Number.MAX_SAFE_INTEGER, 'revision')
-            : patch.incrementRevision !== false
-              ? latest.revision + 1
-              : latest.revision
-        const mergedReferences = patch.references
-          ? { ...latest.references, ...patch.references }
-          : { ...latest.references }
-        const mergedAllocated =
-          patch.allocatedReferences || latest.allocatedReferences
-            ? { ...(latest.allocatedReferences ?? {}), ...(patch.allocatedReferences ?? {}) }
-            : undefined
-        const updated: StateAuthorityMetadata = {
-          revision: nextRevision,
-          fencingToken,
-          updatedAt: new Date().toISOString(),
-          references: mergedReferences,
-          ...(mergedAllocated && Object.keys(mergedAllocated).length > 0
-            ? { allocatedReferences: mergedAllocated }
-            : {}),
-        }
-        await atomicWriteJson(this.authorityFilePath, updated, 0o640, async () => {
-          await assertLeaseToken()
-        })
-        await rm(this.intentFilePath, { force: true }).catch(() => undefined)
-        committed = true
-        return updated
-      },
-      restorePreAcquireAuthorityIfUncommitted: async () => {
-        if (committed) return
-        const holderNow = await this.readLockHolder().catch(() => null)
-        if (!holderNow || holderNow.leaseId !== leaseId || holderNow.fencingToken !== fencingToken) return
-        if (preAcquireAuthorityRaw === null) {
-          await rm(this.authorityFilePath, { force: true }).catch(() => undefined)
-        } else {
-          await atomicWriteJson(this.authorityFilePath, JSON.parse(preAcquireAuthorityRaw), 0o640).catch(() => undefined)
-        }
-      },
-      release: async () => {
-        if (released) return
-        released = true
-        const holderNow = await this.readLockHolder().catch(() => null)
-        if (holderNow && holderNow.leaseId === leaseId) {
-          await rm(this.intentFilePath, { force: true }).catch(() => undefined)
-          await rm(this.ownerFilePath, { force: true }).catch(() => undefined)
-          for (let attempt = 0; attempt < 5; attempt++) {
+      const run = <T>(fn: () => Promise<T>): Promise<T> => {
+        if (closing) return Promise.resolve().then(() => fail('CONFLICT', 'state writer lease is closing'))
+        const result = tail.then(fn)
+        tail = result.catch(() => undefined)
+        return result
+      }
+      const rollbackCurrent = async (restoreOnly = false): Promise<void> => {
+        const authority = await assertCurrent()
+        const journal = await this.validatedIntent(holder)
+        if (!journal) return
+        if (committed || authority.committedLeaseId === leaseId || authority.revision !== journal.baseRevision || restoreOnly && !journal.restore) return fail('CONFLICT', 'rollback cannot disprove a committed or changed authority')
+        if (journal.restore) await this.recoverRestore(journal.restore, false, journal)
+        else await this.recoverGeneric(journal)
+        await rm(this.intentFilePath)
+      }
+      const lease: WriterLease = {
+        pid: process.pid, fencingToken, leaseId, acquiredAt, initialAuthority: current, preAcquireAuthorityRaw,
+        assertFencingToken: expected => run(() => assertCurrent(expected)),
+        recordIntent: value => run(async () => {
+          await assertCurrent()
+          if (committed) return fail('CONFLICT', 'cannot journal after authority commit')
+          if (await readJsonIfExists(this.intentFilePath) !== null) return fail('CONFLICT', 'an uncommitted state journal already exists')
+          const record: WriteIntentRecord = { ...value, leaseId, fencingToken, baseRevision: current.revision, recordedAt: new Date().toISOString() }
+          // Validate the full prospective journal before publication, without canonical file effects.
+          await this.validatedIntent(holder, record)
+          await atomicWriteJson(this.intentFilePath, record, 0o640)
+        }),
+        recordRestoreIntent: input => run(async () => {
+          await assertCurrent()
+          if (committed || await readJsonIfExists(this.intentFilePath) !== null) return fail('CONFLICT', 'cannot replace active recovery evidence')
+          if (!Array.isArray(input.entries) || input.entries.length !== RESTORE_ENTRIES.length || input.entries.some((name, index) => name !== RESTORE_ENTRIES[index])) return fail('VALIDATION', 'restore entries must be the complete canonical allowlist')
+          await this.validateRestorePlan({ stageName: input.stageName, backupName: input.backupName, entries: input.entries.map(name => ({ name, originalHash: null, stagedHash: null })) })
+          const entries = []
+          for (const name of input.entries) entries.push({ name, originalHash: await this.treeHash(join(this.stateDir, name)), stagedHash: await this.treeHash(join(this.stateDir, input.stageName, name)) })
+          const record: WriteIntentRecord = { op: 'restoreGenerationSnapshot', leaseId, fencingToken, baseRevision: current.revision, recordedAt: new Date().toISOString(), createdRelPaths: [], backups: [], restore: { stageName: input.stageName, backupName: input.backupName, entries } }
+          await this.validatedIntent(holder, record)
+          await atomicWriteJson(this.intentFilePath, record, 0o640)
+        }),
+        rollbackIntent: () => run(() => rollbackCurrent()),
+        rollbackRestoreIntent: () => run(() => rollbackCurrent(true)),
+        clearIntent: () => run(async () => {
+          await assertCurrent()
+          if (!committed && (await this.readAuthority()).committedLeaseId !== leaseId) return fail('CONFLICT', 'uncommitted recovery evidence cannot be cleared')
+          const journal = await this.validatedIntent(holder)
+          if (journal?.restore) await this.recoverRestore(journal.restore, true, journal)
+          if (journal) await rm(this.intentFilePath)
+        }),
+        commitAuthority: (patch = {}) => run(async () => {
+          const latest = await assertCurrent()
+          if (committed) return fail('CONFLICT', 'state writer lease already committed')
+          const revision = patch.revision !== undefined ? assertInt(patch.revision, latest.revision, Number.MAX_SAFE_INTEGER, 'revision') : patch.incrementRevision === false ? latest.revision : assertInt(latest.revision + 1, latest.revision, Number.MAX_SAFE_INTEGER, 'revision')
+          const updated = validateStateAuthority({ ...latest, committedLeaseId: leaseId, revision, fencingToken, updatedAt: new Date().toISOString(), references: { ...latest.references, ...patch.references }, ...(latest.allocatedReferences || patch.allocatedReferences ? { allocatedReferences: { ...latest.allocatedReferences, ...patch.allocatedReferences } } : {}) })
+          await atomicWriteJson(this.authorityFilePath, updated, 0o640, () => assertCurrent())
+          committed = true
+          const journal = await this.validatedIntent(holder)
+          if (journal && !journal.restore) await rm(this.intentFilePath)
+          return updated
+        }),
+        // Acquire changed only the epoch: retain it even when the operation aborts, preventing ABA.
+        restorePreAcquireAuthorityIfUncommitted: () => run(async () => { await assertCurrent() }),
+        release: () => {
+          if (releasePromise) return releasePromise
+          closing = true
+          releasePromise = tail.then(async () => {
             try {
-              await rm(this.lockDirPath, { recursive: true, force: true })
-              break
-            } catch {
-              await sleepMs(5 * (attempt + 1))
-            }
-          }
-        }
-      },
+              const finalAuthority = await assertCurrent()
+              const info = await lstat(this.intentFilePath).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
+              if (info && (committed || finalAuthority.committedLeaseId === leaseId)) await this.recoverOrphan(guard)
+              else if (!info) await rm(this.lockDirPath, { recursive: true })
+              // Any journal, including malformed bytes/failed rollback evidence, remains for guarded recovery.
+            } finally { released = true; await guard.release() }
+          })
+          return releasePromise
+        },
+      }
+      leaseOwnsGuard = true
+      return lease
+    } finally {
+      if (!leaseOwnsGuard) {
+        try {
+          if (prepared) await rm(prepared, { recursive: true, force: true })
+          if (publishedLease && (await this.readLockHolder())?.leaseId === publishedLease) await rm(this.lockDirPath, { recursive: true, force: true })
+        } finally { await guard.release() }
+      }
     }
-
-    return lease
   }
 
   /**
