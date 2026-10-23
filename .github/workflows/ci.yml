@@ -87,6 +87,12 @@ jobs:
       - name: Exercise 24 resource-meter views and 264 component states (synthetic data)
         run: node scripts/toolchain.mjs node tests/browser/resource-usage-acceptance.mjs --output=test-results/resource-usage-${{ github.run_id }}-${{ github.run_attempt }}
 
+      - name: Exercise interruptible shell overlay motion (synthetic data)
+        run: node scripts/toolchain.mjs node tests/browser/shell-motion-acceptance.mjs --output=test-results/shell-motion-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Exercise shell motion partial-setup recovery (synthetic failure injection)
+        run: node scripts/toolchain.mjs node tests/browser/shell-motion-exception-acceptance.mjs --output=test-results/shell-motion-exception-${{ github.run_id }}-${{ github.run_attempt }}
+
   qualification-prerequisites:
     if: github.event_name == 'workflow_dispatch'
     name: Read-only Linux prerequisite report (qualification not run)

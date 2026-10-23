@@ -10,6 +10,7 @@ import type {
 } from '@xpanel/core'
 import { dirForLocale, t, type Locale } from './i18n.ts'
 import { escapeHtml, renderLtrValue, renderStatusBadge } from './tokens.ts'
+import { SHELL_MOTION_CLIENT_SCRIPT } from './shell-motion.ts'
 
 export type WsConnectionState = 'connected' | 'reconnecting' | 'offline'
 export type ReconcileStageStatus = 'pending' | 'running' | 'passed' | 'failed'
@@ -442,6 +443,7 @@ export function renderReconcileBanner(
 export const BROWSER_REALTIME_SCRIPT = /* js */ `
 (function () {
   'use strict';
+${SHELL_MOTION_CLIENT_SCRIPT}
 
   var reconnectAttempt = 0;
   var ws = null;
@@ -703,10 +705,10 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
     }
   }
 
-  function closeActiveOverlay(restoreFocus) {
-    if (!activeOverlay) return;
-    var overlay = activeOverlay;
+  function finishOverlayClose(overlay, restoreFocus) {
+    if (activeOverlay !== overlay) return;
     activeOverlay = null;
+    if (overlay.motion) { overlay.motion.destroy(); overlay.motion = null; }
     if (overlay.kind === 'mobile-nav') {
       setMobileNavigationState(false);
       if (overlay.role === null) overlay.element.removeAttribute('role');
@@ -728,15 +730,38 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
     if (restoreFocus) restoreVisibleFocus(overlay.returnFocus);
   }
 
+  function closeActiveOverlay(restoreFocus, immediate) {
+    if (!activeOverlay) return;
+    var overlay = activeOverlay;
+    if (overlay.closing) {
+      overlay.restoreFocusAfterClose = overlay.restoreFocusAfterClose || restoreFocus;
+      if (immediate) finishOverlayClose(overlay, overlay.restoreFocusAfterClose);
+      return;
+    }
+    if (overlay.motion && !immediate) {
+      overlay.closing = true;
+      overlay.restoreFocusAfterClose = restoreFocus;
+      overlay.motion.close(function () { finishOverlayClose(overlay, overlay.restoreFocusAfterClose); });
+    } else finishOverlayClose(overlay, restoreFocus);
+  }
+
   function openOverlay(element, kind, trigger) {
     if (!element) return;
-    if (activeOverlay && activeOverlay.element === element) return;
+    if (activeOverlay && activeOverlay.element === element) {
+      if (activeOverlay.closing && activeOverlay.motion) {
+        activeOverlay.closing = false;
+        activeOverlay.restoreFocusAfterClose = false;
+        activeOverlay.motion.open();
+        focusOverlay(activeOverlay);
+      }
+      return;
+    }
     lastKeyPrefix = null;
     clearTimeout(lastKeyPrefixTimer);
     var returnFocus = trigger || document.activeElement;
     if (activeOverlay) {
       if (activeOverlay.element.contains(returnFocus)) returnFocus = activeOverlay.returnFocus;
-      closeActiveOverlay(false);
+      closeActiveOverlay(false, true);
     }
     returnFocus = toolbarFocusReturn(returnFocus);
     closeToolbarOptions();
@@ -775,13 +800,16 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
     document.body.style.overflow = 'hidden';
     document.documentElement.style.overflow = 'hidden';
     activeOverlay = overlay;
+    overlay.closing = false;
+    overlay.motion = createShellMotionController(element, kind);
+    if (overlay.motion) overlay.motion.open();
     focusOverlay(overlay);
   }
 
   function toggleCommandPalette(forceOpen, trigger) {
     var modal = document.getElementById('xp-cmdk-modal') || document.querySelector('[data-xp-cmdk]');
     if (!modal) return;
-    var shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : modal.hidden;
+    var shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : modal.hidden || Boolean(activeOverlay && activeOverlay.element === modal && activeOverlay.closing);
     if (shouldOpen) {
       var alreadyOpen = activeOverlay && activeOverlay.element === modal;
       openOverlay(modal, 'cmdk', trigger);
@@ -885,7 +913,7 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
 
   function toggleMobileNavigation(trigger) {
     if (window.innerWidth >= 960) return;
-    if (activeOverlay && activeOverlay.kind === 'mobile-nav') {
+    if (activeOverlay && activeOverlay.kind === 'mobile-nav' && !activeOverlay.closing) {
       closeActiveOverlay(true);
       return;
     }
@@ -924,7 +952,7 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
       if (window.innerWidth >= 960) {
         if (activeOverlay && activeOverlay.kind === 'mobile-nav') {
           var focused = responsiveFocusTarget();
-          closeActiveOverlay(false);
+          closeActiveOverlay(false, true);
           if (!isVisibleElement(focused)) restoreVisibleFocus(focused);
         }
         setMobileNavigationState(false);
@@ -1222,6 +1250,16 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
 
     // Delegated click handlers for File Manager (create/chmod/restore) and action buttons
     document.addEventListener('click', function (e) {
+      if (activeOverlay && activeOverlay.kind === 'cmdk' && e.target === activeOverlay.element) {
+        e.preventDefault(); closeActiveOverlay(true); return;
+      }
+      var navigation = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (activeOverlay && navigation && activeOverlay.element.contains(navigation) &&
+          ((activeOverlay.kind === 'cmdk' && navigation.hasAttribute('data-cmdk-item')) ||
+           (activeOverlay.kind === 'mobile-nav' && navigation.hasAttribute('data-nav-route')))) {
+        // Navigation is never held behind a presentation animation.
+        closeActiveOverlay(true, true); return;
+      }
       var target = e.target && e.target.closest ? e.target.closest('[data-action], [data-filter-chip]') : null;
       if (!target) return;
 
