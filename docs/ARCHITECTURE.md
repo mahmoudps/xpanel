@@ -40,7 +40,7 @@ Rules and renderers remain pure. The API owns request authority and application 
 
 The current web implementation renders HTML in the API process and adds browser clients for login, navigation and live updates. It is not a separate frontend SSR service, and it is not currently an entirely static UI served by Nginx.
 
-The shared UI contract uses IBM Plex Sans for English interface text and brands and Noto Sans Arabic for Arabic interface text, including ordinary navigation. Monospace is confined to technical content. Caption, label, body, card-heading and page-heading roles use a consistent hierarchy with shared spacing and independent 44px interaction targets; see [standards](STANDARDS.md). Rendered layouts still require browser verification at supported widths and directions.
+The shared UI contract uses IBM Plex Sans for English interface text and brands and IBM Plex Sans Arabic for Arabic interface text, including ordinary navigation. Monospace is confined to technical content. Caption, label, body, card-heading and page-heading roles use a consistent hierarchy with shared spacing and independent 44px interaction targets; see [standards](STANDARDS.md). Rendered layouts still require browser verification at supported widths and directions.
 
 ### Immutable application profiles
 

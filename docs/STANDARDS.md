@@ -103,15 +103,15 @@ See [TESTING.md](TESTING.md) for executable commands.
 
 ### Typography and spacing roles
 
-Use IBM Plex Sans for English interface text and brands, and Noto Sans Arabic for Arabic interface text. Keep ordinary navigation, labels, buttons, headings and values in the interface family. Reserve IBM Plex Mono for code, commands, file paths and technical identifiers; tabular numbers do not by themselves require a monospace family.
+Use IBM Plex Sans for English interface text and brands, and IBM Plex Sans Arabic for Arabic interface text. Noto Sans Arabic remains an allowed fallback face, not the Arabic UI face. Keep ordinary navigation, labels, buttons, headings and values in the interface family. Reserve IBM Plex Mono for code, commands, file paths and technical identifiers; tabular numbers do not by themselves require a monospace family.
 
 | Role | Font size | Latin line height | Arabic line height |
 |---|---|---|---|
-| Caption | 12px | 18px | 20px |
-| Label | 13px | 20px | 22px |
-| Body and ordinary controls | 14px | 20px | 22px |
-| Card heading | 16px | 24px | 26px |
-| Page heading | 22px | 28px | 32px |
+| Caption | 13px | 20px | 22px |
+| Label | 14px | 22px | 24px |
+| Body and ordinary controls | 16px | 24px | 26px |
+| Card heading | 18px | 28px | 30px |
+| Page heading | 26px | 34px | 36px |
 | Mobile input | 16px | 24px | 24px |
 
 Arabic uses additional vertical room for its glyphs; Latin and Arabic line heights are not identical. Brands use proportional Plex Sans with their role line height; technical-only Mono does not change the ordinary interface hierarchy.

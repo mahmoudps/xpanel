@@ -94,16 +94,43 @@ describe('listener-specific sign-in presentation', () => {
     assert.doesNotMatch(html, /type="email"|IMAP|SMTP|Sieve|delivery|name="email"/)
   })
 
-  it('keeps administrator recovery commands out of account-facing sign-in pages', () => {
+  it('keeps administrator recovery commands out of public sign-in pages', () => {
     for (const audience of ['xpanel', 'xmail'] as const) {
       const html = renderLoginSurface({ audience })
-      assert.match(html, /Contact your hosting administrator/)
-      assert.doesNotMatch(html, /data-cli-recovery|xpanel reset-password|disable-2fa/)
+      assert.match(html, /This page cannot reset a password/)
+      assert.doesNotMatch(html, /reset-password|disable-2fa/)
       assert.match(html, /<details[^>]+data-account-recovery><summary>Sign-in help<\/summary>/)
       assert.doesNotMatch(html, /<details[^>]+open/)
     }
-    assert.match(renderLoginSurface({ audience: 'xwhm' }), /data-cli-recovery/)
-    assert.match(renderLoginSurface(), /xpanel reset-password/)
+    for (const html of [renderLoginSurface({ audience: 'xwhm' }), renderLoginSurface()]) {
+      assert.match(html, /data-admin-note/)
+      assert.match(html, /Server administrator/)
+      assert.match(html, /operations runbook/)
+      assert.doesNotMatch(html, /reset-password|disable-2fa|<pre\b/)
+      assert.doesNotMatch(html, /<details[^>]+open/)
+    }
+  })
+
+  it('names the panel, labels the theme control, and links only safe sibling origins', () => {
+    const bare = renderLoginSurface({ audience: 'xpanel', theme: 'light' })
+    assert.match(bare, /data-login-product="xpanel"/)
+    assert.match(bare, /aria-label="Dark theme"/)
+    assert.match(bare, /class="xp-login-theme__label"/)
+    assert.match(bare, /data-password-label>Show</)
+    assert.doesNotMatch(bare, /data-panel-link|mailto:/)
+    const linked = renderLoginSurface({
+      audience: 'xpanel', theme: 'light', supportEmail: 'ops@example.test',
+      panels: [
+        { surface: 'xpanel', origin: 'https://panel.example.test:2083' },
+        { surface: 'xwhm', origin: 'https://whm.example.test:2087' },
+        { surface: 'xmail', origin: 'http://mail.example.test:2096' },
+        { surface: 'xmail', origin: 'https://user:pass@mail.example.test:2096' },
+      ],
+    })
+    assert.match(linked, /data-panel-link="xwhm" href="https:\/\/whm\.example\.test:2087\/login\?lang=en&amp;theme=light"/)
+    assert.match(linked, /mailto:ops@example.test/)
+    assert.doesNotMatch(linked, /data-panel-link="xpanel"|data-panel-link="xmail"|http:\/\/mail/)
+    assert.doesNotMatch(renderLoginSurface({ audience: 'xmail', supportEmail: 'not an email' }), /mailto:/)
   })
 
   it('escapes server-provided values and preserves observed lockout on every audience', () => {

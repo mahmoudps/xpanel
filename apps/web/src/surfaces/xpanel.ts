@@ -10,6 +10,7 @@ import type {
   WebsiteAnalyticsSnapshot,
 } from '@xpanel/core'
 import { renderWebsiteAnalyticsChart } from '../charts.ts'
+import { formatDisplayName } from '../display-name.ts'
 import { type Locale, t } from '../i18n.ts'
 import {
   type AsyncActionBannerProps,
@@ -148,7 +149,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
     <div class="xp-card" style="padding: 12px; margin-block-end: 12px;" data-account-summary-card="true">
       <div style="display: flex; justify-content: space-between; align-items: center;">
         <strong class="xp-mono"><bdi dir="ltr">${escapeHtml(account.username)}</bdi></strong>
-        ${plan ? renderStatusBadge('ok', plan.name) : ''}
+        ${plan ? renderStatusBadge('ok', formatDisplayName(plan.name)) : ''}
       </div>
     </div>
 
@@ -196,7 +197,7 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
         <div class="xp-kpi-grid">
           <div class="xp-field"><span class="xp-label">${isAr ? 'الحساب' : 'Account'}</span><strong><bdi dir="ltr">${escapeHtml(account.username)}</bdi></strong></div>
           <div class="xp-field"><span class="xp-label">${isAr ? 'النطاق الأساسي' : 'Primary domain'}</span><strong><bdi dir="ltr">${escapeHtml(account.primaryDomain)}</bdi></strong></div>
-          <div class="xp-field"><span class="xp-label">${isAr ? 'الخطة' : 'Plan'}</span><strong>${escapeHtml(plan?.name ?? (isAr ? 'غير متاحة' : 'Unavailable'))}</strong></div>
+          <div class="xp-field"><span class="xp-label">${isAr ? 'الخطة' : 'Plan'}</span><strong>${escapeHtml(plan?.name ? formatDisplayName(plan.name) : (isAr ? 'غير متاحة' : 'Unavailable'))}</strong></div>
           <div class="xp-field"><span class="xp-label">${isAr ? 'الحالة' : 'Status'}</span>${renderStatusBadge(account.status === 'active' ? 'ok' : 'suspended', account.status)}</div>
         </div>
         <p class="xp-prose" role="status" data-resource-metrics="unavailable">${isAr ? 'قياسات الموارد غير متاحة بعد.' : 'Resource measurements are not available yet.'}</p>
@@ -351,7 +352,7 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
 
         <!-- File Manager Toolbar & Breadcrumb -->
         <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-block-end: var(--xp-space-field);">
-          <nav aria-label="File manager breadcrumb" class="xp-mono">
+          <nav aria-label="File manager breadcrumb" class="xp-breadcrumb xp-mono">
             <bdi dir="ltr">${escapeHtml(account.home)}</bdi>
           </nav>
           <div style="display: flex; flex-wrap: wrap; gap: 8px;">

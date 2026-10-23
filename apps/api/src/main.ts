@@ -7,6 +7,8 @@ import { loadAgentCredentialFile } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
 import { canSeeAccount, fail, hasAcl } from '@xpanel/core'
 import { visibleNavigation } from '@xpanel/catalog'
+import type { VisibilityContext } from '@xpanel/catalog'
+import { publicContactEmail } from '../../web/src/display-name.ts'
 import type { OsProfile } from '@xpanel/core'
 import { createDb, latestActive, migrate, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
@@ -44,31 +46,110 @@ const detectHostOsProfile = async (): Promise<OsProfile> => {
  * Loads `serveWebUi` from `@xpanel/web` dynamically so visiting `/`, `/login`, `/whm`, `/panel`, `/mail`
  * renders the full bilingual HTML5 UI hydrated with live state from `StateStore` and `Db` when available.
  */
+const WORKSPACE_HOME: Record<EntryPoint, string> = { xpanel: '/home', xwhm: '/whm', xmail: '/mail/inbox' }
+
+const isWorkspaceHome = (route: { surface: string; activeRoute: string }): boolean =>
+  WORKSPACE_HOME[route.surface as EntryPoint] === route.activeRoute
+
+const suggestedPanel = (pathname: string, current?: EntryPoint): EntryPoint | undefined => {
+  const path = pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
+  const guess: EntryPoint | undefined = path === '/whm' || path.startsWith('/whm/') ? 'xwhm'
+    : path === '/mail' || path.startsWith('/mail/') ? 'xmail'
+    : path === '/panel' || path.startsWith('/panel/') ? 'xpanel'
+    : undefined
+  return guess && guess !== current ? guess : undefined
+}
+
 export const createDefaultWebRenderer = async (deps: {
   store: StateStore
   db: Db
   serverSecret: string
   entryPoint?: EntryPoint
+  /** Exact public origins. Missing origins are not linked. */
+  panels?: Partial<Record<EntryPoint, string>>
 }): Promise<(req: Request) => Promise<Response> | Response> => {
   const { serveWebUi, resolveWebDocumentRoute } = await import('../../web/src/index.ts')
+  const panelLinks = (['xpanel', 'xwhm', 'xmail'] as const).flatMap(surface => {
+    const origin = deps.panels?.[surface]
+    if (!origin) return []
+    try {
+      const url = new URL(origin)
+      if (url.protocol !== 'https:' || url.origin !== origin) return []
+      return [{ surface, origin: url.origin }]
+    } catch {
+      return []
+    }
+  })
   return async (req) => {
     const url = new URL(req.url)
     const headers = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }
+    let resolvedContact: string | undefined | null = null
+    const supportEmail = async (): Promise<string | undefined> => {
+      if (resolvedContact !== null) return resolvedContact || undefined
+      try {
+        resolvedContact = publicContactEmail((await deps.store.getServerSettings())?.adminEmail) ?? ''
+      } catch {
+        resolvedContact = ''
+      }
+      return resolvedContact || undefined
+    }
+    const documentStatus = async (
+      status: 403 | 404,
+      model: {
+        surface: EntryPoint
+        visibility?: VisibilityContext
+        accountId?: string
+        workspaceHref?: string
+        suggested?: EntryPoint
+      },
+    ) => {
+      const email = await supportEmail()
+      return serveWebUi(req, async () => ({
+        surface: model.surface,
+        activeRoute: url.pathname,
+        ...(model.visibility ? { visibility: model.visibility } : {}),
+        ...(model.accountId ? { accountId: model.accountId } : {}),
+        ...(email ? { supportEmail: email } : {}),
+        ...(panelLinks.length ? { panels: panelLinks } : {}),
+        error: {
+          status,
+          surface: model.surface,
+          ...(model.workspaceHref ? { workspaceHref: model.workspaceHref } : {}),
+          ...(model.suggested ? { suggested: model.suggested } : {}),
+        },
+      }))
+    }
     if (req.method !== 'GET' && req.method !== 'HEAD') return new Response(null, { status: 405, headers })
     if (url.pathname === '/favicon.ico' || url.pathname === '/assets' || url.pathname.startsWith('/assets/')) {
       return serveWebUi(req)
     }
-    if (url.pathname === '/login') return serveWebUi(req, async () => ({
-      surface: 'login',
-      ...(deps.entryPoint ? { login: { audience: deps.entryPoint, targetSurface: deps.entryPoint } } : {}),
-    }))
+    if (url.pathname === '/login') {
+      const email = await supportEmail()
+      return serveWebUi(req, async () => ({
+        surface: 'login',
+        ...(email ? { supportEmail: email } : {}),
+        ...(panelLinks.length ? { panels: panelLinks } : {}),
+        login: {
+          ...(deps.entryPoint ? { audience: deps.entryPoint, targetSurface: deps.entryPoint } : {}),
+          ...(email ? { supportEmail: email } : {}),
+          ...(panelLinks.length ? { panels: panelLinks } : {}),
+        },
+      }))
+    }
     const documentRoute = resolveWebDocumentRoute(url.pathname)
     if (!documentRoute) {
-      return new Response('Not Found', { status: 404, headers: { ...headers, 'content-type': 'text/plain; charset=utf-8' } })
+      return documentStatus(404, {
+        surface: deps.entryPoint ?? 'xpanel',
+        ...(suggestedPanel(url.pathname, deps.entryPoint) ? { suggested: suggestedPanel(url.pathname, deps.entryPoint) } : {}),
+      })
     }
     // The listener, never a query parameter or a forwarded header, chooses its HTML surface.
     if (deps.entryPoint && url.pathname !== '/' && documentRoute.surface !== deps.entryPoint) {
-      return new Response('Not Found', { status: 404, headers })
+      const suggested = documentRoute.surface !== 'login' && documentRoute.surface !== deps.entryPoint ? documentRoute.surface : suggestedPanel(url.pathname, deps.entryPoint)
+      return documentStatus(404, {
+        surface: deps.entryPoint,
+        ...(suggested ? { suggested } : {}),
+      })
     }
 
     // Browser documents require a session; a scoped API token cannot expose an unscoped HTML snapshot.
@@ -80,12 +161,21 @@ export const createDefaultWebRenderer = async (deps: {
       return new Response(null, { status: 303, headers: { ...headers, location: '/login' } })
     }
     const principal = caller.principal
-    if (deps.entryPoint && !entryPointAllowsRole(deps.entryPoint, principal.kind)) return new Response(null, { status: 403, headers })
+    const roleHome: EntryPoint | undefined = principal.kind === 'user' ? 'xpanel' : 'xwhm'
+    const wrongRole = (deps.entryPoint && !entryPointAllowsRole(deps.entryPoint, principal.kind))
+      || (documentRoute.surface === 'xwhm' && principal.kind === 'user')
+    if (wrongRole && documentRoute.surface !== 'login') {
+      const deniedSurface: EntryPoint = documentRoute.surface === 'xwhm' || documentRoute.surface === 'xmail' ? documentRoute.surface : 'xpanel'
+      return documentStatus(403, {
+        surface: deps.entryPoint ?? deniedSurface,
+        visibility: { principal, disabledFeatures: new Set() },
+        ...(roleHome !== (deps.entryPoint ?? deniedSurface) ? { suggested: roleHome } : {}),
+      })
+    }
     if (principal.kind === 'root' && !caller.principalRecord.totpEnabled && process.env.XPANEL_ALLOW_PASSWORD_ONLY_ROOT !== '1') {
       return new Response('Multi-factor enrollment is required.', { status: 403, headers })
     }
-    const surface = documentRoute.surface
-    if (surface === 'xwhm' && principal.kind === 'user') return new Response(null, { status: 403, headers })
+    const surface: EntryPoint = documentRoute.surface === 'xwhm' || documentRoute.surface === 'xmail' ? documentRoute.surface : 'xpanel'
     if (url.pathname === '/') {
       const target = new URL(deps.entryPoint ? ENTRY_POINTS[deps.entryPoint].home : principal.kind === 'user' ? '/panel' : '/whm', url)
       for (const key of ['lang', 'theme', 'density', 'accountId']) if (url.searchParams.has(key)) target.searchParams.set(key, url.searchParams.get(key)!)
@@ -93,14 +183,37 @@ export const createDefaultWebRenderer = async (deps: {
     }
     const reseller = principal.kind === 'reseller' ? (await deps.store.getReseller(principal.id)) ?? undefined : undefined
     const requiredAcl = surface === 'xmail' ? 'edit-account' : 'list-accounts'
-    if (principal.kind === 'reseller' && (!reseller || !hasAcl(principal, reseller, requiredAcl))) return new Response(null, { status: 403, headers })
+    if (principal.kind === 'reseller' && (!reseller || !hasAcl(principal, reseller, requiredAcl))) {
+      return documentStatus(403, {
+        surface,
+        visibility: { principal, ...(reseller ? { reseller } : {}), disabledFeatures: new Set() },
+      })
+    }
     const accountId = url.searchParams.get('accountId')
-    if (principal.kind === 'user' && accountId && accountId !== principal.accountId) return new Response(null, { status: 404, headers })
+    const ownAccountId = principal.kind === 'user' && accountId === principal.accountId ? accountId : undefined
+    if (principal.kind === 'user' && accountId && accountId !== principal.accountId) {
+      return documentStatus(404, {
+        surface,
+        visibility: { principal, disabledFeatures: new Set() },
+        workspaceHref: ENTRY_POINTS[surface].home,
+      })
+    }
     const scoped = principal.kind === 'user'
       ? await deps.store.readAccountWorkspace(principal.accountId, { username: principal.username })
       : accountId ? await deps.store.readAccountWorkspace(accountId) : null
-    if (accountId && (!scoped?.account || !canSeeAccount(principal, scoped.account))) return new Response(null, { status: 404, headers })
-    if (principal.kind === 'user' && (!scoped?.account || scoped.account.status !== 'active' || !scoped.plan || !scoped.featureList)) return new Response(null, { status: 403, headers })
+    if (accountId && (!scoped?.account || !canSeeAccount(principal, scoped.account))) {
+      return documentStatus(404, {
+        surface,
+        visibility: { principal, ...(reseller ? { reseller } : {}), disabledFeatures: new Set() },
+        workspaceHref: ENTRY_POINTS[surface].home,
+      })
+    }
+    if (principal.kind === 'user' && (!scoped?.account || scoped.account.status !== 'active' || !scoped.plan || !scoped.featureList)) {
+      return documentStatus(403, {
+        surface,
+        visibility: { principal, disabledFeatures: new Set(scoped?.featureList?.disabled ?? []) },
+      })
+    }
     const scopedVisibility = {
       principal,
       ...(reseller ? { reseller } : {}),
@@ -109,12 +222,23 @@ export const createDefaultWebRenderer = async (deps: {
     const qualifiedRoute = visibleNavigation(scopedVisibility).some(item => item.surface === surface
       && item.sections.some(section => section.pages.some(page => page.route === documentRoute.activeRoute)))
     if (!qualifiedRoute) {
+      if (!isWorkspaceHome(documentRoute)) {
+        return documentStatus(404, {
+          surface,
+          visibility: scopedVisibility,
+          ...(ownAccountId ? { accountId: ownAccountId } : {}),
+          workspaceHref: ENTRY_POINTS[surface].home,
+        })
+      }
+      const email = await supportEmail()
       const summaryAccount = principal.kind === 'user' && surface === 'xpanel' ? scoped?.account : null
       const summaryPlan = summaryAccount ? scoped?.plan : null
       return serveWebUi(req, async () => ({
         surface,
-        activeRoute: documentRoute.activeRoute,
         visibility: scopedVisibility,
+        ...(ownAccountId ? { accountId: ownAccountId } : {}),
+        ...(email ? { supportEmail: email } : {}),
+        ...(panelLinks.length ? { panels: panelLinks } : {}),
         workspaceSummary: {
           ...(summaryAccount ? { account: { id: summaryAccount.id, ownerId: summaryAccount.ownerId, username: summaryAccount.username,
             primaryDomain: summaryAccount.primaryDomain, status: summaryAccount.status, planId: summaryAccount.planId } } : {}),
@@ -126,11 +250,27 @@ export const createDefaultWebRenderer = async (deps: {
     const snap = await deps.store.readSnapshot()
     const ownedAccounts = snap.accounts.filter((account) => canSeeAccount(principal, account))
     const account = accountId ? ownedAccounts.find((a) => a.id === accountId) : ownedAccounts[0]
-    if (accountId && !account) return new Response(null, { status: 404, headers })
-    if (principal.kind === 'user' && (!account || account.status !== 'active')) return new Response(null, { status: 403, headers })
+    if (accountId && !account) {
+      return documentStatus(404, {
+        surface,
+        visibility: { principal, ...(reseller ? { reseller } : {}), disabledFeatures: new Set() },
+        workspaceHref: ENTRY_POINTS[surface].home,
+      })
+    }
+    if (principal.kind === 'user' && (!account || account.status !== 'active')) {
+      return documentStatus(403, {
+        surface,
+        visibility: { principal, disabledFeatures: new Set() },
+      })
+    }
     const plan = account ? snap.plans.find((p) => p.id === account.planId) : undefined
     const featureList = plan ? snap.featureLists.find((f) => f.id === plan.featureListId) : undefined
-    if (principal.kind === 'user' && (!plan || !featureList)) return new Response(null, { status: 403, headers })
+    if (principal.kind === 'user' && (!plan || !featureList)) {
+      return documentStatus(403, {
+        surface,
+        visibility: { principal, disabledFeatures: new Set(featureList?.disabled ?? []) },
+      })
+    }
     const visibility = {
       principal,
       ...(reseller ? { reseller } : {}),
@@ -148,7 +288,6 @@ export const createDefaultWebRenderer = async (deps: {
     const active = await latestActive(deps.db)
     return serveWebUi(req, async () => ({
       surface,
-      activeRoute: documentRoute.activeRoute,
       ...(url.searchParams.has('accountId') && account ? { accountId: account.id } : {}),
       visibility,
       ...(active ? { generationId: active.id } : {}),
@@ -333,10 +472,11 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
     const apps = {} as Record<EntryPoint, ReturnType<typeof createApiApp>>
     for (const entryPoint of ENTRY_POINT_ORDER) {
       const config = entryPoints[entryPoint]
-      const webRenderer = await createDefaultWebRenderer({ store, db: dbHandle.db, serverSecret, entryPoint })
+      const publicPanels = Object.fromEntries(ENTRY_POINT_ORDER.map(name => [name, entryPoints[name].publicOrigin])) as Record<EntryPoint, string>
+      const webRenderer = await createDefaultWebRenderer({ store, db: dbHandle.db, serverSecret, entryPoint, panels: publicPanels })
       const app = createApiApp({
         db: dbHandle.db, store, agentApp, agentToken, os, serverSecret, webRenderer,
-        entryPoint, publicOrigin: config.publicOrigin, allowedOrigins: [config.publicOrigin],
+        entryPoint, publicOrigin: config.publicOrigin, publicPanels, allowedOrigins: [config.publicOrigin],
         ingressSecret, requireSecureCookies: true, requireOriginHeader: true,
         ...(opts.homeBaseDir ? { homeBaseDir: opts.homeBaseDir } : {}),
       })

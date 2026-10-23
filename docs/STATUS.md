@@ -38,7 +38,7 @@ The clean checkout and CI must repeat these commands for every exact published s
 
 A reduced-motion focus defect was identified: reducing a visibility transition to a tiny duration still allowed the navigation sheet to remain hidden during its focus call. The source now disables transitions and animations under the preference and uses immediate scrolling. Re-run the unchanged focus requirements against the final export; do not convert earlier failures into successful evidence.
 
-The UI typography contract retains IBM Plex Sans/Arabic, uses Sans for brands and ordinary controls, and confines monospace to technical content. Caption/label/body/card/page roles and shared spacing require actual browser inspection; loaded fonts alone do not prove visual consistency. No full-screen visual acceptance or final matrix pass is asserted by these definitions.
+The UI typography contract uses IBM Plex Sans and IBM Plex Sans Arabic, uses Sans for brands and ordinary controls, and confines monospace to technical content. Caption/label/body/card/page roles and shared spacing require actual browser inspection; loaded fonts alone do not prove visual consistency. No full-screen visual acceptance or final matrix pass is asserted by these definitions.
 
 Native Linux tests are separate from portable checks. Their implementations and fixture results do not automatically qualify an installation, reboot, tenant workload or service deployment on a different source revision or operating system.
 

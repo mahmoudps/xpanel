@@ -163,7 +163,8 @@ describe('production web renderer boundary regressions', () => {
     const render = await renderer()
     const cookie = await session(principal.id)
     for (const path of ['/whm', '/whm/accounts']) {
-      await observe(`root-mfa-unenrolled:${path}`, await render(request(path, cookie)), 403)
+      const html = await observe(`root-mfa-unenrolled:${path}`, await render(request(path, cookie)), 403)
+      expect(html).toBe('Multi-factor enrollment is required.')
     }
     expect(snapshotReads).toBe(0)
   })
@@ -173,31 +174,68 @@ describe('production web renderer boundary regressions', () => {
     const cookie = await session(principal.id)
     const render = await renderer()
     expect(tools.some(tool => tool.status === 'verified' && tool.delivery.status === 'verified')).toBe(false)
-    for (const path of ['/whm', '/whm/accounts']) {
-      const html = await observe(`unverified-catalog:${path}`, await render(request(path, cookie)), 200)
-      expect.soft(html.includes('data-tool-availability="unverified"')).toBe(true)
-      expect.soft(/alice-shop\.com|srv1\.xpanel\.test/.test(html)).toBe(false)
-    }
+    const home = await observe('unverified-catalog:/whm', await render(request('/whm', cookie)), 200)
+    expect.soft(home.includes('data-tool-availability="unverified"')).toBe(true)
+    expect.soft(/alice-shop\.com|srv1\.xpanel\.test/.test(home)).toBe(false)
+    const accounts = await observe('unverified-catalog:/whm/accounts', await render(request('/whm/accounts', cookie)), 404)
+    expect.soft(accounts.includes('data-status-page="404"')).toBe(true)
+    expect.soft(accounts.includes('data-tool-availability="unverified"')).toBe(false)
+    expect.soft(/alice-shop\.com|srv1\.xpanel\.test/.test(accounts)).toBe(false)
   })
 
   it('hydrates only a bounded identity summary while tools remain unqualified', async () => {
     const principal = await root()
     const cookie = await session(principal.id)
     const render = await renderer()
-    for (const path of ['/whm/accounts', '/panel/files/manager', '/mail/inbox']) {
-      await observe(`empty-state:${path}`, await render(request(path, cookie)), 200)
+    await observe('empty-state:/mail/inbox', await render(request('/mail/inbox', cookie)), 200)
+    const inbox = hydration.at(-1)
+    expect(inbox).toBeDefined()
+    expect((inbox!.visibility as { principal: { kind: string } }).principal.kind).toBe('root')
+    expect(inbox!.catalog).toBeUndefined()
+    expect(inbox!.workspaceSummary).toEqual({})
+    for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(inbox).not.toHaveProperty(key)
+    for (const path of ['/whm/accounts', '/panel/files/manager']) {
+      await observe(`empty-state:${path}`, await render(request(path, cookie)), 404)
       const supplied = hydration.at(-1)
       expect(supplied).toBeDefined()
       const visibility = supplied!.visibility as { principal: { kind: string } }
       observations.push({ id: `hydration:${path}`, visibilityPrincipalKind: visibility.principal.kind,
-        catalogOverridden: supplied!.catalog !== undefined, summaryKeys: Object.keys(supplied!.workspaceSummary as object),
-        fullStateSupplied: ['whm', 'panel', 'mail', 'generationId'].some(key => key in supplied!),
+        catalogOverridden: supplied!.catalog !== undefined,
+        fullStateSupplied: ['whm', 'panel', 'mail', 'generationId', 'workspaceSummary'].some(key => key in supplied!),
       })
       expect(visibility.principal.kind).toBe('root')
       expect(supplied!.catalog).toBeUndefined()
-      expect(supplied!.workspaceSummary).toEqual({})
-      for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(supplied).not.toHaveProperty(key)
+      expect(supplied!.error).toMatchObject({ status: 404 })
+      for (const key of ['whm', 'panel', 'mail', 'generationId', 'workspaceSummary']) expect(supplied).not.toHaveProperty(key)
     }
+    expect(snapshotReads).toBe(0)
+  })
+
+  it('uses a styled 404 for unknown and unqualified routes and keeps the workspace on home', async () => {
+    const principal = await root()
+    const cookie = await session(principal.id)
+    const render = await renderer()
+    const unknown = await observe('route-404:anonymous-email', await render(request('/panel/email')), 404)
+    expect(unknown).toContain('data-status-page="404"')
+    expect(unknown).not.toContain('data-tool-availability="unverified"')
+    const domains = await observe('route-404:domains', await render(request('/panel/domains', cookie)), 404)
+    expect(domains).toContain('data-status-page="404"')
+    expect(domains).toContain('Back to workspace')
+    expect(domains).not.toContain('href="/domains')
+    const home = await observe('route-home:/panel', await render(request('/panel', cookie)), 200)
+    expect(home).toContain('data-tool-availability="unverified"')
+    expect(home).toContain('Not yet available')
+    const crossedRender = await createDefaultWebRenderer({
+      store: state.store, db: db.db, serverSecret: SERVER_SECRET, entryPoint: 'xpanel',
+      panels: {
+        xpanel: 'https://panel.example.test:2083',
+        xwhm: 'https://whm.example.test:2087',
+        xmail: 'https://mail.example.test:2096',
+      },
+    })
+    const crossed = await observe('route-404:cross-whm', await crossedRender(request('/whm')), 404)
+    expect(crossed).toContain('https://whm.example.test:2087/login')
+    expect(crossed).not.toContain('href="/whm')
     expect(snapshotReads).toBe(0)
   })
 

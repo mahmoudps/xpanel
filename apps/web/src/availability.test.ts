@@ -26,7 +26,12 @@ describe('verified production availability', () => {
   it.each(['xwhm', 'xpanel', 'xmail'] as const)('shows an honest unavailable workspace for %s without publishing service actions', surface => {
     const html = renderWebApp({ surface, locale: 'en' })
     expect(html).toContain('data-tool-availability="unverified"')
-    expect(html).toContain('Service management is unavailable in this release.')
+    expect(html).toContain('Your tools are not on this server yet')
+    expect(html).toContain('Not yet available')
+    expect(html).not.toContain('data-action="logout"')
+    const sidebar = /<aside class="xp-sidebar"[\s\S]*?<\/aside>/.exec(html)?.[0] ?? ''
+    expect(sidebar).toContain('data-planned-group=')
+    expect(sidebar).not.toMatch(/<a\b/)
     expect(html).not.toMatch(/<form\b|data-nav-route="|data-cmdk-item="/)
     expect(html).not.toContain('alice-shop.com')
     expect(html).not.toContain('data-generation-chip=')
@@ -132,7 +137,8 @@ describe('verified production availability', () => {
 
   it('renders an Arabic unavailable state with Latin digits', () => {
     const html = renderWebApp({ surface: 'xpanel', locale: 'ar' })
-    expect(html).toContain('الأدوات غير متاحة')
+    expect(html).toContain('أدواتك ليست على هذا الخادم بعد')
+    expect(html).toContain('غير متاحة بعد')
     expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
   })
 

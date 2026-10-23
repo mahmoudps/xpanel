@@ -1,3 +1,5 @@
+import { panelLabel, safePanelLinks, type PanelId, type PanelLink } from '../chrome.ts'
+import { publicContactEmail } from '../display-name.ts'
 import { escapeHtml } from '../tokens.ts'
 
 export interface LoginSurfaceProps {
@@ -9,6 +11,10 @@ export interface LoginSurfaceProps {
   username?: string
   lockout?: { locked: boolean; lockedUntil?: string; retryAfterSec?: number }
   errorMessage?: string | null
+  /** Exact public origins of the three panels. Omitted origins are not linked. */
+  panels?: readonly PanelLink[]
+  /** Configured administrator contact. Shown only when it is a plain email address. */
+  supportEmail?: string
 }
 
 export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
@@ -30,6 +36,9 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
   const themeMark = theme === 'dark'
     ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></svg>'
     : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M20.7 14.7A9 9 0 0 1 9.3 3.3 9 9 0 1 0 20.7 14.7Z"/></svg>'
+  const themeLabel = theme === 'dark' ? text('Light theme', 'الوضع الفاتح') : text('Dark theme', 'الوضع الداكن')
+  const contact = publicContactEmail(props.supportEmail)
+  const siblingPanels = safePanelLinks(props.panels).filter(panel => panel.surface !== (audience ?? targetSurface))
   const locked = props.lockout?.locked === true
   const retry = props.lockout?.retryAfterSec
   const observedRetry = typeof retry === 'number' && Number.isFinite(retry) && retry > 0 ? Math.ceil(retry) : ''
@@ -45,12 +54,13 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
     </div>
     <div class="xp-topbar-actions">
       <a href="/login?lang=${isAr ? 'en' : 'ar'}&amp;theme=${theme}&amp;target=${targetSurface}" class="xp-btn xp-btn--ghost" lang="${isAr ? 'en' : 'ar'}">${text('العربية', 'English')}</a>
-      <a href="/login?lang=${locale}&amp;theme=${theme === 'dark' ? 'light' : 'dark'}&amp;target=${targetSurface}" class="xp-btn xp-btn--ghost ${audience ? 'xp-login-theme' : ''}" aria-label="${theme === 'dark' ? text('Light theme', 'الوضع الفاتح') : text('Dark theme', 'الوضع الداكن')}">${audience ? themeMark : theme === 'dark' ? text('Light theme', 'الوضع الفاتح') : text('Dark theme', 'الوضع الداكن')}</a>
+      <a href="/login?lang=${locale}&amp;theme=${theme === 'dark' ? 'light' : 'dark'}&amp;target=${targetSurface}" class="xp-btn xp-btn--ghost xp-login-theme" aria-label="${themeLabel}" title="${themeLabel}">${themeMark}<span class="xp-login-theme__label">${themeLabel}</span></a>
     </div>
   </header>
   <main class="xp-login-main" aria-labelledby="login-heading">
     <section class="xp-card xp-login-card">
       ${audience ? '' : `<div class="xp-login-step">${text('Step 1 of 2 — Credentials', 'الخطوة 1 من 2 — بيانات الدخول')}</div>`}
+      <p class="xp-login-identity__product" dir="ltr" data-login-product="${audience ?? 'xpanel'}">${brand}</p>
       <h1 id="login-heading" class="xp-page-title">${audience ? profileHeading : text(`Sign in to ${brand}`, `تسجيل الدخول إلى ${brand}`)}</h1>
       ${audience ? '' : `<p class="xp-subtitle" id="login-description">${text('Enter your account credentials. Additional verification appears when required.', 'أدخل بيانات حسابك. تظهر خطوات التحقق الإضافية عند طلبها.')}</p>`}
       <div class="xp-alert xp-alert--critical" role="alert" data-auth-error data-lockout-state="${locked ? 'locked' : 'unknown'}" ${props.errorMessage || locked ? '' : 'hidden'}>${escapeHtml(props.errorMessage ?? (locked ? (isAr ? 'تسجيل الدخول مقفل مؤقتًا.' : 'Sign-in is temporarily locked.') : ''))}</div>
@@ -68,6 +78,7 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
             <button type="button" class="xp-password-toggle" data-action="toggle-password" data-target="login-password" aria-controls="login-password" aria-pressed="false" aria-label="${text('Show password', 'إظهار كلمة المرور')}">
               <svg data-password-show width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.5" stroke="currentColor" stroke-width="1.6"/></svg>
               <svg data-password-hide width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" hidden><path d="m4 4 16 16M9.8 6.3A11 11 0 0 1 12 6c6.1 0 9.5 6 9.5 6a17 17 0 0 1-3.2 3.8M6.1 7.6A18 18 0 0 0 2.5 12s3.4 6 9.5 6a11 11 0 0 0 4-0.8M10.2 10.2a2.5 2.5 0 0 0 3.6 3.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span data-password-label>${text('Show', 'إظهار')}</span>
             </button>
           </div>
         </div>
@@ -122,12 +133,11 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
         </form>
       </section>
       <button type="button" class="xp-btn" data-action="logout" data-auth-cancel hidden>${text('Cancel and sign out', 'إلغاء وتسجيل الخروج')}</button>
-      ${audience && audience !== 'xwhm' ? `<details class="xp-cli-recovery" data-account-recovery><summary>${text('Sign-in help', 'مساعدة الدخول')}</summary><p class="xp-help">${text('Contact your hosting administrator.', 'تواصل مع مدير الاستضافة.')}</p></details>` : `<details class="xp-cli-recovery" data-cli-recovery>
-        <summary>${audience ? text('Sign-in help', 'مساعدة الدخول') : text('Recover access with server administrator help', 'استعادة الوصول بمساعدة مدير الخادم')}</summary>
-        <p class="xp-help">${text('An administrator with root SSH access can use:', 'يمكن لمدير يملك وصول root عبر SSH استخدام:')}</p>
-        <pre class="xp-code-block" dir="ltr"><bdi dir="ltr">xpanel reset-password &lt;user&gt; --password-stdin
-xpanel disable-2fa &lt;user&gt;</bdi></pre>
+      ${audience && audience !== 'xwhm' ? `<details class="xp-cli-recovery" data-account-recovery><summary>${text('Sign-in help', 'مساعدة الدخول')}</summary><p class="xp-help">${text('This page cannot reset a password. If you forgot yours, ask your hosting provider to set a new one, then sign in here. When the account uses two-factor authentication, a recovery code can be entered after the password is accepted.', 'هذه الصفحة لا تعيد تعيين كلمة المرور. إذا نسيتها، اطلب من مزوّد الاستضافة تعيين كلمة جديدة ثم سجّل الدخول هنا. إذا كان الحساب يستخدم التحقق الثنائي، يمكن إدخال رمز استرداد بعد قبول كلمة المرور.')}</p>${contact ? `<p class="xp-help" data-support-contact="email">${text('Write to', 'راسل')} <a href="mailto:${escapeHtml(contact)}"><bdi dir="ltr">${escapeHtml(contact)}</bdi></a>.</p>` : `<p class="xp-help">${text('Your hosting provider is the person who can set that password.', 'مزوّد الاستضافة هو من يستطيع تعيين كلمة المرور.')}</p>`}</details>` : `<details class="xp-cli-recovery" data-admin-note>
+        <summary>${text('Server administrator', 'مدير الخادم')}</summary>
+        <p class="xp-help">${text('Password and two-factor recovery are done on the server by someone with root access. The steps are in the operations runbook, not on this page.', 'استعادة كلمة المرور والتحقق الثنائي تتم على الخادم بيد من يملك صلاحية root. الخطوات في دليل التشغيل، وليست في هذه الصفحة.')}</p>
       </details>`}
+      ${siblingPanels.length ? `<nav class="xp-login-siblings" aria-label="${text('Other panels', 'اللوحات الأخرى')}"><span class="xp-help">${text('Other panels on this server', 'لوحات أخرى على هذا الخادم')}</span>${siblingPanels.map(panel => `<a class="xp-login-sibling" data-panel-link="${panel.surface}" href="${escapeHtml(panel.origin)}/login?lang=${locale}&amp;theme=${theme}">${panelLabel(panel.surface as PanelId)}</a>`).join('')}</nav>` : ''}
     </section>
 
     ${audience ? '' : `<aside class="xp-login-aside" aria-label="${text('Sign-in information and surfaces', 'معلومات الدخول والواجهات')}">

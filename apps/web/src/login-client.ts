@@ -235,8 +235,10 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
       button.setAttribute('aria-label', visible ? copy.hide : copy.show);
       button.setAttribute('aria-pressed', String(visible));
       var showIcon = button.querySelector('[data-password-show]'), hideIcon = button.querySelector('[data-password-hide]');
+      var label = button.querySelector('[data-password-label]');
       if (showIcon) showIcon.toggleAttribute('hidden', visible);
       if (hideIcon) hideIcon.toggleAttribute('hidden', !visible);
+      if (label) label.textContent = visible ? (ar ? 'إخفاء' : 'Hide') : (ar ? 'إظهار' : 'Show');
       if (typeof start === 'number' && typeof end === 'number') input.setSelectionRange(start, end, direction || 'none');
     } else if (action === 'restart-enrollment') {
       clearEnrollment(); show('[data-auth-enrollment-details]', false); setup.hidden = false; step('enrollment-required'); message(copy.enrollment, false);
