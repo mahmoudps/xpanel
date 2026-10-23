@@ -772,6 +772,8 @@ export interface AuditQuery {
   actor?: string
   target?: string
   action?: string
+  /** Actor match, or the username appearing in the target. */
+  mentions?: string
 }
 
 /** Newest first. */
@@ -801,6 +803,10 @@ export const listAudit = async (db: Db, q: AuditQuery = {}): Promise<AuditEntry[
   if (q.action !== undefined) {
     clauses.push(`action = $${params.length + 1}`)
     params.push(q.action)
+  }
+  if (q.mentions !== undefined && q.mentions.length > 0 && q.mentions.length <= 64) {
+    clauses.push(`(actor = $${params.length + 1} OR instr(target, $${params.length + 2}) > 0)`)
+    params.push(q.mentions, q.mentions)
   }
   params.push(limit)
   const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''

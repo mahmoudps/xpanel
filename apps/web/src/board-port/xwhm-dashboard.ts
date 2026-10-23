@@ -1,7 +1,7 @@
 import type { Account, AuditEntry, Certificate, Plan, ServerIpEntry } from '@xpanel/core'
 import { ARABIC_TYPE_CSS } from '../arabic-type.ts'
 import { isolateLtrRuns } from '../bidi-runs.ts'
-import { auditActionLabel } from '../audit-labels.ts'
+import { auditActionLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
 import type { Locale } from '../i18n.ts'
 import { escapeHtml, formatAsciiDate, formatAsciiNumber, formatBytes, formatUtcClock, formatUtcDay } from '../tokens.ts'
 
@@ -29,6 +29,8 @@ export interface DashboardHostSample {
   uptimeSeconds?: number
   engine?: string
   panelVersion?: string
+  /** DNS name from the panel certificate. */
+  panelDomain?: string
   /** ISO time of the host probe. Empty when the sample was not taken. */
   sampledAt?: string
   nginxTest?: { ok: boolean; at: string }
@@ -55,7 +57,13 @@ interface DashboardProps {
   driftCount?: number | null
   /** Previous superseded generation, the rollback target. */
   rollbackGenerationId?: number
+  /** When the active generation was activated. */
+  generationActivatedAt?: string
   certificates?: readonly Pick<Certificate, 'names' | 'notAfter'>[]
+  /** Computed near-limit rows. Omit when usage was not measured. An empty list is none. */
+  nearLimits?: Array<{ name: string; note: string }>
+  /** Fixed clock for certificate day counts. Tests pass this; live pages use the current time. */
+  now?: number
 }
 
 export interface DashboardChip {
@@ -303,6 +311,7 @@ export const mapAgentHostInfo = (info: unknown): DashboardHostSample | null => {
     ...(uptimeSeconds !== undefined ? { uptimeSeconds } : {}),
     ...(agentText(identity, 'engine') ? { engine: agentText(identity, 'engine') } : {}),
     ...(agentText(identity, 'version') ? { panelVersion: agentText(identity, 'version') } : {}),
+    ...(agentText(identity, 'panelDomain') ? { panelDomain: agentText(identity, 'panelDomain') } : {}),
     ...(sampledAt && !Number.isNaN(Date.parse(sampledAt)) ? { sampledAt } : {}),
     ...(nginxTest ? { nginxTest } : {}),
     ...(apacheTest ? { apacheTest } : {}),
@@ -799,19 +808,46 @@ const meterPercent = (used: number, total: number): { now: string; pct: string }
   return { now: String(value), pct: `${value}%` }
 }
 
-const expiringCertificates = (certificates: readonly Pick<Certificate, 'names' | 'notAfter'>[] | undefined): { name: string; date: string }[] => {
-  if (!certificates) return []
-  const now = Date.now()
-  const windowMs = 30 * 24 * 60 * 60 * 1000
-  const rows: { name: string; date: string }[] = []
+const certificateRows = (
+  certificates: readonly Pick<Certificate, 'names' | 'notAfter'>[],
+  now: number,
+): { name: string; date: string; days: number }[] => {
+  const rows: { name: string; date: string; days: number }[] = []
   for (const certificate of certificates) {
     const when = Date.parse(certificate.notAfter)
-    if (!Number.isFinite(when) || when - now > windowMs) continue
+    if (!Number.isFinite(when)) continue
     const name = certificate.names.find(item => item.length > 0)
     if (!name) continue
-    rows.push({ name, date: formatUtcDay(certificate.notAfter) })
+    rows.push({ name, date: formatUtcDay(certificate.notAfter), days: Math.ceil((when - now) / 86_400_000) })
   }
   return rows
+}
+
+const arAccountCount = (count: number): string => {
+  const rule = new Intl.PluralRules('ar').select(count)
+  if (rule === 'zero') return 'لا حسابات'
+  if (rule === 'one') return 'حساب واحد'
+  if (rule === 'two') return 'حسابان'
+  if (rule === 'few') return `«${count}» حسابات`
+  return `«${count}» حساباً`
+}
+
+const arDayCount = (count: number): string => {
+  const rule = new Intl.PluralRules('ar').select(count)
+  if (rule === 'zero') return '«0» يوم'
+  if (rule === 'one') return 'يوم واحد'
+  if (rule === 'two') return 'يومان'
+  if (rule === 'few') return `«${count}» أيام`
+  return `«${count}» يوماً`
+}
+
+const arPlanCount = (count: number): string => {
+  const rule = new Intl.PluralRules('ar').select(count)
+  if (rule === 'zero') return ''
+  if (rule === 'one') return ' وخطة واحدة'
+  if (rule === 'two') return ' وخطتان'
+  if (rule === 'few') return ` و«${count}» خطط`
+  return ` و«${count}» خطة`
 }
 
 export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel => {
@@ -827,7 +863,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
   const readableName = (value: string | undefined): string | null =>
     value && value !== 'Server' && value !== 'الخادم' ? value : null
   const hostname = readableName(props.hostSample?.hostname) ?? readableName(props.hostname) ?? '—'
-  const panelDomain = readableName(props.panelHostname)
+  const panelDomain = readableName(props.hostSample?.panelDomain) ?? readableName(props.panelHostname)
   const panelRow = panelDomain && panelDomain !== hostname ? panelDomain : null
   const probedVersion = hostText(props.hostSample?.panelVersion)
   const version = probedVersion !== '—'
@@ -866,37 +902,52 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     ? props.hostSample.inodes
     : null
   const homeOnRoot = inodes ? inodes.homeOnRoot === true || inodes.mount === '/' : false
-  const expiring = props.certificates === undefined ? null : expiringCertificates(props.certificates)
-  const certificateNotice: DashboardNotice = expiring === null
+  const listedCertificates = props.certificates === undefined ? null : certificateRows(props.certificates, props.now ?? Date.now())
+  const soon = listedCertificates?.filter(item => item.days < 30) ?? []
+  const certificateNotice: DashboardNotice = listedCertificates === null
     ? { tone: 'info', html: '<span>—</span>' }
-    : expiring.length === 0
-      ? { tone: 'warn', html: `<span>${ar ? rich('لا شهادات تُجدَّد خلال «30» يوماً.') : escapeHtml('No certificates renew within 30 days.')}</span>` }
+    : listedCertificates.length === 0
+      ? { tone: 'info', html: `<span>${ar ? rich('لا شهادات تُجدَّد خلال «30» يوماً.') : escapeHtml('No certificates renew within 30 days.')}</span>` }
       : {
-          tone: 'warn',
-          html: `<span>${ar
-            ? rich(expiring.length === 1 ? '«1» شهادة تُجدَّد خلال «30» يوماً:' : `«${expiring.length}» شهادات تُجدَّد خلال «30» يوماً:`)
-            : escapeHtml(expiring.length === 1 ? '1 certificate renews within 30 days:' : `${expiring.length} certificates renew within 30 days:`)} ${expiring.map(item => ar ? `<bdi dir="ltr"><span style="font-family: 'IBM Plex Mono', monospace">${escapeHtml(item.name)}</span></bdi> <bdi dir="ltr">(${escapeHtml(item.date)})</bdi>` : `${mono(item.name)} (${mono(item.date)})`).join(', ')}</span>`,
+          tone: soon.length > 0 ? 'warn' : 'info',
+          html: `<span>${soon.length > 0
+            ? (ar
+              ? rich(soon.length === 1 ? '«1» شهادة تُجدَّد خلال «30» يوماً:' : `«${soon.length}» شهادات تُجدَّد خلال «30» يوماً:`)
+              : escapeHtml(soon.length === 1 ? '1 certificate renews within 30 days:' : `${soon.length} certificates renew within 30 days:`))
+            : ''} ${listedCertificates.map(item => {
+            if (ar) return `<bdi dir="ltr">${mono(item.name)}</bdi> · ${rich(arDayCount(item.days))} <bdi dir="ltr">(${escapeHtml(item.date)})</bdi>`
+            return `${mono(item.name)} · ${escapeHtml(item.days === 1 ? '1 day' : `${item.days} days`)} (${mono(item.date)})`
+          }).join(', ')}</span>`,
         }
   const planPhrase = planCount === null
     ? ''
     : ar
-      ? (planCount === 1 ? ' و«1» خطة' : ` و«${planCount}» خططاً`)
+      ? arPlanCount(planCount)
       : (planCount === 1 ? ' and 1 plan' : ` and ${planCount} plans`)
   const accountsSentence = total === null
     ? '—'
     : ar
-      ? `«${total}» حساباً${planPhrase}. الموزعون يرون الحسابات التي يملكونها فقط.`
+      ? `${arAccountCount(total)}${planPhrase}. الموزعون يرون الحسابات التي يملكونها فقط.`
       : `${total} ${total === 1 ? 'account' : 'accounts'}${planPhrase}. Resellers see only the accounts they own.`
-  const audit = (props.auditEntries ?? []).slice(0, 8).map((entry: AuditEntry): DashboardAuditRow => ({
-    time: formatUtcClock(entry.at),
-    datetime: entry.at,
-    actor: entry.actor,
-    from: '—',
-    action: auditActionLabel(entry.action, locale),
-    target: entry.target,
-    result: entry.outcome === 'ok' ? okChip(ar ? 'مطبّق' : 'Applied') : badChip(entry.outcome),
-    detail: '—',
-  }))
+  const audit = (props.auditEntries ?? []).slice(0, 8).map((entry: AuditEntry): DashboardAuditRow => {
+    const target = auditTargetLabel(entry.target, locale)
+    const outcome = auditOutcomeLabel(entry.action, entry.outcome, locale)
+    const chip = entry.outcome === 'ok'
+      ? okChip(outcome)
+      : entry.outcome === 'denied'
+        ? emptyChip(outcome)
+        : badChip(outcome)
+    return {
+      time: formatUtcClock(entry.at),
+      datetime: entry.at,
+      actor: entry.actor,
+      from: '—',
+      action: auditActionLabel(entry.action, locale),
+      target,
+      result: chip,
+      detail: target,
+    }
+  })
   const sampledAt = props.hostSample?.sampledAt && !Number.isNaN(Date.parse(props.hostSample.sampledAt)) ? props.hostSample.sampledAt : ''
   const utcMinute = (iso: string): string => formatAsciiDate(iso, { includeTime: true }).replace(/:\d{2} UTC$/, ' UTC')
   const clock = (iso: string): string => formatUtcClock(iso)
@@ -946,7 +997,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     reconcilerLede: ar ? 'الحالة المطلوبة تساوي الحالة المطبّقة عندما ينجح الفحص.' : 'The desired state equals the applied state when the drift check reports none.',
     reconcilerTiles: [
       { label: ar ? 'المطلوب والمطبّق' : 'Desired and applied', value: inSync ? `${generationId} = ${generationId}` : '—', note: inSync ? (ar ? 'متساويان' : 'Equal') : '—' },
-      { label: ar ? 'الجيل النشط' : 'Active generation', value: generationId !== undefined ? String(generationId) : '—', note: '—' },
+      { label: ar ? 'الجيل النشط' : 'Active generation', value: generationId !== undefined ? String(generationId) : '—', note: props.generationActivatedAt && !Number.isNaN(Date.parse(props.generationActivatedAt)) ? (ar ? `فُعّل «${clock(props.generationActivatedAt)}»` : `Activated ${clock(props.generationActivatedAt)}`) : '—' },
       { label: ar ? 'الانحراف' : 'Drift', value: driftValue, note: '—' },
       configTile('nginx -t', props.hostSample?.nginxTest, 'nginx'),
       configTile('apachectl configtest', props.hostSample?.apacheTest, 'apache'),
@@ -976,7 +1027,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
         ? { label: ar ? 'الذاكرة' : 'Memory', value: `${formatBytes(memory.totalBytes - memory.availableBytes)} / ${formatBytes(memory.totalBytes)}`, ...memoryMeter, color: '#1D5BD6', note: ar ? `«${formatBytes(memory.availableBytes)}» متاحة` : `${formatBytes(memory.availableBytes)} available`, noteColor: '#5D6B7E' }
         : meter(ar ? 'الذاكرة' : 'Memory'),
       disk && disk.totalBytes > 0
-        ? { label: ar ? `القرص على «${disk.mount}»` : `Disk on ${disk.mount}`, value: `${formatBytes(disk.usedBytes)} / ${formatBytes(disk.totalBytes)}`, ...diskMeter, color: '#1D5BD6', note: '—', noteColor: '#5D6B7E' }
+        ? { label: ar ? `القرص على «${disk.mount}»` : `Disk on ${disk.mount}`, value: `${formatBytes(disk.usedBytes)} / ${formatBytes(disk.totalBytes)}`, ...diskMeter, color: '#1D5BD6', note: diskMeter.pct, noteColor: '#5D6B7E' }
         : meter(ar ? 'القرص على «/home»' : 'Disk on /home'),
       inodes
         ? {
@@ -1005,7 +1056,11 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     ],
     accountsSentence,
     nearTitle: ar ? 'قرب الحد' : 'Near a limit',
-    near: [{ name: '—', note: '—', color: '#5D6B7E' }],
+    near: props.nearLimits === undefined
+      ? [{ name: '—', note: '—', color: '#5D6B7E' }]
+      : props.nearLimits.length === 0
+        ? [{ name: ar ? 'لا حسابات قرب الحد' : 'None', note: '—', color: '#5D6B7E' }]
+        : props.nearLimits.map(row => ({ name: row.name, note: row.note, color: '#B54708' })),
     viewAccounts: ar ? 'عرض الحسابات' : 'View accounts',
     resellersLink: ar ? 'الموزعون' : 'Resellers',
     hostTitle: ar ? 'المضيف' : 'Host',

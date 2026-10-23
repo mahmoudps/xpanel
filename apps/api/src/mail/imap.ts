@@ -39,6 +39,8 @@ export interface ImapFetchedMessage {
   internalDate: string | null
   sizeBytes: number
   rawMime: string
+  /** The BODYSTRUCTURE response text, when the server sent one. */
+  bodyStructure?: string
   parsed: ParsedMimeMessage
   attachmentTokens: {
     token: string
@@ -61,6 +63,27 @@ interface ScopedAttachmentRecord {
 
 const DEFAULT_TIMEOUT_MS = 15_000
 const DEFAULT_ATTACHMENT_TTL_MS = 15 * 60 * 1000 // 15 minutes
+
+/**
+ * Names and sizes from an IMAP BODYSTRUCTURE. A part counts when it carries a
+ * NAME or FILENAME and an octet count. Text parts without a name stay out.
+ */
+export const attachmentsFromBodyStructure = (source: string): { name: string; sizeBytes: number }[] => {
+  const marker = source.toUpperCase().indexOf('BODYSTRUCTURE')
+  const body = marker < 0 ? source : source.slice(marker + 'BODYSTRUCTURE'.length)
+  const results: { name: string; sizeBytes: number }[] = []
+  const partRe = /\("([A-Za-z0-9.+-]+)"\s+"([A-Za-z0-9.+-]+)"\s+(\([^)]*\)|NIL)\s+(?:\([^)]*\)|NIL)\s+(?:\([^)]*\)|NIL)\s+"[^"]*"\s+(\d+)/gi
+  let match: RegExpExecArray | null
+  while ((match = partRe.exec(body)) !== null) {
+    const params = match[3] ?? ''
+    const name = /"(?:NAME|FILENAME)"\s+"((?:\\"|[^"])+)"/i.exec(params)?.[1]?.replace(/\\"/g, '"')
+    const sizeBytes = Number.parseInt(match[4] ?? '', 10)
+    if (!name || !Number.isFinite(sizeBytes) || sizeBytes < 0) continue
+    if (match[1]?.toLowerCase() === 'text' && !/name|filename/i.test(params)) continue
+    results.push({ name, sizeBytes })
+  }
+  return results
+}
 
 const quoteImapString = (val: string): string => {
   if (/[\r\n\u0000]/.test(val)) {
@@ -428,7 +451,7 @@ export class ImapProtocolClient {
     }
 
     const res = await this.sendCommand(
-      `UID FETCH ${seqStr} (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[])`,
+      `UID FETCH ${seqStr} (UID FLAGS INTERNALDATE RFC822.SIZE BODYSTRUCTURE BODY.PEEK[])`,
     )
     if (res.status !== 'OK') {
       fail('PRECONDITION_FAILED', `IMAP UID FETCH failed: ${res.statusText}`)
@@ -451,6 +474,11 @@ export class ImapProtocolClient {
       const flagsMatch = /\bFLAGS\s+\(([^)]*)\)/i.exec(firstLine)
       const dateMatch = /\bINTERNALDATE\s+"([^"]*)"/i.exec(firstLine)
       const sizeMatch = /\bRFC822\.SIZE\s+(\d+)/i.exec(firstLine)
+      const structureStart = firstLine.toUpperCase().indexOf('BODYSTRUCTURE')
+      const structureEnd = structureStart < 0 ? -1 : firstLine.toUpperCase().indexOf('BODY.PEEK', structureStart)
+      const bodyStructure = structureStart < 0
+        ? ''
+        : firstLine.slice(structureStart, structureEnd < 0 ? undefined : structureEnd).trim()
 
       const uid = uidMatch ? Number.parseInt(uidMatch[1]!, 10) : 0
       const flags = flagsMatch ? (flagsMatch[1] ?? '').split(/\s+/).filter(Boolean) : []
@@ -492,6 +520,7 @@ export class ImapProtocolClient {
         internalDate,
         sizeBytes,
         rawMime,
+        ...(bodyStructure ? { bodyStructure } : {}),
         parsed,
         attachmentTokens,
       }
@@ -697,6 +726,33 @@ export class ImapProtocolClient {
     const appendUidMatch = /\[APPENDUID\s+\d+\s+(\d+)\]/i.exec(res.statusText)
     const appendedUid = appendUidMatch ? Number.parseInt(appendUidMatch[1]!, 10) : null
     return { appendedUid, statusText: res.statusText }
+  }
+
+  /** `STATUS` counts. A missing folder returns null instead of failing the mailbox. */
+  async folderStatus(folder: string, requestedMailbox?: string): Promise<{ messages: number; unseen: number } | null> {
+    this.assertAuthenticatedMailbox(requestedMailbox)
+    const res = await this.sendCommand(`STATUS ${quoteImapString(folder)} (MESSAGES UNSEEN)`)
+    if (res.status !== 'OK') return null
+    const line = res.untagged.find(item => /\bSTATUS\b/i.test(item)) ?? ''
+    const messages = Number.parseInt(/\bMESSAGES\s+(\d+)/i.exec(line)?.[1] ?? '', 10)
+    const unseen = Number.parseInt(/\bUNSEEN\s+(\d+)/i.exec(line)?.[1] ?? '', 10)
+    if (!Number.isFinite(messages)) return null
+    return { messages, unseen: Number.isFinite(unseen) ? unseen : 0 }
+  }
+
+  /** Dovecot STORAGE is kibibytes. Null when the quota plugin did not answer. */
+  async quotaRoot(requestedMailbox?: string): Promise<{ usedKb: number; limitKb: number } | null> {
+    this.assertAuthenticatedMailbox(requestedMailbox)
+    const res = await this.sendCommand('GETQUOTAROOT INBOX')
+    if (res.status !== 'OK') return null
+    for (const line of res.untagged) {
+      const match = /\bSTORAGE\s+(\d+)\s+(\d+)/i.exec(line)
+      if (!match) continue
+      const usedKb = Number.parseInt(match[1]!, 10)
+      const limitKb = Number.parseInt(match[2]!, 10)
+      if (Number.isFinite(usedKb) && Number.isFinite(limitKb)) return { usedKb, limitKb }
+    }
+    return null
   }
 
   async logout(): Promise<void> {

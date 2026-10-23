@@ -1743,6 +1743,37 @@ export class StateStore {
     return (await this.readAllServiceUsersUnlocked()).filter((u) => u.accountId === aid).map(toPublicServiceUser)
   }
 
+  /** Service users for one account. Reads that account's users directory and does not scan other accounts. */
+  async listOwnedServiceUsers(username: string): Promise<ServiceUser[]> {
+    if (typeof username !== 'string' || !/^[a-z][a-z0-9]{1,15}$/.test(username)) return []
+    this.assertNotReentrant()
+    return this.mutex.run(() => this.runOperation(async () => {
+      const rawAcc = await readJsonIfExists<unknown>(join(this.accountDir(username), 'account.json'))
+      if (rawAcc === null) return []
+      const account = validateAccountFile(rawAcc)
+      const plan = await this.getPlan(account.planId)
+      if (!plan) return []
+      const server = await this.readServerFile()
+      const reservedPorts = new Set<number>(server
+        ? [server.settings.panelPort, server.settings.sshPort, server.settings.backendPort, server.settings.backendTlsPort]
+        : [])
+      const domainsById = new Map<string, Domain>()
+      for (const file of await listJsonFiles(join(this.accountDir(username), 'domains'))) {
+        const raw = await readJsonIfExists<unknown>(file)
+        if (raw === null) continue
+        const domain = validateDomainFile(raw, { account, plan, reservedLoopbackPorts: reservedPorts })
+        domainsById.set(domain.id, domain)
+      }
+      const users: ServiceUser[] = []
+      for (const file of await listJsonFiles(join(this.accountDir(username), 'users'))) {
+        const raw = await readJsonIfExists<unknown>(file)
+        if (raw === null) continue
+        users.push(toPublicServiceUser(validateServiceUserFile(raw, { account, plan, domainsById })))
+      }
+      return users
+    }))
+  }
+
   updateServiceUser(id: Id, patch: ServiceUserPatch, opts?: MutationOptions): Promise<ServiceUser> {
     return this.withMutationLock(opts, async (lease) => {
       if (typeof patch !== 'object' || patch === null) fail('VALIDATION', 'service user patch must be an object')

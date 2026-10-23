@@ -34,7 +34,7 @@ import { renderWhmDashboard, whmDashboardFromProps } from './xwhm-dashboard.ts'
 
 describe('lab host command fixture', () => {
   it('checks every host field against the raw command output', async () => {
-    assert.equal(parseHostname(HOSTNAME_F), 'license.developments.world')
+    assert.equal(parseHostname(HOSTNAME_F), 'host.example.test')
     assert.equal(parseOsRelease(OS_RELEASE), 'Ubuntu 24.04.3 LTS')
     assert.equal(parseKernelRelease(UNAME_R), '6.8.0-90-generic')
     assert.equal(parseProcUptime(PROC_UPTIME), 126000)
@@ -52,8 +52,8 @@ describe('lab host command fixture', () => {
     assert.deepEqual({ used: inodes.used, total: inodes.total, mount: inodes.mount }, { used: 148410, total: 9732496, mount: '/' })
 
     const model = await labHostDashboard()
-    assert.equal(model.hostname, 'license.developments.world')
-    assert.equal(model.ledeHost, 'license.developments.world')
+    assert.equal(model.hostname, 'host.example.test')
+    assert.equal(model.ledeHost, 'host.example.test')
     assert.equal(model.hostRows.find(row => row.label === 'System')?.value, 'Ubuntu 24.04.3 LTS')
     assert.equal(model.hostRows.find(row => row.label === 'Kernel')?.value, '6.8.0-90-generic')
     assert.equal(model.hostRows.find(row => row.label === 'Uptime')?.value, '1 day, 11 hours')
@@ -69,7 +69,7 @@ describe('lab host command fixture', () => {
     assert.equal(model.meters[3]?.value, '148,410 / 9,732,496')
     assert.equal(model.meters[3]?.pct, '2%')
     assert.equal(model.meters[3]?.note, '/home is on /')
-    assert.equal(model.servicesMeta, '8 / 9')
+    assert.equal(model.servicesMeta, '13 / 14')
     assert.deepEqual(model.services.map(row => [row.name, row.status.label]), [
       ['nginx', 'Running'],
       ['Apache', 'Running'],
@@ -81,11 +81,16 @@ describe('lab host command fixture', () => {
       ['Dovecot', 'Running'],
       ['pure-ftpd', 'Running'],
       ['PowerDNS', 'Running'],
+      ['OpenDKIM', 'Running'],
+      ['xpanel-api', 'Running'],
+      ['xpanel-agent', 'Running'],
+      ['cron', 'Running'],
+      ['ssh', 'Running'],
     ])
 
     const html = renderWhmDashboard(model)
     for (const marker of [
-      'license.developments.world',
+      'host.example.test',
       'Panel domain',
       PANEL_DOMAIN,
       'Ubuntu 24.04.3 LTS',
@@ -106,7 +111,7 @@ describe('lab host command fixture', () => {
       'Not installed',
       '>Redis ',
       'Stopped',
-      '8 / 9',
+      '13 / 14',
       'Passed',
       'Syntax OK · 13:48 UTC',
       '13:48 UTC · generation 142',
@@ -117,7 +122,7 @@ describe('lab host command fixture', () => {
     ]) {
       assert.ok(html.includes(marker), marker)
     }
-    assert.ok(html.indexOf('license.developments.world') < html.indexOf(PANEL_DOMAIN))
+    assert.ok(html.indexOf('host.example.test') < html.indexOf(PANEL_DOMAIN))
     assert.equal(html.includes('aria-label="CPU"'), false)
     assert.equal(html.includes('aria-valuenow="0"'), false)
     assert.equal(html.includes('7.57'), false)
@@ -127,7 +132,7 @@ describe('lab host command fixture', () => {
     const arabic = renderWhmDashboard(whmDashboardFromProps({
       locale: 'ar',
       hostSample: {
-        hostname: 'license.developments.world',
+        hostname: 'host.example.test',
         load1: 0,
         load5: 0.02,
         load15: 0,

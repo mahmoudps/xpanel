@@ -11,6 +11,7 @@ import type {
   WebsiteAnalyticsSnapshot,
 } from '@xpanel/core'
 import { renderWebsiteAnalyticsChart } from '../charts.ts'
+import { auditActionLabel, auditTargetLabel } from '../audit-labels.ts'
 import { formatDisplayName } from '../display-name.ts'
 import { type Locale, t } from '../i18n.ts'
 import {
@@ -57,6 +58,8 @@ export interface PanelSurfaceProps {
   databaseUsers?: Pick<DatabaseUser, 'id' | 'name' | 'grants'>[]
   serviceUsers?: ServiceUser[]
   dnsRecords?: DnsRecord[]
+  lastSignInAt?: string
+  recentAudit?: Array<{ action: string; target: string }>
   terminalSessionId?: string
   actionState?: AsyncActionBannerProps
 }
@@ -136,6 +139,14 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
       ...(generationId !== undefined ? { generationId } : {}),
       actionHtml: actionBannerHtml,
       ...(accountRoutes ? { qualifiedRoutes: accountRoutes } : {}),
+      ...(props.lastSignInAt ? { lastSignInAt: props.lastSignInAt } : {}),
+      ...(props.recentAudit ? { recentChanges: props.recentAudit.map(entry => ({
+        pill: isAr ? 'تدقيق' : 'Audit',
+        pillBg: '#EEF0F3',
+        pillFg: '#344054',
+        titleHtml: escapeHtml(auditActionLabel(entry.action, locale)),
+        detailHtml: escapeHtml(auditTargetLabel(entry.target, locale)),
+      })) } : {}),
       signOutLabel: isAr ? 'تسجيل الخروج' : 'Sign out',
     })), locale)
   }

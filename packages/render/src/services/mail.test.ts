@@ -260,6 +260,9 @@ describe('Postfix main.cf', () => {
       smtpd_recipient_restrictions: 'check_recipient_access texthash:/etc/postfix/xpanel/recipient_access',
       smtpd_tls_cert_file: '/etc/xpanel/ssl/host.net/fullchain.pem',
       message_size_limit: String(50 * 1024 * 1024),
+      smtpd_milters: 'local:/run/opendkim/opendkim.sock',
+      non_smtpd_milters: 'local:/run/opendkim/opendkim.sock',
+      milter_default_action: 'accept',
     })
     const a = postconfAction(rhel, s)
     expect(a.kind === 'exec' && a.argv.slice(0, 4)).toEqual(['postconf', '-c', '/opt/test/postfix', '-e'])
@@ -320,6 +323,10 @@ describe('Dovecot configuration', () => {
     expect(f.content).toContain('quota_warning = storage=95%% quota-warning 95 %u')
     expect(f.content).toContain('quota_warning2 = storage=80%% quota-warning 80 %u')
     expect(f.content).toContain('executable = script /opt/xpanel/libexec/quota-warning')
+    expect(f.content).toContain('auto = subscribe')
+    expect(f.content).toContain('special_use = \\Sent')
+    expect(f.content).toContain('special_use = \\Junk')
+    expect(f.content).toContain('special_use = \\Archive')
     expect(f.content).toContain('sieve = file:~/mail/%Ld/%Ln/sieve;active=~/mail/%Ld/%Ln/.dovecot.sieve')
     expect(f.content).toContain('postmaster_address = postmaster@host.net')
     rejects(() => renderDovecotXpanelConf(debian, { postmaster: 'a@b.net\nmail_location = /' }))

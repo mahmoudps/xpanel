@@ -57,7 +57,9 @@ describe('bounded mail reference layout', () => {
     const html = renderMailSurface(fixture({ messages: [], quotaUsedMb: undefined, quotaLimitMb: undefined }))
     expect(html).toContain('No messages in this folder.')
     expect(html).toContain('data-mail-pane="empty"')
-    expect(html).not.toMatch(/data-mail-uid=|data-mail-folder=|xp-mail-count|xp-mail-sidebar-quota/)
+    expect(html).not.toMatch(/data-mail-uid=|xp-mail-count|xp-mail-sidebar-quota/)
+    expect(html).toContain('href="/mail/inbox?folder=Sent"')
+    expect(html).toContain('href="/mail/inbox?folder=Drafts"')
     expect(html).not.toMatch(/TLS:|DKIM: pass|SPF: pass|DMARC: pass|Live stream connected/)
     expect(html).not.toContain('Billing')
     expect(html).not.toContain('Starred')
@@ -71,7 +73,8 @@ describe('bounded mail reference layout', () => {
     expect(html.match(/data-mail-uid=/g)).toHaveLength(1)
     // Read-only folder observations have no route that the production adapter cannot honor.
     expect(html).toContain('<li data-mail-folder="Sent">')
-    expect(html).not.toMatch(/href="[^"]*[?&](?:amp;)?(?:folder|uid)=/)
+    expect(html).toContain('href="/mail/inbox?folder=Sent"')
+    expect(html).not.toMatch(/href="\/mail\/inbox[^"]*[?&](?:amp;)?uid=/)
   })
 
   it('escapes all mailbox, folder, subject, sender and message body observations', () => {
@@ -165,9 +168,9 @@ describe('bounded mail reference layout', () => {
 
   it('does not turn a missing authentication result into a failure', () => {
     const html = renderMailSurface(fixture({ messages: [message({ dkimPass: undefined, spfPass: undefined, dmarcPass: undefined })] }))
-    expect(html).toContain('DKIM: —')
-    expect(html).toContain('SPF: —')
-    expect(html).toContain('DMARC: —')
+    expect(html).toContain('DKIM: not checked')
+    expect(html).toContain('SPF: not checked')
+    expect(html).toContain('DMARC: not checked')
     expect(html).not.toContain('DKIM: fail')
     expect(html).not.toContain('SPF: fail')
   })

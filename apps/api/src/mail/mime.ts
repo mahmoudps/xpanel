@@ -54,6 +54,8 @@ export interface ParsedMimeMessage {
   headers: Record<string, string>
   messageId: string | null
   from: string
+  /** Display name from the From header. Empty when the header is only an address. */
+  fromName: string
   to: string[]
   cc: string[]
   subject: string
@@ -1006,11 +1008,15 @@ export class MimeCodecAndSanitizer {
     const fromDecoded = decodeRfc2047(topHeaders['from'] ?? '')
     const fromAngle = /<([^>]+)>/.exec(fromDecoded)
     const fromAddr = (fromAngle ? fromAngle[1]! : fromDecoded).trim().toLowerCase()
+    const fromName = fromAngle
+      ? fromDecoded.slice(0, fromAngle.index).replace(/^"(.*)"$/, '$1').trim()
+      : ''
 
     return {
       headers: topHeaders,
       messageId: topHeaders['message-id']?.trim() ?? null,
       from: fromAddr,
+      fromName,
       to: parseAddressList(topHeaders['to']),
       cc: parseAddressList(topHeaders['cc']),
       subject: decodeRfc2047(topHeaders['subject'] ?? ''),

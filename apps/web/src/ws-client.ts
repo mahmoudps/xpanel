@@ -447,6 +447,7 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
 ${SHELL_MOTION_CLIENT_SCRIPT}
 
   var reconnectAttempt = 0;
+  var wsOpened = false;
   var ws = null;
   var lastKeyPrefix = null;
   var lastKeyPrefixTimer = null;
@@ -463,7 +464,11 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     if (!indicator || indicator.getAttribute('data-ws-indicator') === 'unavailable') return;
     var ar = document.documentElement.lang === 'ar';
     var connected = state === 'connected';
-    var label = connected ? (ar ? 'مباشر' : 'Live') : state === 'offline' ? (ar ? 'غير متصل' : 'Offline') : (ar ? 'جار الاتصال' : 'Connecting');
+    var label = connected
+      ? (ar ? 'مباشر' : 'Live')
+      : state === 'offline' ? (ar ? 'غير متصل' : 'Offline')
+      : state === 'reconnecting' ? (ar ? 'إعادة الاتصال' : 'Reconnecting')
+      : (ar ? 'جار الاتصال' : 'Connecting');
     indicator.setAttribute('data-ws-indicator', connected ? 'connected' : 'disconnected');
     var badge = indicator.querySelector('.xp-badge');
     if (!badge) return;
@@ -567,6 +572,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     }
 
     ws.onopen = function () {
+      wsOpened = true;
       reconnectAttempt = 0;
       setWsBadgeState('connected');
     };
@@ -585,12 +591,12 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     };
 
     ws.onclose = function () {
-      setWsBadgeState('reconnecting');
+      setWsBadgeState(wsOpened ? 'reconnecting' : 'offline');
       scheduleReconnect();
     };
 
     ws.onerror = function () {
-      setWsBadgeState('offline');
+      if (!wsOpened) setWsBadgeState('offline');
     };
   }
 
@@ -1711,7 +1717,11 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       var dialog = document.querySelector(selector);
       return dialog ? dialog.querySelector('[name="' + name + '"]') : null;
     }
-    function failText(error) { return (error && error.message) || (ar ? 'تعذر إكمال الطلب.' : 'The request could not be completed.'); }
+    function failText(error) {
+      var details = error && error.details;
+      if (ar && details && typeof details.messageAr === 'string' && details.messageAr) return details.messageAr;
+      return (error && error.message) || (ar ? 'تعذر إكمال الطلب.' : 'The request could not be completed.');
+    }
     function reload() { window.location.reload(); }
     document.querySelectorAll('[data-certificate-form]').forEach(function (form) {
       form.addEventListener('submit', function (event) {
@@ -2135,9 +2145,14 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       var subject = document.getElementById('compose-subject');
       var body = document.getElementById('compose-body');
       var addresses = [];
+      var copies = [];
       document.querySelectorAll('[data-mail-chip="to"]').forEach(function (chip) {
         var addr = chip.getAttribute('data-addr');
         if (addr) addresses.push(addr);
+      });
+      document.querySelectorAll('[data-mail-chip="cc"]').forEach(function (chip) {
+        var addr = chip.getAttribute('data-addr');
+        if (addr) copies.push(addr);
       });
       if (to && to.value && to.value.trim()) addresses.push(to.value.trim());
       var text = '';
@@ -2146,16 +2161,20 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       note(status, ar ? 'جار الإرسال.' : 'Sending.');
       window.xpanelSessionRequest('POST', '/api/webmail/send', {
         to: addresses.join(', '),
+        cc: copies.join(', '),
         subject: subject ? subject.value.trim() : '',
         text: text.trim(),
-      }).then(function () {
-        note(status, ar ? 'أُرسلت الرسالة.' : 'The message was sent.');
+      }).then(function (data) {
+        var sent = ar ? 'أُرسلت الرسالة.' : 'The message was sent.';
+        if (data && data.savedToSent === true) sent += ar ? ' توجد نسخة في المرسل.' : ' A copy is in Sent.';
+        note(status, sent);
         if (body) {
           if (body.tagName === 'TEXTAREA' || body.tagName === 'INPUT') body.value = '';
           else body.textContent = '';
         }
-        document.querySelectorAll('[data-mail-chip="to"]').forEach(function (chip) { chip.remove(); });
+        document.querySelectorAll('[data-mail-chip="to"], [data-mail-chip="cc"]').forEach(function (chip) { chip.remove(); });
         if (to) to.value = '';
+        if (subject) subject.value = '';
         sendButton.disabled = false;
       }).catch(function (error) {
         sendButton.disabled = false;

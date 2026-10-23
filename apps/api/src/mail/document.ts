@@ -3,18 +3,32 @@ import type { Db } from '@xpanel/db'
 import { ExtendedFeaturesStore, type EmailFilter, type StateStore } from '@xpanel/state'
 import { openMailboxSession, type MailboxTransport } from './inbox.ts'
 
+export interface MailDocumentAttachment {
+  name: string
+  sizeBytes: number
+}
+
 export interface MailDocumentMessage {
   uid: number
-  folder: 'INBOX'
+  folder: string
   from: string
+  fromName?: string
   to: string
+  cc?: string
   subject: string
   preview: string
   body: string
   receivedAt: string
   unread: boolean
+  attachments?: MailDocumentAttachment[]
   /** The list fetch did not include a body for this row. The open action reads it. */
   bodyPending?: boolean
+}
+
+export interface MailDocumentFolderCount {
+  folder: string
+  total: number
+  unread: number
 }
 
 export interface MailDocumentRule {
@@ -27,14 +41,84 @@ export interface MailDocumentRule {
 
 export interface MailDocument {
   mailbox: string
+  quotaUsedMb?: number
   quotaLimitMb?: Limit
   messages?: MailDocumentMessage[]
+  folderCounts?: MailDocumentFolderCount[]
   mailListFailed?: boolean
   vacationEnabled?: boolean
   sieveRules?: MailDocumentRule[]
   identityDkim?: string
   identitySpf?: string
   identitySize?: string
+  composeDraft?: MailComposeDraft
+}
+
+export interface MailComposeDraft {
+  to: string
+  cc: string
+  subject: string
+  body: string
+}
+
+const quoted = (body: string): string => body.replace(/\r\n/g, '\n').split('\n').map(line => `> ${line}`).join('\n')
+
+const withPrefix = (subject: string, prefix: 'Re:' | 'Fwd:'): string => {
+  const trimmed = subject.trim()
+  return trimmed.toLowerCase().startsWith(prefix.toLowerCase()) ? trimmed : `${prefix} ${trimmed}`
+}
+
+const splitAddresses = (value: string): string[] =>
+  value.split(/[,;]/).map(part => part.trim()).filter(part => part.includes('@'))
+
+/** Reply, reply-all, or forward. The quoted body is the original text. */
+export const composeDraftFromMessage = (input: {
+  mode: 'reply' | 'reply-all' | 'forward'
+  mailbox: string
+  from: string
+  fromName?: string
+  to: string
+  cc?: string
+  subject: string
+  body: string
+}): MailComposeDraft => {
+  const sender = input.fromName && input.fromName.trim().length > 0 ? `${input.fromName.trim()} <${input.from}>` : input.from
+  const quote = input.mode === 'forward'
+    ? `---------- Forwarded message ----------\nFrom: ${sender}\nSubject: ${input.subject}\n\n${quoted(input.body)}`
+    : quoted(input.body)
+  const body = `\n\n${quote}`
+  if (input.mode === 'forward') {
+    return { to: '', cc: '', subject: withPrefix(input.subject, 'Fwd:'), body }
+  }
+  const mailbox = input.mailbox.toLowerCase()
+  const senderAddr = input.from.toLowerCase()
+  if (input.mode === 'reply') return { to: input.from, cc: '', subject: withPrefix(input.subject, 'Re:'), body }
+  const cc = [...splitAddresses(input.to), ...splitAddresses(input.cc ?? '')]
+    .filter(addr => addr.toLowerCase() !== mailbox && addr.toLowerCase() !== senderAddr)
+  return { to: input.from, cc: cc.join(', '), subject: withPrefix(input.subject, 'Re:'), body }
+}
+
+/** `message_size_limit` bytes from a Postfix main.cf. */
+export const messageSizeLimitBytes = (mainCf: string): number | null => {
+  const match = /^[ \t]*message_size_limit[ \t]*=[ \t]*(\d+)[ \t]*$/m.exec(mainCf)
+  if (!match) return null
+  const bytes = Number(match[1])
+  return Number.isSafeInteger(bytes) && bytes > 0 ? bytes : null
+}
+
+/** True when smtpd_milters names a socket. An empty assignment is not a connection. */
+export const smtpdMiltersConnected = (mainCf: string): boolean => {
+  const match = /^[ \t]*smtpd_milters[ \t]*=[ \t]*(.*)$/m.exec(mainCf)
+  const value = match?.[1]?.trim() ?? ''
+  return value.length > 0
+}
+
+/** 10,240,000 B is 9.77 MiB and is shown as 10 MB. Values under 9.5 MB keep one decimal. */
+export const formatMessageSizeLimit = (bytes: number): string | null => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return null
+  const mb = bytes / (1024 * 1024)
+  if (mb >= 9.5) return `${Math.round(mb)} MB`
+  return `${mb.toFixed(mb >= 1 ? 1 : 2)} MB`
 }
 
 const fieldLabel: Record<string, string> = {
@@ -62,8 +146,7 @@ const UNSAVED_SETTINGS = new Date(0).toISOString()
 
 /**
  * Reads the values the xMail pages are allowed to show.
- * Quota usage is omitted: nothing in this process runs IMAP GETQUOTA.
- * Vacation, filters, DKIM and the size limit are omitted when their files were never written.
+ * A missing vacation file is off. Filters, DKIM and the size limit stay unknown when their files could not be read.
  */
 export const loadMailDocument = async (input: {
   db: Db
@@ -71,6 +154,10 @@ export const loadMailDocument = async (input: {
   serverSecret: string
   sessionId: string | null
   transport: MailboxTransport
+  folder?: string
+  /** Postfix main.cf text. Absent when the file could not be read. */
+  postfixMain?: string | null
+  reply?: { mode: 'reply' | 'reply-all' | 'forward'; uid: number }
 }): Promise<MailDocument> => {
   if (!input.sessionId) return { mailbox: '' }
   const { record, password } = await openMailboxSession(input.db, input.serverSecret, input.sessionId)
@@ -82,7 +169,7 @@ export const loadMailDocument = async (input: {
 
   try {
     const vacation = await extended.storedVacationResponder(record.mailbox)
-    if (vacation) document.vacationEnabled = vacation.enabled
+    document.vacationEnabled = vacation ? vacation.enabled : false
   } catch { /* the file could not be read; the page keeps the unknown mark */ }
 
   try {
@@ -99,9 +186,15 @@ export const loadMailDocument = async (input: {
   try {
     const domain = record.mailbox.split('@')[1] ?? ''
     const auth = domain ? await extended.readEmailAuth(domain) : null
-    if (auth?.dkimTxtValue) document.identityDkim = `Selector ${auth.selector} is stored for ${auth.domain}`
-    if (auth) {
-      document.identitySpf = `${auth.spfTxtValue ? 'SPF record stored' : 'SPF record not stored'} · ${auth.dmarcTxtValue ? 'DMARC record stored' : 'DMARC record not stored'}`
+    const postfixMain = typeof input.postfixMain === 'string' ? input.postfixMain : null
+    const milter = postfixMain !== null && smtpdMiltersConnected(postfixMain)
+    if (auth?.dkimTxtValue && milter) document.identityDkim = `Selector ${auth.selector} is stored for ${auth.domain}`
+    else if (auth?.dkimTxtValue && postfixMain === null) document.identityDkim = `Selector ${auth.selector} is stored for ${auth.domain}`
+    else if (postfixMain !== null) document.identityDkim = milter ? 'OpenDKIM milter is connected' : 'not signed'
+    if (auth || postfixMain !== null) {
+      const spf = auth?.spfTxtValue ? 'SPF record stored' : 'SPF record missing'
+      const dmarc = auth?.dmarcTxtValue ? 'DMARC record stored' : 'DMARC record missing'
+      document.identitySpf = `${spf} · ${dmarc}`
     }
   } catch { /* unknown */ }
 
@@ -111,39 +204,78 @@ export const loadMailDocument = async (input: {
       mtaMaxMsgSizeMb?: number
       mta?: { maxMessageSizeMb?: number }
     }
-    const size = fine.mta?.maxMessageSizeMb ?? fine.mtaMaxMsgSizeMb
-    if (fine.updatedAt && fine.updatedAt !== UNSAVED_SETTINGS && typeof size === 'number' && Number.isFinite(size) && size > 0) {
-      document.identitySize = `${size} MiB per message`
+    const fromFile = typeof input.postfixMain === 'string' ? messageSizeLimitBytes(input.postfixMain) : null
+    const formatted = fromFile !== null ? formatMessageSizeLimit(fromFile) : null
+    if (formatted) document.identitySize = formatted
+    else {
+      const size = fine.mta?.maxMessageSizeMb ?? fine.mtaMaxMsgSizeMb
+      if (fine.updatedAt && fine.updatedAt !== UNSAVED_SETTINGS && typeof size === 'number' && Number.isFinite(size) && size > 0) {
+        document.identitySize = `${size} MiB per message`
+      }
     }
   } catch { /* unknown */ }
 
   try {
-    const listed = await input.transport.list(record.mailbox, password)
+    if (input.transport.quota) {
+      const measured = await input.transport.quota(record.mailbox, password)
+      if (measured) document.quotaUsedMb = measured.usedMb
+    }
+  } catch { /* usage stays unknown */ }
+
+  const folder = input.folder && input.folder.length > 0 ? input.folder : 'INBOX'
+  try {
+    const listed = await input.transport.list(record.mailbox, password, folder)
     const messages: MailDocumentMessage[] = listed.map(item => ({
       uid: item.uid,
-      folder: 'INBOX',
+      folder,
       from: item.from,
+      ...(item.fromName ? { fromName: item.fromName } : {}),
       to: item.to,
+      ...(item.cc ? { cc: item.cc } : {}),
       subject: item.subject,
       preview: item.preview ?? '',
       body: '',
       receivedAt: item.receivedAt,
       unread: item.unread,
+      ...(item.attachments && item.attachments.length > 0 ? { attachments: item.attachments } : {}),
       bodyPending: true,
     }))
     const first = messages[0]
     if (first) {
       try {
-        const full = await input.transport.read(record.mailbox, password, first.uid)
+        const full = await input.transport.read(record.mailbox, password, first.uid, folder)
         first.body = full.body
         first.unread = full.unread
         first.bodyPending = false
+        if (full.fromName) first.fromName = full.fromName
+        if (full.cc) first.cc = full.cc
+        if (full.attachments && full.attachments.length > 0) first.attachments = full.attachments
         if (!first.preview) first.preview = previewOf(full.body)
       } catch { /* the row stays pending */ }
     }
     document.messages = messages
   } catch {
     document.mailListFailed = true
+  }
+  try {
+    if (input.transport.counts) {
+      document.folderCounts = await input.transport.counts(record.mailbox, password)
+    }
+  } catch { /* folder counts stay unknown */ }
+  if (input.reply && Number.isInteger(input.reply.uid) && input.reply.uid > 0) {
+    try {
+      const source = await input.transport.read(record.mailbox, password, input.reply.uid, folder)
+      document.composeDraft = composeDraftFromMessage({
+        mode: input.reply.mode,
+        mailbox: record.mailbox,
+        from: source.from,
+        ...(source.fromName ? { fromName: source.fromName } : {}),
+        to: source.to,
+        ...(source.cc ? { cc: source.cc } : {}),
+        subject: source.subject,
+        body: source.body,
+      })
+    } catch { /* compose stays empty when that message cannot be read */ }
   }
   return document
 }

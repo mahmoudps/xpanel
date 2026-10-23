@@ -564,6 +564,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
             ...(inodes ? { inodes } : {}),
             ...(homeOnRoot ? { homeOnRoot: true } : {}),
             identity,
+            ...(identity.certificates ? { certificates: identity.certificates } : {}),
             sampledAt: new Date().toISOString(),
             ...(configChecks.nginx || configChecks.apache ? { configChecks } : {}),
           })
