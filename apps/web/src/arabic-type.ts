@@ -3,13 +3,18 @@
 export const BOARD_SANS_LTR = "'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif"
 export const BOARD_SANS_RTL = "'IBM Plex Sans Arabic', 'IBM Plex Sans', system-ui, sans-serif"
 
-const ar = (selector: string): string =>
-  [`html[lang="ar"] ${selector}`, `html[dir=rtl] ${selector}`, `[dir=rtl] ${selector}`].join(',\n')
+const ar = (selector: string): string => {
+  const port = '.xp-board-port'
+  const onPort = selector.startsWith(port)
+    ? `.xp-board-port[dir=rtl]${selector.slice(port.length)}`
+    : `[dir=rtl] ${selector}`
+  return [`html[lang="ar"] ${selector}`, `html[dir=rtl] ${selector}`, onPort].join(',\n')
+}
 
 const size = (px: string): string => `[style*="font-size: ${px}"], [style*="font-size:${px}"]`
 
-/** Body copy that is still 12–13px. Technical LTR islands, mono, controls, and pills stay put. */
-const body13 = `:is(${size('13px')}):not([dir="ltr"]):not([style*="Plex Mono"]):not([style*="999px"]):not(bdi[dir="ltr"]):not(code):not(kbd):not(dt):not(label):not(button):not(input):not(select):not(textarea):not(a):not(h1):not(h2):not(h3):not(h4):not(h5):not(h6):not(th)`
+/** Body copy that is still 13–14px. Technical LTR islands, mono, controls, and pills stay put. */
+const body13 = `:is(${size('13px')}, ${size('14px')}):not([dir="ltr"]):not([style*="Plex Mono"]):not([style*="999px"]):not(bdi[dir="ltr"]):not(code):not(kbd):not(dt):not(label):not(button):not(input):not(select):not(textarea):not(a):not(h1):not(h2):not(h3):not(h4):not(h5):not(h6):not(th)`
 
 /** Section labels and captions. Pills and mono values are not captions. */
 const caption = `:is(${size('11px')}, ${size('12px')}):not(p):not([dir="ltr"]):not([style*="Plex Mono"]):not([style*="999px"]):not(bdi[dir="ltr"]):not(code):not(kbd):not(button):not(h1):not(h2):not(h3):not(h4):not(h5):not(h6)`
@@ -36,13 +41,19 @@ ${ar(caption)} {
   overflow-wrap: anywhere;
   min-inline-size: 0;
 }
+${ar(`${caption}:is(nav span[id], .xp-nav-group__label, .xp-nav-section__title)`)},
+${ar('.xp-nav-group__label')},
+${ar('.xp-nav-section__title')} {
+  font-size: 14px !important;
+  line-height: 1.75 !important;
+}
 ${ar(`:is(${size('11px')}):is([style*="999px"], .xp-nav-soon)`)},
 ${ar('.xp-nav-soon')} {
   font-size: 12px !important;
 }
 ${ar(body13)},
 ${ar(`p:is(${size('12px')}, ${size('13px')}, ${size('14px')})`)} {
-  font-size: 14.5px !important;
+  font-size: 16px !important;
   line-height: 1.75 !important;
   overflow-wrap: anywhere;
   min-inline-size: 0;
@@ -60,13 +71,32 @@ ${ar(':is(.xp-dialog__header, .xp-account-dialog__header) > h2')} {
   font-size: calc(var(--xp-type-card) + 2px);
   line-height: 1.5;
 }
-${ar('.xp-nav-group__label')} { font-size: 12.5px; line-height: 1.6; }
 ${ar('.xp-board-port nav a:not([style*="background: #1D5BD6"])')},
 ${ar('.xp-nav-item')} {
+  font-size: 16px !important;
+  line-height: 1.75 !important;
   font-weight: 500 !important;
   min-inline-size: 0;
   height: auto;
   white-space: normal;
+}
+${ar('[data-tool="true"] > a')} {
+  font-size: 16px !important;
+  line-height: 1.75 !important;
+}
+${ar('[data-tool="true"] > a > span:not([aria-hidden="true"])')} {
+  flex: 0 0 auto !important;
+  min-width: max-content !important;
+  min-inline-size: max-content !important;
+  white-space: nowrap !important;
+}
+${ar('[data-tool="true"] > a > bdi')} {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  min-inline-size: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
 }
 ${ar('.xp-board-port nav a :is(span, bdi)')},
 ${ar('.xp-nav-item span')} {

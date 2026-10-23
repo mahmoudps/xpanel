@@ -1,5 +1,6 @@
 import type { Account, AuditEntry, Certificate, Plan, ServerIpEntry } from '@xpanel/core'
 import { ARABIC_TYPE_CSS } from '../arabic-type.ts'
+import { isolateLtrRuns } from '../bidi-runs.ts'
 import type { Locale } from '../i18n.ts'
 import { escapeHtml, formatBytes } from '../tokens.ts'
 
@@ -174,13 +175,13 @@ const plain = (value: string): string => value.replace(/«|»/g, '')
 
 const ltr = (value: string): string => `<bdi dir="ltr">${escapeHtml(value)}</bdi>`
 
-const rich = (value: string): string => value.split(/«([^»]*)»/).map((part, index) => index % 2 === 1 ? ltr(part) : escapeHtml(part)).join('')
+const rich = (value: string): string => value.split(/«([^»]*)»/).map((part, index) => index % 2 === 1 ? ltr(part) : isolateLtrRuns(part)).join('')
 
-/** English stays escaped text so the approved LTR pixels do not move. Arabic isolates Latin tokens. */
+/** English stays escaped text so the approved LTR pixels do not move. Arabic isolates Latin tokens and dates. */
 const show = (value: string, ar: boolean): string => {
   if (!ar) return escapeHtml(value)
   if (value.includes('«')) return rich(value)
-  if (/[\u0600-\u06FF]/.test(value)) return escapeHtml(value)
+  if (/[\u0600-\u06FF]/.test(value)) return isolateLtrRuns(value)
   return ltr(value)
 }
 
@@ -679,7 +680,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
           tone: 'warn',
           html: `<span>${ar
             ? rich(expiring.length === 1 ? '«1» شهادة تُجدَّد خلال «30» يوماً:' : `«${expiring.length}» شهادات تُجدَّد خلال «30» يوماً:`)
-            : escapeHtml(expiring.length === 1 ? '1 certificate renews within 30 days:' : `${expiring.length} certificates renew within 30 days:`)} ${expiring.map(item => `${mono(item.name)} (${mono(item.date)})`).join(', ')}</span>`,
+            : escapeHtml(expiring.length === 1 ? '1 certificate renews within 30 days:' : `${expiring.length} certificates renew within 30 days:`)} ${expiring.map(item => ar ? `<bdi dir="ltr"><span style="font-family: 'IBM Plex Mono', monospace">${escapeHtml(item.name)}</span></bdi> <bdi dir="ltr">(${escapeHtml(item.date)})</bdi>` : `${mono(item.name)} (${mono(item.date)})`).join(', ')}</span>`,
         }
   const planPhrase = planCount === null
     ? ''

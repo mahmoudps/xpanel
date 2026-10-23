@@ -1,5 +1,6 @@
 import type { Locale } from '../i18n.ts'
 import { ARABIC_TYPE_CSS } from '../arabic-type.ts'
+import { isolateLtrRuns } from '../bidi-runs.ts'
 import { formatDisplayName } from '../display-name.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -343,7 +344,7 @@ const navHtml = (groups: HomeNavView[], ar: boolean, phone: boolean): string => 
 const toolRow = (item: HomeToolView, ar: boolean, phone: boolean): string => {
   const svgStyle = ar ? ` style="transform: ${item.flip ? 'scaleX(-1)' : 'none'}"` : ''
   const hint = ar
-    ? `<bdi dir="${item.hintDir}" style="flex: none; font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums; font-family: ${item.hintFont}">${escapeHtml(item.hint)}</bdi>`
+    ? `<bdi dir="${item.hintDir}" style="flex: none; font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums; font-family: ${item.hintFont}">${isolateLtrRuns(item.hint)}</bdi>`
     : `<span style="flex: none; font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums; font-family: ${item.hintFont}">${escapeHtml(item.hint)}</span>`
   const well = phone ? 'width: 32px; height: 32px' : 'width: 30px; height: 30px'
   const row = phone
@@ -658,7 +659,7 @@ export const renderDesktop = (model: HomeDesktopModel): string => {
     const value = ar
       ? `<bdi dir="ltr" style="color: #475467; font-variant-numeric: tabular-nums">${escapeHtml(meter.value)}</bdi>`
       : `<span style="color: #475467; font-variant-numeric: tabular-nums">${escapeHtml(meter.value)}</span>`
-    return `<li style="display: flex; flex-direction: column; gap: 6px"><div style="display: flex; justify-content: space-between; gap: 8px; font-size: 13px"><span style="font-weight: 600">${escapeHtml(meter.label)}</span>${value}</div><div aria-hidden="true" style="height: 8px; border-radius: 4px; background: #E9ECF1; overflow: hidden"><div style="height: 8px; width: ${meter.pct}%; background: ${paint.color}; border-radius: 4px"></div></div><span style="font-size: 12px; color: ${paint.noteColor}">${escapeHtml(meter.note)}</span></li>`
+    return `<li style="display: flex; flex-direction: column; gap: 6px"><div style="display: flex; justify-content: space-between; gap: 8px; font-size: 13px"><span style="font-weight: 600">${escapeHtml(meter.label)}</span>${value}</div><div aria-hidden="true" style="height: 8px; border-radius: 4px; background: #E9ECF1; overflow: hidden"><div style="height: 8px; width: ${meter.pct}%; background: ${paint.color}; border-radius: 4px"></div></div><span style="font-size: 12px; color: ${paint.noteColor}">${ar ? isolateLtrRuns(meter.note) : escapeHtml(meter.note)}</span></li>`
   }).join('')
   const line = ar ? '1.7' : '1.6'
   const changes = model.changes.length
@@ -777,7 +778,7 @@ export const renderPhone = (model: HomePhoneModel): string => {
     const value = ar
       ? `<bdi dir="ltr" style="font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums">${escapeHtml(meter.value)}</bdi>`
       : `<span style="font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums">${escapeHtml(meter.value)}</span>`
-    return `<li style="flex: none; width: 150px; scroll-snap-align: start; display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 12px; background: #FFFFFF; border: 1px solid #E2E6EC"><span style="font-size: 12px; color: #475467">${escapeHtml(meter.label)}</span>${value}<div aria-hidden="true" style="height: 6px; border-radius: 3px; background: #E9ECF1; overflow: hidden"><div style="height: 6px; width: ${meter.pct}%; background: ${paint.color}; border-radius: 3px"></div></div><span style="font-size: 12px; color: ${paint.noteColor}; font-weight: ${paint.noteWeight}">${escapeHtml(meter.note)}</span></li>`
+    return `<li style="flex: none; width: 150px; scroll-snap-align: start; display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 12px; background: #FFFFFF; border: 1px solid #E2E6EC"><span style="font-size: 12px; color: #475467">${escapeHtml(meter.label)}</span>${value}<div aria-hidden="true" style="height: 6px; border-radius: 3px; background: #E9ECF1; overflow: hidden"><div style="height: 6px; width: ${meter.pct}%; background: ${paint.color}; border-radius: 3px"></div></div><span style="font-size: 12px; color: ${paint.noteColor}; font-weight: ${paint.noteWeight}">${ar ? isolateLtrRuns(meter.note) : escapeHtml(meter.note)}</span></li>`
   }).join('')
   const groups = model.groups.map((group, index) => {
     const tools = group.tools.map(item => toolRow(item, ar, true)).join('')
