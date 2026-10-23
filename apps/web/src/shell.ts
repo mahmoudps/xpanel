@@ -39,6 +39,7 @@ const routePageTitles: Readonly<Record<string, LocalizedTitle>> = {
   '/files/trash': ['Trash', 'المهملات'], '/files/ftp': ['FTP accounts', 'حسابات FTP'],
   '/security/ssl/issue': ['Issue certificate', 'إصدار شهادة'],
   '/whm/plans/features': ['Feature lists', 'قوائم الميزات'],
+  '/whm/backups': ['Server backups', 'نسخ الخادم'],
   '/whm/resellers/privileges': ['Reseller privileges', 'صلاحيات الموزعين'],
   '/mail/folders': ['Folders', 'المجلدات'],
 }
@@ -95,8 +96,9 @@ const surfaceSections: Record<SurfaceShellProps['surface'], Readonly<Record<stri
     '/whm/server/upgrade': 'upgrade', '/whm/transfers': 'transfer',
     '/whm/security/sign-in': 'security',
     '/whm/server/setup': 'design', '/whm/domains': 'design', '/whm/ssl': 'design',
+    '/whm/backups': 'backups',
     '/whm/services/web': 'design', '/whm/software/php': 'design', '/whm/security': 'design',
-    '/whm/security/ssh': 'design', '/whm/backups': 'design',
+    '/whm/security/ssh': 'design',
   },
   xmail: {
     '/mail': 'inbox', '/mail/inbox': 'inbox', '/mail/folders': 'inbox', '/mail/compose': 'compose',
