@@ -262,6 +262,17 @@ describe('runUpgrade: success', () => {
 
     expect(shared(w)).toEqual([{ verb: 'reload', unit: 'nginx.service' }, { verb: 'reload', unit: 'apache2.service' }])
     expect(w.events).toEqual(['restart xpanel-api.service', 'restart xpanel-agent.service', 'reconcile', 'reload nginx.service', 'reload apache2.service'])
+    expect(w.host.actions).toContainEqual({
+      kind: 'ensure-dir',
+      path: '/var/lib/xpanel/acme',
+      mode: 0o755,
+      owner: 'root',
+      group: 'root',
+    })
+    expect(w.host.actions).toContainEqual({
+      kind: 'exec',
+      argv: ['/usr/bin/setfacl', '-m', 'u:nginx:x', '/var/lib/xpanel'],
+    })
 
     const linkWrites = w.fs.writes.filter((p) => p.startsWith('/opt/xpanel/.current-') || p === '/opt/xpanel/current')
     expect(linkWrites).toEqual(['/opt/xpanel/.current-20261022T013500Z', '/opt/xpanel/.current-20261022T013500Z', '/opt/xpanel/current'])

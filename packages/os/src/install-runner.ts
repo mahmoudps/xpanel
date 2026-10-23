@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import { fail } from '@xpanel/core'
 import type { ApacheMpm, Engine, RenderedFile } from '@xpanel/core'
+import { services as rendered } from '@xpanel/render'
+import { ACME_DIR, acmeTraverseAclArgv, acmeTraverseProbeArgv } from './acme-access.ts'
 import { detectOs, profileFor } from './detect.ts'
 import { installBundle, itkAvailable } from './install.ts'
 import { parseOsRelease } from './osRelease.ts'
@@ -534,6 +536,8 @@ export interface InstallerExecutionHost {
   initSchemaAsXpanelUser(dbPath: string, stateDir: string): void
   /** Optional random hex generator for 32-byte credentials */
   generateSecretHex?: () => string
+  /** Optional argv runner. When present, the ACME traversal probe must exit 0. */
+  command?: (argv: string[]) => { code: number }
 }
 
 const VALID_CREDENTIAL_HEX = /^[a-f0-9]{64}\n?$/
@@ -900,6 +904,38 @@ export const runUnifiedInstaller = (
     for (const file of bundle.files) {
       writeManagedConfigWithBackup(host, journal, file, backupStamp)
     }
+    if (services.withMail) {
+      writeManagedConfigWithBackup(host, journal, rendered.renderDovecotAuthConf(profile), backupStamp)
+      writeManagedConfigWithBackup(host, journal, rendered.renderDovecotMailboxConf(profile), backupStamp)
+      const maps = rendered.renderPostfixMaps(profile, [])
+      for (const action of maps.actions) {
+        if (action.kind === 'ensure-dir') host.ensureDir(action.path, { mode: action.mode, owner: action.owner, group: action.group })
+      }
+      for (const file of maps.files) {
+        if (host.readFile(file.path) === null) {
+          host.writeFile(file.path, {
+            content: file.content,
+            mode: file.mode,
+            owner: file.owner ?? 'root',
+            group: file.group ?? 'root',
+          })
+        }
+      }
+      const merge = (path: string, body: string): void => {
+        const existing = host.readFile(path)
+        writeManagedConfigWithBackup(host, journal, {
+          path,
+          content: rendered.replaceManagedBlock(existing?.content ?? '', body),
+          mode: 0o644,
+          owner: 'root',
+          group: 'root',
+        }, backupStamp)
+      }
+      merge(`${profile.paths.postfixDir}/main.cf`, rendered.localDeliveryMainBlock(profile))
+      merge(`${profile.paths.postfixDir}/master.cf`, rendered.localSubmissionMasterBlock(profile))
+      host.runAction({ kind: 'systemd', verb: 'reload', unit: profile.services.dovecot }, 'configs')
+      host.runAction({ kind: 'systemd', verb: 'reload', unit: profile.services.postfix }, 'configs')
+    }
   })
 
   // Phase 6: schema
@@ -955,6 +991,15 @@ export const runUnifiedInstaller = (
     }
     if (!agentUnit || !apiUnit) {
       fail('PRECONDITION_FAILED', 'Post-install health probe failed: systemd unit files are missing')
+    }
+    host.ensureDir(ACME_DIR, { mode: 0o755, owner: 'root', group: 'root' })
+    host.runAction({ kind: 'exec', argv: acmeTraverseAclArgv(profile.paths.nginxUser) }, 'health-probe')
+    if (host.command) {
+      for (const argv of acmeTraverseProbeArgv(profile.paths.nginxUser)) {
+        if (host.command(argv).code !== 0) {
+          fail('PRECONDITION_FAILED', 'Post-install health probe failed: nginx cannot read the ACME challenge directory')
+        }
+      }
     }
   })
 

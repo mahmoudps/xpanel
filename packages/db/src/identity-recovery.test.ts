@@ -649,4 +649,35 @@ describe('A25(c): MFA sealing secret rotation and loss recovery drill', () => {
     expect((await findActiveSessionByTokenHash(handle.db, sha('root-sess')))?.id).toBe(session.id)
     expect(randomUUID()).toBeDefined()
   })
+
+  it('keeps a live session that shares the principal password timestamp', async () => {
+    const source = await createFileDb('same-ms.db')
+    const root = await createRootPrincipal(source.handle.db, {
+      username: 'root',
+      passwordHash: ARGON2,
+      forcePasswordChange: false,
+    })
+    const session = await createSession(source.handle.db, {
+      principalId: root.id,
+      tokenHash: sha('same-ms-session'),
+      expiresAt: futureIso(),
+      mfaVerified: true,
+    })
+    const stamp = '2026-10-23T18:00:00.000Z'
+    await source.handle.db.query(`UPDATE principals SET password_changed_at = $1 WHERE id = $2`, [stamp, root.id])
+    await source.handle.db.query(`UPDATE sessions SET created_at = $1 WHERE id = $2`, [stamp, session.id])
+    const backupDir = join(source.dir, 'backup')
+    const manifest = await createIdentityAuthorityBackup(source.handle.db, {
+      backupDir,
+      serverSecret: OLD_SERVER_SECRET,
+    })
+    expect(manifest.watermark.principals[root.id]?.revokedAllBefore).toBeNull()
+    const replacement = await createFileDb('same-ms-restore.db')
+    const restored = await restoreIdentityAuthorityBackup(replacement.handle.db, {
+      backupDir,
+      serverSecret: OLD_SERVER_SECRET,
+    })
+    expect(restored.restoredActiveSessions).toBe(1)
+    expect((await findActiveSessionByTokenHash(replacement.handle.db, sha('same-ms-session')))?.id).toBe(session.id)
+  })
 })

@@ -137,6 +137,7 @@ PHP_COMPACT="${PHP_VERSION//./}"
 if [[ "$OS_FAMILY" == "debian" ]]; then
   PACKAGES=(
     nginx
+    acl
     apache2
     libapache2-mpm-itk
     apache2-suexec-custom
@@ -173,6 +174,7 @@ else
   fi
   PACKAGES=(
     nginx
+    acl
     httpd
     mod_ssl
     mod_fcgid
@@ -335,6 +337,161 @@ NODE
   (umask 0077; set -o noclobber; "$NODE_BIN" --input-type=module -e 'import { randomBytes } from "node:crypto"; process.stdout.write(randomBytes(32).toString("hex") + "\n")' > "$target")
   chown root:xpanel "$target"
   chmod 0640 "$target"
+}
+
+render_dovecot_auth() {
+  cat <<'EOF'
+# managed by xPanel: virtual mailboxes only, one passwd-file per domain
+disable_plaintext_auth = yes
+auth_mechanisms = plain login
+auth_username_format = %Lu
+auth_username_chars = abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890.-_@
+
+passdb {
+  driver = passwd-file
+  args = username_format=%Lu /etc/dovecot/xpanel/domains/%Ld.passwd
+}
+
+userdb {
+  driver = passwd-file
+  args = username_format=%Lu /etc/dovecot/xpanel/domains/%Ld.passwd
+}
+EOF
+}
+
+render_dovecot_mailboxes() {
+  cat <<'EOF'
+# managed by xPanel: per-domain passwd-file, Postfix SASL, and LMTP delivery
+first_valid_uid = 1000
+last_valid_uid = 60000
+first_valid_gid = 1000
+last_valid_gid = 60000
+
+passdb {
+  driver = passwd-file
+  args = username_format=%Lu /etc/dovecot/xpanel/domains/%Ld.passwd
+  result_success = return-ok
+}
+
+userdb {
+  driver = passwd-file
+  args = username_format=%Lu /etc/dovecot/xpanel/domains/%Ld.passwd
+}
+
+service auth {
+  unix_listener /var/spool/postfix/private/auth {
+    mode = 0660
+    user = postfix
+    group = postfix
+  }
+}
+
+service lmtp {
+  unix_listener /var/spool/postfix/private/dovecot-lmtp {
+    mode = 0600
+    user = postfix
+    group = postfix
+  }
+}
+
+protocol lmtp {
+  postmaster_address = postmaster@localhost.localdomain
+}
+EOF
+}
+
+render_main_block() {
+  cat <<'EOF'
+virtual_mailbox_domains = texthash:/etc/postfix/xpanel/virtual_domains
+virtual_mailbox_maps = texthash:/etc/postfix/xpanel/virtual_mailboxes
+virtual_alias_maps = texthash:/etc/postfix/xpanel/virtual_aliases
+virtual_transport = lmtp:unix:private/dovecot-lmtp
+transport_maps = texthash:/etc/postfix/xpanel/transport
+smtpd_sasl_auth_enable = yes
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = private/auth
+smtpd_sender_login_maps = texthash:/etc/postfix/xpanel/sender_logins
+smtpd_recipient_restrictions = check_recipient_access texthash:/etc/postfix/xpanel/recipient_access
+EOF
+}
+
+render_master_block() {
+  cat <<'EOF'
+127.0.0.1:587 inet n - n - - smtpd
+  -o syslog_name=postfix/submission
+  -o smtpd_tls_security_level=may
+  -o smtpd_tls_auth_only=no
+  -o smtpd_sasl_auth_enable=yes
+  -o smtpd_sasl_type=dovecot
+  -o smtpd_sasl_path=private/auth
+  -o smtpd_sender_login_maps=texthash:/etc/postfix/xpanel/sender_logins
+  -o smtpd_sender_restrictions=reject_sender_login_mismatch
+  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_client_restrictions=permit_sasl_authenticated,reject
+EOF
+}
+
+apply_managed_block() {
+  local target="$1" renderer="$2" body_file
+  [[ ! -L "$target" ]] || die "Refusing to update symbolic link: $target"
+  body_file="$(mktemp)"
+  if ! "$renderer" > "$body_file"; then rm -f -- "$body_file"; die "Cannot render $target"; fi
+  backup_config "$target"
+  if [[ -e "$target" ]]; then assert_root_file "$target"; fi
+  "$NODE_BIN" --input-type=module - "$target" "$body_file" <<'NODE'
+import { closeSync, constants, fstatSync, openSync, readFileSync, writeFileSync } from 'node:fs'
+const target = process.argv[2]
+const body = readFileSync(process.argv[3], 'utf8').trimEnd()
+const begin = '# xpanel-managed-begin'
+const end = '# xpanel-managed-end'
+const block = `${begin}\n${body}\n${end}\n`
+let existing = ''
+try { existing = readFileSync(target, 'utf8') } catch { /* a new main.cf or master.cf starts empty */ }
+const pattern = new RegExp(`${begin}[\\s\\S]*?${end}\\n?`)
+const next = pattern.test(existing)
+  ? existing.replace(pattern, block)
+  : `${existing.length === 0 || existing.endsWith('\n') ? existing : `${existing}\n`}${block}`
+const fd = openSync(target, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o644)
+try {
+  const st = fstatSync(fd)
+  if (!st.isFile() || st.uid !== 0) throw new Error(`refusing to update ${target}`)
+  writeFileSync(fd, next)
+} finally { closeSync(fd) }
+NODE
+  rm -f -- "$body_file"
+  chown root:root "$target"
+  chmod 0644 "$target"
+}
+
+install_local_mail() {
+  install -d -o root -g root -m 0755 /etc/dovecot/conf.d /etc/dovecot/xpanel /etc/postfix/xpanel /var/spool/postfix/private
+  install -d -o root -g dovecot -m 0750 /etc/dovecot/xpanel/domains
+  write_config /etc/dovecot/conf.d/10-auth.conf render_dovecot_auth 0644 root
+  write_config /etc/dovecot/conf.d/11-xpanel-mailboxes.conf render_dovecot_mailboxes 0644 root
+  local spec file what path
+  for spec in \
+    "virtual_domains:virtual mailbox domains" \
+    "virtual_mailboxes:virtual mailboxes" \
+    "virtual_aliases:forwarders and default addresses" \
+    "sender_logins:sender login ownership" \
+    "transport:transports" \
+    "recipient_access:suspended and deferred recipients"
+  do
+    file="${spec%%:*}"
+    what="${spec#*:}"
+    path="/etc/postfix/xpanel/${file}"
+    if [[ ! -e "$path" && ! -L "$path" ]]; then
+      MAP_WHAT="$what" write_config "$path" render_map_header 0640 postfix
+    fi
+  done
+  apply_managed_block /etc/postfix/main.cf render_main_block
+  apply_managed_block /etc/postfix/master.cf render_master_block
+  if systemctl is-active --quiet postfix; then systemctl reload postfix; fi
+  if systemctl is-active --quiet dovecot; then systemctl reload dovecot; fi
+}
+
+render_map_header() {
+  printf '# managed by xPanel: %s\n' "$MAP_WHAT"
 }
 
 render_runtime_env() {
@@ -553,6 +710,16 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   render_agent_service
   echo ""
   render_api_service
+  echo "--- ACME HTTP-01 ---"
+  echo "install -d -m 0755 root:root /var/lib/xpanel/acme"
+  echo "setfacl -m u:nginx:x /var/lib/xpanel"
+  echo "runuser -u nginx -- test -x /var/lib/xpanel and read /var/lib/xpanel/acme"
+  if [[ "$WITH_MAIL" -eq 1 ]]; then
+    echo "--- Local mail ---"
+    echo "Dovecot conf.d/11-xpanel-mailboxes.conf (passwd-file and Postfix auth socket)"
+    echo "Postfix submission 127.0.0.1:587 with reject_sender_login_mismatch"
+    echo "virtual_transport = lmtp:unix:private/dovecot-lmtp"
+  fi
   echo "=== Dry-Run Complete (no host files mutated) ==="
   exit 0
 fi
@@ -641,6 +808,20 @@ else
   fi
   dnf install -y "https://rpms.remirepo.net/enterprise/remi-release-${OS_MAJOR}.rpm"
   dnf install -y --setopt=install_weak_deps=False "${PACKAGES[@]}"
+fi
+
+echo "[2b/6] Opening /var/lib/xpanel so nginx can serve ACME HTTP-01 challenges..."
+if ! id nginx >/dev/null 2>&1; then
+  useradd --system --no-create-home --shell /usr/sbin/nologin nginx
+fi
+install -d -o root -g root -m 0755 /var/lib/xpanel/acme
+setfacl -m u:nginx:x /var/lib/xpanel
+runuser -u nginx -- /usr/bin/test -x /var/lib/xpanel
+runuser -u nginx -- /usr/bin/test -x /var/lib/xpanel/acme
+runuser -u nginx -- /usr/bin/test -r /var/lib/xpanel/acme
+if [[ "$WITH_MAIL" -eq 1 ]]; then
+  echo "[2c/6] Configuring Dovecot mailboxes, LMTP delivery, and loopback submission..."
+  install_local_mail
 fi
 
 echo "[3/6] Installing xpanel-jailshell at ${JAILSHELL_BIN}..."

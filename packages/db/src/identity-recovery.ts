@@ -497,10 +497,12 @@ export const captureRevocationWatermark = async (
       maxSessionRevokedByPrincipal.get(p.id) ?? null,
       maxTokenRevokedByPrincipal.get(p.id) ?? null,
     )
-    const revokedAllBefore =
-      !hasActiveSessions && !hasActiveTokens
-        ? laterIso(p.password_changed_at, latestRevoked)
-        : p.password_changed_at
+    // A live session shares the principal's password timestamp when both are created in
+    // the same millisecond. The cutoff would revoke it. Password changes revoke every
+    // session first, so the cutoff still applies once none remain.
+    const revokedAllBefore = hasActiveSessions || hasActiveTokens
+      ? null
+      : laterIso(p.password_changed_at, latestRevoked)
 
     principals[p.id] = {
       id: p.id,

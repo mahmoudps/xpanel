@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@xpanel/core": "workspace:*"
+    "@xpanel/core": "workspace:*",
+    "@xpanel/render": "workspace:*"
   },
   "license": "AGPL-3.0-only"
 }

@@ -22,7 +22,7 @@ describe('phase-1 write repair', () => {
     expect(classifyCliInvocation({ platform: 'darwin', uid: 0, command: 'status', serviceUid: null })).toBe('run')
   })
 
-  it('fails startup with a clear error when an existing state directory is not writable', async () => {
+  it.skipIf(process.platform === 'win32')('fails startup with a clear error when an existing state directory is not writable', async () => {
     const root = await mkdtemp(join(tmpdir(), 'xpanel-state-access-'))
     const plans = join(root, 'plans')
     await mkdir(plans, { recursive: true })

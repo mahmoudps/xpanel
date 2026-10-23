@@ -1,7 +1,7 @@
 import { posix } from 'node:path'
 import { auditEntry, fail } from '@xpanel/core'
 import type { ErrorCode, HostAction, OsProfile, Principal } from '@xpanel/core'
-import { assertUnitName } from '@xpanel/os'
+import { ACME_DIR, acmeTraverseAclArgv, assertUnitName } from '@xpanel/os'
 import type { FsPort } from '../ports.ts'
 import { errorCode, errorMessage } from '../ports.ts'
 import { stepPaths } from '../steps.ts'
@@ -526,6 +526,8 @@ const migrateStep = async (c: Ctx, releaseDir: string): Promise<void> => {
 
 const activateStep = async (c: Ctx): Promise<void> => {
   await panelUnits(c, 'panel', 'restart')
+  await run(c, 'acme-dir', { kind: 'ensure-dir', path: ACME_DIR, mode: 0o755, owner: 'root', group: 'root' })
+  await run(c, 'acme-acl', { kind: 'exec', argv: acmeTraverseAclArgv('nginx') })
   const r = await c.ports.reconciler.reconcile(`upgrade ${c.from} -> ${c.plan.release.version}`)
   c.newGeneration = r.generationId
   log(c, 'reconcile', true, `generation ${r.generationId}`)

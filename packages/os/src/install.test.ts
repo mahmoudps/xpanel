@@ -878,6 +878,36 @@ describe('H02 unified preflight, opt-in services & durable install phase journal
     expect(error(() => runUnifiedInstaller(host, { phpVersions: ['8.3'] })).code).toBe('PRECONDITION_FAILED')
   })
 
+  it('lets nginx traverse the ACME parent and writes local mail delivery when mail is selected', () => {
+    const files = new Map<string, VirtualFileEntry>()
+    const dirs = new Map<string, { mode: number; owner: string; group: string }>()
+    const actions: InstallAction[] = []
+    const host: InstallerExecutionHost = {
+      probe: cleanProbe(),
+      journalStorage: { read: () => null, write: () => undefined },
+      readFile: (p) => files.get(p) ?? null,
+      writeFile: (p, entry) => { files.set(p, { ...entry }) },
+      ensureDir: (p, entry) => { dirs.set(p, { ...entry }) },
+      ensureGroup: (name) => (name === 'xpanel' ? 991 : 992),
+      ensureUser: () => undefined,
+      runAction: (action) => { actions.push(action) },
+      initSchemaAsXpanelUser: (dbPath) => {
+        files.set(dbPath, { content: 'SQLite format 3', mode: 0o660, owner: 'xpanel', group: 'xpanel' })
+      },
+      generateSecretHex: () => 'ab'.repeat(32),
+    }
+    runUnifiedInstaller(host, { phpVersions: ['8.3'], withMail: true })
+    expect(dirs.get('/var/lib/xpanel/acme')).toEqual({ mode: 0o755, owner: 'root', group: 'root' })
+    expect(actions).toContainEqual({ kind: 'exec', argv: ['/usr/bin/setfacl', '-m', 'u:nginx:x', '/var/lib/xpanel'] })
+    expect(files.get('/etc/dovecot/conf.d/11-xpanel-mailboxes.conf')?.content).toContain('passwd-file')
+    expect(files.get('/etc/dovecot/conf.d/11-xpanel-mailboxes.conf')?.content).toContain('private/auth')
+    expect(files.get('/etc/postfix/master.cf')?.content).toContain('127.0.0.1:587')
+    expect(files.get('/etc/postfix/master.cf')?.content).toContain('reject_sender_login_mismatch')
+    expect(files.get('/etc/postfix/main.cf')?.content).toContain('virtual_transport = lmtp:unix:private/dovecot-lmtp')
+    host.command = () => ({ code: 1 })
+    expect(error(() => runUnifiedInstaller(host, { phpVersions: ['8.3'], withMail: true })).message).toMatch(/nginx cannot read the ACME/)
+  })
+
   it('validates resolveOptInServices against hostile input', () => {
     expect(error(() => resolveOptInServices(null as never)).code).toBe('VALIDATION')
     expect(error(() => resolveOptInServices({ withMail: 'yes' as never })).code).toBe('VALIDATION')

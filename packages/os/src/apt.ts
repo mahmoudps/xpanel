@@ -26,7 +26,7 @@ export const aptProfile = (release: OsRelease): XpanelOsProfile => {
     codename: os.codename,
     packageManager: 'apt',
     // add-apt-repository imports the PPA signing key with gpg; adduser creates the nginx user
-    bootstrapPackages: ['software-properties-common', 'ca-certificates', 'gnupg', 'adduser'],
+    bootstrapPackages: ['software-properties-common', 'ca-certificates', 'gnupg', 'adduser', 'acl'],
     // Ubuntu's nginx runs as www-data, Apache's user; a separate identity keeps Nginx out of
     // anything Apache's shared children can read (temp bodies, cache, prefork docroots)
     extraSystemUsers: ['nginx'],
