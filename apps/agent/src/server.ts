@@ -16,6 +16,9 @@ import { LinuxHostExecutor } from './executor.ts'
 import type { AgentExecutor } from './executor.ts'
 import { JailedFileManager } from './file-manager.ts'
 import { probeHostCapabilities } from './host-probes.ts'
+import { parseDf, parseLoadavg, parseMeminfo } from './host-info.ts'
+import { readHostServices, restartHostService } from './host-services.ts'
+import { createAccountBackup, listAccountBackups, restoreAccountBackup, DEFAULT_BACKUP_DIR } from './account-backup.ts'
 import type { AccountFileRunner } from './file-manager.ts'
 import {
   assertValidKernelPeerCredentials,
@@ -510,6 +513,54 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
           }
         } catch { /* An unreadable address list stays empty. Account creation keeps the unverified result. */ }
         return jsonResponse({ addresses })
+      }
+
+      if (method === 'GET' && pathname === '/host/info') {
+        await assertRootCaller(caller, 'host.info')
+        if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)
+        const loadText = await deps.executor.readFile('/proc/loadavg')
+        const memText = await deps.executor.readFile('/proc/meminfo')
+        const disk = await deps.executor.runCommand(['/usr/bin/df', '-B1', '-P', '/'])
+        if (!loadText || !memText || !disk.ok) return fail('PRECONDITION_FAILED', 'host measurements could not be read')
+        try {
+          return jsonResponse({ load: parseLoadavg(loadText), memory: parseMeminfo(memText), disk: parseDf(disk.stdout) })
+        } catch (error) {
+          return fail('PRECONDITION_FAILED', error instanceof Error ? error.message : 'host measurements could not be read')
+        }
+      }
+
+      if (method === 'GET' && pathname === '/host/services') {
+        await assertRootCaller(caller, 'host.services')
+        if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)
+        const services = await readHostServices(argv => deps.executor!.runCommand(argv))
+        return jsonResponse({ services })
+      }
+
+      const serviceRestart = /^\/host\/services\/([a-z0-9-]+)\/restart$/.exec(pathname)
+      if (method === 'POST' && serviceRestart) {
+        await assertRootCaller(caller, 'host.services.restart')
+        if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)
+        const service = await restartHostService(argv => deps.executor!.runCommand(argv), serviceRestart[1]!)
+        return jsonResponse({ service })
+      }
+
+      const accountBackup = /^\/accounts\/([a-z][a-z0-9]{2,15})\/backups$/.exec(pathname)
+      if (accountBackup && (method === 'GET' || method === 'POST')) {
+        await assertRootCaller(caller, 'account.backup')
+        if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)
+        const username = accountBackup[1]!
+        const account = await deps.store.getAccountByUsername(username)
+        if (!account || account.username !== username) return fail('NOT_FOUND', 'account not found')
+        const target = { username: account.username, home: account.home, uid: account.uid, status: account.status }
+        const root = process.env.XPANEL_BACKUP_DIR || DEFAULT_BACKUP_DIR
+        if (method === 'GET') return jsonResponse({ backups: await listAccountBackups(root, target) })
+        const body = await readObjectBody(req)
+        if (body.op === 'create') return jsonResponse({ backup: await createAccountBackup({ executor: deps.executor, root, account: target }) }, 201)
+        if (body.op === 'restore') {
+          if (typeof body.file !== 'string') return fail('VALIDATION', 'backup file is required')
+          return jsonResponse({ backup: await restoreAccountBackup({ executor: deps.executor, root, account: target, file: body.file }) })
+        }
+        return fail('VALIDATION', 'backup operation must be create or restore')
       }
 
       if (method === 'POST' && (pathname === '/reconcile' || pathname === '/state/apply')) {

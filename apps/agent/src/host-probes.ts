@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 
-export type AgentHostProbe = 'linux-account' | 'apache' | 'mariadb' | 'mail' | 'files' | 'acme'
+export type AgentHostProbe = 'linux-account' | 'apache' | 'mariadb' | 'mail' | 'files' | 'acme' | 'pdns' | 'backups' | 'systemd' | 'host-info'
 export type AgentHostProbeResult = 'passed' | 'failed'
 
 const ANY = (present: (path: string) => boolean, paths: readonly string[]): boolean => paths.some(present)
@@ -16,6 +16,10 @@ export const classifyHostBinaries = (
   mail: present('/usr/sbin/postfix') && ANY(present, ['/usr/sbin/dovecot', '/usr/bin/doveadm']) ? 'passed' : 'failed',
   files: filesReady ? 'passed' : 'failed',
   acme: ANY(present, ['/usr/bin/certbot', '/usr/bin/lego', '/usr/local/bin/acme.sh', '/root/.acme.sh/acme.sh']) ? 'passed' : 'failed',
+  pdns: ANY(present, ['/usr/bin/pdnsutil', '/usr/bin/pdns_control', '/usr/sbin/pdns_server']) ? 'passed' : 'failed',
+  backups: present('/var/lib/xpanel') ? 'passed' : 'failed',
+  systemd: present('/usr/bin/systemctl') ? 'passed' : 'failed',
+  'host-info': present('/proc/loadavg') ? 'passed' : 'failed',
 })
 
 let cached: { at: number; filesReady: boolean; probes: Record<AgentHostProbe, AgentHostProbeResult> } | undefined

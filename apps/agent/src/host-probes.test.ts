@@ -11,6 +11,10 @@ describe('host capability probes', () => {
     expect(probes.mail).toBe('failed')
     expect(probes.files).toBe('failed')
     expect(probes.acme).toBe('failed')
+    expect(probes.pdns).toBe('failed')
+    expect(probes.systemd).toBe('failed')
+    expect(probes.backups).toBe('failed')
+    expect(probes['host-info']).toBe('failed')
   })
 
   it('requires both postfix and dovecot, and the confined file runner', () => {
@@ -20,5 +24,15 @@ describe('host capability probes', () => {
     expect(classifyHostBinaries(path => present.has(path), true).files).toBe('passed')
     expect(classifyHostBinaries(path => present.has(path), true).acme).toBe('passed')
     expect(classifyHostBinaries(() => false, true).mail).toBe('failed')
+  })
+
+  it('passes PowerDNS, backups, systemd and host info from the paths this server already has', () => {
+    const present = new Set(['/usr/bin/pdnsutil', '/var/lib/xpanel', '/usr/bin/systemctl', '/proc/loadavg'])
+    const probes = classifyHostBinaries(path => present.has(path), false)
+    expect(probes.pdns).toBe('passed')
+    expect(probes.backups).toBe('passed')
+    expect(probes.systemd).toBe('passed')
+    expect(probes['host-info']).toBe('passed')
+    expect(classifyHostBinaries(path => path === '/usr/sbin/pdns_server', false).pdns).toBe('passed')
   })
 })

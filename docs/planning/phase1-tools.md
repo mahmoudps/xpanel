@@ -30,6 +30,10 @@ The API adds `control-plane: passed` after it can read agent `/health`. The agen
 | `mail` | `/usr/sbin/postfix` and (`/usr/sbin/dovecot` or `/usr/bin/doveadm`) exist |
 | `files` | The agent was started with the confined helper `/opt/xpanel/bin/xpanel-account-files` |
 | `acme` | `certbot`, `lego`, or `acme.sh` exists. This probe is reported and does **not** qualify certificate issuance |
+| `pdns` | `/usr/bin/pdnsutil`, `/usr/bin/pdns_control`, or `/usr/sbin/pdns_server` exists |
+| `backups` | `/var/lib/xpanel` exists. The agent creates `/var/lib/xpanel/backups` on first use. `XPANEL_BACKUP_DIR` overrides that directory |
+| `systemd` | `/usr/bin/systemctl` exists |
+| `host-info` | `/proc/loadavg` exists. The screen also reads `/proc/meminfo` and `df -B1 -P /` |
 
 `test:linux` remains the host qualification harness for executor behaviour. It does not flip the static catalog. A lab host qualifies tools by running the real agent and API; no separate evidence file is required.
 
@@ -48,6 +52,11 @@ A page is hidden until every tool on it qualifies. Feature keys must not be in t
 | `mysql-databases`, `mysql-users` | control-plane, mariadb | Database and user create, grant, delete |
 | `file-manager`, `file-text-editor` | control-plane, files | Browse, text upload, edit, mkdir, trash, empty trash inside the account home |
 | `ssl-tls-status` | control-plane | Stored certificate state per domain |
+| `reseller-center` | control-plane | List resellers and create one with a password and ACL flags |
+| `dns-zone-manager`, `add-dns-zone`, `delete-dns-zone` | control-plane, pdns | List, add, edit and delete zones. Saving reconciles the zone to local PowerDNS |
+| `backup-restoration` | control-plane, backups | Create an account archive in the local backup directory and restore it into that account home |
+| `restart-web`, `restart-mysql`, `restart-mta`, `restart-imap`, `restart-ftp`, `restart-dns` | control-plane, systemd | Status and restart for Apache, MariaDB, Postfix, Dovecot, pure-ftpd and PowerDNS |
+| `server-information` | control-plane, host-info | Load average, memory and the root filesystem |
 
 Accounts, create-account, plans, domains, email, databases, files, and SSL status are separate pages so a missing binary hides only the page that needs it. Unimplemented catalog ids stayed on their own pages and remain unqualified.
 
@@ -82,5 +91,10 @@ Packages and services that change what appears:
 - `/opt/xpanel/bin/xpanel-account-files` present at agent start for the file manager
 - a primary shared IPv4 in the pool (`isPrimary`) so create-account can assign an address; `ip -j addr` only observes it
 - feature lists that do not disable the keys named above
+- `pdnsutil`, `pdns_control`, or `pdns_server` for the DNS zone editor. PowerDNS is already running on the lab; no extra package is required when one of those binaries is present
+- `/var/lib/xpanel` present so the backup probe passes. The agent creates `/var/lib/xpanel/backups/<user>` mode `0700` and writes each archive mode `0600`. Optional override: `XPANEL_BACKUP_DIR`
+- `/usr/bin/systemctl` for service status and restart. A unit that is not installed stays visible as “Not installed” and restart is refused
+- `/proc/loadavg`, `/proc/meminfo`, and `df` for server information
+- GNU tar, including `--no-overwrite-dir`, for account restore
 
-Terminate removes the Linux user and home. Run it only against an account you intend to delete.
+Terminate removes the Linux user and home. Run it only against an account you intend to delete. Account backup runs `tar` as that user, then the root agent copies the archive. Restore lists archive members first and refuses a path that starts with `/`, contains `..`, or contains a backslash. Archives larger than 2 GiB are refused.

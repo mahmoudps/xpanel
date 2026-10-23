@@ -231,9 +231,9 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
             <h1 id="whm-services-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
             <p class="xp-prose">${isAr ? 'إصدارات الخدمات واستهلاك الذاكرة وحالة التشغيل.' : 'Service versions, memory use and running status.'}</p>
           </div>
-          ${renderStatusBadge('ok', `${services.filter((s) => s.active).length}/${services.length} Healthy`)}
+          ${services.length > 0 ? renderStatusBadge('ok', `${services.filter((s) => s.active).length}/${services.length} Healthy`) : ''}
         </div>
-        <div class="xp-table-wrap">
+        ${services.length > 0 ? `<div class="xp-table-wrap">
           <table class="xp-table">
             <thead>
               <tr>
@@ -262,10 +262,51 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
                 .join('')}
             </tbody>
           </table>
+        </div>` : ''}
+        <div class="xp-table-wrap" data-host-services="true">
+          <table class="xp-table">
+            <thead><tr><th>${isAr ? 'الخدمة' : 'Service'}</th><th>${isAr ? 'الوحدة' : 'Unit'}</th><th>${isAr ? 'الحالة' : 'Status'}</th><th>${isAr ? 'إجراء' : 'Action'}</th></tr></thead>
+            <tbody data-host-service-rows="true"><tr><td colspan="4">${isAr ? 'جار قراءة حالة الخدمات.' : 'Reading service status.'}</td></tr></tbody>
+          </table>
+          <p class="xp-help" data-host-service-status role="status"></p>
         </div>
       </section>
 
 ` : ''}
+      ${section === 'dns' ? `<section class="xp-card" data-dns-editor="true" aria-labelledby="whm-dns-heading">
+        <div class="xp-card__header"><h1 id="whm-dns-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1></div>
+        <p class="xp-prose">${isAr ? 'حفظ المنطقة يطبّقها على خادم PowerDNS المحلي.' : 'Saving a zone applies it to the local PowerDNS server.'}</p>
+        <div class="xp-kpi-grid">
+          <div class="xp-field"><label class="xp-label" for="dns-zone">${isAr ? 'المنطقة' : 'Zone'}</label><select id="dns-zone" class="xp-select" data-dns-zone="true"></select></div>
+          <div class="xp-field"><label class="xp-label" for="dns-account">${isAr ? 'الحساب' : 'Account'}</label><select id="dns-account" class="xp-select" data-dns-account="true">${accounts.map(account => `<option value="${escapeHtml(account.id)}">${escapeHtml(account.username)}</option>`).join('')}</select></div>
+          <div class="xp-field"><label class="xp-label" for="dns-new-name">${isAr ? 'اسم منطقة جديدة' : 'New zone name'}</label><input id="dns-new-name" class="xp-input xp-mono" dir="ltr" data-dns-new-name="true" /></div>
+        </div>
+        <div class="xp-table-wrap"><table class="xp-table"><thead><tr><th>${isAr ? 'الاسم' : 'Name'}</th><th>${isAr ? 'النوع' : 'Type'}</th><th>TTL</th><th>${isAr ? 'المحتوى' : 'Content'}</th><th>${isAr ? 'الأولوية' : 'Priority'}</th></tr></thead><tbody data-dns-records="true"></tbody></table></div>
+        <p class="xp-help" data-dns-status role="status"></p>
+        <div class="xp-plan-editor-actions">
+          <button type="button" class="xp-btn" data-dns-add-record="true">${isAr ? 'سجل جديد' : 'Add record'}</button>
+          <button type="button" class="xp-btn" data-dns-add-zone="true">${isAr ? 'إضافة المنطقة' : 'Add zone'}</button>
+          <button type="button" class="xp-btn xp-btn--primary" data-dns-save="true">${isAr ? 'حفظ المنطقة' : 'Save zone'}</button>
+          <button type="button" class="xp-btn" data-dns-delete="true">${isAr ? 'حذف المنطقة' : 'Delete zone'}</button>
+        </div>
+      </section>` : ''}
+      ${section === 'backups' ? `<section class="xp-card" data-account-backups="true" aria-labelledby="whm-backup-heading">
+        <div class="xp-card__header"><h1 id="whm-backup-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1></div>
+        <p class="xp-prose">${isAr ? 'الأرشيف يُحفظ في مجلد النسخ المحلي، بحد 2 GiB، ويُستعاد إلى مجلد الحساب فقط.' : 'The archive is stored in the local backup directory, limited to 2 GiB, and restored only into that account home.'}</p>
+        <div class="xp-field"><label class="xp-label" for="backup-account">${isAr ? 'الحساب' : 'Account'}</label><select id="backup-account" class="xp-select" data-backup-account="true">${accounts.map(account => `<option value="${escapeHtml(account.username)}">${escapeHtml(account.username)}</option>`).join('')}</select></div>
+        <div class="xp-table-wrap"><table class="xp-table"><thead><tr><th>${isAr ? 'الملف' : 'File'}</th><th>${isAr ? 'الحجم' : 'Size'}</th><th></th></tr></thead><tbody data-backup-files="true"></tbody></table></div>
+        <p class="xp-help" data-backup-status role="status"></p>
+        <button type="button" class="xp-btn xp-btn--primary" data-backup-create="true">${isAr ? 'إنشاء نسخة' : 'Create backup'}</button>
+      </section>` : ''}
+      ${section === 'server-info' ? `<section class="xp-card" data-host-info="true" aria-labelledby="whm-server-info-heading">
+        <div class="xp-card__header"><h1 id="whm-server-info-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1></div>
+        <div class="xp-kpi-grid" data-host-info-grid="true">
+          <div class="xp-field"><span class="xp-label">${isAr ? 'الحمل' : 'Load'}</span><strong data-host-load="true" class="xp-mono" dir="ltr">${isAr ? 'جار القراءة' : 'Reading'}</strong></div>
+          <div class="xp-field"><span class="xp-label">${isAr ? 'الذاكرة' : 'Memory'}</span><strong data-host-memory="true" class="xp-mono" dir="ltr">${isAr ? 'جار القراءة' : 'Reading'}</strong></div>
+          <div class="xp-field"><span class="xp-label">${isAr ? 'القرص' : 'Disk'}</span><strong data-host-disk="true" class="xp-mono" dir="ltr">${isAr ? 'جار القراءة' : 'Reading'}</strong></div>
+        </div>
+        <p class="xp-help" data-host-info-status role="status"></p>
+      </section>` : ''}
       ${section === 'accounts' || section === 'create-account' ? `
       <section class="xp-card xp-accounts${section === 'create-account' ? ' xp-accounts--create' : ''}" id="whm-accounts" data-section="accounts-isolation" data-accounts-workspace aria-labelledby="whm-accounts-heading">
         <div class="xp-card__header xp-accounts__header">
@@ -578,11 +619,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
                   <td><strong class="xp-mono"><bdi dir="ltr">${escapeHtml(res.username)}</bdi></strong></td>
                   <td>${renderThresholdMeter(undefined, res.maxAccounts, { locale, unit: isAr ? 'حسابات' : 'accounts', label: isAr ? 'عدد حسابات الموزع' : 'Reseller accounts', configuredLimit: true })}</td>
                   <td>${renderThresholdMeter(undefined, res.totalDiskMb === 'unlimited' ? res.totalDiskMb : Number.isSafeInteger(res.totalDiskMb) ? res.totalDiskMb / 1024 : undefined, { locale, unit: 'GiB', label: isAr ? 'تخصيص القرص' : 'Disk allocation', configuredLimit: true })}</td>
-                  <td>
-                    <button type="button" role="switch" aria-checked="${res.oversell ? 'true' : 'false'}" class="xp-btn" data-switch="reseller-oversell-${escapeHtml(res.username)}">
-                      ${renderStatusBadge(res.oversell ? 'warn' : 'ok', res.oversell ? 'Oversell: ON' : 'Oversell: OFF')}
-                    </button>
-                  </td>
+                  <td>${renderStatusBadge(res.oversell ? 'warn' : 'ok', res.oversell ? (isAr ? 'البيع الزائد مفعّل' : 'Oversell on') : (isAr ? 'البيع الزائد متوقف' : 'Oversell off'))}</td>
                   <td class="xp-mono"><bdi dir="ltr">${escapeHtml(res.delegatedIps.join(', '))}</bdi></td>
                   <td class="xp-mono"><bdi dir="ltr">${escapeHtml(res.nameservers.join(', '))}</bdi></td>
                 </tr>
@@ -604,6 +641,24 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
             ).join('')}
           </div>
         </div>
+        ${isRoot ? `<form class="xp-card xp-form-group" style="margin-block-start: var(--xp-space-card);" data-reseller-create-form="true">
+          <div class="xp-card__header"><h2>${isAr ? 'موزع جديد' : 'New reseller'}</h2></div>
+          <div class="xp-kpi-grid">
+            <div class="xp-field"><label class="xp-label" for="reseller-username">${isAr ? 'اسم المستخدم' : 'Username'}</label><input id="reseller-username" name="username" class="xp-input xp-mono" dir="ltr" required maxlength="16" autocomplete="off" /></div>
+            <div class="xp-field"><label class="xp-label" for="reseller-password">${isAr ? 'كلمة المرور' : 'Password'}</label><input id="reseller-password" name="password" type="password" class="xp-input" required autocomplete="new-password" /></div>
+            <div class="xp-field"><label class="xp-label" for="reseller-accounts">${isAr ? 'حد الحسابات' : 'Account limit'}</label><input id="reseller-accounts" name="maxAccounts" type="number" class="xp-input xp-mono" min="0" value="10" required /></div>
+            <div class="xp-field"><label class="xp-label" for="reseller-disk">${isAr ? 'حد القرص (MB)' : 'Disk limit (MB)'}</label><input id="reseller-disk" name="totalDiskMb" type="number" class="xp-input xp-mono" min="1" value="10240" required /></div>
+            <div class="xp-field"><label class="xp-label" for="reseller-bandwidth">${isAr ? 'حد النقل (MB)' : 'Bandwidth limit (MB)'}</label><input id="reseller-bandwidth" name="totalBandwidthMb" type="number" class="xp-input xp-mono" min="1" value="102400" required /></div>
+          </div>
+          <label class="xp-plan-cap-option"><input type="checkbox" name="oversell" /><span>${isAr ? 'السماح بالبيع الزائد' : 'Allow overselling'}</span></label>
+          <fieldset class="xp-field" data-reseller-acl-choices="true"><legend class="xp-label">${isAr ? 'الصلاحيات' : 'Permissions'}</legend>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              ${ALL_RESELLER_ACLS.map(acl => `<label class="xp-plan-cap-option"><input type="checkbox" name="acl" value="${escapeHtml(acl)}" /><span class="xp-mono" dir="ltr">${escapeHtml(acl)}</span></label>`).join('')}
+            </div>
+          </fieldset>
+          <p class="xp-help" data-reseller-status role="status" hidden></p>
+          <button type="submit" class="xp-btn xp-btn--primary">${isAr ? 'إنشاء الموزع' : 'Create reseller'}</button>
+        </form>` : ''}
       </section>
 
       <!-- Multi-IPv4 / Multi-IPv6 Pool & Postfix Mail Outbound IP Configuration -->

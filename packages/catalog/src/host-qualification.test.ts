@@ -22,11 +22,28 @@ describe('host qualification', () => {
       files: 'failed',
     })
     const qualified = new Set(qualifyHostTools(tools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
-    expect(qualified).toEqual(new Set(['list-accounts', 'modify-account', 'password-modification', 'manage-account-suspension', 'terminate-accounts', 'add-package', 'edit-package', 'delete-package', 'mysql-databases', 'mysql-users', 'ssl-tls-status']))
+    expect(qualified).toEqual(new Set(['list-accounts', 'modify-account', 'password-modification', 'manage-account-suspension', 'terminate-accounts', 'add-package', 'edit-package', 'delete-package', 'mysql-databases', 'mysql-users', 'ssl-tls-status', 'reseller-center']))
     expect(qualified.has('create-account')).toBe(false)
     expect(qualified.has('file-manager')).toBe(false)
     expect(qualified.has('email-accounts')).toBe(false)
     for (const id of qualified) expect(PHASE1_TOOL_PROBES[id]?.every(probe => report.probes[probe] === 'passed')).toBe(true)
+  })
+
+  it('verifies phase 2 administrator tools only when their own probes passed', () => {
+    const report = passed('linux', {
+      'control-plane': 'passed',
+      pdns: 'passed',
+      backups: 'passed',
+      systemd: 'passed',
+      'host-info': 'passed',
+    })
+    const qualified = new Set(qualifyHostTools(tools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
+    for (const id of ['reseller-center', 'dns-zone-manager', 'add-dns-zone', 'delete-dns-zone', 'backup-restoration', 'restart-web', 'restart-mysql', 'restart-mta', 'restart-imap', 'restart-ftp', 'restart-dns', 'server-information']) {
+      expect(qualified.has(id), id).toBe(true)
+    }
+    for (const id of ['restart-ssh', 'aapanel-performance-test', 'backup-config', 'zone-ttl-bulk', 'create-account', 'file-manager']) {
+      expect(qualified.has(id), id).toBe(false)
+    }
   })
 
   it('stays unqualified when the operator turns host qualification off', () => {
