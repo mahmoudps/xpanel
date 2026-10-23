@@ -13,7 +13,7 @@ import { mapAgentHostInfo, mapAgentServices } from '../../web/src/board-port/xwh
 import { publicContactEmail } from '../../web/src/display-name.ts'
 import { ACCOUNT_SECURITY_ROUTES } from '../../web/src/surfaces/account-security.ts'
 import type { OsProfile } from '@xpanel/core'
-import { createDb, getMailboxSession, latestActive, listAudit, migrate, type Db } from '@xpanel/db'
+import { createDb, getMailboxSession, latestActive, listAudit, migrate, previousGeneration, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { runCli } from './cli.ts'
@@ -262,6 +262,30 @@ export const createDefaultWebRenderer = async (deps: {
         },
       }))
     }
+    const homeAccount = scoped?.account
+    const homePlan = scoped?.plan
+    if (surface === 'xpanel' && documentRoute.activeRoute === '/home' && principal.kind === 'user' && homeAccount?.status === 'active' && homePlan) {
+      const email = await supportEmail()
+      return serveWebUi(req, async () => ({
+        surface,
+        activeRoute: '/home',
+        security,
+        visibility: scopedVisibility,
+        ...(qualifiedCatalog ? { catalog: qualifiedCatalog } : {}),
+        ...(ownAccountId ? { accountId: ownAccountId } : {}),
+        ...(email ? { supportEmail: email } : {}),
+        ...(panelLinks.length ? { panels: panelLinks } : {}),
+        panel: {
+          account: homeAccount,
+          plan: homePlan,
+          domains: [],
+          databases: [],
+          databaseUsers: [],
+          serviceUsers: [],
+          files: [],
+        },
+      }))
+    }
     // Qualified screens re-authorize against their fresh full snapshot, not the earlier projection.
     const snap = await deps.store.readSnapshot()
     const ownedAccounts = snap.accounts.filter((account) => canSeeAccount(principal, account))
@@ -316,14 +340,15 @@ export const createDefaultWebRenderer = async (deps: {
         return null
       }
     }
-    const [hostInfo, hostServices, hostDrift, auditPage] = dashboardRoute
+    const [hostInfo, hostServices, hostDrift, auditPage, rollbackGeneration] = dashboardRoute
       ? await Promise.all([
           readAgentJson('/host/info'),
           readAgentJson('/host/services'),
           readAgentJson('/host/drift'),
           listAudit(deps.db, { limit: 8 }).catch(() => []),
+          previousGeneration(deps.db).catch(() => null),
         ])
-      : [null, null, null, []]
+      : [null, null, null, [], null]
     const asRecord = (value: unknown): Record<string, unknown> | null =>
       value !== null && typeof value === 'object' ? value as Record<string, unknown> : null
     const hostSample = mapAgentHostInfo(hostInfo)
@@ -356,6 +381,7 @@ export const createDefaultWebRenderer = async (deps: {
           auditEntries: auditPage,
           certificates: snap.certificates,
           driftCount,
+          ...(rollbackGeneration ? { rollbackGenerationId: rollbackGeneration.id } : {}),
           ...(hostSample ? { hostSample } : {}),
           ...(serviceRows ? { services: serviceRows } : {}),
         } : {}),

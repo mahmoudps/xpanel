@@ -29,7 +29,8 @@ describe('xWHM dashboard board port', () => {
     const product = renderWhmSurface({ principal: { kind: 'root', id: 'root', username: 'root' }, activeRoute: '/whm' })
     assert.match(product, /data-board-port="xwhm-dashboard"/)
     assert.match(product, /aria-label="Search tools and accounts"/)
-    assert.doesNotMatch(product, /Activity & Jobs|Sign out|data-generation-chip=/)
+    assert.match(product, /data-action="logout"/)
+    assert.doesNotMatch(product, /Activity & Jobs|data-generation-chip=/)
   })
 
   it('keeps the approved English dashboard free of bidi isolates', () => {

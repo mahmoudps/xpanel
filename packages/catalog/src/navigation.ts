@@ -18,9 +18,13 @@ export const visibleNavigation = (
 ): NavSurface[] => {
   if (ctx === undefined) return []
   const allowed = new Set(visibleTools(catalog, ctx).map(tool => tool.id))
-  if (allowed.size === 0) return []
+  // Home opens once the session names an account. Its tools stay listed, qualified or not.
+  const accountResolved = ctx.principal.kind === 'user' && ctx.principal.accountId.trim().length > 0
+  if (allowed.size === 0 && !accountResolved) return []
   const pageReady = (page: NavPage): boolean => {
-    if (!allowsPageRole(page, ctx) || page.tools.length === 0) return false
+    if (!allowsPageRole(page, ctx)) return false
+    if (page.route === '/home' && accountResolved) return true
+    if (page.tools.length === 0) return false
     if (page.tools.every(id => allowed.has(id))) return true
     // The server dashboard reads the same host sample as Server Information.
     // Its own tools stay on this page, and the page opens once that probe is verified.

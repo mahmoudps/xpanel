@@ -1,4 +1,4 @@
-import { readHostIdentity } from '../../../agent/src/host-identity.ts'
+import { readHostConfigChecks, readHostIdentity } from '../../../agent/src/host-identity.ts'
 import { parseDf, parseDfInodes, parseLoadavg, parseMeminfo } from '../../../agent/src/host-info.ts'
 import { readHostServices, type HostCommandResult } from '../../../agent/src/host-services.ts'
 import { mapAgentHostInfo, mapAgentServices, whmDashboardFromProps, type WhmDashboardModel } from './xwhm-dashboard.ts'
@@ -27,6 +27,9 @@ export const MEMINFO = 'MemTotal:        7939453 kB\nMemFree:         2000000 kB
 export const DF_ROOT = 'Filesystem     1B-blocks         Used    Available Capacity Mounted on\n/dev/vda1    161000000000  40000000000 121000000000      25% /\n'
 export const DF_HOME = 'Filesystem     1B-blocks         Used    Available Capacity Mounted on\n/dev/vda1    161000000000  40000000000 121000000000      25% /\n'
 export const DF_INODES = 'Filesystem       Inodes   IUsed    IFree IUse% Mounted on\n/dev/vda1       9732496  148410  9584086    2% /\n'
+export const NGINX_T = 'nginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful\n'
+export const APACHE_T = 'Syntax OK\n'
+export const SAMPLED_AT = '2026-10-23T13:48:00.000Z'
 export const PANEL_DOMAIN = 'panel.xpanel-lab.test'
 
 const SAFE_ARG = /^[A-Za-z0-9@+=:./_-]+$/
@@ -48,7 +51,7 @@ const serviceText = (unit: string): string => {
 }
 
 /** Dashboard model produced by parsing the lab command output. */
-export const labHostDashboard = async (): Promise<WhmDashboardModel> => {
+export const labHostDashboard = async (locale: 'en' | 'ar' = 'en'): Promise<WhmDashboardModel> => {
   const argv: string[][] = []
   const identity = await readHostIdentity({
     readFile: async (path) => {
@@ -63,10 +66,23 @@ export const labHostDashboard = async (): Promise<WhmDashboardModel> => {
       if (bin.endsWith('/hostname') && command[1] === '-f') return { ok: true, stdout: HOSTNAME_F, stderr: '' }
       if (bin.endsWith('/uname') && command[1] === '-r') return { ok: true, stdout: UNAME_R, stderr: '' }
       if (bin.endsWith('/nginx') && command[1] === '-v') return { ok: true, stdout: '', stderr: NGINX_V }
+      if (bin.endsWith('/nginx') && command[1] === '-t') return { ok: true, stdout: '', stderr: NGINX_T }
       if (bin.endsWith('/apache2') && command[1] === '-v') return { ok: true, stdout: APACHE_V, stderr: '' }
+      if (command[1] === 'configtest' && bin.endsWith('/apachectl')) return { ok: true, stdout: APACHE_T, stderr: '' }
+      if (command[1] === 'configtest') return { ok: false, stdout: '', stderr: 'spawn ENOENT' }
       return { ok: false, stdout: '', stderr: '' }
     },
   })
+  const configChecks = await readHostConfigChecks({
+    readFile: async () => null,
+    runCommand: async (command) => {
+      argv.push(command)
+      const bin = command[0] ?? ''
+      if (bin.endsWith('/nginx') && command[1] === '-t') return { ok: true, stdout: '', stderr: NGINX_T }
+      if (bin.endsWith('/apachectl') && command[1] === 'configtest') return { ok: true, stdout: APACHE_T, stderr: '' }
+      return { ok: false, stdout: '', stderr: 'spawn ENOENT' }
+    },
+  }, new Date(SAMPLED_AT))
   if (!argv.every(command => command.every(arg => SAFE_ARG.test(arg)))) throw new Error('host command argv left the safe set')
   const disk = parseDf(DF_ROOT)
   const home = parseDf(DF_HOME)
@@ -78,6 +94,8 @@ export const labHostDashboard = async (): Promise<WhmDashboardModel> => {
     inodes,
     ...(home.mount === '/' || home.filesystem === disk.filesystem || inodes.mount === '/' ? { homeOnRoot: true } : {}),
     identity,
+    sampledAt: SAMPLED_AT,
+    configChecks,
   }
   const services = await readHostServices(async (command): Promise<HostCommandResult> => {
     argv.push(command)
@@ -89,11 +107,13 @@ export const labHostDashboard = async (): Promise<WhmDashboardModel> => {
   const rows = mapAgentServices({ services })
   if (!sample || !rows) throw new Error('lab host fixture did not parse')
   return whmDashboardFromProps({
-    locale: 'en',
+    locale,
     principal: { username: 'root' },
     hostname: sample.hostname ?? PANEL_DOMAIN,
     ...(sample.hostname && sample.hostname !== PANEL_DOMAIN ? { panelHostname: PANEL_DOMAIN } : {}),
     hostSample: sample,
     services: rows,
+    generationId: 142,
+    rollbackGenerationId: 140,
   })
 }

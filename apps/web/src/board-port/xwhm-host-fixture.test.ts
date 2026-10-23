@@ -107,6 +107,13 @@ describe('lab host command fixture', () => {
       '>Redis ',
       'Stopped',
       '8 / 9',
+      'Passed',
+      'Syntax OK · 13:48 UTC',
+      '13:48 UTC · generation 142',
+      '2026-10-23 13:48 UTC',
+      '>140<',
+      'Previous generation',
+      'Sampled 13:48 UTC',
     ]) {
       assert.ok(html.includes(marker), marker)
     }

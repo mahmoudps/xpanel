@@ -11,7 +11,7 @@ import {
   restoreAccountBackup,
   type BackupAccountTarget,
 } from './account-backup.ts'
-import { readHostIdentity } from './host-identity.ts'
+import { readHostConfigChecks, readHostIdentity } from './host-identity.ts'
 import { parseApacheVersion, parseDf, parseKernelRelease, parseLoadavg, parseMeminfo, parseNginxVersion, parseOsRelease, parsePackageVersion, parseProcUptime } from './host-info.ts'
 import { readHostServices, restartHostService, type HostCommandResult } from './host-services.ts'
 
@@ -80,6 +80,30 @@ describe('host measurements', () => {
     expect(missing.kernel).toBeUndefined()
     expect(missing.engine).toBeUndefined()
     expect(missing.version).toBe('0.1.0')
+  })
+
+  it('records nginx -t and apachectl configtest without failing when a binary is missing', async () => {
+    const seen: string[][] = []
+    const checks = await readHostConfigChecks({
+      readFile: async () => null,
+      runCommand: async (argv) => {
+        seen.push(argv)
+        const bin = argv[0] ?? ''
+        if (bin.endsWith('/nginx') && argv[1] === '-t') return { ok: true, stdout: '', stderr: 'syntax is ok\n' }
+        return { ok: false, stdout: '', stderr: 'spawn ENOENT' }
+      },
+    }, new Date('2026-10-23T13:48:00.000Z'))
+    expect(checks.nginx).toEqual({ ok: true, at: '2026-10-23T13:48:00.000Z' })
+    expect(checks.apache).toBeUndefined()
+    expect(seen.some(argv => argv[0] === '/usr/sbin/nginx' && argv[1] === '-t')).toBe(true)
+    expect(seen.some(argv => argv[1] === 'configtest')).toBe(true)
+    expect(seen.every(argv => argv.every(arg => /^[A-Za-z0-9@+=:./_-]+$/.test(arg)))).toBe(true)
+    const failed = await readHostConfigChecks({
+      readFile: async () => null,
+      runCommand: async (argv) => ({ ok: argv[1] !== 'configtest', stdout: '', stderr: argv[1] === 'configtest' ? 'AH00526: Syntax error\n' : '' }),
+    }, new Date('2026-10-23T13:48:00.000Z'))
+    expect(failed.nginx?.ok).toBe(true)
+    expect(failed.apache?.ok).toBe(false)
   })
 
   it('refuses unreadable figures', () => {

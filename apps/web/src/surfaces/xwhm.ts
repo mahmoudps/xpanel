@@ -83,6 +83,8 @@ export interface WhmSurfaceProps {
   auditEntries?: AuditEntry[]
   hostSample?: DashboardHostSample | null
   driftCount?: number | null
+  /** Previous superseded generation. Empty when the host has nothing to roll back to. */
+  rollbackGenerationId?: number
   certificates?: readonly Pick<Certificate, 'names' | 'notAfter'>[]
   actionState?: AsyncActionBannerProps
 }
@@ -145,7 +147,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
     locale, principal, hostname: props.hostname, panelHostname: props.panelHostname, version: props.version, availableVersion: props.availableVersion,
     generationId: props.generationId, accounts: props.accounts, resellers: props.resellers, ipPool: props.ipPool,
     plans: props.plans, services, auditEntries, hostSample: props.hostSample, driftCount: props.driftCount,
-    certificates: props.certificates,
+    certificates: props.certificates, rollbackGenerationId: props.rollbackGenerationId,
   })), locale)
 
   const rawHtml = renderSurfaceShell({

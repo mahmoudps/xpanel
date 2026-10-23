@@ -137,6 +137,25 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
     assert.equal((await f.request('xpanel', '/api/auth/me', { cookie: panel.cookie })).status, 200)
   })
 
+  it('ends the session on logout when the CSRF token is missing or stale, and still rejects a cross-origin logout', async () => {
+    const missing = await f.login('xpanel')
+    const logout = await f.request('xpanel', '/api/auth/logout', { method: 'POST', cookie: missing.cookie })
+    assert.equal(logout.status, 200)
+    assert.match(logout.headers.get('set-cookie')!, /^__Host-xpanel_session=;/)
+    assert.equal((await f.request('xpanel', '/api/auth/me', { cookie: missing.cookie })).status, 401)
+    const stale = await f.login('xpanel')
+    const expired = await f.request('xpanel', '/api/auth/logout', { method: 'POST', cookie: stale.cookie, csrf: 'expired-csrf-token' })
+    assert.equal(expired.status, 200)
+    assert.equal((await f.request('xpanel', '/api/auth/me', { cookie: stale.cookie })).status, 401)
+    const kept = await f.login('xpanel')
+    const cross = await f.request('xpanel', '/api/auth/logout', { method: 'POST', cookie: kept.cookie, headers: { origin: origin('xmail') } })
+    assert.equal(cross.status, 403)
+    assert.equal((await f.request('xpanel', '/api/auth/me', { cookie: kept.cookie })).status, 200)
+    const other = await f.request('xpanel', '/api/auth/change-password', { method: 'POST', cookie: kept.cookie, body: { currentPassword: PASSWORD, newPassword: 'Another-password-fixture-2026' } })
+    assert.equal(other.status, 403)
+    assert.equal((await f.request('xpanel', '/api/auth/me', { cookie: kept.cookie })).status, 200)
+  })
+
   it('logs out only the current profile session but credential changes revoke every profile session', async () => {
     const panel = await f.login('xpanel'); const mail = await f.login('xmail')
     const logout = await f.request('xpanel', '/api/auth/logout', { method: 'POST', cookie: panel.cookie, csrf: panel.data.csrfToken })

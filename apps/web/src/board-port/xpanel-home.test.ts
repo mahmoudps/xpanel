@@ -91,6 +91,40 @@ describe('xPanel home board port', () => {
     assert.match(emptyHtml, /لا تغييرات مسجّلة لهذا الحساب بعد\./)
     assert.equal((emptyHtml.match(/<h1\b/g) ?? []).length, 1)
   })
+
+  it('lists unqualified tools as disabled coming-soon rows and keeps qualified ones linked', () => {
+    const qualified = new Set(['/files/manager', '/mail/inbox'])
+    const html = renderXpanelHome(xpanelHomeFromProps({
+      locale: 'en',
+      account: { username: 'owner', uid: 1000, home: '/home/owner', primaryDomain: 'example.test', ipv4: '192.0.2.10' },
+      qualifiedRoutes: qualified,
+      signOutLabel: 'Sign out',
+    }))
+    const rows = (source: string) => source.match(/<li data-tool="true"[\s\S]*?<\/li>/g)?.join('\n') ?? ''
+    const tools = rows(html)
+    assert.match(html, /35 tools in 9 groups/)
+    assert.match(tools, /<a href="\/files\/manager"/)
+    assert.match(tools, /<a href="\/mail\/inbox"/)
+    assert.match(tools, /<a href="\/security\/account"/)
+    assert.match(html, /href="\?lang=ar"/)
+    assert.match(html, /data-action="logout"/)
+    assert.match(tools, /aria-disabled="true"/)
+    assert.match(tools, />Coming soon</)
+    assert.match(tools, /data-tool-wiring="soon"/)
+    assert.doesNotMatch(tools, /<a href="\/files\/backup"/)
+    const arabic = renderXpanelHome(xpanelHomeFromProps({
+      locale: 'ar',
+      account: { username: 'owner', uid: 1000, home: '/home/owner', primaryDomain: 'example.test', ipv4: '192.0.2.10' },
+      qualifiedRoutes: new Set(),
+    }))
+    const arabicTools = rows(arabic)
+    assert.match(arabicTools, /قيد التفعيل/)
+    assert.match(arabic, /35 أداة في 9 مجموعات/)
+    assert.match(arabicTools, /<a href="\/security\/account"/)
+    assert.doesNotMatch(arabicTools, /<a href="\/files\/manager"/)
+    const specimen = renderFidelityDocument('ltr')
+    assert.doesNotMatch(specimen, /aria-disabled="true"|Coming soon/)
+  })
   it('keeps board sample data out of product code', () => {
     const product = readFileSync(new URL('./xpanel-home.ts', import.meta.url), 'utf8')
     for (const sample of ['alice-shop.com', '198.51.100.24', '1,431 today', 'Generation 142']) assert.ok(!product.includes(sample), sample)

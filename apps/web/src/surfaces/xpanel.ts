@@ -103,6 +103,9 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
   const xpanelNav = visibleNavigation(visibility, props.catalog).find((n) => n.surface === 'xpanel')
 
   const qualifiedRoutes = new Set((xpanelNav?.sections ?? []).flatMap(section => section.pages.map(page => page.route)))
+  const accountRoutes = props.visibility
+    ? new Set(visibleNavigation(props.visibility, props.catalog).flatMap(item => item.sections.flatMap(section => section.pages.map(page => page.route))))
+    : undefined
 
   const switchLangCode = isAr ? 'en' : 'ar'
   const switchLangLabel = isAr ? 'English' : 'العربية'
@@ -119,10 +122,11 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
     : ''
 
   if (section === 'overview') {
+    const homePlan = plan && plan.id === account.planId ? plan : undefined
     return ensureAccessibleSurfaceHtml(renderXpanelHome(xpanelHomeFromProps({
       locale,
       account,
-      ...(plan ? { plan } : {}),
+      ...(homePlan ? { plan: homePlan } : {}),
       domains,
       databases,
       databaseUsers,
@@ -131,6 +135,8 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
       dnsRecords,
       ...(generationId !== undefined ? { generationId } : {}),
       actionHtml: actionBannerHtml,
+      ...(accountRoutes ? { qualifiedRoutes: accountRoutes } : {}),
+      signOutLabel: isAr ? 'تسجيل الخروج' : 'Sign out',
     })), locale)
   }
 

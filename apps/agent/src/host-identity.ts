@@ -107,3 +107,50 @@ export const readHostIdentity = async (reader: HostIdentityReader): Promise<Host
   if (version) identity.version = version
   return identity
 }
+
+export interface HostConfigCheck {
+  ok: boolean
+  at: string
+}
+
+export interface HostConfigChecks {
+  nginx?: HostConfigCheck
+  apache?: HostConfigCheck
+}
+
+const NGINX_TEST_ARGV = [['/usr/sbin/nginx', '-t'], ['/usr/bin/nginx', '-t']] as const
+const APACHE_TEST_ARGV = [['/usr/sbin/apachectl', 'configtest'], ['/usr/sbin/apache2ctl', 'configtest']] as const
+
+const commandMissing = (result: { ok: boolean; stderr: string }): boolean =>
+  !result.ok && /ENOENT|not found/i.test(result.stderr)
+
+const firstPresent = async (
+  reader: HostIdentityReader,
+  commands: readonly (readonly string[])[],
+): Promise<{ ok: boolean } | null> => {
+  for (const argv of commands) {
+    let result: { ok: boolean; stdout: string; stderr: string }
+    try {
+      result = await reader.runCommand([...argv])
+    } catch {
+      continue
+    }
+    if (commandMissing(result)) continue
+    return { ok: result.ok }
+  }
+  return null
+}
+
+/**
+ * Read-only `nginx -t` and `apachectl configtest`. A missing binary leaves that
+ * check empty and does not fail the host-info probe.
+ */
+export const readHostConfigChecks = async (reader: HostIdentityReader, now = new Date()): Promise<HostConfigChecks> => {
+  const at = now.toISOString()
+  const checks: HostConfigChecks = {}
+  const nginx = await firstPresent(reader, NGINX_TEST_ARGV)
+  if (nginx) checks.nginx = { ok: nginx.ok, at }
+  const apache = await firstPresent(reader, APACHE_TEST_ARGV)
+  if (apache) checks.apache = { ok: apache.ok, at }
+  return checks
+}

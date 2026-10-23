@@ -20,7 +20,7 @@ import { JailedFileManager } from './file-manager.ts'
 import { AcmeCertificateServiceAdapter } from './services/acme.ts'
 import { createHttp01AcmeClient } from './services/acme-client.ts'
 import { probeHostCapabilities, readHostMeasurements } from './host-probes.ts'
-import { readHostIdentity } from './host-identity.ts'
+import { readHostConfigChecks, readHostIdentity } from './host-identity.ts'
 import { parseDf, parseDfInodes, parseLoadavg, parseMeminfo } from './host-info.ts'
 import { readHostServices, restartHostService } from './host-services.ts'
 import { createAccountBackup, listAccountBackups, restoreAccountBackup, DEFAULT_BACKUP_DIR } from './account-backup.ts'
@@ -537,6 +537,10 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         try {
           const disk = parseDf(diskResult.stdout)
           const identity = await readHostIdentity(deps.executor)
+          let configChecks: Awaited<ReturnType<typeof readHostConfigChecks>> = {}
+          try {
+            configChecks = await readHostConfigChecks(deps.executor)
+          } catch { /* A missing test binary leaves that tile empty. */ }
           let homeOnRoot = false
           let inodes: ReturnType<typeof parseDfInodes> | null = null
           const home = await deps.executor.runCommand(['/usr/bin/df', '-B1', '-P', '/home'])
@@ -560,6 +564,8 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
             ...(inodes ? { inodes } : {}),
             ...(homeOnRoot ? { homeOnRoot: true } : {}),
             identity,
+            sampledAt: new Date().toISOString(),
+            ...(configChecks.nginx || configChecks.apache ? { configChecks } : {}),
           })
         } catch (error) {
           return fail('PRECONDITION_FAILED', error instanceof Error ? error.message : 'host measurements could not be read')

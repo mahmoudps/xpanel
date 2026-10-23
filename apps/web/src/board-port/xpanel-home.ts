@@ -217,6 +217,8 @@ export interface HomeToolView {
   hintDir: 'ltr' | 'rtl'
   flip: boolean
   keys: string
+  /** False when this account has not qualified the tool. The row stays visible. */
+  enabled: boolean
 }
 
 export interface HomeGroupView {
@@ -264,6 +266,7 @@ export interface HomeDesktopModel {
   emptyChanges: string
   metricsUnavailable: boolean
   actionHtml: string
+  signOutLabel?: string
 }
 
 export interface HomePhoneModel {
@@ -280,6 +283,16 @@ export interface HomePhoneModel {
   nav: HomeNavView[]
   metricsUnavailable: boolean
   actionHtml: string
+  signOutLabel?: string
+}
+
+const ALWAYS_LIVE_HREFS = new Set(['/security/account'])
+
+/** A missing set keeps the board specimen fully linked. A set enables only qualified routes. */
+const toolEnabled = (href: string, qualified: ReadonlySet<string> | undefined): boolean => {
+  if (qualified === undefined) return true
+  if (href.startsWith('?')) return true
+  return ALWAYS_LIVE_HREFS.has(href) || qualified.has(href)
 }
 
 export const navViews = (ar: boolean, idPrefix: string): HomeNavView[] => NAV.map((group, index) => ({
@@ -293,19 +306,22 @@ export const navViews = (ar: boolean, idPrefix: string): HomeNavView[] => NAV.ma
   })),
 }))
 
-export const groupViews = (ar: boolean, phone: boolean, hints: (tool: ToolDef) => Hint): HomeGroupView[] => GROUPS.map(group => {
+export const groupViews = (ar: boolean, phone: boolean, hints: (tool: ToolDef) => Hint, qualified?: ReadonlySet<string>): HomeGroupView[] => GROUPS.map(group => {
   const tools = group.tools.map(item => {
     const hint = hints(item)
     const href = item.id === 'prefs.language' ? (ar ? '?lang=en' : '?lang=ar') : item.href
+    const enabled = toolEnabled(href, qualified)
+    const soon = ar ? 'قيد التفعيل' : 'Coming soon'
     return {
       href,
       icon: item.icon,
       name: ar ? item.ar : item.en,
-      hint: hint.text,
-      hintFont: hint.mono ? MONO : 'inherit',
-      hintDir: hint.dir,
+      hint: enabled ? hint.text : soon,
+      hintFont: enabled && hint.mono ? MONO : 'inherit',
+      hintDir: enabled ? hint.dir : (ar ? 'rtl' : 'ltr'),
       flip: Boolean(item.flip),
       keys: `${ar ? item.ar : item.en} ${item.keys}`,
+      enabled,
     }
   })
   return {
@@ -342,14 +358,20 @@ const navHtml = (groups: HomeNavView[], ar: boolean, phone: boolean): string => 
 
 const toolRow = (item: HomeToolView, ar: boolean, phone: boolean): string => {
   const svgStyle = ar ? ` style="transform: ${item.flip ? 'scaleX(-1)' : 'none'}"` : ''
+  const hintColor = item.enabled ? '#5D6B7E' : '#98A2B3'
   const hint = ar
-    ? `<bdi dir="${item.hintDir}" style="flex: none; font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums; font-family: ${item.hintFont}">${escapeHtml(item.hint)}</bdi>`
-    : `<span style="flex: none; font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums; font-family: ${item.hintFont}">${escapeHtml(item.hint)}</span>`
+    ? `<bdi dir="${item.hintDir}" style="flex: none; font-size: 12px; color: ${hintColor}; font-variant-numeric: tabular-nums; font-family: ${item.hintFont}">${escapeHtml(item.hint)}</bdi>`
+    : `<span style="flex: none; font-size: 12px; color: ${hintColor}; font-variant-numeric: tabular-nums; font-family: ${item.hintFont}">${escapeHtml(item.hint)}</span>`
   const well = phone ? 'width: 32px; height: 32px' : 'width: 30px; height: 30px'
   const row = phone
     ? 'display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 8px; border-radius: 8px; text-decoration: none; color: #101828; font-size: 15px'
     : 'display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 8px; border-radius: 8px; text-decoration: none; color: #101828; font-size: 14px'
-  return `<li data-tool="true" data-tool-keys="${escapeHtml(item.keys)}"><a href="${escapeHtml(item.href)}" style="${row}"><span aria-hidden="true" style="flex: none; ${well}; border-radius: 8px; background: #F3F7FE; border: 1px solid #E8EFFD; color: #1D5BD6; display: flex; align-items: center; justify-content: center">${bareIcon(item.icon, svgStyle)}</span><span style="flex: 1 1 auto; min-width: 0; font-weight: 500">${escapeHtml(item.name)}</span>${hint}</a></li>`
+  const icon = `<span aria-hidden="true" style="flex: none; ${well}; border-radius: 8px; background: #F3F7FE; border: 1px solid #E8EFFD; color: #1D5BD6; display: flex; align-items: center; justify-content: center">${bareIcon(item.icon, svgStyle)}</span><span style="flex: 1 1 auto; min-width: 0; font-weight: 500">${escapeHtml(item.name)}</span>${hint}`
+  if (!item.enabled) {
+    const disabled = `${row}; color: #98A2B3; cursor: not-allowed`
+    return `<li data-tool="true" data-tool-wiring="soon" data-tool-keys="${escapeHtml(item.keys)}"><span aria-disabled="true" style="${disabled}">${icon}</span></li>`
+  }
+  return `<li data-tool="true" data-tool-keys="${escapeHtml(item.keys)}"><a href="${escapeHtml(item.href)}" style="${row}">${icon}</a></li>`
 }
 
 const tech = (value: string, ar: boolean): string => ar && !/[\u0600-\u06FF]/.test(value) ? `<bdi dir="ltr">${escapeHtml(value)}</bdi>` : escapeHtml(value)
@@ -518,9 +540,9 @@ const liveGeneration = (facts: LiveFacts): { pill: { label: string; bg: string; 
   return { pill: neutral, html: `<span style="font-variant-numeric: tabular-nums">Generation ${facts.generationId}</span>` }
 }
 
-const desktopFromFacts = (facts: LiveFacts, actionHtml: string): HomeDesktopModel => {
+const desktopFromFacts = (facts: LiveFacts, actionHtml: string, qualified?: ReadonlySet<string>, signOutLabel?: string): HomeDesktopModel => {
   const ar = facts.ar
-  const groups = groupViews(ar, false, item => liveHint(item, facts, false))
+  const groups = groupViews(ar, false, item => liveHint(item, facts, false), qualified)
   const generation = liveGeneration(facts)
   return {
     ar, username: facts.username, domain: facts.domain, planLabel: facts.planLabel,
@@ -538,17 +560,19 @@ const desktopFromFacts = (facts: LiveFacts, actionHtml: string): HomeDesktopMode
     changesTitle: ar ? 'آخر التغييرات' : 'Recent changes', changes: [],
     emptyChanges: ar ? 'لا تغييرات مسجّلة لهذا الحساب بعد.' : 'No changes are recorded for this account yet.',
     metricsUnavailable: true, actionHtml,
+    ...(signOutLabel ? { signOutLabel } : {}),
   }
 }
 
-const phoneFromFacts = (facts: LiveFacts, actionHtml: string, titleTag: 'h1' | 'div'): HomePhoneModel => {
+const phoneFromFacts = (facts: LiveFacts, actionHtml: string, titleTag: 'h1' | 'div', qualified?: ReadonlySet<string>, signOutLabel?: string): HomePhoneModel => {
   const ar = facts.ar
-  const groups = groupViews(ar, true, item => liveHint(item, facts, true)).map((group, index) => ({ ...group, open: index === 0 }))
+  const groups = groupViews(ar, true, item => liveHint(item, facts, true), qualified).map((group, index) => ({ ...group, open: index === 0 }))
   return {
     ar, username: facts.username, domain: facts.domain, planLabel: facts.planLabel,
     title: ar ? 'الرئيسية' : 'Home', titleTag, ledeHtml: livePhoneLede(facts),
     countText: totalCount(groups, ar, true), groups, meters: livePhoneMeters(facts),
     nav: navViews(ar, 'm-nav-group-'), metricsUnavailable: true, actionHtml,
+    ...(signOutLabel ? { signOutLabel } : {}),
   }
 }
 
@@ -578,6 +602,9 @@ export interface XpanelHomeProps {
   dnsRecords?: Array<{ zone: string }>
   generationId?: number
   actionHtml?: string
+  /** Routes this account may open. Omit it for the board specimen, which links every tool. */
+  qualifiedRoutes?: ReadonlySet<string>
+  signOutLabel?: string
 }
 
 const factsFromProps = (props: XpanelHomeProps): LiveFacts => {
@@ -625,7 +652,10 @@ const factsFromProps = (props: XpanelHomeProps): LiveFacts => {
 export const xpanelHomeFromProps = (props: XpanelHomeProps): { desktop: HomeDesktopModel; phone: HomePhoneModel } => {
   const facts = factsFromProps(props)
   const actionHtml = props.actionHtml ?? ''
-  return { desktop: desktopFromFacts(facts, actionHtml), phone: phoneFromFacts(facts, actionHtml, 'div') }
+  return {
+    desktop: desktopFromFacts(facts, actionHtml, props.qualifiedRoutes, props.signOutLabel),
+    phone: phoneFromFacts(facts, actionHtml, 'div', props.qualifiedRoutes, props.signOutLabel),
+  }
 }
 
 const sideMeter = (label: string, value: string, pct: number, ar: boolean): string => {
@@ -707,6 +737,7 @@ export const renderDesktop = (model: HomeDesktopModel): string => {
       <span style="flex: 1 1 auto"></span>
       <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: #EEF0F3; color: #344054; font-size: 12px; font-weight: 600; font-family: ${MONO}">${domainPill}</span>
       ${lang}
+      ${model.signOutLabel ? `<button type="button" data-action="logout" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer">${escapeHtml(model.signOutLabel)}</button>` : ''}
       <button type="button" aria-label="${ar ? `قائمة المستخدم، ${escapeHtml(model.username)}` : `User menu, ${escapeHtml(model.username)}`}" style="width: 44px; height: 44px; border-radius: 50%; border: 1px solid #C7D7F8; background: #E8EFFD; color: #1D5BD6; font-family: ${MONO}; font-size: 15px; font-weight: 600">${escapeHtml(model.username.slice(0, 1).toLowerCase())}</button>
     </header>
     <div style="width: 100%; max-width: 1180px; margin: 0 auto; padding: 24px clamp(16px, 3vw, 32px) 52px; display: flex; flex-direction: column; gap: 26px">
@@ -810,6 +841,7 @@ export const renderPhone = (model: HomePhoneModel): string => {
     <button type="button" id="xpanel-home-menu" data-home-action="open-menu" aria-label="${ar ? 'فتح التنقل' : 'Open navigation'}" aria-expanded="false" aria-controls="m-drawer" style="flex: none; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"></path></svg></button>
     <a href="/home" style="display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 4px; text-decoration: none">${`<span aria-hidden="true" style="width: 28px; height: 28px; border-radius: 7px; background: #101828; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 15px; font-weight: 600">x</span>`}${brand}</a>
     <span style="flex: 1 1 auto"></span>
+    ${model.signOutLabel ? `<button type="button" data-action="logout" style="flex: none; min-height: 44px; padding: 0 10px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer">${escapeHtml(model.signOutLabel)}</button>` : ''}
     <button type="button" aria-label="${ar ? `قائمة المستخدم، ${escapeHtml(model.username)}` : `User menu, ${escapeHtml(model.username)}`}" style="flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #C7D7F8; background: #E8EFFD; color: #1D5BD6; font-family: ${MONO}; font-size: 15px; font-weight: 600">${escapeHtml(model.username.slice(0, 1).toLowerCase())}</button>
   </header>
   <main style="flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px 16px 32px; display: flex; flex-direction: column; gap: 16px">

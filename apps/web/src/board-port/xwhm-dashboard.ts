@@ -1,7 +1,7 @@
 import type { Account, AuditEntry, Certificate, Plan, ServerIpEntry } from '@xpanel/core'
 import { auditActionLabel } from '../audit-labels.ts'
 import type { Locale } from '../i18n.ts'
-import { escapeHtml, formatAsciiNumber, formatBytes, formatUtcClock, formatUtcDay } from '../tokens.ts'
+import { escapeHtml, formatAsciiDate, formatAsciiNumber, formatBytes, formatUtcClock, formatUtcDay } from '../tokens.ts'
 
 interface DashboardServiceInput {
   name: string
@@ -27,6 +27,10 @@ export interface DashboardHostSample {
   uptimeSeconds?: number
   engine?: string
   panelVersion?: string
+  /** ISO time of the host probe. Empty when the sample was not taken. */
+  sampledAt?: string
+  nginxTest?: { ok: boolean; at: string }
+  apacheTest?: { ok: boolean; at: string }
 }
 
 interface DashboardProps {
@@ -47,6 +51,8 @@ interface DashboardProps {
   hostSample?: DashboardHostSample | null
   /** Null when drift was not read. A number is the count reported by the host. */
   driftCount?: number | null
+  /** Previous superseded generation, the rollback target. */
+  rollbackGenerationId?: number
   certificates?: readonly Pick<Certificate, 'names' | 'notAfter'>[]
 }
 
@@ -145,6 +151,7 @@ export interface WhmDashboardModel {
   servicesMeta: string
   services: DashboardServiceRow[]
   servicesLink: string
+  signOutLabel?: string
 }
 
 const okChip = (label: string): DashboardChip => ({ label, bg: '#E7F5EE', fg: '#0E7A4E' })
@@ -265,6 +272,16 @@ export const mapAgentHostInfo = (info: unknown): DashboardHostSample | null => {
   const coresRaw = identity?.cores
   const cores = typeof coresRaw === 'number' && Number.isInteger(coresRaw) && coresRaw >= 1 && coresRaw <= 4096 ? coresRaw : undefined
   const homeOnRoot = record.homeOnRoot === true || inodeMount === '/'
+  const configChecks = agentRecord(record.configChecks)
+  const configCheck = (name: string): { ok: boolean; at: string } | undefined => {
+    const check = agentRecord(configChecks?.[name])
+    const at = agentText(check, 'at')
+    if (!check || typeof check.ok !== 'boolean' || !at || Number.isNaN(Date.parse(at))) return undefined
+    return { ok: check.ok, at }
+  }
+  const sampledAt = agentText(record, 'sampledAt')
+  const nginxTest = configCheck('nginx')
+  const apacheTest = configCheck('apache')
   const sample: DashboardHostSample = {
     ...(agentNumber(load, 'load1') !== undefined ? { load1: agentNumber(load, 'load1') } : {}),
     ...(agentNumber(load, 'load5') !== undefined ? { load5: agentNumber(load, 'load5') } : {}),
@@ -284,6 +301,9 @@ export const mapAgentHostInfo = (info: unknown): DashboardHostSample | null => {
     ...(uptimeSeconds !== undefined ? { uptimeSeconds } : {}),
     ...(agentText(identity, 'engine') ? { engine: agentText(identity, 'engine') } : {}),
     ...(agentText(identity, 'version') ? { panelVersion: agentText(identity, 'version') } : {}),
+    ...(sampledAt && !Number.isNaN(Date.parse(sampledAt)) ? { sampledAt } : {}),
+    ...(nginxTest ? { nginxTest } : {}),
+    ...(apacheTest ? { apacheTest } : {}),
   }
   return sample
 }
@@ -397,6 +417,7 @@ const headerHtml = (model: WhmDashboardModel): string => {
       <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: ${genBg}; color: ${genFg}; font-size: 12px; font-weight: 600"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: ${genFg}"></span>${generationBody}</span>
       <span style="display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: #EEF0F3; color: #344054; font-size: 12px; font-weight: 600; font-family: 'IBM Plex Mono', monospace">${show(model.versionLabel, ar)}</span>
       ${lang}
+      ${model.signOutLabel ? `<button type="button" data-action="logout" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer">${escapeHtml(model.signOutLabel)}</button>` : ''}
       <button type="button" aria-label="${escapeHtml(model.locale === 'ar' ? `قائمة المستخدم ${model.username}` : `User menu for ${model.username}`)}" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding-block: 0; padding-inline: 6px 12px; border-radius: 999px; border: 1px solid #E2E6EC; background: #FFFFFF; color: #101828; font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; cursor: pointer"><span aria-hidden="true" style="width: 32px; height: 32px; border-radius: 50%; background: #0E1726; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 13px">${initial}</span>${show(model.username, ar)}</button>
     </header>`
 }
@@ -873,6 +894,24 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     result: entry.outcome === 'ok' ? okChip(ar ? 'مطبّق' : 'Applied') : badChip(entry.outcome),
     detail: '—',
   }))
+  const sampledAt = props.hostSample?.sampledAt && !Number.isNaN(Date.parse(props.hostSample.sampledAt)) ? props.hostSample.sampledAt : ''
+  const utcMinute = (iso: string): string => formatAsciiDate(iso, { includeTime: true }).replace(/:\d{2} UTC$/, ' UTC')
+  const clock = (iso: string): string => formatUtcClock(iso)
+  const rollbackId = typeof props.rollbackGenerationId === 'number' && Number.isSafeInteger(props.rollbackGenerationId) && props.rollbackGenerationId > 0
+    ? props.rollbackGenerationId
+    : null
+  const configTile = (label: string, check: { ok: boolean; at: string } | undefined, kind: 'nginx' | 'apache') => {
+    if (!check) return { label, value: '', note: '—', chip: emptyChip('—'), monoLabel: true }
+    const when = clock(check.at)
+    if (!check.ok) return { label, value: '', note: ar ? `«${when}»` : when, chip: badChip(ar ? 'فشل' : 'Failed'), monoLabel: true }
+    if (kind === 'apache') {
+      return { label, value: '', note: ar ? `الصياغة سليمة · «${when}»` : `Syntax OK · ${when}`, chip: okChip(ar ? 'نجح' : 'Passed'), monoLabel: true }
+    }
+    const note = generationId !== undefined
+      ? (ar ? `«${when}» · الجيل «${generationId}»` : `${when} · generation ${generationId}`)
+      : (ar ? `«${when}»` : when)
+    return { label, value: '', note, chip: okChip(ar ? 'نجح' : 'Passed'), monoLabel: true }
+  }
   const emptyAudit: DashboardAuditRow = { time: '—', datetime: '', actor: '—', from: '—', action: '—', target: '—', result: emptyChip('—'), detail: '—' }
   const emptyService: DashboardServiceRow = { name: '—', version: '', note: '', status: emptyChip('—') }
   const meter = (label: string): DashboardMeter => ({ label, value: '—', now: '0', pct: '0%', color: '#1D5BD6', note: '—', noteColor: '#5D6B7E' })
@@ -889,8 +928,9 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     crumbPage: ar ? 'اللوحة' : 'Dashboard',
     ledeHost: hostname,
     ledeRest: ar ? 'نظرة على الموفّق والحسابات والموارد والخدمات. آخر تحديث ' : 'at a glance: the reconciler, accounts, resources and services. Updated ',
-    ledeTime: '—',
-    ledeDatetime: '',
+    ledeTime: sampledAt ? utcMinute(sampledAt) : '—',
+    ledeDatetime: sampledAt ? new Date(sampledAt).toISOString() : '',
+    signOutLabel: ar ? 'تسجيل الخروج' : 'Sign out',
     createLabel: ar ? 'إنشاء حساب' : 'Create account',
     searchLabel: ar ? 'ابحث في الأدوات والحسابات' : 'Search tools and accounts',
     searchPlaceholder: ar ? 'ابحث في الأدوات والحسابات' : 'Search tools and accounts',
@@ -905,15 +945,15 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
       { label: ar ? 'المطلوب والمطبّق' : 'Desired and applied', value: inSync ? `${generationId} = ${generationId}` : '—', note: inSync ? (ar ? 'متساويان' : 'Equal') : '—' },
       { label: ar ? 'الجيل النشط' : 'Active generation', value: generationId !== undefined ? String(generationId) : '—', note: '—' },
       { label: ar ? 'الانحراف' : 'Drift', value: driftValue, note: '—' },
-      { label: 'nginx -t', value: '', note: '—', chip: emptyChip('—'), monoLabel: true },
-      { label: 'apachectl configtest', value: '', note: '—', chip: emptyChip('—'), monoLabel: true },
-      { label: ar ? 'هدف التراجع' : 'Rollback target', value: '—', note: '—' },
+      configTile('nginx -t', props.hostSample?.nginxTest, 'nginx'),
+      configTile('apachectl configtest', props.hostSample?.apacheTest, 'apache'),
+      { label: ar ? 'هدف التراجع' : 'Rollback target', value: rollbackId ? String(rollbackId) : '—', note: rollbackId ? (ar ? 'الجيل السابق' : 'Previous generation') : '—' },
     ],
     driftButton: ar ? 'افحص الانحراف الآن' : 'Check for drift now',
     driftLink: ar ? 'الأجيال في سجل التدقيق' : 'View generations in the audit log',
     driftStatus: '',
     resourcesTitle: ar ? 'موارد الخادم' : 'Server resources',
-    resourcesSampled: '—',
+    resourcesSampled: sampledAt ? (ar ? `العينة «${clock(sampledAt)}»` : `Sampled ${clock(sampledAt)}`) : '—',
     meters: [
       loadValue === null
         ? meter(ar ? 'المعالج' : 'CPU')

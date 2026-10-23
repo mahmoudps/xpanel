@@ -263,7 +263,13 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     } else if (action === 'logout') {
       event.preventDefault(); button.disabled = true;
       try {
-        await sessionRequest('POST', '/api/auth/logout', {});
+        if (!csrfToken) {
+          try {
+            var me = await requestJson('GET', '/api/auth/me');
+            if (typeof me.csrfToken === 'string' && me.csrfToken) csrfToken = me.csrfToken;
+          } catch (ignored) { /* A missing token still attempts sign-out. */ }
+        }
+        await requestJson('POST', '/api/auth/logout', {}, csrfToken || undefined);
         csrfToken = null; principal = null; clearCredentials(); clearEnrollment(); window.location.assign('/login?lang=' + (ar ? 'ar' : 'en'));
       } catch (error) {
         if (error.status === 401) window.location.assign('/login?lang=' + (ar ? 'ar' : 'en'));
