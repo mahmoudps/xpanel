@@ -29,7 +29,7 @@ The API adds `control-plane: passed` after it can read agent `/health`. The agen
 | `mariadb` | `/usr/bin/mariadb` or `/usr/bin/mysql` exists |
 | `mail` | `/usr/sbin/postfix` and (`/usr/sbin/dovecot` or `/usr/bin/doveadm`) exist |
 | `files` | The agent was started with the confined helper `/opt/xpanel/bin/xpanel-account-files` |
-| `acme` | `certbot`, `lego`, or `acme.sh` exists. This probe is reported and does **not** qualify certificate issuance |
+| `acme` | The in-repo HTTP-01 client is built into the Linux agent. `certbot`, `lego`, or `acme.sh` also pass the probe. Issuance uses the in-repo client |
 
 `test:linux` remains the host qualification harness for executor behaviour. It does not flip the static catalog. A lab host qualifies tools by running the real agent and API; no separate evidence file is required.
 
@@ -48,6 +48,7 @@ A page is hidden until every tool on it qualifies. Feature keys must not be in t
 | `mysql-databases`, `mysql-users` | control-plane, mariadb | Database and user create, grant, delete |
 | `file-manager`, `file-text-editor` | control-plane, files | Browse, text upload, edit, mkdir, trash, empty trash inside the account home |
 | `ssl-tls-status` | control-plane | Stored certificate state per domain |
+| `ssl-install` | control-plane, apache, acme | Issue or renew one account domain over HTTP-01 |
 
 Accounts, create-account, plans, domains, email, databases, files, and SSL status are separate pages so a missing binary hides only the page that needs it. Unimplemented catalog ids stayed on their own pages and remain unqualified.
 
@@ -57,7 +58,7 @@ Terminate probes `GET /accounts/:user/purge`. Only `LinuxHostExecutor` answers `
 
 ## Not qualified
 
-**Certificate issuance.** `ssl-install` and the certificate-file tools stay on `/security/ssl/files`. `AcmeCertificateServiceAdapter` can run an HTTP-01 issuance flow and is not exposed. The status page has no Issue button. Installing certbot, lego, or acme.sh does not by itself issue a certificate.
+**Certificate files.** Keys, CSRs and uploaded certificate files stay on `/security/ssl/files` and are not an issuance flow. Wildcard names need DNS-01, which this client does not send.
 
 **xMail inbox.** Panel and xMail sign-in is the hosting account, not a mailbox. Mailbox passwords are the service-user secrets used by Postfix and Dovecot. Reading an inbox needs a mailbox-scoped IMAP or `doveadm` reader, and that reader is not connected. Inbox, folders, and compose stay unqualified. No sample messages are shown.
 
@@ -80,6 +81,7 @@ Packages and services that change what appears:
 - `mariadb` or `mysql` client for databases
 - `postfix` and `dovecot` for mailboxes
 - `/opt/xpanel/bin/xpanel-account-files` present at agent start for the file manager
+- no extra ACME package: the agent speaks HTTP-01 itself. The rendered nginx edge must answer port 80 and alias `/.well-known/acme-challenge/` to `/var/lib/xpanel/acme`. Apache stays the site engine behind that edge. A failed check is shown with the certificate authority's message. `sslinstall (SSL Host Installer)` and `AutoSSL` must stay enabled on the plan
 - a primary shared IPv4 in the pool (`isPrimary`) so create-account can assign an address; `ip -j addr` only observes it
 - feature lists that do not disable the keys named above
 

@@ -33,6 +33,7 @@ const surfacePageTitles: Record<SurfaceKind, Readonly<Record<string, LocalizedTi
 
 const routePageTitles: Readonly<Record<string, LocalizedTitle>> = {
   '/files/trash': ['Trash', 'المهملات'], '/files/ftp': ['FTP accounts', 'حسابات FTP'],
+  '/security/ssl/issue': ['Issue certificate', 'إصدار شهادة'],
   '/whm/plans/features': ['Feature lists', 'قوائم الميزات'],
   '/whm/resellers/privileges': ['Reseller privileges', 'صلاحيات الموزعين'],
   '/mail/folders': ['Folders', 'المجلدات'],
@@ -73,7 +74,7 @@ const surfaceSections: Record<SurfaceShellProps['surface'], Readonly<Record<stri
     '/metrics/traffic': 'analytics', '/metrics/web-stats': 'analytics',
     '/files/manager': 'files', '/files/trash': 'files', '/advanced/terminal': 'terminal',
     '/databases/mariadb': 'databases', '/email/accounts': 'users', '/files/ftp': 'users',
-    '/security/ssl': 'ssl',
+    '/security/ssl': 'ssl', '/security/ssl/issue': 'ssl',
     '/domains/zone-editor': 'dns',
   },
   xwhm: {

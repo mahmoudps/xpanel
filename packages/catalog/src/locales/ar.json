@@ -845,6 +845,7 @@
  "nav.page.xpanel.spam-quarantine.name": "حجر البريد المزعج",
  "nav.page.xpanel.ssh-access.name": "الوصول عبر SSH",
  "nav.page.xpanel.certificate-files.name": "ملفات الشهادات",
+ "nav.page.xpanel.issue-certificate.name": "إصدار شهادة",
  "nav.page.xpanel.ssl.name": "SSL/TLS",
  "nav.page.xpanel.staging.name": "مواقع التجهيز",
  "nav.page.xpanel.terminal.name": "الطرفية",

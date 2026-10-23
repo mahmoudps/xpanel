@@ -20,5 +20,6 @@ describe('host capability probes', () => {
     expect(classifyHostBinaries(path => present.has(path), true).files).toBe('passed')
     expect(classifyHostBinaries(path => present.has(path), true).acme).toBe('passed')
     expect(classifyHostBinaries(() => false, true).mail).toBe('failed')
+    expect(classifyHostBinaries(() => false, false, true).acme).toBe('passed')
   })
 })
