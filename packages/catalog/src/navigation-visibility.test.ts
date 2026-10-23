@@ -21,7 +21,7 @@ const design: NavSurface[] = [{
   }] }],
 }]
 
-const fileManagerToolIds = ['file-manager', 'file-text-editor', 'html-editor', 'images']
+const fileManagerToolIds = ['file-manager', 'file-text-editor']
 const ownerContractSplits = [
   { route: '/email/forwarders', core: ['forwarders', 'domain-forwarders', 'default-address', 'autoresponders'], adminRoute: '/whm/email/bcc', admin: ['aapanel-mail-bcc'] },
   { route: '/email/mailing-lists', core: ['mailing-lists'], adminRoute: '/whm/email/marketing', admin: ['aapanel-mail-subscribers', 'aapanel-mail-campaigns', 'aapanel-mail-automation'] },
@@ -110,7 +110,7 @@ describe('verified navigation policy', () => {
     expect(routesOf(visibleNavigation(ownerContext, unqualified))).not.toContain('/files/manager')
   })
 
-  it.each(['filemanager', 'html-editor', 'images'])('still denies the owner file manager when feature %s is disabled', feature => {
+  it.each(['filemanager'])('still denies the owner file manager when feature %s is disabled', feature => {
     expect(routesOf(visibleNavigation({ principal: owner, disabledFeatures: new Set([feature]) }, qualifiedToolFixtures(fileManagerToolIds))))
       .not.toContain('/files/manager')
   })

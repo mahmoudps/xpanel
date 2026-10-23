@@ -53,18 +53,32 @@ export function renderSecurityNavLink(surface: PanelId, locale: Locale, activeRo
   return `<a class="xp-nav-item${current ? ' xp-nav-item--active' : ''}" href="${escapeHtml(href)}" data-security-link="true"${current ? ' aria-current="page"' : ''}>${escapeHtml(securityLabel(locale))}</a>`
 }
 
-/** Catalog groups shown as unavailable. They are not links and do not claim a tool is qualified. */
-export function renderPlannedNavigation(surface: PanelId, locale: Locale, activeRoute = ''): string {
+/** Catalog groups. A group becomes links only when this server qualified every tool on its page. */
+export function renderPlannedNavigation(surface: PanelId, locale: Locale, activeRoute = '', qualified: readonly NavSurface[] = []): string {
   const design = surfaceDesign(surface)
+  const live = qualified.find(item => item.surface === surface)
   const isAr = locale === 'ar'
   const items = (design?.sections ?? []).map(section => {
+    const ready = live?.sections.find(item => item.id === section.id)
     const name = navigationLabel(surface, 'section', section, locale)
+    if (ready && ready.pages.length > 0) {
+      const links = ready.pages.map(page => {
+        const current = activeRoute === page.route
+        const label = navigationLabel(surface, 'page', page, locale)
+        return `<a class="xp-nav-item${current ? ' xp-nav-item--active' : ''}" data-nav-route="${escapeHtml(page.route)}" href="${escapeHtml(page.route)}"${current ? ' aria-current="page"' : ''}>${escapeHtml(label)}</a>`
+      }).join('')
+      return `<li class="xp-nav-ready" data-nav-section="${escapeHtml(section.id)}"><span class="xp-nav-ready__name">${escapeHtml(name)}</span><div class="xp-nav-ready__pages">${links}</div></li>`
+    }
     return `<li class="xp-nav-planned__item" data-planned-group="${escapeHtml(section.id)}"><span class="xp-nav-planned__name">${escapeHtml(name)}</span><span class="xp-nav-planned__state">${escapeHtml(isAr ? 'غير متاحة بعد' : 'Not yet available')}</span></li>`
   }).join('')
-  const note = isAr
-    ? 'هذه الأدوات غير متاحة على هذا الخادم بعد.'
-    : 'These tools are not available on this server yet.'
-  return `<nav class="xp-nav-planned-wrap" aria-label="${escapeHtml(isAr ? 'أدوات غير متاحة' : 'Unavailable tools')}"><p class="xp-nav-note" data-navigation-empty="true">${escapeHtml(note)}</p>${renderSecurityNavLink(surface, locale, activeRoute)}<ul class="xp-nav-planned">${items}</ul></nav>`
+  const waiting = (design?.sections ?? []).some(section => {
+    const ready = live?.sections.find(item => item.id === section.id)
+    return !ready || ready.pages.length === 0
+  })
+  const note = waiting
+    ? `<p class="xp-nav-note" data-navigation-empty="true">${escapeHtml(isAr ? 'هذه الأدوات غير متاحة على هذا الخادم بعد.' : 'These tools are not available on this server yet.')}</p>`
+    : ''
+  return `<nav class="xp-nav-planned-wrap" aria-label="${escapeHtml(isAr ? 'أدوات الاستضافة' : 'Hosting tools')}">${note}${renderSecurityNavLink(surface, locale, activeRoute)}<ul class="xp-nav-planned">${items}</ul></nav>`
 }
 
 export interface UserMenuModel {

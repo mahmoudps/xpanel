@@ -150,10 +150,7 @@ export const navigation: NavSurface[] = [
             "tools": [
               "email-accounts",
               "email-account-create",
-              "email-account-manage",
-              "connect-devices",
-              "email-disk-usage",
-              "address-importer"
+              "email-account-manage"
             ],
             "keywords": [
               "Email Accounts",
@@ -240,7 +237,10 @@ export const navigation: NavSurface[] = [
             ],
             "tools": [
               "global-email-filters",
-              "email-filters"
+              "email-filters",
+              "connect-devices",
+              "email-disk-usage",
+              "address-importer"
             ],
             "keywords": [
               "Email Filters",
@@ -431,9 +431,7 @@ export const navigation: NavSurface[] = [
             ],
             "tools": [
               "file-manager",
-              "file-text-editor",
-              "html-editor",
-              "images"
+              "file-text-editor"
             ],
             "keywords": [
               "File Manager",
@@ -474,7 +472,9 @@ export const navigation: NavSurface[] = [
               "owner"
             ],
             "tools": [
-              "file-trash"
+              "file-trash",
+              "html-editor",
+              "images"
             ],
             "keywords": [
               "Trash",
@@ -636,7 +636,8 @@ export const navigation: NavSurface[] = [
               "owner"
             ],
             "tools": [
-              "phpmyadmin"
+              "phpmyadmin",
+              "database-wizard"
             ],
             "keywords": [
               "phpMyAdmin",
@@ -660,8 +661,7 @@ export const navigation: NavSurface[] = [
             ],
             "tools": [
               "mysql-databases",
-              "mysql-users",
-              "database-wizard"
+              "mysql-users"
             ],
             "keywords": [
               "MySQL Databases",
@@ -788,8 +788,7 @@ export const navigation: NavSurface[] = [
             ],
             "tools": [
               "domains",
-              "create-domain",
-              "force-https-redirect"
+              "create-domain"
             ],
             "keywords": [
               "Domains",
@@ -823,6 +822,7 @@ export const navigation: NavSurface[] = [
               "owner"
             ],
             "tools": [
+              "force-https-redirect",
               "manage-domain",
               "aapanel-site-start-stop",
               "aapanel-site-expiry",
@@ -1131,11 +1131,7 @@ export const navigation: NavSurface[] = [
               "owner"
             ],
             "tools": [
-              "ssl-tls-status",
-              "ssl-install",
-              "ssl-certificates",
-              "ssl-private-keys",
-              "ssl-csrs"
+              "ssl-tls-status"
             ],
             "keywords": [
               "SSL/TLS",
@@ -1156,7 +1152,30 @@ export const navigation: NavSurface[] = [
               "HTTPS",
               "SSL/TLS Certificates (Unified View and Default Key Type)"
             ],
-            "summary": "See certificate coverage for every hostname, issue free auto-renewing certificates after a preflight, install your own and manage keys, requests and certificates."
+            "summary": "See the stored certificate state for every hostname on this account."
+          },
+          {
+            "id": "certificate-files",
+            "name": "Certificate files",
+            "route": "/security/ssl/files",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "owner"
+            ],
+            "tools": [
+              "ssl-install",
+              "ssl-certificates",
+              "ssl-private-keys",
+              "ssl-csrs"
+            ],
+            "keywords": [
+              "Private Keys",
+              "CSR",
+              "Install SSL"
+            ],
+            "summary": "Stored keys, requests and certificate files. Issuing a certificate stays here until this server has a working ACME client."
           },
           {
             "id": "account-security",
@@ -1949,19 +1968,10 @@ export const navigation: NavSurface[] = [
             ],
             "tools": [
               "list-accounts",
-              "list-suspended-accounts",
-              "show-accounts-over-quota",
               "modify-account",
               "password-modification",
-              "force-password-change",
-              "quota-modification",
-              "limit-bandwidth-usage",
-              "upgrade-downgrade-account",
-              "modify-upgrade-multiple-accounts",
               "manage-account-suspension",
-              "terminate-accounts",
-              "rearrange-account",
-              "manage-demo-mode"
+              "terminate-accounts"
             ],
             "keywords": [
               "List Accounts",
@@ -2019,7 +2029,16 @@ export const navigation: NavSurface[] = [
             ],
             "tools": [
               "account-health",
-              "account-repair"
+              "account-repair",
+              "list-suspended-accounts",
+              "show-accounts-over-quota",
+              "force-password-change",
+              "quota-modification",
+              "limit-bandwidth-usage",
+              "upgrade-downgrade-account",
+              "modify-upgrade-multiple-accounts",
+              "rearrange-account",
+              "manage-demo-mode"
             ],
             "keywords": [
               "Account health",
@@ -2132,8 +2151,7 @@ export const navigation: NavSurface[] = [
             "tools": [
               "add-package",
               "edit-package",
-              "delete-package",
-              "tweak-packages"
+              "delete-package"
             ],
             "keywords": [
               "Packages",
@@ -2159,7 +2177,8 @@ export const navigation: NavSurface[] = [
               "reseller:manage-plans"
             ],
             "tools": [
-              "feature-manager"
+              "feature-manager",
+              "tweak-packages"
             ],
             "keywords": [
               "Feature Manager",

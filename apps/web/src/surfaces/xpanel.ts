@@ -2,6 +2,7 @@ import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xp
 import type {
   Account,
   Database,
+  DatabaseUser,
   DnsRecord,
   Domain,
   DomainCustomConfig,
@@ -50,6 +51,7 @@ export interface PanelSurfaceProps {
   websiteAnalytics?: WebsiteAnalyticsSnapshot
   files?: JailedFileEntry[]
   databases?: Database[]
+  databaseUsers?: Pick<DatabaseUser, 'id' | 'name' | 'grants'>[]
   serviceUsers?: ServiceUser[]
   dnsRecords?: DnsRecord[]
   terminalSessionId?: string
@@ -87,6 +89,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
   const websiteAnalytics = props.websiteAnalytics
   const files = (props.files ?? []).filter(file => activeRoute !== '/files/trash' || file.trashed)
   const databases = props.databases ?? []
+  const databaseUsers = props.databaseUsers ?? []
   const serviceUsers = (props.serviceUsers ?? []).filter(user => activeRoute === '/files/ftp' ? user.services.ftp : user.services.email)
   const dnsRecords = props.dnsRecords ?? []
   const terminalSessionId = props.terminalSessionId
@@ -225,6 +228,7 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
                 <th>${isAr ? 'عناوين IP' : 'IP addresses'}</th>
                 <th>${isAr ? 'PHP / بيئة التشغيل' : 'PHP / Runtime'}</th>
                 <th>${isAr ? 'شهادة TLS' : 'TLS certificate'}</th>
+                <th>${isAr ? 'الإجراء' : 'Action'}</th>
               </tr>
             </thead>
             <tbody>
@@ -246,6 +250,7 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
                   <td>
                     ${renderStatusBadge(dom.certificateId ? 'ok' : 'suspended', dom.certificateId ? (isAr ? 'شهادة مضبوطة' : 'Certificate configured') : (isAr ? 'لا توجد شهادة' : 'No certificate'))}
                   </td>
+                  <td>${dom.kind === 'primary' ? '' : `<button type="button" class="xp-btn" data-remove-domain="${escapeHtml(dom.id)}">${isAr ? 'إزالة' : 'Remove'}</button>`}</td>
                 </tr>
               `,
                 )
@@ -253,6 +258,22 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
             </tbody>
           </table>
         </div>
+        <form class="xp-form-group" data-domain-form="true" data-account-username="${escapeHtml(account.username)}" data-primary-id="${escapeHtml(domains.find(domain => domain.kind === 'primary')?.id ?? '')}">
+          <div class="xp-field">
+            <label class="xp-label" for="domain-name">${isAr ? 'اسم النطاق' : 'Domain name'}</label>
+            <input id="domain-name" name="name" type="text" class="xp-input xp-mono" dir="ltr" required placeholder="shop.example.test" />
+          </div>
+          <div class="xp-field">
+            <label class="xp-label" for="domain-kind">${isAr ? 'النوع' : 'Type'}</label>
+            <select id="domain-kind" name="kind" class="xp-select">
+              <option value="addon">${isAr ? 'نطاق إضافي' : 'Addon domain'}</option>
+              <option value="subdomain">${isAr ? 'نطاق فرعي' : 'Subdomain'}</option>
+            </select>
+          </div>
+          <p class="xp-help">${isAr ? 'النطاق الفرعي يجب أن ينتهي باسم النطاق الأساسي.' : 'A subdomain must end with the primary domain.'}</p>
+          <p class="xp-help" data-domain-status role="status" hidden></p>
+          <button type="submit" class="xp-btn xp-btn--primary">${isAr ? 'إضافة النطاق' : 'Add domain'}</button>
+        </form>
       </section>
 
 ` : ''}
@@ -343,7 +364,7 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
 
 ` : ''}
       ${section === 'files' ? `      <!-- 5. Jailed File Manager (/home/<user>, 0640/0750 Permission Guard, .trash) -->
-      <section class="xp-card" id="xpanel-file-manager" data-section="jailed-file-manager" aria-labelledby="xpanel-files-heading">
+      <section class="xp-card" id="xpanel-file-manager" data-section="jailed-file-manager" data-file-manager="${activeRoute === '/files/manager' ? 'browse' : 'trash'}" data-account-username="${escapeHtml(account.username)}" aria-labelledby="xpanel-files-heading">
         <div class="xp-card__header">
           <div>
             <h1 id="xpanel-files-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
@@ -360,6 +381,7 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
           </nav>
           <div style="display: flex; flex-wrap: wrap; gap: 8px;">
             <button type="button" class="xp-btn xp-btn--primary" data-action="upload-file">${escapeHtml(t(locale, 'files.upload'))}</button>
+            <input id="jailed-file-upload" type="file" data-file-upload hidden />
             <button type="button" class="xp-btn" data-action="new-file">${escapeHtml(t(locale, 'files.newFile'))}</button>
             <button type="button" class="xp-btn" data-action="new-folder">${escapeHtml(t(locale, 'files.newFolder'))}</button>
             <button type="button" class="xp-btn" data-action="empty-trash">${isAr ? 'إفراغ المهملات' : 'Empty trash'}</button>
@@ -413,7 +435,9 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
               <h2>${escapeHtml(t(locale, 'files.editor'))} — <code class="xp-mono"><bdi dir="ltr">${escapeHtml(account.home)}</bdi></code></h2>
             </div>
             <label class="xp-sr-only" for="jailed-code-editor">${isAr ? 'محتوى الملف' : 'File contents'}</label>
-            <textarea id="jailed-code-editor" rows="5" class="xp-textarea xp-mono" dir="ltr"></textarea>
+            <textarea id="jailed-code-editor" rows="5" class="xp-textarea xp-mono" dir="ltr" data-editor-path=""></textarea>
+            <button type="button" class="xp-btn xp-btn--primary" data-action="save-file">${isAr ? 'حفظ النص' : 'Save text'}</button>
+            <p class="xp-help" data-file-status role="status" hidden></p>
           </div>
 
           <div class="xp-card xp-form-group" data-chmod-policy-modal="true">
@@ -505,8 +529,40 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
                   )
                   .join('')}
               </tbody>
-            </table>
+          </table>
+        </div>
+        <form class="xp-form-group" data-database-form="true" data-account-username="${escapeHtml(account.username)}">
+          <div class="xp-field">
+            <label class="xp-label" for="database-name">${isAr ? 'اسم قاعدة البيانات' : 'Database name'}</label>
+            <input id="database-name" name="name" type="text" class="xp-input xp-mono" dir="ltr" required pattern="[a-z0-9][a-z0-9_]{0,40}" placeholder="shop" />
           </div>
+          <p class="xp-help" data-database-status role="status" hidden></p>
+          <button type="submit" class="xp-btn xp-btn--primary">${isAr ? 'إنشاء قاعدة البيانات' : 'Create database'}</button>
+        </form>
+        <div class="xp-table-wrap">
+          <table class="xp-table">
+            <thead><tr><th>${isAr ? 'مستخدم قاعدة البيانات' : 'Database user'}</th><th>${isAr ? 'الصلاحيات' : 'Grants'}</th><th></th></tr></thead>
+            <tbody>
+              ${databaseUsers.map(user => `<tr data-database-user="${escapeHtml(user.name)}"><td class="xp-mono"><bdi dir="ltr">${escapeHtml(user.name)}</bdi></td><td class="xp-mono">${escapeHtml(String(user.grants.length))}</td><td><button type="button" class="xp-btn" data-remove-database-user="${escapeHtml(user.id)}">${isAr ? 'حذف' : 'Delete'}</button></td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        <form class="xp-form-group" data-database-user-form="true" data-account-username="${escapeHtml(account.username)}">
+          <div class="xp-field">
+            <label class="xp-label" for="database-user-name">${isAr ? 'اسم المستخدم' : 'User name'}</label>
+            <input id="database-user-name" name="name" type="text" class="xp-input xp-mono" dir="ltr" required pattern="[a-z0-9][a-z0-9_]{0,24}" />
+          </div>
+          <div class="xp-field">
+            <label class="xp-label" for="database-user-password">${isAr ? 'كلمة المرور' : 'Password'}</label>
+            <input id="database-user-password" name="password" type="password" class="xp-input" minlength="8" required autocomplete="new-password" />
+          </div>
+          <div class="xp-field">
+            <label class="xp-label" for="database-user-grant">${isAr ? 'منح على' : 'Grant on'}</label>
+            <select id="database-user-grant" name="databaseId" class="xp-select">${databases.filter(db => !db.trashedAt).map(db => `<option value="${escapeHtml(db.id)}">${escapeHtml(db.name)}</option>`).join('')}</select>
+          </div>
+          <p class="xp-help" data-database-user-status role="status" hidden></p>
+          <button type="submit" class="xp-btn xp-btn--primary">${isAr ? 'إنشاء المستخدم' : 'Create user'}</button>
+        </form>
 
 </section>` : ''}
       ${section === 'users' ? `          <section class="xp-card" data-section="service-users">
@@ -521,6 +577,7 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
                     <th>Login</th>
                     <th>Services</th>
                     <th>Mailbox Quota</th>
+                    <th>${isAr ? 'الإجراء' : 'Action'}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -534,6 +591,10 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
                         ${u.services.ftp ? renderStatusBadge('ok', `FTP (${u.ftpDir})`) : ''}
                       </td>
                       <td class="xp-mono xp-tabular">${String(u.mailboxQuotaMb)} MB</td>
+                      <td>
+                        <button type="button" class="xp-btn" data-mailbox-password="${escapeHtml(u.id)}">${isAr ? 'كلمة المرور' : 'Password'}</button>
+                        <button type="button" class="xp-btn" data-remove-mailbox="${escapeHtml(u.id)}">${isAr ? 'حذف' : 'Delete'}</button>
+                      </td>
                     </tr>
                   `,
                     )
@@ -541,6 +602,26 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
                 </tbody>
               </table>
             </div>
+            ${activeRoute === '/email/accounts' ? `<form class="xp-form-group" data-mailbox-form="true">
+              <div class="xp-field">
+                <label class="xp-label" for="mailbox-local">${isAr ? 'الاسم' : 'Name'}</label>
+                <input id="mailbox-local" name="localPart" type="text" class="xp-input xp-mono" dir="ltr" required pattern="[a-z0-9][a-z0-9._-]{0,31}" />
+              </div>
+              <div class="xp-field">
+                <label class="xp-label" for="mailbox-domain">${isAr ? 'النطاق' : 'Domain'}</label>
+                <select id="mailbox-domain" name="domainId" class="xp-select">${domains.map(domain => `<option value="${escapeHtml(domain.id)}">${escapeHtml(domain.name)}</option>`).join('')}</select>
+              </div>
+              <div class="xp-field">
+                <label class="xp-label" for="mailbox-password">${isAr ? 'كلمة المرور' : 'Password'}</label>
+                <input id="mailbox-password" name="password" type="password" class="xp-input" minlength="8" required autocomplete="new-password" />
+              </div>
+              <div class="xp-field">
+                <label class="xp-label" for="mailbox-quota">${isAr ? 'الحصة (MB)' : 'Quota (MB)'}</label>
+                <input id="mailbox-quota" name="mailboxQuotaMb" type="number" class="xp-input xp-mono" min="1" value="1024" required />
+              </div>
+              <p class="xp-help" data-mailbox-status role="status" hidden></p>
+              <button type="submit" class="xp-btn xp-btn--primary">${isAr ? 'إنشاء صندوق البريد' : 'Create mailbox'}</button>
+            </form>` : ''}
           </section>
 
 ` : ''}
@@ -579,6 +660,20 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
         </aside>
 
 ` : ''}
+      ${section === 'ssl' ? `<section class="xp-card" data-section="ssl-status" aria-labelledby="xpanel-ssl-heading">
+        <div class="xp-card__header">
+          <div>
+            <h1 id="xpanel-ssl-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
+            <p class="xp-prose">${isAr ? 'هذه حالة الشهادات المحفوظة. إصدار شهادة جديدة يحتاج عميل ACME على الخادم، وهو غير موصول بعد.' : 'This is the stored certificate state. Issuing a new certificate needs an ACME client on the server, and that client is not connected yet.'}</p>
+          </div>
+        </div>
+        <div class="xp-table-wrap">
+          <table class="xp-table">
+            <thead><tr><th>${isAr ? 'النطاق' : 'Domain'}</th><th>${isAr ? 'الشهادة' : 'Certificate'}</th></tr></thead>
+            <tbody>${domains.map(domain => `<tr><td class="xp-mono"><bdi dir="ltr">${escapeHtml(domain.name)}</bdi></td><td>${renderStatusBadge(domain.certificateId ? 'ok' : 'suspended', domain.certificateId ? (isAr ? 'محفوظة' : 'Stored') : (isAr ? 'لا توجد شهادة' : 'No certificate'))}</td></tr>`).join('')}</tbody>
+          </table>
+        </div>
+      </section>` : ''}
             ${section === undefined || (section === 'config' && !customConfig) || (section === 'analytics' && !websiteAnalytics) ? renderSurfaceUnavailable(locale, '/home') : ''}`,
   })
   return ensureAccessibleSurfaceHtml(rawHtml.trim(), locale)

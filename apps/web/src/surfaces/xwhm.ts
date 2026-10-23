@@ -325,13 +325,33 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           <dd>
           <bdi dir="ltr">${escapeHtml(acc.extraIps.join(', '))}</bdi>
           </dd>
-          </div>` : ''}<div>
+          </div>` : ''}          <div>
           <dt>${isAr ? 'الطرفية' : 'Shell'}</dt>
           <dd>
           <bdi dir="ltr">${escapeHtml(acc.shell)}</bdi>
           </dd>
           </div>
+          <div>
+          <dt>${isAr ? 'البريد' : 'Contact'}</dt>
+          <dd><bdi dir="ltr">${escapeHtml(acc.contactEmail)}</bdi></dd>
+          </div>
+          <div>
+          <dt>${isAr ? 'حصة القرص' : 'Disk quota'}</dt>
+          <dd><bdi dir="ltr">${escapeHtml((() => { const disk = plans.find(plan => plan.id === acc.planId)?.resources.diskMb; return disk === undefined ? (isAr ? 'غير متاحة' : 'Unavailable') : disk === 'unlimited' ? (isAr ? 'غير محدود' : 'Unlimited') : disk + ' MB' })())}</bdi></dd>
+          </div>
           </dl>
+          ${(isRoot || heldAcls.has('edit-account')) ? `<form class="xp-form-group" data-account-contact-form="true" data-account-id="${escapeHtml(acc.id)}">
+            <label class="xp-label" for="contact-${escapeHtml(acc.id)}">${isAr ? 'بريد التواصل' : 'Contact email'}</label>
+            <input id="contact-${escapeHtml(acc.id)}" name="contactEmail" type="email" class="xp-input" dir="ltr" required value="${escapeHtml(acc.contactEmail)}" />
+            <p class="xp-help" data-account-contact-status role="status" hidden></p>
+            <button type="submit" class="xp-btn">${isAr ? 'حفظ البريد' : 'Save email'}</button>
+          </form>` : ''}
+          ${(isRoot || heldAcls.has('change-password')) ? `<form class="xp-form-group" data-account-password-form="true" data-account-id="${escapeHtml(acc.id)}">
+            <label class="xp-label" for="password-${escapeHtml(acc.id)}">${isAr ? 'كلمة مرور جديدة' : 'New password'}</label>
+            <input id="password-${escapeHtml(acc.id)}" name="password" type="password" class="xp-input" minlength="8" required autocomplete="new-password" />
+            <p class="xp-help" data-account-password-status role="status" hidden></p>
+            <button type="submit" class="xp-btn">${isAr ? 'تغيير كلمة المرور' : 'Change password'}</button>
+          </form>` : ''}
           </details>
           </div>
           </td>
@@ -473,6 +493,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
                   <td class="xp-mono xp-tabular">${plan.resources.maxProcesses}</td>
                   <td class="xp-mono xp-tabular">${String(plan.caps.addonDomains)}</td>
                   <td>${renderStatusBadge(plan.shell === 'jailed' ? 'ok' : 'suspended', plan.shell === 'jailed' ? 'jailed' : 'none')}</td>
+                  <td><button type="button" class="xp-btn" data-plan-delete="${escapeHtml(plan.id)}">${isAr ? 'حذف' : 'Delete'}</button></td>
                 </tr>
               `,
                 )
@@ -482,14 +503,14 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
         </div>
 
         <!-- Create / Edit Plan Drawer Form with Explicit Unlimited Checkboxes -->
-        <form class="xp-card xp-form-group" style="margin-block-start: var(--xp-space-card);" action="/api/whm/plans" method="post" data-plan-editor-form="true">
+        <form class="xp-card xp-form-group" style="margin-block-start: var(--xp-space-card);" action="/api/plans" method="post" data-plan-editor-form="true">
           <div class="xp-card__header">
             <h3>${isAr ? 'إنشاء / تعديل خطة' : 'Create / edit plan'}</h3>
           </div>
           <div class="xp-kpi-grid">
             <div class="xp-field">
               <label class="xp-label" for="plan-name">${isAr ? 'اسم الخطة' : 'Plan Name'}</label>
-              <input id="plan-name" name="name" type="text" class="xp-input" value="Enterprise" />
+              <input id="plan-name" name="name" type="text" class="xp-input" required maxlength="64" />
             </div>
             <div class="xp-field">
               <label class="xp-label" for="plan-cpu-quota">${isAr ? 'المعالج (%)' : 'CPU (%)'}</label>
@@ -520,6 +541,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
               <input type="checkbox" name="unlimitedAddonDomains" value="unlimited" />
               <span>${isAr ? 'نطاقات إضافية غير محدودة' : 'Unlimited addon domains'}</span>
             </label>
+            <p class="xp-help" data-plan-status role="status" hidden></p>
             <button type="submit" class="xp-btn xp-btn--primary">${escapeHtml(t(locale, 'common.reviewAndApply'))}</button>
           </div>
         </form>

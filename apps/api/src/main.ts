@@ -15,6 +15,7 @@ import { createDb, latestActive, migrate, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { runCli } from './cli.ts'
+import { loadQualifiedCatalog } from './host-catalog.ts'
 import { createApiApp, ensureRootPrincipal, listenApiServer } from './server.ts'
 import { authenticateRequest } from './auth.ts'
 import { createAgentClient } from './agent-client.ts'
@@ -68,6 +69,8 @@ export const createDefaultWebRenderer = async (deps: {
   entryPoint?: EntryPoint
   /** Exact public origins. Missing origins are not linked. */
   panels?: Partial<Record<EntryPoint, string>>
+  /** Connected agent. Implemented tools qualify only when its Linux probes pass. */
+  agent?: { fetch: AgentApp['fetch']; token: string } | null
 }): Promise<(req: Request) => Promise<Response> | Response> => {
   const { serveWebUi, resolveWebDocumentRoute } = await import('../../web/src/index.ts')
   const panelLinks = (['xpanel', 'xwhm', 'xmail'] as const).flatMap(surface => {
@@ -223,7 +226,9 @@ export const createDefaultWebRenderer = async (deps: {
       ...(reseller ? { reseller } : {}),
       disabledFeatures: new Set(scoped?.featureList?.disabled ?? []),
     }
-    const qualifiedRoute = visibleNavigation(scopedVisibility).some(item => item.surface === surface
+    const catalog = await loadQualifiedCatalog(deps.agent ?? null)
+    const qualifiedCatalog = catalog.some(tool => tool.status === 'verified') ? catalog : undefined
+    const qualifiedRoute = visibleNavigation(scopedVisibility, catalog).some(item => item.surface === surface
       && item.sections.some(section => section.pages.some(page => page.route === documentRoute.activeRoute)))
     if (!qualifiedRoute) {
       if (!isWorkspaceHome(documentRoute) && !ACCOUNT_SECURITY_ROUTES.has(documentRoute.activeRoute)) {
@@ -242,6 +247,7 @@ export const createDefaultWebRenderer = async (deps: {
         activeRoute: documentRoute.activeRoute,
         security,
         visibility: scopedVisibility,
+        ...(qualifiedCatalog ? { catalog: qualifiedCatalog } : {}),
         ...(ownAccountId ? { accountId: ownAccountId } : {}),
         ...(email ? { supportEmail: email } : {}),
         ...(panelLinks.length ? { panels: panelLinks } : {}),
@@ -290,6 +296,7 @@ export const createDefaultWebRenderer = async (deps: {
     const visibleFirewall = principal.kind === 'root' ? snap.firewall.rules : []
     const accountDomains = snap.domains.filter((d) => d.accountId === account?.id)
     const accountDatabases = snap.databases.filter((d) => d.accountId === account?.id)
+    const accountDatabaseUsers = snap.databaseUsers.filter((user) => user.accountId === account?.id).map((user) => ({ id: user.id, accountId: user.accountId, name: user.name, grants: user.grants }))
     const accountServiceUsers = snap.serviceUsers.filter((u) => u.accountId === account?.id).map((u) => ({ ...u, passwordHash: '' }))
     const active = await latestActive(deps.db)
     return serveWebUi(req, async () => ({
@@ -298,6 +305,7 @@ export const createDefaultWebRenderer = async (deps: {
       security,
       ...(url.searchParams.has('accountId') && account ? { accountId: account.id } : {}),
       visibility,
+      ...(qualifiedCatalog ? { catalog: qualifiedCatalog } : {}),
       ...(active ? { generationId: active.id } : {}),
       whm: {
         principal,
@@ -314,6 +322,7 @@ export const createDefaultWebRenderer = async (deps: {
         ...(plan ? { plan } : {}),
         domains: accountDomains,
         databases: accountDatabases,
+        databaseUsers: accountDatabaseUsers,
         serviceUsers: accountServiceUsers,
         files: [],
       },
@@ -351,7 +360,9 @@ export const startPanelServer = async (opts: PanelServerOptions = {}) => {
     await ensureRootPrincipal(dbHandle.db, { ...(opts.rootPassword ? { password: opts.rootPassword } : {}) })
     if (!opts.agentApp) client = createAgentClient({ socketPath: opts.agentSocket ?? process.env.XPANEL_AGENT_SOCKET ?? '/run/xpanel/agent.sock', token: agentToken })
     const agentApp = opts.agentApp ?? client!
-    const webRenderer = opts.webRenderer ?? await createDefaultWebRenderer({ store, db: dbHandle.db, serverSecret })
+    const webRenderer = opts.webRenderer ?? await createDefaultWebRenderer({
+      store, db: dbHandle.db, serverSecret, agent: { fetch: request => agentApp.fetch(request), token: agentToken },
+    })
     const app = createApiApp({
       db: dbHandle.db, store, agentApp, agentToken, os, webRenderer, serverSecret,
       secureCookies: !opts.agentApp,
@@ -481,7 +492,10 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
     for (const entryPoint of ENTRY_POINT_ORDER) {
       const config = entryPoints[entryPoint]
       const publicPanels = Object.fromEntries(ENTRY_POINT_ORDER.map(name => [name, entryPoints[name].publicOrigin])) as Record<EntryPoint, string>
-      const webRenderer = await createDefaultWebRenderer({ store, db: dbHandle.db, serverSecret, entryPoint, panels: publicPanels })
+      const webRenderer = await createDefaultWebRenderer({
+        store, db: dbHandle.db, serverSecret, entryPoint, panels: publicPanels,
+        agent: { fetch: request => agentApp.fetch(request), token: agentToken },
+      })
       const app = createApiApp({
         db: dbHandle.db, store, agentApp, agentToken, os, serverSecret, webRenderer,
         entryPoint, publicOrigin: config.publicOrigin, publicPanels, allowedOrigins: [config.publicOrigin],

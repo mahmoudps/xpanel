@@ -12,8 +12,10 @@ import { appendAudit, getPrincipal, latestActive } from '@xpanel/db'
 import type { Db } from '@xpanel/db'
 import type { StateStore } from '@xpanel/state'
 import { IoAnalyticsEngine, runJailedShellCommand, WebsiteAnalyticsEngine } from './analytics.ts'
+import { LinuxHostExecutor } from './executor.ts'
 import type { AgentExecutor } from './executor.ts'
 import { JailedFileManager } from './file-manager.ts'
+import { probeHostCapabilities } from './host-probes.ts'
 import type { AccountFileRunner } from './file-manager.ts'
 import {
   assertValidKernelPeerCredentials,
@@ -438,10 +440,13 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       authenticateService(req)
       if (method === 'GET' && pathname === '/health') {
         const currentGen = await latestActive(deps.db)
+        const executor = deps.executor instanceof LinuxHostExecutor ? 'linux' : deps.executor ? 'fake' : 'unknown'
         return jsonResponse({
           ok: true,
           os: deps.os,
           currentGeneration: currentGen,
+          executor,
+          ...(executor === 'linux' ? { probes: probeHostCapabilities(Boolean(deps.accountFileRunner)) } : {}),
           ...(verifiedPeer
             ? {
                 peer: {
@@ -458,6 +463,54 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       if (method === 'GET' && pathname === '/internal/events') return streamInternalEvents(req)
 
       const caller = await authenticateCaller(req)
+
+      const purgeMatch = /^\/accounts\/([a-z][a-z0-9]{2,15})\/purge$/.exec(pathname)
+      if ((method === 'GET' || method === 'POST') && purgeMatch) {
+        await assertRootCaller(caller, 'account.purge')
+        if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)
+        if (method === 'GET') return jsonResponse({ available: true, contract: 'target-bound-userdel' })
+        const username = purgeMatch[1]!
+        const body = await readObjectBody(req)
+        const account = await deps.store.getAccountByUsername(username)
+        const uid = body.uid
+        const home = body.home
+        const confirmed = body.confirmUsername === username
+          && account?.status === 'terminating'
+          && account.username === username
+          && uid === account.uid
+          && home === account.home
+          && typeof uid === 'number'
+          && Number.isInteger(uid)
+          && uid >= 20_000
+          && uid <= 60_000
+          && home === `/home/${username}`
+        if (!confirmed || !account) return jsonResponse({ purged: false, reason: 'target_refused' }, 409)
+        const removed = await deps.executor.runCommand(['/usr/sbin/userdel', '-r', '--', username])
+        const alreadyGone = /does not exist|no such user|unknown user/i.test(removed.stderr)
+        if (!removed.ok && !alreadyGone) return jsonResponse({ purged: false, reason: 'userdel_failed' }, 409)
+        const remains = await deps.executor.runCommand(['/usr/bin/test', '-e', '--', account.home])
+        if (remains.ok) return jsonResponse({ purged: false, reason: 'home_still_present' }, 409)
+        return jsonResponse({ purged: true })
+      }
+
+      if (method === 'GET' && pathname === '/host/addresses') {
+        await assertRootCaller(caller, 'host.addresses')
+        if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ addresses: [] }, 404)
+        const primary = await deps.executor.runCommand(['/usr/sbin/ip', '-j', 'addr'])
+        const observed = primary.ok ? primary : await deps.executor.runCommand(['/usr/bin/ip', '-j', 'addr'])
+        const addresses: string[] = []
+        try {
+          const parsed = JSON.parse(observed.stdout || '[]') as { addr_info?: { local?: string }[] }[]
+          if (Array.isArray(parsed)) {
+            for (const iface of parsed) {
+              for (const info of iface?.addr_info ?? []) {
+                if (typeof info?.local === 'string' && info.local.length > 0) addresses.push(info.local)
+              }
+            }
+          }
+        } catch { /* An unreadable address list stays empty. Account creation keeps the unverified result. */ }
+        return jsonResponse({ addresses })
+      }
 
       if (method === 'POST' && (pathname === '/reconcile' || pathname === '/state/apply')) {
         if (pathname === '/reconcile') await assertRootCaller(caller, 'reconcile')

@@ -208,7 +208,7 @@ const renderUnavailableWorkspace = (
   return renderSurfaceShell({
     surface: panelSurface,
     locale,
-    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${panelLabel(panelSurface)}</strong></div>${renderPlannedNavigation(panelSurface, locale, path)}`,
+    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${panelLabel(panelSurface)}</strong></div>${renderPlannedNavigation(panelSurface, locale, path, state?.visibility ? visibleNavigation(state.visibility, state.catalog) : [])}`,
     topbar: renderUserMenu({
       locale,
       theme,

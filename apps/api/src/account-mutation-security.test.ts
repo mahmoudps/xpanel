@@ -60,6 +60,7 @@ const fixture = async () => {
   const rootSession = await session(root.id)
   const resellerSession = await session(resellerPrincipal.id)
   let mode: Outcome = 'applied'
+  let purgeMode: 'missing' | 'ready' = 'missing'
   let calls = 0
   let pause: { enter: () => void; gate: Promise<void> } | undefined
   const holdNextApply = () => {
@@ -71,6 +72,15 @@ const fixture = async () => {
     return { entered, release }
   }
   const host = createHttpServer(async (request, response) => {
+    const purgePath = '/accounts/' + account.username + '/purge'
+    if (request.url === purgePath) {
+      if (purgeMode !== 'ready') { response.writeHead(404); response.end(); return }
+      response.setHeader('content-type', 'application/json')
+      if (request.method === 'GET') { response.end(JSON.stringify({ available: true, contract: 'target-bound-userdel' })); return }
+      request.resume()
+      response.end(JSON.stringify({ purged: true }))
+      return
+    }
     if (request.url !== '/state/apply') { response.writeHead(404); response.end(); return }
     calls++
     request.resume()
@@ -93,7 +103,11 @@ const fixture = async () => {
   cleanup.push(() => new Promise<void>(resolve => { host.closeAllConnections(); host.close(() => resolve()) }))
   const agentApp: AgentApp = {
     subscribe: () => () => {},
-    fetch: async request => fetch('http://127.0.0.1:' + hostPort + new URL(request.url).pathname, { method: request.method, headers: request.headers, body: await request.text() }),
+    fetch: async request => {
+      const method = request.method
+      const body = method === 'GET' || method === 'HEAD' ? undefined : await request.text()
+      return fetch('http://127.0.0.1:' + hostPort + new URL(request.url).pathname, { method, headers: request.headers, ...(body !== undefined ? { body } : {}) })
+    },
   }
   const servers: Awaited<ReturnType<typeof listenApiServer>>[] = []
   const open = async (agent: 'connected' | 'missing' | 'missing-token' = 'connected') => {
@@ -145,7 +159,7 @@ const fixture = async () => {
     if (action === 'update') return request('PATCH', '/api/accounts/' + account.id, { shell: 'jailed' }, options)
     return request('DELETE', '/api/accounts/' + account.id, { confirmUsername: account.username }, options)
   }
-  return { database, state, plan, account, other, root, reseller, owner, alias, neighbor, rootSession, resellerSession, request, open, fingerprints, identities, accountSuccess, perform, holdNextApply, setMode: (value: Outcome) => { mode = value }, calls: () => calls }
+  return { database, state, plan, account, other, root, reseller, owner, alias, neighbor, rootSession, resellerSession, request, open, fingerprints, identities, accountSuccess, perform, holdNextApply, setMode: (value: Outcome) => { mode = value }, setPurge: (value: 'missing' | 'ready') => { purgeMode = value }, calls: () => calls }
 }
 
 describe('real HTTP account mutation security', () => {
@@ -296,19 +310,53 @@ describe('account mutation outcomes and race boundaries', () => {
     expect(f.calls()).toBe(0)
   })
 
-  it.each(['connected', 'missing'] as const)('refuses contact-only metadata before effects until the narrow index writer is qualified (%s)', async agent => {
+  it.each(['connected', 'missing'] as const)('updates a contact email through the index writer without a host call (%s)', async agent => {
     const port = await f.open(agent)
-    const beforeState = await f.fingerprints()
     const beforeIdentity = await f.identities()
-    const beforeIndex = await f.database.db.query('SELECT * FROM idx_accounts ORDER BY id')
     const response = await f.request('PATCH', '/api/accounts/' + f.account.id, { contactEmail: 'changed-metadata@example.test' }, { port })
-    expect(response.status).toBe(412)
-    const data = await response.json() as { details: Record<string, unknown> }
-    expect(data.details).toMatchObject({ reason: 'metadata_index_update_unqualified', stateChanged: false, verificationRequired: true })
-    expect(await f.fingerprints()).toEqual(beforeState)
+    expect(response.status).toBe(200)
+    expect((await f.state.store.getAccount(f.account.id))!.contactEmail).toBe('changed-metadata@example.test')
+    const indexed = await f.database.db.query<{ contact_email: string }>('SELECT contact_email FROM idx_accounts WHERE id = $1', [f.account.id])
+    expect(indexed[0]?.contact_email).toBe('changed-metadata@example.test')
     expect(await f.identities()).toEqual(beforeIdentity)
-    expect(await f.database.db.query('SELECT * FROM idx_accounts ORDER BY id')).toEqual(beforeIndex)
-    expect(await f.accountSuccess()).toEqual([])
+    expect(f.calls()).toBe(0)
+  })
+
+  it('restores the previous contact email when the index writer fails', async () => {
+    vi.spyOn(dbApi, 'syncAccountContactIndex').mockRejectedValueOnce(new Error('Synthetic index outage'))
+    const response = await f.request('PATCH', '/api/accounts/' + f.account.id, { contactEmail: 'changed-metadata@example.test' })
+    expect(response.status).toBe(503)
+    const data = await response.json() as { details: { stateChanged: boolean; reason: string } }
+    expect(data.details).toMatchObject({ reason: 'contact_index_failed', stateChanged: false })
+    expect((await f.state.store.getAccount(f.account.id))!.contactEmail).toBe('owner@example.test')
+    expect(f.calls()).toBe(0)
+  })
+
+  it('changes every login for the account and leaves the neighbor untouched', async () => {
+    const before = await f.identities()
+    const response = await f.request('POST', '/api/accounts/' + f.account.id + '/password', { password: 'correct-horse-battery' })
+    expect(response.status).toBe(200)
+    const owner = await findPrincipalByUsername(f.database.db, f.owner.username)
+    const alias = await findPrincipalByUsername(f.database.db, f.alias.username)
+    const neighbor = await findPrincipalByUsername(f.database.db, f.neighbor.username)
+    expect(owner?.passwordHash).not.toBe(HASH)
+    expect(alias?.passwordHash).not.toBe(HASH)
+    expect(neighbor?.passwordHash).toBe(HASH)
+    const after = await f.identities()
+    for (const row of after.sessions) if ([f.owner.id, f.alias.id].includes(String(row.principal_id))) expect(row.revoked_at).not.toBeNull()
+    expect(after.sessions.filter(row => row.principal_id === f.neighbor.id)).toEqual(before.sessions.filter(row => row.principal_id === f.neighbor.id))
+    expect(after.tokens.filter(row => row.principal_id === f.neighbor.id)).toEqual(before.tokens.filter(row => row.principal_id === f.neighbor.id))
+    expect(f.calls()).toBe(0)
+  })
+
+  it('terminates an account only after the target-bound purge contract succeeds', async () => {
+    f.setPurge('ready')
+    const response = await f.request('DELETE', '/api/accounts/' + f.account.id, { confirmUsername: f.account.username })
+    expect(response.status).toBe(200)
+    expect(await f.state.store.getAccount(f.account.id)).toBeNull()
+    expect(await f.database.db.query('SELECT id FROM principals WHERE account_id = $1', [f.account.id])).toEqual([])
+    expect(await findPrincipalByUsername(f.database.db, f.neighbor.username)).not.toBeNull()
+    expect(await f.state.store.getAccount(f.other.id)).not.toBeNull()
     expect(f.calls()).toBe(0)
   })
 
