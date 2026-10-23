@@ -1608,7 +1608,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           return fail('NOT_FOUND', 'mailbox not found')
         }
         const messages = await mailboxTransport.list(opened.record.mailbox, opened.password)
-        return jsonResponse({ mailbox: opened.record.mailbox, messages })
+        return jsonResponse({ mailbox: opened.record.mailbox, folder: 'INBOX', complete: true, messages })
       }
       if (inboxMatch && (method === 'GET' || method === 'DELETE')) {
         const caller = await requireCaller(req)

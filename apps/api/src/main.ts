@@ -12,11 +12,13 @@ import type { VisibilityContext } from '@xpanel/catalog'
 import { publicContactEmail } from '../../web/src/display-name.ts'
 import { ACCOUNT_SECURITY_ROUTES } from '../../web/src/surfaces/account-security.ts'
 import type { OsProfile } from '@xpanel/core'
-import { createDb, getMailboxSession, latestActive, listAudit, migrate, type Db } from '@xpanel/db'
+import { createDb, latestActive, listAudit, migrate, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { runCli } from './cli.ts'
 import { loadQualifiedCatalog } from './host-catalog.ts'
+import { loadMailDocument, type MailDocument } from './mail/document.ts'
+import { createLocalMailboxTransport } from './mail/inbox.ts'
 import { createApiApp, ensureRootPrincipal, listenApiServer } from './server.ts'
 import { authenticateRequest } from './auth.ts'
 import { createAgentClient } from './agent-client.ts'
@@ -397,13 +399,27 @@ export const createDefaultWebRenderer = async (deps: {
         serviceUsers: accountServiceUsers,
         files: [],
       },
-      mail: {
-        mailbox: caller.sessionId ? (await getMailboxSession(deps.db, caller.sessionId))?.mailbox ?? '' : '',
-        domain: '',
-        messages: [],
-        sieveRules: [],
-        quotaUsedMb: 0,
-      },
+      mail: await (async () => {
+        if (surface !== 'xmail') return { mailbox: '' }
+        const loaded = await loadMailDocument({
+          db: deps.db,
+          store: deps.store,
+          serverSecret: deps.serverSecret,
+          sessionId: caller.sessionId,
+          transport: createLocalMailboxTransport(),
+        }).catch((): MailDocument => ({ mailbox: '', mailListFailed: true }))
+        return {
+          mailbox: loaded.mailbox,
+          ...(loaded.quotaLimitMb !== undefined ? { quotaLimitMb: loaded.quotaLimitMb } : {}),
+          ...(loaded.messages !== undefined ? { messages: loaded.messages } : {}),
+          ...(loaded.mailListFailed ? { mailListFailed: true } : {}),
+          ...(loaded.vacationEnabled !== undefined ? { vacationEnabled: loaded.vacationEnabled } : {}),
+          ...(loaded.sieveRules ? { sieveRules: loaded.sieveRules } : {}),
+          ...(loaded.identityDkim ? { identityDkim: loaded.identityDkim } : {}),
+          ...(loaded.identitySpf ? { identitySpf: loaded.identitySpf } : {}),
+          ...(loaded.identitySize ? { identitySize: loaded.identitySize } : {}),
+        }
+      })(),
     }))
   }
 }

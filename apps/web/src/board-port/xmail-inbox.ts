@@ -1,6 +1,7 @@
 import type { Locale } from '../i18n.ts'
 import { escapeHtml, renderAsyncActionState, type AsyncActionBannerProps } from '../tokens.ts'
 import { renderLiveUpdatesIndicator } from '../shell.ts'
+import { formatMailboxQuota, formatMailStamp } from './mail-truth.ts'
 
 const MONO = "'IBM Plex Mono', monospace"
 const FONT_EN = "'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif"
@@ -75,6 +76,7 @@ interface MailCard {
   attachments: Attachment[]
   attachTotal?: string
   blocks: Block[]
+  bodyPending?: boolean
 }
 
 interface InboxModel {
@@ -83,6 +85,8 @@ interface InboxModel {
   mailbox: string
   quotaText: string
   quotaPct: number
+  quotaMeasured: boolean
+  listState: 'messages' | 'empty' | 'unread' | 'failed'
   title: string
   countText: string
   pager: string
@@ -131,7 +135,7 @@ const initialsOf = (name: string, local?: boolean): string => {
   return name.split(/\s+/).filter(word => /^[A-Za-z]/.test(word)).slice(0, 2).map(word => word.charAt(0).toUpperCase()).join('')
 }
 
-const fullDate = (datetime: string): string => `${datetime.slice(0, 10)} ${datetime.slice(11, 16)} UTC`
+const fullDate = (datetime: string): string => formatMailStamp(datetime).full
 
 const messageRow = (card: MailCard, selected: boolean, ar: boolean): string => {
   const unread = card.unread
@@ -151,8 +155,10 @@ const readingInner = (card: MailCard, model: InboxModel): string => {
   const ar = model.locale === 'ar'
   const avatarBg = card.local ? '#101828' : '#E7F5EE'
   const avatarFg = card.local ? '#FFFFFF' : '#0E7A4E'
-  const authBg = card.local ? '#EEF0F3' : (card.auth.includes(': fail') ? '#FEF3F2' : '#E7F5EE')
-  const authFg = card.local ? '#344054' : (card.auth.includes(': fail') ? '#B42318' : '#0E7A4E')
+  const authFailed = card.auth.includes(': fail')
+  const authUnknown = card.auth.includes(': —')
+  const authBg = card.local || (authUnknown && !authFailed) ? '#EEF0F3' : (authFailed ? '#FEF3F2' : '#E7F5EE')
+  const authFg = card.local || (authUnknown && !authFailed) ? '#344054' : (authFailed ? '#B42318' : '#0E7A4E')
   const cc = card.cc
     ? `<div style="display: flex; gap: 6px"><dt>${ar ? 'نسخة' : 'Cc'}</dt><dd style="margin: 0; font-family: ${MONO}; color: #344054">${tech(card.cc, ar)}</dd></div>`
     : ''
@@ -163,7 +169,8 @@ const readingInner = (card: MailCard, model: InboxModel): string => {
     if (block.pre !== undefined) {
       return `<pre style="margin: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid #E2E6EC; background: #F8F9FB; color: #101828; font-family: ${MONO}; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere">${escapeHtml(block.pre)}</pre>`
     }
-    return `<p style="margin: 0; max-width: 68ch; white-space: pre-line">${escapeHtml(block.p ?? '')}</p>`
+    const pending = card.bodyPending ? ' data-mail-body="pending"' : ''
+    return `<p${pending} style="margin: 0; max-width: 68ch; white-space: pre-line">${escapeHtml(block.p ?? '')}</p>`
   }).join('')
   const images = card.remoteImages
     ? `<div role="note" data-mail-images="true" style="margin: 16px 28px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; border: 1px solid #C7D7F8; background: #F3F7FE; font-size: 13px; line-height: 1.6"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1D5BD6" stroke-width="2" stroke-linecap="round" style="flex: none"><circle cx="12" cy="12" r="9"></circle><path d="M12 8h.01M11 12h1v4h1"></path></svg><span style="flex: 1 1 240px">${ar ? 'الصور البعيدة محجوبة حتى لا يرى المرسل أنك فتحت الرسالة.' : 'Remote images are blocked so the sender can\'t see when you open this message.'}</span><button type="button" data-mail-action="load-images" style="min-height: 40px; padding: 0 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 13px; font-weight: 600">${ar ? 'تحميل الصور' : 'Load images'}</button></div>`
@@ -228,9 +235,13 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
       if (hit) shown += 1
     }
     if (pager) {
-      var loaded = pager.getAttribute('data-loaded') || '0'
-      var total = Number(pager.getAttribute('data-total') || loaded)
-      pager.textContent = (!q && filter === 'all') ? ('1\u2013' + shown + ' of ' + (total - removed)) : (shown + ' of the latest ' + loaded + ' shown')
+      var listState = root.getAttribute('data-list-state') || 'messages'
+      if ((listState === 'unread' || listState === 'failed') && rows.length === 0) pager.textContent = '\u2014'
+      else {
+        var loaded = pager.getAttribute('data-loaded') || '0'
+        var total = Number(pager.getAttribute('data-total') || loaded)
+        pager.textContent = (!q && filter === 'all') ? ('1\u2013' + shown + ' of ' + (total - removed)) : (shown + ' of the latest ' + loaded + ' shown')
+      }
     }
     var empty = root.querySelector('[data-mail-filter-empty]')
     var slot = root.querySelector('[data-mail-list-slot]')
@@ -300,6 +311,19 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
     var pane = store.content.querySelector('[data-reading-id="' + id + '"]')
     if (!pane) return
     article.innerHTML = pane.innerHTML
+    var pendingBody = article.querySelector('[data-mail-body="pending"]')
+    var opened = list && list.querySelector('[data-mail-open="' + id + '"]')
+    var uid = opened && opened.getAttribute('data-mail-uid')
+    if (pendingBody && uid && typeof window.xpanelSessionRequest === 'function') {
+      window.xpanelSessionRequest('GET', '/api/webmail/inbox/' + uid).then(function (data) {
+        var message = data && data.message ? data.message : null
+        if (!message || !pendingBody.isConnected) return
+        pendingBody.textContent = message.body || ''
+        pendingBody.removeAttribute('data-mail-body')
+      }).catch(function () {
+        if (pendingBody.isConnected) pendingBody.textContent = text('data-body-failed')
+      })
+    }
     if (imagesLoaded[id]) {
       var blocked = article.querySelector('[data-mail-images]')
       if (blocked) blocked.remove()
@@ -444,14 +468,19 @@ const renderInbox = (model: InboxModel): string => {
     : `<article data-mail-pane="reading-pane" data-mail-article="true" aria-label="${ar ? 'لوحة القراءة' : 'Reading pane'}" style="flex: 2.618 1 420px; min-width: 0; background: #FFFFFF; display: flex; flex-direction: column">${emptyReading(ar, model.folderEmpty)}</article>`
   const route = model.product ? '/mail/inbox' : ''
   const copy = model.copy
-  return `<div class="xp-board-port" data-board-port="xmail-inbox" data-surface="xmail" data-mail-layout="reference" data-mailbox="${escapeHtml(model.mailbox)}" data-locale="${model.locale}" data-move-targets="${escapeHtml(JSON.stringify(model.moveTargets))}" data-move-label="${escapeHtml(copy.moveLabel)}" data-empty-title="${escapeHtml(copy.emptyTitle)}" data-empty-body="${escapeHtml(copy.emptyBody)}" data-empty-clear="${escapeHtml(copy.emptyClear)}" data-undo-label="${escapeHtml(copy.undo)}" data-moved-prefix="${escapeHtml(copy.moved)}" data-trash-label="${escapeHtml(ar ? 'المحذوفات' : 'Trash')}"${ar ? ' dir="rtl"' : ''} style="min-height: 100vh; display: flex; flex-direction: column; background: #F5F6F8; font-family: ${font}; color: #101828">
+  const listNote = model.listState === 'failed'
+    ? (ar ? 'تعذر قراءة خادم البريد.' : 'The mail server could not be read.')
+    : model.listState === 'unread'
+      ? (ar ? 'لم تُقرأ الرسائل من خادم البريد بعد.' : 'The inbox has not been read from the mail server.')
+      : ''
+  return `<div class="xp-board-port" data-board-port="xmail-inbox" data-surface="xmail" data-mail-layout="reference" data-mailbox="${escapeHtml(model.mailbox)}" data-locale="${model.locale}" data-list-state="${model.listState}" data-body-failed="${escapeHtml(ar ? 'تعذر قراءة نص الرسالة.' : 'The message body could not be read.')}" data-move-targets="${escapeHtml(JSON.stringify(model.moveTargets))}" data-move-label="${escapeHtml(copy.moveLabel)}" data-empty-title="${escapeHtml(copy.emptyTitle)}" data-empty-body="${escapeHtml(copy.emptyBody)}" data-empty-clear="${escapeHtml(copy.emptyClear)}" data-undo-label="${escapeHtml(copy.undo)}" data-moved-prefix="${escapeHtml(copy.moved)}" data-trash-label="${escapeHtml(ar ? 'المحذوفات' : 'Trash')}"${ar ? ' dir="rtl"' : ''} style="min-height: 100vh; display: flex; flex-direction: column; background: #F5F6F8; font-family: ${font}; color: #101828">
 <style>${PORT_CSS}</style>
 <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 12px 24px; background: #FFFFFF; border-bottom: 1px solid #E2E6EC">
   <a href="${escapeHtml(model.inboxHref)}" style="display: flex; align-items: center; gap: 10px; min-height: 44px; text-decoration: none"><span aria-hidden="true" style="width: 36px; height: 36px; border-radius: 8px; background: #0E7A4E; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 18px; font-weight: 600">x</span><span style="font-family: ${MONO}; font-size: 17px; font-weight: 500; color: #0E7A4E">${ar ? `<bdi dir="ltr">xMail</bdi>` : 'xMail'}</span></a>
   <form role="search" aria-label="${ar ? 'البحث في البريد' : 'Search mail'}" style="flex: 1 1 280px; max-width: 520px; position: relative; display: flex; align-items: center; margin: 0"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5D6B7E" stroke-width="2" stroke-linecap="round" style="position: absolute; inset-inline-start: 12px"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><input id="xmail-query" type="search" aria-label="${ar ? 'البحث في البريد' : 'Search mail'}" placeholder="${ar ? 'ابحث عن المرسل أو الموضوع أو النص' : 'Search sender, subject or text'}" style="width: 100%; min-height: 44px; padding-inline: 38px 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; font-family: inherit; font-size: 14px; color: #101828"></form>
   <span style="flex: 1 1 0; min-width: 0"></span>
   <div style="display: flex; align-items: center; gap: 8px; min-width: 0"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#475467" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 7l9 6 9-6"></path></svg><span style="font-family: ${MONO}; font-size: 13px; color: #101828">${mailbox}</span></div>
-  <div style="display: flex; flex-direction: column; gap: 4px; min-width: 150px"><div style="display: flex; justify-content: space-between; gap: 10px; font-size: 12px"><span style="font-weight: 600; color: #344054">${ar ? 'صندوق البريد' : 'Mailbox'}</span><span style="color: #475467; font-variant-numeric: tabular-nums">${quota}</span></div><div aria-hidden="true" style="height: 6px; border-radius: 3px; background: #E9ECF1; overflow: hidden"><div style="height: 6px; width: ${model.quotaPct}%; background: #1D5BD6; border-radius: 3px"></div></div></div>
+  <div style="display: flex; flex-direction: column; gap: 4px; min-width: 150px"><div style="display: flex; justify-content: space-between; gap: 10px; font-size: 12px"><span style="font-weight: 600; color: #344054">${ar ? 'صندوق البريد' : 'Mailbox'}</span><span style="color: #475467; font-variant-numeric: tabular-nums">${quota}</span></div><div data-quota-ratio="${model.quotaMeasured ? 'measured' : 'unknown'}" aria-hidden="true" style="height: 6px; border-radius: 3px; background: #E9ECF1; overflow: hidden"><div style="height: 6px; width: ${model.quotaPct}%; background: #1D5BD6; border-radius: 3px"></div></div></div>
   ${model.wsHtml}
   <button type="button"${model.logoutAttr} style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 14px; font-weight: 600">${ar ? 'تسجيل الخروج' : 'Sign out'}</button>
 </header>
@@ -471,7 +500,7 @@ const renderInbox = (model: InboxModel): string => {
       </div>
       <div data-mail-list-slot="true">
         <ul data-mail-list="true" aria-label="${ar ? 'الرسائل' : 'Messages'}" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">${rows}</ul>
-        ${listEmpty}
+        ${listEmpty}${listNote ? `<div role="status" data-mail-list-state="${model.listState}" style="display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 24px; text-align: center"><p style="margin: 0; font-size: 14px; font-weight: 600">${escapeHtml(listNote)}</p></div>` : ''}
       </div>
       <div style="margin-top: auto; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 16px; font-size: 12px; color: #5D6B7E"><span data-mail-pager="true" data-rest="${escapeHtml(model.pager)}" data-loaded="${model.loaded}" data-total="${model.total}" style="font-variant-numeric: tabular-nums">${escapeHtml(model.pager)}</span><button type="button" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: #1D5BD6; font-family: inherit; font-size: 13px; font-weight: 600">${ar ? 'رسائل أقدم' : 'Older messages'}</button></div>
     </section>
@@ -520,6 +549,8 @@ const fixtureModel = (): InboxModel => ({
   mailbox: 'info@alice-shop.com',
   quotaText: '1.2 / 5 GB',
   quotaPct: 24,
+  quotaMeasured: true,
+  listState: 'messages',
   title: 'Inbox',
   countText: '412 messages · 12 unread',
   pager: '1\u201310 of 412',
@@ -603,9 +634,10 @@ export interface XmailInboxMessageInput {
   body: string
   receivedAt: string
   unread: boolean
-  dkimPass: boolean
-  spfPass: boolean
-  dmarcPass: boolean
+  dkimPass?: boolean
+  spfPass?: boolean
+  dmarcPass?: boolean
+  bodyPending?: boolean
 }
 
 export interface XmailInboxProps {
@@ -620,17 +652,22 @@ export interface XmailInboxProps {
   actionState?: AsyncActionBannerProps
   vacationEnabled?: boolean
   sieveCount?: number
+  mailListFailed?: boolean
 }
 
 export const xmailInboxFromProps = (props: XmailInboxProps): InboxModel => {
   const locale = props.locale ?? 'en'
   const ar = locale === 'ar'
   const activeFolder = props.activeFolder && props.activeFolder.length > 0 ? props.activeFolder : 'INBOX'
+  const observedMessages = props.messages !== undefined
   const all = (props.messages ?? []).filter(message => Number.isSafeInteger(message.uid) && message.uid > 0)
   const visible = all.filter(message => message.folder === activeFolder)
   const selected = visible.find(message => message.uid === props.selectedUid) ?? visible[0]
+  const authWord = (value: boolean | undefined): string => value === undefined ? '—' : (value ? 'pass' : 'fail')
   const cards: MailCard[] = visible.map(message => {
-    const auth = `DKIM: ${message.dkimPass ? 'pass' : 'fail'} · SPF: ${message.spfPass ? 'pass' : 'fail'} · DMARC: ${message.dmarcPass ? 'pass' : 'fail'}`
+    const auth = `DKIM: ${authWord(message.dkimPass)} · SPF: ${authWord(message.spfPass)} · DMARC: ${authWord(message.dmarcPass)}`
+    const stamp = formatMailStamp(message.receivedAt)
+    const pending = message.bodyPending === true && message.body.length === 0
     const fromName = message.from
     return {
       id: `uid-${message.uid}`,
@@ -641,12 +678,13 @@ export const xmailInboxFromProps = (props: XmailInboxProps): InboxModel => {
       cc: '',
       subject: message.subject,
       snippet: message.preview,
-      time: message.receivedAt.slice(11, 16) || message.receivedAt.slice(0, 10),
-      datetime: message.receivedAt,
+      time: stamp.time,
+      datetime: stamp.datetime,
       unread: message.unread,
       auth,
       attachments: [],
-      blocks: [block(message.body)],
+      bodyPending: pending,
+      blocks: [block(pending ? (ar ? 'لم يُحمّل نص هذه الرسالة بعد.' : 'This message body has not been loaded.') : message.body)],
     }
   })
   const unreadIn = (folder: string): number => all.filter(message => message.folder === folder && message.unread).length
@@ -668,18 +706,14 @@ export const xmailInboxFromProps = (props: XmailInboxProps): InboxModel => {
   const customIds = [...observed].filter(folder => !STANDARD.some(item => item.id === folder) && folder !== activeFolder)
   const custom: FolderLink[] = customIds.map(folder => ({ id: folder, label: folder, href: '/mail/inbox', icon: 'folder' as const, current: false, observed: folder }))
   const unread = visible.filter(message => message.unread).length
-  const countText = visible.length === 0
+  const listState = observedMessages ? (visible.length === 0 ? 'empty' : 'messages') : (props.mailListFailed ? 'failed' : 'unread')
+  const countText = listState === 'empty'
     ? (ar ? '0 رسائل' : '0 messages')
-    : `${phrase(visible.length, ar, 'رسالة واحدة', 'رسالتان', 'رسائل', 'رسالة', 'message')}${unread ? ` · ${unread} ${ar ? 'غير مقروء' : 'unread'}` : ''}`
-  let quotaText = '—'
-  let quotaPct = 0
-  if (typeof props.quotaUsedMb === 'number' && typeof props.quotaLimitMb === 'number' && props.quotaLimitMb > 0) {
-    quotaText = `${props.quotaUsedMb} / ${props.quotaLimitMb} MiB`
-    quotaPct = Math.max(0, Math.min(100, Math.round((props.quotaUsedMb / props.quotaLimitMb) * 100)))
-  } else if (typeof props.quotaUsedMb === 'number' && props.quotaLimitMb === 'unlimited') {
-    quotaText = `${props.quotaUsedMb} / unlimited`
-  } else if (typeof props.quotaUsedMb === 'number') quotaText = `${props.quotaUsedMb} MiB`
-  const pager = visible.length === 0 ? '0 of 0' : `1\u2013${visible.length} of ${visible.length}`
+    : listState === 'messages'
+      ? `${phrase(visible.length, ar, 'رسالة واحدة', 'رسالتان', 'رسائل', 'رسالة', 'message')}${unread ? ` · ${unread} ${ar ? 'غير مقروء' : 'unread'}` : ''}`
+      : '—'
+  const quota = formatMailboxQuota(props.quotaUsedMb, props.quotaLimitMb, locale)
+  const pager = listState === 'empty' ? '0 of 0' : listState === 'messages' ? `1\u2013${visible.length} of ${visible.length}` : '—'
   const title = STANDARD.find(item => item.id === activeFolder)?.[ar ? 'ar' : 'en'] ?? activeFolder
   const vacation = props.vacationEnabled === undefined ? '—' : (props.vacationEnabled ? (ar ? 'يعمل' : 'On') : (ar ? 'متوقف' : 'Off'))
   const filters = props.sieveCount === undefined ? '—' : (ar ? `${props.sieveCount} نشطة` : `${props.sieveCount} active`)
@@ -687,8 +721,10 @@ export const xmailInboxFromProps = (props: XmailInboxProps): InboxModel => {
     locale,
     product: true,
     mailbox: props.mailbox,
-    quotaText,
-    quotaPct,
+    quotaText: quota.text,
+    quotaPct: quota.percent ?? 0,
+    quotaMeasured: quota.percent !== null,
+    listState,
     title,
     countText,
     pager,
@@ -704,7 +740,7 @@ export const xmailInboxFromProps = (props: XmailInboxProps): InboxModel => {
     filters,
     messages: cards,
     selectedId: selected ? `uid-${selected.uid}` : null,
-    folderEmpty: visible.length === 0,
+    folderEmpty: listState === 'empty',
     wsHtml: renderLiveUpdatesIndicator(locale, props.realtimeEnabled === true),
     actionHtml: props.actionState ? renderAsyncActionState({ ...props.actionState, locale }) : '',
     logoutAttr: ' data-action="logout"',

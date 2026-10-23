@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { fail } from '@xpanel/core'
 import { createTestDb } from '@xpanel/db'
-import { createTestStateStore } from '@xpanel/state'
+import { createTestStateStore, ExtendedFeaturesStore } from '@xpanel/state'
 import { createApiApp } from './server.ts'
+import { loadMailDocument } from './mail/document.ts'
 import type { InboxMessage, MailboxSendInput, MailboxTransport } from './mail/inbox.ts'
-import { createLocalMailboxTransport } from './mail/inbox.ts'
+import { createLocalMailboxTransport, mailReceivedAtUtc } from './mail/inbox.ts'
 
 const SECRET = 'mailbox-inbox-synthetic-server-secret-32b'
 const ORIGIN = 'https://mail.example.test'
@@ -129,6 +130,7 @@ describe('xMail mailbox inbox', () => {
 
     const listed = await call('GET', '/api/webmail/inbox', undefined, session)
     expect(listed.status).toBe(200)
+    expect(listed.payload).toMatchObject({ folder: 'INBOX', complete: true })
     expect(listed.payload.messages?.map(item => item.subject)).toEqual(['Alpha note'])
     expect(listed.payload.messages?.[0]?.body).toBeUndefined()
 
@@ -158,6 +160,91 @@ describe('xMail mailbox inbox', () => {
     expect(otherList.payload.messages?.map(item => item.subject)).toEqual(['Beta note'])
     const stillEmpty = await call('GET', '/api/webmail/inbox', undefined, session)
     expect(stillEmpty.payload.messages).toEqual([])
+  })
+
+  it('converts a mail date to UTC and keeps text that is not a date', () => {
+    expect(mailReceivedAtUtc('22-Oct-2026 14:30:00 +0300')).toBe('2026-10-22T11:30:00.000Z')
+    expect(mailReceivedAtUtc('Thu, 23 Oct 2026 12:00:00 +0000')).toBe('2026-10-23T12:00:00.000Z')
+    expect(mailReceivedAtUtc('not a date')).toBe('not a date')
+    expect(mailReceivedAtUtc('')).toBe('')
+  })
+
+  it('binds the mailbox document to the stored quota and only the settings that were written', async () => {
+    const boxes = new Map<string, Box>([
+      ['inbox@alpha.example.test', { password: 'alpha-secret', messages: [message(7, 'Alpha note', 'Hello from alpha')], sent: [] }],
+    ])
+    const transport: MailboxTransport = {
+      async verify(mailbox, password) {
+        const box = boxes.get(mailbox)
+        if (!box || box.password !== password) fail('UNAUTHENTICATED', 'imap rejected the password')
+      },
+      async list(mailbox, password) {
+        await this.verify(mailbox, password)
+        return boxes.get(mailbox)!.messages.map(({ body: _body, ...summary }) => summary)
+      },
+      async read(mailbox, password, uid) {
+        await this.verify(mailbox, password)
+        const found = boxes.get(mailbox)!.messages.find(item => item.uid === uid)
+        if (!found) return fail('NOT_FOUND', 'message not found')
+        return { ...found, unread: false }
+      },
+      async remove() { return undefined },
+      async send() { return { messageId: '<sent@alpha.example.test>' } },
+    }
+    const { database, state, alpha, login } = await harness(transport)
+    const logged = await login('inbox@alpha.example.test', 'alpha-secret')
+    expect(logged.status).toBe(200)
+    const rows = await database.db.query<{ session_id: string }>('SELECT session_id FROM mailbox_sessions')
+    const sessionId = rows[0]?.session_id ?? ''
+    const read = async () => loadMailDocument({
+      db: database.db, store: state.store, serverSecret: SECRET, sessionId, transport,
+    })
+    const before = await read()
+    expect(before.mailbox).toBe('inbox@alpha.example.test')
+    expect(before.quotaLimitMb).toBe(100)
+    expect(before).not.toHaveProperty('quotaUsedMb')
+    expect(before.messages?.map(item => [item.subject, item.body, item.bodyPending, item.unread])).toEqual([['Alpha note', 'Hello from alpha', false, false]])
+    expect(before.vacationEnabled).toBeUndefined()
+    expect(before.sieveRules).toEqual([])
+    expect(before.identityDkim).toBeUndefined()
+    expect(before.identitySize).toBeUndefined()
+    expect(before.mailListFailed).toBeUndefined()
+
+    const extended = new ExtendedFeaturesStore(state.store.rootDir)
+    await extended.saveVacationResponder('inbox@alpha.example.test', { enabled: true, subject: 'Away', body: 'Out of office' })
+    await extended.saveEmailFilter({
+      accountId: alpha.id, mailbox: 'inbox@alpha.example.test', name: 'Orders',
+      rules: [{ field: 'subject', operator: 'contains', value: 'invoice' }], action: 'folder', actionTarget: 'Orders', enabled: false,
+    })
+    await extended.provisionBatchEmailAuth(['alpha.example.test'], '192.0.2.10')
+    const { updatedAt: _updatedAt, ...settings } = await extended.getServerFineSettings()
+    await extended.saveServerFineSettings({ ...settings, mtaMaxMsgSizeMb: 25 })
+    const after = await read()
+    expect(after.vacationEnabled).toBe(true)
+    expect(after.sieveRules).toEqual([expect.objectContaining({ name: 'Orders', condition: 'Subject contains invoice', action: 'File into Orders', enabled: false })])
+    expect(after.identityDkim).toBe('Selector default is stored for alpha.example.test')
+    expect(after.identitySpf).toBe('SPF record stored · DMARC record stored')
+    expect(after.identitySize).toBe('25 MiB per message')
+  })
+
+  it('keeps the stored quota when the mail server cannot be listed', async () => {
+    const transport: MailboxTransport = {
+      async verify() { return undefined },
+      async list() { return fail('PRECONDITION_FAILED', 'the mail server could not be reached (ECONNREFUSED)') },
+      async read() { return fail('PRECONDITION_FAILED', 'the mail server could not be reached (ECONNREFUSED)') },
+      async remove() { return undefined },
+      async send() { return fail('PRECONDITION_FAILED', 'the mail server could not be reached (ECONNREFUSED)') },
+    }
+    const { database, state, login } = await harness(transport)
+    const logged = await login('inbox@alpha.example.test', 'alpha-secret')
+    expect(logged.status).toBe(200)
+    const rows = await database.db.query<{ session_id: string }>('SELECT session_id FROM mailbox_sessions')
+    const loaded = await loadMailDocument({
+      db: database.db, store: state.store, serverSecret: SECRET, sessionId: rows[0]?.session_id ?? '', transport,
+    })
+    expect(loaded.quotaLimitMb).toBe(100)
+    expect(loaded.messages).toBeUndefined()
+    expect(loaded.mailListFailed).toBe(true)
   })
 
   it('reports an unreachable mail server without treating it as a bad password', async () => {
