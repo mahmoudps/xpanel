@@ -40,6 +40,7 @@ export {
   phpInstallPlan,
   resolveInstallOptions,
 } from './install.ts'
+export { ACME_DIR, ACME_PARENT, acmeDirAction, acmeTraverseAclArgv, acmeTraverseProbeArgv, assertNginxUser } from './acme-access.ts'
 export {
   SAFE_ARG,
   assertAbsolutePath,

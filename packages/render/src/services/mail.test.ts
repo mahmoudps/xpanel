@@ -9,9 +9,13 @@ import {
   mailConfigTests,
   postconfAction,
   postfixClientServices,
+  localDeliveryMainBlock,
+  localSubmissionMasterBlock,
   postfixMainSettings,
   renderDovecotAuthConf,
+  renderDovecotMailboxConf,
   renderDovecotXpanelConf,
+  replaceManagedBlock,
   renderFilterSieve,
   renderPostfixMaps,
   renderPostfixMainFragment,
@@ -466,6 +470,27 @@ describe('dkimDnsRecord', () => {
     const spki = publicKey.export({ type: 'spki', format: 'der' })
     const r = dkimDnsRecord('example.com', 'ed', publicKey.export({ type: 'spki', format: 'pem' }).toString(), { keyType: 'ed25519' })
     expect(r.content).toBe(`v=DKIM1; k=ed25519; p=${spki.subarray(12).toString('base64')}`)
+  })
+
+  it('writes the loopback submission service and keeps the managed block idempotent', () => {
+    const main = localDeliveryMainBlock(debian)
+    expect(main).toContain('virtual_transport = lmtp:unix:private/dovecot-lmtp')
+    expect(main).not.toContain('reject_sender_login_mismatch')
+    const master = localSubmissionMasterBlock(debian)
+    expect(master).toContain('127.0.0.1:587 inet n - n - - smtpd')
+    expect(master).toContain('smtpd_sender_restrictions=reject_sender_login_mismatch')
+    expect(master).toContain('smtpd_tls_security_level=may')
+    expect(master).toContain('smtpd_tls_auth_only=no')
+    const once = replaceManagedBlock('queue_directory = /var/spool/postfix\n', main)
+    expect(replaceManagedBlock(once, main)).toBe(once)
+    expect(once).toContain('queue_directory = /var/spool/postfix')
+    const mailbox = renderDovecotMailboxConf(debian, { postmaster: 'postmaster@host.example' })
+    expect(mailbox.path).toBe('/etc/dovecot/conf.d/11-xpanel-mailboxes.conf')
+    expect(mailbox.content).toContain('passwd-file')
+    expect(mailbox.content).toContain('result_success = return-ok')
+    expect(mailbox.content).toContain('/var/spool/postfix/private/auth')
+    expect(mailbox.content).toContain('/var/spool/postfix/private/dovecot-lmtp')
+    expect(mailbox.content).toContain('postmaster_address = postmaster@host.example')
   })
 
   it('rejects bad selectors, garbage keys and weak RSA', () => {

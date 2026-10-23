@@ -380,6 +380,64 @@ export const postfixClientServices = (os: OsProfile): HostAction[] => {
   return [...service('587', 'submission', {}), ...service('465', 'submissions', { smtpd_tls_wrappermode: 'yes' })]
 }
 
+export const MANAGED_BLOCK_BEGIN = '# xpanel-managed-begin'
+export const MANAGED_BLOCK_END = '# xpanel-managed-end'
+
+const LOCAL_DELIVERY_KEYS = [
+  'virtual_mailbox_domains',
+  'virtual_mailbox_maps',
+  'virtual_alias_maps',
+  'virtual_transport',
+  'transport_maps',
+  'smtpd_sasl_auth_enable',
+  'smtpd_sasl_type',
+  'smtpd_sasl_path',
+  'smtpd_sender_login_maps',
+  'smtpd_recipient_restrictions',
+] as const
+
+/**
+ * Replaces one marked region or appends it. A second call with the same body
+ * leaves the file unchanged, so installer and reconciler can repeat it.
+ */
+export const replaceManagedBlock = (existing: string, body: string): string => {
+  if (body.includes(MANAGED_BLOCK_BEGIN) || body.includes(MANAGED_BLOCK_END)) {
+    return invalid('managed block', 'markers', 'cannot appear in the block body')
+  }
+  const block = `${MANAGED_BLOCK_BEGIN}\n${body.trimEnd()}\n${MANAGED_BLOCK_END}\n`
+  const pattern = new RegExp(`${MANAGED_BLOCK_BEGIN}[\\s\\S]*?${MANAGED_BLOCK_END}\\n?`)
+  if (pattern.test(existing)) return existing.replace(pattern, block)
+  const base = existing.length === 0 || existing.endsWith('\n') ? existing : `${existing}\n`
+  return `${base}${block}`
+}
+
+/** Virtual mailbox maps and LMTP delivery. Sender mismatch is enforced on submission, not port 25. */
+export const localDeliveryMainBlock = (os: OsProfile, o: PostfixMainOptions = {}): string => {
+  const settings = postfixMainSettings(os, o)
+  return LOCAL_DELIVERY_KEYS.map((key) => `${key} = ${settings[key]}`).join('\n')
+}
+
+/**
+ * Loopback submission for webmail AUTH PLAIN without TLS. `smtpd_tls_security_level=may`
+ * keeps plaintext available on 127.0.0.1; sender login mismatch is rejected here only.
+ */
+export const localSubmissionMasterBlock = (os: OsProfile, o: PostfixOptions = {}): string => {
+  const senders = postfixMainSettings(os, o).smtpd_sender_login_maps
+  return [
+    '127.0.0.1:587 inet n - n - - smtpd',
+    '  -o syslog_name=postfix/submission',
+    '  -o smtpd_tls_security_level=may',
+    '  -o smtpd_tls_auth_only=no',
+    '  -o smtpd_sasl_auth_enable=yes',
+    '  -o smtpd_sasl_type=dovecot',
+    '  -o smtpd_sasl_path=private/auth',
+    `  -o smtpd_sender_login_maps=${senders}`,
+    '  -o smtpd_sender_restrictions=reject_sender_login_mismatch',
+    '  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject',
+    '  -o smtpd_client_restrictions=permit_sasl_authenticated,reject',
+  ].join('\n')
+}
+
 // ---- Dovecot configuration ------------------------------------------------------------------
 
 export interface DovecotConfOptions {
@@ -415,6 +473,67 @@ passdb {
 userdb {
   driver = passwd-file
   args = username_format=%Lu ${dir}/%Ld.passwd
+}
+`,
+    mode: 0o644,
+    owner: 'root',
+    group: 'root',
+  }
+}
+
+/**
+ * Additive Dovecot drop-in: per-domain passwd-file, the Postfix SASL socket, and LMTP
+ * delivery into the account maildir. `result_success = return-ok` stops after a mailbox
+ * password matches so a later system passdb cannot override it.
+ */
+const DEFAULT_POSTMASTER = 'postmaster@localhost.localdomain'
+
+export const renderDovecotMailboxConf = (
+  os: OsProfile,
+  o: { postmaster?: string; postfixSpoolDir?: string } = {},
+): RenderedFile => {
+  const postmaster = o.postmaster === undefined || o.postmaster === DEFAULT_POSTMASTER
+    ? DEFAULT_POSTMASTER
+    : normalizeHostedEmail(o.postmaster, 'postmaster address').address
+  const spool = assertAbsPath('postfix spool dir', o.postfixSpoolDir ?? '/var/spool/postfix')
+  const dir = dovecotDomainsDir(os)
+  return {
+    path: `${assertAbsPath('dovecot dir', os.paths.dovecotDir)}/conf.d/11-xpanel-mailboxes.conf`,
+    content: `# managed by xPanel: per-domain passwd-file, Postfix SASL, and LMTP delivery
+first_valid_uid = ${MIN_ACCOUNT_UID}
+last_valid_uid = ${MAX_ACCOUNT_UID}
+first_valid_gid = ${MIN_ACCOUNT_UID}
+last_valid_gid = ${MAX_ACCOUNT_UID}
+
+passdb {
+  driver = passwd-file
+  args = username_format=%Lu ${dir}/%Ld.passwd
+  result_success = return-ok
+}
+
+userdb {
+  driver = passwd-file
+  args = username_format=%Lu ${dir}/%Ld.passwd
+}
+
+service auth {
+  unix_listener ${spool}/private/auth {
+    mode = 0660
+    user = postfix
+    group = postfix
+  }
+}
+
+service lmtp {
+  unix_listener ${spool}/private/dovecot-lmtp {
+    mode = 0600
+    user = postfix
+    group = postfix
+  }
+}
+
+protocol lmtp {
+  postmaster_address = ${postmaster}
 }
 `,
     mode: 0o644,

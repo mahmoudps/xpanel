@@ -19,7 +19,7 @@ import type { AgentExecutor } from './executor.ts'
 import { JailedFileManager } from './file-manager.ts'
 import { AcmeCertificateServiceAdapter } from './services/acme.ts'
 import { createHttp01AcmeClient } from './services/acme-client.ts'
-import { probeHostCapabilities } from './host-probes.ts'
+import { probeHostCapabilities, readHostMeasurements } from './host-probes.ts'
 import { parseDf, parseLoadavg, parseMeminfo } from './host-info.ts'
 import { readHostServices, restartHostService } from './host-services.ts'
 import { createAccountBackup, listAccountBackups, restoreAccountBackup, DEFAULT_BACKUP_DIR } from './account-backup.ts'
@@ -187,6 +187,8 @@ export interface AgentServerDeps {
   ioAnalytics?: IoAnalyticsEngine
   websiteAnalytics?: WebsiteAnalyticsEngine
   os: { id: string; versionId: string; family: string }
+  /** System account nginx runs as. The ACME traversal probe uses it. */
+  nginxUser?: string
   /** Optional override for account home root in tests (maps `/home/<user>` into `<homeBaseDir>/home/<user>`) */
   homeBaseDir?: string
   /** Provisioned local service credential; there is no unauthenticated mode. */
@@ -450,13 +452,15 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       authenticateService(req)
       if (method === 'GET' && pathname === '/health') {
         const currentGen = await latestActive(deps.db)
-        const executor = deps.executor instanceof LinuxHostExecutor ? 'linux' : deps.executor ? 'fake' : 'unknown'
+        const linuxExecutor = deps.executor instanceof LinuxHostExecutor ? deps.executor : null
+        const executor = linuxExecutor ? 'linux' : deps.executor ? 'fake' : 'unknown'
+        const measurements = linuxExecutor ? await readHostMeasurements(linuxExecutor, deps.nginxUser ?? 'nginx') : undefined
         return jsonResponse({
           ok: true,
           os: deps.os,
           currentGeneration: currentGen,
           executor,
-          ...(executor === 'linux' ? { probes: probeHostCapabilities(Boolean(deps.accountFileRunner), true) } : {}),
+          ...(measurements ? { probes: probeHostCapabilities(Boolean(deps.accountFileRunner), true, measurements) } : {}),
           ...(verifiedPeer
             ? {
                 peer: {

@@ -10,6 +10,8 @@ import { StateStore } from '@xpanel/state'
 import { NativeAccountFileRunner, verifyHelperBinary } from './account-file-runner.ts'
 import { IoAnalyticsEngine, WebsiteAnalyticsEngine } from './analytics.ts'
 import { createProductionHostTargetMatcher, LinuxHostExecutor } from './executor.ts'
+import { ensureAcmeWebRoot } from './host-access.ts'
+import { ensureInstalledMail } from './services/local-mail.ts'
 import { HostReconciler } from './reconciler.ts'
 import { createAgentApp, listenAgentSocket, loadAgentCredentialFile } from './server.ts'
 import { createMariaDbSqlRunner, DEFAULT_MARIADB_ADMIN_CNF, MariaDbServiceAdapter } from './services/mariadb.ts'
@@ -96,6 +98,15 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
   })
   await reconciler.recoverInterruptedReconciliation().catch(() => undefined)
 
+  await ensureAcmeWebRoot(executor, os.paths.nginxUser).catch((error: unknown) => {
+    process.stderr.write(`xpanel-agent ACME webroot: ${error instanceof Error ? error.message : String(error)}\n`)
+  })
+  if (existsSync('/usr/sbin/postfix') && existsSync('/usr/sbin/dovecot')) {
+    await ensureInstalledMail(executor, os).catch((error: unknown) => {
+      process.stderr.write(`xpanel-agent local mail: ${error instanceof Error ? error.message : String(error)}\n`)
+    })
+  }
+
   const app = createAgentApp({
     reconciler,
     store,
@@ -105,6 +116,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
     ioAnalytics,
     websiteAnalytics,
     os: { id: os.id, versionId: os.versionId, family: os.family },
+    nginxUser: os.paths.nginxUser,
     agentToken,
   })
 

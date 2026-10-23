@@ -301,6 +301,9 @@ importers:
       '@xpanel/core':
         specifier: workspace:*
         version: link:../core
+      '@xpanel/render':
+        specifier: workspace:*
+        version: link:../render
 
   packages/render:
     dependencies:

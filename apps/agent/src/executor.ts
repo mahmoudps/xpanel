@@ -302,6 +302,9 @@ const SYSTEM_EXACT_TARGETS = new Set<string>([
   '/run/xpanel/fpm',
 ])
 
+/** Read-only host measurements. Existence is not a grant, and no other /proc path is readable. */
+const HOST_MEASUREMENT_READS = new Set<string>(['/proc/loadavg', '/proc/meminfo'])
+
 const ACCOUNT_HOME_DIR_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}(?:\/(?:public_html|logs|tmp|mail|etc|ssl|\.ssh|cgi-bin))?$/
 const ACCOUNT_MANAGED_WRAPPER_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/(?:cgi-bin\/php\.cgi|(?:public_html\/)?\.user\.ini)$/
 
@@ -311,6 +314,7 @@ const ACCOUNT_MANAGED_WRAPPER_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/(?:cgi-bin\
  */
 export const createProductionHostTargetMatcher = (): ((path: string, operation: HostTargetOperation) => boolean) => {
   return (path: string, operation: HostTargetOperation): boolean => {
+    if (HOST_MEASUREMENT_READS.has(path)) return operation === 'read'
     if (path === '/home') return operation === 'ensure-directory'
     if (SYSTEM_EXACT_TARGETS.has(path)) return true
     if (SYSTEM_CONFIG_PREFIXES.some((prefix) => path.startsWith(prefix))) return true

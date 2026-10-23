@@ -22,7 +22,7 @@ export const dnfProfile = (release: OsRelease): XpanelOsProfile => {
     major: os.major,
     codename: '',
     packageManager: 'dnf',
-    bootstrapPackages: ['dnf-plugins-core'],
+    bootstrapPackages: ['dnf-plugins-core', 'acl'],
     // the nginx and httpd packages create their own users
     extraSystemUsers: [],
     packages: {

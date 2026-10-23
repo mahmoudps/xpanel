@@ -29,11 +29,11 @@ The API adds `control-plane: passed` after it can read agent `/health`. The agen
 | `mariadb` | `/usr/bin/mariadb` or `/usr/bin/mysql` exists |
 | `mail` | `/usr/sbin/postfix` and (`/usr/sbin/dovecot` or `/usr/bin/doveadm`) exist |
 | `files` | The agent was started with the confined helper `/opt/xpanel/bin/xpanel-account-files` |
-| `acme` | The in-repo HTTP-01 client is built into the Linux agent. `certbot`, `lego`, or `acme.sh` also pass the probe. Issuance uses the in-repo client |
+| `acme` | The in-repo HTTP-01 client is built into the Linux agent. `certbot`, `lego`, or `acme.sh` also pass the probe. The probe fails when nginx cannot traverse `/var/lib/xpanel` and read `/var/lib/xpanel/acme`. Issuance uses the in-repo client |
 | `pdns` | `/usr/bin/pdnsutil`, `/usr/bin/pdns_control`, or `/usr/sbin/pdns_server` exists |
 | `backups` | `/var/lib/xpanel` exists. The agent creates `/var/lib/xpanel/backups` on first use. `XPANEL_BACKUP_DIR` overrides that directory |
 | `systemd` | `/usr/bin/systemctl` exists |
-| `host-info` | `/proc/loadavg` exists. The screen also reads `/proc/meminfo` and `df -B1 -P /` |
+| `host-info` | The agent read and parsed `/proc/loadavg` and `/proc/meminfo`. A path that exists but cannot be read fails the probe. The screen also reads `df -B1 -P /` |
 
 `test:linux` remains the host qualification harness for executor behaviour. It does not flip the static catalog. A lab host qualifies tools by running the real agent and API; no separate evidence file is required.
 
@@ -90,13 +90,13 @@ Packages and services that change what appears:
 - `mariadb` or `mysql` client for databases
 - `postfix` and `dovecot` for mailboxes. xMail signs in with the mailbox address. Dovecot must accept IMAP LOGIN on 127.0.0.1 port 143, and Postfix submission must accept AUTH PLAIN on 127.0.0.1 port 587. `XPANEL_IMAP_HOST`, `XPANEL_IMAP_PORT`, `XPANEL_SMTP_HOST` and `XPANEL_SMTP_PORT` override those defaults. `XPANEL_IMAP_TIMEOUT_MS` and `XPANEL_SMTP_TIMEOUT_MS` bound the connections
 - `/opt/xpanel/bin/xpanel-account-files` present at agent start for the file manager
-- no extra ACME package: the agent speaks HTTP-01 itself. The rendered nginx edge must answer port 80 and alias `/.well-known/acme-challenge/` to `/var/lib/xpanel/acme`. Apache stays the site engine behind that edge. A failed check is shown with the certificate authority's message. `sslinstall (SSL Host Installer)` and `AutoSSL` must stay enabled on the plan
+- no extra ACME package: the agent speaks HTTP-01 itself. The rendered nginx edge must answer port 80 and alias `/.well-known/acme-challenge/` to `/var/lib/xpanel/acme`. `/var/lib/xpanel` is mode 2770, so the installer grants nginx execute with `setfacl -m u:nginx:x /var/lib/xpanel` and the probe fails when nginx cannot read that directory. Apache stays the site engine behind that edge. A failed check is shown with the certificate authority's message. `sslinstall (SSL Host Installer)` and `AutoSSL` must stay enabled on the plan
 - a primary shared IPv4 in the pool (`isPrimary`) so create-account can assign an address; `ip -j addr` only observes it
 - feature lists that do not disable the keys named above
 - `pdnsutil`, `pdns_control`, or `pdns_server` for the DNS zone editor. PowerDNS is already running on the lab; no extra package is required when one of those binaries is present
 - `/var/lib/xpanel` present so the backup probe passes. The agent creates `/var/lib/xpanel/backups/<user>` mode `0700` and writes each archive mode `0600`. Optional override: `XPANEL_BACKUP_DIR`
 - `/usr/bin/systemctl` for service status and restart. A unit that is not installed stays visible as “Not installed” and restart is refused
-- `/proc/loadavg`, `/proc/meminfo`, and `df` for server information
+- readable `/proc/loadavg` and `/proc/meminfo`, plus `df`, for server information. The agent allowlist permits those two reads and the probe parses them
 - GNU tar, including `--no-overwrite-dir`, for account restore
 
 Terminate removes the Linux user and home. Run it only against an account you intend to delete. Account backup runs `tar` as that user, then the root agent copies the archive. Restore lists archive members first and refuses a path that starts with `/`, contains `..`, or contains a backslash. Archives larger than 2 GiB are refused.

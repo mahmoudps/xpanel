@@ -29,6 +29,7 @@ import type { ConfigGeneration, Db } from '@xpanel/db'
 import { edge, services, system } from '@xpanel/render'
 import type { StateSnapshot, StateStore } from '@xpanel/state'
 import type { AgentExecutor } from './executor.ts'
+import { applyPostfixLocalDelivery, retirePostfixLocalDelivery } from './services/local-mail.ts'
 import {
   buildGenerationManifest,
   computeFilesChecksum,
@@ -54,6 +55,8 @@ export interface CompiledGeneration {
   preActions: HostAction[]
   postActions: HostAction[]
   terminatingAccounts: { id: Id; username: string }[]
+  /** Postfix main.cf and master.cf are merged outside the owned file list. */
+  localMail: boolean
 }
 
 export interface CompileOptions {
@@ -82,6 +85,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   const preActions: HostAction[] = []
   const postActions: HostAction[] = []
   const terminatingAccounts: { id: Id; username: string }[] = []
+  let localMail = false
 
   const seenTests = new Set<string>()
   const addTest = (t: ConfigTest): void => {
@@ -155,6 +159,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   // 2. Accounts, slices, domains, PHP-FPM pools, cron timers, MariaDB, Mail, FTP
   const olsAccountRenders: edge.OlsAccountRender[] = []
   const ftpUsers: services.FtpUserInput[] = []
+  const mailDomains: services.MailDomainInput[] = []
   const sqlStatements: string[] = []
   let needsDaemonReload = false
 
@@ -313,20 +318,21 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     for (const dom of accountDomains) {
       const mailUsers = accountUsers.filter((u) => u.domainId === dom.id && u.services.email)
       if (mailUsers.length > 0) {
-        files.push(
-          services.dovecotPasswdFile(os, {
-            domain: dom.name,
-            account,
-            login: mailLogin,
-            delivery: mailDelivery,
-            mailboxes: mailUsers.map((u) => ({
-              local: u.localPart,
-              passwordHash: u.passwordHash,
-              quotaMb: u.mailboxQuotaMb,
-              suspendLogin: mailLogin === 'denied',
-            })),
-          }),
-        )
+        const mailboxes = mailUsers.map((u) => ({
+          local: u.localPart,
+          passwordHash: u.passwordHash,
+          quotaMb: u.mailboxQuotaMb,
+          suspendLogin: mailLogin === 'denied',
+        }))
+        const domainInput = {
+          domain: dom.name,
+          account,
+          login: mailLogin,
+          delivery: mailDelivery,
+          mailboxes,
+        }
+        files.push(services.dovecotPasswdFile(os, domainInput))
+        mailDomains.push(domainInput)
       }
     }
 
@@ -396,6 +402,23 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       owner: 'root',
       group: 'root',
     })
+  }
+
+  if (mailDomains.length > 0) {
+    const hostname = snapshot.server?.settings.hostname
+    const postmaster = hostname && hostname.includes('.') ? `postmaster@${hostname}` : 'postmaster@localhost.localdomain'
+    const domainsDir = services.dovecotDomainsDir(os)
+    preActions.push(
+      { kind: 'ensure-dir', path: domainsDir.slice(0, domainsDir.lastIndexOf('/')), mode: 0o755, owner: 'root', group: 'root' },
+      { kind: 'ensure-dir', path: domainsDir, mode: 0o750, owner: 'root', group: 'dovecot' },
+    )
+    files.push(services.renderDovecotMailboxConf(os, { postmaster }))
+    const maps = services.renderPostfixMaps(os, mailDomains)
+    files.push(...maps.files)
+    preActions.push(...maps.actions.filter((action) => action.kind === 'ensure-dir'))
+    postActions.push(...maps.actions.filter((action) => action.kind !== 'ensure-dir'))
+    postActions.push({ kind: 'systemd', verb: 'reload', unit: os.services.dovecot })
+    localMail = true
   }
 
   // Pure-FTPd passwd + mkdb
@@ -509,6 +532,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     preActions,
     postActions,
     terminatingAccounts,
+    localMail,
   }
 }
 
@@ -1166,6 +1190,18 @@ export class HostReconciler {
         for (const file of verifiedStagedFiles) {
           await this.deps.executor.writeFile(file)
           journalRecord.switchedFilePaths.push(file.path)
+        }
+
+        const removedMail = manifestDiff.removed.some((file) =>
+          file.path.includes('/postfix/xpanel/')
+          || file.path.endsWith('/11-xpanel-mailboxes.conf')
+          || (file.path.endsWith('.passwd') && file.path.includes('/dovecot/')))
+        if (compiled.localMail) {
+          await applyPostfixLocalDelivery(this.deps.executor, this.deps.os)
+        } else if (removedMail) {
+          await retirePostfixLocalDelivery(this.deps.executor, this.deps.os)
+          await this.deps.executor.runAction({ kind: 'systemd', verb: 'reload', unit: this.deps.os.services.postfix })
+          await this.deps.executor.runAction({ kind: 'systemd', verb: 'reload', unit: this.deps.os.services.dovecot })
         }
 
         for (const unit of manifestDiff.removedUnits) {
