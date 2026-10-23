@@ -1,4 +1,5 @@
 import type { Locale } from '../i18n.ts'
+import { ARABIC_TYPE_CSS } from '../arabic-type.ts'
 import { formatDisplayName } from '../display-name.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -44,13 +45,12 @@ const ICONS = {
 
 export const MONO = "'IBM Plex Mono', monospace"
 const LRM = '\u200E'
-const FONT_EN = "'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif"
-const FONT_AR = "'IBM Plex Sans Arabic', 'IBM Plex Sans', system-ui, sans-serif"
 
 const PORT_CSS = `.xp-board-port{line-height:normal;font-size:16px;font-kerning:auto;font-feature-settings:normal;font-synthesis:weight style small-caps;-webkit-font-smoothing:antialiased}
 .xp-board-port a{color:#1D5BD6}.xp-board-port a:hover{color:#1546A8}
 .xp-board-port :focus-visible{outline:2px solid #1D5BD6;outline-offset:2px}
-.xp-board-port p{max-inline-size:none}`
+.xp-board-port p{max-inline-size:none}
+${ARABIC_TYPE_CSS}`
 
 export interface Hint {
   text: string
@@ -635,7 +635,6 @@ const sideMeter = (label: string, value: string, pct: number, ar: boolean): stri
 
 export const renderDesktop = (model: HomeDesktopModel): string => {
   const ar = model.ar
-  const font = ar ? FONT_AR : FONT_EN
   const brand = ar
     ? `<bdi dir="ltr" style="font-family: ${MONO}; font-size: 17px; font-weight: 500; color: #1D5BD6">xPanel</bdi>`
     : `<span style="font-family: ${MONO}; font-size: 17px; font-weight: 500; color: #1D5BD6">xPanel</span>`
@@ -678,7 +677,7 @@ export const renderDesktop = (model: HomeDesktopModel): string => {
   const lang = ar
     ? `<a href="?lang=en" lang="en" hreflang="en" dir="ltr" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 8px; font-family: 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 600; text-decoration: none">English</a>`
     : `<a href="?lang=ar" lang="ar" hreflang="ar" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 8px; font-family: 'IBM Plex Sans Arabic', 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 600; text-decoration: none">العربية</a>`
-  return `<div class="xp-board-port" data-home-desktop="true" data-locale="${ar ? 'ar' : 'en'}"${ar ? ' dir="rtl"' : ''} style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #F5F6F8; font-family: ${font}; color: #101828">
+  return `<div class="xp-board-port" data-home-desktop="true" data-locale="${ar ? 'ar' : 'en'}"${ar ? ' dir="rtl"' : ''} style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #F5F6F8; color: #101828">
   <style>${PORT_CSS}</style>
   <nav aria-label="${ar ? 'تنقل xPanel' : 'xPanel navigation'}" style="flex: 1 1 248px; max-width: 100%; background: #FFFFFF; border-inline-end: 1px solid #E2E6EC; padding: 20px 14px; display: flex; flex-direction: column; gap: 16px">
     <a href="/home" style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 4px; text-decoration: none; color: #1D5BD6">
@@ -770,7 +769,6 @@ const drawerHtml = (model: HomePhoneModel): string => {
 
 export const renderPhone = (model: HomePhoneModel): string => {
   const ar = model.ar
-  const font = ar ? FONT_AR : FONT_EN
   const title = model.titleTag === 'h1'
     ? `<h1 style="margin: 0; font-size: 22px; font-weight: 600">${escapeHtml(model.title)}</h1>`
     : `<div role="heading" aria-level="1" style="margin: 0; font-size: 22px; font-weight: 600">${escapeHtml(model.title)}</div>`
@@ -804,7 +802,7 @@ export const renderPhone = (model: HomePhoneModel): string => {
   const filterStyle = ar
     ? 'width: 100%; min-height: 44px; padding-inline-start: 40px; padding-inline-end: 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; font-family: inherit; font-size: 16px; color: #101828; text-align: start'
     : 'width: 100%; min-height: 44px; padding-inline-start: 40px; padding-inline-end: 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; font-family: inherit; font-size: 16px; color: #101828'
-  return `<div class="xp-board-port" data-home-phone="true" data-locale="${ar ? 'ar' : 'en'}"${ar ? ' dir="rtl"' : ''} style="width: 390px; height: 844px; position: relative; overflow: hidden; display: flex; flex-direction: column; background: #F5F6F8; font-family: ${font}; color: #101828">
+  return `<div class="xp-board-port" data-home-phone="true" data-locale="${ar ? 'ar' : 'en'}"${ar ? ' dir="rtl"' : ''} style="width: 390px; height: 844px; position: relative; overflow: hidden; display: flex; flex-direction: column; background: #F5F6F8; color: #101828">
   <style>${PORT_CSS}</style>
   <header style="flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #FFFFFF; border-bottom: 1px solid #E2E6EC">
     <button type="button" id="xpanel-home-menu" data-home-action="open-menu" aria-label="${ar ? 'فتح التنقل' : 'Open navigation'}" aria-expanded="false" aria-controls="m-drawer" style="flex: none; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"></path></svg></button>

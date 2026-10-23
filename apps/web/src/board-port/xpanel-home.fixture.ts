@@ -165,9 +165,6 @@ export const xpanelHomeFixturePhone = (): HomePhoneModel => {
 }
 
 const documentShell = (body: string, locale: 'en' | 'ar', title: string): string => {
-  const font = locale === 'ar'
-    ? "'IBM Plex Sans Arabic','IBM Plex Sans',system-ui,sans-serif"
-    : "'IBM Plex Sans','IBM Plex Sans Arabic',system-ui,sans-serif"
   return `<!doctype html>
 <html lang="${locale}" dir="${locale === 'ar' ? 'rtl' : 'ltr'}">
 <head>
@@ -176,7 +173,7 @@ const documentShell = (body: string, locale: 'en' | 'ar', title: string): string
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
 <style>
-body{margin:0;background:#F5F6F8;color:#101828;font-family:${font}}
+body{margin:0;background:#F5F6F8;color:#101828;font-family:'IBM Plex Sans','IBM Plex Sans Arabic',system-ui,sans-serif}
 *{box-sizing:border-box}
 a{color:#1D5BD6}a:hover{color:#1546A8}
 :focus-visible{outline:2px solid #1D5BD6;outline-offset:2px}

@@ -4,6 +4,7 @@
 // tabular numerals on all metrics/IPs/IDs, and icon + text on every status badge and threshold meter.
 
 import { resolveResourceUsage, type ResourceQuantityState } from '@xpanel/core'
+import { ARABIC_TYPE_CSS } from './arabic-type.ts'
 import { MAIL_LAYOUT_CSS } from './mail-layout.ts'
 
 export type StatusBadgeKind = 'ok' | 'warn' | 'critical' | 'suspended' | 'reconciling'
@@ -753,6 +754,7 @@ html[dir="rtl"] { font-family: var(--xp-font-sans-rtl); }
 
 /* Arabic glyphs need additional vertical room; direction alone never selects a font. */
 html[lang="ar"] {
+  font-family: var(--xp-font-sans-rtl);
   --xp-leading-caption: 22px;
   --xp-leading-label: 24px;
   --xp-leading-body: 26px;
@@ -3210,4 +3212,5 @@ html[dir="rtl"] .xp-accounts__technical bdi, html[dir="rtl"] .xp-account-dialog_
 .xp-totp-qr > svg { display: block; inline-size: 168px; block-size: 168px; max-inline-size: 100%; }
 
 ${MAIL_LAYOUT_CSS}
+${ARABIC_TYPE_CSS}
 `
