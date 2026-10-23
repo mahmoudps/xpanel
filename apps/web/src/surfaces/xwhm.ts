@@ -25,6 +25,7 @@ import {
   renderStatusBadge,
   renderThresholdMeter,
 } from '../tokens.ts'
+import { renderWhmDashboard, whmDashboardFromProps } from '../board-port/xwhm-dashboard.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
@@ -130,6 +131,12 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
   const actionBannerHtml = props.actionState
     ? renderAsyncActionState({ ...props.actionState, locale })
     : ''
+
+  if (section === 'overview') return ensureAccessibleSurfaceHtml(renderWhmDashboard(whmDashboardFromProps({
+    locale, principal, hostname: props.hostname, version: props.version, availableVersion: props.availableVersion,
+    generationId: props.generationId, accounts: props.accounts, resellers: props.resellers, ipPool: props.ipPool,
+    services, auditEntries,
+  })), locale)
 
   const rawHtml = renderSurfaceShell({
     surface: 'xwhm', locale,
