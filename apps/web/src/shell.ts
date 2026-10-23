@@ -8,7 +8,7 @@ type LocalizedTitle = readonly [english: string, arabic: string]
 
 const surfacePageTitles: Record<SurfaceKind, Readonly<Record<string, LocalizedTitle>>> = {
   xpanel: {
-    overview: ['Dashboard', 'لوحة التحكم'], resources: ['Resources & quotas', 'الموارد والحصص'],
+    overview: ['Home', 'الرئيسية'], resources: ['Resources & quotas', 'الموارد والحصص'],
     domains: ['Domains', 'النطاقات'], config: ['Site settings', 'إعدادات الموقع'],
     analytics: ['Website traffic', 'زيارات الموقع'], files: ['Files', 'الملفات'],
     terminal: ['Terminal', 'الطرفية'], databases: ['Databases', 'قواعد البيانات'],
@@ -16,7 +16,7 @@ const surfacePageTitles: Record<SurfaceKind, Readonly<Record<string, LocalizedTi
     ssl: ['Certificates', 'الشهادات'], security: ['Account security', 'أمان الحساب'],
   },
   xwhm: {
-    overview: ['Dashboard', 'لوحة التحكم'], io: ['Disk I/O', 'عمليات القرص'],
+    overview: ['Server dashboard', 'لوحة الخادم'], io: ['Disk I/O', 'عمليات القرص'],
     services: ['Services', 'الخدمات'], accounts: ['Accounts', 'الحسابات'],
     dns: ['DNS zones', 'مناطق DNS'], backups: ['Account backups', 'نسخ الحسابات'],
     'server-info': ['Server information', 'معلومات الخادم'],
@@ -81,16 +81,22 @@ const surfaceSections: Record<SurfaceShellProps['surface'], Readonly<Record<stri
     '/security/ssl': 'ssl', '/security/ssl/issue': 'ssl',
     '/security/account': 'security',
     '/domains/zone-editor': 'dns',
+    '/files/backup': 'design', '/files/directory-privacy': 'design',
+    '/software/php': 'design', '/software/htaccess': 'design', '/advanced/cron': 'design',
+    '/design/system': 'design', '/design/components': 'design', '/design/navigation': 'design',
   },
   xwhm: {
     '/whm': 'overview', '/whm/monitoring/io': 'io', '/whm/services': 'services',
     '/whm/services/health': 'services', '/whm/accounts': 'accounts', '/whm/accounts/new': 'create-account',
-    '/whm/plans': 'plans', '/whm/plans/features': 'plans', '/whm/resellers': 'resellers',
+    '/whm/plans': 'plans', '/whm/plans/features': 'design', '/whm/resellers': 'resellers',
     '/whm/dns': 'dns', '/whm/backups/restore': 'backups', '/whm/monitoring/server-info': 'server-info',
     '/whm/resellers/privileges': 'resellers', '/whm/server/ips': 'ips', '/whm/email/outbound': 'mail-ips',
     '/whm/security/firewall': 'firewall', '/whm/audit': 'audit', '/whm/panel/data': 'generations',
     '/whm/server/upgrade': 'upgrade', '/whm/transfers': 'transfer',
     '/whm/security/sign-in': 'security',
+    '/whm/server/setup': 'design', '/whm/domains': 'design', '/whm/ssl': 'design',
+    '/whm/services/web': 'design', '/whm/software/php': 'design', '/whm/security': 'design',
+    '/whm/security/ssh': 'design', '/whm/backups': 'design',
   },
   xmail: {
     '/mail': 'inbox', '/mail/inbox': 'inbox', '/mail/folders': 'inbox', '/mail/compose': 'compose',

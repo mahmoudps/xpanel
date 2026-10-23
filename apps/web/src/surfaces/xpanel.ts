@@ -22,8 +22,8 @@ import {
   renderAsyncActionState,
   renderStatusBadge,
 } from '../tokens.ts'
-import { accountSecurityRoute, renderSecurityNavLink } from '../chrome.ts'
-import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, getSurfaceNavigationLabel, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
+import { renderDesignMain, renderDesignNav, renderHomeToolGrid } from '../design-board.ts'
+import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
 
 export interface JailedFileEntry {
@@ -100,30 +100,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
   const visibility = props.visibility?.principal.kind === 'user' && props.visibility.principal.accountId === account.id ? props.visibility : undefined
   const xpanelNav = visibleNavigation(visibility, props.catalog).find((n) => n.surface === 'xpanel')
 
-  const sidebarSectionsHtml = (xpanelNav?.sections ?? [])
-    .map((section) => {
-      const isExpanded = section.pages.some((p) => p.route === activeRoute)
-      return `
-      <details class="xp-nav-section" ${isExpanded ? 'open' : ''} data-nav-section="${escapeHtml(section.id)}">
-        <summary class="xp-nav-section__title">
-          <span>${escapeHtml(getSurfaceNavigationLabel('xpanel', 'section', section, locale))}</span>
-        </summary>
-        <div class="xp-nav-section__items">
-          ${section.pages
-            .map(
-              (page) => `
-            <a href="${escapeHtml(page.route)}" class="xp-nav-item ${page.route === activeRoute ? 'xp-nav-item--active' : ''}" ${page.route === activeRoute ? 'aria-current="page"' : ''} data-nav-route="${escapeHtml(page.route)}">
-              <span>${escapeHtml(getSurfaceNavigationLabel('xpanel', 'page', page, locale))}</span>
-            </a>
-          `,
-            )
-            .join('')}
-        </div>
-      </details>
-    `
-    })
-    .join('')
-  const securityNavLink = renderSecurityNavLink('xpanel', locale, activeRoute, (xpanelNav?.sections ?? []).some(section => section.pages.some(page => page.route === accountSecurityRoute('xpanel'))))
+  const qualifiedRoutes = new Set((xpanelNav?.sections ?? []).flatMap(section => section.pages.map(page => page.route)))
 
   const switchLangCode = isAr ? 'en' : 'ar'
   const switchLangLabel = isAr ? 'English' : 'العربية'
@@ -158,15 +135,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
       </div>
     </div>
 
-    <div class="xp-sidebar__favorites" aria-label="${isAr ? 'وصول سريع' : 'Quick access'}">
-      <div class="xp-label">${isAr ? 'وصول سريع' : 'Quick access'}</div>
-      ${(xpanelNav?.sections ?? []).flatMap(section => section.pages).slice(0, 3).map(page => `<a href="${escapeHtml(page.route)}" class="xp-nav-item">${escapeHtml(getSurfaceNavigationLabel('xpanel', 'page', page, locale))}</a>`).join('')}
-    </div>
-
-    <nav aria-label="${isAr ? 'أقسام xPanel' : 'xPanel sections'}">
-      ${sidebarSectionsHtml || `<p role="status" data-navigation-empty="true">${escapeHtml(isAr ? 'لا توجد أدوات مثبتة الجاهزية ومتاحة لحسابك.' : 'No verified tools are available for your account.')}</p>`}
-      ${securityNavLink}
-    </nav>`,
+    ${renderDesignNav('xpanel', locale, activeRoute, qualifiedRoutes)}`,
     topbar: `      <div class="xp-topbar__start">
         ${renderPageSearchButton(locale)}
 
@@ -208,6 +177,7 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
         </div>
         <p class="xp-prose" role="status" data-resource-metrics="unavailable">${isAr ? 'قياسات الموارد غير متاحة بعد.' : 'Resource measurements are not available yet.'}</p>
       </section>
+${section === 'overview' ? `<section class="xp-card" aria-labelledby="home-facts"><div class="xp-card__header"><h2 id="home-facts">${isAr ? 'معلومات عامة' : 'General information'}</h2></div><div class="xp-kpi-grid"><div class="xp-field"><span class="xp-label">${isAr ? 'المجلد' : 'Home directory'}</span><strong class="xp-mono"><bdi dir="ltr">${escapeHtml(account.home)}</bdi></strong></div><div class="xp-field"><span class="xp-label">uid</span><strong class="xp-mono"><bdi dir="ltr">${account.uid}</bdi></strong></div><div class="xp-field"><span class="xp-label">${isAr ? 'الصدفة' : 'Shell'}</span><strong><bdi dir="ltr">${escapeHtml(account.shell)}</bdi></strong></div></div></section><section class="xp-card" aria-labelledby="home-changes"><div class="xp-card__header"><h2 id="home-changes">${isAr ? 'آخر التغييرات' : 'Recent changes'}</h2></div><p class="xp-prose" role="status">${isAr ? 'لا تغييرات مسجّلة لهذا الحساب بعد.' : 'No changes are recorded for this account yet.'}</p></section>${renderHomeToolGrid(locale, qualifiedRoutes)}` : ''}
 ` : ''}
       ${section === 'domains' ? `      <!-- 2. Domains & Multi-IP Binding Table -->
       <section class="xp-card" id="xpanel-domains" data-section="domains-multi-ip" aria-labelledby="xpanel-domains-heading">
@@ -735,6 +705,7 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
         <p class="xp-help">${isAr ? 'يبقى الفحص الفاشل في هذه الصفحة مع رسالة جهة الشهادات.' : 'A failed check stays on this page with the certificate authority message.'}</p>` : `<p class="xp-help">${isAr ? 'أضف نطاقًا قبل إصدار شهادة.' : 'Add a domain before issuing a certificate.'}</p>`}
       </section>` : ''}
             ${section === 'security' ? `<section class="xp-card" data-section="account-security"><h1 id="xpanel-security-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1></section>` : ''}
+            ${section === 'design' ? renderDesignMain(activeRoute, locale) : ''}
             ${section === undefined || (section === 'config' && !customConfig) || (section === 'analytics' && !websiteAnalytics) ? renderSurfaceUnavailable(locale, '/home') : ''}`,
   })
   return ensureAccessibleSurfaceHtml(rawHtml.trim(), locale)

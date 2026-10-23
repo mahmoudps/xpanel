@@ -103,18 +103,26 @@ Every screen stylesheet sets the same link and focus rules, with no `transition`
 - `:focus-visible { outline: 2px solid #1D5BD6; outline-offset: 2px }`.
 - Inside `nav[aria-label="xWHM navigation"]`, `:focus-visible` uses `outline-color: #6EA0FF`.
 
-Six xWHM screens (Upgrade, Transfer, SSH, Firewall, Panel security, Audit log) also declare these keyframes and nothing else. The declarations are not referenced by any `animation` property in the templates or in the logic classes, so the source gives them no duration, delay, easing, iteration, direction, or fill:
+The keyframe bodies are:
 
 - `xp-indet`: `0% { transform: translateX(-100%) }` to `100% { transform: translateX(260%) }`.
 - `xp-shimmer`: `0% { background-position: -480px 0 }` to `100% { background-position: 480px 0 }`.
 - `xp-spin`: `to { transform: rotate(360deg) }`.
 - `xp-drain`: `from { width: 100% }` to `to { width: 0% }`.
 
-The same six screens end the style block with:
+Premium components is the board that applies them. The timings are written on the elements, not left as unused declarations:
+
+- Indeterminate progress: `animation: xp-indet 1.4s ease-in-out infinite`. The bar is absolute, `inset-block: 0`, 40% wide, `#1D5BD6`, radius 4px, inside an 8px track (`#E9ECF1`, radius 4px).
+- Determinate progress: `transition: width 0.6s ease`. The fill is `#1D5BD6`. The tall track is 8px with radius 4px. The compact upload track is 4px with radius 2px.
+- Skeleton: `linear-gradient(90deg, #EEF0F3 0%, #F8F9FB 50%, #EEF0F3 100%)`, `background-size: 960px 100%`, `animation: xp-shimmer 1.4s linear infinite`.
+- Spinner: `animation: xp-spin 0.9s linear infinite` on the open arc.
+- Undo toast drain: a 3px bar, background `#6EA0FF`, `animation: xp-drain 8s linear infinite`. The light toast shadow is `0 12px 24px -10px rgba(16, 24, 40, 0.18)`. A critical toast uses border `#F4B8B2`. Padding on the toast body is 14px.
+
+Six xWHM screens (Upgrade, Transfer, SSH, Firewall, Panel security, Audit log) declare the same four keyframes and do not apply them. Premium components and those screens end the style block with:
 
 `@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important } }`
 
-No screen declares `transition`, `cubic-bezier`, a spring, stiffness, damping, mass, or a drag physics config. Searches of the logic classes found no `setTimeout`, `setInterval`, `requestAnimationFrame`, or style animation writes. Confirm panels, filter chips, the move menu, the undo bar, compose discard, and wizard steps appear and disappear by replacing state. There is no open/close duration.
+No screen declares a spring, stiffness, damping, mass, or a drag physics config. Component styles do not use a custom `cubic-bezier`. Searches of the logic classes found no `setTimeout`, `setInterval`, or `requestAnimationFrame`. Confirm panels, filter chips, the move menu, compose discard, and wizard steps appear and disappear by replacing state. There is no open or close duration on those.
 
 The undo bar on Inbox, when a message is moved, is an instant `role="status"` strip: background `#101828`, text `#FFFFFF`, 13px, padding `8px 8px 8px 16px`, and an Undo button with `min-height: 40px`, transparent background, border `#475467`, white text. The move menu is an instant absolute list: `top: 50px`, `min-width: 200px`, radius 10, border `#E2E6EC`, shadow `0 8px 24px rgba(16, 24, 40, 0.12)`. A selected message row is `#F3F7FE` with `box-shadow: inset 3px 0 0 #1D5BD6`. The Compose control on the Compose screen is fill `#1546A8` with white text. The Inbox Compose control is fill `#1D5BD6`.
 
@@ -124,7 +132,7 @@ The design-tool runtime (`support.js`) is not part of the design. It paints a st
 
 A live read of the Inbox artboard agrees with the source text. Keyboard focus draws `2px solid #1D5BD6` with offset `2px`. `transition-duration` on those controls is `0s` (the initial value; the shorthand reports `all` because no transition was declared). Selecting a message and opening the upgrade confirm panel both replace the markup in the same turn.
 
-The product stylesheet copies the four keyframes verbatim and does not attach a duration to them. Unclassed links use the accent and the accent hover with no transition. `prefers-reduced-motion: reduce` sets `animation` and `transition` to `none`. The Compose control on the Compose screen uses fill `#1546A8`, white text, and no inset bar. A selected message row uses `#F3F7FE` and `inset 3px 0 0 #1D5BD6`.
+The product stylesheet copies the four keyframes and binds the Premium components timings. The usage meter grows on the inline axis, so its fill uses `transition: inline-size 0.6s ease` for the same 0.6s ease the board writes as `transition: width 0.6s ease`. The spinner uses `animation: xp-spin 0.9s linear infinite`. The indeterminate bar uses `animation: xp-indet 1.4s ease-in-out infinite`. Skeleton blocks use `animation: xp-shimmer 1.4s linear infinite` and the 960px gradient. The toast drain uses `animation: xp-drain 8s linear infinite` at 3px and `#6EA0FF`. Unclassed links use the accent and the accent hover with no transition. `prefers-reduced-motion: reduce` sets `animation: none !important; transition: none !important`. The Compose control on the Compose screen uses fill `#1546A8`, white text, and no inset bar. A selected message row uses `#F3F7FE` and `inset 3px 0 0 #1D5BD6`.
 
 The mobile navigation sheet and the command palette are not in the artboards. Their controller stays so a reversal does not jump and so a link navigates in the same event: 200ms for the sheet, 160ms for the palette, easing `cubic-bezier(0.2, 0.8, 0.2, 1)`, fill `both`. Reduced motion skips that controller and leaves no running animation. Those two numbers are the controller's own values. They are not artboard values.
 

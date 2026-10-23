@@ -1,9 +1,10 @@
 import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { canSeeAccount, type Account, type Plan } from '@xpanel/core'
-import { panelLabel, renderPlannedNavigation, renderSupportNotice, renderUserMenu, roleLabel, type PanelLink } from './chrome.ts'
+import { panelLabel, renderSecurityNavLink, renderSupportNotice, renderUserMenu, roleLabel, type PanelLink } from './chrome.ts'
 import { formatDisplayName } from './display-name.ts'
 import { dirForLocale, type Locale, SUPPORTED_LOCALES, t } from './i18n.ts'
 import { isStatusCode, renderStatusBody, statusPageCopy, type StatusPageModel } from './status-page.ts'
+import { designHeading, renderDesignMain, renderDesignNav } from './design-board.ts'
 import { ACCOUNT_SECURITY_ROUTES, renderAccountSecurityCard } from './surfaces/account-security.ts'
 import { type LoginSurfaceProps, renderLoginSurface } from './surfaces/login.ts'
 import { type MailSurfaceProps, renderMailSurface } from './surfaces/xmail.ts'
@@ -178,6 +179,8 @@ const securityPageHeading = (route: string, locale: Locale): string | undefined 
 export const workspacePageHeading = (surface: WebSurfaceKind, locale: Locale, activeRoute: string): string => {
   const security = securityPageHeading(activeRoute, locale)
   if (security) return security
+  const design = designHeading(activeRoute, locale)
+  if (design) return design
   const panel = surface === 'xwhm' || surface === 'xmail' ? surface : 'xpanel'
   return getSurfacePageTitle(panel, resolveSurfaceSection(panel, activeRoute), locale, activeRoute)
 }
@@ -195,20 +198,14 @@ const renderUnavailableWorkspace = (
   const panelSurface = surface === 'xwhm' || surface === 'xmail' ? surface : 'xpanel'
   const path = workspacePath(surface, activeRoute)
   const principal = state?.visibility?.principal
-  const isAr = locale === 'ar'
   const pageHeading = workspacePageHeading(surface, locale, path)
   const securityPage = ACCOUNT_SECURITY_ROUTES.has(path)
-  const heading = isAr ? 'أدواتك ليست على هذا الخادم بعد' : 'Your tools are not on this server yet'
-  const body = isAr
-    ? 'أنت داخل الحساب. النطاقات والبريد والملفات وبقية أدوات الاستضافة ستظهر في القائمة عندما يستطيع هذا الخادم تشغيلها. إلى ذلك الحين تعرض هذه الصفحة حسابك فقط.'
-    : 'You are signed in. Domains, mail, files and the other hosting tools will appear in the sidebar when this server can run them. Until then, this page only shows your account.'
-  const guestBody = isAr
-    ? 'النطاقات والبريد والملفات وبقية أدوات الاستضافة ليست متاحة على هذا الخادم بعد. ستظهر في القائمة عندما يستطيع الخادم تشغيلها.'
-    : 'Domains, mail, files and the other hosting tools are not available on this server yet. They will appear in the sidebar when the server can run them.'
+  const qualifiedRoutes = new Set((state?.visibility ? visibleNavigation(state.visibility, state.catalog) : []).filter(item => item.surface === panelSurface).flatMap(item => item.sections.flatMap(section => section.pages.map(page => page.route))))
+  const design = securityPage ? '' : renderDesignMain(path, locale)
   return renderSurfaceShell({
     surface: panelSurface,
     locale,
-    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${panelLabel(panelSurface)}</strong></div>${renderPlannedNavigation(panelSurface, locale, path, state?.visibility ? visibleNavigation(state.visibility, state.catalog) : [])}`,
+    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${panelLabel(panelSurface)}</strong></div>${renderDesignNav(panelSurface, locale, path, qualifiedRoutes)}${panelSurface === 'xmail' ? renderSecurityNavLink('xmail', locale, path) : ''}`,
     topbar: renderUserMenu({
       locale,
       theme,
@@ -220,16 +217,12 @@ const renderUnavailableWorkspace = (
       signedIn: authenticated && principal !== undefined,
     }),
     content: `<section class="xp-workspace-summary" data-surface="${surface}" data-tool-availability="unverified"${securityPage ? ' data-security-page="true"' : ''}>
-  <h1 class="xp-page-title">${escapeHtml(pageHeading)}</h1>
+  ${securityPage ? `<h1 class="xp-page-title">${escapeHtml(pageHeading)}</h1>` : design || `<h1 class="xp-page-title">${escapeHtml(pageHeading)}</h1>`}
   ${actionState ? renderAsyncActionState({ ...actionState, locale }) : ''}
   ${state && !securityPage ? renderWorkspaceSummary(state, locale) : ''}
-  ${securityPage ? '' : `<section class="xp-card xp-workspace-availability" role="status">
-    <h2>${escapeHtml(heading)}</h2>
-    <p class="xp-prose">${escapeHtml(authenticated ? body : guestBody)}</p>
-    ${renderSupportNotice(locale, state?.supportEmail)}
-    <div role="alert" data-auth-error hidden></div>
-    <p role="status" data-auth-status></p>
-  </section>`}
+  ${securityPage ? '' : renderSupportNotice(locale, state?.supportEmail)}
+  <div role="alert" data-auth-error hidden></div>
+  <p role="status" data-auth-status></p>
 </section>`,
   })
 }

@@ -236,7 +236,7 @@ describe('production web renderer boundary regressions', () => {
     expect(domains).not.toContain('href="/domains')
     const home = await observe('route-home:/panel', await render(request('/panel', cookie)), 200)
     expect(home).toContain('data-tool-availability="unverified"')
-    expect(home).toContain('Not yet available')
+    expect(home).toContain('Coming soon')
     const crossedRender = await createDefaultWebRenderer({
       store: state.store, db: db.db, serverSecret: SERVER_SECRET, entryPoint: 'xpanel',
       panels: {
@@ -279,7 +279,7 @@ describe('production web renderer boundary regressions', () => {
         expect(html).toContain(locale === 'ar' ? 'نشط' : 'Active')
         expect(html).toContain('data-tool-availability="unverified"')
         expect(html.match(/data-workspace-field=/g)).toHaveLength(5)
-        expect(html).not.toMatch(/data-realtime-enabled="true"|<form\b|data-nav-route=|data-cmdk-item=|[\u0660-\u0669\u06f0-\u06f9]/)
+        expect(html).not.toMatch(/data-realtime-enabled="true"|<form\b|data-cmdk-item=|[\u0660-\u0669\u06f0-\u06f9]/)
         for (const value of [owner.id, other.id, principal.id, plan.id, featureList.id, owner.home, owner.contactEmail, owner.ipv4, other.primaryDomain, PUBLIC_VECTOR, 'Resource usage']) expect(html).not.toContain(value)
       }
       await observe('scoped-summary-http:other-account', await fetch(`${origin}/panel?accountId=${other.id}`, { headers: { cookie }, redirect: 'manual' }), 404)

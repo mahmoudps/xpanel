@@ -1005,8 +1005,14 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     var toast = document.createElement('div');
     toast.className = 'xp-card xp-toast';
     toast.setAttribute('data-toast-level', level || 'ok');
-    toast.style.cssText = 'padding:12px 16px;border-inline-start:4px solid var(--xp-accent);box-shadow:var(--xp-shadow-md);';
-    toast.textContent = message;
+    var body = document.createElement('div');
+    body.className = 'xp-toast__body';
+    body.textContent = message;
+    var drain = document.createElement('div');
+    drain.className = 'xp-toast__drain';
+    drain.setAttribute('aria-hidden', 'true');
+    toast.appendChild(body);
+    toast.appendChild(drain);
     region.appendChild(toast);
     setTimeout(function () {
       if (toast.parentNode) toast.parentNode.removeChild(toast);

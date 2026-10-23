@@ -16,9 +16,9 @@ New pages should look like the existing ones without a private stylesheet. Rende
 
 The sidebar width, brand mark, navigation item, disabled tool row, top bar, user pill, focus ring, dialog, badge, and toast already live in the design tokens. A new page inherits them by using the classes. Adding a one-off colour or a fixed left/right inset will drift from the artboard and from Arabic.
 
-Motion values are recorded in the Motion section of [artifact-design-system.md](artifact-design-system.md). Do not add a duration, easing curve, or spring the artboard does not declare. Hover and focus on the artboard are immediate. `prefers-reduced-motion: reduce` removes animation and transition.
+Motion values are recorded in the Motion section of [artifact-design-system.md](artifact-design-system.md). Shared components already carry the Premium components timings: spinner `xp-spin 0.9s linear infinite`, meter fill `0.6s ease`, indeterminate bar `xp-indet 1.4s ease-in-out infinite`, skeleton `xp-shimmer 1.4s linear infinite`, toast drain `xp-drain 8s linear infinite`. Use `xp-status-icon--spin`, `xp-meter__fill`, `xp-meter__indet`, `xp-skeleton`, and `xp-toast__drain` rather than a new duration. Hover and focus on the artboards are immediate. `prefers-reduced-motion: reduce` removes animation and transition.
 
-Unavailable catalog groups stay on `renderPlannedNavigation`. They use the dashed disabled row and must not become links.
+Design-complete screens from the artifact boards are real routes. The sidebar lists them in the board’s groups. A page whose tool is not connected yet renders `renderDesignMain` from `apps/web/src/design-board.ts`: the board’s title, its section cards, the board’s empty state, and disabled actions with `قيد التفعيل` / Coming soon. Its records come from the named adapter next to that route (`readPanelPhpPage`, `readSshPage`, and the others). Wiring the tool means filling that one function. Do not invent rows in the page. Home in Arabic and on a narrow viewport is the same `/home` route.
 
 ## Checking the result
 

@@ -26,14 +26,13 @@ describe('verified production availability', () => {
   it.each(['xwhm', 'xpanel', 'xmail'] as const)('shows an honest unavailable workspace for %s without publishing service actions', surface => {
     const html = renderWebApp({ surface, locale: 'en' })
     expect(html).toContain('data-tool-availability="unverified"')
-    expect(html).toContain('Your tools are not on this server yet')
-    expect(html).toContain('Not yet available')
+    expect(html).toContain('data-nav-wiring="soon"')
+    expect(html).toContain(surface === 'xwhm' ? 'Server dashboard' : surface === 'xmail' ? 'Inbox' : 'Home')
     expect(html).not.toContain('data-action="logout"')
     const sidebar = /<aside class="xp-sidebar"[\s\S]*?<\/aside>/.exec(html)?.[0] ?? ''
-    expect(sidebar).toContain('data-planned-group=')
     expect(sidebar).toContain('data-security-link="true"')
-    expect(sidebar.replace(/<a\b[^>]*data-security-link="true"[^>]*>[\s\S]*?<\/a>/g, '')).not.toMatch(/<a\b/)
-    expect(html).not.toMatch(/<form\b|data-nav-route="|data-cmdk-item="/)
+    expect(sidebar).toContain('data-nav-route=')
+    expect(html).not.toMatch(/<form\b|data-cmdk-item="/)
     expect(html).not.toContain('alice-shop.com')
     expect(html).not.toContain('data-generation-chip=')
   })
@@ -57,7 +56,7 @@ describe('verified production availability', () => {
     expect(html.match(/data-workspace-field=/g)).toHaveLength(5)
     expect(html).toContain('<bdi dir="ltr">owner7.example.test</bdi>')
     expect(html).toContain('data-tool-availability="unverified"')
-    expect(html).not.toMatch(/data-realtime-enabled="true"|<form\b|data-nav-route=|data-cmdk-item=|data-generation-chip=|[\u0660-\u0669\u06f0-\u06f9]/)
+    expect(html).not.toMatch(/data-realtime-enabled="true"|<form\b|data-cmdk-item=|data-generation-chip=|[\u0660-\u0669\u06f0-\u06f9]/)
     for (const marker of ['private-', '9123456', '9123457', '192.0.2.199', 'Resource usage', 'quotaUsed', 'unlimited']) expect(html).not.toContain(marker)
   })
 
@@ -138,10 +137,9 @@ describe('verified production availability', () => {
 
   it('renders an Arabic unavailable state with Latin digits', () => {
     const html = renderWebApp({ surface: 'xpanel', locale: 'ar' })
-    expect(html).toContain('أدواتك ليست على هذا الخادم بعد')
-    expect(html).toContain('غير متاحة بعد')
-    expect(html).toContain('<h1 class="xp-page-title">لوحة التحكم</h1>')
-    expect(html).toContain('<title>لوحة التحكم — xPanel</title>')
+    expect(html).toContain('قيد التفعيل')
+    expect(html).toContain('<h1 class="xp-page-title">الرئيسية</h1>')
+    expect(html).toContain('<title>الرئيسية — xPanel</title>')
     expect(html).not.toContain('مساحة العمل')
     expect(html).not.toContain('tool groups planned')
     expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
@@ -149,8 +147,8 @@ describe('verified production availability', () => {
 
   it('uses the real page heading and keeps security free of the unavailable-tools card', () => {
     const home = renderWebApp({ surface: 'xwhm', locale: 'en', visibility: { principal: { kind: 'root', id: 'root', username: 'root' } } })
-    expect(home).toContain('<h1 class="xp-page-title">Dashboard</h1>')
-    expect(home).toContain('<title>Dashboard — xWHM</title>')
+    expect(home).toContain('<h1 class="xp-page-title">Server dashboard</h1>')
+    expect(home).toContain('<title>Server dashboard — xWHM</title>')
     expect(home).not.toContain('>Workspace<')
     const security = renderWebApp({
       surface: 'xwhm', locale: 'en', activeRoute: '/whm/security/sign-in',
@@ -184,7 +182,7 @@ describe('verified production availability', () => {
       : { kind: 'user' as const, id: 'synthetic-owner', username: 'synthetic-owner', accountId: 'synthetic-account' }
     const html = renderWebApp({ surface, activeRoute: '/synthetic-unregistered-route', visibility: { principal, disabledFeatures: new Set() } })
     expect(html).toContain('data-tool-availability="unverified"')
-    expect(html).not.toMatch(/<form\b|data-nav-route="|data-cmdk-item="/)
+    expect(html).not.toMatch(/<form\b|data-cmdk-item="/)
     expect(html).not.toContain('data-realtime-enabled="true"')
   })
 })
@@ -210,7 +208,7 @@ describe('bounded workspace summary DTO', () => {
     expect(html).toContain('owner7.example.test')
     expect(html).toContain('Configured plan7')
     expect(html.match(/data-workspace-field=/g)).toHaveLength(5)
-    expect(html).not.toMatch(/private-|data-nav-route=|data-realtime-enabled="true"/)
+    expect(html).not.toMatch(/private-|data-realtime-enabled="true"/)
   })
 
   it('does not fall back to a larger provider payload when the explicit DTO is empty', () => {
