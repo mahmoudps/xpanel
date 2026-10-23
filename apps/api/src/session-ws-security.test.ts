@@ -870,6 +870,7 @@ describe('WebSocket authentication against real API and SQLite authority', () =>
     await createResellerPrincipal(database.db, {
       id: resellerA.id, username: resellerA.username, passwordHash: fixturePasswordHash,
     })
+    await state.store.saveServerIp({ address: '203.0.113.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
     const accountA = await state.store.createAccount({
       username: 'alice',
       passwordHash: fixturePasswordHash,

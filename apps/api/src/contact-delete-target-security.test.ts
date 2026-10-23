@@ -65,6 +65,7 @@ describe('contact metadata DELETE target contracts on real local HTTP', () => {
       caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 5, forwarders: 5, mailingLists: 2, ftpAccounts: 5, databases: 5, phpWorkers: 4 }, dedicatedIp: false, shell: 'jailed', defaultMailboxQuotaMb: 512 })
     const account = async (username: string, ownerId: string | null): Promise<Account> => state.store.createAccount({ username, passwordHash: PASSWORD_HASH, primaryDomain: `${username}.example.test`, planId: plan.id, ownerId, contactEmail: `${username}@example.test`, ipv4: '192.0.2.10', shell: 'jailed',
       php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
+    await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
     const alice = await account('contactalice', reseller.id)
     const bob = await account('contactbob', null)
     const user = await createUserPrincipal(db.db, { username: alice.username, accountId: alice.id, passwordHash: PASSWORD_HASH })

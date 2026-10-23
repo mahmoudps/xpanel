@@ -333,6 +333,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     assert.equal(planRes.status, 201)
     const { plan } = (await planRes.json()) as { plan: { id: string } }
 
+    await stateHandle.store.saveServerIp({ address: '203.0.113.10', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
     // Create Account alice
     const aliceRes = await root.request('/api/accounts', {
       method: 'POST',
@@ -381,6 +382,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     const { client: root } = await loginRoot()
     await root.request('/api/server/settings', { method: 'PUT', body: DEFAULT_SETTINGS })
 
+    await stateHandle.store.saveServerIp({ address: '203.0.113.10', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
     const planRes = await root.request('/api/plans', {
       method: 'POST',
       body: { name: 'IsolationPlan' },
@@ -473,6 +475,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     const { client: root } = await loginRoot()
     await root.request('/api/server/settings', { method: 'PUT', body: DEFAULT_SETTINGS })
 
+    await stateHandle.store.saveServerIp({ address: '203.0.113.10', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
     // Create plan with 1 MiB disk quota
     const planRes = await root.request('/api/plans', {
       method: 'POST',
@@ -601,7 +604,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
         version: 6,
         prefixLength: 64,
         interfaceName: 'eth0',
-        role: 'dedicated',
+        role: 'shared',
         ownerKind: 'root',
         ownerId: null,
         ptrHostname: 'vip6.alice.example.com',
@@ -613,7 +616,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     // Create plan and account using dedicated IPv4 + IPv6
     const planRes = await root.request('/api/plans', {
       method: 'POST',
-      body: { name: 'DedicatedIpPlan' },
+      body: { name: 'DedicatedIpPlan', dedicatedIp: true },
     })
     const { plan } = (await planRes.json()) as { plan: { id: string } }
 
@@ -664,6 +667,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     const { client: root } = await loginRoot()
     await root.request('/api/server/settings', { method: 'PUT', body: DEFAULT_SETTINGS })
 
+    await stateHandle.store.saveServerIp({ address: '203.0.113.10', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
     const planRes = await root.request('/api/plans', { method: 'POST', body: { name: 'CustomCfgPlan' } })
     const { plan } = (await planRes.json()) as { plan: { id: string } }
 
@@ -732,6 +736,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     const { client: root } = await loginRoot()
     await root.request('/api/server/settings', { method: 'PUT', body: DEFAULT_SETTINGS })
 
+    await stateHandle.store.saveServerIp({ address: '203.0.113.10', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
     const planRes = await root.request('/api/plans', { method: 'POST', body: { name: 'AnalyticsPlan' } })
     const { plan } = (await planRes.json()) as { plan: { id: string } }
 

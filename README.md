@@ -61,6 +61,8 @@ Seven new administrative destinations separate navigation metadata only; they ar
 
 The account UI has a compact 5-column list, one scoped action dialog and a bounded creation form. JSON requests, explicit confirmation, keyboard/focus handling and verification-required feedback are tested independently. The production catalog still has 0 verified capabilities; synthetic fixtures enable these screens for tests and do not make every tool available in production.
 
+Account IP allocation previews are advisory desired-state inventory. Shared assignment uses the configured pool; dedicated choices require plan entitlement and an unallocated permitted address. A preview does not reserve or bind an address. Account creation revalidates the selection under the existing writer lease. Actual network-interface binding remains unqualified. Changing assigned account addresses or releasing reserved dedicated addresses is blocked until a verified target-bound transition is available.
+
 Account DELETE currently returns HTTP 412 after current-target authorization and exact username confirmation, without purging account state or deleting its identity. Contact-email-only PATCH also returns 412 before effects until a qualified metadata/index writer exists. Other successful configuration acknowledgements report global scope with `targetVerified: false`; they do not prove that the requested account hosting workload is working. Unknown or failed outcomes require review before retrying. Native account lifecycle, service and recovery acceptance remain open.
 
 ## Contributing

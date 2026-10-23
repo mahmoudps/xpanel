@@ -10,6 +10,7 @@ let h: TestStateStoreHandle
 
 beforeAll(async () => {
   h = await createTestStateStore()
+  for (const address of ['203.0.113.10', '203.0.113.11', '2001:db8::10']) await h.store.saveServerIp({ address, version: address.includes(':') ? 6 : 4, prefixLength: address.includes(':') ? 64 : 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: address === '203.0.113.10', notes: 'Diagnostic inventory' })
 })
 
 afterAll(async () => {

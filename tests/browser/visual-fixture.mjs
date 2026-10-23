@@ -100,6 +100,11 @@ export async function createVisualFixture({ port = 0, host = '127.0.0.1', qualif
       const url = new URL(incoming.url ?? '/', origin)
       const route = resolveWebDocumentRoute(url.pathname)
       const asset = url.pathname === '/favicon.ico' || url.pathname === '/assets' || url.pathname.startsWith('/assets/')
+      if (url.pathname === '/api/ips') {
+        outgoing.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-visual-fixture': 'synthetic' })
+        outgoing.end(incoming.method === 'HEAD' ? undefined : JSON.stringify({ scope: 'desired-state', hostBinding: 'unverified', defaultSharedIpv4: { poolId: 'visual-ip', address: account.ipv4 }, dedicated: { entitled: false, unallocated: [], count: 0 } }))
+        return
+      }
       if (!asset && !route) {
         outgoing.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
         outgoing.end(incoming.method === 'HEAD' ? undefined : 'No synthetic visual document exists here.')

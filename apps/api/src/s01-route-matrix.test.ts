@@ -164,6 +164,7 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       defaultMailboxQuotaMb: 250,
     })
 
+    await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
     alice = await state.store.createAccount({
       username: 'alice',
       passwordHash,

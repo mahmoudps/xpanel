@@ -79,6 +79,7 @@ describe('Portable Ubuntu and RHEL configuration plans (no host or browser proof
         shell: 'jailed',
         defaultMailboxQuotaMb: 1024,
       })
+      await stateHandle.store.saveServerIp({ address: '203.0.113.10', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
       await stateHandle.store.createAccount({
         username: 'xpalice',
         passwordHash: ARGON2,
@@ -299,6 +300,7 @@ describe('Portable Ubuntu and RHEL configuration plans (no host or browser proof
           shell: 'jailed',
           defaultMailboxQuotaMb: 1024,
         })
+        await stateHandle.store.saveServerIp({ address: '203.0.113.20', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
         await stateHandle.store.createAccount({
           username: 'eluser',
           passwordHash: ARGON2,

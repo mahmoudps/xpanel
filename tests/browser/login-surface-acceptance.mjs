@@ -71,6 +71,39 @@ async function inspect(page) {
   })
 }
 
+async function inspectNativeInputEdges(page, ids) {
+  const labels = await page.evaluate(ids => ids.map(id => {
+    const input = document.getElementById(id), label = document.querySelector('label[for="' + id + '"]')
+    if (!input || !label || !input.value || !input.checkVisibility() || !label.checkVisibility() || !label.textContent.trim()) return { id, missing: true }
+    const range = document.createRange(); range.selectNodeContents(label)
+    const labelBox = range.getBoundingClientRect(), control = input.getBoundingClientRect(), rtl = document.documentElement.dir === 'rtl'
+    return { id, missing: false, label_edge: rtl ? labelBox.right : labelBox.left, label_bottom: labelBox.bottom, control_top: control.top, rtl }
+  }), ids)
+  const cdp = await page.context().newCDPSession(page)
+  try {
+    const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true })
+    const descend = node => [node, ...(node.children ?? []).flatMap(descend), ...(node.shadowRoots ?? []).flatMap(descend)]
+    const nodes = descend(root)
+    for (const field of labels) {
+      assert.equal(field.missing, false, 'A native input measurement requires a nonempty visible value and label')
+      const inputs = nodes.filter(node => node.nodeName === 'INPUT' && node.attributes?.some((value, index, attrs) => value === 'id' && attrs[index + 1] === field.id))
+      assert.equal(inputs.length, 1, 'Resolve exactly one native input by its explicit ID')
+      const text = (inputs[0].shadowRoots ?? []).flatMap(descend).filter(node => node.nodeType === 3 && node.nodeValue.length > 0)
+      assert.equal(text.length, 1, 'Measure the actual native input value text, never a mirrored element')
+      const { object } = await cdp.send('DOM.resolveNode', { backendNodeId: text[0].backendNodeId })
+      const measured = await cdp.send('Runtime.callFunctionOn', { objectId: object.objectId, functionDeclaration: 'function () { const range = document.createRange(); range.selectNodeContents(this); const box = range.getBoundingClientRect(); return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, length: this.textContent.length } }', returnByValue: true })
+      assert.ok(!measured.exceptionDetails && measured.result.value?.width > 0 && measured.result.value.length > 0, 'Chromium must expose a nonempty native rendered value Range')
+      field.value_range = measured.result.value
+      field.value_edge = field.rtl ? field.value_range.right : field.value_range.left
+      field.edge_delta = Math.abs(field.label_edge - field.value_edge)
+      field.edge_basis = 'actual-native-input-text-range'
+      assert.ok(field.edge_delta <= 1, 'The actual filled native input value shares its label text edge within 1px')
+      assert.ok(field.value_range.top >= field.label_bottom - 1, 'The actual value lies below its label')
+    }
+  } finally { await cdp.detach() }
+  return labels
+}
+
 export async function runLoginSurfaceAcceptance({ output } = {}) {
   assert.equal(process.versions.node, readFileSync(join(root, '.node-version'), 'utf8').trim(), 'Use the pinned workspace runtime.')
   const destination = resolve(output ?? join(root, 'test-results/login-surfaces', `run-${Date.now()}`))
@@ -98,6 +131,11 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
         await expect(page.locator('html')).toHaveAttribute('data-login-visual-fixture', 'synthetic')
         assert.equal(await page.locator('h1').count(), 1)
         await expect(page.locator('h1')).toHaveText(headings[state.audience][state.locale])
+        await expect(page).toHaveTitle(audiences[state.audience] + ' — ' + headings[state.audience][state.locale])
+        await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/assets/favicon-' + state.audience + '.svg')
+        assert.equal(await page.getByRole('main').count(), 1)
+        await expect(page.getByRole('main')).toHaveAccessibleName(headings[state.audience][state.locale])
+        await expect(page.getByRole('form')).toHaveAccessibleName(headings[state.audience][state.locale])
         await expect(page.locator('.xp-brand__name')).toHaveText(audiences[state.audience])
         assert.equal(await page.locator('.xp-login-aside,.xp-login-context,.xp-login-footer').count(), 0, 'Dedicated sign-in must stay a functional form without marketing panels or footer prose')
         await expect(page.locator('[data-auth-submit]')).toBeEnabled()
@@ -109,7 +147,7 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
         assert.ok(metrics.submit.fits_first_viewport, 'Essential sign-in form must fit the first viewport')
         assert.equal(metrics.eastern_digits, false, 'Visible digits must be ASCII')
         assert.ok(metrics.targets.every(target => target.width >= 43.5 && target.height >= 43.5), 'All visible controls need 44px targets')
-        assert.ok(metrics.fields.length >= 2 && metrics.fields.every(field => field.label_text && field.edge_delta <= 1 && field.control.top >= field.label_bottom - 1 && field.control.height >= 48), 'Nonempty labels must align within 1px directly above 48px inputs')
+        assert.ok(metrics.fields.length >= 2 && metrics.fields.every(field => field.label_text && field.control.top >= field.label_bottom - 1 && field.control.height >= 48), 'Nonempty labels remain directly above 48px inputs; filled text edges are measured independently')
         assert.ok(metrics.definitions.every(field => field.edge_delta <= 1 && field.below), 'Context values must align directly below their labels')
         assert.ok(metrics.contrasts.every(item => item.ratio + 0.02 >= item.required), 'Semantic text contrast must meet AA ratios')
         assert.equal(metrics.fonts.ready, true, 'Fonts must settle within 5 seconds')
@@ -122,6 +160,16 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
           catch (error) { if (error.appliedFontObservation) metrics.fonts.applied_roles[role] = error.appliedFontObservation; throw error }
         }
         const password = page.locator('#login-password')
+        await page.locator('#login-username').fill('synthetic_123')
+        await password.fill('Synthetic123!')
+        await page.locator('[data-action="toggle-password"]').click()
+        await expect(password).toHaveAttribute('type', 'text')
+        outcome.metrics.native_value_edges = await inspectNativeInputEdges(page, ['login-username', 'login-password'])
+        assert.equal(outcome.metrics.native_value_edges.length, 2)
+        outcome.filled_screenshot = `screenshots/${state.id}-filled.png`
+        await page.screenshot({ path: join(destination, outcome.filled_screenshot), fullPage: true })
+        await page.locator('[data-action="toggle-password"]').click()
+        await expect(password).toHaveAttribute('type', 'password')
         const syntheticValue = 'Synthetic visual password 123!'
         await password.fill(syntheticValue)
         await page.locator('#login-username').focus(); await page.keyboard.press('Tab'); await expect(password).toBeFocused()

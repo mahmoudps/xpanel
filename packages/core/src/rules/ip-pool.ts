@@ -60,6 +60,7 @@ export const validateServerIpEntry = (v: unknown): ServerIpEntry => {
   const o = v as Record<string, unknown>
   const id = typeof o.id === 'string' && UUID_RE.test(o.id) ? o.id.toLowerCase() : fail('VALIDATION', 'invalid server IP id')
   const { address, version } = canonicalIp(o.address, 'address')
+  if (o.version !== undefined && o.version !== version) return fail('VALIDATION', 'IP family does not match address')
   const maxPrefix = version === 4 ? 32 : 128
   const prefixLength =
     typeof o.prefixLength === 'number' && Number.isSafeInteger(o.prefixLength) && o.prefixLength >= 1 && o.prefixLength <= maxPrefix
@@ -83,7 +84,9 @@ export const validateServerIpEntry = (v: unknown): ServerIpEntry => {
     ownerId = o.ownerId.toLowerCase()
   }
   const ptrHostname = o.ptrHostname == null || o.ptrHostname === '' ? null : validateDomainName(String(o.ptrHostname))
-  const isPrimary = typeof o.isPrimary === 'boolean' ? o.isPrimary : false
+  if (o.isPrimary !== undefined && typeof o.isPrimary !== 'boolean') return fail('VALIDATION', 'isPrimary must be a boolean')
+  const isPrimary = o.isPrimary === true
+  if (isPrimary && (role !== 'shared' || ownerKind !== 'root')) return fail('VALIDATION', 'the default IP must be root-owned and shared')
   const notes = typeof o.notes === 'string' && o.notes.length <= 255 && !/[\r\n\0]/.test(o.notes) ? o.notes : ''
 
   return {
@@ -101,6 +104,112 @@ export const validateServerIpEntry = (v: unknown): ServerIpEntry => {
   }
 }
 
+/** Inventory policy, never proof that the address is configured on a Linux interface. */
+export const validateServerIpPool = (value: unknown): ServerIpEntry[] => {
+  if (!Array.isArray(value) || value.length > 4096) return fail('VALIDATION', 'IP pool must contain at most 4096 entries')
+  const entries = value.map(validateServerIpEntry), ids = new Set<string>(), addresses = new Set<string>(), defaults = new Set<number>()
+  for (const entry of entries) {
+    hostingAddress(entry.address)
+    if (ids.has(entry.id) || addresses.has(entry.address)) fail('VALIDATION', 'duplicate IP pool ID or canonical address')
+    if (entry.isPrimary && defaults.has(entry.version)) fail('VALIDATION', 'only one default shared IP is allowed per address family')
+    ids.add(entry.id); addresses.add(entry.address); if (entry.isPrimary) defaults.add(entry.version)
+  }
+  return entries.sort((a, b) => a.address.localeCompare(b.address))
+}
+
+export type IpAssignmentRequest = { mode: 'shared' } | { mode: 'dedicated'; poolId?: Id }
+export interface AccountIpRequest {
+  ipAssignment?: IpAssignmentRequest
+  ipv4?: string
+  ipv6?: string | null
+  extraIps?: string[]
+}
+export interface AccountIpContext {
+  /** Omitted for a new-account preview; reads never allocate an account ID. */
+  accountId?: Id
+  ownerId: Id | null
+  planDedicatedIp: boolean
+  reseller: Pick<Reseller, 'id' | 'delegatedIps'> | null
+  pool: readonly ServerIpEntry[]
+  allAccounts: readonly Pick<Account, 'id' | 'ipv4' | 'ipv6' | 'extraIps'>[]
+  domains?: readonly (Pick<Domain, 'accountId' | 'ipv4' | 'ipv6'> & Partial<Pick<Domain, 'name'>>)[]
+  mailIpConfig?: MailIpConfig | null
+}
+const hostingAddress = (raw: string): string => {
+  const { address, version } = canonicalIp(raw), ip = parseIp(address)!
+  if (version === 4 ? ip.value >> 24n === 0n || ip.value >> 24n === 127n || ip.value >> 16n === 0xa9fen || ip.value >> 28n >= 0xen : ip.value === 0n || ip.value === 1n || ip.value >> 118n === 0x3fan || ip.value >> 120n === 0xffn) fail('VALIDATION', 'IP address cannot be assigned for hosting')
+  return address
+}
+const addressReferences = (address: string, context: AccountIpContext): boolean => {
+  const same = (raw: string | null | undefined) => raw != null && canonicalIp(raw).address === address
+  if (context.allAccounts.some(account => account.id !== context.accountId && [account.ipv4, account.ipv6, ...(account.extraIps ?? [])].some(same))) return true
+  if (context.domains?.some(domain => domain.accountId !== context.accountId && [domain.ipv4, domain.ipv6].some(same))) return true
+  const mail = context.mailIpConfig
+  return !!mail && ([mail.defaultIpv4, mail.defaultIpv6].some(same) || mail.domainOverrides.some(override =>
+    !context.domains?.some(domain => domain.accountId === context.accountId && domain.name === override.domainName)
+    && [override.ipv4, override.ipv6].some(same)))
+}
+const targetCanUse = (entry: ServerIpEntry, context: AccountIpContext): boolean => {
+  if (entry.role === 'mail') return false
+  if (entry.ownerKind === 'account') return entry.ownerId === context.accountId
+  if (entry.ownerKind === 'reseller') return entry.ownerId === context.ownerId
+  return context.ownerId === null || entry.role === 'shared' && entry.isPrimary || !!context.reseller?.delegatedIps.some(raw => canonicalIp(raw).address === entry.address)
+}
+const assignedAddress = (raw: unknown, context: AccountIpContext, version?: 4 | 6): string => {
+  const parsed = canonicalIp(raw)
+  if (version && parsed.version !== version) fail('VALIDATION', 'address family does not match requested assignment')
+  const address = hostingAddress(parsed.address), entry = context.pool.find(ip => ip.address === address)
+  if (!entry || !targetCanUse(entry, context)) return fail('FORBIDDEN', 'IP is not in the account owner’s assignable server pool')
+  if (entry.role === 'dedicated') {
+    if (!context.planDedicatedIp) fail('FORBIDDEN', 'the hosting plan does not permit a dedicated IP')
+    if (addressReferences(address, context)) fail('CONFLICT', 'dedicated IP is already reserved')
+  }
+  return address
+}
+
+/** Run under the state writer lease; the resulting account is the sole reservation record. */
+export const resolveAccountIpAssignment = (request: AccountIpRequest, context: AccountIpContext): { ipv4: string; ipv6?: string | null; extraIps?: string[] } => {
+  const pool = validateServerIpPool(context.pool)
+  context = { ...context, pool }
+  if (context.ownerId !== null && context.reseller?.id !== context.ownerId) fail('FORBIDDEN', 'account reseller context is unavailable')
+  const assignment = request.ipAssignment
+  if (assignment !== undefined && (typeof assignment !== 'object' || assignment === null || !['shared', 'dedicated'].includes(assignment.mode)
+    || Object.keys(assignment).some(key => key !== 'mode' && !(assignment.mode === 'dedicated' && key === 'poolId')))) fail('VALIDATION', 'invalid IP assignment request')
+  if (assignment?.mode === 'dedicated' && assignment.poolId !== undefined && (typeof assignment.poolId !== 'string' || !UUID_RE.test(assignment.poolId) || assignment.poolId !== assignment.poolId.toLowerCase())) fail('VALIDATION', 'poolId must be a canonical UUID')
+  if (assignment !== undefined && request.ipv4 !== undefined) fail('VALIDATION', 'IP assignment mode cannot be combined with a literal IPv4')
+  let ipv4: string
+  if (request.ipv4 !== undefined) ipv4 = assignedAddress(request.ipv4, context, 4)
+  else if (assignment?.mode === 'dedicated') {
+    if (!context.planDedicatedIp) fail('FORBIDDEN', 'the hosting plan does not permit a dedicated IP')
+    const selected = assignment.poolId === undefined ? undefined : pool.find(entry => entry.id === assignment.poolId)
+    if (assignment.poolId !== undefined && (!selected || selected.version !== 4 || selected.role !== 'dedicated' || !targetCanUse(selected, context))) fail('FORBIDDEN', 'dedicated IP selection is unavailable to this owner')
+    const entry = selected ?? pool.find(entry => entry.version === 4 && entry.role === 'dedicated' && targetCanUse(entry, context) && !addressReferences(entry.address, context))
+    if (!entry) return fail('PRECONDITION_FAILED', 'no unallocated dedicated IPv4 is available', { reason: 'dedicated_ipv4_unavailable', stateChanged: false })
+    ipv4 = assignedAddress(entry.address, context, 4)
+  } else {
+    const entry = pool.find(entry => entry.version === 4 && entry.isPrimary && entry.role === 'shared' && entry.ownerKind === 'root')
+    if (!entry) return fail('PRECONDITION_FAILED', 'no default shared IPv4 is configured', { reason: 'shared_ipv4_unavailable', stateChanged: false })
+    ipv4 = assignedAddress(entry.address, context, 4)
+  }
+  const ipv6 = request.ipv6 === undefined ? undefined : request.ipv6 === null ? null : assignedAddress(request.ipv6, context, 6)
+  const extraIps = request.extraIps === undefined ? undefined : validateIpList(request.extraIps).map(address => assignedAddress(address, context))
+  if (extraIps && extraIps.length !== request.extraIps!.length) fail('VALIDATION', 'an account address cannot be repeated')
+  const values = [ipv4, ...(ipv6 ? [ipv6] : []), ...(extraIps ?? [])]
+  if (new Set(values).size !== values.length) fail('VALIDATION', 'an account address cannot be repeated')
+  return { ipv4, ...(ipv6 !== undefined && { ipv6 }), ...(extraIps !== undefined && { extraIps }) }
+}
+
+/** Advisory desired-state projection; commit always repeats selection under the writer lease. */
+export const projectAccountIpAvailability = (raw: AccountIpContext) => {
+  const context = { ...raw, pool: validateServerIpPool(raw.pool) }
+  if (context.ownerId !== null && context.reseller?.id !== context.ownerId) fail('FORBIDDEN', 'account reseller context is unavailable')
+  const shared = context.pool.find(entry => entry.version === 4 && entry.isPrimary && entry.role === 'shared' && entry.ownerKind === 'root')
+  const unallocated = context.planDedicatedIp ? context.pool.filter(entry => entry.role === 'dedicated' && targetCanUse(entry, context) && !addressReferences(entry.address, context)).map(entry => ({ poolId: entry.id, address: entry.address, version: entry.version })) : []
+  return { scope: 'desired-state' as const, hostBinding: 'unverified' as const,
+    defaultSharedIpv4: shared ? { poolId: shared.id, address: shared.address } : null,
+    dedicated: { entitled: context.planDedicatedIp, unallocated, count: unallocated.length } }
+}
+
 /**
  * Verifies that an IPv4 or IPv6 address can be assigned to an account by the caller (`root` or `reseller`),
  * enforcing reseller delegation boundaries and dedicated-IP exclusivity across accounts.
@@ -112,6 +221,8 @@ export const assertIpAssignableToAccount = (
     callerKind?: 'root' | 'reseller'
     reseller?: Pick<Reseller, 'id' | 'delegatedIps'> | null
     accountId?: Id
+    ownerId?: Id | null
+    planDedicatedIp?: boolean
     pool?: readonly ServerIpEntry[]
     allAccounts?: readonly Pick<Account, 'id' | 'ipv4' | 'ipv6' | 'extraIps'>[]
   } = {},
@@ -121,51 +232,14 @@ export const assertIpAssignableToAccount = (
     fail('VALIDATION', `expected IPv${opts.expectedVersion} address, got IPv${version}`, { ip: address })
   }
 
-  const poolEntry = opts.pool?.find((e) => e.address === address)
-
-  // Reseller caller can only use IPs delegated to that reseller
-  if (opts.callerKind === 'reseller') {
-    const res = opts.reseller ?? fail('FORBIDDEN', 'reseller context is required')
-    const delegated = new Set(res.delegatedIps.map((ip) => canonicalIp(ip).address))
-    const ownedInPool = poolEntry?.ownerKind === 'reseller' && poolEntry.ownerId === res.id
-    if (!delegated.has(address) && !ownedInPool) {
-      return fail('FORBIDDEN', `IP address ${address} is not delegated to reseller`, { ip: address, resellerId: res.id })
-    }
-  }
-
-  if (poolEntry) {
-    if (poolEntry.ownerKind === 'account' && poolEntry.ownerId !== null && poolEntry.ownerId !== opts.accountId) {
-      fail('CONFLICT', `dedicated IP ${address} is reserved for another account`, { ip: address })
-    }
-    if (
-      poolEntry.ownerKind === 'reseller' &&
-      opts.reseller &&
-      poolEntry.ownerId !== null &&
-      poolEntry.ownerId !== opts.reseller.id
-    ) {
-      fail('FORBIDDEN', `IP ${address} belongs to another reseller`, { ip: address })
-    }
-    if (poolEntry.role === 'dedicated' && opts.allAccounts) {
-      const other = opts.allAccounts.find(
-        (a) =>
-          a.id !== opts.accountId &&
-          (a.ipv4 === address || a.ipv6 === address || (a.extraIps ?? []).includes(address)),
-      )
-      if (other) {
-        fail('CONFLICT', `dedicated IP ${address} is already in use by another account`, {
-          ip: address,
-          otherAccountId: other.id,
-        })
-      }
-    }
-  }
-
-  return address
+  const ownerId = opts.ownerId === undefined ? opts.callerKind === 'reseller' ? opts.reseller?.id ?? fail('FORBIDDEN', 'reseller context is required') : null : opts.ownerId
+  return assignedAddress(address, { accountId: opts.accountId, ownerId, planDedicatedIp: opts.planDedicatedIp ?? false,
+    reseller: opts.reseller ?? null, pool: validateServerIpPool(opts.pool ?? []), allAccounts: opts.allAccounts ?? [] }, opts.expectedVersion)
 }
 
 /**
- * Verifies that a domain-specific IPv4 or IPv6 override belongs to the owning account,
- * its reseller's delegated pool, or an available entry in the server IP pool.
+ * Verifies that a domain-specific IPv4 or IPv6 override is already assigned to its account.
+ * Delegation or unallocated inventory alone does not reserve an address for a domain.
  */
 export const assertIpAssignableToDomain = (
   rawIp: unknown,
@@ -185,26 +259,8 @@ export const assertIpAssignableToDomain = (
     opts.account.ipv4,
     ...(opts.account.ipv6 ? [opts.account.ipv6] : []),
     ...(opts.account.extraIps ?? []),
-  ])
+  ].map(value => canonicalIp(value).address))
   if (accountIps.has(address)) return address
-
-  if (opts.reseller) {
-    const delegated = new Set(opts.reseller.delegatedIps.map((ip) => canonicalIp(ip).address))
-    if (delegated.has(address)) return address
-  }
-
-  if (opts.pool && opts.pool.length > 0) {
-    const entry =
-      opts.pool.find((e) => e.address === address) ??
-      fail('FORBIDDEN', `IP ${address} is not in the server IP pool or assigned to this account`, { ip: address })
-    if (entry.ownerKind === 'account' && entry.ownerId !== opts.account.id) {
-      return fail('FORBIDDEN', `IP ${address} is assigned to another account`, { ip: address })
-    }
-    if (entry.ownerKind === 'reseller' && entry.ownerId !== opts.account.ownerId) {
-      return fail('FORBIDDEN', `IP ${address} is delegated to another reseller`, { ip: address })
-    }
-    return address
-  }
 
   fail('FORBIDDEN', `domain IP ${address} is not assigned to account`, { ip: address })
   return address

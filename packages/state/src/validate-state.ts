@@ -42,6 +42,7 @@ import {
   validateMailIpConfig,
   validatePrefixList,
   validateServerIpEntry,
+  validateServerIpPool,
   validateServerSettings,
   validateUsername,
 } from '@xpanel/core'
@@ -505,14 +506,7 @@ export const validateDomainCustomConfigFile = (
 }
 
 export const validateIpPoolFile = (v: unknown) => {
-  if (!Array.isArray(v) || v.length > 4096) return fail('VALIDATION', 'ipPool must be an array of at most 4096 entries')
-  const entries = v.map((e) => validateServerIpEntry(e))
-  const seenAddr = new Set<string>()
-  for (const e of entries) {
-    if (seenAddr.has(e.address)) fail('VALIDATION', `duplicate IP address in pool: ${e.address}`, { address: e.address })
-    seenAddr.add(e.address)
-  }
-  return entries.sort((a, b) => a.address.localeCompare(b.address))
+  return validateServerIpPool(v)
 }
 
 export const validateMailIpConfigFile = (v: unknown) => validateMailIpConfig(v)

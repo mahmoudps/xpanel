@@ -1544,6 +1544,7 @@ html[dir="rtl"] .xp-nav-section:not([open]) > .xp-nav-section__title::after { tr
   overflow-wrap: anywhere;
 }
 .xp-login-shell[data-login-audience] .xp-form { gap: var(--xp-space-field); }
+.xp-login-shell .xp-field > label.xp-label { padding-inline-start: calc(var(--xp-space-md) + 1px); }
 .xp-login-shell[data-login-audience] .xp-input,
 .xp-login-shell[data-login-audience] button[type="submit"] {
   min-block-size: var(--xp-login-control-size);
@@ -1837,6 +1838,64 @@ html[dir="rtl"] :is(.xp-io-monitor, .xp-website-analytics) .xp-kpi__value {
   border-color: var(--xp-border-focus);
   outline: var(--xp-focus-width) solid var(--xp-border-focus);
   outline-offset: var(--xp-focus-offset);
+}
+
+/* Native control states are scoped to authenticated workspaces. */
+.xp-workspace { --xp-control-edge: oklch(0.510 0.018 255); }
+[data-theme="light"] .xp-workspace { --xp-control-edge: #808b9c; }
+
+.xp-workspace :is(.xp-input, .xp-select, .xp-textarea),
+.xp-workspace :is(.xp-input, .xp-select, .xp-textarea):focus {
+  border-color: var(--xp-control-edge);
+}
+
+.xp-workspace :is(.xp-input, .xp-textarea)[readonly] {
+  background-color: var(--xp-bg-subtle);
+}
+
+/* Keep the native picker and options; only the closed control chrome is authored. */
+.xp-workspace select.xp-select:not([multiple]):not([size]) {
+  appearance: none;
+  min-block-size: var(--xp-hit-target);
+  line-height: 24px;
+  padding-inline-end: calc(var(--xp-space-md) + var(--xp-space-field));
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right calc(var(--xp-space-md) + 4px) center, right var(--xp-space-md) center;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+}
+
+html[dir="rtl"] .xp-workspace select.xp-select:not([multiple]):not([size]) {
+  background-position: left var(--xp-space-md) center, left calc(var(--xp-space-md) + 4px) center;
+}
+
+html[dir="rtl"] .xp-workspace select.xp-select[dir="ltr"]:not([multiple]):not([size]) {
+  padding-inline-start: calc(var(--xp-space-md) + var(--xp-space-field));
+  padding-inline-end: var(--xp-space-md);
+}
+
+.xp-workspace label[for]:has(+ :is(input.xp-input:not([type="checkbox"], [type="radio"]), select.xp-select, textarea.xp-textarea)),
+.xp-workspace label[for] + :is(input.xp-input:not([type="checkbox"], [type="radio"]), select.xp-select, textarea.xp-textarea) + .xp-help {
+  padding-inline: calc(var(--xp-space-md) + 1px);
+}
+
+@media (forced-colors: active) {
+  .xp-workspace select.xp-select:not([multiple]):not([size]),
+  html[dir="rtl"] .xp-workspace select.xp-select[dir="ltr"]:not([multiple]):not([size]) {
+    /* Native OS chrome preserves the user's high-contrast picker affordance. */
+    appearance: auto;
+    background-image: none;
+    padding-inline: var(--xp-space-md);
+  }
+}
+
+.xp-workspace .xp-btn:disabled {
+  background-color: var(--xp-bg-subtle);
+  border-color: var(--xp-control-edge);
+  color: var(--xp-text-secondary);
+  opacity: 1;
+  cursor: not-allowed;
+  transition: none;
 }
 
 .xp-input.xp-mono,

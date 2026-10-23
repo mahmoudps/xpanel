@@ -212,6 +212,7 @@ describe('production web renderer boundary regressions', () => {
     const accountInput = { passwordHash: PUBLIC_VECTOR, planId: plan.id, ownerId: null, contactEmail: 'private-summary-contact@example.test', ipv4: '192.0.2.199', shell: 'none' as const,
       php: { version: '8.3', handler: 'fpm' as const, fpm: { mode: 'ondemand' as const, maxChildren: 1, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} },
     }
+    await state.store.saveServerIp({ address: '192.0.2.199', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
     const owner = await state.store.createAccount({ ...accountInput, username: 'owner7', primaryDomain: 'owner7.example.test' })
     const other = await state.store.createAccount({ ...accountInput, username: 'other7', primaryDomain: 'private-other-account.example.test' })
     const principal = await createUserPrincipal(db.db, { username: owner.username, accountId: owner.id, passwordHash: PUBLIC_VECTOR })

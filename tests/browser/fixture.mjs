@@ -36,6 +36,7 @@ export async function createBrowserFixture() {
     const { id: fixturePlanId, ...planInput } = defaultPlan({ name: 'Browser fixture', featureListId: features.id })
     const plan = await store.createPlan(planInput)
     const ownerHash = await hashPasswordArgon2id(ownerPassword)
+    await store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
     const owner = await store.createAccount({
       username: 'browserowner', passwordHash: ownerHash, primaryDomain: 'browserowner.test',
       planId: plan.id, ownerId: null, contactEmail: 'owner@browserowner.test', ipv4: '192.0.2.10', shell: 'none',

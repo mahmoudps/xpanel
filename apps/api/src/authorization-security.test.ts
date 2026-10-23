@@ -32,6 +32,7 @@ describe('HTTP authorization security regressions', () => {
     await setTotpSecret(db.db, rootId, sealTotpSecret('JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', SERVER_SECRET), [])
     featureListId = (await state.store.createFeatureList({ name: 'Fixture features', ownerId: null, disabled: [] })).id
     const plan = await state.store.createPlan({ name: 'Fixture plan', ownerId: null, featureListId, resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 }, caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 10, forwarders: 10, mailingLists: 5, ftpAccounts: 5, databases: 5, phpWorkers: 5 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
+    await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
     alice = await state.store.createAccount({ username: 'alice', passwordHash, primaryDomain: 'alice.example.test', planId: plan.id, ownerId: null, contactEmail: 'owner@alice.example.test', ipv4: '192.0.2.10', shell: 'none', php })
     bob = await state.store.createAccount({ username: 'bobby', passwordHash, primaryDomain: 'bob.example.test', planId: plan.id, ownerId: null, contactEmail: 'owner@bob.example.test', ipv4: '192.0.2.10', shell: 'none', php })
     aliceId = (await createUserPrincipal(db.db, { username: alice.username, accountId: alice.id, passwordHash })).id

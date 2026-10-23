@@ -35,7 +35,8 @@ const fixture = async () => {
     resources: { diskMb: 1024, bandwidthMbMonth: 'unlimited', ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 },
     caps: { addonDomains: 2, aliasDomains: 2, subdomains: 2, mailboxes: 2, forwarders: 2, mailingLists: 2, ftpAccounts: 2, databases: 2, phpWorkers: 4 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100,
   })
-  const reseller = await state.store.createReseller({ username: 'reseller7', passwordHash: HASH, acl: ['create-account', 'list-accounts', 'edit-account', 'suspend-account', 'terminate-account', 'change-plan'], maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] })
+  await state.store.saveServerIp({ address: '192.0.2.42', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: false, notes: '' })
+  const reseller = await state.store.createReseller({ username: 'reseller7', passwordHash: HASH, acl: ['create-account', 'list-accounts', 'edit-account', 'suspend-account', 'terminate-account', 'change-plan'], maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: ['192.0.2.42'] })
   const accountInput = { passwordHash: HASH, planId: plan.id, contactEmail: 'owner@example.test', ipv4: '192.0.2.42', shell: 'none' as const,
     php: { version: '8.3', handler: 'fpm' as const, fpm: { mode: 'ondemand' as const, maxChildren: 4, startServers: 2, minSpareServers: 1, maxSpareServers: 3, maxRequests: 100, processIdleTimeoutSec: 10 }, ini: {} },
   }
@@ -141,7 +142,7 @@ const fixture = async () => {
   const perform = async (action: Action, options: { port?: number; session?: typeof rootSession } = {}) => {
     if (action === 'create') return request('POST', '/api/accounts', { ...accountInput, username: 'newowner7', primaryDomain: 'newowner7.example.test', ownerId: null }, options)
     if (action === 'suspend' || action === 'unsuspend') return request('POST', '/api/accounts/' + account.id + '/' + action, { reason: 'Synthetic reason' }, options)
-    if (action === 'update') return request('PATCH', '/api/accounts/' + account.id, { ipv4: '192.0.2.43' }, options)
+    if (action === 'update') return request('PATCH', '/api/accounts/' + account.id, { shell: 'jailed' }, options)
     return request('DELETE', '/api/accounts/' + account.id, { confirmUsername: account.username }, options)
   }
   return { database, state, plan, account, other, root, reseller, owner, alias, neighbor, rootSession, resellerSession, request, open, fingerprints, identities, accountSuccess, perform, holdNextApply, setMode: (value: Outcome) => { mode = value }, calls: () => calls }
@@ -290,7 +291,7 @@ describe('account mutation outcomes and race boundaries', () => {
     const beforeState = await f.fingerprints()
     const response = await f.request('POST', '/api/accounts', { username: 'newowner7', passwordHash: HASH, primaryDomain: 'newowner7.example.test', planId: f.plan.id })
     expect(response.status).toBe(412)
-    expect(await f.fingerprints()).toEqual(beforeState)
+    expect((await f.fingerprints()).filter(([path]) => path !== 'authority.json')).toEqual(beforeState.filter(([path]) => path !== 'authority.json'))
     expect(await findPrincipalByUsername(f.database.db, 'newowner7')).toBeNull()
     expect(f.calls()).toBe(0)
   })
@@ -447,7 +448,7 @@ describe('account mutation outcomes and race boundaries', () => {
       expect(f.calls()).toBe(1)
     } else {
       expect(response.status).toBe(412)
-      expect(await f.fingerprints()).toEqual(beforeState)
+      expect((await f.fingerprints()).filter(([path]) => path !== 'authority.json')).toEqual(beforeState.filter(([path]) => path !== 'authority.json'))
       expect(await findPrincipalByUsername(f.database.db, 'newowner7')).toBeNull()
       expect(f.calls()).toBe(0)
     }

@@ -82,7 +82,7 @@ async function geometry(page) {
       const isControl = /^(INPUT|SELECT|TEXTAREA)$/.test(value.tagName)
       const isBadge = value.classList.contains('xp-badge')
       const valueRange = document.createRange(); valueRange.selectNodeContents(value)
-      const valueRect = isControl || isBadge ? box : valueRange.getBoundingClientRect()
+      const valueRect = isControl ? { left: box.left + parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth), right: box.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth) } : isBadge ? box : valueRange.getBoundingClientRect()
       return [{ id: value.id || null, tag: value.tagName, right_delta: Math.abs(labelRect.right - valueRect.right), left_delta: Math.abs(labelRect.left - valueRect.left),
         label_bottom: labelRect.bottom, value_top: box.top, direction: style.direction, text_align: style.textAlign, explicit_ltr: value.getAttribute('dir') === 'ltr', control: isControl, value_kind: isBadge ? 'badge_outer_box' : isControl ? 'control_outer_box' : 'plain_value_text' }]
     })

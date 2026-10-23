@@ -223,9 +223,16 @@ export function renderWebApp(state: WebAppRenderState): string {
     },
   }
 
-  const pageTitle =
-    state.title ??
-    `${t(locale, `surface.${state.surface}`)} — ${t(locale, 'app.title')}`
+  const loginAudience = state.surface === 'login' && (state.login?.audience === 'xpanel' || state.login?.audience === 'xwhm' || state.login?.audience === 'xmail') ? state.login.audience : undefined
+  const loginIdentity = loginAudience ? {
+    xpanel: { brand: 'xPanel', en: 'Account sign in', ar: 'دخول الحساب' },
+    xwhm: { brand: 'xWHM', en: 'Server sign in', ar: 'دخول إدارة الخادم' },
+    xmail: { brand: 'xMail', en: 'Mail sign in', ar: 'دخول البريد' },
+  }[loginAudience] : undefined
+  const pageTitle = state.title ?? (loginIdentity
+    ? `${loginIdentity.brand} — ${loginIdentity[locale]}`
+    : `${t(locale, `surface.${state.surface}`)} — ${t(locale, 'app.title')}`)
+  const faviconHref = loginAudience ? `/assets/favicon-${loginAudience}.svg` : '/assets/favicon.svg'
 
   let surfaceBodyHtml = ''
   const activeRoute = state.activeRoute ?? (state.surface === 'xwhm' ? '/whm' : state.surface === 'xmail' ? '/mail/inbox' : state.surface === 'login' ? '/login' : '/home')
@@ -296,7 +303,7 @@ export function renderWebApp(state: WebAppRenderState): string {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(pageTitle)}</title>
-  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+  <link rel="icon" type="image/svg+xml" href="${faviconHref}" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -315,7 +322,16 @@ export function renderWebApp(state: WebAppRenderState): string {
 
 const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#1D5BD6"/><text x="20" y="27" text-anchor="middle" fill="#FFFFFF" font-family="monospace" font-weight="700" font-size="22">x</text></svg>`
 
+const LOGIN_FAVICONS = {
+  xpanel: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#1D5BD6"/><g transform="translate(8 8)" fill="none" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3"/><path d="M5 20v-2a7 7 0 0 1 14 0v2"/></g></svg>',
+  xwhm: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#101828"/><g transform="translate(8 8)" fill="none" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01M12 6.5h5M12 17.5h5"/></g></svg>',
+  xmail: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#087F5B"/><g transform="translate(8 8)" fill="none" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></g></svg>',
+}
+
 const PUBLIC_STATIC_ASSETS: Readonly<Record<string, { body: string; contentType: string }>> = {
+  '/assets/favicon-xpanel.svg': { body: LOGIN_FAVICONS.xpanel, contentType: 'image/svg+xml; charset=utf-8' },
+  '/assets/favicon-xwhm.svg': { body: LOGIN_FAVICONS.xwhm, contentType: 'image/svg+xml; charset=utf-8' },
+  '/assets/favicon-xmail.svg': { body: LOGIN_FAVICONS.xmail, contentType: 'image/svg+xml; charset=utf-8' },
   '/favicon.ico': {
     body: FAVICON_SVG,
     contentType: 'image/svg+xml; charset=utf-8',

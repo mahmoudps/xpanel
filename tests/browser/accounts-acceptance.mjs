@@ -36,6 +36,12 @@ async function fixture() {
     if (url.pathname.startsWith('/api/')) {
       res.setHeader('content-type', 'application/json')
       if (url.pathname === '/api/auth/me') { res.end(JSON.stringify({ csrfToken: 'synthetic-ui-fixture-csrf' })); return }
+      if (url.pathname === '/api/ips' && req.method === 'GET') {
+        assert.equal(url.searchParams.get('view'), 'allocation')
+        assert.equal(url.searchParams.get('planId'), plan.id)
+        res.end(JSON.stringify({ scope: 'desired-state', hostBinding: 'unverified', defaultSharedIpv4: { poolId: '10000000-0000-4000-8000-000000000001', address: alpha.ipv4 }, dedicated: { entitled: false, unallocated: [], count: 0 } }))
+        return
+      }
       let raw = ''
       for await (const chunk of req) raw += chunk
       const body = raw ? JSON.parse(raw) : {}
@@ -151,6 +157,7 @@ async function createAccountGate(page, host, state, result, destination, expect)
   result.requests = host.requests.slice(initial)
   assert.equal(result.requests.length, 2)
   assert.equal(result.requests.every(request => request.path === '/api/accounts' && request.method === 'POST' && request.csrf === 'synthetic-ui-fixture-csrf'), true)
+  assert.equal(result.requests.every(request => request.body.ipAssignment?.mode === 'shared' && request.body.ipv4 === undefined && request.body.ipv6 === undefined), true)
   await page.screenshot({ path: join(destination, 'screenshots/' + state.id + '-pending.png'), fullPage: true })
   await page.reload()
   const conflictForm = page.locator('[data-create-account-form]')

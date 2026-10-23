@@ -1020,8 +1020,15 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     var button = form.querySelector('button[type="submit"]');
     var feedback = form.querySelector('[data-account-create-status]');
     var password = form.querySelector('[name="password"]');
-    if (!button || !feedback || !password) return;
+    var plan = form.querySelector('[name="planId"]');
+    var assignment = form.querySelector('[name="ipAssignment"]');
+    var ipFeedback = form.querySelector('[data-account-ip-status]');
+    var ipAddress = form.querySelector('[data-account-ip-address]');
+    var ipRefresh = form.querySelector('[data-account-ip-refresh]');
+    if (!button || !feedback || !password || !plan || !assignment || !ipFeedback || !ipAddress || !ipRefresh) return;
     var busy = false, accepted = false, dirty = false, reviewRequired = false;
+    var canCreate = !button.disabled, wantedAssignment = 'shared', availability = null;
+    var previewController = null, previewTimer = null, previewSequence = 0, previewPlan = null;
     var controls = Array.prototype.map.call(form.querySelectorAll('input,select'), function (control) {
       return { element: control, disabled: control.disabled, readOnly: Boolean(control.readOnly) };
     });
@@ -1032,36 +1039,160 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       feedback.setAttribute('data-state', state);
       feedback.setAttribute('role', state === 'failed' ? 'alert' : 'status');
     }
+    function ipStatus(message, state) {
+      ipFeedback.textContent = message;
+      ipFeedback.setAttribute('data-state', state);
+      ipFeedback.setAttribute('role', state === 'failed' ? 'alert' : 'status');
+    }
+    function uuid(value) { return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value); }
+    function ipv4(value) {
+      if (typeof value !== 'string') return false;
+      var parts = value.split('.');
+      return parts.length === 4 && parts.every(function (part) { return /^(0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255; });
+    }
+    function parseAvailability(data) {
+      if (!data || data.scope !== 'desired-state' || data.hostBinding !== 'unverified' || !data.dedicated || typeof data.dedicated.entitled !== 'boolean' || !Array.isArray(data.dedicated.unallocated) || data.dedicated.unallocated.length > 4096 || data.dedicated.count !== data.dedicated.unallocated.length) throw new Error('Invalid IP availability');
+      var shared = data.defaultSharedIpv4;
+      if (shared !== null && (!shared || !uuid(shared.poolId) || !ipv4(shared.address))) throw new Error('Invalid shared IP availability');
+      var ids = {}, addresses = {}, available = [];
+      data.dedicated.unallocated.forEach(function (entry) {
+        if (!entry || !uuid(entry.poolId) || ![4, 6].includes(entry.version) || typeof entry.address !== 'string' || entry.address.length > 64 || ids[entry.poolId] || addresses[entry.address] || entry.version === 4 && !ipv4(entry.address)) throw new Error('Invalid dedicated IP availability');
+        ids[entry.poolId] = true; addresses[entry.address] = true;
+        if (entry.version === 4) available.push({ poolId: entry.poolId, address: entry.address });
+      });
+      if (!data.dedicated.entitled && available.length) throw new Error('Invalid dedicated IP entitlement');
+      return { shared: shared, entitled: data.dedicated.entitled, available: available };
+    }
+    function option(value, label, disabled) {
+      var element = document.createElement('option');
+      element.value = value; element.textContent = label; element.disabled = Boolean(disabled);
+      return element;
+    }
+    function updateIpSelection() {
+      var current = availability && previewPlan === plan.value ? availability : null;
+      var shared = wantedAssignment === 'shared';
+      var selected = current && current.available.find(function (entry) { return wantedAssignment === 'dedicated:' + entry.poolId; });
+      var available = shared ? !current || Boolean(current.shared) : Boolean(current && current.entitled && (wantedAssignment === 'dedicated:auto' ? current.available.length : selected));
+      assignment.setCustomValidity(available ? '' : shared ? copy('No default shared IPv4 is configured.', 'لم يُضبط عنوان IPv4 مشترك افتراضي.') : copy('This dedicated IPv4 selection is unavailable. Choose another assignment.', 'العنوان المخصص المحدد غير متاح. اختر تعيينًا آخر.'));
+      ipAddress.textContent = current && (shared ? current.shared && current.shared.address : selected && selected.address) || '';
+      ipAddress.parentElement.hidden = !ipAddress.textContent;
+      if (current) ipStatus(available ? copy('Host binding unverified.', 'لم يُتحقق من ربط العنوان بالخادم.') : assignment.validationMessage, available ? 'ready' : 'unavailable');
+      return available;
+    }
+    function renderIpOptions() {
+      var current = availability && previewPlan === plan.value ? availability : null;
+      var nodes = [option('shared', copy('Default shared', 'المشترك الافتراضي'), Boolean(current && !current.shared)), option('dedicated:auto', copy('Dedicated · Automatic', 'مخصص تلقائي'), !current || !current.entitled || !current.available.length)];
+      if (current) current.available.forEach(function (entry) { nodes.push(option('dedicated:' + entry.poolId, String.fromCharCode(0x2066) + entry.address + String.fromCharCode(0x2069), false)); });
+      if (!nodes.some(function (entry) { return entry.value === wantedAssignment; })) nodes.push(option(wantedAssignment, copy('Dedicated selection unavailable', 'التعيين المخصص غير متاح'), true));
+      assignment.replaceChildren.apply(assignment, nodes);
+      assignment.value = wantedAssignment;
+      assignment.disabled = !canCreate || busy || accepted || reviewRequired;
+      ipRefresh.disabled = !canCreate || busy || accepted || reviewRequired;
+      updateIpSelection();
+    }
+    function cancelPreview() {
+      previewSequence++;
+      if (previewController) previewController.abort();
+      if (previewTimer !== null) clearTimeout(previewTimer);
+      previewController = null; previewTimer = null;
+    }
+    function refreshIpAvailability() {
+      cancelPreview();
+      availability = null; previewPlan = plan.value;
+      renderIpOptions();
+      if (!canCreate || !plan.value || !form.isConnected || busy || accepted || reviewRequired) {
+        ipStatus(copy('IP availability unavailable.', 'توفر عناوين IP غير متاح.'), 'unavailable'); return;
+      }
+      ipStatus(copy('Loading IP availability…', 'جارٍ تحميل العناوين…'), 'loading');
+      if (typeof window.fetch !== 'function' || typeof AbortController !== 'function') {
+        ipStatus(copy('Could not load IP availability.', 'تعذر تحميل توفر العناوين.'), 'failed'); return;
+      }
+      var sequence = previewSequence, context = plan.value, controller = new AbortController();
+      previewController = controller;
+      previewTimer = setTimeout(function () { controller.abort(); }, 20000);
+      function current() { return sequence === previewSequence && context === plan.value && form.isConnected && !busy && !accepted && !reviewRequired; }
+      async function readPreviewJson(response) {
+        if (!response.body || typeof response.body.getReader !== 'function') { controller.abort(); throw new Error('IP availability stream unavailable'); }
+        var reader = response.body.getReader(), bytes = new Uint8Array(1048576), length = 0;
+        try {
+          while (true) {
+            var part = await reader.read();
+            if (!current()) { controller.abort(); await reader.cancel(); return null; }
+            if (part.done) break;
+            if (!(part.value instanceof Uint8Array) || part.value.byteLength > bytes.byteLength - length) {
+              controller.abort(); await reader.cancel(); throw new Error('IP availability response too large');
+            }
+            bytes.set(part.value, length); length += part.value.byteLength;
+          }
+          return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, length)));
+        } catch (error) {
+          controller.abort();
+          await reader.cancel().catch(function () {});
+          throw error;
+        } finally { reader.releaseLock(); }
+      }
+      window.fetch('/api/ips?view=allocation&planId=' + encodeURIComponent(context), { method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error', headers: { accept: 'application/json' }, signal: controller.signal }).then(function (response) {
+        if (!current()) { controller.abort(); return null; }
+        if (!response.ok) { var error = new Error('IP availability unavailable'); error.status = response.status; controller.abort(); throw error; }
+        return readPreviewJson(response);
+      }).then(function (data) {
+        if (!current()) return;
+        availability = parseAvailability(data); renderIpOptions();
+      }).catch(function (error) {
+        if (!current()) return;
+        availability = null; renderIpOptions();
+        ipStatus(error && error.status === 401 ? copy('Your session expired. Sign in again.', 'انتهت الجلسة. سجّل الدخول مجددًا.') : error && error.status === 403 ? copy('IP availability is not permitted for this plan.', 'لا تملك صلاحية عرض العناوين لهذه الخطة.') : copy('Could not load IP availability.', 'تعذر تحميل توفر العناوين.'), 'failed');
+      }).finally(function () {
+        if (sequence !== previewSequence) return;
+        if (previewTimer !== null) clearTimeout(previewTimer);
+        previewController = null; previewTimer = null;
+      });
+    }
+    assignment.addEventListener('change', function () {
+      wantedAssignment = assignment.value; dirty = true; updateIpSelection();
+    });
+    plan.addEventListener('change', function () {
+      dirty = true; refreshIpAvailability();
+    });
+    ipRefresh.addEventListener('click', function () { if (!busy && !accepted && !reviewRequired) refreshIpAvailability(); });
+    window.addEventListener('pagehide', cancelPreview);
     form.addEventListener('input', function () { dirty = true; });
     window.addEventListener('beforeunload', function (event) {
       if (!dirty || accepted) return;
       event.preventDefault(); event.returnValue = '';
     });
+    refreshIpAvailability();
     form.addEventListener('submit', function (event) {
       event.preventDefault();
-      if (busy || accepted || button.disabled || !form.reportValidity()) return;
+      if (busy || accepted || button.disabled || !updateIpSelection() || !form.reportValidity()) return;
       if (typeof window.xpanelSessionRequest !== 'function') {
         status(copy('Account creation is unavailable. No changes were made.', 'إنشاء الحساب غير متاح. لم تُجرَ تغييرات.'), 'failed'); return;
       }
       var value = function (name) { return form.querySelector('[name="' + name + '"]').value.trim(); };
-      var body = { username: value('username'), primaryDomain: value('primaryDomain'), planId: value('planId'), password: password.value };
-      var ipv4 = value('ipv4'), ipv6 = value('ipv6');
-      if (ipv4) body.ipv4 = ipv4;
+      var ipAssignment = wantedAssignment === 'shared' ? { mode: 'shared' } : { mode: 'dedicated' };
+      if (wantedAssignment !== 'shared' && wantedAssignment !== 'dedicated:auto') ipAssignment.poolId = wantedAssignment.slice('dedicated:'.length);
+      var body = { username: value('username'), primaryDomain: value('primaryDomain'), planId: value('planId'), password: password.value, ipAssignment: ipAssignment };
+      var ipv6 = value('ipv6');
       if (ipv6) body.ipv6 = ipv6;
       var submittedValues = controls.map(function (state) {
         return state.element.name === 'password' ? '' : state.element.value;
       });
+      cancelPreview();
       busy = true; button.disabled = true; form.setAttribute('aria-busy', 'true');
+      ipRefresh.disabled = true;
       controls.forEach(function (state) { state.element.disabled = true; });
       password.value = '';
       status(copy('Submitting…', 'جارٍ الإرسال…'), 'loading');
+      var refreshAfterRefusal = false;
       Promise.resolve().then(function () { return window.xpanelSessionRequest('POST', '/api/accounts', body); }).then(function (result) {
         var execution = result && result.execution;
-        if (!result || !result.account || result.account.username !== body.username || !result.reconcile || result.reconcile.status !== 'applied' || !execution || execution.status !== 'configuration_applied' || execution.scope !== 'global_configuration' || execution.targetVerified !== false || execution.verificationRequired !== true) {
+        if (!result || !result.account || result.account.username !== body.username || !ipv4(result.account.ipv4) || !result.reconcile || result.reconcile.status !== 'applied' || !execution || execution.status !== 'configuration_applied' || execution.scope !== 'global_configuration' || execution.targetVerified !== false || execution.verificationRequired !== true) {
           reviewRequired = true;
           status(copy('The result could not be verified. Review accounts before retrying.', 'تعذر التحقق من النتيجة. راجع الحسابات قبل إعادة المحاولة.'), 'failed'); return;
         }
         accepted = true; dirty = false;
+        ipAddress.textContent = result.account.ipv4; ipAddress.parentElement.hidden = false;
+        ipStatus(copy('Host binding unverified.', 'لم يُتحقق من ربط العنوان بالخادم.'), 'ready');
         status(copy('Account configuration created. Hosting verification is still required.', 'أُنشئ إعداد الحساب. ما زال يلزم التحقق من الاستضافة.'), 'pending');
       }).catch(function (error) {
         var details = error && error.details || {};
@@ -1072,7 +1203,11 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         if (!reviewRequired) {
           if (error && error.status === 401) message = copy('Your session expired. Sign in again.', 'انتهت الجلسة. سجّل الدخول مجددًا.');
           else if (error && error.status === 403) message = copy('You do not have permission to create accounts.', 'لا تملك صلاحية إنشاء الحسابات.');
-          else if (details.reason === 'account_ipv4_unavailable') message = copy('Choose a server IPv4 address before creating the account.', 'اختر عنوان IPv4 للخادم قبل إنشاء الحساب.');
+          else if (details.reason === 'shared_ipv4_unavailable' || details.reason === 'account_ipv4_unavailable') {
+            message = copy('No default shared IPv4 is available. Review the IP pool.', 'لا يتوفر عنوان IPv4 مشترك افتراضي. راجع مخزون العناوين.'); refreshAfterRefusal = true;
+          } else if (details.reason === 'dedicated_ipv4_unavailable') {
+            message = copy('No dedicated IPv4 is available. Choose another assignment.', 'لا يتوفر عنوان IPv4 مخصص. اختر تعيينًا آخر.'); refreshAfterRefusal = true;
+          }
         }
         status(message, 'failed');
       }).finally(function () {
@@ -1083,7 +1218,9 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
           control.disabled = reviewRequired || (accepted && control.tagName === 'SELECT') || state.disabled;
           if (control.tagName === 'INPUT') control.readOnly = accepted || state.readOnly;
         });
-        busy = false; form.setAttribute('aria-busy', 'false'); button.disabled = accepted || reviewRequired;
+        busy = false; form.setAttribute('aria-busy', 'false'); button.disabled = accepted || reviewRequired || !canCreate;
+        ipRefresh.disabled = accepted || reviewRequired || !canCreate;
+        if (refreshAfterRefusal) refreshIpAvailability();
         feedback.focus();
       });
     });

@@ -195,6 +195,7 @@ describe('reconciler capability preflight ordering', () => {
       })
       // Shape-only state fixture; these tests never authenticate a password.
       const passwordHash = '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNo'
+      await state.store.saveServerIp({ address: '203.0.113.10', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
       const account = await state.store.createAccount({
         username: 'alice', passwordHash, primaryDomain: 'alice.example.com', planId: plan.id,
         ownerId: null, contactEmail: 'alice@example.com', ipv4: '203.0.113.10', shell: 'none',

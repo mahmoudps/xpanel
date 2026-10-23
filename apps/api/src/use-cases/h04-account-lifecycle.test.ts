@@ -97,6 +97,10 @@ async function createTestHarness() {
   })
   await store.markSetupComplete()
 
+  for (const address of ['203.0.113.10', '203.0.113.11', '203.0.113.12', '203.0.113.15', '203.0.113.20', '203.0.113.21', '203.0.113.30', '203.0.113.40', '203.0.113.41', '203.0.113.42']) {
+    await store.saveServerIp({ address, version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: address === '203.0.113.10', notes: '' })
+  }
+  await store.saveServerIp({ address: '2001:db8::10', version: 6, prefixLength: 64, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
   const featureList = await store.createFeatureList({
     name: 'default-full',
     ownerId: null,
@@ -545,7 +549,7 @@ describe('H04 Account Lifecycle Coordinator (Plans, Resellers, Provisioning, Sus
         totalBandwidthMb: 512000,
         oversell: false,
         nameservers: ['ns1.xpanel.test', 'ns2.xpanel.test'],
-        delegatedIps: ['203.0.113.21'],
+        delegatedIps: ['203.0.113.20', '203.0.113.21'],
         passwordHash: TEST_ARGON2_HASH,
       })
 

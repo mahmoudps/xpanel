@@ -9,6 +9,7 @@ import { groups, tools, visibleTools, visibleNavigation } from '@xpanel/catalog'
 import {
   fail,
   isXpanelError,
+  isUuid,
   assertAcl,
   parseIp,
   canonicalIp,
@@ -1498,12 +1499,6 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         requireAccountHostAgent()
         const username = validateUsername(body.username)
         const passwordHash = await passwordHashFromInput(body)
-        let ipv4 = body.ipv4
-        if (!ipv4) {
-          const pool = await deps.store.listServerIps()
-          ipv4 = pool.find(ip => ip.version === 4 && ip.isPrimary)?.address
-          if (!ipv4) return fail('PRECONDITION_FAILED', 'select a server IPv4 address before creating an account', { reason: 'account_ipv4_unavailable', stateChanged: false })
-        }
         let ownerId: Id | null
         let expectedRevision: number
         const lease = await deps.store.getWriterLock().acquire()
@@ -1518,7 +1513,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           expectedRevision = (await lease.assertFencingToken()).revision
         } finally { await lease.release() }
         const account = await deps.store.createAccount({ username, passwordHash, primaryDomain: body.primaryDomain, planId: body.planId,
-          ownerId, contactEmail: body.contactEmail ?? username + '@' + body.primaryDomain, ipv4,
+          ownerId, contactEmail: body.contactEmail ?? username + '@' + body.primaryDomain,
+          ...(body.ipv4 !== undefined && { ipv4: body.ipv4 }), ...(body.ipAssignment !== undefined && { ipAssignment: body.ipAssignment }),
           ...(body.ipv6 !== undefined && { ipv6: body.ipv6 }), ...(body.extraIps !== undefined && { extraIps: body.extraIps }),
           shell: body.shell ?? 'jailed', php: body.php ?? defaultPhp('8.3'), ...(body.homeBase !== undefined && { homeBase: body.homeBase }),
         }, { expectedRevision })
@@ -1619,6 +1615,26 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       // ---- Multi-IPv4 / IPv6 Pool Management -----------------------------------------
       if (method === 'GET' && pathname === '/api/ips') {
         const caller = await requireCaller(req)
+        if (url.searchParams.size > 0) {
+          const allowed = new Set(['view', 'planId', 'ownerId'])
+          for (const key of url.searchParams.keys()) {
+            if (!allowed.has(key) || url.searchParams.getAll(key).length !== 1) return fail('VALIDATION', 'invalid or repeated IP allocation query parameter')
+          }
+          const planId = url.searchParams.get('planId'), requestedOwner = url.searchParams.get('ownerId')
+          if (url.searchParams.get('view') !== 'allocation' || !isUuid(planId) || planId !== planId.toLowerCase()
+            || (requestedOwner !== null && (!isUuid(requestedOwner) || requestedOwner !== requestedOwner.toLowerCase()))) {
+            return fail('VALIDATION', 'allocation preview requires a canonical planId and optional ownerId UUID')
+          }
+          let ownerId: Id | null = requestedOwner
+          if (caller.principal.kind === 'reseller') {
+            const resellerId = await resolveResellerId(caller)
+            if (!resellerId || (requestedOwner !== null && requestedOwner !== resellerId)) return fail('FORBIDDEN', 'allocation preview owner must match the authenticated reseller')
+            ownerId = resellerId
+          } else if (caller.principal.kind !== 'root') {
+            return fail('FORBIDDEN', 'hosting administrator permission is required for allocation preview')
+          }
+          return jsonResponse(await deps.store.readAccountIpAllocationOptions({ planId, ownerId }))
+        }
         const all = await deps.store.listServerIps()
         if (caller.principal.kind === 'root') {
           return jsonResponse({ ips: all })
@@ -1639,6 +1655,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const caller = await requireCaller(req)
         await assertRoot(caller, 'ips.save')
         const body = await readJsonBody<Partial<ServerIpEntry> & { address: string }>(req)
+        if (typeof body.address !== 'string') return fail('VALIDATION', 'address must be an IP address string')
         const version: 4 | 6 = body.version ?? (body.address.includes(':') ? 6 : 4)
         const ip = await deps.store.saveServerIp({
           ...(body.id && { id: body.id }),
@@ -1670,7 +1687,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const caller = await requireCaller(req)
         await assertRoot(caller, 'ips.delete')
         const ipId = ipDeleteMatch[1]!.toLowerCase()
-        await deps.store.deleteServerIp(ipId)
+        if (!await deps.store.deleteServerIp(ipId)) return fail('NOT_FOUND', 'IP pool entry not found')
         const reconcile = await triggerReconcile(caller)
         await emitAudit({
           actor: caller.principal.username,

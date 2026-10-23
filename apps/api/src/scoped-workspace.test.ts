@@ -31,6 +31,7 @@ const fixture = async () => {
   const input = { passwordHash: HASH, planId: plan.id, ownerId: null, contactEmail: 'private-scoped-contact@example.test', ipv4: '192.0.2.10', shell: 'none' as const,
     php: { version: '8.3', handler: 'fpm' as const, fpm: { mode: 'ondemand' as const, maxChildren: 1, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} },
   }
+  await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
   const account = await state.store.createAccount({ ...input, username: 'owner7', primaryDomain: 'owner7.example.test' })
   const other = await state.store.createAccount({ ...input, username: 'other7', primaryDomain: 'private-other-scoped.example.test' })
   const owner = await createUserPrincipal(database.db, { username: account.username, accountId: account.id, passwordHash: HASH })

@@ -77,6 +77,7 @@ describe('generation restore preserves live desired state on refusal', () => {
     fault.baseRevision = 0
     fault.artifactsAtCommit = []
     state = await createTestStateStore()
+    await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: 'Diagnostic inventory' })
     const feature = await state.store.createFeatureList({ name: 'Snapshot features', ownerId: null, disabled: [] })
     const plan = await state.store.createPlan({
       name: 'Snapshot plan', ownerId: null, featureListId: feature.id,

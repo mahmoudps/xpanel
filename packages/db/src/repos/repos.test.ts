@@ -230,6 +230,7 @@ describe('reindexFromState & FTS5 searchIndex', () => {
         nameservers: ['ns1.xpanel.test'],
         delegatedIps: ['192.0.2.10'],
       })
+      await store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
       const acc = await store.createAccount({
         username: 'alice',
         passwordHash: ARGON2,

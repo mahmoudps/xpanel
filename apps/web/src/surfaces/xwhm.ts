@@ -414,8 +414,16 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
             <span class="xp-help" id="new-acc-password-help">${isAr ? '8 أحرف على الأقل.' : 'At least 8 characters.'}</span>
           </div>
           <div class="xp-accounts__field">
-          <label class="xp-label" for="new-acc-ipv4">${isAr ? 'عنوان IPv4' : 'IPv4 Address'}</label>
-          <input id="new-acc-ipv4" name="ipv4" type="text" class="xp-input xp-mono" dir="ltr" value="" />
+          <label class="xp-label" for="new-acc-ipv4">${isAr ? 'تعيين IPv4' : 'IPv4 assignment'}</label>
+          <select id="new-acc-ipv4" name="ipAssignment" class="xp-select" required aria-describedby="new-acc-ipv4-address new-acc-ipv4-status">
+            <option value="shared">${isAr ? 'المشترك الافتراضي' : 'Default shared'}</option>
+            <option value="dedicated:auto" disabled>${isAr ? 'مخصص تلقائي' : 'Dedicated · Automatic'}</option>
+          </select>
+          <div class="xp-help">
+            <output class="xp-field-value xp-mono" data-account-ip-preview hidden><bdi id="new-acc-ipv4-address" dir="ltr" style="display:inline" data-account-ip-address></bdi></output>
+            <span id="new-acc-ipv4-status" data-account-ip-status role="status" aria-live="polite">${isAr ? 'جارٍ تحميل العناوين…' : 'Loading IP availability…'}</span>
+          </div>
+          <button type="button" class="xp-btn xp-btn--ghost" style="justify-self:start" data-account-ip-refresh>${isAr ? 'تحديث العناوين' : 'Refresh IP availability'}</button>
           </div>
           <div class="xp-accounts__field">
           <label class="xp-label" for="new-acc-ipv6">${isAr ? 'عنوان IPv6 (اختياري)' : 'IPv6 address (optional)'}</label>

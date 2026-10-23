@@ -93,6 +93,12 @@ jobs:
       - name: Exercise shell motion partial-setup recovery (synthetic failure injection)
         run: node scripts/toolchain.mjs node tests/browser/shell-motion-exception-acceptance.mjs --output=test-results/shell-motion-exception-${{ github.run_id }}-${{ github.run_attempt }}
 
+      - name: Exercise browser native-control states and login boundaries (synthetic data)
+        run: node scripts/toolchain.mjs node tests/browser/native-control-states-acceptance.mjs --output=test-results/native-control-states-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Exercise advisory account IP allocation workflows (synthetic data)
+        run: node scripts/toolchain.mjs node tests/browser/ip-allocation-acceptance.mjs --output=test-results/ip-allocation-${{ github.run_id }}-${{ github.run_attempt }}
+
   qualification-prerequisites:
     if: github.event_name == 'workflow_dispatch'
     name: Read-only Linux prerequisite report (qualification not run)

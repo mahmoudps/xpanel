@@ -148,6 +148,22 @@ Cases cover measured zero, bounded thresholds and over-limit values, explicit un
 
 These are synthetic component and layout observations, not live resource collection, effective kernel limits, quota enforcement, authenticated scale, mail usage or reseller capacity proof. Bind full-suite results to the exact checkout; retain failures and before/after fingerprints.
 
+## Browser form-control states
+
+```bash
+node scripts/toolchain.mjs node tests/browser/native-control-states-acceptance.mjs --output=test-results/native-control-states
+```
+
+Use a new output directory. The harness checks workspace input/select/help states, English/Arabic alignment, disabled/read-only behavior, keyboard focus and forced-colors adaptation. It also captures each login audience to check that workspace selectors stay scoped. Native browser controls here are unrelated to privileged Linux helpers. External applied-font assertions remain required; this is not offline or cross-browser qualification.
+
+## Advisory account IP allocation
+
+```bash
+node scripts/toolchain.mjs node tests/browser/ip-allocation-acceptance.mjs --output=test-results/ip-allocation
+```
+
+Use a new output directory. Synthetic API replies exercise shared defaults, dedicated choices, preview failure, request races/cancellation and refused or uncertain submission outcomes. Portable router/state cases separately cover authorization, plan entitlement, allocation conflicts and preservation of legacy reservations. Preview is read-only and advisory; commit revalidates under the writer lease. No browser fixture or configuration acknowledgement proves network-interface binding or live provisioning.
+
 ## Native Linux tests
 
 Native tests are privileged and may create accounts, groups, systemd resources, mounts, quota filesystems and firewall fixtures. Use only an explicitly disposable native Linux VM with no customer data, useful workloads or shared state. Do not set the acknowledgement on a workstation, shared container, WSL session or production server. The runner does not invoke sudo or provision a missing VM for you.

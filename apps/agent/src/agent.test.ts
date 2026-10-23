@@ -100,6 +100,21 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
       shell,
       defaultMailboxQuotaMb: 1024,
     })
+    await stateHandle.store.saveServerIp({
+      address: '203.0.113.10',
+      version: 4,
+      prefixLength: 24,
+      interfaceName: 'eth0',
+      role: 'shared',
+      ownerKind: 'root',
+      ownerId: null,
+      ptrHostname: 'srv1.example.com',
+      isPrimary: true,
+      notes: 'Primary IPv4',
+    })
+    await stateHandle.store.saveServerIp({ address: '2001:db8::10', version: 6, prefixLength: 64, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    await stateHandle.store.saveServerIp({ address: '203.0.113.77', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: false, notes: '' })
+    await stateHandle.store.saveServerIp({ address: '2001:db8::77', version: 6, prefixLength: 64, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: false, notes: '' })
     const account = await stateHandle.store.createAccount({
       username: 'alice',
       passwordHash: ARGON2,
@@ -151,18 +166,6 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
     })
 
     // Save multi-IP pool and outbound mail IP configuration
-    await stateHandle.store.saveServerIp({
-      address: '203.0.113.10',
-      version: 4,
-      prefixLength: 24,
-      interfaceName: 'eth0',
-      role: 'shared',
-      ownerKind: 'root',
-      ownerId: null,
-      ptrHostname: 'srv1.example.com',
-      isPrimary: true,
-      notes: 'Primary IPv4',
-    })
     await stateHandle.store.saveMailIpConfig({
       mode: 'account-ip',
       defaultIpv4: '203.0.113.10',
@@ -290,6 +293,7 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
 
   it('routes IO analytics, website analytics and jailed shell through a fake executor with auth, RBAC and audit logging', async () => {
     const { account, plan } = await seedServerAndAccount('jailed')
+    await stateHandle.store.saveServerIp({ address: '203.0.113.11', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: false, notes: '' })
     const bob = await stateHandle.store.createAccount({
       username: 'bob',
       passwordHash: ARGON2,

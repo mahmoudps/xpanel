@@ -138,6 +138,7 @@ describe('R01 — state, identity & recovery authority (A18, A25, A58)', () => {
 
   beforeEach(async () => {
     h = await createTestStateStore()
+    for (const suffix of [10, 11, 20, 30, 31, 32, 40, 50, 60]) await h.store.saveServerIp({ address: `192.0.2.${suffix}`, version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: suffix === 10, notes: 'Diagnostic inventory' })
     const fl = await h.store.createFeatureList({
       name: 'Standard',
       ownerId: null,
@@ -246,11 +247,11 @@ describe('R01 — state, identity & recovery authority (A18, A25, A58)', () => {
 
   it('enforces fencing tokens, monotonic revisions, and expectedRevision CAS conflict detection', async () => {
     const auth0 = await h.store.getAuthorityMetadata()
-    // beforeEach ran createFeatureList (rev 1) and createPlan (rev 2)
-    expect(auth0.revision).toBe(2)
-    expect(auth0.fencingToken).toBeGreaterThanOrEqual(2)
+    // beforeEach registered 9 diagnostic IP entries, then the feature list and plan.
+    expect(auth0.revision).toBe(11)
+    expect(auth0.fencingToken).toBeGreaterThanOrEqual(11)
 
-    // Matching expectedRevision succeeds and increments revision to 3
+    // Matching expectedRevision succeeds and increments revision to 12.
     const acc = await h.store.createAccount(
       {
         username: 'casuser',
@@ -263,17 +264,17 @@ describe('R01 — state, identity & recovery authority (A18, A25, A58)', () => {
         shell: 'jailed',
         php: defaultPhp(),
       },
-      { expectedRevision: 2 },
+      { expectedRevision: 11 },
     )
     expect(acc.uid).toBe(20000)
 
     const auth1 = await h.store.getAuthorityMetadata()
-    expect(auth1.revision).toBe(3)
+    expect(auth1.revision).toBe(12)
     expect(auth1.fencingToken).toBeGreaterThan(auth0.fencingToken)
 
     // Stale expectedRevision is rejected with CONFLICT without mutating state
     await expect(
-      h.store.suspendAccount(acc.id, 'stale write attempt', { expectedRevision: 2 }),
+      h.store.suspendAccount(acc.id, 'stale write attempt', { expectedRevision: 11 }),
     ).rejects.toMatchObject({ code: 'CONFLICT' })
     expect((await h.store.getAccount(acc.id))?.status).toBe('active')
 
@@ -347,7 +348,7 @@ describe('R01 — state, identity & recovery authority (A18, A25, A58)', () => {
       JSON.stringify({
         op: 'createAccount:crasheduser',
         fencingToken: 99,
-        baseRevision: 2,
+        baseRevision: 11,
         createdRelPaths: ['accounts/crasheduser'],
         backups: [],
         recordedAt: new Date(Date.now() - 60_000).toISOString(),
@@ -450,14 +451,14 @@ describe('R01 — state, identity & recovery authority (A18, A25, A58)', () => {
     })
 
     const snap1 = await h.store.readSnapshot()
-    expect(snap1.revision).toBe(3)
+    expect(snap1.revision).toBe(12)
 
     // Saving the exact pre-read snapshot succeeds when revision has not drifted
     const saved1 = await h.store.saveGenerationSnapshot(1, snap1)
     expect(saved1.checksum).toBe(snap1.checksum)
     expect(saved1.revision).toBe(snap1.revision)
 
-    // Mutate state after reading snap1 so revision advances to 4
+    // Mutate state after reading snap1 so revision advances to 13.
     await h.store.createFeatureList({
       name: 'Concurrent mutation after compile',
       ownerId: null,

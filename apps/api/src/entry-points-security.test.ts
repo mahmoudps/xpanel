@@ -27,6 +27,7 @@ const fixture = async () => {
   const plan = await state.store.createPlan({ name: 'Standard', ownerId: null, featureListId: feature.id,
     resources: { diskMb: 1024, bandwidthMbMonth: 10240, ioReadBps: 10000000, ioWriteBps: 10000000, ioReadIops: 1000, ioWriteIops: 1000, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 },
     caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 5, forwarders: 5, mailingLists: 2, ftpAccounts: 5, databases: 5, phpWorkers: 4 }, dedicatedIp: false, shell: 'jailed', defaultMailboxQuotaMb: 512 })
+  await state.store.saveServerIp({ address: '203.0.113.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
   const account = await state.store.createAccount({ username: 'alice', passwordHash: HASH, primaryDomain: 'alice.example.test', planId: plan.id, ownerId: null, contactEmail: 'alice@example.test', ipv4: '203.0.113.10', shell: 'jailed',
     php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 4, startServers: 2, minSpareServers: 1, maxSpareServers: 3, maxRequests: 500, processIdleTimeoutSec: 10 }, ini: {} } })
   const user = await createUserPrincipal(database.db, { username: 'alice', passwordHash: HASH, accountId: account.id })

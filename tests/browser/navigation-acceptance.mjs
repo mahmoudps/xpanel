@@ -237,18 +237,68 @@ async function boundary(page, state, expect, observations) {
 }
 
 async function fields(page, state, expect, observations) {
-  const values = await page.evaluate(ids => ids.map(id => {
+  if (state.path === '/login') {
+    await page.locator('#login-username').fill('synthetic_123')
+    await page.locator('#login-password').fill('Synthetic123!')
+    await page.locator('[data-action="toggle-password"]').click()
+    await expect(page.locator('#login-password')).toHaveAttribute('type', 'text')
+  }
+  const values = await page.evaluate(({ ids, legacyLogin }) => ids.map(id => {
     const control = document.getElementById(id), label = document.querySelector(`label[for="${id}"]`)
     if (!control || !label || !label.textContent.trim() || !label.checkVisibility() || !control.checkVisibility()) return { id, missing: true }
     const range = document.createRange(); range.selectNodeContents(label)
-    const a = range.getBoundingClientRect(), b = control.getBoundingClientRect()
-    return { id, missing: false, label_bottom: a.bottom, value_top: b.top, edge_delta: Math.abs(document.dir === 'rtl' ? a.right - b.right : a.left - b.left), width: b.width, height: b.height, direction: getComputedStyle(control).direction, align: getComputedStyle(control).textAlign }
-  }), state.fields)
+    const a = range.getBoundingClientRect(), b = control.getBoundingClientRect(), style = getComputedStyle(control), rtl = document.dir === 'rtl'
+    const labelEdge = rtl ? a.right : a.left
+    const valueEdge = legacyLogin ? (rtl ? b.right : b.left) : (rtl ? b.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth) : b.left + parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth))
+    return { id, missing: false, label_bottom: a.bottom, label_edge: labelEdge, value_top: b.top, value_edge: valueEdge, edge_basis: legacyLogin ? 'pending-native-input-range' : 'native-control-text-content-box', edge_delta: Math.abs(labelEdge - valueEdge), width: b.width, height: b.height, direction: style.direction, align: style.textAlign, native_select: control.tagName === 'SELECT' }
+  }), { ids: state.fields, legacyLogin: state.path === '/login' })
+  if (state.path === '/login') {
+    const cdp = await page.context().newCDPSession(page)
+    try {
+      const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true })
+      const descend = node => [node, ...(node.children ?? []).flatMap(descend), ...(node.shadowRoots ?? []).flatMap(descend)]
+      const nodes = descend(root)
+      for (const value of values) {
+        const inputs = nodes.filter(node => node.nodeName === 'INPUT' && node.attributes?.some((item, index, attrs) => item === 'id' && attrs[index + 1] === value.id))
+        assert.equal(inputs.length, 1, 'Resolve exactly one login input for actual text measurement')
+        const text = (inputs[0].shadowRoots ?? []).flatMap(descend).filter(node => node.nodeType === 3 && node.nodeValue.length > 0)
+        assert.equal(text.length, 1, 'A nonempty native login value must be observable; a mirrored field cannot pass')
+        const { object } = await cdp.send('DOM.resolveNode', { backendNodeId: text[0].backendNodeId })
+        const measured = await cdp.send('Runtime.callFunctionOn', { objectId: object.objectId, functionDeclaration: 'function () { const range = document.createRange(); range.selectNodeContents(this); const box = range.getBoundingClientRect(); return { left: box.left, right: box.right, top: box.top, width: box.width, length: this.textContent.length } }', returnByValue: true })
+        assert.ok(!measured.exceptionDetails && measured.result.value?.width > 0 && measured.result.value.length > 0)
+        value.rendered_value = measured.result.value
+        value.value_edge = state.locale === 'ar' ? value.rendered_value.right : value.rendered_value.left
+        value.edge_basis = 'actual-native-input-text-range'
+        value.edge_delta = Math.abs(value.label_edge - value.value_edge)
+      }
+    } finally { await cdp.detach() }
+  }
+  // The closed native SELECT text lives in Chromium's UA shadow tree, not the OPTION box.
+  // Measure that actual rendered text Range so an extra native inner inset cannot pass.
+  if (values.some(value => value.native_select)) {
+    const cdp = await page.context().newCDPSession(page)
+    try {
+      const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true })
+      const find = (node, id) => node.nodeName === 'SELECT' && node.attributes?.some((value, index, attrs) => value === 'id' && attrs[index + 1] === id) ? node : [...(node.children ?? []), ...(node.shadowRoots ?? [])].map(child => find(child, id)).find(Boolean)
+      for (const value of values.filter(value => value.native_select)) {
+        const select = find(root, value.id)
+        const inner = select?.shadowRoots?.flatMap(node => node.children ?? []).find(node => node.attributes?.includes('-internal-select-inner-element'))
+        assert.ok(inner, 'The actual native SELECT value element must be observable')
+        const { object } = await cdp.send('DOM.resolveNode', { backendNodeId: inner.backendNodeId })
+        const measured = await cdp.send('Runtime.callFunctionOn', { objectId: object.objectId, functionDeclaration: 'function () { const range = document.createRange(); range.selectNodeContents(this); const box = range.getBoundingClientRect(); return { left: box.left, right: box.right, width: box.width, text: this.textContent } }', returnByValue: true })
+        assert.ok(measured.result.value.width > 0)
+        value.rendered_value = measured.result.value
+        value.value_edge = state.locale === 'ar' ? value.rendered_value.right : value.rendered_value.left
+        value.edge_basis = 'actual-native-select-text-range'
+        value.edge_delta = Math.abs(value.label_edge - value.value_edge)
+      }
+    } finally { await cdp.detach() }
+  }
   assert.equal(values.length, state.fields.length)
   assert.ok(values.length >= 2)
   for (const value of values) {
     assert.equal(value.missing, false, `Explicit field contract ${value.id} must exist and be visible`)
-    assert.ok(value.edge_delta <= 1, `Field ${value.id} shares its label's logical edge`)
+    assert.ok(value.edge_delta <= 1, `Field ${value.id} shares its label's logical content edge`)
     assert.ok(value.value_top >= value.label_bottom - 1, `Field ${value.id} lies below its label`)
     assert.ok(value.width >= 44 && value.height >= 44)
     if (state.locale === 'ar' && value.direction === 'ltr') assert.equal(value.align, 'right')

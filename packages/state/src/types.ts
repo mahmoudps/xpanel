@@ -10,6 +10,7 @@ import type {
   FeatureList,
   FirewallRule,
   Id,
+  IpAssignmentRequest,
   Limit,
   LockoutContext,
   MailIpConfig,
@@ -104,7 +105,9 @@ export interface NewAccount extends MutationOptions {
   /** reseller id, or null for root-owned */
   ownerId: Id | null
   contactEmail: string
-  ipv4: string
+  ipv4?: string
+  /** Explicit desired-state allocation; omission selects the persisted shared IPv4 default. */
+  ipAssignment?: IpAssignmentRequest
   ipv6?: string | null
   extraIps?: string[]
   shell: ShellAccess

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { navigation } from '@xpanel/catalog'
+import { serveWebUi } from './app.ts'
 import { resolveSurfaceSection } from './shell.ts'
 import { contextualizeDocumentLinks, contextualizeNavigationHref, resolveWebDocumentRoute } from './document-routes.ts'
 
@@ -48,5 +49,44 @@ describe('product document route identity and context', () => {
     const themeUrl = new URL(contextualizeNavigationHref('?surface=xwhm&lang=ar&theme=dark',context),'http://localhost')
     expect(themeUrl.searchParams.get('accountId')).toBe('selected-second-account')
     expect(themeUrl.searchParams.get('theme')).toBe('dark')
+  })
+})
+
+describe('public login document identity and static icons', () => {
+  it.each(['xpanel', 'xwhm', 'xmail'] as const)('serves a stable tenant-free SVG mark for %s', async audience => {
+    const request = new Request('http://localhost/assets/favicon-' + audience + '.svg')
+    const first = await serveWebUi(request)
+    const second = await serveWebUi(new Request(request.url + '?accountId=synthetic-private-context&lang=ar&target=xwhm'))
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(200)
+    expect(first.headers.get('content-type')).toBe('image/svg+xml; charset=utf-8')
+    const svg = await first.text()
+    expect(await second.text()).toBe(svg)
+    expect(svg).toContain('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">')
+    expect(svg).not.toMatch(/synthetic-private-context|script|foreignObject|href=|<text\b/)
+    const otherIcons = await Promise.all(['xpanel', 'xwhm', 'xmail'].filter(value => value !== audience).map(async value => (await serveWebUi(new Request('http://localhost/assets/favicon-' + value + '.svg'))).text()))
+    expect(otherIcons.every(other => other !== svg)).toBe(true)
+  })
+
+  it('does not promote a URL target into a document title or profile icon', async () => {
+    const generic = await serveWebUi(new Request('http://localhost/login?target=xwhm&audience=xmail'))
+    const genericHtml = await generic.text()
+    expect(genericHtml).toContain('<title>xPanel Sign In — xPanel Control Plane</title>')
+    expect(genericHtml).toContain('href="/assets/favicon.svg"')
+    expect(genericHtml).not.toMatch(/<div\b[^>]*\bdata-login-audience=/)
+    const bound = await serveWebUi(new Request('http://localhost/login?target=xwhm&lang=ar'), () => ({ surface: 'login', login: { audience: 'xmail', targetSurface: 'xmail' } }))
+    const boundHtml = await bound.text()
+    expect(boundHtml).toContain('<title>xMail — دخول البريد</title>')
+    expect(boundHtml).toContain('href="/assets/favicon-xmail.svg"')
+  })
+
+  it('preserves the generic icon and refuses invented profile asset paths', async () => {
+    const legacy = await serveWebUi(new Request('http://localhost/assets/favicon.svg'))
+    const alias = await serveWebUi(new Request('http://localhost/favicon.ico'))
+    expect(legacy.status).toBe(200)
+    expect(await legacy.text()).toBe(await alias.text())
+    for (const path of ['/assets/favicon-root.svg', '/assets/favicon-xmail.svg/extra']) {
+      expect((await serveWebUi(new Request('http://localhost' + path))).status).toBe(404)
+    }
   })
 })

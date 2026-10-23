@@ -14,6 +14,7 @@ let plan: Plan
 let featureList: FeatureList
 beforeEach(async () => {
   handle = await createTestStateStore()
+  for (const address of ['192.0.2.10', '192.0.2.11']) await handle.store.saveServerIp({ address, version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: address === '192.0.2.10', notes: 'Diagnostic inventory' })
   featureList = await handle.store.createFeatureList({ name: 'Scoped features', ownerId: null, disabled: [] })
   plan = await handle.store.createPlan({ name: 'Scoped plan', ownerId: null, featureListId: featureList.id,
     resources: { diskMb: 1000, bandwidthMbMonth: 'unlimited', ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
