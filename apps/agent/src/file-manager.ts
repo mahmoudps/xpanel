@@ -4,6 +4,8 @@ import type { Account, Limit } from '@xpanel/core'
 
 /** Browser text/code editor maximum UTF-8 payload: 1 MiB. */
 export const MAX_EDIT_BYTES = 1024 * 1024
+/** Confined binary upload and download maximum: 2 MiB. */
+export const MAX_BINARY_BYTES = 2 * 1024 * 1024
 export const MAX_FILE_MODE = 0o640
 export const MAX_DIR_MODE = 0o750
 export const MAX_FILE_LIST_ENTRIES = 10_000
@@ -34,6 +36,13 @@ export interface FileText {
   mtime: string
 }
 
+export interface FileBytes {
+  path: string
+  contentBase64: string
+  sizeBytes: number
+  mtime: string
+}
+
 export interface AccountFileContext {
   account: Readonly<FileAccount>
   homeRoot: string
@@ -48,6 +57,8 @@ export type AccountFileRequest =
   | { op: 'list'; path: string; showHidden: boolean }
   | { op: 'read'; path: string }
   | { op: 'write'; path: string; content: string; overwrite: boolean; mode: number }
+  | { op: 'put-bytes'; path: string; contentBase64: string; overwrite: boolean; mode: number }
+  | { op: 'get-bytes'; path: string }
   | { op: 'mkdir'; path: string; mode: number }
   | { op: 'chmod'; path: string; mode: number }
   | { op: 'trash'; path: string }
@@ -70,6 +81,20 @@ export interface JailedFileManagerOptions {
 }
 
 const TRASH_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
+
+/** Decode a canonical base64 payload. Rejects whitespace, URL-safe alphabet, and non-canonical padding. */
+export const decodeFileBase64 = (value: string): Buffer => {
+  if (typeof value !== 'string' || value.length > Math.ceil(MAX_BINARY_BYTES / 3) * 4) {
+    fail('VALIDATION', 'binary content must be canonical base64 within the upload limit')
+  }
+  if (value !== '' && !BASE64.test(value)) fail('VALIDATION', 'binary content must be canonical base64')
+  const bytes = Buffer.from(value, 'base64')
+  if (bytes.length > MAX_BINARY_BYTES || bytes.toString('base64') !== value) {
+    fail('VALIDATION', 'binary content must be canonical base64 within the upload limit')
+  }
+  return bytes
+}
 const MAX_RETENTION_DAYS = 36_500
 
 export const assertSafeFileMode = (mode: number): number => {
@@ -260,6 +285,30 @@ export class JailedFileManager {
     const entry = changedEntry(await this.execute({ op: 'write', path: relative, content, overwrite, mode }), 'write', relative)
     if (entry.kind !== 'file' || entry.mode !== mode || entry.sizeBytes !== Buffer.byteLength(content, 'utf8')) return invalidResult('write')
     return entry
+  }
+
+  async putBytes(path: string, contentBase64: string, opts: { overwrite?: boolean; mode?: number } = {}): Promise<FileEntry> {
+    const relative = contentPath(path)
+    const bytes = decodeFileBase64(contentBase64)
+    const mode = assertSafeFileMode(opts.mode ?? MAX_FILE_MODE)
+    const overwrite = booleanOption(opts.overwrite, true)
+    const entry = changedEntry(await this.execute({
+      op: 'put-bytes', path: relative, contentBase64: bytes.toString('base64'), overwrite, mode,
+    }), 'put-bytes', relative)
+    if (entry.kind !== 'file' || entry.mode !== mode || entry.sizeBytes !== bytes.length) return invalidResult('put-bytes')
+    return entry
+  }
+
+  async getBytes(path: string): Promise<FileBytes> {
+    const relative = contentPath(path)
+    const result = resultRecord(await this.execute({ op: 'get-bytes', path: relative }), ['path', 'contentBase64', 'sizeBytes', 'mtime'], 'get-bytes')
+    if (result.path !== relative || typeof result.contentBase64 !== 'string' || !validByteCount(result.sizeBytes) || !validTimestamp(result.mtime)) {
+      return invalidResult('get-bytes')
+    }
+    let bytes: Buffer
+    try { bytes = decodeFileBase64(result.contentBase64) } catch { return invalidResult('get-bytes') }
+    if (bytes.length !== result.sizeBytes) return invalidResult('get-bytes')
+    return { path: relative, contentBase64: bytes.toString('base64'), sizeBytes: bytes.length, mtime: result.mtime }
   }
 
   async mkdir(path: string, mode = MAX_DIR_MODE): Promise<FileEntry> {

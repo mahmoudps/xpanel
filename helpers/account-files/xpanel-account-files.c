@@ -35,8 +35,9 @@
 #endif
 
 #define XP_PROTOCOL_VERSION 1
-#define XP_MAX_STDIN_BYTES (2 * 1024 * 1024)
+#define XP_MAX_STDIN_BYTES (4 * 1024 * 1024)
 #define XP_MAX_EDIT_BYTES_CEILING (1024 * 1024)
+#define XP_MAX_BINARY_BYTES (2 * 1024 * 1024)
 #define XP_MAX_LIST_ENTRIES_CEILING 10000
 #define XP_MAX_PATH_BYTES 4096
 #define XP_MIN_ACCOUNT_ID 1000
@@ -1167,31 +1168,90 @@ static void op_read(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_e
   respond_success_raw(sb.data);
 }
 
-static void op_write(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_edit_bytes, int64_t max_file_mode) {
-  const char *path = NULL;
-  size_t path_len = 0;
-  const char *content = NULL;
-  size_t content_len = 0;
-  bool overwrite = true;
-  int64_t mode = 0;
+static int b64_digit(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '+') return 62;
+  if (c == '/') return 63;
+  return -1;
+}
 
-  if (!jv_get_str(req, "path", &path, &path_len) ||
-      !jv_get_str(req, "content", &content, &content_len) ||
-      !jv_get_bool(req, "overwrite", &overwrite) ||
-      !jv_get_int(req, "mode", &mode)) {
-    respond_error("VALIDATION", EINVAL, "write requires path, content, overwrite, and mode");
+static bool decode_base64(const char *in, size_t in_len, unsigned char **out, size_t *out_len) {
+  if (in_len == 0) {
+    unsigned char *empty = calloc(1, 1);
+    if (!empty) _exit(12);
+    *out = empty;
+    *out_len = 0;
+    return true;
   }
+  if ((in_len % 4) != 0 || in_len > ((size_t)XP_MAX_BINARY_BYTES + 2) / 3 * 4) return false;
+  size_t cap = in_len / 4 * 3;
+  unsigned char *buf = malloc(cap ? cap : 1);
+  if (!buf) _exit(12);
+  size_t n = 0;
+  for (size_t i = 0; i < in_len; i += 4) {
+    int pad = 0;
+    int v[4];
+    for (int j = 0; j < 4; j++) {
+      char c = in[i + (size_t)j];
+      if (c == '=') {
+        if (j < 2) {
+          free(buf);
+          return false;
+        }
+        v[j] = 0;
+        pad++;
+      } else if (pad != 0) {
+        free(buf);
+        return false;
+      } else {
+        int digit = b64_digit(c);
+        if (digit < 0) {
+          free(buf);
+          return false;
+        }
+        v[j] = digit;
+      }
+    }
+    if (pad > 2) {
+      free(buf);
+      return false;
+    }
+    buf[n++] = (unsigned char)((v[0] << 2) | (v[1] >> 4));
+    if (pad < 2) buf[n++] = (unsigned char)(((v[1] & 15) << 4) | (v[2] >> 2));
+    if (pad < 1) buf[n++] = (unsigned char)(((v[2] & 3) << 6) | v[3]);
+  }
+  if (n > (size_t)XP_MAX_BINARY_BYTES) {
+    free(buf);
+    return false;
+  }
+  *out = buf;
+  *out_len = n;
+  return true;
+}
+
+static const char B64_ALPHABET[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static void append_base64(StrBuf *sb, const unsigned char *data, size_t len) {
+  for (size_t i = 0; i < len; i += 3) {
+    unsigned int value = ((unsigned int)data[i]) << 16;
+    if (i + 1 < len) value |= ((unsigned int)data[i + 1]) << 8;
+    if (i + 2 < len) value |= (unsigned int)data[i + 2];
+    sb_append_char(sb, B64_ALPHABET[(value >> 18) & 63]);
+    sb_append_char(sb, B64_ALPHABET[(value >> 12) & 63]);
+    sb_append_char(sb, i + 1 < len ? B64_ALPHABET[(value >> 6) & 63] : '=');
+    sb_append_char(sb, i + 2 < len ? B64_ALPHABET[value & 63] : '=');
+  }
+}
+
+static void publish_regular_bytes(int home_dirfd, uid_t uid, const char *path, size_t path_len,
+                                  const unsigned char *bytes, size_t nbytes, bool overwrite, int64_t mode,
+                                  int64_t max_file_mode) {
   assert_safe_rel_path(path, path_len, false);
-  if (!is_valid_utf8(content, content_len)) {
-    respond_error("VALIDATION", EINVAL, "content must be valid UTF-8 text");
-  }
-  if ((int64_t)content_len > max_edit_bytes) {
-    respond_error("LIMIT_EXCEEDED", EFBIG, "content exceeds the 1 MiB editor limit");
-  }
   if (mode <= 0 || mode > max_file_mode || (mode & ~max_file_mode) != 0) {
     respond_error("VALIDATION", EINVAL, "regular file mode must not exceed 0640");
   }
-
   char parent_rel[XP_MAX_PATH_BYTES + 1];
   char base_name[NAME_MAX + 1];
   split_rel_path(path, parent_rel, base_name);
@@ -1243,8 +1303,8 @@ static void op_write(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_
   }
 
   size_t off = 0;
-  while (off < content_len) {
-    ssize_t n = write(tmp_fd, content + off, content_len - off);
+  while (off < nbytes) {
+    ssize_t n = write(tmp_fd, bytes + off, nbytes - off);
     if (n < 0) {
       if (errno == EINTR) continue;
       int err = errno;
@@ -1295,7 +1355,119 @@ static void op_write(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_
 
   StrBuf sb;
   sb_init(&sb, 256);
-  append_file_entry_json(&sb, base_name, path, "file", (int64_t)content_len, (mode_t)mode, &final_st.st_mtim);
+  append_file_entry_json(&sb, base_name, path, "file", (int64_t)nbytes, (mode_t)mode, &final_st.st_mtim);
+  respond_success_raw(sb.data);
+}
+
+static void op_write(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_edit_bytes, int64_t max_file_mode) {
+  const char *path = NULL;
+  size_t path_len = 0;
+  const char *content = NULL;
+  size_t content_len = 0;
+  bool overwrite = true;
+  int64_t mode = 0;
+
+  if (!jv_get_str(req, "path", &path, &path_len) ||
+      !jv_get_str(req, "content", &content, &content_len) ||
+      !jv_get_bool(req, "overwrite", &overwrite) ||
+      !jv_get_int(req, "mode", &mode)) {
+    respond_error("VALIDATION", EINVAL, "write requires path, content, overwrite, and mode");
+  }
+  if (!is_valid_utf8(content, content_len)) {
+    respond_error("VALIDATION", EINVAL, "content must be valid UTF-8 text");
+  }
+  if ((int64_t)content_len > max_edit_bytes) {
+    respond_error("LIMIT_EXCEEDED", EFBIG, "content exceeds the 1 MiB editor limit");
+  }
+  publish_regular_bytes(home_dirfd, uid, path, path_len, (const unsigned char *)content, content_len, overwrite, mode, max_file_mode);
+}
+
+static void op_put_bytes(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_file_mode) {
+  const char *path = NULL;
+  size_t path_len = 0;
+  const char *encoded = NULL;
+  size_t encoded_len = 0;
+  bool overwrite = true;
+  int64_t mode = 0;
+  if (!jv_get_str(req, "path", &path, &path_len) ||
+      !jv_get_str(req, "contentBase64", &encoded, &encoded_len) ||
+      !jv_get_bool(req, "overwrite", &overwrite) ||
+      !jv_get_int(req, "mode", &mode)) {
+    respond_error("VALIDATION", EINVAL, "put-bytes requires path, contentBase64, overwrite, and mode");
+  }
+  unsigned char *bytes = NULL;
+  size_t nbytes = 0;
+  if (!decode_base64(encoded, encoded_len, &bytes, &nbytes) || nbytes > (size_t)XP_MAX_BINARY_BYTES) {
+    free(bytes);
+    respond_error("VALIDATION", EINVAL, "binary content must be canonical base64 within 2 MiB");
+  }
+  publish_regular_bytes(home_dirfd, uid, path, path_len, bytes, nbytes, overwrite, mode, max_file_mode);
+}
+
+static void op_get_bytes(int home_dirfd, uid_t uid, const JsonVal *req) {
+  const char *path = NULL;
+  size_t path_len = 0;
+  if (!jv_get_str(req, "path", &path, &path_len)) {
+    respond_error("VALIDATION", EINVAL, "get-bytes requires a string path");
+  }
+  assert_safe_rel_path(path, path_len, false);
+  int fd = xp_openat2(home_dirfd, path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK, 0, XP_RESOLVE_CONFINED);
+  if (fd < 0) respond_errno(errno, "openat2 read failed");
+  struct stat st;
+  if (fstat(fd, &st) != 0) {
+    int err = errno;
+    close(fd);
+    respond_errno(err, "fstat read failed");
+  }
+  if (!S_ISREG(st.st_mode)) {
+    close(fd);
+    respond_error("FORBIDDEN", EACCES, "only regular files can be read");
+  }
+  if (st.st_uid != uid) {
+    close(fd);
+    respond_error("FORBIDDEN", EACCES, "file owner UID does not match account UID");
+  }
+  if (st.st_nlink > 1) {
+    close(fd);
+    respond_error("FORBIDDEN", EMLINK, "hardlinked files are forbidden");
+  }
+  if ((int64_t)st.st_size > XP_MAX_BINARY_BYTES) {
+    close(fd);
+    respond_error("LIMIT_EXCEEDED", EFBIG, "file exceeds the 2 MiB download limit");
+  }
+  size_t cap = (size_t)XP_MAX_BINARY_BYTES + 1;
+  unsigned char *buf = calloc(1, cap);
+  if (!buf) _exit(12);
+  size_t total = 0;
+  while (total < cap) {
+    ssize_t n = read(fd, buf + total, cap - total);
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      int err = errno;
+      close(fd);
+      free(buf);
+      respond_errno(err, "read failed");
+    }
+    if (n == 0) break;
+    total += (size_t)n;
+  }
+  close(fd);
+  if (total > (size_t)XP_MAX_BINARY_BYTES) {
+    free(buf);
+    respond_error("LIMIT_EXCEEDED", EFBIG, "file exceeds the 2 MiB download limit");
+  }
+  char mtime[32];
+  format_iso8601_utc(&st.st_mtim, mtime);
+  StrBuf sb;
+  sb_init(&sb, total + 256);
+  sb_append_str(&sb, "{\"path\":");
+  sb_append_json_str(&sb, path, path_len);
+  sb_append_str(&sb, ",\"contentBase64\":\"");
+  append_base64(&sb, buf, total);
+  sb_append_fmt(&sb, "\",\"sizeBytes\":%zu,\"mtime\":", total);
+  sb_append_json_cstr(&sb, mtime);
+  sb_append_char(&sb, '}');
+  free(buf);
   respond_success_raw(sb.data);
 }
 
@@ -2071,6 +2243,10 @@ int main(int argc, char **argv) {
     op_read(home_dirfd, account_uid, req, max_edit_bytes);
   } else if (strcmp(op, "write") == 0) {
     op_write(home_dirfd, account_uid, req, max_edit_bytes, max_file_mode);
+  } else if (strcmp(op, "put-bytes") == 0) {
+    op_put_bytes(home_dirfd, account_uid, req, max_file_mode);
+  } else if (strcmp(op, "get-bytes") == 0) {
+    op_get_bytes(home_dirfd, account_uid, req);
   } else if (strcmp(op, "mkdir") == 0) {
     op_mkdir(home_dirfd, account_uid, req, max_dir_mode);
   } else if (strcmp(op, "chmod") == 0) {

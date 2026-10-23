@@ -203,6 +203,7 @@ export interface AgentApp {
 
 const FILE_AUDIT_ACTIONS: Readonly<Record<string, string>> = {
   write: 'file.write',
+  'put-bytes': 'file.write',
   mkdir: 'file.mkdir',
   chmod: 'file.chmod',
   trash: 'file.trash',
@@ -369,13 +370,14 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
     const body = await readObjectBody(req)
     const fields: Record<string, readonly string[]> = {
       list: ['path', 'showHidden'], read: ['path'], write: ['path', 'content', 'overwrite', 'mode'],
+      'put-bytes': ['path', 'contentBase64', 'overwrite', 'mode'], 'get-bytes': ['path'],
       mkdir: ['path', 'mode'], chmod: ['path', 'mode'], trash: ['path'],
       'list-trash': [], restore: ['trashId', 'overwrite'], 'empty-trash': ['olderThanDays'],
     }
     if (typeof body.op !== 'string' || !Object.hasOwn(fields, body.op)) fail('VALIDATION', 'unsupported file operation')
     const op = body.op as string
     if (Object.keys(body).some(key => key !== 'op' && !fields[op]!.includes(key))) fail('VALIDATION', 'unknown file operation field')
-    for (const key of ['path', 'content', 'trashId']) {
+    for (const key of ['path', 'content', 'contentBase64', 'trashId']) {
       if (body[key] !== undefined && typeof body[key] !== 'string') fail('VALIDATION', `${key} must be a string`)
     }
     for (const key of ['overwrite', 'showHidden']) {
@@ -385,8 +387,9 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       if (body[key] !== undefined && typeof body[key] !== 'number') fail('VALIDATION', `${key} must be a number`)
     }
     if (op === 'write' && typeof body.content !== 'string') fail('VALIDATION', 'write content is required')
+    if (op === 'put-bytes' && typeof body.contentBase64 !== 'string') fail('VALIDATION', 'binary content is required')
     return body as {
-      op: string; path?: string; content?: string; overwrite?: boolean; mode?: number;
+      op: string; path?: string; content?: string; contentBase64?: string; overwrite?: boolean; mode?: number;
       showHidden?: boolean; trashId?: string; olderThanDays?: number
     }
   }
@@ -653,6 +656,14 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
                 ...(body.mode !== undefined && { mode: body.mode }),
               })
               break
+            case 'put-bytes':
+              result = await fm.putBytes(body.path ?? '', body.contentBase64 ?? '', {
+                overwrite: body.overwrite ?? true,
+                ...(body.mode !== undefined && { mode: body.mode }),
+              })
+              break
+            case 'get-bytes':
+              return jsonResponse(await fm.getBytes(body.path ?? ''))
             case 'mkdir':
               result = await fm.mkdir(body.path ?? '', body.mode ?? 0o750)
               break

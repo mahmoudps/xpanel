@@ -8,6 +8,11 @@ export interface HostCatalogSource {
 
 let cached: { at: number; token: string; catalog: readonly CatalogTool[] } | undefined
 
+/** Drops the short-lived host catalog so tests can observe a new health report. */
+export const resetQualifiedCatalogCache = (): void => {
+  cached = undefined
+}
+
 /** Ask the connected agent which implemented tools this host can run. */
 export const loadQualifiedCatalog = async (source: HostCatalogSource | null): Promise<readonly CatalogTool[]> => {
   if (process.env.XPANEL_HOST_QUALIFICATION === 'off' || source === null) return tools
