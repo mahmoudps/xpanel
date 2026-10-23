@@ -1155,6 +1155,27 @@ export const navigation: NavSurface[] = [
             "summary": "See the stored certificate state for every hostname on this account."
           },
           {
+            "id": "issue-certificate",
+            "name": "Issue certificate",
+            "route": "/security/ssl/issue",
+            "template": "custom",
+            "artboard": "PanelSsl",
+            "primaryAction": "Issue certificate",
+            "roles": [
+              "owner"
+            ],
+            "tools": [
+              "ssl-install"
+            ],
+            "keywords": [
+              "Install SSL",
+              "Let's Encrypt",
+              "HTTP-01",
+              "Issue certificate"
+            ],
+            "summary": "Issue or renew a certificate for one of this account's domains."
+          },
+          {
             "id": "certificate-files",
             "name": "Certificate files",
             "route": "/security/ssl/files",
@@ -1165,7 +1186,6 @@ export const navigation: NavSurface[] = [
               "owner"
             ],
             "tools": [
-              "ssl-install",
               "ssl-certificates",
               "ssl-private-keys",
               "ssl-csrs"
@@ -1175,7 +1195,7 @@ export const navigation: NavSurface[] = [
               "CSR",
               "Install SSL"
             ],
-            "summary": "Stored keys, requests and certificate files. Issuing a certificate stays here until this server has a working ACME client."
+            "summary": "Stored keys, requests and certificate files."
           },
           {
             "id": "account-security",

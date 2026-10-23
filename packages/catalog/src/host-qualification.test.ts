@@ -26,7 +26,16 @@ describe('host qualification', () => {
     expect(qualified.has('create-account')).toBe(false)
     expect(qualified.has('file-manager')).toBe(false)
     expect(qualified.has('email-accounts')).toBe(false)
+    expect(qualified.has('ssl-install')).toBe(false)
     for (const id of qualified) expect(PHASE1_TOOL_PROBES[id]?.every(probe => report.probes[probe] === 'passed')).toBe(true)
+  })
+
+  it('verifies certificate issuance when Apache and the ACME probe passed', () => {
+    const report = passed('linux', { 'control-plane': 'passed', apache: 'passed', acme: 'passed' })
+    const qualified = new Set(qualifyHostTools(tools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
+    expect(qualified.has('ssl-install')).toBe(true)
+    expect(qualified.has('ssl-tls-status')).toBe(true)
+    expect(qualified.has('create-account')).toBe(false)
   })
 
   it('stays unqualified when the operator turns host qualification off', () => {

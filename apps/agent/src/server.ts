@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto'
+import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, open } from 'node:fs/promises'
 import { once } from 'node:events'
@@ -7,6 +7,8 @@ import type { Server } from 'node:http'
 import { Socket } from 'node:net'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { fail, isUuid, isXpanelError } from '@xpanel/core'
+import { profileFor } from '@xpanel/os'
+import { edge } from '@xpanel/render'
 import type { Account, ErrorCode, Id, LiveEvent, Principal } from '@xpanel/core'
 import { appendAudit, getPrincipal, latestActive } from '@xpanel/db'
 import type { Db } from '@xpanel/db'
@@ -15,6 +17,8 @@ import { IoAnalyticsEngine, runJailedShellCommand, WebsiteAnalyticsEngine } from
 import { LinuxHostExecutor } from './executor.ts'
 import type { AgentExecutor } from './executor.ts'
 import { JailedFileManager } from './file-manager.ts'
+import { AcmeCertificateServiceAdapter } from './services/acme.ts'
+import { createHttp01AcmeClient } from './services/acme-client.ts'
 import { probeHostCapabilities } from './host-probes.ts'
 import type { AccountFileRunner } from './file-manager.ts'
 import {
@@ -449,7 +453,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
           os: deps.os,
           currentGeneration: currentGen,
           executor,
-          ...(executor === 'linux' ? { probes: probeHostCapabilities(Boolean(deps.accountFileRunner)) } : {}),
+          ...(executor === 'linux' ? { probes: probeHostCapabilities(Boolean(deps.accountFileRunner), true) } : {}),
           ...(verifiedPeer
             ? {
                 peer: {
@@ -720,6 +724,67 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
           }
           throw err
         }
+      }
+
+      const certificateMatch = /^\/accounts\/([a-z][a-z0-9]{2,15})\/certificates$/.exec(pathname)
+      if (method === 'POST' && certificateMatch) {
+        const username = certificateMatch[1]!
+        const account = (await deps.store.getAccountByUsername(username)) ?? fail('NOT_FOUND', `account "${username}" not found`)
+        await assertAccountCaller(caller, account, 'certificates')
+        const executor = deps.executor
+        if (!executor) return fail('PRECONDITION_FAILED', 'host executor is not connected')
+        const body = await readObjectBody(req)
+        const domainName = typeof body.domain === 'string' ? body.domain.trim().toLowerCase() : ''
+        if (!domainName) return fail('VALIDATION', 'domain is required')
+        const domains = await deps.store.listDomains({ accountId: account.id })
+        const domain = domains.find(item => item.name === domainName)
+        if (!domain || domain.accountId !== account.id) return fail('NOT_FOUND', 'domain not found')
+        const release = await executor.readFile('/etc/os-release')
+        if (!release) return fail('PRECONDITION_FAILED', 'the host operating system could not be read')
+        const directoryUrl = typeof body.directoryUrl === 'string' && body.directoryUrl.startsWith('http://127.0.0.1:')
+          ? body.directoryUrl
+          : 'https://acme-v02.api.letsencrypt.org/directory'
+        const accountKeyPath = '/var/lib/xpanel/acme-account/account-key.pem'
+        const existingKey = await executor.readFile(accountKeyPath)
+        const caClient = createHttp01AcmeClient({ directoryUrl, ...(existingKey ? { accountKeyPem: existingKey } : {}) })
+        if (!existingKey) {
+          await executor.writeFile({ path: accountKeyPath, content: caClient.accountKeyPem, mode: 0o600, owner: 'root', group: 'root' })
+        }
+        const adapter = new AcmeCertificateServiceAdapter({
+          executor,
+          os: profileFor(release),
+          directoryUrl,
+          caClient,
+          http01ChallengeDir: edge.XP_PATHS.acmeDir,
+        })
+        const certId = typeof body.certificateId === 'string' && isUuid(body.certificateId) ? body.certificateId : randomUUID()
+        const result = await adapter.issueOrRenewCertificate({
+          certId,
+          accountId: account.id,
+          callerRole: caller.role === 'root' || caller.role === 'reseller' || caller.role === 'user' ? caller.role : 'user',
+          names: [domain.name],
+          challenge: 'http-01',
+          domains,
+        })
+        await appendAudit(deps.db, {
+          actor: caller.actor,
+          action: 'certificate.issued',
+          target: `domain:${domain.name}`,
+          detail: { certId: result.certId, notAfter: result.notAfter },
+          outcome: 'ok',
+        })
+        return jsonResponse({
+          certificate: {
+            id: result.certId,
+            names: result.identifiers,
+            notAfter: result.notAfter,
+            fingerprintSha256: result.fingerprintSha256,
+            certPath: result.fullchainPath,
+            keyPath: result.privkeyPath,
+            challenge: 'http-01' as const,
+          },
+          orderUrl: result.orderUrl,
+        })
       }
 
       return fail('NOT_FOUND', `route ${method} ${pathname} not found`)

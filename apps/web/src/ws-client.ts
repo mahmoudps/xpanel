@@ -1617,6 +1617,24 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     }
     function failText(error) { return (error && error.message) || (ar ? 'تعذر إكمال الطلب.' : 'The request could not be completed.'); }
     function reload() { window.location.reload(); }
+    document.querySelectorAll('[data-certificate-form]').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var status = form.querySelector('[data-certificate-status]');
+        var username = form.getAttribute('data-account-username');
+        var domain = form.querySelector('[name="domain"]').value;
+        var button = form.querySelector('button[type="submit"]');
+        if (button) button.disabled = true;
+        note(status, ar ? 'جار إصدار الشهادة. قد يستغرق هذا نحو دقيقة.' : 'Issuing the certificate. This can take about a minute.');
+        window.xpanelSessionRequest('POST', '/api/accounts/' + username + '/certificates', { domain: domain }).then(function () {
+          note(status, ar ? 'صدرت الشهادة.' : 'The certificate was issued.');
+          reload();
+        }).catch(function (error) {
+          if (button) button.disabled = false;
+          note(status, failText(error));
+        });
+      });
+    });
     document.querySelectorAll('[data-domain-form]').forEach(function (form) {
       form.addEventListener('submit', function (event) {
         event.preventDefault();

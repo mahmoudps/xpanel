@@ -713,7 +713,7 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
         <div class="xp-card__header">
           <div>
             <h1 id="xpanel-ssl-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-            <p class="xp-prose">${isAr ? 'هذه حالة الشهادات المحفوظة. إصدار شهادة جديدة يحتاج عميل ACME على الخادم، وهو غير موصول بعد.' : 'This is the stored certificate state. Issuing a new certificate needs an ACME client on the server, and that client is not connected yet.'}</p>
+            <p class="xp-prose">${isAr ? 'أصدر شهادة أو جدّدها لنطاق على هذا الحساب. يجيب الخادم على فحص HTTP-01 عبر المنفذ 80.' : 'Issue or renew a certificate for a domain on this account. The server answers the HTTP-01 check on port 80.'}</p>
           </div>
         </div>
         <div class="xp-table-wrap">
@@ -722,6 +722,17 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
             <tbody>${domains.map(domain => `<tr><td class="xp-mono"><bdi dir="ltr">${escapeHtml(domain.name)}</bdi></td><td>${renderStatusBadge(domain.certificateId ? 'ok' : 'suspended', domain.certificateId ? (isAr ? 'محفوظة' : 'Stored') : (isAr ? 'لا توجد شهادة' : 'No certificate'))}</td></tr>`).join('')}</tbody>
           </table>
         </div>
+        ${domains.length > 0 ? `<form class="xp-form-group" data-certificate-form="true" data-account-username="${escapeHtml(account.username)}">
+          <div class="xp-field">
+            <label class="xp-label" for="certificate-domain">${isAr ? 'النطاق' : 'Domain'}</label>
+            <select id="certificate-domain" name="domain" class="xp-input" required>
+              ${domains.map(domain => `<option value="${escapeHtml(domain.name)}">${escapeHtml(domain.name)}</option>`).join('')}
+            </select>
+          </div>
+          <p class="xp-help" data-certificate-status role="status" hidden></p>
+          <button type="submit" class="xp-btn xp-btn--primary">${isAr ? 'إصدار أو تجديد' : 'Issue or renew'}</button>
+        </form>
+        <p class="xp-help">${isAr ? 'يبقى الفحص الفاشل في هذه الصفحة مع رسالة جهة الشهادات.' : 'A failed check stays on this page with the certificate authority message.'}</p>` : `<p class="xp-help">${isAr ? 'أضف نطاقًا قبل إصدار شهادة.' : 'Add a domain before issuing a certificate.'}</p>`}
       </section>` : ''}
             ${section === undefined || (section === 'config' && !customConfig) || (section === 'analytics' && !websiteAnalytics) ? renderSurfaceUnavailable(locale, '/home') : ''}`,
   })

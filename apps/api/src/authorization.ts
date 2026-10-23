@@ -120,6 +120,7 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   if (/^\/api\/resellers(?:\/|$)/.test(pathname)) return { resource: 'resellers', rootOnly: !read }
   if (/^\/api\/accounts\/[^/]+\/files$/.test(pathname)) return { resource: 'files', acl: 'edit-account', toolIds: ['file-manager'] }
   if (/^\/api\/accounts\/[^/]+\/shell$/.test(pathname)) return { resource: 'shell', acl: 'edit-account', toolIds: ['ssh-access'] }
+  if (/^\/api\/accounts\/[^/]+\/certificates$/.test(pathname)) return { resource: 'accounts', acl: 'manage-ssl', toolIds: ['ssl-install'] }
   if (/^\/api\/accounts(?:\/|$)/.test(pathname)) {
     const acl: ResellerAcl = read ? 'list-accounts'
       : /\/(?:suspend|unsuspend)$/.test(pathname) ? 'suspend-account'

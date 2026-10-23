@@ -1551,6 +1551,72 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         })
       }
 
+      const accountCertificatesMatch = /^\/api\/accounts\/([a-z][a-z0-9]{2,15})\/certificates$/.exec(pathname)
+      if (method === 'POST' && accountCertificatesMatch) {
+        const caller = await requireCaller(req)
+        const username = accountCertificatesMatch[1]!
+        const account = await deps.store.getAccountByUsername(username)
+        if (!account) return fail('NOT_FOUND', `account "${username}" not found`)
+        await assertCanAccessAccount(caller, account, 'certificates')
+        await assertCanBindCertificate(caller, account)
+        const body = await readJsonBody<{ domain?: unknown; certificateId?: unknown; directoryUrl?: unknown }>(req)
+        const domainName = typeof body.domain === 'string' ? body.domain.trim().toLowerCase() : ''
+        if (!domainName) return fail('VALIDATION', 'domain is required')
+        const domain = (await deps.store.listDomains({ accountId: account.id })).find(item => item.name === domainName)
+        if (!domain) return fail('NOT_FOUND', 'domain not found')
+        const directoryUrl = caller.principal.kind === 'root' && typeof body.directoryUrl === 'string' && body.directoryUrl.startsWith('http://127.0.0.1:')
+          ? body.directoryUrl
+          : undefined
+        const certificateId = typeof body.certificateId === 'string' ? body.certificateId : undefined
+        const agentResponse = await callAgent(`/accounts/${username}/certificates`, {
+          method: 'POST',
+          caller,
+          body: {
+            domain: domain.name,
+            ...(certificateId ? { certificateId } : {}),
+            ...(directoryUrl ? { directoryUrl } : {}),
+          },
+        })
+        if (!agentResponse.ok) return agentResponse
+        const issued = await agentResponse.json() as {
+          certificate?: {
+            id?: string
+            names?: string[]
+            notAfter?: string
+            fingerprintSha256?: string | null
+            certPath?: string
+            keyPath?: string
+          }
+        }
+        const certificate = issued.certificate
+        if (!certificate?.id || !certificate.certPath || !certificate.keyPath || !certificate.notAfter || !certificate.names?.length) {
+          return fail('PRECONDITION_FAILED', 'the certificate authority did not return a usable certificate')
+        }
+        const stored = await deps.store.createCertificate({
+          id: certificate.id,
+          accountId: account.id,
+          names: certificate.names,
+          source: 'acme',
+          challenge: 'http-01',
+          notAfter: certificate.notAfter,
+          autoRenew: true,
+          certPath: certificate.certPath,
+          keyPath: certificate.keyPath,
+          fingerprintSha256: certificate.fingerprintSha256 ?? null,
+        })
+        if (domain.certificateId !== stored.id) await deps.store.updateDomain(domain.id, { certificateId: stored.id })
+        const reconcile = await triggerReconcile(caller, { scope: { accountId: account.id, resellerId: account.ownerId } })
+        await emitAudit({
+          actor: caller.principal.username,
+          action: 'certificate.issued',
+          target: `domain:${domain.name}`,
+          detail: { certificateId: stored.id, notAfter: stored.notAfter },
+          outcome: 'ok',
+          principalId: caller.principal.id,
+        }, { accountId: account.id, resellerId: account.ownerId })
+        return jsonResponse({ certificate: stored, reconcile })
+      }
+
       const accountShellMatch = /^\/api\/accounts\/([a-z][a-z0-9]{2,15})\/shell$/.exec(pathname)
       if (method === 'POST' && accountShellMatch) {
         const caller = await requireCaller(req)

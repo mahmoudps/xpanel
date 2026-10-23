@@ -34,6 +34,7 @@ export const entryPointAllowsApiRoute = (entryPoint: EntryPoint, pathname: strin
   if (entryPoint === 'xwhm') return pathname === '/api/search' ? method === 'GET' : administratorFamilies.test(pathname)
   if (/^\/api\/accounts(?:\/[^/]+)?$/.test(pathname)) return method === 'GET'
   if (/^\/api\/accounts\/[^/]+\/(?:files|shell)$/.test(pathname)) return true
+  if (/^\/api\/accounts\/[^/]+\/certificates$/.test(pathname)) return method === 'POST'
   if (ownerFamilies.test(pathname)) return !isMongoDatabaseRoute(pathname) && !['/api/analytics/io', '/api/analytics/websites/ingest'].includes(pathname)
   if (/^\/api\/mail(?:\/|$)/.test(pathname)) return pathname !== '/api/mail/ips' && pathname !== '/api/mail/caldav-carddav'
   return method === 'GET' && ['/api/branding', '/api/languages'].includes(pathname)
