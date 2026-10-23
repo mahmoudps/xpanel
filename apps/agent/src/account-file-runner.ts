@@ -8,7 +8,7 @@ import type { ErrorCode } from '@xpanel/core'
 import type { AccountFileContext, AccountFileRequest, AccountFileRunner } from './file-manager.ts'
 
 export const ACCOUNT_FILE_HELPER_PROTOCOL_VERSION = 1
-export const MAX_HELPER_STDIN_BYTES = 2 * 1024 * 1024
+export const MAX_HELPER_STDIN_BYTES = 4 * 1024 * 1024
 export const MAX_HELPER_STDOUT_BYTES = 4 * 1024 * 1024
 export const MAX_HELPER_STDERR_BYTES = 64 * 1024
 export const DEFAULT_HELPER_TIMEOUT_MS = 15_000

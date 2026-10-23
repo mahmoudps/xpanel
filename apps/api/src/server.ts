@@ -5,7 +5,7 @@ import type { IncomingMessage, Server } from 'node:http'
 import { networkInterfaces } from 'node:os'
 import { agentCallerHeaders } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
-import { groups, tools, visibleTools, visibleNavigation } from '@xpanel/catalog'
+import { groups, visibleTools, visibleNavigation } from '@xpanel/catalog'
 import {
   fail,
   isXpanelError,
@@ -113,6 +113,7 @@ import { renderWebApp } from '../../web/src/app.ts'
 import { requestPrefersHtml } from '../../web/src/status-page.ts'
 import { ENTRY_POINTS, entryPointAllowsApiRoute, entryPointAllowsRole, sessionTokenHash } from './entry-points.ts'
 import type { EntryPoint } from './entry-points.ts'
+import { loadQualifiedCatalog } from './host-catalog.ts'
 import { renderTotpQrSvg } from './totp-qr.ts'
 
 // Public PHC fixture used only to equalize unknown-user password work; never an account credential.
@@ -1200,7 +1201,12 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           if (!reseller) return fail('FORBIDDEN', 'reseller authorization is unavailable')
           context.reseller = reseller
         }
-        return jsonResponse({ tools: visibleTools(tools, context), groups, navigation: visibleNavigation(context) })
+        const catalog = await loadQualifiedCatalog(
+          deps.agentApp && deps.agentToken
+            ? { fetch: request => deps.agentApp!.fetch(request), token: deps.agentToken }
+            : null,
+        )
+        return jsonResponse({ tools: visibleTools(catalog, context), groups, navigation: visibleNavigation(context, catalog) })
       }
 
       if (method === 'GET' && pathname === '/api/search') {
@@ -2866,11 +2872,14 @@ export const listenApiServer = async (
         response.headers.forEach((value, key) => res.setHeader(key, value))
         res.end(Buffer.from(await response.arrayBuffer()))
       }
-      const maxBodyBytes = 1024 * 1024
+      const requestPath = (req.url ?? '/').split('?')[0] ?? '/'
+      const accountFileWrite = req.method === 'POST' && /^\/api\/accounts\/[a-z][a-z0-9]{2,15}\/files$/.test(requestPath)
+      const maxBodyBytes = accountFileWrite ? 3 * 1024 * 1024 : 1024 * 1024
       try {
         const declaredLength = req.headers['content-length']
+        const bodyLimit = accountFileWrite ? '3 MiB' : '1 MiB'
         if (declaredLength && Number(declaredLength) > maxBodyBytes) {
-          await writeResponse(transportProblem(413, 'CONTENT_TOO_LARGE', 'request body exceeds 1 MiB', req.url ?? '/'))
+          await writeResponse(transportProblem(413, 'CONTENT_TOO_LARGE', `request body exceeds ${bodyLimit}`, req.url ?? '/'))
           req.resume()
           return
         }
@@ -2880,7 +2889,7 @@ export const listenApiServer = async (
           const bytes = Buffer.from(chunk)
           bodyBytes += bytes.byteLength
           if (bodyBytes > maxBodyBytes) {
-            await writeResponse(transportProblem(413, 'CONTENT_TOO_LARGE', 'request body exceeds 1 MiB', req.url ?? '/'))
+            await writeResponse(transportProblem(413, 'CONTENT_TOO_LARGE', `request body exceeds ${bodyLimit}`, req.url ?? '/'))
             req.resume()
             return
           }

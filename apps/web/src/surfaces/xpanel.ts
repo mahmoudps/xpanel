@@ -369,6 +369,7 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
           <div>
             <h1 id="xpanel-files-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
             <p class="xp-prose">${escapeHtml(t(locale, 'files.jailNotice'))}</p>
+            <p class="xp-help">${escapeHtml(t(locale, 'files.uploadLimit'))}</p>
           </div>
           <div style="display: flex; flex-wrap: wrap; gap: 8px;">
           </div>

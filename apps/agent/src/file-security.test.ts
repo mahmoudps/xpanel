@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, it } from 'vitest'
 import { fail, isXpanelError, XpanelError } from '@xpanel/core'
 import { FakeHostExecutor } from './executor.ts'
-import { JailedFileManager, MAX_EDIT_BYTES, MAX_FILE_LIST_ENTRIES, NativeAccountFileRunner } from './file-manager.ts'
+import { decodeFileBase64, JailedFileManager, MAX_BINARY_BYTES, MAX_EDIT_BYTES, MAX_FILE_LIST_ENTRIES, NativeAccountFileRunner } from './file-manager.ts'
 import type { AccountFileContext, AccountFileRequest, AccountFileRunner, FileEntry, HelperProcessSpawner, TrashItem } from './file-manager.ts'
 
 const account = { username: 'alice', uid: 29101, gid: 29101, home: '/home/alice' }
@@ -129,6 +129,28 @@ describe('account file execution boundary', () => {
     assert.equal(calls.length, 9)
     assert.equal(await readFile(join(home, 'public_html', 'private.txt'), 'utf8'), 'tenant-content-marker')
     await assert.rejects(() => stat(join(home, 'public_html', 'new-directory')), { code: 'ENOENT' })
+  })
+
+  it('round-trips binary uploads through the confined runner and rejects unsafe payloads', async () => {
+    const payload = Buffer.from([0, 255, 10, 13, 0x80, 0x7f])
+    const encoded = payload.toString('base64')
+    const { runner, calls } = contractRunner((request) => {
+      if (request.op === 'put-bytes') return entry(request.path, 'file', decodeFileBase64(request.contentBase64).length, request.mode)
+      if (request.op === 'get-bytes') return { path: request.path, contentBase64: encoded, sizeBytes: payload.length, mtime: timestamp }
+      return undefined
+    })
+    const manager = new JailedFileManager(home, 1, { account, runner })
+    const saved = await manager.putBytes('public_html/pixel.bin', encoded)
+    assert.equal(saved.sizeBytes, payload.length)
+    assert.equal(saved.kind, 'file')
+    const loaded = await manager.getBytes('public_html/pixel.bin')
+    assert.deepEqual(decodeFileBase64(loaded.contentBase64), payload)
+    assert.equal(calls[0]?.request.op, 'put-bytes')
+    assert.equal(await readFile(join(home, 'public_html', 'private.txt'), 'utf8'), 'tenant-content-marker')
+    await assert.rejects(() => manager.putBytes('../etc/passwd', encoded), code('FORBIDDEN'))
+    await assert.rejects(() => manager.putBytes('public_html/pixel.bin', '@@@@'), code('VALIDATION'))
+    await assert.rejects(() => manager.putBytes('public_html/pixel.bin', Buffer.alloc(MAX_BINARY_BYTES + 1).toString('base64')), code('VALIDATION'))
+    await assert.rejects(() => manager.getBytes('.trash/secret.bin'), code('FORBIDDEN'))
   })
 
   it('forwards a frozen identity subset and resource limits', async () => {
@@ -317,7 +339,7 @@ describe('NativeAccountFileRunner protocol v1 and child process boundaries', () 
       })
     })
 
-  it('validates all 9 operations over the protocol v1 JSON envelope and records worker telemetry', async () => {
+  it('validates every confined file operation over the protocol v1 JSON envelope and records worker telemetry', async () => {
     const receivedPayloads: Record<string, unknown>[] = []
     const runner = new NativeAccountFileRunner({
       binaryPath: '/opt/xpanel/bin/xpanel-account-files',
@@ -341,6 +363,12 @@ describe('NativeAccountFileRunner protocol v1 and child process boundaries', () 
             break
           case 'write':
             result = entry(req.path, 'file', Buffer.byteLength(req.content, 'utf8'), req.mode)
+            break
+          case 'put-bytes':
+            result = entry(req.path, 'file', decodeFileBase64(req.contentBase64).length, req.mode)
+            break
+          case 'get-bytes':
+            result = { path: req.path, contentBase64: Buffer.from([0, 255]).toString('base64'), sizeBytes: 2, mtime: timestamp }
             break
           case 'mkdir':
             result = entry(req.path, 'directory', 0, req.mode)
@@ -386,6 +414,8 @@ describe('NativeAccountFileRunner protocol v1 and child process boundaries', () 
     assert.equal((await manager.list('public_html'))[0]?.path, 'public_html/private.txt')
     assert.equal((await manager.readText('public_html/private.txt')).content, 'helper-read')
     assert.equal((await manager.writeText('public_html/private.txt', 'updated')).sizeBytes, 7)
+    assert.equal((await manager.putBytes('public_html/pixel.bin', Buffer.from([0, 255]).toString('base64'))).sizeBytes, 2)
+    assert.equal((await manager.getBytes('public_html/pixel.bin')).sizeBytes, 2)
     assert.equal((await manager.mkdir('public_html/sub')).kind, 'directory')
     assert.equal((await manager.chmod('public_html/private.txt', 0o600)).mode, 0o600)
     assert.equal((await manager.moveToTrash('public_html/private.txt')).id, identifier)
@@ -393,8 +423,8 @@ describe('NativeAccountFileRunner protocol v1 and child process boundaries', () 
     assert.equal((await manager.restoreFromTrash(identifier)).path, 'public_html/private.txt')
     assert.equal(await manager.emptyTrash({ olderThanDays: 3 }), 1)
 
-    assert.equal(receivedPayloads.length, 9)
-    assert.equal(runner.observations.length, 9)
+    assert.equal(receivedPayloads.length, 11)
+    assert.equal(runner.observations.length, 11)
     assert.equal(runner.lastObservation?.uid, account.uid)
     assert.equal(runner.lastObservation?.gid, account.gid)
     assert.equal(runner.lastObservation?.cgroup, '/xpanel.slice/xpanel-29101.slice')

@@ -1834,7 +1834,27 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
           remove.addEventListener('click', function () {
             files({ op: 'trash', path: entry.path }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); });
           });
-          action.appendChild(open); action.appendChild(remove); row.appendChild(action); tbody.appendChild(row);
+          action.appendChild(open);
+          if (entry.kind === 'file') {
+            var download = document.createElement('button');
+            download.type = 'button'; download.className = 'xp-btn';
+            download.textContent = ar ? 'تنزيل' : 'Download';
+            download.addEventListener('click', function () {
+              files({ op: 'get-bytes', path: entry.path }).then(function (file) {
+                var encoded = String(file.contentBase64 || '');
+                var binary = atob(encoded);
+                var bytes = new Uint8Array(binary.length);
+                for (var i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+                var url = URL.createObjectURL(new Blob([bytes]));
+                var link = document.createElement('a');
+                link.href = url; link.download = entry.name || 'download';
+                link.click();
+                URL.revokeObjectURL(url);
+              }).catch(function (error) { note(fileStatus, failText(error)); });
+            });
+            action.appendChild(download);
+          }
+          action.appendChild(remove); row.appendChild(action); tbody.appendChild(row);
         });
       }
       function refresh() { return files({ op: 'list', path: currentPath }).then(function (data) { paint(data.entries || []); }).catch(function (error) { note(fileStatus, failText(error)); }); }
@@ -1843,11 +1863,25 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       if (upload && picker) upload.addEventListener('click', function () { picker.click(); });
       if (picker) picker.addEventListener('change', function () {
         var file = picker.files && picker.files[0];
+        picker.value = '';
         if (!file) return;
-        file.text().then(function (content) {
+        if (file.size > 2 * 1024 * 1024) {
+          note(fileStatus, ar ? 'الحد 2 ميجابايت.' : 'The limit is 2 MB.');
+          return;
+        }
+        var reader = new FileReader();
+        reader.onload = function () {
+          var bytes = new Uint8Array(reader.result);
+          var binary = '';
+          var step = 0x8000;
+          for (var i = 0; i < bytes.length; i += step) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+          }
           var path = (currentPath ? currentPath.replace(/[/]$/, '') + '/' : '') + file.name;
-          return files({ op: 'write', path: path, content: content });
-        }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); });
+          files({ op: 'put-bytes', path: path, contentBase64: btoa(binary) }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); });
+        };
+        reader.onerror = function () { note(fileStatus, ar ? 'تعذر قراءة الملف.' : 'The file could not be read.'); };
+        reader.readAsArrayBuffer(file);
       });
       var newFile = filesRoot.querySelector('[data-action="new-file"]');
       if (newFile) newFile.addEventListener('click', function () {

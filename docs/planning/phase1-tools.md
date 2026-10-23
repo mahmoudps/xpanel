@@ -19,7 +19,7 @@ Stuffing synthetic `CapabilityEvidence` into the static catalog would mark tools
 - the tool is in `PHASE1_TOOL_PROBES`
 - every probe that tool names is `passed`
 
-The API adds `control-plane: passed` after it can read agent `/health`. The agent reports the other probes from binaries on the host, cached for 30 seconds. The qualified catalog is cached in the API for 15 seconds. The unprivileged API still reaches the host only through the root agent.
+The API adds `control-plane: passed` after it can read agent `/health`. The agent reports the other probes from binaries on the host, cached for 30 seconds. The qualified catalog is cached in the API for 15 seconds. `GET /api/catalog` and the sidebar both read that copy. The unprivileged API still reaches the host only through the root agent.
 
 | Probe | Passes when |
 | --- | --- |
@@ -46,7 +46,7 @@ A page is hidden until every tool on it qualifies. Feature keys must not be in t
 | `domains`, `create-domain` | control-plane, apache | List, add addon or subdomain, remove |
 | `email-accounts`, `email-account-create`, `email-account-manage` | control-plane, mail | Mailbox create, list, password, quota, delete. Reconcile writes Postfix/Dovecot config |
 | `mysql-databases`, `mysql-users` | control-plane, mariadb | Database and user create, grant, delete |
-| `file-manager`, `file-text-editor` | control-plane, files | Browse, text upload, edit, mkdir, trash, empty trash inside the account home |
+| `file-manager`, `file-text-editor` | control-plane, files | Browse, text edit, binary upload and download up to 2 MiB, mkdir, trash, empty trash inside the account home |
 | `ssl-tls-status` | control-plane | Stored certificate state per domain |
 
 Accounts, create-account, plans, domains, email, databases, files, and SSL status are separate pages so a missing binary hides only the page that needs it. Unimplemented catalog ids stayed on their own pages and remain unqualified.
@@ -60,8 +60,6 @@ Terminate probes `GET /accounts/:user/purge`. Only `LinuxHostExecutor` answers `
 **Certificate issuance.** `ssl-install` and the certificate-file tools stay on `/security/ssl/files`. `AcmeCertificateServiceAdapter` can run an HTTP-01 issuance flow and is not exposed. The status page has no Issue button. Installing certbot, lego, or acme.sh does not by itself issue a certificate.
 
 **xMail inbox.** Panel and xMail sign-in is the hosting account, not a mailbox. Mailbox passwords are the service-user secrets used by Postfix and Dovecot. Reading an inbox needs a mailbox-scoped IMAP or `doveadm` reader, and that reader is not connected. Inbox, folders, and compose stay unqualified. No sample messages are shown.
-
-**File bytes.** The file API writes UTF-8 text. Binary upload is not a qualified operation.
 
 **The rest of the catalog.** About 593 tools remain researched until each one has an agent operation, an API route, a screen, and a probe on this allowlist.
 
