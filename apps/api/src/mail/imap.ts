@@ -555,6 +555,24 @@ export class ImapProtocolClient {
   /**
    * Updates flags on a message by UID (`UID STORE <uid> +FLAGS.SILENT / -FLAGS.SILENT / FLAGS.SILENT`).
    */
+  async searchAllUids(folder: string, requestedMailbox?: string): Promise<number[]> {
+    const mailbox = this.assertAuthenticatedMailbox(requestedMailbox)
+    if (this.selectedFolder !== folder) await this.selectFolder(folder, mailbox)
+    const res = await this.sendCommand('UID SEARCH ALL')
+    if (res.status !== 'OK') fail('PRECONDITION_FAILED', `IMAP UID SEARCH failed: ${res.statusText}`)
+    const line = res.untagged.find(item => /^\*\s+SEARCH\b/i.test(item)) ?? ''
+    return line.replace(/^\*\s+SEARCH\s*/i, '').trim().split(/\s+/).filter(Boolean)
+      .map(value => Number.parseInt(value, 10))
+      .filter(value => Number.isSafeInteger(value) && value > 0)
+  }
+
+  async deleteByUid(folder: string, uid: number, requestedMailbox?: string): Promise<void> {
+    if (!Number.isSafeInteger(uid) || uid <= 0) fail('VALIDATION', 'message uid is invalid')
+    await this.storeFlagsByUid(folder, uid, 'add', ['\\Deleted'], requestedMailbox)
+    const res = await this.sendCommand('EXPUNGE')
+    if (res.status !== 'OK') fail('PRECONDITION_FAILED', `IMAP EXPUNGE failed: ${res.statusText}`)
+  }
+
   async storeFlagsByUid(
     folder: string,
     uid: number,

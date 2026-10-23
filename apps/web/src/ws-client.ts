@@ -1787,6 +1787,78 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       });
       refresh();
     }
+    var mailLive = document.querySelector('[data-mail-live="true"]');
+    if (mailLive) {
+      var list = mailLive.querySelector('[data-live-mail-list]');
+      var reader = mailLive.querySelector('[data-mail-pane="reading-pane"], [data-mail-pane="empty"]');
+      function showMessage(message) {
+        if (!reader) return;
+        reader.textContent = '';
+        var heading = document.createElement('h2');
+        heading.textContent = message.subject || (ar ? 'بدون موضوع' : 'No subject');
+        var meta = document.createElement('p');
+        meta.textContent = (message.from || '') + ' → ' + (message.to || '');
+        var body = document.createElement('div');
+        body.textContent = message.body || '';
+        var remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'xp-btn';
+        remove.textContent = ar ? 'حذف' : 'Delete';
+        remove.addEventListener('click', function () {
+          window.xpanelSessionRequest('DELETE', '/api/webmail/inbox/' + message.uid).then(loadInbox).catch(function (error) { note(list, failText(error)); });
+        });
+        reader.appendChild(heading);
+        reader.appendChild(meta);
+        reader.appendChild(body);
+        reader.appendChild(remove);
+      }
+      function paintInbox(messages) {
+        if (!list) return;
+        list.textContent = '';
+        if (!messages.length) {
+          var empty = document.createElement('p');
+          empty.className = 'xp-mail-empty';
+          empty.textContent = ar ? 'لا توجد رسائل في هذا المجلد.' : 'No messages in this folder.';
+          list.appendChild(empty);
+          return;
+        }
+        messages.forEach(function (message) {
+          var row = document.createElement('button');
+          row.type = 'button';
+          row.className = 'xp-mail-row';
+          row.textContent = (message.unread ? '• ' : '') + (message.from || '') + ' — ' + (message.subject || '');
+          row.addEventListener('click', function () {
+            window.xpanelSessionRequest('GET', '/api/webmail/inbox/' + message.uid).then(function (data) { showMessage(data.message || data); }).catch(function (error) { note(list, failText(error)); });
+          });
+          list.appendChild(row);
+        });
+      }
+      function loadInbox() {
+        return window.xpanelSessionRequest('GET', '/api/webmail/inbox').then(function (data) { paintInbox(data.messages || []); }).catch(function (error) { note(list, failText(error)); });
+      }
+      loadInbox();
+    }
+    var sendButton = document.querySelector('[data-mail-send="true"]');
+    if (sendButton) sendButton.addEventListener('click', function () {
+      var status = document.getElementById('mail-send-status');
+      var to = document.getElementById('compose-to');
+      var subject = document.getElementById('compose-subject');
+      var body = document.getElementById('compose-body');
+      sendButton.disabled = true;
+      note(status, ar ? 'جار الإرسال.' : 'Sending.');
+      window.xpanelSessionRequest('POST', '/api/webmail/send', {
+        to: to ? to.value.trim() : '',
+        subject: subject ? subject.value.trim() : '',
+        text: body ? body.value : '',
+      }).then(function () {
+        note(status, ar ? 'أُرسلت الرسالة.' : 'The message was sent.');
+        if (body) body.value = '';
+        sendButton.disabled = false;
+      }).catch(function (error) {
+        sendButton.disabled = false;
+        note(status, failText(error));
+      });
+    });
   }
 
   if (typeof window !== 'undefined') {

@@ -4862,13 +4862,7 @@ export const navigation: NavSurface[] = [
             ],
             "tools": [
               "webmail-message-list",
-              "webmail-message-read",
-              "webmail-reply-forward",
-              "webmail-attachments",
-              "webmail-search",
-              "webmail-spam-marking",
-              "webmail-quota",
-              "webmail-search-index"
+              "webmail-message-read"
             ],
             "keywords": [
               "Inbox",
@@ -4885,7 +4879,7 @@ export const navigation: NavSurface[] = [
               "Quota",
               "Rebuild search index"
             ],
-            "summary": "Read, search, sort, thread, reply to, forward and move your mail, mark junk, and see how full your mailbox is."
+            "summary": "List, read and delete the messages in this mailbox."
           },
           {
             "id": "compose",
@@ -4907,7 +4901,7 @@ export const navigation: NavSurface[] = [
               "Send mail",
               "Draft"
             ],
-            "summary": "Write and send mail in plain text or HTML with autosaved drafts, a chosen identity and address autocomplete."
+            "summary": "Write a plain-text message and send it through the local mail server."
           },
           {
             "id": "folders",
@@ -4930,6 +4924,33 @@ export const navigation: NavSurface[] = [
               "Subfolders"
             ],
             "summary": "Create, nest, rename, subscribe to and delete mail folders; system folders stay protected."
+          },
+          {
+            "id": "mail-later",
+            "name": "More mail tools",
+            "route": "/mail/later",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "owner"
+            ],
+            "tools": [
+              "webmail-reply-forward",
+              "webmail-attachments",
+              "webmail-search",
+              "webmail-spam-marking",
+              "webmail-quota",
+              "webmail-search-index"
+            ],
+            "keywords": [
+              "Reply",
+              "Forward",
+              "Attachments",
+              "Search mail",
+              "Quota"
+            ],
+            "summary": "Reply, attachments, search, junk marking and mailbox quota."
           }
         ]
       },

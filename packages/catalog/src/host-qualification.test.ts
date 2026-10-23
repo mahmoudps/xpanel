@@ -26,7 +26,19 @@ describe('host qualification', () => {
     expect(qualified.has('create-account')).toBe(false)
     expect(qualified.has('file-manager')).toBe(false)
     expect(qualified.has('email-accounts')).toBe(false)
+    expect(qualified.has('webmail-message-list')).toBe(false)
+    expect(qualified.has('webmail-compose')).toBe(false)
     for (const id of qualified) expect(PHASE1_TOOL_PROBES[id]?.every(probe => report.probes[probe] === 'passed')).toBe(true)
+  })
+
+  it('verifies the mailbox inbox when the mail probe passed', () => {
+    const report = passed('linux', { 'control-plane': 'passed', mail: 'passed' })
+    const qualified = new Set(qualifyHostTools(tools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
+    expect(qualified.has('webmail-message-list')).toBe(true)
+    expect(qualified.has('webmail-message-read')).toBe(true)
+    expect(qualified.has('webmail-compose')).toBe(true)
+    expect(qualified.has('webmail-folders')).toBe(false)
+    expect(qualified.has('email-accounts')).toBe(true)
   })
 
   it('stays unqualified when the operator turns host qualification off', () => {

@@ -34,6 +34,9 @@ export const PHASE1_TOOL_PROBES: Readonly<Record<string, readonly HostProbe[]>> 
   'file-manager': ['control-plane', 'files'],
   'file-text-editor': ['control-plane', 'files'],
   'ssl-tls-status': ['control-plane'],
+  'webmail-message-list': ['control-plane', 'mail'],
+  'webmail-message-read': ['control-plane', 'mail'],
+  'webmail-compose': ['control-plane', 'mail'],
 }
 
 /** Copy the catalog and mark only the implemented tools whose probes passed. */

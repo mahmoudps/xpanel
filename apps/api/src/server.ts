@@ -114,6 +114,9 @@ import { requestPrefersHtml } from '../../web/src/status-page.ts'
 import { ENTRY_POINTS, entryPointAllowsApiRoute, entryPointAllowsRole, sessionTokenHash } from './entry-points.ts'
 import type { EntryPoint } from './entry-points.ts'
 import { renderTotpQrSvg } from './totp-qr.ts'
+import { createLocalMailboxTransport, establishMailboxSession, openMailboxSession, parseMailboxSend } from './mail/inbox.ts'
+import type { MailboxTransport } from './mail/inbox.ts'
+import { deleteMailboxSession } from '@xpanel/db'
 
 // Public PHC fixture used only to equalize unknown-user password work; never an account credential.
 const DUMMY_PASSWORD_HASH = "$argon2id$v=19$m=65536,t=3,p=4$QkJCQkJCQkJCQkJCQkJCQg$02+8XtfLLaSCZqlfA84rmzJ5VytASY+ko8Y0KCBMjk8"
@@ -237,6 +240,7 @@ export interface ApiServerDeps {
   lockoutThreshold?: number
   lockoutDurationMs?: number
   homeBaseDir?: string
+  mailboxTransport?: MailboxTransport
   webRenderer?: (req: Request) => Promise<Response> | Response
   /** Exact HTTPS origins of the three panels, used by the misdirected-host page. */
   publicPanels?: Partial<Record<EntryPoint, string>>
@@ -901,6 +905,65 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           })
         }
 
+        if (entryPoint === 'xmail' && username.includes('@')) {
+          let established: Awaited<ReturnType<typeof establishMailboxSession>>
+          try {
+            established = await establishMailboxSession({
+              db: deps.db,
+              store: deps.store,
+              serverSecret,
+              transport: deps.mailboxTransport ?? createLocalMailboxTransport(),
+              entryPoint,
+              mailbox: username,
+              password,
+              ip,
+              userAgent: req.headers.get('user-agent') ?? 'xpanel-client',
+            })
+          } catch (err) {
+            if (isXpanelError(err) && err.code === 'UNAUTHENTICATED') {
+              await emitAudit({
+                actor: username,
+                action: 'auth.login_failed',
+                target: `mailbox:${username}`,
+                detail: { reason: 'invalid_credentials' },
+                outcome: 'denied',
+                ip,
+              })
+              await recordFailedLoginAndMaybeLock(username, ip, 'invalid_credentials', null)
+              return fail('UNAUTHENTICATED', 'invalid username or password')
+            }
+            throw err
+          }
+          await clearLockout(deps.db, { username })
+          await recordLoginAttempt(deps.db, { surface: 'panel', username, ip, success: true })
+          await recordLogin(deps.db, established.principal.id)
+          const mailboxCsrf = deriveCsrfToken(established.rawToken, serverSecret, entryPoint)
+          const mailboxCookie = formatSessionCookie(established.rawToken, {
+            entryPoint,
+            secure: useSecureCookies(req),
+            maxAgeSec: 86_400,
+          })
+          await emitAudit({
+            actor: established.mailbox,
+            action: 'auth.login',
+            target: `mailbox:${established.mailbox}`,
+            detail: { sessionId: established.session.id },
+            outcome: 'ok',
+            principalId: established.principal.id,
+            ip,
+          }, { accountId: established.principal.kind === 'user' ? established.principal.accountId : null, resellerId: null })
+          return jsonResponse({
+            principal: established.principal,
+            mailbox: established.mailbox,
+            entryPoint,
+            home: ENTRY_POINTS[entryPoint].home,
+            session: { id: established.session.id, expiresAt: established.session.expiresAt, mfaVerified: established.session.mfaVerified },
+            csrfToken: mailboxCsrf,
+            passwordChangeRequired: false,
+            mfaEnrollmentRequired: false,
+          }, 200, { 'set-cookie': mailboxCookie })
+        }
+
         const principalRecord = await findPrincipalByUsername(deps.db, username)
         const passwordMatches = await verifyPasswordArgon2id(password, principalRecord?.passwordHash ?? DUMMY_PASSWORD_HASH)
         const passwordValid = principalRecord !== null && !principalRecord.disabled && passwordMatches
@@ -1038,6 +1101,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (method === 'POST' && pathname === '/api/auth/logout') {
         const caller = await requireCaller(req, { allowUnverifiedMfa: true })
         if (caller.sessionId) {
+          await deleteMailboxSession(deps.db, caller.sessionId)
           await revokeSession(deps.db, caller.sessionId)
         }
         await emitAudit({
@@ -1524,6 +1588,41 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           })
           return jsonResponse({ ok: true })
         }
+      }
+
+      const mailboxTransport = deps.mailboxTransport ?? createLocalMailboxTransport()
+      const inboxMatch = /^\/api\/webmail\/inbox\/([1-9]\d*)$/.exec(pathname)
+      if (pathname === '/api/webmail/inbox' && method === 'GET') {
+        const caller = await requireCaller(req)
+        const opened = await openMailboxSession(deps.db, serverSecret, caller.sessionId)
+        if (caller.principal.kind === 'user' && caller.principal.accountId !== opened.record.accountId) {
+          return fail('NOT_FOUND', 'mailbox not found')
+        }
+        const messages = await mailboxTransport.list(opened.record.mailbox, opened.password)
+        return jsonResponse({ mailbox: opened.record.mailbox, messages })
+      }
+      if (inboxMatch && (method === 'GET' || method === 'DELETE')) {
+        const caller = await requireCaller(req)
+        const opened = await openMailboxSession(deps.db, serverSecret, caller.sessionId)
+        if (caller.principal.kind === 'user' && caller.principal.accountId !== opened.record.accountId) {
+          return fail('NOT_FOUND', 'mailbox not found')
+        }
+        const uid = Number(inboxMatch[1])
+        if (method === 'DELETE') {
+          await mailboxTransport.remove(opened.record.mailbox, opened.password, uid)
+          return jsonResponse({ ok: true, uid })
+        }
+        const message = await mailboxTransport.read(opened.record.mailbox, opened.password, uid)
+        return jsonResponse({ mailbox: opened.record.mailbox, message })
+      }
+      if (pathname === '/api/webmail/send' && method === 'POST') {
+        const caller = await requireCaller(req)
+        const opened = await openMailboxSession(deps.db, serverSecret, caller.sessionId)
+        if (caller.principal.kind === 'user' && caller.principal.accountId !== opened.record.accountId) {
+          return fail('NOT_FOUND', 'mailbox not found')
+        }
+        const sent = await mailboxTransport.send(opened.record.mailbox, opened.password, parseMailboxSend(await readJsonBody(req)))
+        return jsonResponse({ mailbox: opened.record.mailbox, messageId: sent.messageId }, 201)
       }
 
       // ---- Accounts: Jailed Files & Shell (Proxied to Agent) -------------------------
