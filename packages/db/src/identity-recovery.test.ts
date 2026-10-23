@@ -519,7 +519,7 @@ describe('A25(c): MFA sealing secret rotation and loss recovery drill', () => {
     expect(await findActiveApiTokenByHash(handle.db, sha('tok-before-rotate'))).toBeNull()
   })
 
-  it('handles loss of the MFA sealing secret via explicit recovery that revokes all sessions/tokens and forces fresh MFA enrollment', async () => {
+  it('handles loss of the MFA sealing secret by revoking sessions and tokens and clearing factors until the principal enrolls again', async () => {
     const { dir, handle } = await createFileDb()
     const root = await createRootPrincipal(handle.db, {
       username: 'root',

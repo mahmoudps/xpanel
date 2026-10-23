@@ -1323,8 +1323,8 @@ export interface MfaSealKeyRecoveryResult {
  * Explicit administrative recovery drill when the MFA sealing secret (`/etc/xpanel/server.secret`)
  * is lost and replaced with `newServerSecret`.
  * Atomically clears undecryptable MFA factors, deletes pending enrollments, and revokes all active
- * sessions and API tokens so affected principals (including `root`) must re-authenticate and
- * complete fresh MFA enrollment before administering the server.
+ * sessions and API tokens so affected principals (including `root`) must sign in again.
+ * Cleared factors are not required again until that principal enrolls.
  */
 export const recoverFromMfaSealKeyLoss = (
   db: Db,

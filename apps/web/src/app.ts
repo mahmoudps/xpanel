@@ -1,6 +1,7 @@
 import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { canSeeAccount, type Account, type Plan } from '@xpanel/core'
 import { dirForLocale, type Locale, SUPPORTED_LOCALES, t } from './i18n.ts'
+import { ACCOUNT_SECURITY_ROUTES, renderAccountSecurityCard } from './surfaces/account-security.ts'
 import { type LoginSurfaceProps, renderLoginSurface } from './surfaces/login.ts'
 import { type MailSurfaceProps, renderMailSurface } from './surfaces/xmail.ts'
 import { type PanelSurfaceProps, renderPanelSurface } from './surfaces/xpanel.ts'
@@ -49,6 +50,8 @@ export interface WebAppRenderState {
   liveState?: Partial<LiveEventState>
   actionState?: AsyncActionBannerProps
   login?: LoginSurfaceProps
+  /** Present for an authenticated document. Enrollment stays optional when this is false. */
+  security?: { totpEnabled: boolean }
   whm?: WhmSurfaceProps
   panel?: PanelSurfaceProps
   mail?: MailSurfaceProps
@@ -142,10 +145,14 @@ const renderWorkspaceSummary = (state: WebAppRenderState, locale: Locale): strin
   const emptyAccount = state.surface === 'xpanel' && !authorized
     ? `<p class="xp-prose" data-workspace-account-empty="true">${isAr ? 'لا يتوفر حساب مصرح به لعرضه.' : 'No authorized account is available to display.'}</p>`
     : ''
+  const mfaLink = state.surface === 'xwhm' && principal.kind === 'root' && state.security?.totpEnabled === false && state.activeRoute !== '/whm/security/sign-in'
+    ? `<p class="xp-prose" data-mfa-optional-link><a href="/whm/security/sign-in">${escapeHtml(t(locale, 'security.2fa.workspaceLink'))}</a></p>`
+    : ''
   return `<section class="xp-card" data-workspace-identity="true"${state.surface === 'xpanel' ? ' data-workspace-account-overview="true"' : ''} aria-labelledby="xp-workspace-summary-title">
     <h2 id="xp-workspace-summary-title">${title}</h2>
     <div class="xp-kpi-grid">${identityFields}${accountFields}</div>
     ${emptyAccount}
+    ${mfaLink}
   </section>`
 }
 
@@ -236,6 +243,7 @@ export function renderWebApp(state: WebAppRenderState): string {
 
   let surfaceBodyHtml = ''
   const activeRoute = state.activeRoute ?? (state.surface === 'xwhm' ? '/whm' : state.surface === 'xmail' ? '/mail/inbox' : state.surface === 'login' ? '/login' : '/home')
+  const securityPrincipal = state.visibility?.principal.kind
   const hasVerifiedSurface = visibleNavigation(state.visibility, state.catalog).some(item => item.surface === state.surface && item.sections.some(section => section.pages.some(page => page.route === activeRoute)))
   if (state.surface !== 'login' && !hasVerifiedSurface)
     surfaceBodyHtml = renderUnavailableWorkspace(state.surface, locale, state.visibility !== undefined, state.actionState, activeRoute, theme, state)
@@ -286,6 +294,16 @@ export function renderWebApp(state: WebAppRenderState): string {
         visibility: state.visibility,
       })
       break
+  }
+
+  if (state.surface !== 'login' && state.security && securityPrincipal && ACCOUNT_SECURITY_ROUTES.has(activeRoute)) {
+    const card = renderAccountSecurityCard({
+      locale,
+      totpEnabled: state.security.totpEnabled,
+      principalKind: securityPrincipal,
+      surface: state.surface,
+    })
+    surfaceBodyHtml = surfaceBodyHtml.replace(/(<main\b[^>]*\bid="main-content"[^>]*>)/, `$1${card}`)
   }
 
   surfaceBodyHtml = ensureAccessibleSurfaceHtml(surfaceBodyHtml, locale)

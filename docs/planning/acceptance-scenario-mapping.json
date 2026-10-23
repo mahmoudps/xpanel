@@ -332,8 +332,8 @@
         "H",
         "B"
       ],
-      "title": "Root first-login password change and MFA enrollment gate",
-      "independentOracle": "With forcePasswordChange=true or root MFA unenrolled, all mutating endpoints return 403 PRECONDITION_FAILED until password change and TOTP enrollment complete.",
+      "title": "Root first-login password change; MFA only when enrolled",
+      "independentOracle": "With forcePasswordChange=true, ordinary endpoints stay forbidden until the password is changed. Unenrolled root, reseller, and user sessions are not blocked for missing MFA. When TOTP is enabled, password-only login does not open a session; disable-2fa restores password-only access.",
       "harnesses": [
         "apps/api/src/s01-s05-security-auth.test.ts",
         "apps/api/src/h03-onboarding.test.ts"

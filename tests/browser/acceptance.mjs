@@ -112,7 +112,7 @@ export async function runBrowserAcceptance({ chromium, expect }) {
       }, { mobile: locale === 'ar' })
     }
 
-    await scenario('BR-ROOT-BOOTSTRAP', 'Root changes the bootstrap password, enrolls MFA, rejects replay and CSRF, then logs out through the UI', async ({ page, panel, context, record }) => {
+    await scenario('BR-ROOT-BOOTSTRAP', 'Root changes the bootstrap password, opens the workspace without MFA, enrolls from the security page, then returns to password-only after disable-2fa', async ({ page, panel, context, record }) => {
       const bootstrap = await panel.rootState()
       record('persisted_bootstrap_state', bootstrap)
       expect(bootstrap).toEqual({ exists: true, force_password_change: true, mfa_enabled: false })
@@ -128,6 +128,13 @@ export async function runBrowserAcceptance({ chromium, expect }) {
       expect((await submit(page, '[data-auth-password-form]', '/api/auth/change-password', record)).status()).toBe(200)
       await expect(page.locator(loginForm)).toBeVisible()
       expect((await login(page, 'root', panel.replacementPassword, record)).status()).toBe(200)
+      await page.waitForURL(url => url.pathname === '/whm')
+      record('password_only_workspace', { path: new URL(page.url()).pathname })
+      await expect(page.locator('[data-mfa-optional-link]')).toBeVisible()
+      await expect(page.locator('[data-auth-setup-form]')).toHaveCount(0)
+      await page.goto(`${panel.baseUrl}/whm/security/sign-in`)
+      await expect(page.locator('[data-mfa-recommendation]')).toBeVisible()
+      await accessibility(page, record)
       await expect(page.locator('[data-action="setup-2fa"]')).toBeVisible()
       await page.locator('#enrollment-password').fill(panel.replacementPassword)
       const [setup] = await Promise.all([
@@ -150,7 +157,9 @@ export async function runBrowserAcceptance({ chromium, expect }) {
       expect(recoveryCodes.length, 'Recovery codes are displayed once before acknowledgement').toBe(8)
       await page.locator('[data-action="acknowledge-recovery"]').click()
       record('recovery_codes_acknowledged')
-      await page.waitForURL(url => url.pathname === '/whm')
+      await page.waitForURL(url => url.pathname === '/whm/security/sign-in')
+      await expect(page.locator('[data-mfa-enabled="true"]')).toBeVisible()
+      await page.goto(`${panel.baseUrl}/whm`)
       const enrolled = await panel.rootState()
       record('persisted_enrolled_state', enrolled)
       expect(enrolled).toEqual({ exists: true, force_password_change: false, mfa_enabled: true })
@@ -188,6 +197,15 @@ export async function runBrowserAcceptance({ chromium, expect }) {
       expect(recovery.status()).toBe(200)
       await page.waitForURL(url => url.pathname === '/whm')
       record('replay_denied_and_recovery_login_completed')
+      await page.goto(`${panel.baseUrl}/login?target=xwhm`)
+      await panel.disableRoot2fa()
+      const disabled = await panel.rootState()
+      record('persisted_disabled_state', disabled)
+      expect(disabled).toEqual({ exists: true, force_password_change: false, mfa_enabled: false })
+      expect((await login(page, 'root', panel.replacementPassword, record)).status()).toBe(200)
+      await page.waitForURL(url => url.pathname === '/whm')
+      await expect(page.locator('[data-mfa-optional-link]')).toBeVisible()
+      record('disable_2fa_restored_password_login')
     })
 
     await scenario('BR-OWNER-SCOPE', 'An account owner signs in through the UI and cannot open the administrative HTML surface', async ({ page, panel, record }) => {

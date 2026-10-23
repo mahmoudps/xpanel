@@ -81,9 +81,7 @@ export const createDefaultWebRenderer = async (deps: {
     }
     const principal = caller.principal
     if (deps.entryPoint && !entryPointAllowsRole(deps.entryPoint, principal.kind)) return new Response(null, { status: 403, headers })
-    if (principal.kind === 'root' && !caller.principalRecord.totpEnabled && process.env.XPANEL_ALLOW_PASSWORD_ONLY_ROOT !== '1') {
-      return new Response('Multi-factor enrollment is required.', { status: 403, headers })
-    }
+    const security = { totpEnabled: caller.principalRecord.totpEnabled }
     const surface = documentRoute.surface
     if (surface === 'xwhm' && principal.kind === 'user') return new Response(null, { status: 403, headers })
     if (url.pathname === '/') {
@@ -114,6 +112,7 @@ export const createDefaultWebRenderer = async (deps: {
       return serveWebUi(req, async () => ({
         surface,
         activeRoute: documentRoute.activeRoute,
+        security,
         visibility: scopedVisibility,
         workspaceSummary: {
           ...(summaryAccount ? { account: { id: summaryAccount.id, ownerId: summaryAccount.ownerId, username: summaryAccount.username,
@@ -149,6 +148,7 @@ export const createDefaultWebRenderer = async (deps: {
     return serveWebUi(req, async () => ({
       surface,
       activeRoute: documentRoute.activeRoute,
+      security,
       ...(url.searchParams.has('accountId') && account ? { accountId: account.id } : {}),
       visibility,
       ...(active ? { generationId: active.id } : {}),

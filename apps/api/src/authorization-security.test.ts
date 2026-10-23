@@ -128,21 +128,51 @@ describe('HTTP authorization security regressions', () => {
     expect(await passwordOnly.json()).toMatchObject({ details: { mfaRequired: true } })
   })
 
-  it('unenrolled root must change bootstrap password first and still enroll MFA after relogin', async () => {
+  it('unenrolled root changes the bootstrap password and then opens the workspace without MFA', async () => {
     await setTotpSecret(db.db, rootId, null, [])
     await setPasswordHash(db.db, rootId, passwordHash, { forceChange: true })
     const signedIn = await login('root')
     const auth = await signedIn.json() as { csrfToken: string }
-    expect(auth).toMatchObject({ passwordChangeRequired: true, mfaEnrollmentRequired: true })
+    expect(auth).toMatchObject({ passwordChangeRequired: true, mfaEnrollmentRequired: false, totpEnabled: false })
     const cookie = signedIn.headers.get('set-cookie')!.split(';')[0]!
     expect((await sessionRequest(cookie, auth.csrfToken, '/api/auth/2fa/setup', 'POST', { password: 'GeneratedFixturePassword!' })).status).toBe(403)
+    expect((await sessionRequest(cookie, auth.csrfToken, '/api/domains')).status).toBe(403)
     expect((await sessionRequest(cookie, auth.csrfToken, '/api/auth/change-password', 'POST', { currentPassword: 'GeneratedFixturePassword!', newPassword: 'ReplacementRootPassword!' })).status).toBe(200)
     const fresh = await login('root', 'ReplacementRootPassword!')
     const next = await fresh.json() as { csrfToken: string }
-    expect(next).toMatchObject({ passwordChangeRequired: false, mfaEnrollmentRequired: true })
+    expect(next).toMatchObject({ passwordChangeRequired: false, mfaEnrollmentRequired: false, totpEnabled: false })
     const freshCookie = fresh.headers.get('set-cookie')!.split(';')[0]!
-    expect((await sessionRequest(freshCookie, next.csrfToken, '/api/domains')).status).toBe(403)
+    expect((await sessionRequest(freshCookie, next.csrfToken, '/api/domains')).status).toBe(200)
     expect((await sessionRequest(freshCookie, next.csrfToken, '/api/auth/2fa/setup', 'POST', { password: 'ReplacementRootPassword!' })).status).toBe(200)
+  })
+
+  it('disabling an enrolled root factor restores password-only administration', async () => {
+    const denied = await login('root')
+    expect(denied.status).toBe(401)
+    expect(await denied.json()).toMatchObject({ details: { mfaRequired: true } })
+    await setTotpSecret(db.db, rootId, null, [])
+    const signedIn = await login('root')
+    expect(signedIn.status).toBe(200)
+    const body = await signedIn.json() as { csrfToken: string }
+    expect(body).toMatchObject({ totpEnabled: false, mfaEnrollmentRequired: false })
+    const cookie = signedIn.headers.get('set-cookie')!.split(';')[0]!
+    expect((await sessionRequest(cookie, body.csrfToken, '/api/domains')).status).toBe(200)
+  })
+
+  it('reseller and user password sessions are not held for missing two-factor enrollment', async () => {
+    const reseller = await state.store.createReseller({ username: 'resell', passwordHash, acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 10000, totalBandwidthMb: 100000, oversell: false, nameservers: [], delegatedIps: [] })
+    await createResellerPrincipal(db.db, { id: reseller.id, username: reseller.username, passwordHash })
+    const resellerLogin = await login('resell')
+    expect(resellerLogin.status).toBe(200)
+    const resellerBody = await resellerLogin.json() as { csrfToken: string }
+    expect(resellerBody).toMatchObject({ mfaEnrollmentRequired: false, totpEnabled: false })
+    const resellerCookie = resellerLogin.headers.get('set-cookie')!.split(';')[0]!
+    expect((await sessionRequest(resellerCookie, resellerBody.csrfToken, '/api/accounts')).status).toBe(200)
+    const userLogin = await login()
+    const userBody = await userLogin.json() as { csrfToken: string }
+    expect(userBody).toMatchObject({ mfaEnrollmentRequired: false, totpEnabled: false })
+    const userCookie = userLogin.headers.get('set-cookie')!.split(';')[0]!
+    expect((await sessionRequest(userCookie, userBody.csrfToken, '/api/domains')).status).toBe(200)
   })
 
   it('password change cannot overwrite a reset committed after its session credential snapshot', async () => {
