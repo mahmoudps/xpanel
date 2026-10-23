@@ -472,7 +472,13 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
     <dd style="margin: 0; font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums">${show(item.value, ar)}</dd>
   </div>`).join('')
   const near = model.near.map((item, index) => `<li style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; font-size: 13px;${index ? ' border-top: 1px solid #EEF0F3' : ''}"><span style="font-family: 'IBM Plex Mono', monospace">${show(item.name, ar)}</span><span style="color: ${escapeHtml(item.color)}; font-weight: 600; font-variant-numeric: tabular-nums">${show(item.note, ar)}</span></li>`).join('')
-  const hostRows = model.hostRows.map(row => `<dt style="color: #5D6B7E">${show(row.label, ar)}</dt><dd style="${row.ddStyle}">${show(row.value, ar)}</dd>`).join('')
+  const hostRows = model.hostRows.map(row => {
+    let value = show(row.value, ar)
+    if (ar && row.ddStyle.includes('overflow-wrap')) {
+      value = value.replaceAll('<bdi dir="ltr">', '<bdi dir="ltr" style="overflow-wrap: anywhere">')
+    }
+    return `<dt style="color: #5D6B7E">${show(row.label, ar)}</dt><dd style="${row.ddStyle}">${value}</dd>`
+  }).join('')
   const controllers = model.controllers.map(name => `<li style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: #E7F5EE; color: #0E7A4E; font-size: 12px; font-weight: 600; font-family: 'IBM Plex Mono', monospace"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #0E7A4E"></span>${show(name, ar)}</li>`).join('')
   const services = model.services.map((row, index) => `<li style="display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 4px 20px; border-top: 1px solid ${index === 0 ? 'transparent' : '#EEF0F3'}">
     <span style="display: flex; flex-direction: column; min-width: 0; line-height: 1.4"><span style="font-size: 14px; font-weight: 500">${show(row.name, ar)} <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5D6B7E">${show(row.version, ar)}</span></span>${row.note ? `<span style="font-size: 12px; color: #5D6B7E">${show(row.note, ar)}</span>` : ''}</span>
@@ -775,7 +781,7 @@ export const whmDashboardFixtureAr = (): WhmDashboardModel => ({
     { label: 'النواة', value: '6.8.0-45-generic', ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace" },
     { label: 'مدة التشغيل', value: '41 days, 6 hours', ddStyle: 'margin: 0; font-variant-numeric: tabular-nums' },
     { label: 'العتاد', value: '4 cores · 8 GB', ddStyle: 'margin: 0; font-variant-numeric: tabular-nums' },
-    { label: 'المحرك', value: 'nginx 1.24.0 → apache2 2.4.58 · mpm\u2011itk', ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace" },
+    { label: 'المحرك', value: 'nginx 1.24.0 → apache2 2.4.58 · mpm\u2011itk', ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace; overflow-wrap: anywhere" },
     { label: 'xPanel', value: 'v1.4.2 · control schema 37', ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace" },
   ],
   controllersTitle: 'متحكمات «cgroup v2»',
