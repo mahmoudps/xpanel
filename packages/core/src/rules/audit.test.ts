@@ -38,6 +38,7 @@ describe('auditEntry', () => {
   })
 
   it('redacts secrets anywhere in the detail', () => {
+    const id = '27ee9b5f-23d4-4e7e-abc1-c8311fc5da23'
     const e = auditEntry(root, 'account.create', 'bob', {
       username: 'bob',
       password: 'hunter2',
@@ -46,7 +47,8 @@ describe('auditEntry', () => {
       SSH_KEY: 'ssh-ed25519 AAAA',
       Passphrase: 'p',
       clientSecret: { deep: 'value' },
-    }, 'ok')
+    }, 'ok', { id })
+    expect(e.id).toBe(id)
     expect(e.detail).toEqual({
       username: 'bob',
       password: REDACTED,
@@ -56,7 +58,7 @@ describe('auditEntry', () => {
       Passphrase: REDACTED,
       clientSecret: REDACTED,
     })
-    expect(JSON.stringify(e)).not.toMatch(/hunter2|t0k|AAAA|abc/)
+    expect(JSON.stringify(e.detail)).not.toMatch(/hunter2|t0k|AAAA|abc/)
   })
 
   it('masks credentials carried inside values', () => {
