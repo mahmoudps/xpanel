@@ -49,6 +49,8 @@ A page is hidden until every tool on it qualifies. Feature keys must not be in t
 | `file-manager`, `file-text-editor` | control-plane, files | Browse, text edit, binary upload and download up to 2 MiB, mkdir, trash, empty trash inside the account home |
 | `ssl-tls-status` | control-plane | Stored certificate state per domain |
 | `ssl-install` | control-plane, apache, acme | Issue or renew one account domain over HTTP-01 |
+| `webmail-message-list`, `webmail-message-read` | control-plane, mail | Mailbox sign-in, inbox list, read and delete over IMAP |
+| `webmail-compose` | control-plane, mail | Plain-text send through local Postfix submission |
 
 Accounts, create-account, plans, domains, email, databases, files, and SSL status are separate pages so a missing binary hides only the page that needs it. Unimplemented catalog ids stayed on their own pages and remain unqualified.
 
@@ -60,7 +62,7 @@ Terminate probes `GET /accounts/:user/purge`. Only `LinuxHostExecutor` answers `
 
 **Certificate files.** Keys, CSRs and uploaded certificate files stay on `/security/ssl/files` and are not an issuance flow. Wildcard names need DNS-01, which this client does not send.
 
-**xMail inbox.** Panel and xMail sign-in is the hosting account, not a mailbox. Mailbox passwords are the service-user secrets used by Postfix and Dovecot. Reading an inbox needs a mailbox-scoped IMAP or `doveadm` reader, and that reader is not connected. Inbox, folders, and compose stay unqualified. No sample messages are shown.
+**xMail beyond the inbox.** Reply, attachments, search, junk, quota and folders stay unqualified. The inbox lists, reads and deletes messages from the signed-in mailbox, and compose sends plain text. No sample messages are stored.
 
 **The rest of the catalog.** About 593 tools remain researched until each one has an agent operation, an API route, a screen, and a probe on this allowlist.
 
@@ -77,7 +79,7 @@ Packages and services that change what appears:
 - `useradd` (`/usr/sbin`) for suspend/terminate, and with Apache for create-account and domains
 - `apache2` or `httpd` plus `apachectl` for account creation and domains
 - `mariadb` or `mysql` client for databases
-- `postfix` and `dovecot` for mailboxes
+- `postfix` and `dovecot` for mailboxes. xMail signs in with the mailbox address. Dovecot must accept IMAP LOGIN on 127.0.0.1 port 143, and Postfix submission must accept AUTH PLAIN on 127.0.0.1 port 587. `XPANEL_IMAP_HOST`, `XPANEL_IMAP_PORT`, `XPANEL_SMTP_HOST` and `XPANEL_SMTP_PORT` override those defaults. `XPANEL_IMAP_TIMEOUT_MS` and `XPANEL_SMTP_TIMEOUT_MS` bound the connections
 - `/opt/xpanel/bin/xpanel-account-files` present at agent start for the file manager
 - no extra ACME package: the agent speaks HTTP-01 itself. The rendered nginx edge must answer port 80 and alias `/.well-known/acme-challenge/` to `/var/lib/xpanel/acme`. Apache stays the site engine behind that edge. A failed check is shown with the certificate authority's message. `sslinstall (SSL Host Installer)` and `AutoSSL` must stay enabled on the plan
 - a primary shared IPv4 in the pool (`isPrimary`) so create-account can assign an address; `ip -j addr` only observes it

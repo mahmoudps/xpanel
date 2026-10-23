@@ -7,6 +7,7 @@ export const OPERATIONAL_TABLES = [
   'xpanel_schema_migrations',
   'principals',
   'sessions',
+  'mailbox_sessions',
   'totp_enrollments',
   'api_tokens',
   'login_attempts',

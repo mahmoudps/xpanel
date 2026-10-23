@@ -87,9 +87,10 @@ describe('listener-specific sign-in presentation', () => {
     assert.match(html, /target=xpanel/)
   })
 
-  it('describes the current account mail boundary without promising mailbox authentication', () => {
+  it('asks xMail for the mailbox address', () => {
     const html = renderLoginSurface({ audience: 'xmail', locale: 'en' })
-    assert.match(html, /Hosting account username/)
+    assert.match(html, /Mailbox address/)
+    assert.doesNotMatch(html, /Hosting account username/)
     assert.doesNotMatch(html, /Mail workspace|Your hosting, in one place|Account access|sign-in address|Mail tools/)
     assert.doesNotMatch(html, /type="email"|IMAP|SMTP|Sieve|delivery|name="email"/)
   })

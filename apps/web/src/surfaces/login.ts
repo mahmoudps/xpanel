@@ -68,7 +68,7 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
       <noscript><p>${text('JavaScript is required to submit this sign-in form.', 'يلزم تشغيل JavaScript لإرسال نموذج تسجيل الدخول.')}</p></noscript>
       <form class="xp-form" method="post" action="/api/auth/login" ${audience ? 'aria-labelledby="login-heading"' : 'aria-describedby="login-description"'} data-login-form>
         <div class="xp-field">
-          <label class="xp-label" for="login-username">${audience === 'xmail' ? text('Hosting account username', 'اسم مستخدم الاستضافة') : text('Username', 'اسم المستخدم')}</label>
+          <label class="xp-label" for="login-username">${audience === 'xmail' ? text('Mailbox address', 'عنوان صندوق البريد') : text('Username', 'اسم المستخدم')}</label>
           <input id="login-username" name="username" type="text" class="xp-input" dir="ltr" autocomplete="username" autocapitalize="none" spellcheck="false" required value="${escapeHtml(props.username ?? '')}" />
         </div>
         <div class="xp-field">

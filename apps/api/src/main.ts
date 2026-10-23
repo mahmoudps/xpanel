@@ -12,7 +12,7 @@ import type { VisibilityContext } from '@xpanel/catalog'
 import { publicContactEmail } from '../../web/src/display-name.ts'
 import { ACCOUNT_SECURITY_ROUTES } from '../../web/src/surfaces/account-security.ts'
 import type { OsProfile } from '@xpanel/core'
-import { createDb, latestActive, migrate, type Db } from '@xpanel/db'
+import { createDb, getMailboxSession, latestActive, migrate, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { runCli } from './cli.ts'
@@ -329,7 +329,13 @@ export const createDefaultWebRenderer = async (deps: {
         serviceUsers: accountServiceUsers,
         files: [],
       },
-      mail: { mailbox: '', domain: '', messages: [], sieveRules: [], quotaUsedMb: 0 },
+      mail: {
+        mailbox: caller.sessionId ? (await getMailboxSession(deps.db, caller.sessionId))?.mailbox ?? '' : '',
+        domain: '',
+        messages: [],
+        sieveRules: [],
+        quotaUsedMb: 0,
+      },
     }))
   }
 }

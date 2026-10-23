@@ -32,8 +32,8 @@ describe('createDb', () => {
       expect(jm?.journal_mode.toLowerCase()).toBe('wal')
 
       const first = await migrate(h.runner)
-      expect(first.applied).toEqual(['0001_init.sql'])
-      expect(await currentSchemaVersion(h.runner)).toBe(1)
+      expect(first.applied).toEqual(['0001_init.sql', '0002_mailbox_sessions.sql'])
+      expect(await currentSchemaVersion(h.runner)).toBe(2)
 
       const root = await createRootPrincipal(h.db, { username: 'root', passwordHash: ARGON2 })
       const sealed = Uint8Array.from({ length: 32 }, (_, i) => 255 - i)

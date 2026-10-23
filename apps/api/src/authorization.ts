@@ -138,6 +138,10 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
     const toolId = pathname.includes('domain-forwarders') ? 'domain-forwarders' : pathname.includes('forwarders') ? 'forwarders' : pathname.includes('mailing-lists') ? 'mailing-lists' : pathname.includes('filters') ? 'email-filters' : 'email-accounts'
     return { resource: 'mail', acl: read ? 'list-accounts' : 'edit-account', toolIds: [toolId] }
   }
+  if (pathname === '/api/webmail/inbox' && method === 'GET') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-message-list'] }
+  if (/^\/api\/webmail\/inbox\/[1-9]\d*$/.test(pathname) && method === 'GET') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-message-read'] }
+  if (/^\/api\/webmail\/inbox\/[1-9]\d*$/.test(pathname) && method === 'DELETE') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-message-read'] }
+  if (pathname === '/api/webmail/send' && method === 'POST') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-compose'] }
   if (/^\/api\/webmail(?:\/|$)/.test(pathname)) return { resource: 'webmail', acl: 'edit-account', toolIds: ['email-accounts'] }
   if (/^\/api\/backups(?:\/|$)/.test(pathname)) return { resource: 'backups', acl: 'transfer', toolIds: ['backup'] }
   if (/^\/api\/(?:transfers|lifecycle)(?:\/|$)/.test(pathname)) return { resource: 'lifecycle', rootOnly: true }

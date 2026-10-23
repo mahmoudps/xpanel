@@ -83,12 +83,13 @@ describe('bounded mail reference layout', () => {
     expect(html).toContain('data-mailbox="&lt;img')
   })
 
-  it.each(['en', 'ar'] as const)('keeps the %s composer non-submitting until real delivery is wired', locale => {
+  it.each(['en', 'ar'] as const)('keeps the %s composer on the local mail server without a raw form', locale => {
     const html = renderMailSurface(fixture({ activeRoute: '/mail/compose', locale }))
     expect(html).toContain('data-compose-form="true"')
-    expect(html).toContain('data-mail-send-availability="unavailable"')
+    expect(html).toContain('data-mail-send-availability="available"')
+    expect(html).toContain('data-mail-send="true"')
     expect(html).not.toMatch(/<form\b|\/api\/mail\/send|type="submit"/)
-    expect(html).toMatch(/<button type="button"[^>]+disabled aria-describedby="mail-send-status"/)
+    expect(html).toMatch(/<button type="button"[^>]+data-mail-send="true" aria-describedby="mail-send-status"/)
     for (const id of ['compose-from', 'compose-to', 'compose-subject', 'compose-body']) {
       expect(html).toContain(`for="${id}"`)
       expect(html).toContain(`id="${id}"`)
