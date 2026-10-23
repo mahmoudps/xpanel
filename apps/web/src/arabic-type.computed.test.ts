@@ -2,8 +2,11 @@ import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { describe, it } from 'vitest'
 import { ARABIC_TYPE_CSS } from './arabic-type.ts'
-import { renderFidelityDocument as renderDashboard } from './board-port/xwhm-dashboard.ts'
+import { renderFidelityDocument as renderDashboard, renderWhmDashboard, whmDashboardFromProps } from './board-port/xwhm-dashboard.ts'
 import { renderFidelityDocument as renderHome } from './board-port/xpanel-home.fixture.ts'
+import { renderMailSurface } from './surfaces/xmail.ts'
+import { renderWhmSurface } from './surfaces/xwhm.ts'
+import { DESIGN_TOKENS_CSS } from './tokens.ts'
 import playwright from '../../../node_modules/@playwright/test/index.js'
 
 interface Browser {
@@ -45,6 +48,7 @@ const inboxDocument = (): string => `<!doctype html>
   <li data-tool="true"><a style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 8px; font-size: 14px; text-decoration: none; color: #101828"><span style="flex: 1 1 auto; min-width: 0; font-weight: 500">معالج النسخ الاحتياطي</span><span data-meta title="آخر نسخة 2026-10-21" dir="rtl" style="display: inline-flex; align-items: baseline; gap: 0.35em; flex: 1 1 auto; min-width: 0; font-size: 12px; color: #5D6B7E"><span data-meta-label>آخر نسخة</span><bdi data-meta-value dir="ltr" style="flex: none; flex-shrink: 0; white-space: nowrap">2026-10-21</bdi></span></a></li>
 </ul>
 <p style="margin: 8px 0 0; font-size: 12px; color: #5D6B7E"><bdi dir="ltr">13:48 UTC</bdi></p>
+<pre style="font-family: 'IBM Plex Mono', monospace">سجل داخلي</pre>
 </div>
 </body>
 </html>`
@@ -60,18 +64,24 @@ interface Sample {
   face: string
 }
 
-interface DomBox { left: number; right: number; width: number }
+interface DomBox { left: number; right: number; width: number; height: number }
+interface DomNode { nodeType: number; nodeValue: string | null; textContent: string | null }
 interface DomEl {
   textContent: string | null
+  nodeType: number
+  nodeValue: string | null
   scrollWidth: number
   clientWidth: number
+  childNodes: ArrayLike<DomNode | DomEl>
+  parentElement: DomEl | null
   firstChild: { data: string } | null
   getClientRects: () => ArrayLike<unknown>
   getBoundingClientRect: () => DomBox
   getAttribute: (name: string) => string | null
   querySelector: (selector: string) => DomEl | null
+  querySelectorAll: (selector: string) => ArrayLike<DomEl>
 }
-interface DomStyle { fontSize: string; lineHeight: string; fontFamily: string }
+interface DomStyle { fontSize: string; lineHeight: string; fontFamily: string; overflow: string; overflowX: string }
 interface DomRange {
   setStart: (node: unknown, offset: number) => void
   setEnd: (node: unknown, offset: number) => void
@@ -79,9 +89,12 @@ interface DomRange {
 }
 interface Dom {
   document: {
+    body: DomEl
+    documentElement: { clientWidth: number }
     querySelector: (selector: string) => DomEl | null
     querySelectorAll: (selector: string) => ArrayLike<DomEl>
     createRange: () => DomRange
+    createElement: (tag: string) => DomEl & { style: { fontFamily: string; fontSize: string }; textContent: string }
   }
   getComputedStyle: (el: DomEl) => DomStyle
 }
@@ -158,10 +171,102 @@ const valueClip = (): { count: number; clipped: string[] } => {
   const nodes = Array.from(root.document.querySelectorAll('bdi[dir="ltr"], [data-meta-value]'))
   const clipped: string[] = []
   for (const node of nodes) {
-    if (node.scrollWidth > node.clientWidth + 1) clipped.push((node.textContent ?? '').trim())
+    const box = node.getBoundingClientRect()
+    let hidden = node.scrollWidth > node.clientWidth + 1
+    let parent = node.parentElement
+    while (!hidden && parent) {
+      const style = root.getComputedStyle(parent)
+      if (/auto|scroll|hidden|clip/.test(`${style.overflowX} ${style.overflow}`)) {
+        const host = parent.getBoundingClientRect()
+        hidden = box.width > 0 && (box.left < host.left - 1 || box.right > host.right + 1)
+      }
+      parent = parent.parentElement
+    }
+    if (hidden) clipped.push((node.textContent ?? '').trim())
   }
   return { count: nodes.length, clipped }
 }
+
+const headers = (): { count: number; hidden: string[] } => {
+  const root = globalThis as unknown as Dom
+  const view = root.document.documentElement.clientWidth
+  const hidden: string[] = []
+  const nodes = Array.from(root.document.querySelectorAll('th'))
+  for (const th of nodes) {
+    const box = th.getBoundingClientRect()
+    const visible = box.width > 8 && box.height > 8 && box.left >= -1 && box.right <= view + 1
+    if (!visible) hidden.push((th.textContent ?? '').trim())
+  }
+  return { count: nodes.length, hidden }
+}
+
+const auditShape = (): { rows: number[]; cells: number[]; pills: number[] } => {
+  const root = globalThis as unknown as Dom
+  const rows = Array.from(root.document.querySelectorAll('#audit-title'))
+  const section = rows[0]?.parentElement?.parentElement
+  const trs = section ? Array.from(section.querySelectorAll('tbody tr')) : []
+  const tds = section ? Array.from(section.querySelectorAll('td')) : []
+  const pills = section ? Array.from(section.querySelectorAll('tbody [style*="999px"]')) : []
+  return {
+    rows: trs.map(row => Math.round(row.getBoundingClientRect().height)),
+    cells: tds.map(cell => Math.round(cell.getBoundingClientRect().height)),
+    pills: pills.map(pill => Math.round(pill.getBoundingClientRect().height)),
+  }
+}
+
+const monoArabic = (): string[] => {
+  const root = globalThis as unknown as Dom
+  const bad: string[] = []
+  const walk = (el: DomEl): void => {
+    for (const node of Array.from(el.childNodes)) {
+      if (node.nodeType === 3 && /[\u0600-\u06FF]/.test(node.nodeValue ?? '')) {
+        const font = root.getComputedStyle(el).fontFamily
+        const arabicFace = font.includes('Plex Sans Arabic') || font.includes('XP Arabic In Mono')
+        if (font.includes('Plex Mono') && !arabicFace) bad.push((node.nodeValue ?? '').trim().slice(0, 40))
+      } else if (node.nodeType === 1) walk(node as DomEl)
+    }
+  }
+  walk(root.document.body)
+  return bad
+}
+
+const liveDashboard = (): string => {
+  const body = renderWhmDashboard(whmDashboardFromProps({
+    locale: 'ar',
+    principal: { username: 'root' },
+    nearLimits: [],
+    auditEntries: [
+      { id: '1', at: '2026-10-22T13:48:00Z', actor: 'root', action: 'auth.login', target: 'principal:11111111-1111-4111-8111-111111111111', detail: {}, outcome: 'ok' },
+      { id: '2', at: '2026-10-22T13:31:00Z', actor: 'root', action: 'mailbox.created', target: 'service-user:mbxabc', detail: {}, outcome: 'ok' },
+      { id: '3', at: '2026-10-22T13:02:00Z', actor: 'alice', action: 'account.created', target: 'omar-clinic.net', detail: {}, outcome: 'ok' },
+      { id: '4', at: '2026-10-22T12:40:00Z', actor: 'alice', action: 'file.write', target: `/home/omar/public_html/${'invoice-'.repeat(12)}final.pdf`, detail: {}, outcome: 'ok' },
+    ],
+  }))
+  return `<!doctype html><html lang="ar" dir="rtl"><head><style>body{margin:0}*{box-sizing:border-box}</style></head><body>${body}</body></html>`
+}
+
+const productDocument = (body: string): string =>
+  `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>${DESIGN_TOKENS_CSS}</style></head><body>${body}</body></html>`
+
+const longTarget = `/home/omar/public_html/${'invoice-'.repeat(12)}final.pdf`
+
+const auditLog = (): string => productDocument(renderWhmSurface({
+  locale: 'ar',
+  principal: { kind: 'root', id: 'root', username: 'root' },
+  activeRoute: '/whm/audit',
+  auditEntries: [
+    { id: '1', at: '2026-10-22T13:48:00Z', actor: 'root', action: 'auth.login', target: 'principal:11111111-1111-4111-8111-111111111111', detail: {}, outcome: 'ok' },
+    { id: '2', at: '2026-10-22T13:31:00Z', actor: 'root', action: 'mailbox.created', target: 'service-user:mbxabc', detail: {}, outcome: 'ok' },
+    { id: '3', at: '2026-10-22T13:02:00Z', actor: 'alice', action: 'file.write', target: longTarget, detail: {}, outcome: 'ok' },
+  ],
+}))
+
+const mailFilters = (): string => productDocument(renderMailSurface({
+  locale: 'ar',
+  mailbox: 'info@alice-shop.com',
+  activeRoute: '/mail/settings/filters',
+  sieveRules: [{ id: '1', name: 'أرشيف الفواتير', condition: `header :contains "Subject" "${'invoice-'.repeat(8)}"`, action: 'fileinto INBOX.Archive', enabled: true }],
+}))
 
 const open = async (browser: Browser, html: string): Promise<Page> => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
@@ -180,6 +285,9 @@ describe('Arabic computed type', () => {
         ['home', await open(browser, renderHome('ar'))],
         ['dashboard', await open(browser, renderDashboard('rtl'))],
         ['inbox', await open(browser, inboxDocument())],
+        ['whm', await open(browser, liveDashboard())],
+        ['audit-log', await open(browser, auditLog())],
+        ['mail-filters', await open(browser, mailFilters())],
       ] as const
       const measured: Sample[] = []
       let home = pages[0][1]
@@ -188,6 +296,7 @@ describe('Arabic computed type', () => {
         const box = await page.evaluate(sample)
         box.screen = screen
         measured.push(box)
+        if (screen === 'audit-log' || screen === 'mail-filters') continue
         assert.ok(box.nav >= 14.5, `${screen} nav ${box.nav}px`)
         assert.ok(box.label >= 12.5, `${screen} label ${box.labelText} ${box.label}px`)
         assert.ok(box.body >= 14.5, `${screen} body ${box.body}px`)
@@ -209,6 +318,25 @@ describe('Arabic computed type', () => {
           clips.push({ screen, width, count: clip.count, clipped: clip.clipped })
           assert.ok(clip.count > 0, `${screen} at ${width} has no value node`)
           assert.deepEqual(clip.clipped, [], `${screen} at ${width} clips ${clip.clipped.join(' | ')}`)
+          const head = await page.evaluate(headers)
+          if (head.count > 0) assert.deepEqual(head.hidden, [], `${screen} at ${width} hides ${head.hidden.join(' | ')}`)
+          const faces = await page.evaluate(monoArabic)
+          assert.deepEqual(faces, [], `${screen} at ${width} paints Arabic in mono: ${faces.join(' | ')}`)
+          if (screen === 'dashboard' || screen === 'whm') {
+            const shape = await page.evaluate(auditShape)
+            assert.ok(shape.rows.length > 0, `${screen} audit rows`)
+            assert.ok(shape.pills.length > 0 && shape.pills.every(height => height >= 20 && height <= 40), `${screen} at ${width} result pills ${shape.pills.join(',')}`)
+            const shortRows = shape.rows.slice(0, screen === 'whm' ? 3 : shape.rows.length)
+            if (width === 1440) assert.ok(shortRows.every(height => height >= 32 && height <= 96), `${screen} at 1440 row heights ${shape.rows.join(',')}`)
+            if (width === 390) {
+              const ceiling = screen === 'whm' ? 160 : 96
+              assert.ok(shape.cells.every(height => height >= 32 && height <= ceiling), `${screen} at 390 cell heights ${shape.cells.join(',')}`)
+            }
+            if (screen === 'whm' && width === 1440) {
+              const wrapped = shape.rows[3] ?? 0
+              assert.ok(wrapped > 48 && wrapped <= 160, `wrapped target row ${wrapped}`)
+            }
+          }
           if (screen === 'home' || screen === 'inbox') {
             const backup = await page.evaluate(backupDate)
             assert.equal(backup.text, '2026-10-21')

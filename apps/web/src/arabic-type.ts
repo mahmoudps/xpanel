@@ -14,7 +14,7 @@ const ar = (selector: string): string => {
 const size = (px: string): string => `[style*="font-size: ${px}"], [style*="font-size:${px}"]`
 
 /** Body copy that is still 13–14px. Technical LTR islands, mono, controls, and pills stay put. */
-const body13 = `:is(${size('13px')}, ${size('14px')}):not([dir="ltr"]):not([style*="Plex Mono"]):not([style*="999px"]):not(bdi[dir="ltr"]):not(code):not(kbd):not(dt):not(label):not(button):not(input):not(select):not(textarea):not(a):not(h1):not(h2):not(h3):not(h4):not(h5):not(h6):not(th)`
+const body13 = `:is(${size('13px')}, ${size('14px')}):not([dir="ltr"]):not([style*="Plex Mono"]):not([style*="999px"]):not(bdi[dir="ltr"]):not(code):not(kbd):not(dt):not(label):not(button):not(input):not(select):not(textarea):not(a):not(h1):not(h2):not(h3):not(h4):not(h5):not(h6):not(table):not(td):not(th)`
 
 /** Section labels and captions. Pills and mono values are not captions. */
 const caption = `:is(${size('11px')}, ${size('12px')}):not(p):not([dir="ltr"]):not([style*="Plex Mono"]):not([style*="999px"]):not(bdi[dir="ltr"]):not(code):not(kbd):not(button):not(h1):not(h2):not(h3):not(h4):not(h5):not(h6)`
@@ -24,7 +24,23 @@ const heading = (px: string, next: string): string => `${ar(`:is(h1, h2, h3, h4,
   line-height: 1.5 !important;
 }`
 
+const ARABIC_RANGE = 'U+0600-06FF, U+0750-077F, U+0870-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC'
+
+/** Arabic glyphs only, so a mono run keeps IBM Plex Mono for identifiers and numbers. */
+const arabicFace = (weight: number, file: string): string => `@font-face {
+  font-family: 'XP Arabic In Mono';
+  font-style: normal;
+  font-weight: ${weight};
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/ibmplexsansarabic/v15/${file}.woff2) format('woff2');
+  unicode-range: ${ARABIC_RANGE};
+}`
+
 export const ARABIC_TYPE_CSS = `
+${arabicFace(400, 'Qw3CZRtWPQCuHme67tEYUIx3Kh0PHR9N6Ys43PWrfQ')}
+${arabicFace(500, 'Qw3NZRtWPQCuHme67tEYUIx3Kh0PHR9N6YPO_-CRXMR5Kw')}
+${arabicFace(600, 'Qw3NZRtWPQCuHme67tEYUIx3Kh0PHR9N6YPi-OCRXMR5Kw')}
+${arabicFace(700, 'Qw3NZRtWPQCuHme67tEYUIx3Kh0PHR9N6YOG-eCRXMR5Kw')}
 .xp-board-port { font-family: ${BOARD_SANS_LTR}; }
 html[lang="ar"] .xp-board-port,
 html[dir=rtl] .xp-board-port,
@@ -119,6 +135,36 @@ ${ar('bdi[dir="ltr"]')} {
   overflow: visible !important;
   text-overflow: clip !important;
 }
+${ar('[style*="Plex Mono"]')},
+${ar('.xp-mono')},
+${ar('code')} {
+  font-family: 'XP Arabic In Mono', 'IBM Plex Mono', monospace !important;
+}
+${ar('table')} {
+  width: 100% !important;
+  min-width: 0 !important;
+  table-layout: auto;
+}
+${ar('table :is(th, td)')} {
+  line-height: 1.4 !important;
+}
+${ar('th')} {
+  white-space: nowrap !important;
+  overflow-wrap: normal !important;
+}
+${ar('table span[style*="overflow-wrap: anywhere"] bdi[dir="ltr"]')},
+${ar('table div[style*="align-items: flex-start"] span bdi[dir="ltr"]')},
+${ar('.xp-table td bdi[dir="ltr"]')} {
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  flex-shrink: 1 !important;
+  min-inline-size: 0 !important;
+}
+${ar('table :is([style*="999px"], .xp-badge)')} {
+  white-space: nowrap !important;
+  overflow-wrap: normal !important;
+  max-inline-size: none !important;
+}
 ${ar('.xp-board-port nav a :is(span, bdi)')},
 ${ar('.xp-nav-item span')} {
   min-inline-size: 0;
@@ -146,6 +192,17 @@ html[lang="ar"] .xp-board-port[data-home-phone="true"],
   overflow-y: auto !important;
 }
 @media (max-width: 390px) {
+  ${ar('table')},
+  ${ar('thead')},
+  ${ar('tbody')},
+  ${ar('tr')},
+  ${ar('th')},
+  ${ar('td')} {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box;
+  }
   ${ar('.xp-board-port')},
   .xp-board-port[dir=rtl] { max-inline-size: 100%; }
   ${ar('.xp-board-port > nav')},
