@@ -283,7 +283,22 @@ export function renderWebApp(state: WebAppRenderState): string {
   let surfaceBodyHtml = ''
   const activeRoute = state.activeRoute ?? (state.surface === 'xwhm' ? '/whm' : state.surface === 'xmail' ? '/mail/inbox' : state.surface === 'login' ? '/login' : '/home')
   const securityPrincipal = state.visibility?.principal.kind
-  const hasVerifiedSurface = !state.error && visibleNavigation(state.visibility, state.catalog).some(item => item.surface === state.surface && item.sections.some(section => section.pages.some(page => page.route === activeRoute)))
+  const routeMatches = (pages: ReturnType<typeof visibleNavigation>): boolean =>
+    pages.some(item => item.surface === state.surface && item.sections.some(section => section.pages.some(page => page.route === activeRoute)))
+  let routeReady = routeMatches(visibleNavigation(state.visibility, state.catalog))
+  const sessionPrincipal = state.visibility?.principal
+  const accountRecordReady = sessionPrincipal?.kind === 'user'
+    && state.panel?.account?.status === 'active'
+    && state.panel.account.id === sessionPrincipal.accountId
+  // Home can open from an account id alone. That shortcut stays on the unavailable
+  // summary until the account record is loaded, unless the catalog itself qualifies Home.
+  if (routeReady && state.surface === 'xpanel' && activeRoute === '/home' && !accountRecordReady && sessionPrincipal?.kind === 'user' && state.visibility) {
+    routeReady = routeMatches(visibleNavigation(
+      { ...state.visibility, principal: { ...sessionPrincipal, accountId: '' } },
+      state.catalog,
+    ))
+  }
+  const hasVerifiedSurface = !state.error && routeReady
   const statusSurface = state.error?.surface ?? (state.surface === 'xwhm' || state.surface === 'xmail' ? state.surface : 'xpanel')
   const pageHeading = workspacePageHeading(state.surface, locale, activeRoute)
   const pageTitle = state.title ?? (state.error && isStatusCode(state.error.status)

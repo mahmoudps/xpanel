@@ -527,7 +527,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     }
   }
 
-  const requireCaller = async (req: Request, opts?: { allowUnverifiedMfa?: boolean }): Promise<AuthenticatedCaller> => {
+  const requireCaller = async (req: Request, opts?: { allowUnverifiedMfa?: boolean; allowInvalidCsrf?: boolean }): Promise<AuthenticatedCaller> => {
     const clientIp = extractClientIp(req)
     const caller = await authenticateRequest(deps.db, req, { serverSecret, clientIp, entryPoint })
     if (!caller) {
@@ -568,7 +568,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         })
         return fail('FORBIDDEN', 'cross-origin state-changing request rejected')
       }
-      if (!caller.csrfValid) {
+      if (!caller.csrfValid && !opts?.allowInvalidCsrf) {
         await emitAudit({
           actor: caller.principal.username,
           action: 'auth.csrf_rejected',
@@ -1103,7 +1103,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       }
 
       if (method === 'POST' && pathname === '/api/auth/logout') {
-        const caller = await requireCaller(req, { allowUnverifiedMfa: true })
+        const caller = await requireCaller(req, { allowUnverifiedMfa: true, allowInvalidCsrf: true })
         if (caller.sessionId) {
           await deleteMailboxSession(deps.db, caller.sessionId)
           await revokeSession(deps.db, caller.sessionId)

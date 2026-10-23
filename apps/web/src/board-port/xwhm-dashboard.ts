@@ -1,24 +1,44 @@
 import type { Account, AuditEntry, Certificate, Plan, ServerIpEntry } from '@xpanel/core'
+import { auditActionLabel } from '../audit-labels.ts'
 import type { Locale } from '../i18n.ts'
-import { escapeHtml, formatBytes } from '../tokens.ts'
+import { escapeHtml, formatAsciiDate, formatAsciiNumber, formatBytes, formatUtcClock, formatUtcDay } from '../tokens.ts'
 
 interface DashboardServiceInput {
   name: string
   version: string
   active: boolean
   installed?: boolean
+  /** False when this row was not probed. Omitted means the probe returned a state. */
+  checked?: boolean
 }
 
 export interface DashboardHostSample {
+  hostname?: string
   load1?: number
+  load5?: number
+  load15?: number
+  cores?: number
+  cpuModel?: string
   memory?: { totalBytes: number; availableBytes: number }
   disk?: { mount: string; totalBytes: number; usedBytes: number; availableBytes: number }
+  inodes?: { mount: string; total: number; used: number; homeOnRoot?: boolean }
+  system?: string
+  kernel?: string
+  uptimeSeconds?: number
+  engine?: string
+  panelVersion?: string
+  /** ISO time of the host probe. Empty when the sample was not taken. */
+  sampledAt?: string
+  nginxTest?: { ok: boolean; at: string }
+  apacheTest?: { ok: boolean; at: string }
 }
 
 interface DashboardProps {
   locale?: Locale
   principal?: { username: string }
   hostname?: string
+  /** Panel vhost, shown beside the system hostname when the two differ. */
+  panelHostname?: string
   version?: string
   availableVersion?: string
   generationId?: number
@@ -31,6 +51,8 @@ interface DashboardProps {
   hostSample?: DashboardHostSample | null
   /** Null when drift was not read. A number is the count reported by the host. */
   driftCount?: number | null
+  /** Previous superseded generation, the rollback target. */
+  rollbackGenerationId?: number
   certificates?: readonly Pick<Certificate, 'names' | 'notAfter'>[]
 }
 
@@ -68,6 +90,8 @@ export interface DashboardMeter {
   color: string
   note: string
   noteColor: string
+  /** False when the reading is not a percentage. The bar is omitted. */
+  showBar?: boolean
 }
 
 export interface DashboardNotice {
@@ -127,6 +151,7 @@ export interface WhmDashboardModel {
   servicesMeta: string
   services: DashboardServiceRow[]
   servicesLink: string
+  signOutLabel?: string
 }
 
 const okChip = (label: string): DashboardChip => ({ label, bg: '#E7F5EE', fg: '#0E7A4E' })
@@ -170,6 +195,154 @@ const NAV: Array<{ id: string; label: [string, string]; items: Array<{ href: str
 ]
 
 const plain = (value: string): string => value.replace(/«|»/g, '')
+
+const arUnit = (n: number, one: string, two: string, few: string, many: string): string => {
+  if (n === 0 || (n >= 3 && n <= 10)) return few
+  if (n === 1) return one
+  if (n === 2) return two
+  return many
+}
+
+const enUnit = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
+
+/** Days and hours from a probed uptime. A missing reading stays empty at the call site. */
+const formatUptime = (seconds: number, ar: boolean): string => {
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  if (ar) {
+    const parts = [
+      days > 0 ? `«${days}» ${arUnit(days, 'يوم', 'يومين', 'أيام', 'يوماً')}` : '',
+      hours > 0 ? `«${hours}» ${arUnit(hours, 'ساعة', 'ساعتين', 'ساعات', 'ساعة')}` : '',
+      days === 0 && hours === 0 ? `«${minutes}» ${arUnit(minutes, 'دقيقة', 'دقيقتين', 'دقائق', 'دقيقة')}` : '',
+    ].filter(part => part.length > 0)
+    return parts.join(' و')
+  }
+  const parts = [
+    days > 0 ? enUnit(days, 'day', 'days') : '',
+    hours > 0 ? enUnit(hours, 'hour', 'hours') : '',
+    days === 0 && hours === 0 ? enUnit(minutes, 'minute', 'minutes') : '',
+  ].filter(part => part.length > 0)
+  return parts.join(', ')
+}
+
+const hostText = (value: string | undefined): string => value && value.length > 0 ? value : '—'
+
+const hardwareLine = (cores: number | null, model: string | null, bytes: string | null, ar: boolean): string => {
+  const parts = [
+    cores === null ? '' : ar ? `«${cores}» ${arUnit(cores, 'نواة', 'نواتين', 'أنوية', 'نواة')}` : `${cores} ${cores === 1 ? 'core' : 'cores'}`,
+    model ? (ar ? `«${model}»` : model) : '',
+    bytes ? (ar ? `«${bytes}»` : bytes) : '',
+  ].filter(part => part.length > 0)
+  return parts.length > 0 ? parts.join(' · ') : '—'
+}
+
+const agentRecord = (value: unknown): Record<string, unknown> | null =>
+  value !== null && typeof value === 'object' ? value as Record<string, unknown> : null
+
+const agentNumber = (record: Record<string, unknown> | null, key: string): number | undefined => {
+  const value = record?.[key]
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+const agentText = (record: Record<string, unknown> | null, key: string): string | undefined => {
+  const value = record?.[key]
+  return typeof value === 'string' && value.length > 0 && value.length <= 200 && !/[\u0000-\u001f\u007f]/.test(value) ? value : undefined
+}
+
+/** Copies `GET /host/info` into the dashboard sample. A missing object stays empty. */
+export const mapAgentHostInfo = (info: unknown): DashboardHostSample | null => {
+  const record = agentRecord(info)
+  if (!record) return null
+  const load = agentRecord(record.load)
+  const memory = agentRecord(record.memory)
+  const disk = agentRecord(record.disk)
+  const inodes = agentRecord(record.inodes)
+  const identity = agentRecord(record.identity)
+  const totalBytes = agentNumber(memory, 'totalBytes')
+  const availableBytes = agentNumber(memory, 'availableBytes')
+  const diskTotal = agentNumber(disk, 'totalBytes')
+  const diskUsed = agentNumber(disk, 'usedBytes')
+  const diskFree = agentNumber(disk, 'availableBytes')
+  const inodeTotal = agentNumber(inodes, 'total')
+  const inodeUsed = agentNumber(inodes, 'used')
+  const inodeMount = agentText(inodes, 'mount')
+  const uptimeRaw = identity?.uptimeSeconds
+  const uptimeSeconds = typeof uptimeRaw === 'number' && Number.isFinite(uptimeRaw) && uptimeRaw >= 0 ? Math.floor(uptimeRaw) : undefined
+  const coresRaw = identity?.cores
+  const cores = typeof coresRaw === 'number' && Number.isInteger(coresRaw) && coresRaw >= 1 && coresRaw <= 4096 ? coresRaw : undefined
+  const homeOnRoot = record.homeOnRoot === true || inodeMount === '/'
+  const configChecks = agentRecord(record.configChecks)
+  const configCheck = (name: string): { ok: boolean; at: string } | undefined => {
+    const check = agentRecord(configChecks?.[name])
+    const at = agentText(check, 'at')
+    if (!check || typeof check.ok !== 'boolean' || !at || Number.isNaN(Date.parse(at))) return undefined
+    return { ok: check.ok, at }
+  }
+  const sampledAt = agentText(record, 'sampledAt')
+  const nginxTest = configCheck('nginx')
+  const apacheTest = configCheck('apache')
+  const sample: DashboardHostSample = {
+    ...(agentNumber(load, 'load1') !== undefined ? { load1: agentNumber(load, 'load1') } : {}),
+    ...(agentNumber(load, 'load5') !== undefined ? { load5: agentNumber(load, 'load5') } : {}),
+    ...(agentNumber(load, 'load15') !== undefined ? { load15: agentNumber(load, 'load15') } : {}),
+    ...(totalBytes !== undefined && availableBytes !== undefined ? { memory: { totalBytes, availableBytes } } : {}),
+    ...(typeof disk?.mount === 'string' && disk.mount.startsWith('/') && disk.mount.length <= 200 && diskTotal !== undefined && diskUsed !== undefined && diskFree !== undefined
+      ? { disk: { mount: disk.mount, totalBytes: diskTotal, usedBytes: diskUsed, availableBytes: diskFree } }
+      : {}),
+    ...(inodeMount && inodeMount.startsWith('/') && inodeTotal !== undefined && inodeUsed !== undefined && Number.isSafeInteger(inodeTotal) && Number.isSafeInteger(inodeUsed) && inodeUsed <= inodeTotal
+      ? { inodes: { mount: inodeMount, total: inodeTotal, used: inodeUsed, ...(homeOnRoot ? { homeOnRoot: true } : {}) } }
+      : {}),
+    ...(agentText(identity, 'hostname') ? { hostname: agentText(identity, 'hostname') } : {}),
+    ...(cores !== undefined ? { cores } : {}),
+    ...(agentText(identity, 'model') ? { cpuModel: agentText(identity, 'model') } : {}),
+    ...(agentText(identity, 'system') ? { system: agentText(identity, 'system') } : {}),
+    ...(agentText(identity, 'kernel') ? { kernel: agentText(identity, 'kernel') } : {}),
+    ...(uptimeSeconds !== undefined ? { uptimeSeconds } : {}),
+    ...(agentText(identity, 'engine') ? { engine: agentText(identity, 'engine') } : {}),
+    ...(agentText(identity, 'version') ? { panelVersion: agentText(identity, 'version') } : {}),
+    ...(sampledAt && !Number.isNaN(Date.parse(sampledAt)) ? { sampledAt } : {}),
+    ...(nginxTest ? { nginxTest } : {}),
+    ...(apacheTest ? { apacheTest } : {}),
+  }
+  return sample
+}
+
+export interface MappedHostService {
+  name: string
+  unit: string
+  version: string
+  active: boolean
+  enabled: boolean
+  rssMb: number
+  role: string
+  installed: boolean
+  checked: boolean
+}
+
+/** Copies `GET /host/services` into dashboard rows. Uninstalled and unchecked rows stay in the list. */
+export const mapAgentServices = (payload: unknown): MappedHostService[] | null => {
+  const services = agentRecord(payload)?.services
+  if (!Array.isArray(services)) return null
+  return services.flatMap(row => {
+    const service = agentRecord(row)
+    if (!service || typeof service.label !== 'string' || service.label.length === 0 || service.label.length > 80) return []
+    const state = service.state
+    const installed = state === 'active' || state === 'inactive' || state === 'failed'
+    const checked = installed || state === 'not-installed'
+    return [{
+      name: service.label,
+      unit: typeof service.unit === 'string' ? service.unit : '',
+      version: '',
+      active: state === 'active',
+      enabled: state === 'active',
+      rssMb: 0,
+      role: '',
+      installed,
+      checked,
+    }]
+  })
+}
 
 const ltr = (value: string): string => `<bdi dir="ltr">${escapeHtml(value)}</bdi>`
 
@@ -244,6 +417,7 @@ const headerHtml = (model: WhmDashboardModel): string => {
       <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: ${genBg}; color: ${genFg}; font-size: 12px; font-weight: 600"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: ${genFg}"></span>${generationBody}</span>
       <span style="display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: #EEF0F3; color: #344054; font-size: 12px; font-weight: 600; font-family: 'IBM Plex Mono', monospace">${show(model.versionLabel, ar)}</span>
       ${lang}
+      ${model.signOutLabel ? `<button type="button" data-action="logout" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer">${escapeHtml(model.signOutLabel)}</button>` : ''}
       <button type="button" aria-label="${escapeHtml(model.locale === 'ar' ? `قائمة المستخدم ${model.username}` : `User menu for ${model.username}`)}" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding-block: 0; padding-inline: 6px 12px; border-radius: 999px; border: 1px solid #E2E6EC; background: #FFFFFF; color: #101828; font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; cursor: pointer"><span aria-hidden="true" style="width: 32px; height: 32px; border-radius: 50%; background: #0E1726; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 13px">${initial}</span>${show(model.username, ar)}</button>
     </header>`
 }
@@ -279,7 +453,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
   </tr>`).join('')
   const meters = model.meters.map(meter => `<div style="display: flex; flex-direction: column; gap: 6px">
     <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 13px"><span style="font-weight: 600">${show(meter.label, ar)}</span><span style="color: #475467; font-variant-numeric: tabular-nums">${show(meter.value, ar)}</span></div>
-    <div role="meter" aria-label="${escapeHtml(plain(meter.label))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${escapeHtml(meter.now)}" aria-valuetext="${escapeHtml(meter.value)}" style="height: 8px; border-radius: 4px; background: #E9ECF1; overflow: hidden"><div style="height: 8px; width: ${escapeHtml(meter.pct)}; background: ${escapeHtml(meter.color)}; border-radius: 4px"></div></div>
+    ${meter.showBar === false ? '' : `<div role="meter" aria-label="${escapeHtml(plain(meter.label))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${escapeHtml(meter.now)}" aria-valuetext="${escapeHtml(meter.value)}" style="height: 8px; border-radius: 4px; background: #E9ECF1; overflow: hidden"><div style="height: 8px; width: ${escapeHtml(meter.pct)}; background: ${escapeHtml(meter.color)}; border-radius: 4px"></div></div>`}
     <span style="font-size: 12px; color: ${escapeHtml(meter.noteColor)}">${show(meter.note, ar)}</span>
   </div>`).join('')
   const accountTiles = model.accountTiles.map(item => `<div style="display: flex; flex-direction: column; gap: 2px">
@@ -338,7 +512,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
               <span role="status" style="font-size: 12px; font-weight: 500; color: #0E7A4E">${show(model.driftStatus, ar)}</span>
             </div>
           </section>
-          <section aria-labelledby="res-title" data-host-observation="${model.meters.every(meter => meter.now === '0') ? 'unavailable' : 'observed'}" style="min-width: 0; display: flex; flex-direction: column; gap: 20px; padding: 24px; border-radius: 12px; background: #FFFFFF; border: 1px solid #E2E6EC">
+          <section aria-labelledby="res-title" data-host-observation="${model.meters.every(meter => meter.value === '—' && meter.now === '0') ? 'unavailable' : 'observed'}" style="min-width: 0; display: flex; flex-direction: column; gap: 20px; padding: 24px; border-radius: 12px; background: #FFFFFF; border: 1px solid #E2E6EC">
             <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px">
               <h2 id="res-title" style="margin: 0; font-size: 16px; font-weight: 600">${show(model.resourcesTitle, ar)}</h2>
               <span style="font-size: 12px; color: #5D6B7E">${show(model.resourcesSampled, ar)}</span>
@@ -632,7 +806,7 @@ const expiringCertificates = (certificates: readonly Pick<Certificate, 'names' |
     if (!Number.isFinite(when) || when - now > windowMs) continue
     const name = certificate.names.find(item => item.length > 0)
     if (!name) continue
-    rows.push({ name, date: certificate.notAfter.slice(0, 10) })
+    rows.push({ name, date: formatUtcDay(certificate.notAfter) })
   }
   return rows
 }
@@ -647,17 +821,29 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
   const total = accounts ? accounts.length : null
   const planCount = props.plans ? props.plans.length : null
   const generationId = props.generationId !== undefined && Number.isSafeInteger(props.generationId) && props.generationId > 0 ? props.generationId : undefined
-  const hostname = props.hostname && props.hostname !== 'Server' && props.hostname !== 'الخادم' ? props.hostname : '—'
-  const version = props.version && props.version !== 'Unavailable' && props.version !== 'غير متاح' ? props.version : '—'
+  const readableName = (value: string | undefined): string | null =>
+    value && value !== 'Server' && value !== 'الخادم' ? value : null
+  const hostname = readableName(props.hostSample?.hostname) ?? readableName(props.hostname) ?? '—'
+  const panelDomain = readableName(props.panelHostname)
+  const panelRow = panelDomain && panelDomain !== hostname ? panelDomain : null
+  const probedVersion = hostText(props.hostSample?.panelVersion)
+  const version = probedVersion !== '—'
+    ? probedVersion
+    : (props.version && props.version !== 'Unavailable' && props.version !== 'غير متاح' ? props.version : '—')
   const ip = (props.ipPool ?? []).find((entry: ServerIpEntry) => entry.isPrimary)?.address ?? (props.ipPool ?? [])[0]?.address ?? '—'
-  const services = (props.services ?? []).map((service): DashboardServiceRow => ({
+  const serviceRoster = props.services ?? []
+  const services = serviceRoster.map((service): DashboardServiceRow => ({
     name: service.name,
     version: service.version,
     note: '',
-    status: service.installed === false
-      ? emptyChip('—')
-      : service.active ? running(ar ? 'يعمل' : 'Running') : emptyChip(ar ? 'متوقف' : 'Stopped'),
+    status: service.checked === false
+      ? emptyChip(ar ? 'غير مفحوص' : 'Not checked')
+      : service.installed === false
+        ? emptyChip(ar ? 'غير مثبت' : 'Not installed')
+        : service.active ? running(ar ? 'يعمل' : 'Running') : emptyChip(ar ? 'متوقف' : 'Stopped'),
   }))
+  const existingServices = serviceRoster.filter(service => service.checked !== false && service.installed !== false)
+  const runningServices = existingServices.filter(service => service.active).length
   const driftKnown = typeof props.driftCount === 'number' && Number.isSafeInteger(props.driftCount) && props.driftCount >= 0
   const driftValue = driftKnown ? String(props.driftCount) : '—'
   const inSync = driftKnown && props.driftCount === 0 && generationId !== undefined
@@ -667,7 +853,16 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     ? meterPercent(memory.totalBytes - memory.availableBytes, memory.totalBytes)
     : { now: '0', pct: '0%' }
   const diskMeter = disk && disk.totalBytes > 0 ? meterPercent(disk.usedBytes, disk.totalBytes) : { now: '0', pct: '0%' }
-  const load = typeof props.hostSample?.load1 === 'number' && Number.isFinite(props.hostSample.load1) ? props.hostSample.load1 : null
+  const finiteLoad = (value: number | undefined): number | null =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+  const loadParts = [finiteLoad(props.hostSample?.load1), finiteLoad(props.hostSample?.load5), finiteLoad(props.hostSample?.load15)].filter((value): value is number => value !== null)
+  const loadValue = loadParts.length > 0 ? loadParts.map(value => value.toFixed(2)).join(' / ') : null
+  const cores = typeof props.hostSample?.cores === 'number' && Number.isInteger(props.hostSample.cores) && props.hostSample.cores >= 1 ? props.hostSample.cores : null
+  const cpuModel = props.hostSample?.cpuModel && props.hostSample.cpuModel.length > 0 ? props.hostSample.cpuModel : null
+  const inodes = props.hostSample?.inodes && props.hostSample.inodes.total > 0 && props.hostSample.inodes.used >= 0 && props.hostSample.inodes.used <= props.hostSample.inodes.total
+    ? props.hostSample.inodes
+    : null
+  const homeOnRoot = inodes ? inodes.homeOnRoot === true || inodes.mount === '/' : false
   const expiring = props.certificates === undefined ? null : expiringCertificates(props.certificates)
   const certificateNotice: DashboardNotice = expiring === null
     ? { tone: 'info', html: '<span>—</span>' }
@@ -690,15 +885,33 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
       ? `«${total}» حساباً${planPhrase}. الموزعون يرون الحسابات التي يملكونها فقط.`
       : `${total} ${total === 1 ? 'account' : 'accounts'}${planPhrase}. Resellers see only the accounts they own.`
   const audit = (props.auditEntries ?? []).slice(0, 8).map((entry: AuditEntry): DashboardAuditRow => ({
-    time: entry.at.slice(11, 16),
+    time: formatUtcClock(entry.at),
     datetime: entry.at,
     actor: entry.actor,
     from: '—',
-    action: entry.action,
+    action: auditActionLabel(entry.action, locale),
     target: entry.target,
     result: entry.outcome === 'ok' ? okChip(ar ? 'مطبّق' : 'Applied') : badChip(entry.outcome),
     detail: '—',
   }))
+  const sampledAt = props.hostSample?.sampledAt && !Number.isNaN(Date.parse(props.hostSample.sampledAt)) ? props.hostSample.sampledAt : ''
+  const utcMinute = (iso: string): string => formatAsciiDate(iso, { includeTime: true }).replace(/:\d{2} UTC$/, ' UTC')
+  const clock = (iso: string): string => formatUtcClock(iso)
+  const rollbackId = typeof props.rollbackGenerationId === 'number' && Number.isSafeInteger(props.rollbackGenerationId) && props.rollbackGenerationId > 0
+    ? props.rollbackGenerationId
+    : null
+  const configTile = (label: string, check: { ok: boolean; at: string } | undefined, kind: 'nginx' | 'apache') => {
+    if (!check) return { label, value: '', note: '—', chip: emptyChip('—'), monoLabel: true }
+    const when = clock(check.at)
+    if (!check.ok) return { label, value: '', note: ar ? `«${when}»` : when, chip: badChip(ar ? 'فشل' : 'Failed'), monoLabel: true }
+    if (kind === 'apache') {
+      return { label, value: '', note: ar ? `الصياغة سليمة · «${when}»` : `Syntax OK · ${when}`, chip: okChip(ar ? 'نجح' : 'Passed'), monoLabel: true }
+    }
+    const note = generationId !== undefined
+      ? (ar ? `«${when}» · الجيل «${generationId}»` : `${when} · generation ${generationId}`)
+      : (ar ? `«${when}»` : when)
+    return { label, value: '', note, chip: okChip(ar ? 'نجح' : 'Passed'), monoLabel: true }
+  }
   const emptyAudit: DashboardAuditRow = { time: '—', datetime: '', actor: '—', from: '—', action: '—', target: '—', result: emptyChip('—'), detail: '—' }
   const emptyService: DashboardServiceRow = { name: '—', version: '', note: '', status: emptyChip('—') }
   const meter = (label: string): DashboardMeter => ({ label, value: '—', now: '0', pct: '0%', color: '#1D5BD6', note: '—', noteColor: '#5D6B7E' })
@@ -715,8 +928,9 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     crumbPage: ar ? 'اللوحة' : 'Dashboard',
     ledeHost: hostname,
     ledeRest: ar ? 'نظرة على الموفّق والحسابات والموارد والخدمات. آخر تحديث ' : 'at a glance: the reconciler, accounts, resources and services. Updated ',
-    ledeTime: '—',
-    ledeDatetime: '',
+    ledeTime: sampledAt ? utcMinute(sampledAt) : '—',
+    ledeDatetime: sampledAt ? new Date(sampledAt).toISOString() : '',
+    signOutLabel: ar ? 'تسجيل الخروج' : 'Sign out',
     createLabel: ar ? 'إنشاء حساب' : 'Create account',
     searchLabel: ar ? 'ابحث في الأدوات والحسابات' : 'Search tools and accounts',
     searchPlaceholder: ar ? 'ابحث في الأدوات والحسابات' : 'Search tools and accounts',
@@ -731,32 +945,52 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
       { label: ar ? 'المطلوب والمطبّق' : 'Desired and applied', value: inSync ? `${generationId} = ${generationId}` : '—', note: inSync ? (ar ? 'متساويان' : 'Equal') : '—' },
       { label: ar ? 'الجيل النشط' : 'Active generation', value: generationId !== undefined ? String(generationId) : '—', note: '—' },
       { label: ar ? 'الانحراف' : 'Drift', value: driftValue, note: '—' },
-      { label: 'nginx -t', value: '', note: '—', chip: emptyChip('—'), monoLabel: true },
-      { label: 'apachectl configtest', value: '', note: '—', chip: emptyChip('—'), monoLabel: true },
-      { label: ar ? 'هدف التراجع' : 'Rollback target', value: '—', note: '—' },
+      configTile('nginx -t', props.hostSample?.nginxTest, 'nginx'),
+      configTile('apachectl configtest', props.hostSample?.apacheTest, 'apache'),
+      { label: ar ? 'هدف التراجع' : 'Rollback target', value: rollbackId ? String(rollbackId) : '—', note: rollbackId ? (ar ? 'الجيل السابق' : 'Previous generation') : '—' },
     ],
     driftButton: ar ? 'افحص الانحراف الآن' : 'Check for drift now',
     driftLink: ar ? 'الأجيال في سجل التدقيق' : 'View generations in the audit log',
     driftStatus: '',
     resourcesTitle: ar ? 'موارد الخادم' : 'Server resources',
-    resourcesSampled: '—',
+    resourcesSampled: sampledAt ? (ar ? `العينة «${clock(sampledAt)}»` : `Sampled ${clock(sampledAt)}`) : '—',
     meters: [
-      load === null
+      loadValue === null
         ? meter(ar ? 'المعالج' : 'CPU')
-        : { label: ar ? 'المعالج' : 'CPU', value: String(load), now: '0', pct: '0%', color: '#1D5BD6', note: ar ? `الحمل «${load}»` : `load ${load}`, noteColor: '#5D6B7E' },
+        : {
+            label: ar ? 'المعالج' : 'CPU',
+            value: loadValue,
+            now: '',
+            pct: '0%',
+            color: '#1D5BD6',
+            note: cores
+              ? (ar ? `«${cores}» ${arUnit(cores, 'نواة', 'نواتين', 'أنوية', 'نواة')}` : `${cores} ${cores === 1 ? 'core' : 'cores'}`)
+              : (ar ? `الحمل «${loadValue}»` : `load ${loadValue}`),
+            noteColor: '#5D6B7E',
+            showBar: false,
+          },
       memory && memory.totalBytes > 0
         ? { label: ar ? 'الذاكرة' : 'Memory', value: `${formatBytes(memory.totalBytes - memory.availableBytes)} / ${formatBytes(memory.totalBytes)}`, ...memoryMeter, color: '#1D5BD6', note: ar ? `«${formatBytes(memory.availableBytes)}» متاحة` : `${formatBytes(memory.availableBytes)} available`, noteColor: '#5D6B7E' }
         : meter(ar ? 'الذاكرة' : 'Memory'),
       disk && disk.totalBytes > 0
         ? { label: ar ? `القرص على «${disk.mount}»` : `Disk on ${disk.mount}`, value: `${formatBytes(disk.usedBytes)} / ${formatBytes(disk.totalBytes)}`, ...diskMeter, color: '#1D5BD6', note: '—', noteColor: '#5D6B7E' }
         : meter(ar ? 'القرص على «/home»' : 'Disk on /home'),
-      meter(ar ? 'العقد على «/home»' : 'Inodes on /home'),
+      inodes
+        ? {
+            label: homeOnRoot ? (ar ? 'العقد على «/»' : 'Inodes on /') : (ar ? `العقد على «${inodes.mount}»` : `Inodes on ${inodes.mount}`),
+            value: `${formatAsciiNumber(inodes.used)} / ${formatAsciiNumber(inodes.total)}`,
+            ...meterPercent(inodes.used, inodes.total),
+            color: '#1D5BD6',
+            note: homeOnRoot ? (ar ? '«/home» على «/»' : '/home is on /') : '—',
+            noteColor: '#5D6B7E',
+          }
+        : meter(ar ? 'العقد على «/home»' : 'Inodes on /home'),
     ],
     resourcesFoot: ar
       ? 'كل حساب محصور داخل شريحته <bdi dir="ltr"><code style="font-family: \'IBM Plex Mono\', monospace">xpanel-&lt;uid&gt;.slice</code></bdi>، فلا يأخذ موقع واحد الخادم كله.'
       : 'Each account is limited inside its own <code style="font-family: \'IBM Plex Mono\', monospace">xpanel-&lt;uid&gt;.slice</code>, so one busy site cannot take the whole server.',
     auditTitle: ar ? 'آخر التدقيق' : 'Recent audit entries',
-    auditWhen: '—',
+    auditWhen: audit.length ? (ar ? 'الأوقات بتوقيت «UTC»' : 'Times in UTC') : '—',
     auditHeads: ar ? ['الوقت', 'الفاعل', 'الإجراء', 'النتيجة'] : ['Time', 'Actor', 'Action', 'Result'],
     audit: audit.length ? audit : [emptyAudit],
     auditLink: ar ? 'افتح السجل' : 'Open the audit log',
@@ -774,18 +1008,19 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     hostTitle: ar ? 'المضيف' : 'Host',
     hostIp: ip,
     hostRows: [
-      { label: ar ? 'النظام' : 'System', value: '—', ddStyle: 'margin: 0' },
-      { label: ar ? 'النواة' : 'Kernel', value: '—', ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace" },
-      { label: ar ? 'مدة التشغيل' : 'Uptime', value: '—', ddStyle: 'margin: 0; font-variant-numeric: tabular-nums' },
-      { label: ar ? 'العتاد' : 'Hardware', value: memory && memory.totalBytes > 0 ? formatBytes(memory.totalBytes) : '—', ddStyle: 'margin: 0; font-variant-numeric: tabular-nums' },
-      { label: ar ? 'المحرك' : 'Engine', value: '—', ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace; overflow-wrap: anywhere" },
+      { label: ar ? 'النظام' : 'System', value: hostText(props.hostSample?.system), ddStyle: 'margin: 0' },
+      { label: ar ? 'النواة' : 'Kernel', value: hostText(props.hostSample?.kernel), ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace" },
+      { label: ar ? 'مدة التشغيل' : 'Uptime', value: typeof props.hostSample?.uptimeSeconds === 'number' && Number.isFinite(props.hostSample.uptimeSeconds) && props.hostSample.uptimeSeconds >= 0 ? formatUptime(Math.floor(props.hostSample.uptimeSeconds), ar) : '—', ddStyle: 'margin: 0; font-variant-numeric: tabular-nums' },
+      { label: ar ? 'العتاد' : 'Hardware', value: hardwareLine(cores, cpuModel, memory && memory.totalBytes > 0 ? formatBytes(memory.totalBytes) : null, ar), ddStyle: 'margin: 0; font-variant-numeric: tabular-nums' },
+      { label: ar ? 'المحرك' : 'Engine', value: hostText(props.hostSample?.engine), ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace; overflow-wrap: anywhere" },
       { label: 'xPanel', value: version, ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace" },
+      ...(panelRow ? [{ label: ar ? 'نطاق اللوحة' : 'Panel domain', value: panelRow, ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace; overflow-wrap: anywhere" }] : []),
     ],
     controllersTitle: ar ? 'متحكمات «cgroup v2»' : 'cgroup v2 controllers',
     controllers: ['cpu', 'io', 'memory', 'pids'],
     controllersNote: ar ? 'حدود الخطط تُفرَض على هذا المضيف عندما يبلغ عنها.' : 'All plan limits are enforced on this host.',
     servicesTitle: ar ? 'الخدمات' : 'Services',
-    servicesMeta: services.length ? (ar ? `«${services.filter(service => service.status.fg === '#0E7A4E').length} / ${services.length}»` : `${services.filter(service => service.status.fg === '#0E7A4E').length} / ${services.length}`) : '—',
+    servicesMeta: serviceRoster.length ? (ar ? `«${runningServices} / ${existingServices.length}»` : `${runningServices} / ${existingServices.length}`) : '—',
     services: services.length ? services : [emptyService],
     servicesLink: ar ? 'إدارة الخدمات' : 'Manage services',
   }

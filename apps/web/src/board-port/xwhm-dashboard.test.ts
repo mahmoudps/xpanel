@@ -29,7 +29,8 @@ describe('xWHM dashboard board port', () => {
     const product = renderWhmSurface({ principal: { kind: 'root', id: 'root', username: 'root' }, activeRoute: '/whm' })
     assert.match(product, /data-board-port="xwhm-dashboard"/)
     assert.match(product, /aria-label="Search tools and accounts"/)
-    assert.doesNotMatch(product, /Activity & Jobs|Sign out|data-generation-chip=/)
+    assert.match(product, /data-action="logout"/)
+    assert.doesNotMatch(product, /Activity & Jobs|data-generation-chip=/)
   })
 
   it('keeps the approved English dashboard free of bidi isolates', () => {
@@ -74,32 +75,70 @@ describe('xWHM dashboard board port', () => {
       accounts: [{ status: 'active' }, { status: 'suspended' }] as Account[],
       resellers: [],
       plans: [] as Plan[],
+      certificates: [{ names: ['lab.example.test'], notAfter: '2020-01-01T00:00:00.000Z' }],
       hostSample: {
         load1: 0.42,
         memory: { totalBytes: 8 * 1024 ** 3, availableBytes: 5 * 1024 ** 3 },
         disk: { mount: '/', totalBytes: 20 * 1024 ** 3, usedBytes: 4 * 1024 ** 3, availableBytes: 16 * 1024 ** 3 },
+        system: 'Debian GNU/Linux 12',
+        kernel: '6.1.0-lab',
+        uptimeSeconds: 41 * 86400 + 6 * 3600,
+        engine: 'nginx 1.24.0',
+        panelVersion: '0.1.0',
       },
-      certificates: [{ names: ['lab.example.test'], notAfter: '2020-01-01T00:00:00.000Z' }],
       services: [
         { name: 'Postfix', version: '', active: true, installed: true },
         { name: 'Redis', version: '', active: false, installed: false },
+        { name: 'PowerDNS', version: '', active: false, checked: false },
       ],
       auditEntries: [{
-        id: 'audit-1', at: '2026-10-23T18:04:00.000Z', actor: 'root', action: 'mailbox.create',
+        id: 'audit-1', at: '2026-10-23T18:04:00.000Z', actor: 'root', action: 'service_user.deleted',
         target: 'box@lab.example.test', detail: {}, outcome: 'ok',
       } satisfies AuditEntry],
     }))
-    for (const marker of ['lab.example.test', '1 certificate renews within 30 days:', 'Generation 28', 'In sync', '28 = 28', 'load 0.42', 'Disk on /', 'mailbox.create', 'Postfix', '2 accounts and 0 plans', 'data-host-observation="observed"']) {
+    for (const marker of ['lab.example.test', '1 certificate renews within 30 days:', '2020-01-01 UTC', 'Generation 28', 'In sync', '28 = 28', 'load 0.42', 'Disk on /', 'Deleted service user', 'box@lab.example.test', '18:04 UTC', 'Times in UTC', 'Postfix', 'Not installed', 'Not checked', '1 / 1', '2 accounts and 0 plans', 'Debian GNU/Linux 12', '6.1.0-lab', '41 days, 6 hours', 'nginx 1.24.0', '0.1.0', 'data-host-observation="observed"']) {
       assert.ok(html.includes(marker), marker)
     }
+    assert.equal(html.includes('service_user.deleted'), false)
+    assert.equal(html.includes('>18:04<'), false)
     assert.equal(html.includes('alice'), false)
     assert.equal(html.includes('Ubuntu'), false)
     assert.equal(html.includes('>41<'), false)
-    assert.equal(html.includes('6.8.0'), false)
     const unread = renderWhmDashboard(whmDashboardFromProps({
       locale: 'en', principal: { username: 'root' }, hostname: 'lab.example.test', driftCount: null, certificates: undefined,
     }))
     assert.equal(unread.includes('In sync'), false)
+    assert.equal(unread.includes('Times in UTC'), false)
     assert.match(unread, /data-host-observation="unavailable"/)
+    const arabic = renderWhmDashboard(whmDashboardFromProps({
+      locale: 'ar',
+      principal: { username: 'root' },
+      services: [{ name: 'PowerDNS', version: '', active: false, installed: false }],
+      auditEntries: [{
+        id: 'audit-ar', at: '2026-10-23T17:29:00.000Z', actor: 'root', action: 'service_user.created',
+        target: 'box@lab.example.test', detail: {}, outcome: 'ok',
+      } satisfies AuditEntry],
+      hostSample: { uptimeSeconds: 2 * 86400 + 3600 },
+    }))
+    assert.match(arabic, /أنشأ مستخدم خدمة/)
+    assert.match(arabic, /غير مثبت/)
+    assert.match(arabic, /17:29 UTC/)
+    assert.match(arabic, /الأوقات بتوقيت/)
+    assert.match(arabic, /<bdi dir="ltr">2<\/bdi> يومين و<bdi dir="ltr">1<\/bdi> ساعة/)
+    assert.doesNotMatch(arabic, /service_user\.created/)
+    const auditPage = renderWhmSurface({
+      principal: { kind: 'root', id: 'root', username: 'root' },
+      activeRoute: '/whm/audit',
+      locale: 'ar',
+      auditEntries: [{
+        id: 'audit-ar', at: '2026-10-23T17:29:00.000Z', actor: 'root', action: 'dns.zone.saved',
+        target: 'lab.example.test', detail: {}, outcome: 'ok',
+      } satisfies AuditEntry],
+    })
+    assert.match(auditPage, /حفظ منطقة/)
+    assert.match(auditPage, /<bdi dir="ltr">DNS<\/bdi>/)
+    assert.match(auditPage, /2026-10-23 17:29:00 UTC/)
+    assert.match(auditPage, /lab\.example\.test/)
+    assert.doesNotMatch(auditPage, /dns\.zone\.saved/)
   })
 })

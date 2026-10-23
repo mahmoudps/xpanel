@@ -53,7 +53,8 @@ describe('verified navigation policy', () => {
   })
 
   it('does not publish unverified catalog navigation in any surface', () => {
-    expect(visibleNavigation({ principal: owner, disabledFeatures: new Set() })).toEqual([])
+    expect(routesOf(visibleNavigation({ principal: owner, disabledFeatures: new Set() }))).toEqual(['/home'])
+    expect(visibleNavigation({ principal: { ...owner, accountId: '' }, disabledFeatures: new Set() })).toEqual([])
     expect(visibleNavigation({ principal: root })).toEqual([])
     expect(visibleNavigation({ principal: reseller, reseller: { acl: ['manage-dns'] } })).toEqual([])
   })
@@ -96,7 +97,7 @@ describe('verified navigation policy', () => {
     const page = navigation.find(surface => surface.surface === 'xpanel')!.sections
       .flatMap(section => section.pages).find(entry => entry.route === '/files/manager')!
     expect(page.tools).toEqual(fileManagerToolIds)
-    expect(routesOf(visibleNavigation(ownerContext, fixtures))).toEqual(['/files/manager'])
+    expect(routesOf(visibleNavigation(ownerContext, fixtures))).toEqual(['/home', '/files/manager'])
     expect(visibleNavigation({ principal: root }, fixtures)).toEqual([])
   })
 
@@ -124,7 +125,7 @@ describe('verified navigation policy', () => {
     expect(isVisible(share, { principal: root })).toBe(true)
     expect(isVisible(share, { principal: reseller, reseller: { acl: [] } })).toBe(false)
     expect(routesOf(visibleNavigation({ principal: root }, fixtures))).toEqual(['/whm/server/file-sharing'])
-    expect(routesOf(visibleNavigation(ownerContext, fixtures))).toEqual(['/files/manager'])
+    expect(routesOf(visibleNavigation(ownerContext, fixtures))).toEqual(['/home', '/files/manager'])
     expect(visibleNavigation({ principal: reseller, reseller: { acl: [] } }, fixtures)).toEqual([])
   })
 
@@ -134,7 +135,8 @@ describe('verified navigation policy', () => {
     expect(routesOf(visibleNavigation(ownerContext, privateCatalog)).some(route => route.startsWith('/whm'))).toBe(false)
     expect(JSON.stringify(productionTools)).toBe(before)
     expect(productionTools.filter(entry => entry.status === 'verified')).toEqual([])
-    expect(visibleNavigation(ownerContext)).toEqual([])
+    expect(routesOf(visibleNavigation(ownerContext))).toEqual(['/home'])
+    expect(visibleNavigation({ principal: root })).toEqual([])
   })
 
   it.each(ownerContractSplits)('keeps $route eligible using only its qualified account capabilities', contract => {
