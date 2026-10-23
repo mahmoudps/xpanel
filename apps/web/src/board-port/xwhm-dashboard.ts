@@ -1,11 +1,18 @@
-import type { Account, AuditEntry, ServerIpEntry } from '@xpanel/core'
+import type { Account, AuditEntry, Certificate, Plan, ServerIpEntry } from '@xpanel/core'
 import type { Locale } from '../i18n.ts'
-import { escapeHtml } from '../tokens.ts'
+import { escapeHtml, formatBytes } from '../tokens.ts'
 
 interface DashboardServiceInput {
   name: string
   version: string
   active: boolean
+  installed?: boolean
+}
+
+export interface DashboardHostSample {
+  load1?: number
+  memory?: { totalBytes: number; availableBytes: number }
+  disk?: { mount: string; totalBytes: number; usedBytes: number; availableBytes: number }
 }
 
 interface DashboardProps {
@@ -20,6 +27,11 @@ interface DashboardProps {
   ipPool?: ServerIpEntry[]
   services?: DashboardServiceInput[]
   auditEntries?: AuditEntry[]
+  plans?: readonly Plan[]
+  hostSample?: DashboardHostSample | null
+  /** Null when drift was not read. A number is the count reported by the host. */
+  driftCount?: number | null
+  certificates?: readonly Pick<Certificate, 'names' | 'notAfter'>[]
 }
 
 export interface DashboardChip {
@@ -602,7 +614,28 @@ export const whmDashboardFixtureAr = (): WhmDashboardModel => ({
 })
 
 const countAccounts = (accounts: Account[] | undefined, status: Account['status']): string =>
-  accounts ? String(accounts.filter(account => account.status === status).length) : '0'
+  accounts ? String(accounts.filter(account => account.status === status).length) : '—'
+
+const meterPercent = (used: number, total: number): { now: string; pct: string } => {
+  if (!Number.isFinite(used) || !Number.isFinite(total) || total <= 0) return { now: '0', pct: '0%' }
+  const value = Math.max(0, Math.min(100, Math.round((used / total) * 100)))
+  return { now: String(value), pct: `${value}%` }
+}
+
+const expiringCertificates = (certificates: readonly Pick<Certificate, 'names' | 'notAfter'>[] | undefined): { name: string; date: string }[] => {
+  if (!certificates) return []
+  const now = Date.now()
+  const windowMs = 30 * 24 * 60 * 60 * 1000
+  const rows: { name: string; date: string }[] = []
+  for (const certificate of certificates) {
+    const when = Date.parse(certificate.notAfter)
+    if (!Number.isFinite(when) || when - now > windowMs) continue
+    const name = certificate.names.find(item => item.length > 0)
+    if (!name) continue
+    rows.push({ name, date: certificate.notAfter.slice(0, 10) })
+  }
+  return rows
+}
 
 export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel => {
   const locale: Locale = props.locale ?? 'en'
@@ -610,8 +643,9 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
   const accounts = props.accounts
   const active = countAccounts(accounts, 'active')
   const suspended = countAccounts(accounts, 'suspended')
-  const resellerCount = props.resellers ? String(props.resellers.length) : '0'
-  const total = accounts ? accounts.length : 0
+  const resellerCount = props.resellers ? String(props.resellers.length) : '—'
+  const total = accounts ? accounts.length : null
+  const planCount = props.plans ? props.plans.length : null
   const generationId = props.generationId !== undefined && Number.isSafeInteger(props.generationId) && props.generationId > 0 ? props.generationId : undefined
   const hostname = props.hostname && props.hostname !== 'Server' && props.hostname !== 'الخادم' ? props.hostname : '—'
   const version = props.version && props.version !== 'Unavailable' && props.version !== 'غير متاح' ? props.version : '—'
@@ -620,8 +654,41 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     name: service.name,
     version: service.version,
     note: '',
-    status: service.active ? running(ar ? 'يعمل' : 'Running') : emptyChip(ar ? 'متوقف' : 'Stopped'),
+    status: service.installed === false
+      ? emptyChip('—')
+      : service.active ? running(ar ? 'يعمل' : 'Running') : emptyChip(ar ? 'متوقف' : 'Stopped'),
   }))
+  const driftKnown = typeof props.driftCount === 'number' && Number.isSafeInteger(props.driftCount) && props.driftCount >= 0
+  const driftValue = driftKnown ? String(props.driftCount) : '—'
+  const inSync = driftKnown && props.driftCount === 0 && generationId !== undefined
+  const memory = props.hostSample?.memory
+  const disk = props.hostSample?.disk
+  const memoryMeter = memory && memory.totalBytes > 0
+    ? meterPercent(memory.totalBytes - memory.availableBytes, memory.totalBytes)
+    : { now: '0', pct: '0%' }
+  const diskMeter = disk && disk.totalBytes > 0 ? meterPercent(disk.usedBytes, disk.totalBytes) : { now: '0', pct: '0%' }
+  const load = typeof props.hostSample?.load1 === 'number' && Number.isFinite(props.hostSample.load1) ? props.hostSample.load1 : null
+  const expiring = props.certificates === undefined ? null : expiringCertificates(props.certificates)
+  const certificateNotice: DashboardNotice = expiring === null
+    ? { tone: 'info', html: '<span>—</span>' }
+    : expiring.length === 0
+      ? { tone: 'warn', html: `<span>${ar ? rich('لا شهادات تُجدَّد خلال «30» يوماً.') : escapeHtml('No certificates renew within 30 days.')}</span>` }
+      : {
+          tone: 'warn',
+          html: `<span>${ar
+            ? rich(expiring.length === 1 ? '«1» شهادة تُجدَّد خلال «30» يوماً:' : `«${expiring.length}» شهادات تُجدَّد خلال «30» يوماً:`)
+            : escapeHtml(expiring.length === 1 ? '1 certificate renews within 30 days:' : `${expiring.length} certificates renew within 30 days:`)} ${expiring.map(item => `${mono(item.name)} (${mono(item.date)})`).join(', ')}</span>`,
+        }
+  const planPhrase = planCount === null
+    ? ''
+    : ar
+      ? (planCount === 1 ? ' و«1» خطة' : ` و«${planCount}» خططاً`)
+      : (planCount === 1 ? ' and 1 plan' : ` and ${planCount} plans`)
+  const accountsSentence = total === null
+    ? '—'
+    : ar
+      ? `«${total}» حساباً${planPhrase}. الموزعون يرون الحسابات التي يملكونها فقط.`
+      : `${total} ${total === 1 ? 'account' : 'accounts'}${planPhrase}. Resellers see only the accounts they own.`
   const audit = (props.auditEntries ?? []).slice(0, 8).map((entry: AuditEntry): DashboardAuditRow => ({
     time: entry.at.slice(11, 16),
     datetime: entry.at,
@@ -654,16 +721,16 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     searchLabel: ar ? 'ابحث في الأدوات والحسابات' : 'Search tools and accounts',
     searchPlaceholder: ar ? 'ابحث في الأدوات والحسابات' : 'Search tools and accounts',
     notices: [
-      { tone: 'warn', html: `<span>${ar ? rich('لا شهادات تُجدَّد خلال «30» يوماً.') : escapeHtml('No certificates renew within 30 days.')}</span>` },
+      certificateNotice,
       { tone: 'info', html: `<span>${escapeHtml(ar ? 'لا ترقية منشورة.' : 'No upgrade is published.')} ${props.availableVersion ? mono(props.availableVersion) : ''}</span>` },
     ],
     reconcilerTitle: ar ? 'الموفّق' : 'Reconciler',
-    reconcilerStatus: generationId !== undefined ? okChip(ar ? 'متزامن' : 'In sync') : emptyChip('—'),
-    reconcilerLede: ar ? 'الحالة المطلوبة تساوي الحالة المطبّقة عندما ينجح الفحص.' : 'The desired state equals the applied state. Every change is written as a new generation, tested, and switched only when the tests pass.',
+    reconcilerStatus: inSync ? okChip(ar ? 'متزامن' : 'In sync') : emptyChip('—'),
+    reconcilerLede: ar ? 'الحالة المطلوبة تساوي الحالة المطبّقة عندما ينجح الفحص.' : 'The desired state equals the applied state when the drift check reports none.',
     reconcilerTiles: [
-      { label: ar ? 'المطلوب والمطبّق' : 'Desired and applied', value: generationId !== undefined ? `${generationId} = ${generationId}` : '—', note: generationId !== undefined ? (ar ? 'متساويان' : 'Equal') : '—' },
+      { label: ar ? 'المطلوب والمطبّق' : 'Desired and applied', value: inSync ? `${generationId} = ${generationId}` : '—', note: inSync ? (ar ? 'متساويان' : 'Equal') : '—' },
       { label: ar ? 'الجيل النشط' : 'Active generation', value: generationId !== undefined ? String(generationId) : '—', note: '—' },
-      { label: ar ? 'الانحراف' : 'Drift', value: '0', note: '—' },
+      { label: ar ? 'الانحراف' : 'Drift', value: driftValue, note: '—' },
       { label: 'nginx -t', value: '', note: '—', chip: emptyChip('—'), monoLabel: true },
       { label: 'apachectl configtest', value: '', note: '—', chip: emptyChip('—'), monoLabel: true },
       { label: ar ? 'هدف التراجع' : 'Rollback target', value: '—', note: '—' },
@@ -673,7 +740,18 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     driftStatus: '',
     resourcesTitle: ar ? 'موارد الخادم' : 'Server resources',
     resourcesSampled: '—',
-    meters: [meter(ar ? 'المعالج' : 'CPU'), meter(ar ? 'الذاكرة' : 'Memory'), meter(ar ? 'القرص على «/home»' : 'Disk on /home'), meter(ar ? 'العقد على «/home»' : 'Inodes on /home')],
+    meters: [
+      load === null
+        ? meter(ar ? 'المعالج' : 'CPU')
+        : { label: ar ? 'المعالج' : 'CPU', value: String(load), now: '0', pct: '0%', color: '#1D5BD6', note: ar ? `الحمل «${load}»` : `load ${load}`, noteColor: '#5D6B7E' },
+      memory && memory.totalBytes > 0
+        ? { label: ar ? 'الذاكرة' : 'Memory', value: `${formatBytes(memory.totalBytes - memory.availableBytes)} / ${formatBytes(memory.totalBytes)}`, ...memoryMeter, color: '#1D5BD6', note: ar ? `«${formatBytes(memory.availableBytes)}» متاحة` : `${formatBytes(memory.availableBytes)} available`, noteColor: '#5D6B7E' }
+        : meter(ar ? 'الذاكرة' : 'Memory'),
+      disk && disk.totalBytes > 0
+        ? { label: ar ? `القرص على «${disk.mount}»` : `Disk on ${disk.mount}`, value: `${formatBytes(disk.usedBytes)} / ${formatBytes(disk.totalBytes)}`, ...diskMeter, color: '#1D5BD6', note: '—', noteColor: '#5D6B7E' }
+        : meter(ar ? 'القرص على «/home»' : 'Disk on /home'),
+      meter(ar ? 'العقد على «/home»' : 'Inodes on /home'),
+    ],
     resourcesFoot: ar
       ? 'كل حساب محصور داخل شريحته <bdi dir="ltr"><code style="font-family: \'IBM Plex Mono\', monospace">xpanel-&lt;uid&gt;.slice</code></bdi>، فلا يأخذ موقع واحد الخادم كله.'
       : 'Each account is limited inside its own <code style="font-family: \'IBM Plex Mono\', monospace">xpanel-&lt;uid&gt;.slice</code>, so one busy site cannot take the whole server.',
@@ -688,7 +766,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
       { label: ar ? 'الموقوفة' : 'Suspended', value: suspended, dot: '#B54708' },
       { label: ar ? 'الموزعون' : 'Resellers', value: resellerCount, dot: '#344054', ring: true },
     ],
-    accountsSentence: ar ? `«${total}» حساباً في المجموع. الموزعون يرون الحسابات التي يملكونها فقط.` : `${total} accounts in total. Resellers see only the accounts they own.`,
+    accountsSentence,
     nearTitle: ar ? 'قرب الحد' : 'Near a limit',
     near: [{ name: '—', note: '—', color: '#5D6B7E' }],
     viewAccounts: ar ? 'عرض الحسابات' : 'View accounts',
@@ -699,7 +777,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
       { label: ar ? 'النظام' : 'System', value: '—', ddStyle: 'margin: 0' },
       { label: ar ? 'النواة' : 'Kernel', value: '—', ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace" },
       { label: ar ? 'مدة التشغيل' : 'Uptime', value: '—', ddStyle: 'margin: 0; font-variant-numeric: tabular-nums' },
-      { label: ar ? 'العتاد' : 'Hardware', value: '—', ddStyle: 'margin: 0; font-variant-numeric: tabular-nums' },
+      { label: ar ? 'العتاد' : 'Hardware', value: memory && memory.totalBytes > 0 ? formatBytes(memory.totalBytes) : '—', ddStyle: 'margin: 0; font-variant-numeric: tabular-nums' },
       { label: ar ? 'المحرك' : 'Engine', value: '—', ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace; overflow-wrap: anywhere" },
       { label: 'xPanel', value: version, ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace" },
     ],

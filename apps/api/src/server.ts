@@ -1638,6 +1638,11 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         await assertRoot(caller, 'server.info')
         return callAgent('/host/info', { caller })
       }
+      if (method === 'GET' && pathname === '/api/server/drift') {
+        const caller = await requireCaller(req)
+        await assertRoot(caller, 'server.drift')
+        return callAgent('/host/drift', { caller })
+      }
       if (method === 'GET' && pathname === '/api/server/services') {
         const caller = await requireCaller(req)
         await assertRoot(caller, 'server.services')

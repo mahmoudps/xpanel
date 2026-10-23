@@ -495,7 +495,7 @@ async function paletteVisibility(page, state, expect, observations) {
   const actual = await page.locator('[data-cmdk-item]').evaluateAll(elements => elements.map(element => element.dataset.cmdkItem).sort())
   const sidebar = await page.locator('[data-xp-sidebar] a[data-nav-route]').evaluateAll(elements => elements.map(element => element.dataset.navRoute).sort())
   assert.ok(actual.length > 8)
-  assert.ok(sidebar.includes('/home') && sidebar.includes('/design/system'), 'The design sidebar lists the board pages')
+  assert.ok(sidebar.includes('/home') && !sidebar.includes('/design/system') && !sidebar.includes('/design/components') && !sidebar.includes('/design/navigation'), 'Product navigation omits the design specimen routes')
   assert.ok(!actual.includes('/design/system'), 'The command palette stays on qualified catalog pages')
   assert.ok(actual.every(path => path !== '/whm' && !path.startsWith('/whm/')), 'The account-owner palette must omit administrator destinations')
   await page.locator('[data-cmdk-search]').fill('/whm')

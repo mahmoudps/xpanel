@@ -231,6 +231,116 @@ const isIncludedRuntimeSource = (relPath) => {
   return false
 }
 
+export const RELEASE_PRIVACY_CONFIG = 'scripts/release-privacy.json'
+
+const PRIVACY_SKIP_DIRS = new Set([
+  '.git',
+  'node_modules',
+  '.pnpm-store',
+  '.tools',
+  '.secrets',
+  '.xpanel-data',
+  '.artifacts',
+  'dist',
+  'coverage',
+  'tmp',
+])
+
+const PRIVACY_TEXT_EXTENSIONS = new Set(['.md', '.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.css', '.html', '.yml', '.yaml', '.sh', '.c', '.sql', '.txt'])
+
+/**
+ * Names the release privacy scan may see in this checkout. The build runner reads this
+ * file, so it does not keep a machine-local exception list.
+ * @param {string} sourceRoot
+ * @returns {Set<string>}
+ */
+export const loadReleasePrivacyAccept = (sourceRoot) => {
+  const configPath = join(sourceRoot, RELEASE_PRIVACY_CONFIG)
+  if (!existsSync(configPath)) return new Set()
+  let parsed
+  try {
+    parsed = JSON.parse(readFileSync(configPath, 'utf8'))
+  } catch (error) {
+    failRelease('PRIVACY_CONFIG', `Release privacy config is not valid JSON: ${RELEASE_PRIVACY_CONFIG}`, {
+      path: RELEASE_PRIVACY_CONFIG,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+  const accept = parsed?.accept
+  if (!Array.isArray(accept) || accept.some(item => typeof item !== 'string' || item.length === 0)) {
+    failRelease('PRIVACY_CONFIG', `Release privacy config accept must be an array of names: ${RELEASE_PRIVACY_CONFIG}`, {
+      path: RELEASE_PRIVACY_CONFIG,
+    })
+  }
+  return new Set(accept)
+}
+
+/**
+ * Flags agent skills, the design-document test, the data-token attribute, and the fidelity script.
+ * A finding is clean when its name is listed in scripts/release-privacy.json.
+ * @param {string} sourceRoot
+ * @returns {{ violations: { marker: string, path: string }[] }}
+ */
+export const scanReleasePrivacy = (sourceRoot) => {
+  const root = resolve(sourceRoot)
+  const accept = loadReleasePrivacyAccept(root)
+  /** @type {{ marker: string, path: string }[]} */
+  const violations = []
+  const seen = new Set()
+
+  const record = (marker, relPath) => {
+    if (accept.has(marker)) return
+    const key = `${marker}\0${relPath}`
+    if (seen.has(key)) return
+    seen.add(key)
+    violations.push({ marker, path: relPath })
+  }
+
+  const walk = (absDir) => {
+    const entries = readdirSync(absDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (PRIVACY_SKIP_DIRS.has(entry.name)) continue
+        walk(join(absDir, entry.name))
+        continue
+      }
+      if (!entry.isFile()) continue
+      const absPath = join(absDir, entry.name)
+      const relPath = toPosix(relative(root, absPath))
+      if (relPath === RELEASE_PRIVACY_CONFIG) continue
+      const base = basename(relPath)
+      if (base === 'SKILL.md') record('SKILL.md', relPath)
+      if (base === 'board-fidelity.mjs') record('board-fidelity.mjs', relPath)
+      const extension = posix.extname(base)
+      if (!PRIVACY_TEXT_EXTENSIONS.has(extension)) continue
+      let text = ''
+      try {
+        const info = statSync(absPath)
+        if (info.size > 1_048_576) continue
+        text = readFileSync(absPath, 'utf8')
+      } catch {
+        continue
+      }
+      if (base === 'design-board.test.ts' || (base.endsWith('.test.ts') && text.includes('docs/design/'))) {
+        record(base, relPath)
+      }
+      if (text.includes('data-token')) record('data-token', relPath)
+      if (base !== 'board-fidelity.mjs' && text.includes('board-fidelity')) record('board-fidelity.mjs', relPath)
+    }
+  }
+
+  walk(root)
+  return { violations }
+}
+
+const assertReleasePrivacy = (sourceRoot) => {
+  const { violations } = scanReleasePrivacy(sourceRoot)
+  if (violations.length === 0) return
+  failRelease('PRIVACY_SCAN', `Release privacy scan found names that scripts/release-privacy.json does not accept: ${violations.map(item => item.marker).join(', ')}`, {
+    violations,
+  })
+}
+
 const collectSourceFiles = (sourceRoot) => {
   /** @type {string[]} */
   const found = []
@@ -604,6 +714,8 @@ export const buildReleaseArtifact = async (options) => {
       failRelease('MISSING_ENTRYPOINT', `Required release file is missing from source tree: ${req}`, { path: req })
     }
   }
+
+  assertReleasePrivacy(sourceRoot)
 
   const relFiles = collectSourceFiles(sourceRoot)
   /** @type {Map<string, { bytes: Buffer, sha256: string, mode: number }>} */

@@ -100,6 +100,32 @@ const normalizeAddress = (local: string, domain: string): string => {
  * the hosting account's UID/GID (`0750`), granular incoming/outgoing/login suspension, and immediate
  * map rebuild + Dovecot auth cache flush on mailbox deletion or password rotation.
  */
+export interface MaildirSnapshot {
+  accounts: readonly { id: string; home: string }[]
+  domains: readonly { id: string; name: string }[]
+  serviceUsers: readonly { accountId: string; domainId: string; localPart: string; services: { email: boolean } }[]
+}
+
+const maildirPaths = (snapshot: MaildirSnapshot): Set<string> => {
+  const accounts = new Map(snapshot.accounts.map(account => [account.id, account.home]))
+  const domains = new Map(snapshot.domains.map(domain => [domain.id, domain.name]))
+  const paths = new Set<string>()
+  for (const user of snapshot.serviceUsers) {
+    if (!user.services.email) continue
+    const home = accounts.get(user.accountId)
+    const domain = domains.get(user.domainId)
+    if (!home || !domain || !user.localPart) continue
+    paths.add(`${home}/mail/${domain}/${user.localPart}`)
+  }
+  return paths
+}
+
+/** Maildir roots present in the applied generation and absent from the desired generation. */
+export const removedMaildirPaths = (previous: MaildirSnapshot, next: MaildirSnapshot): string[] => {
+  const kept = maildirPaths(next)
+  return [...maildirPaths(previous)].filter(path => !kept.has(path)).sort()
+}
+
 export class MailServiceAdapter {
   private readonly executor: AgentExecutor
   private readonly os: OsProfile
@@ -493,7 +519,8 @@ export class MailServiceAdapter {
     await this.flushDovecotAuthAndKick(address)
 
     let removedMaildirPath: string | null = null
-    if (opts.purgeMaildir) {
+    // Deletion removes the Maildir. Callers pass purgeMaildir: false only when a retention policy keeps it.
+    if (opts.purgeMaildir !== false) {
       const acc = services.assertAccount(matchedDomain.account)
       removedMaildirPath = `${acc.home}/mail/${domain}/${local}`
       await this.executor.runAction({ kind: 'remove-path', path: removedMaildirPath })

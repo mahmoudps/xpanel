@@ -23,7 +23,7 @@ describe('product document route identity and context', () => {
     expect(resolveWebDocumentRoute('/panel/files/manager')).toEqual({surface:'xpanel',activeRoute:'/files/manager'})
     expect(resolveWebDocumentRoute('/mail')).toEqual({surface:'xmail',activeRoute:'/mail/inbox'})
     expect(resolveWebDocumentRoute('/whm/accounts/')).toEqual({surface:'xwhm',activeRoute:'/whm/accounts'})
-    for (const path of ['/whm/does-not-exist','/panel/whm/accounts','/reference-a.dc.html','/support.js','/api/accounts','/whm-extra']) expect(resolveWebDocumentRoute(path)).toBeNull()
+    for (const path of ['/whm/does-not-exist','/panel/whm/accounts','/reference-a.dc.html','/support.js','/api/accounts','/whm-extra','/design/system','/design/components','/design/navigation']) expect(resolveWebDocumentRoute(path)).toBeNull()
   })
   it('retains language, theme, density and account while preserving destination overrides', () => {
     const context = {locale:'ar',theme:'light',density:'compact',accountId:'account-fixture'} as const

@@ -540,6 +540,16 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         }
       }
 
+      if (method === 'GET' && pathname === '/host/drift') {
+        await assertRootCaller(caller, 'host.drift')
+        const report = await deps.reconciler.checkDrift()
+        return jsonResponse({
+          hasDrift: report.hasDrift,
+          count: report.items.length,
+          generationId: report.generationId,
+        })
+      }
+
       if (method === 'GET' && pathname === '/host/services') {
         await assertRootCaller(caller, 'host.services')
         if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)

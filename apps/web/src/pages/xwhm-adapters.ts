@@ -51,4 +51,12 @@ export const xwhmPageAdapters = {
     read: { enabled: true, method: 'GET', path: '/api/server/info' },
     benchmark: soon,
   },
+  dashboard: {
+    route: '/whm',
+    toolIds: ['server-information'],
+    info: { enabled: true, method: 'GET', path: '/api/server/info' },
+    services: { enabled: true, method: 'GET', path: '/api/server/services' },
+    drift: { enabled: true, method: 'GET', path: '/api/server/drift' },
+    audit: { enabled: true, method: 'GET', path: '/api/audit?limit=8' },
+  },
 } as const

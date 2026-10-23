@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
+import type { Account, AuditEntry, Plan } from '@xpanel/core'
 import { renderWhmSurface } from '../surfaces/xwhm.ts'
 import { renderWhmDashboard, whmDashboardFixture, whmDashboardFixtureAr, whmDashboardFromProps } from './xwhm-dashboard.ts'
 
@@ -23,6 +24,8 @@ describe('xWHM dashboard board port', () => {
     assert.equal(html.includes('>41<'), false)
     assert.equal(html.includes('data-generation-chip='), false)
     assert.match(html, /data-host-observation="unavailable"/)
+    assert.equal(html.includes('In sync'), false)
+    assert.equal(html.includes('No certificates renew within 30 days.'), false)
     const product = renderWhmSurface({ principal: { kind: 'root', id: 'root', username: 'root' }, activeRoute: '/whm' })
     assert.match(product, /data-board-port="xwhm-dashboard"/)
     assert.match(product, /aria-label="Search tools and accounts"/)
@@ -59,5 +62,44 @@ describe('xWHM dashboard board port', () => {
     }
     assert.equal(html.includes('days, 6 hours 41'), false)
     assert.equal(html.includes('>Dashboard<'), false)
+  })
+
+  it('binds a lab host sample and leaves unread fields empty', () => {
+    const html = renderWhmDashboard(whmDashboardFromProps({
+      locale: 'en',
+      principal: { username: 'root' },
+      hostname: 'lab.example.test',
+      generationId: 28,
+      driftCount: 0,
+      accounts: [{ status: 'active' }, { status: 'suspended' }] as Account[],
+      resellers: [],
+      plans: [] as Plan[],
+      hostSample: {
+        load1: 0.42,
+        memory: { totalBytes: 8 * 1024 ** 3, availableBytes: 5 * 1024 ** 3 },
+        disk: { mount: '/', totalBytes: 20 * 1024 ** 3, usedBytes: 4 * 1024 ** 3, availableBytes: 16 * 1024 ** 3 },
+      },
+      certificates: [{ names: ['lab.example.test'], notAfter: '2020-01-01T00:00:00.000Z' }],
+      services: [
+        { name: 'Postfix', version: '', active: true, installed: true },
+        { name: 'Redis', version: '', active: false, installed: false },
+      ],
+      auditEntries: [{
+        id: 'audit-1', at: '2026-10-23T18:04:00.000Z', actor: 'root', action: 'mailbox.create',
+        target: 'box@lab.example.test', detail: {}, outcome: 'ok',
+      } satisfies AuditEntry],
+    }))
+    for (const marker of ['lab.example.test', '1 certificate renews within 30 days:', 'Generation 28', 'In sync', '28 = 28', 'load 0.42', 'Disk on /', 'mailbox.create', 'Postfix', '2 accounts and 0 plans', 'data-host-observation="observed"']) {
+      assert.ok(html.includes(marker), marker)
+    }
+    assert.equal(html.includes('alice'), false)
+    assert.equal(html.includes('Ubuntu'), false)
+    assert.equal(html.includes('>41<'), false)
+    assert.equal(html.includes('6.8.0'), false)
+    const unread = renderWhmDashboard(whmDashboardFromProps({
+      locale: 'en', principal: { username: 'root' }, hostname: 'lab.example.test', driftCount: null, certificates: undefined,
+    }))
+    assert.equal(unread.includes('In sync'), false)
+    assert.match(unread, /data-host-observation="unavailable"/)
   })
 })

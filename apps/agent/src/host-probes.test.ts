@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createProductionHostTargetMatcher, LinuxHostExecutor } from './executor.ts'
+import { createProductionHostTargetMatcher, LinuxHostExecutor, MAILDIR_BOX_RE } from './executor.ts'
 import { parseLoadavg, parseMeminfo } from './host-info.ts'
 import { classifyHostBinaries, readHostMeasurements } from './host-probes.ts'
 
@@ -72,6 +72,12 @@ describe('host capability probes', () => {
     expect(match('/proc/meminfo', 'read')).toBe(true)
     expect(match('/proc/loadavg', 'write')).toBe(false)
     expect(match('/proc/cpuinfo', 'read')).toBe(false)
+    const maildir = '/home/alice/mail/alice.example.com/ftp_and_mail'
+    expect(MAILDIR_BOX_RE.test(maildir)).toBe(true)
+    expect(match(maildir, 'remove')).toBe(true)
+    expect(match(maildir, 'read')).toBe(false)
+    expect(match(`${maildir}/cur`, 'remove')).toBe(false)
+    expect(match('/home/alice/public_html/index.php', 'remove')).toBe(false)
     if (process.platform !== 'linux') return
     const executor = new LinuxHostExecutor({ trustedHostTargetMatcher: match })
     const load = await executor.readFile('/proc/loadavg')

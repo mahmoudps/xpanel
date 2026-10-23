@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "accept": [
+    "SKILL.md",
+    "design-board.test.ts",
+    "artifact-motion.test.ts",
+    "data-token",
+    "board-fidelity.mjs"
+  ]
+}

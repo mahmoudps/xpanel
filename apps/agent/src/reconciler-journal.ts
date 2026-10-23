@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fail } from '@xpanel/core'
+import { claimStateOwnership } from '@xpanel/state'
 import type { ConfigTest, HostAction, OsProfile, RenderedFile } from '@xpanel/core'
 import type { AgentExecutor } from './executor.ts'
 
@@ -382,6 +383,7 @@ export const detectHostDrift = async (
 
 const fsyncWriteJson = async (filePath: string, data: unknown): Promise<void> => {
   await mkdir(dirname(filePath), { recursive: true })
+  await claimStateOwnership(dirname(filePath))
   const tmp = `${filePath}.${randomUUID()}.tmp`
   const fh = await open(tmp, 'w', 0o600)
   try {
@@ -390,7 +392,9 @@ const fsyncWriteJson = async (filePath: string, data: unknown): Promise<void> =>
   } finally {
     await fh.close()
   }
+  await claimStateOwnership(tmp)
   await rename(tmp, filePath)
+  await claimStateOwnership(filePath)
 }
 
 const readJsonSafe = async <T>(filePath: string): Promise<T | null> => {
@@ -476,6 +480,7 @@ export class ReconcilerJournal {
     const stageDir = this.stagingDirFor(generationId)
     await rm(stageDir, { recursive: true, force: true })
     await mkdir(stageDir, { recursive: true })
+    await claimStateOwnership(stageDir)
 
     for (const file of files) {
       const stagedPath = this.stagedFilePath(generationId, file.path)
@@ -486,6 +491,7 @@ export class ReconcilerJournal {
       } finally {
         await fh.close()
       }
+      await claimStateOwnership(stagedPath)
     }
 
     await this.verifyStagedCandidateIntegrity(generationId, manifest)

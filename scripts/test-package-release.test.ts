@@ -12,6 +12,7 @@ import {
   ReleaseArtifactError,
   buildReleaseArtifact,
   createTarGzBuffer,
+  scanReleasePrivacy,
   parseTarGzBuffer,
   parseSystemdUnitContract,
   unpackVerifiedRelease,
@@ -561,5 +562,31 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
     const dryRunNormalized = baseRun.stdout.replace(/\r\n/g, '\n')
     expect(dryRunNormalized).toContain(agentUnitDisk)
     expect(dryRunNormalized).toContain(apiUnitDisk)
+  })
+})
+
+describe('release privacy scan', () => {
+  it('accepts the skill, the design-doc test, the data-token attribute, and the fidelity script from the repo config', () => {
+    const sourceRoot = resolve(import.meta.dirname, '..')
+    expect(scanReleasePrivacy(sourceRoot).violations).toEqual([])
+  })
+
+  it('rejects those names when the repo config does not accept them', async () => {
+    const sourceRoot = makeSourceFixture()
+    writeSourceFile(sourceRoot, '.cursor/skills/design-board-pixel-port/SKILL.md', '# skill\n')
+    writeSourceFile(sourceRoot, 'apps/web/src/design-board.test.ts', 'expect(page).toContain(\'data-token="accent"\')\n')
+    writeSourceFile(sourceRoot, 'scripts/board-fidelity.mjs', 'export {}\n')
+    const blocked = await expectReleaseError(
+      () => buildReleaseArtifact({ sourceRoot, outputDir: makeTempDir(), version: '0.1.0', createTarball: false }),
+      'PRIVACY_SCAN',
+    )
+    const markers = new Set((blocked.detail.violations as { marker: string }[]).map(item => item.marker))
+    expect(markers).toEqual(new Set(['SKILL.md', 'design-board.test.ts', 'data-token', 'board-fidelity.mjs']))
+
+    writeSourceFile(sourceRoot, 'scripts/release-privacy.json', `${JSON.stringify({
+      schema: 1,
+      accept: ['SKILL.md', 'design-board.test.ts', 'data-token', 'board-fidelity.mjs'],
+    })}\n`)
+    expect(scanReleasePrivacy(sourceRoot).violations).toEqual([])
   })
 })
