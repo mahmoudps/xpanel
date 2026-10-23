@@ -11,7 +11,8 @@ import {
   restoreAccountBackup,
   type BackupAccountTarget,
 } from './account-backup.ts'
-import { parseDf, parseLoadavg, parseMeminfo } from './host-info.ts'
+import { readHostIdentity } from './host-identity.ts'
+import { parseApacheVersion, parseDf, parseKernelRelease, parseLoadavg, parseMeminfo, parseNginxVersion, parseOsRelease, parsePackageVersion, parseProcUptime } from './host-info.ts'
 import { readHostServices, restartHostService, type HostCommandResult } from './host-services.ts'
 
 const account: BackupAccountTarget = { username: 'alice', home: '/home/alice', uid: 20014, status: 'active' }
@@ -33,6 +34,52 @@ describe('host measurements', () => {
     expect(parseDf('Filesystem 1B-blocks Used Available Capacity Mounted on\n/dev/sda1 1000 400 600 40% /\n')).toEqual({
       filesystem: '/dev/sda1', mount: '/', totalBytes: 1000, usedBytes: 400, availableBytes: 600,
     })
+  })
+
+  it('reads the operating system, kernel, uptime and engine only from the probed text', async () => {
+    expect(parseOsRelease('NAME="Debian GNU/Linux"\nVERSION="12 (bookworm)"\nPRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\n')).toBe('Debian GNU/Linux 12 (bookworm)')
+    expect(parseOsRelease('PRETTY_NAME="bad\\nname"\n')).toBeNull()
+    expect(parseProcUptime('3564000.50 10.0\n')).toBe(3564000)
+    expect(parseProcUptime('nope')).toBeNull()
+    expect(parseKernelRelease('6.8.0-45-generic\n')).toBe('6.8.0-45-generic')
+    expect(parseKernelRelease('6.8.0;rm\n')).toBeNull()
+    expect(parseNginxVersion('nginx version: nginx/1.24.0\n')).toBe('1.24.0')
+    expect(parseApacheVersion('Server version: Apache/2.4.58 (Debian)\n')).toBe('2.4.58')
+    expect(parsePackageVersion('{"version":"0.1.0"}')).toBe('0.1.0')
+    expect(parsePackageVersion('{"version":"../etc"}')).toBeNull()
+    const calls: string[][] = []
+    const identity = await readHostIdentity({
+      readFile: async (path) => {
+        if (path === '/etc/os-release') return 'PRETTY_NAME="Debian GNU/Linux 12"\n'
+        if (path === '/proc/uptime') return '3564000.10 1\n'
+        return null
+      },
+      runCommand: async (argv) => {
+        calls.push(argv)
+        const bin = argv[0] ?? ''
+        if (bin.endsWith('/uname')) return { ok: true, stdout: '6.1.0-lab\n', stderr: '' }
+        if (bin.endsWith('/nginx')) return { ok: bin.startsWith('/usr/sbin/'), stdout: '', stderr: 'nginx version: nginx/1.24.0\n' }
+        if (bin.endsWith('/apache2')) return { ok: false, stdout: '', stderr: 'not found' }
+        if (bin.endsWith('/httpd')) return { ok: true, stdout: 'Server version: Apache/2.4.58\n', stderr: '' }
+        return { ok: false, stdout: '', stderr: '' }
+      },
+    })
+    expect(identity.system).toBe('Debian GNU/Linux 12')
+    expect(identity.kernel).toBe('6.1.0-lab')
+    expect(identity.uptimeSeconds).toBe(3564000)
+    expect(identity.engine).toBe('nginx 1.24.0 → httpd 2.4.58')
+    expect(identity.version).toBe('0.1.0')
+    expect(identity.hostname).toBeUndefined()
+    expect(identity.cores).toBeUndefined()
+    expect(calls.every(argv => argv.every(arg => /^[A-Za-z0-9@+=:./_-]+$/.test(arg)))).toBe(true)
+    const missing = await readHostIdentity({
+      readFile: async () => null,
+      runCommand: async () => { throw new Error('denied') },
+    })
+    expect(missing.system).toBeUndefined()
+    expect(missing.kernel).toBeUndefined()
+    expect(missing.engine).toBeUndefined()
+    expect(missing.version).toBe('0.1.0')
   })
 
   it('refuses unreadable figures', () => {
@@ -59,10 +106,29 @@ describe('host services', () => {
     expect(rows.find(row => row.id === 'apache')).toEqual({ id: 'apache', label: 'Apache', unit: 'httpd.service', state: 'failed' })
     expect(rows.find(row => row.id === 'mariadb')).toMatchObject({ unit: 'mariadb.service', state: 'active' })
     expect(rows.find(row => row.id === 'pdns')).toMatchObject({ unit: null, state: 'not-installed' })
+    const unchecked = await readHostServices(async () => command('systemctl missing', false))
+    expect(unchecked.every(row => row.state === 'unchecked' && row.unit === null)).toBe(true)
     await expect(restartHostService(run, 'sshd')).rejects.toMatchObject({ code: 'NOT_FOUND' })
     expect(calls.some(argv => argv.includes('sshd'))).toBe(false)
     await expect(restartHostService(run, 'pdns')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: 'PowerDNS is not installed on this server' })
     await expect(restartHostService(run, 'apache')).rejects.toMatchObject({ code: 'CONFIG_TEST_FAILED', message: 'Apache did not restart (systemctl restart failed)' })
+  })
+
+  it('prefers the active PHP-FPM unit and reports nginx, redis, and postgresql from systemctl', async () => {
+    const run = async (argv: string[]): Promise<HostCommandResult> => {
+      const unit = argv.at(-1) ?? ''
+      if (unit === 'nginx.service') return command('loaded\nactive\n')
+      if (unit === 'php8.3-fpm.service') return command('not-found\ninactive\n')
+      if (unit === 'php8.1-fpm.service') return command('loaded\nactive\n')
+      if (unit === 'redis-server.service') return command('loaded\ninactive\n')
+      if (unit === 'postgresql.service') return command('not-found\ninactive\n')
+      return command('not-found\ninactive\n')
+    }
+    const rows = await readHostServices(run)
+    expect(rows.find(row => row.id === 'nginx')).toMatchObject({ unit: 'nginx.service', state: 'active' })
+    expect(rows.find(row => row.id === 'php-fpm')).toMatchObject({ label: 'PHP-FPM', unit: 'php8.1-fpm.service', state: 'active' })
+    expect(rows.find(row => row.id === 'redis')).toMatchObject({ unit: 'redis-server.service', state: 'inactive' })
+    expect(rows.find(row => row.id === 'postgresql')).toMatchObject({ unit: null, state: 'not-installed' })
   })
 })
 

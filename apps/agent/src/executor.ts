@@ -302,8 +302,8 @@ const SYSTEM_EXACT_TARGETS = new Set<string>([
   '/run/xpanel/fpm',
 ])
 
-/** Read-only host measurements. Existence is not a grant, and no other /proc path is readable. */
-const HOST_MEASUREMENT_READS = new Set<string>(['/proc/loadavg', '/proc/meminfo'])
+/** Read-only host facts. A path is granted only when it is listed here, and no other /proc path is readable. */
+const HOST_MEASUREMENT_READS = new Set<string>(['/proc/loadavg', '/proc/meminfo', '/proc/uptime', '/proc/cpuinfo', '/etc/os-release'])
 
 /** systemd drop-in directories such as user-<uid>.slice.d. The parent unit dir already exists. */
 const SYSTEMD_DROPIN_DIR_RE = /\/[^/]+\.(?:slice|service|socket|timer)\.d$/

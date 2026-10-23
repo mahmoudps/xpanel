@@ -20,7 +20,8 @@ import { JailedFileManager } from './file-manager.ts'
 import { AcmeCertificateServiceAdapter } from './services/acme.ts'
 import { createHttp01AcmeClient } from './services/acme-client.ts'
 import { probeHostCapabilities, readHostMeasurements } from './host-probes.ts'
-import { parseDf, parseLoadavg, parseMeminfo } from './host-info.ts'
+import { readHostIdentity } from './host-identity.ts'
+import { parseDf, parseDfInodes, parseLoadavg, parseMeminfo } from './host-info.ts'
 import { readHostServices, restartHostService } from './host-services.ts'
 import { createAccountBackup, listAccountBackups, restoreAccountBackup, DEFAULT_BACKUP_DIR } from './account-backup.ts'
 import type { AccountFileRunner } from './file-manager.ts'
@@ -531,10 +532,35 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)
         const loadText = await deps.executor.readFile('/proc/loadavg')
         const memText = await deps.executor.readFile('/proc/meminfo')
-        const disk = await deps.executor.runCommand(['/usr/bin/df', '-B1', '-P', '/'])
-        if (!loadText || !memText || !disk.ok) return fail('PRECONDITION_FAILED', 'host measurements could not be read')
+        const diskResult = await deps.executor.runCommand(['/usr/bin/df', '-B1', '-P', '/'])
+        if (!loadText || !memText || !diskResult.ok) return fail('PRECONDITION_FAILED', 'host measurements could not be read')
         try {
-          return jsonResponse({ load: parseLoadavg(loadText), memory: parseMeminfo(memText), disk: parseDf(disk.stdout) })
+          const disk = parseDf(diskResult.stdout)
+          const identity = await readHostIdentity(deps.executor)
+          let homeOnRoot = false
+          let inodes: ReturnType<typeof parseDfInodes> | null = null
+          const home = await deps.executor.runCommand(['/usr/bin/df', '-B1', '-P', '/home'])
+          if (home.ok) {
+            try {
+              const parsedHome = parseDf(home.stdout)
+              homeOnRoot = parsedHome.mount === '/' || parsedHome.filesystem === disk.filesystem
+            } catch { /* A missing /home row leaves the inode meter empty. */ }
+          }
+          const inodeResult = await deps.executor.runCommand(['/usr/bin/df', '-P', '-i', '/home'])
+          if (inodeResult.ok) {
+            try {
+              inodes = parseDfInodes(inodeResult.stdout)
+              if (inodes.mount === '/') homeOnRoot = true
+            } catch { /* Unreadable inode counts stay empty. */ }
+          }
+          return jsonResponse({
+            load: parseLoadavg(loadText),
+            memory: parseMeminfo(memText),
+            disk,
+            ...(inodes ? { inodes } : {}),
+            ...(homeOnRoot ? { homeOnRoot: true } : {}),
+            identity,
+          })
         } catch (error) {
           return fail('PRECONDITION_FAILED', error instanceof Error ? error.message : 'host measurements could not be read')
         }

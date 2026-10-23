@@ -113,6 +113,22 @@ export function formatAsciiDate(
 }
 
 /**
+ * UTC clock `HH:MM UTC`. The panel stores instants in UTC and has no chosen zone,
+ * so every server clock uses this label instead of a bare hour.
+ */
+export function formatUtcClock(isoOrDate: string | Date): string {
+  const full = formatAsciiDate(isoOrDate, { includeTime: true })
+  const clock = /^\d{4}-\d{2}-\d{2} (\d{2}:\d{2}):\d{2} UTC$/.exec(full)
+  return clock ? `${clock[1]} UTC` : full
+}
+
+/** UTC calendar day `YYYY-MM-DD UTC`, the date form of {@link formatUtcClock}. */
+export function formatUtcDay(isoOrDate: string | Date): string {
+  const day = formatAsciiDate(isoOrDate)
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? `${day} UTC` : day
+}
+
+/**
  * Escapes arbitrary strings for safe interpolation into HTML text and attributes.
  */
 export function escapeHtml(str: string): string {
@@ -143,15 +159,16 @@ export function getThresholdLevel(percent: number): ThresholdLevel {
 }
 
 /**
- * Formats byte counts into human-readable units with tabular ASCII (`0-9`) precision.
+ * Formats byte counts in decimal units (powers of 1000), labelled B/KB/MB/GB/TB,
+ * so a figure matches `df -H` and a hosting provider's GB. Digits stay ASCII.
  */
 export function formatAsciiBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   let val = bytes
   let unitIdx = 0
-  while (val >= 1024 && unitIdx < units.length - 1) {
-    val /= 1024
+  while (val >= 1000 && unitIdx < units.length - 1) {
+    val /= 1000
     unitIdx++
   }
   const decimals = unitIdx === 0 ? 0 : val >= 100 ? 0 : val >= 10 ? 1 : 2

@@ -9,6 +9,7 @@ import type { AgentApp } from '@xpanel/agent'
 import { canSeeAccount, fail, hasAcl } from '@xpanel/core'
 import { visibleNavigation } from '@xpanel/catalog'
 import type { VisibilityContext } from '@xpanel/catalog'
+import { mapAgentHostInfo, mapAgentServices } from '../../web/src/board-port/xwhm-dashboard.ts'
 import { publicContactEmail } from '../../web/src/display-name.ts'
 import { ACCOUNT_SECURITY_ROUTES } from '../../web/src/surfaces/account-security.ts'
 import type { OsProfile } from '@xpanel/core'
@@ -325,40 +326,8 @@ export const createDefaultWebRenderer = async (deps: {
       : [null, null, null, []]
     const asRecord = (value: unknown): Record<string, unknown> | null =>
       value !== null && typeof value === 'object' ? value as Record<string, unknown> : null
-    const infoRecord = asRecord(hostInfo)
-    const loadRecord = asRecord(infoRecord?.load)
-    const memoryRecord = asRecord(infoRecord?.memory)
-    const diskRecord = asRecord(infoRecord?.disk)
-    const numberOf = (record: Record<string, unknown> | null, key: string): number | undefined => {
-      const value = record?.[key]
-      return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-    }
-    const hostSample = infoRecord ? {
-      ...(numberOf(loadRecord, 'load1') !== undefined ? { load1: numberOf(loadRecord, 'load1') } : {}),
-      ...(numberOf(memoryRecord, 'totalBytes') !== undefined && numberOf(memoryRecord, 'availableBytes') !== undefined
-        ? { memory: { totalBytes: numberOf(memoryRecord, 'totalBytes')!, availableBytes: numberOf(memoryRecord, 'availableBytes')! } }
-        : {}),
-      ...(typeof diskRecord?.mount === 'string' && numberOf(diskRecord, 'totalBytes') !== undefined && numberOf(diskRecord, 'usedBytes') !== undefined && numberOf(diskRecord, 'availableBytes') !== undefined
-        ? { disk: { mount: diskRecord.mount, totalBytes: numberOf(diskRecord, 'totalBytes')!, usedBytes: numberOf(diskRecord, 'usedBytes')!, availableBytes: numberOf(diskRecord, 'availableBytes')! } }
-        : {}),
-    } : null
-    const serviceRows = Array.isArray(asRecord(hostServices)?.services)
-      ? (asRecord(hostServices)!.services as unknown[]).flatMap(row => {
-          const service = asRecord(row)
-          if (!service || typeof service.label !== 'string') return []
-          const state = service.state
-          return [{
-            name: service.label,
-            unit: typeof service.unit === 'string' ? service.unit : '',
-            version: '',
-            active: state === 'active',
-            enabled: state === 'active',
-            rssMb: 0,
-            role: '',
-            installed: state !== 'not-installed',
-          }]
-        })
-      : undefined
+    const hostSample = mapAgentHostInfo(hostInfo)
+    const serviceRows = mapAgentServices(hostServices)
     const driftRecord = asRecord(hostDrift)
     const driftCount = typeof driftRecord?.count === 'number' && Number.isSafeInteger(driftRecord.count) && driftRecord.count >= 0
       ? driftRecord.count
@@ -379,7 +348,10 @@ export const createDefaultWebRenderer = async (deps: {
         resellers: visibleResellers,
         ipPool: visibleIpPool,
         firewallRules: visibleFirewall,
-        ...(principal.kind === 'root' && snap.server ? { hostname: snap.server.settings.hostname } : {}),
+        ...(principal.kind === 'root' && snap.server ? {
+          hostname: hostSample?.hostname ?? snap.server.settings.hostname,
+          ...(hostSample?.hostname && hostSample.hostname !== snap.server.settings.hostname ? { panelHostname: snap.server.settings.hostname } : {}),
+        } : {}),
         ...(dashboardRoute ? {
           auditEntries: auditPage,
           certificates: snap.certificates,

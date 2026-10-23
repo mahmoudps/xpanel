@@ -6,6 +6,8 @@ import {
   formatAsciiDate,
   formatAsciiNumber,
   formatAsciiPercent,
+  formatUtcClock,
+  formatUtcDay,
   normalizeAsciiDigits,
   renderLtrValue,
 } from './tokens.ts'
@@ -15,6 +17,8 @@ export {
   formatAsciiDate,
   formatAsciiNumber,
   formatAsciiPercent,
+  formatUtcClock,
+  formatUtcDay,
   normalizeAsciiDigits,
   renderLtrValue,
 }

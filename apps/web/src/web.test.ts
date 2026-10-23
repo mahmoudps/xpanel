@@ -52,7 +52,7 @@ const whmFixture: WhmSurfaceProps = {
   ipPool: [{ id: 'fixture-ip', address: '10.0.0.12', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: 'Synthetic address' }],
   mailIpConfig: { mode: 'custom-map', defaultIpv4: fixtureAccount.ipv4, defaultIpv6: fixtureAccount.ipv6 ?? null, defaultHelo: 'mail.alice-shop.com', domainOverrides: [{ domainName: fixtureAccount.primaryDomain, ipv4: fixtureAccount.ipv4, ipv6: null, heloHostname: 'mail.alice-shop.com' }] },
   generations: [{ generationId: 142, at: fixtureAt, actor: 'synthetic-root', summary: 'Synthetic generation', stateChecksum: '9f86d081884c', filesCount: 38, durationMs: 184, status: 'superseded' }],
-  auditEntries: [{ id: 'fixture-audit', at: fixtureAt, actor: 'synthetic-root', action: 'fixture.render', target: 'Synthetic target', detail: {}, outcome: 'ok' }],
+  auditEntries: [{ id: 'fixture-audit', at: fixtureAt, actor: 'synthetic-root', action: 'service_user.deleted', target: 'Synthetic target', detail: {}, outcome: 'ok' }],
 }
 const mailFixture: MailSurfaceProps = {
   mailbox: 'info@alice-shop.com', quotaUsedMb: 42, quotaLimitMb: 1024,
@@ -189,7 +189,10 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     // Config generations rollback + audit log + root lifecycle
     assert.match(html, /data-action="rollback-generation"/)
     assert.match(whmAt('/whm/audit'), /data-audit-id="fixture-audit"/)
-    assert.match(whmAt('/whm/audit'), /fixture\.render/)
+    assert.match(whmAt('/whm/audit'), /Deleted service user/)
+    assert.match(whmAt('/whm/audit'), /Synthetic target/)
+    assert.match(whmAt('/whm/audit'), /2026-10-22 14:05:00 UTC/)
+    assert.doesNotMatch(whmAt('/whm/audit'), /service_user\.deleted/)
     assert.match(html, /data-action="start-transfer"/)
     assert.doesNotMatch(html, /cpmove-ziad\.tar\.gz/)
     assertAllBadgesHaveSvgAndLabel(html)

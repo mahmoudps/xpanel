@@ -26,6 +26,7 @@ import {
   renderStatusBadge,
   renderThresholdMeter,
 } from '../tokens.ts'
+import { auditActionHtml } from '../audit-labels.ts'
 import { renderWhmDashboard, whmDashboardFromProps, type DashboardHostSample } from '../board-port/xwhm-dashboard.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
@@ -40,6 +41,8 @@ export interface WhmServiceHealthRow {
   rssMb: number
   role: string
   installed?: boolean
+  /** False when the unit was not probed. Omitted means the row carries a probe result. */
+  checked?: boolean
 }
 
 export interface WhmConfigGenerationRow {
@@ -63,6 +66,7 @@ export interface WhmSurfaceProps {
   activeReseller?: Reseller | null
   activeRoute?: string
   hostname?: string
+  panelHostname?: string
   version?: string
   availableVersion?: string
   generationId?: number
@@ -138,7 +142,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
     : ''
 
   if (section === 'overview') return ensureAccessibleSurfaceHtml(renderWhmDashboard(whmDashboardFromProps({
-    locale, principal, hostname: props.hostname, version: props.version, availableVersion: props.availableVersion,
+    locale, principal, hostname: props.hostname, panelHostname: props.panelHostname, version: props.version, availableVersion: props.availableVersion,
     generationId: props.generationId, accounts: props.accounts, resellers: props.resellers, ipPool: props.ipPool,
     plans: props.plans, services, auditEntries, hostSample: props.hostSample, driftCount: props.driftCount,
     certificates: props.certificates,
@@ -205,7 +209,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
         </section>
         <section class="xp-board-section" aria-labelledby="whm-dash-audit">
           <header class="xp-board-section__head"><h2 id="whm-dash-audit">${isAr ? 'آخر التدقيق' : 'Recent audit entries'}</h2><a href="/whm/audit">${isAr ? 'افتح السجل' : 'Open the audit log'}</a></header>
-          <div class="xp-table-wrap"><table class="xp-table"><thead><tr><th>${isAr ? 'الوقت' : 'Time'}</th><th>${isAr ? 'الفاعل' : 'Actor'}</th><th>${isAr ? 'الإجراء' : 'Action'}</th><th>${isAr ? 'النتيجة' : 'Result'}</th></tr></thead><tbody>${auditEntries.length ? auditEntries.slice(0, 8).map(entry => `<tr><td><bdi dir="ltr">${escapeHtml(formatAsciiDate(entry.at))}</bdi></td><td><bdi dir="ltr">${escapeHtml(entry.actor)}</bdi></td><td><bdi dir="ltr">${escapeHtml(entry.action)}</bdi></td><td>${escapeHtml(entry.outcome)}</td></tr>`).join('') : `<tr><td colspan="4">${isAr ? 'لا مدخلات تدقيق بعد' : 'No audit entries yet'}</td></tr>`}</tbody></table></div>
+          <div class="xp-table-wrap"><table class="xp-table"><thead><tr><th>${isAr ? 'الوقت' : 'Time'}</th><th>${isAr ? 'الفاعل' : 'Actor'}</th><th>${isAr ? 'الإجراء' : 'Action'}</th><th>${isAr ? 'النتيجة' : 'Result'}</th></tr></thead><tbody>${auditEntries.length ? auditEntries.slice(0, 8).map(entry => `<tr><td><bdi dir="ltr">${escapeHtml(formatAsciiDate(entry.at, { includeTime: true }))}</bdi></td><td><bdi dir="ltr">${escapeHtml(entry.actor)}</bdi></td><td>${auditActionHtml(entry.action, locale)}</td><td>${escapeHtml(entry.outcome)}</td></tr>`).join('') : `<tr><td colspan="4">${isAr ? 'لا مدخلات تدقيق بعد' : 'No audit entries yet'}</td></tr>`}</tbody></table></div>
         </section>
       </section>
 ` : ''}
@@ -923,7 +927,7 @@ ${section === 'audit' ? `<section class="xp-card" data-section="audit-log">
                     <tr data-audit-id="${escapeHtml(entry.id)}">
                       <td class="xp-mono xp-tabular"><time datetime="${escapeHtml(entry.at)}">${escapeHtml(formatAsciiDate(entry.at, { includeTime: true }))}</time></td>
                       <td class="xp-mono"><bdi dir="ltr">${escapeHtml(entry.actor)}</bdi></td>
-                      <td class="xp-mono"><bdi dir="ltr">${escapeHtml(entry.action)}</bdi></td>
+                      <td class="xp-mono">${auditActionHtml(entry.action, locale)}</td>
                       <td class="xp-mono"><bdi dir="ltr">${escapeHtml(entry.target)}</bdi></td>
                       <td>${renderStatusBadge(entry.outcome === 'ok' ? 'ok' : entry.outcome === 'denied' ? 'warn' : 'critical', entry.outcome)}</td>
                     </tr>

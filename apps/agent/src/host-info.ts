@@ -46,6 +46,13 @@ export const parseMeminfo = (text: string): HostMemory => {
   return { totalBytes, availableBytes }
 }
 
+export interface HostInodes {
+  filesystem: string
+  mount: string
+  total: number
+  used: number
+}
+
 /** Parses `df -B1 -P` output for one filesystem. */
 export const parseDf = (text: string): HostDisk => {
   const line = text.trim().split('\n').find(row => row.length > 0 && !row.startsWith('Filesystem'))
@@ -59,4 +66,104 @@ export const parseDf = (text: string): HostDisk => {
     throw new Error('disk figures are unreadable')
   }
   return { filesystem, mount, totalBytes, usedBytes, availableBytes }
+}
+
+/** Parses `df -P -i` output for one filesystem. The percent is computed by the caller. */
+export const parseDfInodes = (text: string): HostInodes => {
+  const line = text.trim().split('\n').find(row => row.length > 0 && !row.startsWith('Filesystem'))
+  const parts = line?.trim().split(/\s+/) ?? []
+  const filesystem = parts[0]
+  const total = finite(parts[1])
+  const used = finite(parts[2])
+  const mount = parts[5]
+  if (!filesystem || !mount || !mount.startsWith('/') || total === null || used === null || !Number.isSafeInteger(total) || !Number.isSafeInteger(used) || used > total) {
+    throw new Error('inode figures are unreadable')
+  }
+  return { filesystem, mount, total, used }
+}
+
+export interface HostCpu {
+  cores: number
+  model: string | null
+}
+
+/** Processor count and the first model name from `/proc/cpuinfo`. */
+export const parseCpuinfo = (text: string): HostCpu | null => {
+  const cores = text.split('\n').filter(line => /^processor\s*:/.test(line)).length
+  if (!Number.isInteger(cores) || cores < 1 || cores > 4096) return null
+  const modelLine = text.split('\n').find(line => /^model name\s*:/.test(line))
+  const modelRaw = modelLine ? modelLine.slice(modelLine.indexOf(':') + 1).trim() : ''
+  return { cores, model: modelRaw ? displayText(modelRaw, 160) : null }
+}
+
+/** One hostname from `hostname -f`. */
+export const parseHostname = (text: string): string | null => {
+  const line = text.trim().split('\n')[0]?.trim() ?? ''
+  if (line.length === 0 || line.length > 253 || line.includes('..')) return null
+  return /^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(line) ? line : null
+}
+
+const quoted = (raw: string): string => {
+  const trimmed = raw.trim()
+  if (trimmed.length >= 2 && ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'")))) {
+    return trimmed.slice(1, -1)
+  }
+  return trimmed
+}
+
+const displayText = (value: string, max: number): string | null => {
+  if (value.length === 0 || value.length > max || /[\u0000-\u001f\u007f]/.test(value) || value.includes('\\')) return null
+  return value
+}
+
+/** `PRETTY_NAME` from `/etc/os-release`, or `NAME` plus `VERSION` when the pretty name is absent. */
+export const parseOsRelease = (text: string): string | null => {
+  const values = new Map<string, string>()
+  for (const line of text.split('\n')) {
+    const eq = line.indexOf('=')
+    if (eq <= 0) continue
+    values.set(line.slice(0, eq), quoted(line.slice(eq + 1)))
+  }
+  const pretty = values.get('PRETTY_NAME')
+  if (pretty) return displayText(pretty, 160)
+  const name = values.get('NAME')
+  const version = values.get('VERSION')
+  if (!name) return null
+  return displayText(version ? `${name} ${version}` : name, 160)
+}
+
+/** Whole seconds from the first field of `/proc/uptime`. */
+export const parseProcUptime = (text: string): number | null => {
+  const seconds = Number(text.trim().split(/\s+/)[0])
+  if (!Number.isFinite(seconds) || seconds < 0 || seconds > 100 * 366 * 24 * 60 * 60) return null
+  return Math.floor(seconds)
+}
+
+/** `uname -r` as one kernel token. */
+export const parseKernelRelease = (text: string): string | null => {
+  const line = text.trim().split('\n')[0]?.trim() ?? ''
+  return /^[A-Za-z0-9._+-]+$/.test(line) && line.length <= 128 ? line : null
+}
+
+export const parseNginxVersion = (text: string): string | null => {
+  const match = /nginx\/(\d+\.\d+\.\d+)/.exec(text)
+  return match ? match[1]! : null
+}
+
+export const parseApacheVersion = (text: string): string | null => {
+  const match = /Apache\/(\d+\.\d+\.\d+)/.exec(text)
+  return match ? match[1]! : null
+}
+
+/** Package manifest `version`, only when it is a plain semver token. */
+export const parsePackageVersion = (text: string): string | null => {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const version = (parsed as { version?: unknown }).version
+  return typeof version === 'string' && /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.]+)?$/.test(version) ? version : null
 }
