@@ -92,8 +92,15 @@ describe('xPanel home board port', () => {
     assert.equal((emptyHtml.match(/<h1\b/g) ?? []).length, 1)
   })
   it('keeps board sample data out of product code', () => {
-    const product = readFileSync(new URL('./xpanel-home.ts', import.meta.url), 'utf8')
-    for (const sample of ['alice-shop.com', '198.51.100.24', '1,431 today', 'Generation 142']) assert.ok(!product.includes(sample), sample)
+    for (const name of ['./xpanel-home.ts', './xmail-inbox.ts']) {
+      const product = readFileSync(new URL(name, import.meta.url), 'utf8')
+      for (const sample of ['alice-shop.com', '198.51.100.24', '1,431 today', 'Generation 142']) assert.ok(!product.includes(sample), `${name}: ${sample}`)
+    }
+    const scripts = new URL('../../../../scripts/', import.meta.url)
+    for (const entry of readdirSync(scripts).filter(entry => entry.startsWith('board-fidelity-'))) {
+      const text = readFileSync(new URL(entry, scripts), 'utf8')
+      for (const privatePath of ['/cursor/stores', '/opt/cursor']) assert.ok(!text.includes(privatePath), `${entry}: ${privatePath}`)
+    }
     const src = new URL('../', import.meta.url)
     const walk = (dir: URL): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(entry => entry.isDirectory()
       ? walk(new URL(entry.name + '/', dir))

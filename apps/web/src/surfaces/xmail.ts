@@ -10,6 +10,7 @@ import {
   renderMobileNavToggle, renderSurfaceUnavailable, renderUnavailableSurfaceShell,
   resolveSurfaceSection,
 } from '../shell.ts'
+import { renderXmailInbox, xmailInboxFromProps } from '../board-port/xmail-inbox.ts'
 
 export interface MailMessageItem {
   uid: number
@@ -20,11 +21,14 @@ export interface MailMessageItem {
   preview: string
   body: string
   receivedAt: string
-  sizeKb: number
+  sizeKb?: number
   unread: boolean
-  dkimPass: boolean
-  spfPass: boolean
-  dmarcPass: boolean
+  /** Absent when the message was not authenticated by this server. */
+  dkimPass?: boolean
+  spfPass?: boolean
+  dmarcPass?: boolean
+  /** True when the body was not part of this response and must be read by UID. */
+  bodyPending?: boolean
 }
 
 export interface SieveFilterRule {
@@ -52,6 +56,14 @@ export interface MailSurfaceProps {
   messages?: MailMessageItem[]
   sieveRules?: SieveFilterRule[]
   vacationEnabled?: boolean
+  /** The IMAP list was attempted and failed. Distinct from an empty folder. */
+  mailListFailed?: boolean
+  /** Stored DKIM selector sentence. Absent when no email-auth file exists. */
+  identityDkim?: string
+  /** Stored SPF and DMARC sentence. Absent when no email-auth file exists. */
+  identitySpf?: string
+  /** Saved message size limit, labelled by the caller. Absent when settings were never saved. */
+  identitySize?: string
   actionState?: AsyncActionBannerProps
 }
 
@@ -96,6 +108,23 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
   const observedFolders = [...new Set(allMessages.map(message => message.folder))].filter(folder => folder !== 'INBOX')
   const observedFolderHtml = observedFolders.length ? `<section class="xp-mail-nav-section" aria-labelledby="mail-observed-folders"><h2 id="mail-observed-folders" class="xp-label">${text('Folders', 'المجلدات')}</h2><ul class="xp-mail-observed-folders">${observedFolders.map(folder => `<li data-mail-folder="${escapeHtml(folder)}">${icons.folder}<span>${escapeHtml(folder)}</span></li>`).join('')}</ul></section>` : ''
   const actionBanner = props.actionState ? renderAsyncActionState({ ...props.actionState, locale }) : ''
+
+  if (section === 'inbox') {
+    return ensureAccessibleSurfaceHtml(renderXmailInbox(xmailInboxFromProps({
+      locale,
+      mailbox,
+      ...(props.quotaUsedMb !== undefined ? { quotaUsedMb: props.quotaUsedMb } : {}),
+      ...(props.quotaLimitMb !== undefined ? { quotaLimitMb: props.quotaLimitMb } : {}),
+      activeFolder,
+      ...(props.selectedUid !== undefined ? { selectedUid: props.selectedUid } : {}),
+      ...(props.messages !== undefined ? { messages: allMessages } : {}),
+      realtimeEnabled: props.realtimeEnabled === true,
+      ...(props.actionState ? { actionState: props.actionState } : {}),
+      ...(props.mailListFailed ? { mailListFailed: true } : {}),
+      ...(props.vacationEnabled !== undefined ? { vacationEnabled: props.vacationEnabled } : {}),
+      ...(props.sieveRules ? { sieveCount: props.sieveRules.filter(rule => rule.enabled).length } : {}),
+    })), locale)
+  }
   const field = (label: string, value: string): string => `<div class="xp-mail-field"><dt class="xp-label">${escapeHtml(label)}</dt><dd><bdi dir="ltr">${escapeHtml(value)}</bdi></dd></div>`
 
   const listHtml = `<section class="xp-mail-messages" data-mail-pane="message-list" aria-labelledby="mail-list-heading">

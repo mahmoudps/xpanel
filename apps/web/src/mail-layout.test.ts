@@ -78,7 +78,8 @@ describe('bounded mail reference layout', () => {
     const attack = '<img src=x onerror="alert(1)">'
     const html = renderMailSurface(fixture({ mailbox: attack, activeFolder: attack, messages: [message({ folder: attack, from: attack, to: attack, subject: attack, preview: attack, body: attack })] }))
     expect(html).not.toContain('<img')
-    expect(html).not.toContain('<script')
+    expect(html).not.toContain('onerror="')
+    expect(html.match(/<script\b[^>]*>/g)).toEqual(['<script id="xmail-inbox-client">'])
     expect(html).toContain('&lt;img src=x onerror=&quot;alert(1)&quot;&gt;')
     expect(html).toContain('data-mailbox="&lt;img')
   })
@@ -95,6 +96,48 @@ describe('bounded mail reference layout', () => {
       expect(html).toContain(`id="${id}"`)
     }
     expect(html).not.toMatch(/data-action="(?:reply-message|forward-message|archive-message)"|Attach files|Save draft/)
+  })
+
+  it('labels mailbox quota in MiB and does not invent a used amount', () => {
+    const measured = renderMailSurface(fixture({ quotaUsedMb: 0, quotaLimitMb: 100 }))
+    expect(measured).toContain('0 / 100 MiB')
+    expect(measured).toContain('data-quota-ratio="measured"')
+    const limitOnly = renderMailSurface(fixture({ quotaLimitMb: 100 }))
+    expect(limitOnly).toContain('— / 100 MiB')
+    expect(limitOnly).toContain('data-quota-ratio="unknown"')
+    expect(limitOnly).not.toContain('0 / 100')
+    const unknown = renderMailSurface(fixture())
+    expect(unknown).toContain('data-quota-ratio="unknown"')
+    expect(unknown).not.toContain('0 MiB')
+  })
+
+  it('labels parsed mail times as UTC and leaves an unparsed date unlabelled', () => {
+    const html = renderMailSurface(fixture({ messages: [message({ receivedAt: '2026-10-22T14:30:00+03:00' })] }))
+    expect(html).toContain('11:30 UTC')
+    expect(html).toContain('2026-10-22 11:30 UTC')
+    const raw = renderMailSurface(fixture({ messages: [message({ receivedAt: 'not a date' })] }))
+    expect(raw).toContain('not a date')
+    expect(raw).not.toContain('not a date UTC')
+  })
+
+  it('does not report an unread inbox as an empty folder', () => {
+    const unread = renderMailSurface(fixture({ messages: undefined }))
+    expect(unread).toContain('The inbox has not been read from the mail server.')
+    expect(unread).toContain('data-list-state="unread"')
+    expect(unread).not.toContain('No messages in this folder.')
+    expect(unread).not.toContain('0 messages')
+    const failed = renderMailSurface(fixture({ messages: undefined, mailListFailed: true }))
+    expect(failed).toContain('The mail server could not be read.')
+    expect(failed).not.toContain('0 messages')
+  })
+
+  it('does not turn a missing authentication result into a failure', () => {
+    const html = renderMailSurface(fixture({ messages: [message({ dkimPass: undefined, spfPass: undefined, dmarcPass: undefined })] }))
+    expect(html).toContain('DKIM: —')
+    expect(html).toContain('SPF: —')
+    expect(html).toContain('DMARC: —')
+    expect(html).not.toContain('DKIM: fail')
+    expect(html).not.toContain('SPF: fail')
   })
 
   it('renders authentication outcomes only from the selected message observation', () => {

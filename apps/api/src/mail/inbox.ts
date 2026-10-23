@@ -13,7 +13,7 @@ import type { StateStore } from '@xpanel/state'
 import { hashPasswordArgon2id } from '../auth.ts'
 import { sessionTokenHash } from '../entry-points.ts'
 import type { EntryPoint } from '../entry-points.ts'
-import { ImapProtocolClient } from './imap.ts'
+import { ImapProtocolClient, type ImapFetchedMessage } from './imap.ts'
 import { SmtpSubmissionClient } from './smtp.ts'
 
 export interface InboxSummary {
@@ -22,6 +22,8 @@ export interface InboxSummary {
   to: string
   subject: string
   receivedAt: string
+  /** First text line already fetched with the message. Empty when the message has no text part. */
+  preview?: string
   unread: boolean
   sizeBytes: number
 }
@@ -84,12 +86,27 @@ const mailFailure = (err: unknown): never => {
   return fail('PRECONDITION_FAILED', `the mail server could not be reached (${message})`)
 }
 
-const summaryOf = (message: { uid: number; flags: string[]; internalDate: string | null; sizeBytes: number; parsed: { from: string; to: string[]; subject: string; date: string | null } }): InboxSummary => ({
+const DATE_LIKE = /(?:\d{4}|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b)/i
+
+/** ISO-8601 UTC when the mail date can be parsed. Otherwise the original text, with no timezone invented. */
+export const mailReceivedAtUtc = (value: string | null | undefined): string => {
+  const raw = (value ?? '').trim()
+  if (!raw || !DATE_LIKE.test(raw)) return raw
+  const parsed = Date.parse(raw)
+  if (Number.isNaN(parsed)) return raw
+  return new Date(parsed).toISOString()
+}
+
+const previewOf = (text: string): string =>
+  text.split(/\r?\n/).map(line => line.trim()).find(line => line.length > 0)?.slice(0, 180) ?? ''
+
+const summaryOf = (message: { uid: number; flags: string[]; internalDate: string | null; sizeBytes: number; parsed: { from: string; to: string[]; subject: string; date: string | null; textBody?: string } }): InboxSummary => ({
   uid: message.uid,
   from: message.parsed.from,
   to: message.parsed.to.join(', '),
   subject: message.parsed.subject,
-  receivedAt: message.parsed.date ?? message.internalDate ?? '',
+  receivedAt: mailReceivedAtUtc(message.parsed.date ?? message.internalDate ?? ''),
+  preview: previewOf(message.parsed.textBody ?? ''),
   unread: !message.flags.some(flag => flag.toLowerCase() === '\\seen'),
   sizeBytes: message.sizeBytes,
 })
@@ -122,10 +139,14 @@ export const createLocalMailboxTransport = (
     },
     async list(mailbox, password) {
       return withImap(imapHost, imapPort, mailbox, password, async client => {
-        const uids = (await client.searchAllUids('INBOX')).slice(-50)
+        const uids = await client.searchAllUids('INBOX')
         if (uids.length === 0) return []
-        const fetched = await client.fetchMessagesByUid('INBOX', uids.join(','))
-        return fetched.messages.map(summaryOf).sort((left, right) => right.uid - left.uid)
+        const messages: ImapFetchedMessage[] = []
+        for (let index = 0; index < uids.length; index += 50) {
+          const fetched = await client.fetchMessagesByUid('INBOX', uids.slice(index, index + 50).join(','))
+          messages.push(...fetched.messages)
+        }
+        return messages.map(summaryOf).sort((left, right) => right.uid - left.uid)
       }, imapTimeout)
     },
     async read(mailbox, password, uid) {

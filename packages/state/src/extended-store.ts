@@ -1326,11 +1326,21 @@ export class ExtendedFeaturesStore {
     })
   }
 
-  async getVacationResponder(mailboxLogin: string): Promise<VacationResponder> {
+  async storedVacationResponder(mailboxLogin: string): Promise<VacationResponder | null> {
     const login = assertEmail(mailboxLogin, 'mailboxLogin')
     const safeBox = safeSlug(login, 'mailboxLogin')
-    const stored = await readJsonIfExists<VacationResponder>(this.extPath('webmail', safeBox, 'vacation.json'))
+    return readJsonIfExists<VacationResponder>(this.extPath('webmail', safeBox, 'vacation.json'))
+  }
+
+  async readEmailAuth(domain: string): Promise<EmailAuthProvisionRecord | null> {
+    const name = validateDomainName(domain)
+    return readJsonIfExists<EmailAuthProvisionRecord>(this.extPath('dns', 'email-auth', `${name}.json`))
+  }
+
+  async getVacationResponder(mailboxLogin: string): Promise<VacationResponder> {
+    const stored = await this.storedVacationResponder(mailboxLogin)
     if (stored) return stored
+    const login = assertEmail(mailboxLogin, 'mailboxLogin')
     return {
       mailboxLogin: login,
       enabled: false,
