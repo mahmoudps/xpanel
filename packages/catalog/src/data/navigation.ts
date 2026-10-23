@@ -2246,12 +2246,7 @@ export const navigation: NavSurface[] = [
               "root"
             ],
             "tools": [
-              "reseller-center",
-              "show-reseller-accounts",
-              "view-reseller-usage-and-account-status",
-              "reseller-account-limits",
-              "reseller-package-limits",
-              "change-ownership-multiple-accounts"
+              "reseller-center"
             ],
             "keywords": [
               "Reseller Center",
@@ -2262,7 +2257,30 @@ export const navigation: NavSurface[] = [
               "Change Ownership of Multiple Accounts",
               "Package limits"
             ],
-            "summary": "Every reseller with allocated, used and capped resources, their accounts, allowed plans, overselling switches and bulk ownership changes."
+            "summary": "List resellers and create one with a username, password and the ACL flags that reseller may use."
+          },
+          {
+            "id": "resellers-more",
+            "name": "More reseller tools",
+            "route": "/whm/resellers/more",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "show-reseller-accounts",
+              "view-reseller-usage-and-account-status",
+              "reseller-account-limits",
+              "reseller-package-limits",
+              "change-ownership-multiple-accounts"
+            ],
+            "keywords": [
+              "Show Reseller Accounts",
+              "Reseller limits"
+            ],
+            "summary": "Reseller usage, account lists, package limits and bulk ownership changes."
           },
           {
             "id": "reseller-privileges",
@@ -2367,10 +2385,7 @@ export const navigation: NavSurface[] = [
             "tools": [
               "dns-zone-manager",
               "add-dns-zone",
-              "delete-dns-zone",
-              "zone-ttl-bulk",
-              "hostname-a-record",
-              "dns-config-cleanup"
+              "delete-dns-zone"
             ],
             "keywords": [
               "Edit DNS Zone",
@@ -2383,7 +2398,29 @@ export const navigation: NavSurface[] = [
               "DNSSEC",
               "Zone editor"
             ],
-            "summary": "Every zone with staged record edits, validation, review and apply, DNSSEC keys, bulk TTL, hostname A record and nameserver config cleanup."
+            "summary": "List, add, edit and delete DNS zones. Saving a zone reconciles it to the local PowerDNS server."
+          },
+          {
+            "id": "dns-more",
+            "name": "More DNS tools",
+            "route": "/whm/dns/more",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root",
+              "reseller:manage-dns"
+            ],
+            "tools": [
+              "zone-ttl-bulk",
+              "hostname-a-record",
+              "dns-config-cleanup"
+            ],
+            "keywords": [
+              "Set Zone Time to Live (TTL)",
+              "DNS cleanup"
+            ],
+            "summary": "Bulk TTL, the hostname A record and nameserver cleanup."
           },
           {
             "id": "ssl-certificates",
@@ -3374,8 +3411,7 @@ export const navigation: NavSurface[] = [
               "root"
             ],
             "tools": [
-              "server-information",
-              "aapanel-performance-test"
+              "server-information"
             ],
             "keywords": [
               "Server Information",
@@ -3384,7 +3420,26 @@ export const navigation: NavSurface[] = [
               "CPU benchmark",
               "Disk benchmark"
             ],
-            "summary": "Hardware and resource inventory of the server, with CPU, disk and network benchmarks."
+            "summary": "Load average, memory and root filesystem space on this server."
+          },
+          {
+            "id": "performance-benchmark",
+            "name": "Performance benchmark",
+            "route": "/whm/monitoring/benchmark",
+            "template": "dashboard",
+            "artboard": null,
+            "primaryAction": "Run benchmark",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-performance-test"
+            ],
+            "keywords": [
+              "Performance Benchmark",
+              "CPU benchmark"
+            ],
+            "summary": "CPU, disk and network benchmarks."
           }
         ]
       },
@@ -3404,21 +3459,12 @@ export const navigation: NavSurface[] = [
               "root"
             ],
             "tools": [
-              "service-manager",
               "restart-web",
-              "restart-php-fpm",
               "restart-mta",
               "restart-imap",
               "restart-dns",
               "restart-mysql",
-              "restart-postgresql",
-              "restart-ftp",
-              "restart-ssh",
-              "restart-mailing-lists",
-              "aapanel-boot-items",
-              "aapanel-supervisor",
-              "system-reboot",
-              "service-watchdog"
+              "restart-ftp"
             ],
             "keywords": [
               "Service Manager",
@@ -3431,7 +3477,34 @@ export const navigation: NavSurface[] = [
               "Forceful Server Reboot",
               "systemctl"
             ],
-            "summary": "One table of every daemon with state, uptime, memory, start-on-boot and monitoring, restart and reload with stated impact, startup items, supervised processes and server reboot."
+            "summary": "Status and restart for Apache, MariaDB, Postfix, Dovecot, pure-ftpd and PowerDNS."
+          },
+          {
+            "id": "services-more",
+            "name": "More service tools",
+            "route": "/whm/services/more",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "service-manager",
+              "restart-php-fpm",
+              "restart-postgresql",
+              "restart-ssh",
+              "restart-mailing-lists",
+              "aapanel-boot-items",
+              "aapanel-supervisor",
+              "system-reboot",
+              "service-watchdog"
+            ],
+            "keywords": [
+              "Service Manager",
+              "Server reboot"
+            ],
+            "summary": "The wider service manager, startup items, supervised processes and server reboot."
           },
           {
             "id": "web-server",
@@ -3683,9 +3756,7 @@ export const navigation: NavSurface[] = [
               "root"
             ],
             "tools": [
-              "backup-restoration",
-              "transfer-or-restore-account",
-              "account-restore-progress"
+              "backup-restoration"
             ],
             "keywords": [
               "Backup Restoration",
@@ -3693,7 +3764,26 @@ export const navigation: NavSurface[] = [
               "Transfer or Restore a cPanel Account",
               "Restore account"
             ],
-            "summary": "Restore whole accounts from scheduled backups, an uploaded archive or a remote server using only the account's credentials, with progress and results."
+            "summary": "Create an account archive in the local backup directory and restore that archive into the account home."
+          },
+          {
+            "id": "restore-more",
+            "name": "More restore tools",
+            "route": "/whm/backups/restore-more",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "transfer-or-restore-account",
+              "account-restore-progress"
+            ],
+            "keywords": [
+              "Transfer or Restore a cPanel Account"
+            ],
+            "summary": "Remote account transfer and restore progress for archives this server did not create."
           },
           {
             "id": "restore-files",

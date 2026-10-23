@@ -1,7 +1,7 @@
 import type { CatalogTool } from './types.ts'
 
 /** Probes a connected Linux agent can report. The control plane is added by the API. */
-export const HOST_PROBES = ['control-plane', 'linux-account', 'apache', 'mariadb', 'mail', 'files', 'acme'] as const
+export const HOST_PROBES = ['control-plane', 'linux-account', 'apache', 'mariadb', 'mail', 'files', 'acme', 'pdns', 'backups', 'systemd', 'host-info'] as const
 export type HostProbe = (typeof HOST_PROBES)[number]
 export type HostProbeResult = 'passed' | 'failed'
 
@@ -38,6 +38,18 @@ export const PHASE1_TOOL_PROBES: Readonly<Record<string, readonly HostProbe[]>> 
   'webmail-message-list': ['control-plane', 'mail'],
   'webmail-message-read': ['control-plane', 'mail'],
   'webmail-compose': ['control-plane', 'mail'],
+  'reseller-center': ['control-plane'],
+  'dns-zone-manager': ['control-plane', 'pdns'],
+  'add-dns-zone': ['control-plane', 'pdns'],
+  'delete-dns-zone': ['control-plane', 'pdns'],
+  'backup-restoration': ['control-plane', 'backups'],
+  'restart-web': ['control-plane', 'systemd'],
+  'restart-mysql': ['control-plane', 'systemd'],
+  'restart-mta': ['control-plane', 'systemd'],
+  'restart-imap': ['control-plane', 'systemd'],
+  'restart-ftp': ['control-plane', 'systemd'],
+  'restart-dns': ['control-plane', 'systemd'],
+  'server-information': ['control-plane', 'host-info'],
 }
 
 /** Copy the catalog and mark only the implemented tools whose probes passed. */

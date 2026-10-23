@@ -1633,6 +1633,32 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const sent = await mailboxTransport.send(opened.record.mailbox, opened.password, parseMailboxSend(await readJsonBody(req)))
         return jsonResponse({ mailbox: opened.record.mailbox, messageId: sent.messageId }, 201)
       }
+      if (method === 'GET' && pathname === '/api/server/info') {
+        const caller = await requireCaller(req)
+        await assertRoot(caller, 'server.info')
+        return callAgent('/host/info', { caller })
+      }
+      if (method === 'GET' && pathname === '/api/server/services') {
+        const caller = await requireCaller(req)
+        await assertRoot(caller, 'server.services')
+        return callAgent('/host/services', { caller })
+      }
+      const serviceRestart = /^\/api\/server\/services\/([a-z0-9-]+)\/restart$/.exec(pathname)
+      if (method === 'POST' && serviceRestart) {
+        const caller = await requireCaller(req)
+        await assertRoot(caller, 'server.services.restart')
+        return callAgent(`/host/services/${serviceRestart[1]}/restart`, { method: 'POST', caller, body: {} })
+      }
+      const accountBackup = /^\/api\/backups\/accounts\/([a-z][a-z0-9]{2,15})$/.exec(pathname)
+      if (accountBackup && (method === 'GET' || method === 'POST')) {
+        const caller = await requireCaller(req)
+        await assertRoot(caller, 'backup.account')
+        const username = accountBackup[1]!
+        const account = await deps.store.getAccountByUsername(username)
+        if (!account) return fail('NOT_FOUND', `account "${username}" not found`)
+        if (method === 'GET') return callAgent(`/accounts/${username}/backups`, { caller })
+        return callAgent(`/accounts/${username}/backups`, { method: 'POST', caller, body: await readJsonBody(req) })
+      }
 
       // ---- Accounts: Jailed Files & Shell (Proxied to Agent) -------------------------
       const accountFilesMatch = /^\/api\/accounts\/([a-z][a-z0-9]{2,15})\/files$/.exec(pathname)

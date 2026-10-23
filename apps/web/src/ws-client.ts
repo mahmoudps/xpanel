@@ -11,6 +11,7 @@ import type {
 import { dirForLocale, t, type Locale } from './i18n.ts'
 import { escapeHtml, renderLtrValue, renderStatusBadge } from './tokens.ts'
 import { SHELL_MOTION_CLIENT_SCRIPT } from './shell-motion.ts'
+import { xwhmPageAdapters } from './pages/xwhm-adapters.ts'
 
 export type WsConnectionState = 'connected' | 'reconnecting' | 'offline'
 export type ReconcileStageStatus = 'pending' | 'running' | 'passed' | 'failed'
@@ -1997,6 +1998,168 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         note(status, failText(error));
       });
     });
+    document.querySelectorAll('[data-reseller-create-form]').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var status = form.querySelector('[data-reseller-status]');
+        var acl = [];
+        form.querySelectorAll('[name="acl"]:checked').forEach(function (box) { acl.push(box.value); });
+        var body = {
+          username: form.querySelector('[name="username"]').value.trim().toLowerCase(),
+          password: form.querySelector('[name="password"]').value,
+          maxAccounts: Number(form.querySelector('[name="maxAccounts"]').value),
+          totalDiskMb: Number(form.querySelector('[name="totalDiskMb"]').value),
+          totalBandwidthMb: Number(form.querySelector('[name="totalBandwidthMb"]').value),
+          oversell: !!form.querySelector('[name="oversell"]').checked,
+          nameservers: [],
+          delegatedIps: [],
+          acl: acl,
+        };
+        form.querySelector('[name="password"]').value = '';
+        window.xpanelSessionRequest('${xwhmPageAdapters.resellers.create.method}', '${xwhmPageAdapters.resellers.create.path}', body).then(reload).catch(function (error) { note(status, failText(error)); });
+      });
+    });
+    var dnsEditor = document.querySelector('[data-dns-editor]');
+    if (dnsEditor) {
+      var zoneSelect = dnsEditor.querySelector('[data-dns-zone]');
+      var recordBody = dnsEditor.querySelector('[data-dns-records]');
+      var dnsStatus = dnsEditor.querySelector('[data-dns-status]');
+      var zones = [];
+      var dnsTypes = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA'];
+      function recordRow(record) {
+        var row = document.createElement('tr');
+        row.setAttribute('data-record-id', record.id || '');
+        function field(name, value) {
+          var cell = document.createElement('td');
+          var input = document.createElement(name === 'type' ? 'select' : 'input');
+          input.setAttribute('data-field', name);
+          if (name === 'type') dnsTypes.forEach(function (type) { var option = document.createElement('option'); option.value = type; option.textContent = type; if (type === value) option.selected = true; input.appendChild(option); });
+          else { input.value = value == null ? '' : String(value); input.className = 'xp-input'; }
+          cell.appendChild(input);
+          row.appendChild(cell);
+        }
+        field('name', record.name || '@');
+        field('type', record.type || 'A');
+        field('ttl', record.ttl || 14400);
+        field('content', record.content || '');
+        field('priority', record.priority);
+        recordBody.appendChild(row);
+      }
+      function paintZone() {
+        var zone = zones.find(function (item) { return item.name === zoneSelect.value; });
+        recordBody.textContent = '';
+        (zone && zone.records || []).forEach(recordRow);
+      }
+      function loadZones() {
+        return window.xpanelSessionRequest('${xwhmPageAdapters.dns.list.method}', '${xwhmPageAdapters.dns.list.path}').then(function (data) {
+          zones = data.zones || [];
+          zoneSelect.textContent = '';
+          zones.forEach(function (zone) { var option = document.createElement('option'); option.value = zone.name; option.textContent = zone.name; zoneSelect.appendChild(option); });
+          paintZone();
+        }).catch(function (error) { note(dnsStatus, failText(error)); });
+      }
+      zoneSelect.addEventListener('change', paintZone);
+      dnsEditor.querySelector('[data-dns-add-record]').addEventListener('click', function () { recordRow({ id: window.crypto.randomUUID(), name: '@', type: 'A', ttl: 14400, content: '', priority: null }); });
+      dnsEditor.querySelector('[data-dns-add-zone]').addEventListener('click', function () {
+        var name = dnsEditor.querySelector('[data-dns-new-name]').value.trim().toLowerCase();
+        var accountId = dnsEditor.querySelector('[data-dns-account]').value;
+        window.xpanelSessionRequest('${xwhmPageAdapters.dns.save.method}', '${xwhmPageAdapters.dns.save.path}' + encodeURIComponent(name), { accountId: accountId || null, serial: 1, records: [] }).then(loadZones).catch(function (error) { note(dnsStatus, failText(error)); });
+      });
+      dnsEditor.querySelector('[data-dns-save]').addEventListener('click', function () {
+        var zone = zones.find(function (item) { return item.name === zoneSelect.value; });
+        if (!zone) { note(dnsStatus, ar ? 'اختر منطقة.' : 'Choose a zone.'); return; }
+        var records = [];
+        recordBody.querySelectorAll('tr').forEach(function (row) {
+          var value = function (name) { return row.querySelector('[data-field="' + name + '"]').value.trim(); };
+          var priority = value('priority');
+          records.push({ id: row.getAttribute('data-record-id') || window.crypto.randomUUID(), name: value('name'), type: value('type'), ttl: Number(value('ttl')), content: value('content'), priority: priority === '' ? null : Number(priority) });
+        });
+        window.xpanelSessionRequest('${xwhmPageAdapters.dns.save.method}', '${xwhmPageAdapters.dns.save.path}' + encodeURIComponent(zone.name), { id: zone.id, accountId: zone.accountId, serial: Number(zone.serial || 1) + 1, records: records }).then(function () { note(dnsStatus, ar ? 'حُفظت المنطقة.' : 'The zone was saved.'); return loadZones(); }).catch(function (error) { note(dnsStatus, failText(error)); });
+      });
+      dnsEditor.querySelector('[data-dns-delete]').addEventListener('click', function () {
+        if (!zoneSelect.value) return;
+        window.xpanelSessionRequest('${xwhmPageAdapters.dns.remove.method}', '${xwhmPageAdapters.dns.remove.path}' + encodeURIComponent(zoneSelect.value)).then(loadZones).catch(function (error) { note(dnsStatus, failText(error)); });
+      });
+      loadZones();
+    }
+    var serviceRoot = document.querySelector('[data-host-services]');
+    if (serviceRoot) {
+      var serviceRows = serviceRoot.querySelector('[data-host-service-rows]');
+      var serviceStatus = serviceRoot.querySelector('[data-host-service-status]');
+      function paintServices(services) {
+        serviceRows.textContent = '';
+        (services || []).forEach(function (service) {
+          var row = document.createElement('tr');
+          [service.label, service.unit || (ar ? 'غير مثبتة' : 'Not installed'), service.state].forEach(function (value) { var cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell); });
+          var action = document.createElement('td');
+          if (service.unit) {
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'xp-btn';
+            button.textContent = ar ? 'إعادة تشغيل' : 'Restart';
+            button.addEventListener('click', function () {
+              button.disabled = true;
+              note(serviceStatus, ar ? 'جار إعادة التشغيل.' : 'Restarting.');
+              window.xpanelSessionRequest('POST', '${xwhmPageAdapters.services.restartPrefix}' + service.id + '${xwhmPageAdapters.services.restartSuffix}', {}).then(function () { note(serviceStatus, ar ? 'أُعيد تشغيل الخدمة.' : 'The service restarted.'); return loadServices(); }).catch(function (error) { button.disabled = false; note(serviceStatus, failText(error)); });
+            });
+            action.appendChild(button);
+          }
+          row.appendChild(action);
+          serviceRows.appendChild(row);
+        });
+      }
+      function loadServices() { return window.xpanelSessionRequest('${xwhmPageAdapters.services.list.method}', '${xwhmPageAdapters.services.list.path}').then(function (data) { paintServices(data.services); }).catch(function (error) { note(serviceStatus, failText(error)); }); }
+      loadServices();
+    }
+    var infoRoot = document.querySelector('[data-host-info]');
+    if (infoRoot) {
+      function mb(bytes) { return Number.isFinite(bytes) ? String(Math.round(bytes / 1048576)) + ' MB' : ''; }
+      window.xpanelSessionRequest('${xwhmPageAdapters.serverInfo.read.method}', '${xwhmPageAdapters.serverInfo.read.path}').then(function (data) {
+        infoRoot.querySelector('[data-host-load]').textContent = [data.load.load1, data.load.load5, data.load.load15].join(' ');
+        infoRoot.querySelector('[data-host-memory]').textContent = mb(data.memory.availableBytes) + ' / ' + mb(data.memory.totalBytes);
+        infoRoot.querySelector('[data-host-disk]').textContent = mb(data.disk.availableBytes) + ' / ' + mb(data.disk.totalBytes);
+      }).catch(function (error) { note(infoRoot.querySelector('[data-host-info-status]'), failText(error)); });
+    }
+    var backupRoot = document.querySelector('[data-account-backups]');
+    if (backupRoot) {
+      var backupAccount = backupRoot.querySelector('[data-backup-account]');
+      var backupFiles = backupRoot.querySelector('[data-backup-files]');
+      var backupStatus = backupRoot.querySelector('[data-backup-status]');
+      function loadBackups() {
+        if (!backupAccount.value) { backupFiles.textContent = ''; return Promise.resolve(); }
+        return window.xpanelSessionRequest('GET', '${xwhmPageAdapters.backups.listPrefix}' + backupAccount.value).then(function (data) {
+          backupFiles.textContent = '';
+          (data.backups || []).forEach(function (item) {
+            var row = document.createElement('tr');
+            var name = document.createElement('td');
+            name.textContent = item.file;
+            var size = document.createElement('td');
+            size.textContent = String(item.bytes);
+            var action = document.createElement('td');
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'xp-btn';
+            button.textContent = ar ? 'استعادة' : 'Restore';
+            button.addEventListener('click', function () {
+              button.disabled = true;
+              note(backupStatus, ar ? 'جار الاستعادة.' : 'Restoring.');
+              window.xpanelSessionRequest('${xwhmPageAdapters.backups.create.method}', '${xwhmPageAdapters.backups.create.path}' + backupAccount.value, { op: 'restore', file: item.file }).then(function () { button.disabled = false; note(backupStatus, ar ? 'استُعيدت النسخة.' : 'The backup was restored.'); }).catch(function (error) { button.disabled = false; note(backupStatus, failText(error)); });
+            });
+            action.appendChild(button);
+            row.appendChild(name);
+            row.appendChild(size);
+            row.appendChild(action);
+            backupFiles.appendChild(row);
+          });
+        }).catch(function (error) { note(backupStatus, failText(error)); });
+      }
+      backupAccount.addEventListener('change', loadBackups);
+      backupRoot.querySelector('[data-backup-create]').addEventListener('click', function () {
+        note(backupStatus, ar ? 'جار إنشاء النسخة. قد يستغرق هذا وقتًا.' : 'Creating the backup. This can take a while.');
+        window.xpanelSessionRequest('${xwhmPageAdapters.backups.create.method}', '${xwhmPageAdapters.backups.create.path}' + backupAccount.value, { op: 'create' }).then(function () { note(backupStatus, ar ? 'أُنشئت النسخة.' : 'The backup was created.'); return loadBackups(); }).catch(function (error) { note(backupStatus, failText(error)); });
+      });
+      loadBackups();
+    }
   }
 
   if (typeof window !== 'undefined') {

@@ -18,6 +18,8 @@ const surfacePageTitles: Record<SurfaceKind, Readonly<Record<string, LocalizedTi
   xwhm: {
     overview: ['Dashboard', 'لوحة التحكم'], io: ['Disk I/O', 'عمليات القرص'],
     services: ['Services', 'الخدمات'], accounts: ['Accounts', 'الحسابات'],
+    dns: ['DNS zones', 'مناطق DNS'], backups: ['Account backups', 'نسخ الحسابات'],
+    'server-info': ['Server information', 'معلومات الخادم'],
     'create-account': ['Create account', 'إنشاء حساب'], plans: ['Hosting plans', 'خطط الاستضافة'],
     resellers: ['Resellers', 'الموزعون'], ips: ['IP addresses', 'عناوين IP'],
     'mail-ips': ['Outbound mail routing', 'توجيه البريد الصادر'], firewall: ['Firewall', 'جدار الحماية'],
@@ -81,6 +83,7 @@ const surfaceSections: Record<SurfaceShellProps['surface'], Readonly<Record<stri
     '/whm': 'overview', '/whm/monitoring/io': 'io', '/whm/services': 'services',
     '/whm/services/health': 'services', '/whm/accounts': 'accounts', '/whm/accounts/new': 'create-account',
     '/whm/plans': 'plans', '/whm/plans/features': 'plans', '/whm/resellers': 'resellers',
+    '/whm/dns': 'dns', '/whm/backups/restore': 'backups', '/whm/monitoring/server-info': 'server-info',
     '/whm/resellers/privileges': 'resellers', '/whm/server/ips': 'ips', '/whm/email/outbound': 'mail-ips',
     '/whm/security/firewall': 'firewall', '/whm/audit': 'audit', '/whm/panel/data': 'generations',
     '/whm/server/upgrade': 'upgrade', '/whm/transfers': 'transfer',

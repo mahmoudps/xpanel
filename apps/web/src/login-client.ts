@@ -89,7 +89,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     if (csrf) headers['x-csrf-token'] = csrf;
     var controller = new AbortController();
     init.signal = controller.signal;
-    var timer = setTimeout(function () { controller.abort(); }, /\/certificates$/.test(path) ? 180000 : 20000);
+    var timer = setTimeout(function () { controller.abort(); }, /\/certificates$|\/api\/backups\/accounts\/|\/restart$/.test(path) ? 180000 : 20000);
     try {
       var response = await fetch(endpoint.href, init);
       var data = await response.json().catch(function () { return null; });
