@@ -95,7 +95,38 @@ Chevrons point back toward the start of the line. In RTL the back icon is mirror
 
 ## Motion
 
-Colour, background, and shadow transitions run in about 160ms. Overlays fade and sheets slide. `prefers-reduced-motion: reduce` removes animation and transition. Navigation is not delayed behind a closing animation.
+Read from the exported screen styles and from each screen's logic class. No duration was filled in where the source does not write one.
+
+Every screen stylesheet sets the same link and focus rules, with no `transition` on either:
+
+- `a { color: #1D5BD6 }` and `a:hover { color: #1546A8 }`. The colour change is immediate.
+- `:focus-visible { outline: 2px solid #1D5BD6; outline-offset: 2px }`.
+- Inside `nav[aria-label="xWHM navigation"]`, `:focus-visible` uses `outline-color: #6EA0FF`.
+
+Six xWHM screens (Upgrade, Transfer, SSH, Firewall, Panel security, Audit log) also declare these keyframes and nothing else. The declarations are not referenced by any `animation` property in the templates or in the logic classes, so the source gives them no duration, delay, easing, iteration, direction, or fill:
+
+- `xp-indet`: `0% { transform: translateX(-100%) }` to `100% { transform: translateX(260%) }`.
+- `xp-shimmer`: `0% { background-position: -480px 0 }` to `100% { background-position: 480px 0 }`.
+- `xp-spin`: `to { transform: rotate(360deg) }`.
+- `xp-drain`: `from { width: 100% }` to `to { width: 0% }`.
+
+The same six screens end the style block with:
+
+`@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important } }`
+
+No screen declares `transition`, `cubic-bezier`, a spring, stiffness, damping, mass, or a drag physics config. Searches of the logic classes found no `setTimeout`, `setInterval`, `requestAnimationFrame`, or style animation writes. Confirm panels, filter chips, the move menu, the undo bar, compose discard, and wizard steps appear and disappear by replacing state. There is no open/close duration.
+
+The undo bar on Inbox, when a message is moved, is an instant `role="status"` strip: background `#101828`, text `#FFFFFF`, 13px, padding `8px 8px 8px 16px`, and an Undo button with `min-height: 40px`, transparent background, border `#475467`, white text. The move menu is an instant absolute list: `top: 50px`, `min-width: 200px`, radius 10, border `#E2E6EC`, shadow `0 8px 24px rgba(16, 24, 40, 0.12)`. A selected message row is `#F3F7FE` with `box-shadow: inset 3px 0 0 #1D5BD6`. The Compose control on the Compose screen is fill `#1546A8` with white text. The Inbox Compose control is fill `#1D5BD6`.
+
+Build map, Mail Inbox, and Mail Compose use only the link and focus rules above. Build map has no keyframes. Its running wave card uses border `#C7D7F8` and `box-shadow: inset 0 3px 0 #1D5BD6`. A done wave uses `inset 0 3px 0 #0E7A4E`. Status chips are immediate colour swaps: Done `#E7F5EE` / `#0E7A4E`, Running `#E8EFFD` / `#1D5BD6`, Next `#EEF0F3` / `#344054`.
+
+The design-tool runtime (`support.js`) is not part of the design. It paints a streaming placeholder with `animation: sc-shine 1.4s ease infinite` and knows the CSS keyword curves `ease-in` `cubic-bezier(.42, 0, 1, 1)`, `ease-out` `cubic-bezier(0, 0, .58, 1)`, and `ease-in-out` `cubic-bezier(.42, 0, .58, 1)`. No component uses those curves.
+
+A live read of the Inbox artboard agrees with the source text. Keyboard focus draws `2px solid #1D5BD6` with offset `2px`. `transition-duration` on those controls is `0s` (the initial value; the shorthand reports `all` because no transition was declared). Selecting a message and opening the upgrade confirm panel both replace the markup in the same turn.
+
+The product stylesheet copies the four keyframes verbatim and does not attach a duration to them. Unclassed links use the accent and the accent hover with no transition. `prefers-reduced-motion: reduce` sets `animation` and `transition` to `none`. The Compose control on the Compose screen uses fill `#1546A8`, white text, and no inset bar. A selected message row uses `#F3F7FE` and `inset 3px 0 0 #1D5BD6`.
+
+The mobile navigation sheet and the command palette are not in the artboards. Their controller stays so a reversal does not jump and so a link navigates in the same event: 200ms for the sheet, 160ms for the palette, easing `cubic-bezier(0.2, 0.8, 0.2, 1)`, fill `both`. Reduced motion skips that controller and leaves no running animation. Those two numbers are the controller's own values. They are not artboard values.
 
 ## What the artboards do not include
 

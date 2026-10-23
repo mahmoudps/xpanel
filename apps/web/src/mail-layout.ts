@@ -59,7 +59,11 @@ export const MAIL_LAYOUT_CSS = /* css */ `
   justify-content: center;
   margin-block-end: 8px;
 }
-.xp-mail-nav-section .xp-mail-compose-link:hover { background: var(--xp-accent-hover); }
+.xp-mail-nav-section .xp-mail-compose-link[aria-current="page"] {
+  background: #1546a8;
+  color: #ffffff;
+  box-shadow: none;
+}
 .xp-mail-nav-section .xp-mail-compose-link > span:first-of-type { flex: initial; }
 .xp-mail-count { padding: 2px 8px; border-radius: 999px; background: var(--xp-accent-soft); font-size: var(--xp-type-caption); line-height: var(--xp-leading-caption); }
 .xp-mail-observed-folders { display: flex; flex-direction: column; list-style: none; margin: 4px 0 0; padding: 0; }
@@ -85,7 +89,8 @@ export const MAIL_LAYOUT_CSS = /* css */ `
 .xp-mail-message-heading h2 { margin: 0; font-size: var(--xp-type-card); font-weight: var(--xp-weight-semibold); line-height: var(--xp-leading-card); overflow-wrap: anywhere; }
 .xp-mail-list { display: flex; flex-direction: column; }
 .xp-mail-row { display: flex; align-items: flex-start; gap: var(--xp-space-md); padding: var(--xp-space-field) var(--xp-space-card); border-block-end: 1px solid var(--xp-border); }
-.xp-mail-row.is-selected { background: var(--xp-accent-soft); box-shadow: inset 3px 0 var(--xp-accent); }
+.xp-mail-row.is-selected { background: #f3f7fe; box-shadow: inset 3px 0 0 #1d5bd6; }
+[data-theme="dark"] .xp-mail-row.is-selected { background: var(--xp-bg-elevated); box-shadow: inset 3px 0 0 var(--xp-accent); }
 html[dir="rtl"] .xp-mail-row.is-selected { box-shadow: inset -3px 0 var(--xp-accent); }
 .xp-mail-read-mark { flex: none; inline-size: 7px; block-size: 7px; margin-block-start: 7px; border-radius: 50%; background: transparent; }
 .xp-mail-row.is-unread .xp-mail-read-mark { background: var(--xp-accent); }

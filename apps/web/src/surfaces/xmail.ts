@@ -89,7 +89,7 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
         const current = page.route === activeRoute
         const compose = page.route === '/mail/compose'
         const unread = page.route === '/mail/inbox' ? allMessages.filter(message => message.folder === 'INBOX' && message.unread).length : 0
-        return `<a href="${escapeHtml(page.route)}" class="xp-nav-item ${current ? 'xp-nav-item--active' : ''} ${compose && section !== 'compose' ? 'xp-mail-compose-link' : ''}" ${current ? 'aria-current="page"' : ''} data-nav-route="${escapeHtml(page.route)}">${compose ? icons.compose : page.route === '/mail/inbox' ? icons.inbox : icons.folder}<span>${escapeHtml(getSurfaceNavigationLabel('xmail', 'page', page, locale))}</span>${unread ? `<span class="xp-mail-count xp-tabular" aria-label="${escapeHtml(text('Unread', 'غير مقروء'))}">${unread}</span>` : ''}</a>`
+        return `<a href="${escapeHtml(page.route)}" class="xp-nav-item ${current ? 'xp-nav-item--active' : ''} ${compose ? 'xp-mail-compose-link' : ''}" ${current ? 'aria-current="page"' : ''} data-nav-route="${escapeHtml(page.route)}">${compose ? icons.compose : page.route === '/mail/inbox' ? icons.inbox : icons.folder}<span>${escapeHtml(getSurfaceNavigationLabel('xmail', 'page', page, locale))}</span>${unread ? `<span class="xp-mail-count xp-tabular" aria-label="${escapeHtml(text('Unread', 'غير مقروء'))}">${unread}</span>` : ''}</a>`
       }).join('')}</div>
     </details>`).join('')
   // Folder observations do not grant a working folder-selection or mutation endpoint.

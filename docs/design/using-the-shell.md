@@ -16,6 +16,8 @@ New pages should look like the existing ones without a private stylesheet. Rende
 
 The sidebar width, brand mark, navigation item, disabled tool row, top bar, user pill, focus ring, dialog, badge, and toast already live in the design tokens. A new page inherits them by using the classes. Adding a one-off colour or a fixed left/right inset will drift from the artboard and from Arabic.
 
+Motion values are recorded in the Motion section of [artifact-design-system.md](artifact-design-system.md). Do not add a duration, easing curve, or spring the artboard does not declare. Hover and focus on the artboard are immediate. `prefers-reduced-motion: reduce` removes animation and transition.
+
 Unavailable catalog groups stay on `renderPlannedNavigation`. They use the dashed disabled row and must not become links.
 
 ## Checking the result
