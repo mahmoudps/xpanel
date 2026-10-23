@@ -242,6 +242,11 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     assert.equal(executor.units.get(cronTimerUnit)?.active, false)
     assert.equal(executor.units.get(cronTimerUnit)?.enabled, false)
 
+    assert.equal(
+      executor.executedActions.some(action => action.kind === 'remove-path' && action.path === '/home/alice/mail/alice.example.com/ftp_and_mail'),
+      true,
+    )
+
     // Unmanaged neighbor files and customer data are untouched
     assert.equal(
       executor.files.get('/etc/nginx/conf.d/unmanaged-neighbor.conf')?.content,

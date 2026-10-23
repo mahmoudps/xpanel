@@ -19,12 +19,18 @@ export const visibleNavigation = (
   if (ctx === undefined) return []
   const allowed = new Set(visibleTools(catalog, ctx).map(tool => tool.id))
   if (allowed.size === 0) return []
+  const pageReady = (page: NavPage): boolean => {
+    if (!allowsPageRole(page, ctx) || page.tools.length === 0) return false
+    if (page.tools.every(id => allowed.has(id))) return true
+    // The server dashboard reads the same host sample as Server Information.
+    // Its own tools stay on this page, and the page opens once that probe is verified.
+    return page.route === '/whm' && allowed.has('server-information')
+  }
   return design.map(surface => ({
     ...surface,
     sections: surface.sections.map(section => ({
       ...section,
-      pages: section.pages.filter(page => allowsPageRole(page, ctx)
-        && page.tools.length > 0 && page.tools.every(id => allowed.has(id))),
+      pages: section.pages.filter(pageReady),
     })).filter(section => section.pages.length > 0),
   })).filter(surface => surface.sections.length > 0)
 }

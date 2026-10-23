@@ -314,6 +314,8 @@ const isEnoent = (err: unknown): boolean => {
 }
 
 const ACCOUNT_HOME_DIR_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}(?:\/(?:public_html|logs|tmp|mail|etc|ssl|\.ssh|cgi-bin))?$/
+/** One mailbox Maildir root. Removal is recursive; nested cur/new/tmp paths are not separate grants. */
+export const MAILDIR_BOX_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 const ACCOUNT_MANAGED_WRAPPER_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/(?:cgi-bin\/php\.cgi|(?:public_html\/)?\.user\.ini)$/
 
 /**
@@ -329,6 +331,7 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
     if (ACCOUNT_HOME_DIR_RE.test(path)) {
       return operation === 'ensure-directory' || operation === 'remove'
     }
+    if (MAILDIR_BOX_RE.test(path)) return operation === 'remove'
     if (ACCOUNT_MANAGED_WRAPPER_RE.test(path)) {
       return operation === 'read' || operation === 'write' || operation === 'remove'
     }
@@ -593,6 +596,10 @@ export class LinuxHostExecutor implements AgentExecutor {
 
   async removePath(path: string): Promise<void> {
     this.requireHostTarget(path, 'remove')
+    if (MAILDIR_BOX_RE.test(path)) {
+      await rm(path, { recursive: true, force: true })
+      return
+    }
     try {
       await unlink(path)
     } catch (error) {

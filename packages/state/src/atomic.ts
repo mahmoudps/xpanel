@@ -2,6 +2,7 @@
 // Every write goes to a sibling temp file, fsyncs the file descriptor, closes it,
 // renames over the target, and fsyncs the parent directory.
 import { mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import { claimStateOwnership } from './ownership.ts'
 import { basename, dirname, join } from 'node:path'
 import { fail } from '@xpanel/core'
 
@@ -41,6 +42,7 @@ export const atomicWriteJson = async (
 ): Promise<void> => {
   const dir = dirname(filePath)
   await mkdir(dir, { recursive: true, mode: 0o750 })
+  await claimStateOwnership(dir)
   const tmpName = `.${basename(filePath)}.${process.pid}-${++tmpSeq}.tmp`
   const tmpPath = join(dir, tmpName)
   const payload = `${JSON.stringify(data, null, 2)}\n`
@@ -57,6 +59,7 @@ export const atomicWriteJson = async (
   await fh.close()
   try {
     if (beforeCommit) await beforeCommit()
+    await claimStateOwnership(tmpPath)
     for (let attempt = 0; ; attempt++) {
       try {
         await rename(tmpPath, filePath)
@@ -73,6 +76,7 @@ export const atomicWriteJson = async (
     await rm(tmpPath, { force: true }).catch(() => undefined)
     throw e
   }
+  await claimStateOwnership(filePath)
   await fsyncDir(dir)
 }
 

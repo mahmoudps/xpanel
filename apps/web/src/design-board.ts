@@ -261,6 +261,14 @@ export const designPages: readonly DesignPage[] = [
 
 const byRoute = new Map(designPages.map(item => [item.route, item]))
 
+/** Specimen routes. They stay out of the product sidebar unless a development checkout sets this flag. Release builds leave it unset. */
+const REFERENCE_DESIGN_ROUTES = new Set(['/design/system', '/design/components', '/design/navigation'])
+
+export const designReferenceRoutesEnabled = (): boolean => process.env.XPANEL_DESIGN_PAGES === '1'
+
+const productDesignPages = (): readonly DesignPage[] =>
+  designReferenceRoutesEnabled() ? designPages : designPages.filter(item => !REFERENCE_DESIGN_ROUTES.has(item.route))
+
 export const designPage = (route: string): DesignPage | undefined => byRoute.get(route)
 
 export const designHeading = (route: string, locale: Locale): string | undefined => {
@@ -272,7 +280,7 @@ export const designHeading = (route: string, locale: Locale): string | undefined
 const copy = (value: Copy, locale: Locale): string => locale === 'ar' ? value[1] : value[0]
 
 export const renderDesignNav = (surface: DesignPage['surface'], locale: Locale, activeRoute: string, qualifiedRoutes: ReadonlySet<string>): string => {
-  const pages = designPages.filter(item => item.surface === surface)
+  const pages = productDesignPages().filter(item => item.surface === surface)
   const groups: { name: string; id: string; items: DesignPage[] }[] = []
   for (const item of pages) {
     const name = copy(item.group, locale)
@@ -357,7 +365,7 @@ const renderNavigationMap = (locale: Locale): string => {
 }
 
 export const renderHomeToolGrid = (locale: Locale, qualifiedRoutes: ReadonlySet<string>): string => {
-  const pages = designPages.filter(item => item.surface === 'xpanel' && item.route !== '/home' && item.group[0] !== 'Foundations')
+  const pages = productDesignPages().filter(item => item.surface === 'xpanel' && item.route !== '/home' && item.group[0] !== 'Foundations')
   const groups: { name: string; items: DesignPage[] }[] = []
   for (const item of pages) {
     const name = copy(item.group, locale)
@@ -373,6 +381,7 @@ export const renderHomeToolGrid = (locale: Locale, qualifiedRoutes: ReadonlySet<
 }
 
 export const renderDesignMain = (route: string, locale: Locale): string => {
+  if (REFERENCE_DESIGN_ROUTES.has(route) && !designReferenceRoutesEnabled()) return ''
   const item = byRoute.get(route)
   if (!item) return ''
   const data = readDesignAdapter(route)

@@ -2,6 +2,7 @@ import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xp
 import type {
   Account,
   AuditEntry,
+  Certificate,
   FirewallRule,
   IoAnalyticsSnapshot,
   MailIpConfig,
@@ -25,7 +26,7 @@ import {
   renderStatusBadge,
   renderThresholdMeter,
 } from '../tokens.ts'
-import { renderWhmDashboard, whmDashboardFromProps } from '../board-port/xwhm-dashboard.ts'
+import { renderWhmDashboard, whmDashboardFromProps, type DashboardHostSample } from '../board-port/xwhm-dashboard.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
@@ -38,6 +39,7 @@ export interface WhmServiceHealthRow {
   enabled: boolean
   rssMb: number
   role: string
+  installed?: boolean
 }
 
 export interface WhmConfigGenerationRow {
@@ -75,6 +77,9 @@ export interface WhmSurfaceProps {
   firewallRules?: FirewallRule[]
   generations?: WhmConfigGenerationRow[]
   auditEntries?: AuditEntry[]
+  hostSample?: DashboardHostSample | null
+  driftCount?: number | null
+  certificates?: readonly Pick<Certificate, 'names' | 'notAfter'>[]
   actionState?: AsyncActionBannerProps
 }
 
@@ -135,7 +140,8 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
   if (section === 'overview') return ensureAccessibleSurfaceHtml(renderWhmDashboard(whmDashboardFromProps({
     locale, principal, hostname: props.hostname, version: props.version, availableVersion: props.availableVersion,
     generationId: props.generationId, accounts: props.accounts, resellers: props.resellers, ipPool: props.ipPool,
-    services, auditEntries,
+    plans: props.plans, services, auditEntries, hostSample: props.hostSample, driftCount: props.driftCount,
+    certificates: props.certificates,
   })), locale)
 
   const rawHtml = renderSurfaceShell({

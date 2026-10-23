@@ -30,6 +30,7 @@ import { edge, services, system } from '@xpanel/render'
 import type { StateSnapshot, StateStore } from '@xpanel/state'
 import type { AgentExecutor } from './executor.ts'
 import { applyPostfixLocalDelivery, retirePostfixLocalDelivery } from './services/local-mail.ts'
+import { removedMaildirPaths } from './services/mail.ts'
 import {
   buildGenerationManifest,
   computeFilesChecksum,
@@ -1138,6 +1139,12 @@ export class HostReconciler {
       os: this.deps.os,
     })
     const previewDiff = diffManifests(previousManifest, previewCandidate)
+    const appliedSnapshot = currentGen ? await this.deps.store.readGenerationSnapshot(currentGen.id) : null
+    if (appliedSnapshot) {
+      for (const path of removedMaildirPaths(appliedSnapshot, snapshot)) {
+        compiled.postActions.push({ kind: 'remove-path', path })
+      }
+    }
 
     // Preflight MUST run before any executor read/write/action or DB/snapshot creation.
     const preflightPlan = {

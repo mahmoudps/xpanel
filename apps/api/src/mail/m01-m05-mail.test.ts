@@ -601,10 +601,8 @@ describe('M01–M05 Mail, Webmail, DKIM/Queue Security, Sieve & Personal Data Su
       'alice@alpha.example',
     ])
 
-    // Delete suspendedbox@alpha.example with purgeMaildir and verify removal from maps + Maildir cleanup
-    const delRes = await adapter.deleteMailbox(domains, 'suspendedbox@alpha.example', {
-      purgeMaildir: true,
-    })
+    // Delete suspendedbox@alpha.example and verify the Maildir is removed with the mailbox
+    const delRes = await adapter.deleteMailbox(domains, 'suspendedbox@alpha.example')
     expect(delRes.deletedAddress).toBe('suspendedbox@alpha.example')
     expect(delRes.removedMaildirPath).toBe('/home/tenanta/mail/alpha.example/suspendedbox')
     const afterDeletePasswd = executor.files.get('/etc/dovecot/xpanel/domains/alpha.example.passwd')

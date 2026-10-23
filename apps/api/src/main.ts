@@ -4,7 +4,7 @@ import { mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
-import { loadAgentCredentialFile } from '@xpanel/agent'
+import { agentCallerHeaders, loadAgentCredentialFile } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
 import { canSeeAccount, fail, hasAcl } from '@xpanel/core'
 import { visibleNavigation } from '@xpanel/catalog'
@@ -12,7 +12,7 @@ import type { VisibilityContext } from '@xpanel/catalog'
 import { publicContactEmail } from '../../web/src/display-name.ts'
 import { ACCOUNT_SECURITY_ROUTES } from '../../web/src/surfaces/account-security.ts'
 import type { OsProfile } from '@xpanel/core'
-import { createDb, getMailboxSession, latestActive, migrate, type Db } from '@xpanel/db'
+import { createDb, getMailboxSession, latestActive, listAudit, migrate, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { runCli } from './cli.ts'
@@ -302,6 +302,67 @@ export const createDefaultWebRenderer = async (deps: {
     const accountDatabaseUsers = snap.databaseUsers.filter((user) => user.accountId === account?.id).map((user) => ({ id: user.id, accountId: user.accountId, name: user.name, grants: user.grants }))
     const accountServiceUsers = snap.serviceUsers.filter((u) => u.accountId === account?.id).map((u) => ({ ...u, passwordHash: '' }))
     const active = await latestActive(deps.db)
+    const dashboardRoute = surface === 'xwhm' && documentRoute.activeRoute === '/whm' && principal.kind === 'root'
+    const readAgentJson = async (path: string): Promise<unknown> => {
+      if (!dashboardRoute || !deps.agent) return null
+      try {
+        const response = await deps.agent.fetch(new Request(`http://agent.local${path}`, {
+          headers: agentCallerHeaders({ principalId: principal.id, token: deps.agent.token }),
+        }))
+        if (!response.ok) return null
+        return await response.json()
+      } catch {
+        return null
+      }
+    }
+    const [hostInfo, hostServices, hostDrift, auditPage] = dashboardRoute
+      ? await Promise.all([
+          readAgentJson('/host/info'),
+          readAgentJson('/host/services'),
+          readAgentJson('/host/drift'),
+          listAudit(deps.db, { limit: 8 }).catch(() => []),
+        ])
+      : [null, null, null, []]
+    const asRecord = (value: unknown): Record<string, unknown> | null =>
+      value !== null && typeof value === 'object' ? value as Record<string, unknown> : null
+    const infoRecord = asRecord(hostInfo)
+    const loadRecord = asRecord(infoRecord?.load)
+    const memoryRecord = asRecord(infoRecord?.memory)
+    const diskRecord = asRecord(infoRecord?.disk)
+    const numberOf = (record: Record<string, unknown> | null, key: string): number | undefined => {
+      const value = record?.[key]
+      return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+    }
+    const hostSample = infoRecord ? {
+      ...(numberOf(loadRecord, 'load1') !== undefined ? { load1: numberOf(loadRecord, 'load1') } : {}),
+      ...(numberOf(memoryRecord, 'totalBytes') !== undefined && numberOf(memoryRecord, 'availableBytes') !== undefined
+        ? { memory: { totalBytes: numberOf(memoryRecord, 'totalBytes')!, availableBytes: numberOf(memoryRecord, 'availableBytes')! } }
+        : {}),
+      ...(typeof diskRecord?.mount === 'string' && numberOf(diskRecord, 'totalBytes') !== undefined && numberOf(diskRecord, 'usedBytes') !== undefined && numberOf(diskRecord, 'availableBytes') !== undefined
+        ? { disk: { mount: diskRecord.mount, totalBytes: numberOf(diskRecord, 'totalBytes')!, usedBytes: numberOf(diskRecord, 'usedBytes')!, availableBytes: numberOf(diskRecord, 'availableBytes')! } }
+        : {}),
+    } : null
+    const serviceRows = Array.isArray(asRecord(hostServices)?.services)
+      ? (asRecord(hostServices)!.services as unknown[]).flatMap(row => {
+          const service = asRecord(row)
+          if (!service || typeof service.label !== 'string') return []
+          const state = service.state
+          return [{
+            name: service.label,
+            unit: typeof service.unit === 'string' ? service.unit : '',
+            version: '',
+            active: state === 'active',
+            enabled: state === 'active',
+            rssMb: 0,
+            role: '',
+            installed: state !== 'not-installed',
+          }]
+        })
+      : undefined
+    const driftRecord = asRecord(hostDrift)
+    const driftCount = typeof driftRecord?.count === 'number' && Number.isSafeInteger(driftRecord.count) && driftRecord.count >= 0
+      ? driftRecord.count
+      : null
     return serveWebUi(req, async () => ({
       surface,
       activeRoute: documentRoute.activeRoute,
@@ -319,6 +380,13 @@ export const createDefaultWebRenderer = async (deps: {
         ipPool: visibleIpPool,
         firewallRules: visibleFirewall,
         ...(principal.kind === 'root' && snap.server ? { hostname: snap.server.settings.hostname } : {}),
+        ...(dashboardRoute ? {
+          auditEntries: auditPage,
+          certificates: snap.certificates,
+          driftCount,
+          ...(hostSample ? { hostSample } : {}),
+          ...(serviceRows ? { services: serviceRows } : {}),
+        } : {}),
       },
       panel: {
         ...(account ? { account } : {}),

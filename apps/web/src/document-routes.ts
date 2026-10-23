@@ -1,4 +1,5 @@
 import { navigation } from '@xpanel/catalog'
+import { designReferenceRoutesEnabled } from './design-board.ts'
 
 export type DocumentSurface = 'login' | 'xwhm' | 'xpanel' | 'xmail'
 export interface WebDocumentRoute { surface: DocumentSurface; activeRoute: string }
@@ -9,7 +10,7 @@ export function resolveWebDocumentRoute(pathname: string): WebDocumentRoute | nu
   if (pathname === '/login') return { surface: 'login', activeRoute: '/login' }
   const path = pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
   if (path === '/' || path === '/panel') return { surface: 'xpanel', activeRoute: '/home' }
-  if (path === '/design/system' || path === '/design/components' || path === '/design/navigation') return { surface: 'xpanel', activeRoute: path }
+  if (designReferenceRoutesEnabled() && (path === '/design/system' || path === '/design/components' || path === '/design/navigation')) return { surface: 'xpanel', activeRoute: path }
   if (path === '/mail') return { surface: 'xmail', activeRoute: '/mail/inbox' }
   const surface = routes.get(path)
   if (surface) return { surface, activeRoute: path }

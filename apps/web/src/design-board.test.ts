@@ -1,10 +1,26 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { renderWebApp } from './app.ts'
-import { designPages, readDesignAdapter, readPanelPhpPage, renderDesignMain, renderHomeToolGrid } from './design-board.ts'
+import { designPages, designReferenceRoutesEnabled, readDesignAdapter, readPanelPhpPage, renderDesignMain, renderDesignNav, renderHomeToolGrid } from './design-board.ts'
+import { resolveWebDocumentRoute } from './document-routes.ts'
 import { renderPanelSurface } from './surfaces/xpanel.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
 
+const withDesignPages = <T>(fn: () => T): T => {
+  const previous = process.env.XPANEL_DESIGN_PAGES
+  process.env.XPANEL_DESIGN_PAGES = '1'
+  try {
+    return fn()
+  } finally {
+    if (previous === undefined) delete process.env.XPANEL_DESIGN_PAGES
+    else process.env.XPANEL_DESIGN_PAGES = previous
+  }
+}
+
 describe('design board routes', () => {
+  afterEach(() => {
+    delete process.env.XPANEL_DESIGN_PAGES
+  })
+
   it('gives every artifact screen a route and an empty adapter until its tool is connected', () => {
     const routes = designPages.map(page => page.route)
     expect(new Set(routes).size).toBe(routes.length)
@@ -43,10 +59,11 @@ describe('design board routes', () => {
     expect(cron).not.toMatch(/alice|20014|xpanel-cron/)
     expect(renderDesignMain('/files/backup', 'en')).toContain('What do you want to back up?')
     expect(renderDesignMain('/whm/security/ssh', 'en')).toContain('No addresses banned by SSH')
-    const system = renderDesignMain('/design/system', 'en')
+    expect(renderDesignMain('/design/system', 'en')).toBe('')
+    const system = withDesignPages(() => renderDesignMain('/design/system', 'en'))
     expect(system).toContain('data-token="accent"')
     expect(system).not.toMatch(/alice|3\.2/)
-    const components = renderDesignMain('/design/components', 'en')
+    const components = withDesignPages(() => renderDesignMain('/design/components', 'en'))
     expect(components).toContain('xp-meter__fill')
     expect(components).toContain('style="width:0%"')
     expect(components).toContain('xp-meter__indet')
@@ -57,10 +74,10 @@ describe('design board routes', () => {
     expect(components).toContain('aria-invalid="true"')
     expect(components).toContain('aria-checked="true"')
     expect(components).not.toMatch(/<form\b|alice|salma|3\.2/)
-    const componentsAr = renderDesignMain('/design/components', 'ar')
+    const componentsAr = withDesignPages(() => renderDesignMain('/design/components', 'ar'))
     expect(componentsAr).toContain('قيد التفعيل')
     expect(componentsAr).not.toContain('Coming soon')
-    const map = renderDesignMain('/design/navigation', 'en')
+    const map = withDesignPages(() => renderDesignMain('/design/navigation', 'en'))
     expect(map).toContain('href="/whm/security/ssh"')
     expect(map).not.toMatch(/\b187\b/)
     const tools = renderHomeToolGrid('en', new Set(['/files/manager']))
@@ -73,8 +90,23 @@ describe('design board routes', () => {
     expect(arabic).not.toContain('Coming soon')
   })
 
+  it('keeps the design specimens out of the product sidebar until the development flag is set', () => {
+    expect(designReferenceRoutesEnabled()).toBe(false)
+    const nav = renderDesignNav('xpanel', 'en', '/home', new Set(['/home']))
+    expect(nav).not.toContain('/design/system')
+    expect(nav).not.toContain('/design/components')
+    expect(nav).not.toContain('/design/navigation')
+    const shell = renderWebApp({ surface: 'xpanel', activeRoute: '/home', locale: 'en' })
+    expect(shell).not.toContain('data-nav-route="/design/system"')
+    expect(resolveWebDocumentRoute('/design/system')).toBeNull()
+    const opened = withDesignPages(() => renderWebApp({ surface: 'xpanel', activeRoute: '/design/system', locale: 'en' }))
+    expect(opened).toContain('data-design-page="/design/system"')
+    expect(opened).toContain('data-nav-route="/design/system"')
+    expect(withDesignPages(() => resolveWebDocumentRoute('/design/components'))).toEqual({ surface: 'xpanel', activeRoute: '/design/components' })
+  })
+
   it('serves the unwired routes from the product shell', () => {
-    for (const route of ['/software/php', '/advanced/cron', '/files/backup', '/design/navigation', '/whm/security/ssh', '/whm/plans/features']) {
+    for (const route of ['/software/php', '/advanced/cron', '/files/backup', '/whm/security/ssh', '/whm/plans/features']) {
       const surface = route.startsWith('/whm') ? 'xwhm' as const : 'xpanel' as const
       const html = renderWebApp({ surface, activeRoute: route, locale: 'en' })
       expect(html).toContain(`data-design-page="${route}"`)

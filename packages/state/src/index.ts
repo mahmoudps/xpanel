@@ -1,4 +1,5 @@
 export * from './atomic.ts'
+export * from './ownership.ts'
 export * from './types.ts'
 export * from './validate-state.ts'
 export * from './store.ts'

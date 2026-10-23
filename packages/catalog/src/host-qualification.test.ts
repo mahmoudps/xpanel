@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { tools } from './data/index.ts'
 import { PHASE1_TOOL_PROBES, qualifyHostTools, type HostQualificationReport } from './host-qualification.ts'
+import { visibleNavigation } from './navigation.ts'
 
 const passed = (executor: HostQualificationReport['executor'], probes: HostQualificationReport['probes']): HostQualificationReport =>
   ({ executor, probes })
@@ -65,6 +66,13 @@ describe('host qualification', () => {
     for (const id of ['restart-ssh', 'aapanel-performance-test', 'backup-config', 'zone-ttl-bulk', 'create-account', 'file-manager']) {
       expect(qualified.has(id), id).toBe(false)
     }
+    const root = { principal: { kind: 'root' as const, id: '00000000-0000-4000-8000-000000000001', username: 'root' } }
+    const routes = visibleNavigation(root, qualifyHostTools(tools, report)).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
+    expect(routes).toContain('/whm')
+    expect(routes).toContain('/whm/monitoring/server-info')
+    const withoutHost = passed('linux', { 'control-plane': 'passed', pdns: 'passed', backups: 'passed', systemd: 'passed' })
+    const hidden = visibleNavigation(root, qualifyHostTools(tools, withoutHost)).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
+    expect(hidden).not.toContain('/whm')
   })
 
   it('stays unqualified when the operator turns host qualification off', () => {
