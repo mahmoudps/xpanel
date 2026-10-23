@@ -58,7 +58,14 @@ const fixtureModel = (): InboxModel => ({
   wsHtml: '',
   actionHtml: '',
   logoutAttr: '',
-  moveTargets: ['Archive', 'Orders', 'Suppliers', 'Invoices 2026', 'Junk'],
+  activeFolder: 'INBOX',
+  moveTargets: [
+    { id: 'Archive', label: 'Archive' },
+    { id: 'Orders', label: 'Orders' },
+    { id: 'Suppliers', label: 'Suppliers' },
+    { id: 'Invoices 2026', label: 'Invoices 2026' },
+    { id: 'Junk', label: 'Junk' },
+  ],
   copy: {
     emptyTitle: 'No messages match',
     emptyBody: 'Nothing in Inbox fits this filter or search.',

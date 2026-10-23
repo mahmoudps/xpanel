@@ -1,4 +1,6 @@
+import { X509Certificate } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
+import { isIP } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import {
   parseApacheVersion,
@@ -9,6 +11,7 @@ import {
   parseOsRelease,
   parsePackageVersion,
   parseProcUptime,
+  parseVersionFile,
 } from './host-info.ts'
 
 export interface HostIdentity {
@@ -20,6 +23,39 @@ export interface HostIdentity {
   model?: string
   engine?: string
   version?: string
+  /** First DNS name on the panel certificate. */
+  panelDomain?: string
+  certificates?: Array<{ names: string[]; notAfter: string }>
+}
+
+export interface ObservedCertificate {
+  names: string[]
+  notAfter: string
+  daysLeft: number
+}
+
+/** Names and expiry from a PEM. A broken certificate stays empty. */
+export const certificateFromPem = (pem: string, now = Date.now()): ObservedCertificate | null => {
+  let cert: X509Certificate
+  try {
+    cert = new X509Certificate(pem)
+  } catch {
+    return null
+  }
+  const names: string[] = []
+  for (const part of (cert.subjectAltName ?? '').split(',')) {
+    const trimmed = part.trim()
+    if (trimmed.startsWith('DNS:')) names.push(trimmed.slice(4).trim())
+    else if (trimmed.startsWith('IP Address:')) names.push(trimmed.slice('IP Address:'.length).trim())
+  }
+  if (names.length === 0) {
+    const cn = /(?:^|,\s*)CN=([^,\n]+)/.exec(cert.subject)
+    if (cn?.[1]) names.push(cn[1].trim())
+  }
+  const when = Date.parse(cert.validTo)
+  if (!Number.isFinite(when) || names.length === 0) return null
+  const daysLeft = Math.ceil((when - now) / 86_400_000)
+  return { names, notAfter: new Date(when).toISOString(), daysLeft }
 }
 
 export interface HostIdentityReader {
@@ -66,7 +102,7 @@ export const readAgentPackageVersion = async (): Promise<string | null> => {
  */
 export const readHostIdentity = async (reader: HostIdentityReader): Promise<HostIdentity> => {
   const identity: HostIdentity = {}
-  const release = await readText(reader, '/etc/os-release')
+  const release = (await readText(reader, '/etc/os-release')) ?? (await readText(reader, '/usr/lib/os-release'))
   const system = release ? parseOsRelease(release) : null
   if (system) identity.system = system
   const uptimeText = await readText(reader, '/proc/uptime')
@@ -103,8 +139,16 @@ export const readHostIdentity = async (reader: HostIdentityReader): Promise<Host
   ].filter(part => part.length > 0).join(' → ')
   if (engine) identity.engine = engine
 
-  const version = await readAgentPackageVersion()
+  const versionFile = await readText(reader, '/opt/xpanel/VERSION')
+  const version = (versionFile ? parseVersionFile(versionFile) : null) ?? await readAgentPackageVersion()
   if (version) identity.version = version
+  const pem = await readText(reader, '/etc/xpanel/ssl/default/fullchain.pem')
+  const certificate = pem ? certificateFromPem(pem) : null
+  if (certificate) {
+    identity.certificates = [{ names: certificate.names, notAfter: certificate.notAfter }]
+    const dns = certificate.names.find(name => isIP(name) === 0)
+    if (dns) identity.panelDomain = dns
+  }
   return identity
 }
 

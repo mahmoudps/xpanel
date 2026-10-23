@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { fail } from '@xpanel/core'
-import { createTestDb } from '@xpanel/db'
+import { createRootPrincipal, createTestDb } from '@xpanel/db'
 import { createTestStateStore, ExtendedFeaturesStore } from '@xpanel/state'
+import { hashPasswordArgon2id } from './auth.ts'
 import { createApiApp } from './server.ts'
 import { loadMailDocument } from './mail/document.ts'
 import type { InboxMessage, MailboxSendInput, MailboxTransport } from './mail/inbox.ts'
-import { createLocalMailboxTransport, mailReceivedAtUtc } from './mail/inbox.ts'
+import { createLocalMailboxTransport, mailboxPrincipalUsername, mailReceivedAtUtc } from './mail/inbox.ts'
 
 const SECRET = 'mailbox-inbox-synthetic-server-secret-32b'
 const ORIGIN = 'https://mail.example.test'
@@ -204,7 +205,7 @@ describe('xMail mailbox inbox', () => {
     expect(before.quotaLimitMb).toBe(100)
     expect(before).not.toHaveProperty('quotaUsedMb')
     expect(before.messages?.map(item => [item.subject, item.body, item.bodyPending, item.unread])).toEqual([['Alpha note', 'Hello from alpha', false, false]])
-    expect(before.vacationEnabled).toBeUndefined()
+    expect(before.vacationEnabled).toBe(false)
     expect(before.sieveRules).toEqual([])
     expect(before.identityDkim).toBeUndefined()
     expect(before.identitySize).toBeUndefined()
@@ -259,6 +260,89 @@ describe('xMail mailbox inbox', () => {
     const response = await login('inbox@alpha.example.test', 'alpha-secret')
     expect(response.status).toBe(412)
     expect(response.payload.detail).toMatch(/the mail server could not be reached/)
+  })
+
+  it('reads the postfix size limit and an empty milter as unsigned mail', async () => {
+    const transport: MailboxTransport = {
+      async verify() { return undefined },
+      async list() { return [] },
+      async read() { return fail('NOT_FOUND', 'message not found') },
+      async remove() { return undefined },
+      async send() { return { messageId: '<sent@alpha.example.test>' } },
+    }
+    const { database, state, login } = await harness(transport)
+    const logged = await login('inbox@alpha.example.test', 'alpha-secret')
+    expect(logged.status).toBe(200)
+    const rows = await database.db.query<{ session_id: string }>('SELECT session_id FROM mailbox_sessions')
+    const postfixMain = [
+      'message_size_limit = 10240000',
+      'smtpd_milters =',
+    ].join('\n')
+    const loaded = await loadMailDocument({
+      db: database.db, store: state.store, serverSecret: SECRET, sessionId: rows[0]?.session_id ?? '', transport, postfixMain,
+    })
+    expect(loaded.identitySize).toBe('10 MB')
+    expect(loaded.identityDkim).toBe('not signed')
+    expect(loaded.identitySpf).toBe('SPF record missing · DMARC record missing')
+  })
+
+  it('removes the mailbox login and its sessions when the mailbox is deleted', async () => {
+    const transport: MailboxTransport = {
+      async verify(mailbox, password) {
+        const accepted = mailbox === 'inbox@alpha.example.test' ? 'alpha-secret' : mailbox === 'other@beta.example.test' ? 'beta-secret' : ''
+        if (password !== accepted) fail('UNAUTHENTICATED', 'imap rejected the password')
+      },
+      async list() { return [] },
+      async read() { return fail('NOT_FOUND', 'message not found') },
+      async remove() { return undefined },
+      async send() { return { messageId: '<sent@alpha.example.test>' } },
+    }
+    const { database, state, login } = await harness(transport)
+    const inbox = await login('inbox@alpha.example.test', 'alpha-secret')
+    const other = await login('other@beta.example.test', 'beta-secret')
+    expect(inbox.status).toBe(200)
+    expect(other.status).toBe(200)
+    const names = async () => (await database.db.query<{ username: string }>('SELECT username FROM principals ORDER BY username')).map(row => row.username)
+    const inboxName = mailboxPrincipalUsername('inbox@alpha.example.test')
+    const otherName = mailboxPrincipalUsername('other@beta.example.test')
+    const before = await names()
+    expect(before).toEqual(expect.arrayContaining([inboxName, otherName]))
+    expect(await database.db.query('SELECT session_id FROM mailbox_sessions')).toHaveLength(2)
+
+    await createRootPrincipal(database.db, {
+      username: 'root',
+      passwordHash: await hashPasswordArgon2id('RootPassword!2026'),
+      forcePasswordChange: false,
+    })
+    const origin = 'https://whm.example.test'
+    const whm = createApiApp({
+      db: database.db, store: state.store, serverSecret: SECRET, entryPoint: 'xwhm',
+      publicOrigin: origin, allowedOrigins: [origin], secureCookies: true,
+    })
+    const rootLogin = await whm.fetch(new Request(`${origin}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'root', password: 'RootPassword!2026' }),
+    }), { remoteAddress: '192.0.2.5' })
+    expect(rootLogin.status).toBe(200)
+    const rootBody = await rootLogin.json() as { csrfToken?: string }
+    const cookie = (rootLogin.headers.get('set-cookie') ?? '').split(';')[0] ?? ''
+    const serviceUser = await state.store.getServiceUserByLogin('inbox@alpha.example.test')
+    expect(serviceUser?.id).toBeTruthy()
+    const removed = await whm.fetch(new Request(`${origin}/api/service-users/${serviceUser!.id}`, {
+      method: 'DELETE',
+      headers: { cookie, 'x-csrf-token': rootBody.csrfToken ?? '' },
+    }), { remoteAddress: '192.0.2.5' })
+    expect(removed.status).toBe(200)
+
+    const after = await names()
+    expect(after).not.toContain(inboxName)
+    expect(after).toContain(otherName)
+    expect(after.filter(name => name.startsWith('mbx'))).toHaveLength(1)
+    const sessions = await database.db.query<{ mailbox: string }>('SELECT mailbox FROM mailbox_sessions')
+    expect(sessions.map(row => row.mailbox)).toEqual(['other@beta.example.test'])
+    expect(await state.store.getServiceUserByLogin('inbox@alpha.example.test')).toBeNull()
+    expect(await state.store.getServiceUserByLogin('other@beta.example.test')).not.toBeNull()
   })
 
   it('turns a refused local IMAP connection into a mail-server error', async () => {

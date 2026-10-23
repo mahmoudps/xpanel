@@ -167,6 +167,34 @@ export const auditActionLabel = (action: string, locale: Locale): string => {
   return locale === 'ar' ? row.ar : row.en
 }
 
+const internalRecord = (locale: Locale): string => locale === 'ar' ? 'سجل داخلي' : 'An internal record'
+const mailboxRecord = (locale: Locale): string => locale === 'ar' ? 'صندوق بريد' : 'Mailbox'
+
+/** A target a person can read. Raw principal, generation, and mailbox ids stay off the row. */
+export const auditTargetLabel = (target: string, locale: Locale): string => {
+  const value = target.trim()
+  const generation = /^generation:(\d+)$/.exec(value)
+  if (generation) return locale === 'ar' ? `الجيل ${generation[1]}` : `Generation ${generation[1]}`
+  const serviceUser = /^service-user:(.+)$/.exec(value)
+  if (serviceUser) {
+    const login = serviceUser[1] ?? ''
+    if (login.length > 0 && !/^mbx/i.test(login) && !/^[0-9a-f-]{32,}$/i.test(login)) return login
+    return mailboxRecord(locale)
+  }
+  if (/^(principal|mbx):/i.test(value) || /\bmbx[0-9a-f]/i.test(value) || /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(value)) {
+    return /mbx|mailbox/i.test(value) ? mailboxRecord(locale) : internalRecord(locale)
+  }
+  return value
+}
+
+/** Sign-in is a sign-in. Other successful rows stay Applied. */
+export const auditOutcomeLabel = (action: string, outcome: string, locale: Locale): string => {
+  if (outcome === 'denied') return locale === 'ar' ? 'مرفوض' : 'Denied'
+  if (outcome !== 'ok') return locale === 'ar' ? 'فشل' : 'Failed'
+  if (action === 'auth.login') return locale === 'ar' ? 'دخول' : 'Signed in'
+  return locale === 'ar' ? 'مطبّق' : 'Applied'
+}
+
 /** Escaped action sentence. Arabic isolates Latin tokens marked with «». */
 export const auditActionHtml = (action: string, locale: Locale): string => {
   const label = auditActionLabel(action, locale)

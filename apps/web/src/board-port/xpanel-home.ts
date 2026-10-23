@@ -1,6 +1,6 @@
 import type { Locale } from '../i18n.ts'
 import { formatDisplayName } from '../display-name.ts'
-import { escapeHtml } from '../tokens.ts'
+import { escapeHtml, formatAsciiBytes, formatUtcClock } from '../tokens.ts'
 
 type IconName = keyof typeof ICONS
 
@@ -486,6 +486,8 @@ interface LiveFacts {
   processLimit: string | null
   ioLimit: string | null
   generationId?: number
+  signInHtml?: string
+  changes?: HomeChange[]
 }
 
 const blankMeter = (label: string, value: string): HomeMeter => ({ label, value, pct: 0, note: '—' })
@@ -554,10 +556,10 @@ const desktopFromFacts = (facts: LiveFacts, actionHtml: string, qualified?: Read
     bannerHtml: null, bannerHref: '/metrics/traffic', bannerLabel: ar ? 'اعرض الاستهلاك لكل نطاق' : 'See bandwidth by domain',
     countText: totalCount(groups, ar, false), groups,
     infoTitle: ar ? 'معلومات عامة' : 'General information',
-    info: infoRows({ ar, username: facts.username, uid: facts.uid, domain: facts.domain, home: facts.home, ipv4: facts.ipv4, plan: facts.planLabel, php: facts.php, slice: facts.slice, signInHtml: signInEmpty(ar) }),
+    info: infoRows({ ar, username: facts.username, uid: facts.uid, domain: facts.domain, home: facts.home, ipv4: facts.ipv4, plan: facts.planLabel, php: facts.php, slice: facts.slice, signInHtml: facts.signInHtml ?? signInEmpty(ar) }),
     usageTitle: ar ? 'استخدام الموارد' : 'Resource usage', usageLink: ar ? 'التفاصيل' : 'Details',
     meters: liveDesktopMeters(facts),
-    changesTitle: ar ? 'آخر التغييرات' : 'Recent changes', changes: [],
+    changesTitle: ar ? 'آخر التغييرات' : 'Recent changes', changes: facts.changes ?? [],
     emptyChanges: ar ? 'لا تغييرات مسجّلة لهذا الحساب بعد.' : 'No changes are recorded for this account yet.',
     metricsUnavailable: true, actionHtml,
     ...(signOutLabel ? { signOutLabel } : {}),
@@ -605,6 +607,8 @@ export interface XpanelHomeProps {
   /** Routes this account may open. Omit it for the board specimen, which links every tool. */
   qualifiedRoutes?: ReadonlySet<string>
   signOutLabel?: string
+  lastSignInAt?: string
+  recentChanges?: HomeChange[]
 }
 
 const factsFromProps = (props: XpanelHomeProps): LiveFacts => {
@@ -644,7 +648,9 @@ const factsFromProps = (props: XpanelHomeProps): LiveFacts => {
     bandwidthLimit: finite(resources?.bandwidthMbMonth) === null ? null : storage(finite(resources?.bandwidthMbMonth) ?? 0),
     memoryLimit: finite(resources?.memoryMb) === null ? null : `${finite(resources?.memoryMb)} MB`,
     processLimit: finite(resources?.maxProcesses) === null ? null : String(finite(resources?.maxProcesses)),
-    ioLimit: io === null ? null : `${io / (1024 * 1024)} MB/s`,
+    ioLimit: io === null ? null : `${formatAsciiBytes(io)}/s`,
+    ...(props.lastSignInAt ? { signInHtml: props.locale === 'ar' ? `<bdi dir="ltr">${escapeHtml(formatUtcClock(props.lastSignInAt))}</bdi>` : escapeHtml(formatUtcClock(props.lastSignInAt)) } : {}),
+    ...(props.recentChanges ? { changes: props.recentChanges } : {}),
     ...(props.generationId ? { generationId: props.generationId } : {}),
   }
 }

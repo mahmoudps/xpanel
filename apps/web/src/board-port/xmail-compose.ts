@@ -506,7 +506,22 @@ export interface XmailComposeProps {
   identityDkim?: string
   identitySpf?: string
   identitySize?: string
+  folderCounts?: Array<{ folder: string; total: number; unread: number }>
+  draft?: { to?: string; cc?: string; subject?: string; body?: string }
 }
+
+/** Arabic file counts: لا ملفات، ملف واحد، ملفان، ٣ ملفات، ١١ ملفاً. */
+export const arabicFileCount = (count: number): string => {
+  const rule = new Intl.PluralRules('ar').select(count)
+  if (rule === 'zero') return 'لا ملفات'
+  if (rule === 'one') return 'ملف واحد'
+  if (rule === 'two') return 'ملفان'
+  if (rule === 'few') return `${count} ملفات`
+  return `${count} ملفاً`
+}
+
+const addressList = (value: string | undefined): string[] =>
+  (value ?? '').split(/[,;]/).map(part => part.trim()).filter(part => part.includes('@'))
 
 export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel => {
   const locale = props.locale ?? 'en'
@@ -514,14 +529,17 @@ export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel =>
   const messages = props.messages ?? []
   const unread = messages.filter(message => message.folder === 'INBOX' && message.unread).length
   const observed = new Set(messages.map(message => message.folder).filter(folder => folder !== 'INBOX'))
+  const folderHref = (id: string): string => id === 'INBOX' ? '/mail/inbox' : `/mail/inbox?folder=${encodeURIComponent(id)}`
   const folders: FolderLink[] = STANDARD.map(item => {
-    const link: FolderLink = { label: ar ? item.ar : item.en, href: '/mail/inbox', icon: item.icon, current: false }
-    if (item.id !== 'INBOX' && observed.has(item.id)) link.observed = item.id
-    if (item.id === 'INBOX' && unread > 0) link.count = { text: String(unread), kind: 'pill' }
+    const measured = props.folderCounts?.find(row => row.folder === item.id)
+    const count = measured ? (item.id === 'INBOX' ? measured.unread : measured.total) : (item.id === 'INBOX' ? unread : 0)
+    const link: FolderLink = { label: ar ? item.ar : item.en, href: folderHref(item.id), icon: item.icon, current: false }
+    if (item.id !== 'INBOX') link.observed = item.id
+    if (count > 0) link.count = { text: String(count), kind: item.id === 'INBOX' ? 'pill' : 'strong' }
     return link
   })
   const custom: FolderLink[] = [...observed].filter(folder => !STANDARD.some(item => item.id === folder)).map(folder => ({
-    label: folder, href: '/mail/inbox', icon: 'folder' as const, current: false, observed: folder,
+    label: folder, href: folderHref(folder), icon: 'folder' as const, current: false, observed: folder,
   }))
   const quota = formatMailboxQuota(props.quotaUsedMb, props.quotaLimitMb, locale)
   const rules = props.sieveRules ?? []
@@ -554,12 +572,17 @@ export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel =>
     fromOptions: [{ value: props.mailbox, label: props.mailbox }],
     fromValue: props.mailbox,
     fromAddr: props.mailbox,
-    chips: [],
-    subject: '',
-    bodyHtml: '<p style="margin: 0; max-width: 68ch"></p>',
+    chips: [
+      ...addressList(props.draft?.to).map(addr => ({ field: 'to', name: addr, addr, invalid: false })),
+      ...addressList(props.draft?.cc).map(addr => ({ field: 'cc', name: addr, addr, invalid: false })),
+    ],
+    subject: props.draft?.subject ?? '',
+    bodyHtml: props.draft?.body
+      ? `<p dir="auto" style="margin: 0; max-width: 68ch; white-space: pre-wrap"><bdi dir="auto">${escapeHtml(props.draft.body)}</bdi></p>`
+      : '<p dir="auto" style="margin: 0; max-width: 68ch"></p>',
     numbersOn: false,
     attachments: [],
-    attachSummary: ar ? '0 ملفات' : '0 files',
+    attachSummary: ar ? arabicFileCount(0) : '0 files',
     attachHelp: dash,
     identityDkim: shownIdentity(props.identityDkim),
     identitySpf: shownIdentity(props.identitySpf),

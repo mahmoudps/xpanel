@@ -326,6 +326,11 @@ export const postfixMainSettings = (os: OsProfile, o: PostfixMainOptions = {}): 
     // stated explicitly so relaying never depends on the distribution's compatibility_level
     smtpd_relay_restrictions: 'permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination',
     smtpd_recipient_restrictions: `check_recipient_access ${t}:${p.recipientAccess}`,
+    // OpenDKIM's Debian/Ubuntu socket. accept keeps mail flowing when the socket is down.
+    smtpd_milters: 'local:/run/opendkim/opendkim.sock',
+    non_smtpd_milters: 'local:/run/opendkim/opendkim.sock',
+    milter_protocol: '6',
+    milter_default_action: 'accept',
   }
   if (o.tls) {
     settings.smtpd_tls_cert_file = assertAbsPath('TLS certificate', o.tls.certFile)
@@ -613,6 +618,31 @@ protocol lmtp {
 
 protocol imap {
   mail_plugins = $mail_plugins imap_quota
+}
+
+namespace inbox {
+  separator = .
+  inbox = yes
+  mailbox Sent {
+    auto = subscribe
+    special_use = \\Sent
+  }
+  mailbox Drafts {
+    auto = subscribe
+    special_use = \\Drafts
+  }
+  mailbox Junk {
+    auto = subscribe
+    special_use = \\Junk
+  }
+  mailbox Trash {
+    auto = subscribe
+    special_use = \\Trash
+  }
+  mailbox Archive {
+    auto = subscribe
+    special_use = \\Archive
+  }
 }
 
 plugin {

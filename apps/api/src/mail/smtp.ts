@@ -1,6 +1,6 @@
 import net from 'node:net'
 import tls from 'node:tls'
-import { fail } from '@xpanel/core'
+import { fail, type ErrorCode } from '@xpanel/core'
 import { MimeCodecAndSanitizer } from './mime.ts'
 import type { MimeAttachmentInput } from './mime.ts'
 
@@ -65,6 +65,45 @@ export interface SmtpSubmissionResult {
 }
 
 const DEFAULT_SMTP_TIMEOUT_MS = 15_000
+
+/** SNI is omitted for an IP. Node rejects `servername` when the host is an address. */
+export const tlsServerName = (host: string): string | undefined => (net.isIP(host) === 0 ? host : undefined)
+
+export const tlsConnectOptions = (host: string, extra: tls.ConnectionOptions): tls.ConnectionOptions => {
+  const servername = tlsServerName(host)
+  return servername === undefined ? extra : { ...extra, servername }
+}
+
+export interface SmtpHumanCopy {
+  en: string
+  ar: string
+}
+
+/** A stable sentence for the person sending mail. The raw SMTP or TLS text stays off the response. */
+export const smtpHumanCopy = (raw: string): SmtpHumanCopy => {
+  const text = raw.toLowerCase()
+  if (text.includes('servername') && text.includes('ip address')) {
+    return {
+      en: 'A secure mail connection cannot use an IP address as the server name.',
+      ar: 'لا يمكن لاتصال البريد الآمن أن يستخدم عنوان IP كاسم للخادم.',
+    }
+  }
+  if (/timed out|econnrefused|econnreset|enotfound|ehostunreach|enetunreach|socket closed|econn/.test(text)) {
+    return { en: 'the mail server could not be reached.', ar: 'تعذر الوصول إلى خادم البريد.' }
+  }
+  if (/\bauth\b/.test(text)) {
+    return { en: 'The mailbox could not sign in to send mail.', ar: 'تعذر تسجيل دخول صندوق البريد لإرسال البريد.' }
+  }
+  if (/mail from|rcpt|recipient|rejected|starttls|ehlo|greeting|\bdata\b/.test(text)) {
+    return { en: 'The mail server refused the message.', ar: 'رفض خادم البريد الرسالة.' }
+  }
+  return { en: 'The message could not be sent.', ar: 'تعذر إرسال الرسالة.' }
+}
+
+const smtpFail = (code: ErrorCode, raw: string, detail?: Record<string, unknown>): never => {
+  const copy = smtpHumanCopy(raw)
+  return fail(code, copy.en, { ...detail, messageAr: copy.ar })
+}
 
 const extractAddress = (raw: string): string => {
   const trimmed = raw.trim()
@@ -330,11 +369,11 @@ export class SmtpSubmissionClient {
         }
         const s = this.config.tls
           ? tls.connect(
-              {
+              tlsConnectOptions(this.config.host, {
                 host: this.config.host,
                 port: this.config.port,
                 rejectUnauthorized: this.config.rejectUnauthorized ?? true,
-              },
+              }),
               () => onConnect(s),
             )
           : net.connect({ host: this.config.host, port: this.config.port }, () => onConnect(s))
@@ -372,11 +411,10 @@ export class SmtpSubmissionClient {
         plain.removeAllListeners('error')
         plain.removeAllListeners('close')
         const loopback = this.config.host === '127.0.0.1' || this.config.host === '::1' || this.config.host === 'localhost'
-        const secure = tls.connect({
+        const secure = tls.connect(tlsConnectOptions(this.config.host, {
           socket: plain,
-          servername: this.config.host,
           rejectUnauthorized: this.config.rejectUnauthorized ?? !loopback,
-        })
+        }))
         socket = secure
         attachIo(secure)
         await new Promise<void>((resolve, reject) => {
@@ -415,7 +453,7 @@ export class SmtpSubmissionClient {
           smtpMessage: authRes.message,
           updatedAt: new Date().toISOString(),
         })
-        fail('UNAUTHENTICATED', `SMTP AUTH PLAIN failed (${authRes.code}): ${authRes.message}`)
+        smtpFail('UNAUTHENTICATED', `SMTP AUTH PLAIN failed (${authRes.code})`)
       }
 
       sendLine(`MAIL FROM:<${senderAddress}>`)
@@ -431,7 +469,7 @@ export class SmtpSubmissionClient {
           smtpMessage: mailFromRes.message,
           updatedAt: new Date().toISOString(),
         })
-        fail('FORBIDDEN', `SMTP MAIL FROM rejected (${mailFromRes.code}): ${mailFromRes.message}`)
+        smtpFail('FORBIDDEN', `SMTP MAIL FROM rejected (${mailFromRes.code})`)
       }
 
       const acceptedRecipients: string[] = []
@@ -463,11 +501,9 @@ export class SmtpSubmissionClient {
           smtpMessage: firstRej?.message ?? 'All recipients rejected',
           updatedAt: new Date().toISOString(),
         })
-        fail(
-          'VALIDATION',
-          `All recipients rejected by SMTP (${firstRej?.code ?? 550}): ${firstRej?.message ?? ''}`,
-          { rejectedRecipients },
-        )
+        smtpFail('VALIDATION', `SMTP recipients rejected (${firstRej?.code ?? 550})`, {
+          rejectedCount: rejectedRecipients.length,
+        })
       }
 
       sendLine('DATA')
@@ -483,7 +519,7 @@ export class SmtpSubmissionClient {
           smtpMessage: dataPrompt.message,
           updatedAt: new Date().toISOString(),
         })
-        fail('PRECONDITION_FAILED', `SMTP DATA rejected (${dataPrompt.code}): ${dataPrompt.message}`)
+        smtpFail('PRECONDITION_FAILED', `SMTP DATA rejected (${dataPrompt.code})`)
       }
 
       // Mark phase BEFORE writing final dot-terminated DATA so a post-DATA timeout is never blindly resent
@@ -512,7 +548,7 @@ export class SmtpSubmissionClient {
           smtpMessage: dataAck.message,
           updatedAt: new Date().toISOString(),
         })
-        fail('PRECONDITION_FAILED', `SMTP DATA payload rejected (${dataAck.code}): ${dataAck.message}`)
+        smtpFail('PRECONDITION_FAILED', `SMTP DATA payload rejected (${dataAck.code})`)
       }
 
       const queueMatch = /\bqueued as ([A-Za-z0-9_-]{6,32})/i.exec(dataAck.message)

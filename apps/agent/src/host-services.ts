@@ -24,6 +24,11 @@ export const HOST_SERVICES: readonly HostServiceSpec[] = [
   { id: 'dovecot', label: 'Dovecot', units: ['dovecot.service'] },
   { id: 'pure-ftpd', label: 'pure-ftpd', units: ['pure-ftpd.service'] },
   { id: 'pdns', label: 'PowerDNS', units: ['pdns.service'] },
+  { id: 'opendkim', label: 'OpenDKIM', units: ['opendkim.service'] },
+  { id: 'xpanel-api', label: 'xpanel-api', units: ['xpanel-api.service'] },
+  { id: 'xpanel-agent', label: 'xpanel-agent', units: ['xpanel-agent.service'] },
+  { id: 'cron', label: 'cron', units: ['cron.service', 'cronie.service'] },
+  { id: 'ssh', label: 'ssh', units: ['ssh.service', 'sshd.service'] },
 ]
 
 export interface HostCommandResult {

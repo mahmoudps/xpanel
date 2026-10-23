@@ -4,7 +4,7 @@ import { readHostServices, type HostCommandResult } from '../../../agent/src/hos
 import { mapAgentHostInfo, mapAgentServices, whmDashboardFromProps, type WhmDashboardModel } from './xwhm-dashboard.ts'
 
 /** Raw command output from the lab host. Parsers read these strings; nothing here is pre-parsed JSON. */
-export const HOSTNAME_F = 'license.developments.world\n'
+export const HOSTNAME_F = 'host.example.test\n'
 export const OS_RELEASE = 'NAME="Ubuntu"\nVERSION="24.04.3 LTS (Noble Numbat)"\nPRETTY_NAME="Ubuntu 24.04.3 LTS"\n'
 export const UNAME_R = '6.8.0-90-generic\n'
 export const PROC_UPTIME = '126000.12 40000.00\n'
@@ -42,6 +42,11 @@ const ACTIVE = new Set([
   'dovecot.service',
   'pure-ftpd.service',
   'pdns.service',
+  'opendkim.service',
+  'xpanel-api.service',
+  'xpanel-agent.service',
+  'cron.service',
+  'ssh.service',
 ])
 
 const serviceText = (unit: string): string => {

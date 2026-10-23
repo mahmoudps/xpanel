@@ -115,7 +115,7 @@ import { ENTRY_POINTS, entryPointAllowsApiRoute, entryPointAllowsRole, sessionTo
 import type { EntryPoint } from './entry-points.ts'
 import { loadQualifiedCatalog } from './host-catalog.ts'
 import { renderTotpQrSvg } from './totp-qr.ts'
-import { createLocalMailboxTransport, establishMailboxSession, openMailboxSession, parseMailboxSend } from './mail/inbox.ts'
+import { createLocalMailboxTransport, establishMailboxSession, mailFolderName, openMailboxSession, parseMailboxSend, revokeMailboxIdentity } from './mail/inbox.ts'
 import type { MailboxTransport } from './mail/inbox.ts'
 import { deleteMailboxSession } from '@xpanel/db'
 
@@ -1600,6 +1600,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       }
 
       const mailboxTransport = deps.mailboxTransport ?? createLocalMailboxTransport()
+      const moveMatch = /^\/api\/webmail\/inbox\/([1-9]\d*)\/move$/.exec(pathname)
       const inboxMatch = /^\/api\/webmail\/inbox\/([1-9]\d*)$/.exec(pathname)
       if (pathname === '/api/webmail/inbox' && method === 'GET') {
         const caller = await requireCaller(req)
@@ -1607,8 +1608,22 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         if (caller.principal.kind === 'user' && caller.principal.accountId !== opened.record.accountId) {
           return fail('NOT_FOUND', 'mailbox not found')
         }
-        const messages = await mailboxTransport.list(opened.record.mailbox, opened.password)
-        return jsonResponse({ mailbox: opened.record.mailbox, folder: 'INBOX', complete: true, messages })
+        const folder = mailFolderName(url.searchParams.get('folder'))
+        const messages = await mailboxTransport.list(opened.record.mailbox, opened.password, folder)
+        return jsonResponse({ mailbox: opened.record.mailbox, folder, complete: true, messages })
+      }
+      if (moveMatch && method === 'POST') {
+        const caller = await requireCaller(req)
+        const opened = await openMailboxSession(deps.db, serverSecret, caller.sessionId)
+        if (caller.principal.kind === 'user' && caller.principal.accountId !== opened.record.accountId) {
+          return fail('NOT_FOUND', 'mailbox not found')
+        }
+        if (!mailboxTransport.move) return fail('PRECONDITION_FAILED', 'this mail server cannot move messages')
+        const body = await readJsonBody<{ folder?: unknown; from?: unknown }>(req)
+        const from = mailFolderName(typeof body.from === 'string' ? body.from : 'INBOX')
+        const to = mailFolderName(typeof body.folder === 'string' ? body.folder : '')
+        await mailboxTransport.move(opened.record.mailbox, opened.password, Number(moveMatch[1]), from, to)
+        return jsonResponse({ ok: true, uid: Number(moveMatch[1]), folder: to })
       }
       if (inboxMatch && (method === 'GET' || method === 'DELETE')) {
         const caller = await requireCaller(req)
@@ -1617,11 +1632,12 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           return fail('NOT_FOUND', 'mailbox not found')
         }
         const uid = Number(inboxMatch[1])
+        const folder = mailFolderName(url.searchParams.get('folder'))
         if (method === 'DELETE') {
-          await mailboxTransport.remove(opened.record.mailbox, opened.password, uid)
+          await mailboxTransport.remove(opened.record.mailbox, opened.password, uid, folder)
           return jsonResponse({ ok: true, uid })
         }
-        const message = await mailboxTransport.read(opened.record.mailbox, opened.password, uid)
+        const message = await mailboxTransport.read(opened.record.mailbox, opened.password, uid, folder)
         return jsonResponse({ mailbox: opened.record.mailbox, message })
       }
       if (pathname === '/api/webmail/send' && method === 'POST') {
@@ -1631,7 +1647,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           return fail('NOT_FOUND', 'mailbox not found')
         }
         const sent = await mailboxTransport.send(opened.record.mailbox, opened.password, parseMailboxSend(await readJsonBody(req)))
-        return jsonResponse({ mailbox: opened.record.mailbox, messageId: sent.messageId }, 201)
+        return jsonResponse({ mailbox: opened.record.mailbox, messageId: sent.messageId, savedToSent: sent.savedToSent === true }, 201)
       }
       if (method === 'GET' && pathname === '/api/server/info') {
         const caller = await requireCaller(req)
@@ -2576,6 +2592,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           return jsonResponse({ serviceUser, reconcile: reconcile?.body ?? null })
         }
         if (method === 'DELETE') {
+          await revokeMailboxIdentity(deps.db, existing.login, suId)
           await deps.store.deleteServiceUser(suId)
           const reconcile = await triggerReconcile(caller, {
             scope: { accountId: account.id, resellerId: account.ownerId },

@@ -141,6 +141,7 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   if (pathname === '/api/webmail/inbox' && method === 'GET') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-message-list'] }
   if (/^\/api\/webmail\/inbox\/[1-9]\d*$/.test(pathname) && method === 'GET') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-message-read'] }
   if (/^\/api\/webmail\/inbox\/[1-9]\d*$/.test(pathname) && method === 'DELETE') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-message-read'] }
+  if (/^\/api\/webmail\/inbox\/[1-9]\d*\/move$/.test(pathname) && method === 'POST') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-message-read'] }
   if (pathname === '/api/webmail/send' && method === 'POST') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-compose'] }
   if (/^\/api\/webmail(?:\/|$)/.test(pathname)) return { resource: 'webmail', acl: 'edit-account', toolIds: ['email-accounts'] }
   if (/^\/api\/backups\/accounts\/[a-z][a-z0-9]{2,15}$/.test(pathname)) return { resource: 'backups', rootOnly: true, toolIds: ['backup-restoration'] }

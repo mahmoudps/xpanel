@@ -17,8 +17,11 @@ export interface MailMessageItem {
   uid: number
   folder: string
   from: string
+  fromName?: string
   to: string
+  cc?: string
   subject: string
+  attachments?: Array<{ name: string; sizeBytes: number }>
   preview: string
   body: string
   receivedAt: string
@@ -65,6 +68,8 @@ export interface MailSurfaceProps {
   identitySpf?: string
   /** Saved message size limit, labelled by the caller. Absent when settings were never saved. */
   identitySize?: string
+  folderCounts?: Array<{ folder: string; total: number; unread: number }>
+  composeDraft?: { to: string; cc: string; subject: string; body: string }
   actionState?: AsyncActionBannerProps
 }
 
@@ -124,6 +129,7 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
       ...(props.mailListFailed ? { mailListFailed: true } : {}),
       ...(props.vacationEnabled !== undefined ? { vacationEnabled: props.vacationEnabled } : {}),
       ...(props.sieveRules ? { sieveCount: props.sieveRules.filter(rule => rule.enabled).length } : {}),
+      ...(props.folderCounts ? { folderCounts: props.folderCounts } : {}),
     })), locale)
   }
 
@@ -141,6 +147,8 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
       ...(props.identityDkim ? { identityDkim: props.identityDkim } : {}),
       ...(props.identitySpf ? { identitySpf: props.identitySpf } : {}),
       ...(props.identitySize ? { identitySize: props.identitySize } : {}),
+      ...(props.folderCounts ? { folderCounts: props.folderCounts } : {}),
+      ...(props.composeDraft ? { draft: props.composeDraft } : {}),
     })), locale)
   }
   const field = (label: string, value: string): string => `<div class="xp-mail-field"><dt class="xp-label">${escapeHtml(label)}</dt><dd><bdi dir="ltr">${escapeHtml(value)}</bdi></dd></div>`

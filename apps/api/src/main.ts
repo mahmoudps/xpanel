@@ -13,13 +13,13 @@ import { mapAgentHostInfo, mapAgentServices } from '../../web/src/board-port/xwh
 import { publicContactEmail } from '../../web/src/display-name.ts'
 import { ACCOUNT_SECURITY_ROUTES } from '../../web/src/surfaces/account-security.ts'
 import type { OsProfile } from '@xpanel/core'
-import { createDb, latestActive, listAudit, migrate, previousGeneration, type Db } from '@xpanel/db'
+import { createDb, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { runCli } from './cli.ts'
 import { loadQualifiedCatalog } from './host-catalog.ts'
 import { loadMailDocument, type MailDocument } from './mail/document.ts'
-import { createLocalMailboxTransport } from './mail/inbox.ts'
+import { createLocalMailboxTransport, mailFolderName } from './mail/inbox.ts'
 import { createApiApp, ensureRootPrincipal, listenApiServer } from './server.ts'
 import { authenticateRequest } from './auth.ts'
 import { createAgentClient } from './agent-client.ts'
@@ -268,6 +268,12 @@ export const createDefaultWebRenderer = async (deps: {
     const homePlan = scoped?.plan
     if (surface === 'xpanel' && documentRoute.activeRoute === '/home' && principal.kind === 'user' && homeAccount?.status === 'active' && homePlan) {
       const email = await supportEmail()
+      const [ownedUsers, sessions, homeAudit] = await Promise.all([
+        deps.store.listOwnedServiceUsers(homeAccount.username).catch(() => []),
+        listSessionsForPrincipal(deps.db, principal.id).catch(() => []),
+        listAudit(deps.db, { mentions: homeAccount.username, limit: 8 }).catch(() => []),
+      ])
+      const lastSignInAt = [...sessions].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.createdAt
       return serveWebUi(req, async () => ({
         surface,
         activeRoute: '/home',
@@ -283,8 +289,10 @@ export const createDefaultWebRenderer = async (deps: {
           domains: [],
           databases: [],
           databaseUsers: [],
-          serviceUsers: [],
+          serviceUsers: ownedUsers.map(user => ({ ...user, passwordHash: '' })),
           files: [],
+          ...(lastSignInAt ? { lastSignInAt } : {}),
+          recentAudit: homeAudit.map(entry => ({ action: entry.action, target: entry.target })),
         },
       }))
     }
@@ -359,6 +367,26 @@ export const createDefaultWebRenderer = async (deps: {
     const driftCount = typeof driftRecord?.count === 'number' && Number.isSafeInteger(driftRecord.count) && driftRecord.count >= 0
       ? driftRecord.count
       : null
+    const hostInfoRecord = asRecord(hostInfo)
+    const hostCertificates = Array.isArray(hostInfoRecord?.certificates)
+      ? hostInfoRecord.certificates.flatMap(item => {
+          const row = asRecord(item)
+          const names = Array.isArray(row?.names) ? row.names.filter((name): name is string => typeof name === 'string' && name.length > 0 && name.length <= 253) : []
+          const notAfter = typeof row?.notAfter === 'string' ? row.notAfter : ''
+          return names.length > 0 && !Number.isNaN(Date.parse(notAfter)) ? [{ names, notAfter }] : []
+        })
+      : []
+    const numericCap = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+    const nearLimits = listedAccounts.flatMap(accountRow => {
+      const accountPlan = snap.plans.find(item => item.id === accountRow.planId)
+      if (!accountPlan) return []
+      const checks: Array<[string, number, number | null]> = [
+        ['mailboxes', snap.serviceUsers.filter(user => user.accountId === accountRow.id && user.services.email).length, numericCap(accountPlan.caps.mailboxes)],
+        ['addon domains', snap.domains.filter(domain => domain.accountId === accountRow.id && domain.kind === 'addon').length, numericCap(accountPlan.caps.addonDomains)],
+        ['databases', snap.databases.filter(database => database.accountId === accountRow.id && !database.trashedAt).length, numericCap(accountPlan.caps.databases)],
+      ]
+      return checks.flatMap(([label, used, cap]) => cap !== null && used / cap >= 0.8 ? [{ name: accountRow.username, note: `${used} / ${cap} ${label}` }] : [])
+    })
     return serveWebUi(req, async () => ({
       surface,
       activeRoute: documentRoute.activeRoute,
@@ -377,12 +405,16 @@ export const createDefaultWebRenderer = async (deps: {
         firewallRules: visibleFirewall,
         ...(principal.kind === 'root' && snap.server ? {
           hostname: hostSample?.hostname ?? snap.server.settings.hostname,
-          ...(hostSample?.hostname && hostSample.hostname !== snap.server.settings.hostname ? { panelHostname: snap.server.settings.hostname } : {}),
+          ...(hostSample?.panelDomain ? { panelHostname: hostSample.panelDomain } : {}),
         } : {}),
         ...(dashboardRoute ? {
           auditEntries: auditPage,
-          certificates: snap.certificates,
+          certificates: hostInfo
+            ? [...hostCertificates, ...snap.certificates.map(certificate => ({ names: certificate.names, notAfter: certificate.notAfter }))]
+            : (snap.certificates.length > 0 ? snap.certificates : undefined),
           driftCount,
+          nearLimits,
+          ...(active?.activatedAt ? { generationActivatedAt: active.activatedAt } : {}),
           ...(rollbackGeneration ? { rollbackGenerationId: rollbackGeneration.id } : {}),
           ...(hostSample ? { hostSample } : {}),
           ...(serviceRows ? { services: serviceRows } : {}),
@@ -399,23 +431,40 @@ export const createDefaultWebRenderer = async (deps: {
       },
       mail: await (async () => {
         if (surface !== 'xmail') return { mailbox: '' }
+        let postfixMain: string | null = null
+        try { postfixMain = readFileSync('/etc/postfix/main.cf', 'utf8') } catch { postfixMain = null }
+        const requestedFolder = url.searchParams.get('folder')
+        let folder = 'INBOX'
+        try { folder = mailFolderName(requestedFolder) } catch { folder = 'INBOX' }
+        const mode = url.searchParams.get('mode')
+        const replyUid = Number(url.searchParams.get('uid'))
+        const replyMode = mode === 'reply' || mode === 'reply-all' || mode === 'forward' ? mode : null
         const loaded = await loadMailDocument({
           db: deps.db,
           store: deps.store,
           serverSecret: deps.serverSecret,
           sessionId: caller.sessionId,
           transport: createLocalMailboxTransport(),
+          folder,
+          postfixMain,
+          ...(replyMode && documentRoute.activeRoute === '/mail/compose' && Number.isInteger(replyUid) && replyUid > 0
+            ? { reply: { mode: replyMode, uid: replyUid } }
+            : {}),
         }).catch((): MailDocument => ({ mailbox: '', mailListFailed: true }))
         return {
           mailbox: loaded.mailbox,
+          ...(folder !== 'INBOX' ? { activeFolder: folder } : {}),
+          ...(loaded.quotaUsedMb !== undefined ? { quotaUsedMb: loaded.quotaUsedMb } : {}),
           ...(loaded.quotaLimitMb !== undefined ? { quotaLimitMb: loaded.quotaLimitMb } : {}),
           ...(loaded.messages !== undefined ? { messages: loaded.messages } : {}),
+          ...(loaded.folderCounts ? { folderCounts: loaded.folderCounts } : {}),
           ...(loaded.mailListFailed ? { mailListFailed: true } : {}),
           ...(loaded.vacationEnabled !== undefined ? { vacationEnabled: loaded.vacationEnabled } : {}),
           ...(loaded.sieveRules ? { sieveRules: loaded.sieveRules } : {}),
           ...(loaded.identityDkim ? { identityDkim: loaded.identityDkim } : {}),
           ...(loaded.identitySpf ? { identitySpf: loaded.identitySpf } : {}),
           ...(loaded.identitySize ? { identitySize: loaded.identitySize } : {}),
+          ...(loaded.composeDraft ? { composeDraft: loaded.composeDraft } : {}),
         }
       })(),
     }))

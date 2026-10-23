@@ -155,6 +155,14 @@ export const parseApacheVersion = (text: string): string | null => {
   return match ? match[1]! : null
 }
 
+const VERSION_TOKEN = /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.]+)?$/
+
+/** One version line from `/opt/xpanel/VERSION`. */
+export const parseVersionFile = (text: string): string | null => {
+  const line = text.trim().split('\n')[0]?.trim() ?? ''
+  return VERSION_TOKEN.test(line) ? line : null
+}
+
 /** Package manifest `version`, only when it is a plain semver token. */
 export const parsePackageVersion = (text: string): string | null => {
   let parsed: unknown
@@ -165,5 +173,5 @@ export const parsePackageVersion = (text: string): string | null => {
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null
   const version = (parsed as { version?: unknown }).version
-  return typeof version === 'string' && /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.]+)?$/.test(version) ? version : null
+  return typeof version === 'string' && VERSION_TOKEN.test(version) ? version : null
 }
