@@ -98,7 +98,9 @@ describe('styled status pages', () => {
     const sidebar = /<aside class="xp-sidebar"[\s\S]*?<\/aside>/.exec(html)?.[0] ?? ''
     for (const group of ['domains', 'email', 'files', 'databases', 'security', 'software']) expect(sidebar).toContain(`data-planned-group="${group}"`)
     expect(sidebar).toContain('غير متاحة بعد')
-    expect(sidebar).not.toMatch(/<a\b|href=/)
+    expect(sidebar).toContain('data-security-link="true"')
+    expect(sidebar).toContain('هذه الأدوات غير متاحة على هذا الخادم بعد.')
+    expect(sidebar.replace(/<a\b[^>]*data-security-link="true"[^>]*>[\s\S]*?<\/a>/g, '')).not.toMatch(/<a\b|href=/)
     expect(html).toContain('data-user-menu')
     expect(html).toContain('data-action="logout"')
     expect(html).toContain('data-density-option="comfortable" aria-current="true"')

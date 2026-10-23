@@ -438,6 +438,7 @@ async function paletteScroll(page, state, expect, observations, capture) {
   assert.ok(initial.maximum > 100, 'The palette scroll check must contain a genuinely overflowing list')
   await page.keyboard.press('ArrowUp')
   await selectedPaletteOption(page, expect, count - 1)
+  await expect.poll(async () => page.locator('[data-cmdk-results]').evaluate(element => element.scrollTop), { timeout: 2000 }).toBeGreaterThan(100)
   const final = await page.locator('[data-cmdk-results]').evaluate(element => {
     const list = element.getBoundingClientRect(), selected = element.querySelector('[aria-selected="true"]').getBoundingClientRect()
     return { scroll_top: element.scrollTop, document_y: scrollY, selected_top: selected.top, selected_bottom: selected.bottom, list_top: list.top, list_bottom: list.bottom, document_width: document.documentElement.scrollWidth, viewport_width: innerWidth }

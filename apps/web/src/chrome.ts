@@ -40,8 +40,21 @@ export function safePanelLinks(links: readonly PanelLink[] | undefined): PanelLi
 
 const surfaceDesign = (surface: PanelId): NavSurface | undefined => navigation.find(item => item.surface === surface)
 
+/** Account security is a real session page. It is not a qualified hosting tool. */
+export const accountSecurityRoute = (surface: PanelId): string =>
+  surface === 'xwhm' ? '/whm/security/sign-in' : surface === 'xmail' ? '/mail/settings/security' : '/security/account'
+
+export const securityLabel = (locale: Locale): string => locale === 'ar' ? 'الأمان' : 'Security'
+
+export function renderSecurityNavLink(surface: PanelId, locale: Locale, activeRoute: string, alreadyListed = false): string {
+  if (alreadyListed) return ''
+  const href = accountSecurityRoute(surface)
+  const current = activeRoute === href
+  return `<a class="xp-nav-item${current ? ' xp-nav-item--active' : ''}" href="${escapeHtml(href)}" data-security-link="true"${current ? ' aria-current="page"' : ''}>${escapeHtml(securityLabel(locale))}</a>`
+}
+
 /** Catalog groups shown as unavailable. They are not links and do not claim a tool is qualified. */
-export function renderPlannedNavigation(surface: PanelId, locale: Locale): string {
+export function renderPlannedNavigation(surface: PanelId, locale: Locale, activeRoute = ''): string {
   const design = surfaceDesign(surface)
   const isAr = locale === 'ar'
   const items = (design?.sections ?? []).map(section => {
@@ -49,9 +62,9 @@ export function renderPlannedNavigation(surface: PanelId, locale: Locale): strin
     return `<li class="xp-nav-planned__item" data-planned-group="${escapeHtml(section.id)}"><span class="xp-nav-planned__name">${escapeHtml(name)}</span><span class="xp-nav-planned__state">${escapeHtml(isAr ? 'غير متاحة بعد' : 'Not yet available')}</span></li>`
   }).join('')
   const note = isAr
-    ? 'هذه مجموعات الأدوات المخططة لهذه اللوحة. ليست متاحة على هذا الخادم بعد.'
-    : 'These are the tool groups planned for this panel. They are not available on this server yet.'
-  return `<nav class="xp-nav-planned-wrap" aria-label="${escapeHtml(isAr ? 'أدوات مخططة' : 'Planned tools')}"><p class="xp-nav-note" data-navigation-empty="true">${escapeHtml(note)}</p><ul class="xp-nav-planned">${items}</ul></nav>`
+    ? 'هذه الأدوات غير متاحة على هذا الخادم بعد.'
+    : 'These tools are not available on this server yet.'
+  return `<nav class="xp-nav-planned-wrap" aria-label="${escapeHtml(isAr ? 'أدوات غير متاحة' : 'Unavailable tools')}"><p class="xp-nav-note" data-navigation-empty="true">${escapeHtml(note)}</p>${renderSecurityNavLink(surface, locale, activeRoute)}<ul class="xp-nav-planned">${items}</ul></nav>`
 }
 
 export interface UserMenuModel {
@@ -59,6 +72,7 @@ export interface UserMenuModel {
   theme: ThemeChoice
   density: DensityChoice
   path: string
+  surface?: PanelId
   accountId?: string
   username?: string
   role?: string
@@ -105,6 +119,7 @@ export function renderUserMenu(model: UserMenuModel): string {
         ${densityLink('comfortable', t(model.locale, 'common.density.comfortable'))}
         ${densityLink('compact', t(model.locale, 'common.density.compact'))}
       </div>
+      <a class="xp-menu-choice" href="${escapeHtml(accountSecurityRoute(model.surface ?? (model.path.startsWith('/whm') ? 'xwhm' : model.path.startsWith('/mail') ? 'xmail' : 'xpanel')))}" data-security-link="true">${escapeHtml(securityLabel(model.locale))}</a>
       ${sessionAction}
     </div>
   </details>`

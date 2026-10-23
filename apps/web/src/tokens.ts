@@ -1698,27 +1698,35 @@ html[dir="rtl"] .xp-workspace-summary .xp-field-value > bdi[dir="ltr"] { text-al
   gap: 2px;
 }
 .xp-nav-planned__item {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--xp-space-sm);
+  column-gap: 12px;
   min-block-size: 44px;
-  padding-inline: 10px;
+  padding-inline: 12px;
   border-radius: var(--xp-radius-sm);
-  color: var(--xp-text-secondary);
+  color: var(--xp-text-primary);
+  background: var(--xp-bg-subtle);
   cursor: not-allowed;
+}
+.xp-nav-planned__name,
+.xp-nav-planned__state {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .xp-nav-planned__name {
   min-inline-size: 0;
   font-size: var(--xp-type-body);
   line-height: var(--xp-leading-body);
   font-weight: var(--xp-weight-medium);
+  color: var(--xp-text-primary);
 }
 .xp-nav-planned__state {
-  flex: none;
-  color: var(--xp-text-muted);
-  font-size: var(--xp-type-caption);
-  line-height: var(--xp-leading-caption);
+  color: var(--xp-text-secondary);
+  font-size: var(--xp-type-label);
+  line-height: var(--xp-leading-label);
+  font-weight: var(--xp-weight-medium);
 }
 .xp-user-menu { position: relative; margin-inline-start: auto; }
 .xp-user-menu__summary {
@@ -1772,7 +1780,8 @@ html[dir="rtl"] .xp-workspace-summary .xp-field-value > bdi[dir="ltr"] { text-al
 .xp-menu-choice[aria-current="true"] { background: var(--xp-bg-elevated); }
 .xp-menu-density { display: grid; gap: 4px; }
 .xp-menu-signout { justify-content: flex-start; }
-.xp-icon-back { display: block; flex: none; }
+.xp-icon-back { display: inline-flex; flex: none; align-items: center; }
+.xp-icon-back svg { display: block; }
 html[dir="rtl"] .xp-icon-back { transform: scaleX(-1); }
 .xp-status-standalone {
   min-block-size: 100dvh;
@@ -2349,6 +2358,11 @@ html[dir="rtl"] .xp-field-value[dir="ltr"] {
   overflow-wrap: anywhere;
 }
 
+.xp-cmdk-results {
+  position: relative;
+  overflow-anchor: none;
+  scroll-behavior: auto;
+}
 .xp-cmdk-dialog {
   inline-size: min(640px, 92vw);
   background-color: var(--xp-bg-surface);

@@ -840,12 +840,30 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     }
     selected.link.setAttribute('aria-selected', 'true');
     palette.input.setAttribute('aria-activedescendant', selected.link.id);
-    if (scroll) {
-      // Keep the selected row visible without scrolling the document behind the dialog.
-      var rowRect = selected.row.getBoundingClientRect();
-      var listRect = palette.results.getBoundingClientRect();
-      if (rowRect.top < listRect.top) palette.results.scrollTop += rowRect.top - listRect.top;
-      else if (rowRect.bottom > listRect.bottom) palette.results.scrollTop += rowRect.bottom - listRect.bottom;
+    if (scroll) revealCommandResult(palette, selected);
+  }
+
+  function revealCommandResult(palette, selected) {
+    var list = palette.results;
+    var row = selected.row;
+    var last = palette.activeIndex === palette.matches.length - 1;
+    var maximum = list.scrollHeight - list.clientHeight;
+    if (last && maximum > 0) {
+      list.scrollTop = maximum;
+      if (list.scrollTop > 0) return;
+    }
+    var rowRect = row.getBoundingClientRect();
+    var listRect = list.getBoundingClientRect();
+    if (rowRect.height > 0 && listRect.height > 0) {
+      if (rowRect.top < listRect.top) list.scrollTop += rowRect.top - listRect.top;
+      else if (rowRect.bottom > listRect.bottom) list.scrollTop += rowRect.bottom - listRect.bottom;
+      return;
+    }
+    if (row.offsetParent === list && row.offsetHeight > 0) {
+      var top = row.offsetTop;
+      var bottom = top + row.offsetHeight;
+      if (top < list.scrollTop) list.scrollTop = top;
+      else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = Math.max(0, bottom - list.clientHeight);
     }
   }
 
