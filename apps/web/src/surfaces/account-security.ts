@@ -51,6 +51,7 @@ export const renderAccountSecurityCard = (props: AccountSecurityCardProps): stri
         <button type="submit" class="xp-btn xp-btn--primary" data-action="setup-2fa">${line(locale, 'security.2fa.start')}</button>
       </form>
       <div data-auth-enrollment-details hidden>
+        <div class="xp-field" data-auth-totp-qr-field hidden><span class="xp-label">${line(locale, 'security.2fa.qr')}</span><div class="xp-totp-qr" data-auth-totp-qr dir="ltr"></div></div>
         <div class="xp-field"><span class="xp-label">${line(locale, 'security.2fa.setupKey')}</span><div><bdi dir="ltr" class="xp-mono" data-auth-totp-secret></bdi></div></div>
         <p class="xp-help">${line(locale, 'security.2fa.setupHelp')}</p>
         <form class="xp-form" data-auth-enroll-form>

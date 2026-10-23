@@ -144,6 +144,7 @@ export async function runBrowserAcceptance({ chromium, expect }) {
       record('mfa_setup', { status: setup.status() })
       expect(setup.status()).toBe(200)
       await expect(page.locator('[data-auth-enrollment-details]')).toBeVisible()
+      await expect(page.locator('[data-auth-totp-qr] > svg'), 'Enrollment QR code is rendered').toBeVisible()
       const secret = (await page.locator('[data-auth-totp-secret]').innerText()).trim()
       expect(/^[A-Z2-7]{16,}$/.test(secret), 'Enrollment secret is presented in the actual UI').toBe(true)
       const code = computeTotpCode(secret)

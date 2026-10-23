@@ -221,9 +221,11 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     // Setup and enable TOTP 2FA
     const setupRes = await rootClient.request('/api/auth/2fa/setup', { method: 'POST', body: { password: 'RootPassword!2026' } })
     assert.equal(setupRes.status, 200)
-    const setupData = (await setupRes.json()) as { secret: string; recoveryCodes: string[] }
+    const setupData = (await setupRes.json()) as { secret: string; recoveryCodes: string[]; otpauthUrl: string; qrCodeSvg?: string }
     assert.ok(setupData.secret.length >= 16)
     assert.equal(setupData.recoveryCodes.length, 8)
+    assert.ok(setupData.otpauthUrl.includes(`secret=${setupData.secret}`))
+    assert.ok(setupData.qrCodeSvg?.startsWith('<svg xmlns="http://www.w3.org/2000/svg"'))
 
     const validTotp = computeTotpCode(setupData.secret)
     const enableRes = await rootClient.request('/api/auth/2fa/enable', {

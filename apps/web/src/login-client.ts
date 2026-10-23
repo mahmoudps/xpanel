@@ -55,8 +55,21 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     recoveryCodes = [];
     var secret = document.querySelector('[data-auth-totp-secret]');
     var codes = document.querySelector('[data-auth-recovery-codes]');
+    var qr = document.querySelector('[data-auth-totp-qr]');
     if (secret) secret.textContent = '';
     if (codes) codes.replaceChildren();
+    if (qr) qr.replaceChildren();
+    show('[data-auth-totp-qr-field]', false);
+  }
+  function renderQr(svgText) {
+    var target = document.querySelector('[data-auth-totp-qr]');
+    if (!target || typeof svgText !== 'string' || !svgText) return false;
+    var parsed = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+    var svg = parsed.documentElement;
+    if (!svg || svg.nodeName.toLowerCase() !== 'svg' || parsed.querySelector('parsererror, script, foreignObject')) return false;
+    target.replaceChildren(document.importNode(svg, true));
+    show('[data-auth-totp-qr-field]', true);
+    return true;
   }
   function step(name) {
     if (login) login.hidden = name !== 'credentials' && name !== 'mfa-required' && name !== 'locked';
@@ -186,6 +199,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
       if (typeof data.secret !== 'string' || !data.secret || !Array.isArray(data.recoveryCodes) || !data.recoveryCodes.length || data.recoveryCodes.some(function (code) { return typeof code !== 'string'; })) throw new Error(copy.unexpected);
       clearEnrollment(); recoveryCodes = data.recoveryCodes.slice();
       document.querySelector('[data-auth-totp-secret]').textContent = data.secret;
+      renderQr(data.qrCodeSvg);
       step('enrollment'); setup.hidden = true; show('[data-auth-enrollment-details]', true);
       message(copy.confirm, false); document.getElementById('enrollment-code').focus();
     } catch (error) { authError(error); }

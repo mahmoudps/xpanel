@@ -2597,5 +2597,8 @@ html[dir="rtl"] .xp-accounts__technical bdi, html[dir="rtl"] .xp-account-dialog_
   .xp-account-dialog__footer > button { flex: 1 1 auto; }
 }
 
+.xp-totp-qr { display: inline-block; inline-size: max-content; padding: 8px; background: #ffffff; border: 1px solid var(--xp-border); border-radius: var(--xp-radius-sm, 6px); line-height: 0; }
+.xp-totp-qr > svg { display: block; inline-size: 168px; block-size: 168px; }
+
 ${MAIL_LAYOUT_CSS}
 `
