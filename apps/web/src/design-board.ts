@@ -1,5 +1,6 @@
 import type { Locale } from './i18n.ts'
 import { escapeHtml } from './tokens.ts'
+import { renderBoardCanvas } from './board-canvas.ts'
 
 type Copy = readonly [english: string, string]
 
@@ -364,10 +365,10 @@ export const renderHomeToolGrid = (locale: Locale, qualifiedRoutes: ReadonlySet<
     else groups.push({ name, items: [item] })
   }
   const soonLabel = copy(soon, locale)
-  return `<div class="xp-home-tools">${groups.map(group => `<section class="xp-board-section"><header class="xp-board-section__head"><h2>${escapeHtml(group.name)}</h2></header><div class="xp-board-section__body xp-home-tool-list">${group.items.map(item => {
+  return `<div class="xp-home-tools">${groups.map(group => `<section class="xp-board-section xp-tool-card" data-tool-card="true"><header class="xp-board-section__head"><h3>${escapeHtml(group.name)}</h3></header><ul class="xp-home-tool-list">${group.items.map(item => {
     const wired = item.live && qualifiedRoutes.has(item.route)
-    return `<a class="xp-home-tool" href="${escapeHtml(item.route)}"><span>${escapeHtml(copy(item.label, locale))}</span>${wired ? '' : `<span class="xp-nav-soon">${escapeHtml(soonLabel)}</span>`}</a>`
-  }).join('')}${group.name === copy(email, locale) ? `<a class="xp-home-tool" href="/mail/inbox"><span>xMail</span></a>` : ''}</div></section>`).join('')}</div>`
+    return `<li><a class="xp-home-tool" href="${escapeHtml(item.route)}"><span>${escapeHtml(copy(item.label, locale))}</span>${wired ? '' : `<span class="xp-nav-soon">${escapeHtml(soonLabel)}</span>`}</a></li>`
+  }).join('')}${group.name === copy(email, locale) ? `<li><a class="xp-home-tool" href="/mail/inbox"><span>xMail</span></a></li>` : ''}</ul></section>`).join('')}</div>`
 }
 
 export const renderDesignMain = (route: string, locale: Locale): string => {
@@ -375,13 +376,14 @@ export const renderDesignMain = (route: string, locale: Locale): string => {
   if (!item) return ''
   const data = readDesignAdapter(route)
   const records = data.wired ? data.records : []
-  const sections = boardSections[route] ?? []
+  const canvas = renderBoardCanvas(route, locale)
+  const sections = canvas ? [] : (boardSections[route] ?? [])
   const crumb = `<nav class="xp-board-crumb" aria-label="${escapeHtml(locale === 'ar' ? 'مسار التنقل' : 'Breadcrumb')}"><ol><li>${escapeHtml(copy(item.group, locale))}</li><li aria-current="page">${escapeHtml(copy(item.label, locale))}</li></ol></nav>`
   const mapped = route === '/design/navigation' ? renderNavigationMap(locale) : ''
   const foundation = route === '/design/system' ? renderTokenBoard(locale) : route === '/design/components' ? renderComponentBoard(locale) : ''
-  const blocks = sections.map((block, index) => renderBoardSection(route, block, index, locale)).join('')
-  const fallback = sections.length || mapped || foundation ? '' : `<div class="xp-design-empty" role="status"><h2>${escapeHtml(copy(item.emptyTitle, locale))}</h2><p class="xp-prose">${escapeHtml(copy(records.length ? noneBody : item.emptyBody, locale))}</p><button type="button" class="xp-btn xp-btn--primary" disabled data-wiring="soon">${escapeHtml(copy(item.action, locale))}</button><p class="xp-help" data-wiring-hint="soon">${escapeHtml(copy(soon, locale))}</p></div>`
-  const headerAction = sections.some(block => block.action) ? '' : `<button type="button" class="xp-btn xp-btn--primary" disabled data-wiring="soon">${escapeHtml(copy(item.action, locale))}</button><p class="xp-help" data-wiring-hint="soon">${escapeHtml(copy(soon, locale))}</p>`
+  const blocks = canvas || sections.map((block, index) => renderBoardSection(route, block, index, locale)).join('')
+  const fallback = canvas || sections.length || mapped || foundation ? '' : `<div class="xp-design-empty" role="status"><h2>${escapeHtml(copy(item.emptyTitle, locale))}</h2><p class="xp-prose">${escapeHtml(copy(records.length ? noneBody : item.emptyBody, locale))}</p><button type="button" class="xp-btn xp-btn--primary" disabled data-wiring="soon">${escapeHtml(copy(item.action, locale))}</button><p class="xp-help" data-wiring-hint="soon">${escapeHtml(copy(soon, locale))}</p></div>`
+  const headerAction = canvas || sections.some(block => block.action) ? '' : `<button type="button" class="xp-btn xp-btn--primary" disabled data-wiring="soon">${escapeHtml(copy(item.action, locale))}</button><p class="xp-help" data-wiring-hint="soon">${escapeHtml(copy(soon, locale))}</p>`
   return `<section class="xp-design-page" data-design-page="${escapeHtml(route)}" data-design-adapter="${escapeHtml(route)}" data-wiring="${data.wired && records.length ? 'live' : 'soon'}">
     <header class="xp-board-head">
       <div>

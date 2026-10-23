@@ -178,6 +178,22 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           <div class="xp-field"><span class="xp-label">${isAr ? 'المشغل' : 'Operator'}</span><strong><bdi dir="ltr">${escapeHtml(principal.username)}</bdi></strong></div>
         </div>
         <p class="xp-prose" role="status" data-host-observation="unavailable">${isAr ? 'قياسات موارد الخادم غير متاحة.' : 'Host resource measurements unavailable.'}</p>
+        <section class="xp-board-section" aria-labelledby="whm-reconcile">
+          <header class="xp-board-section__head"><h2 id="whm-reconcile">${isAr ? 'الموفّق' : 'Reconciler'}</h2></header>
+          <div class="xp-board-section__body"><p role="status">${generationId !== undefined ? `<bdi dir="ltr">#${generationId}</bdi>` : (isAr ? 'لا جيل مطبَّق بعد.' : 'No generation is applied yet.')}</p></div>
+        </section>
+        <section class="xp-board-section" aria-labelledby="whm-dash-accounts">
+          <header class="xp-board-section__head"><h2 id="whm-dash-accounts">${isAr ? 'الحسابات' : 'Accounts'}</h2></header>
+          <dl class="xp-board-dl">
+            <div class="xp-fact"><dt>${isAr ? 'النشطة' : 'Active'}</dt><dd>${props.accounts ? accounts.filter(account => account.status === 'active').length : (isAr ? 'غير متاحة' : 'Unavailable')}</dd></div>
+            <div class="xp-fact"><dt>${isAr ? 'الموقوفة' : 'Suspended'}</dt><dd>${props.accounts ? accounts.filter(account => account.status === 'suspended').length : (isAr ? 'غير متاحة' : 'Unavailable')}</dd></div>
+            <div class="xp-fact"><dt>${isAr ? 'الموزعون' : 'Resellers'}</dt><dd>${props.resellers ? resellers.length : (isAr ? 'غير متاحة' : 'Unavailable')}</dd></div>
+          </dl>
+        </section>
+        <section class="xp-board-section" aria-labelledby="whm-dash-audit">
+          <header class="xp-board-section__head"><h2 id="whm-dash-audit">${isAr ? 'آخر التدقيق' : 'Recent audit entries'}</h2><a href="/whm/audit">${isAr ? 'افتح السجل' : 'Open the audit log'}</a></header>
+          <div class="xp-table-wrap"><table class="xp-table"><thead><tr><th>${isAr ? 'الوقت' : 'Time'}</th><th>${isAr ? 'الفاعل' : 'Actor'}</th><th>${isAr ? 'الإجراء' : 'Action'}</th><th>${isAr ? 'النتيجة' : 'Result'}</th></tr></thead><tbody>${auditEntries.length ? auditEntries.slice(0, 8).map(entry => `<tr><td><bdi dir="ltr">${escapeHtml(formatAsciiDate(entry.at))}</bdi></td><td><bdi dir="ltr">${escapeHtml(entry.actor)}</bdi></td><td><bdi dir="ltr">${escapeHtml(entry.action)}</bdi></td><td>${escapeHtml(entry.outcome)}</td></tr>`).join('') : `<tr><td colspan="4">${isAr ? 'لا مدخلات تدقيق بعد' : 'No audit entries yet'}</td></tr>`}</tbody></table></div>
+        </section>
       </section>
 ` : ''}
       ${section === 'io' && ioSnapshot ? `      <!-- Real-Time Server IO & Per-Account cgroup v2 Slice Monitor -->

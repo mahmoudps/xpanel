@@ -22,6 +22,7 @@ import {
   renderAsyncActionState,
   renderStatusBadge,
 } from '../tokens.ts'
+import { renderAccountHome, renderAccountResources, resourceRowsFromPlan } from '../board-canvas.ts'
 import { renderDesignMain, renderDesignNav, renderHomeToolGrid } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
@@ -167,18 +168,17 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
         </div>
       </div>`,
     content: `      ${actionBannerHtml}
-${section === 'overview' || section === 'resources' ? `      <section class="xp-card xp-form-group" data-section="slice-resources" aria-labelledby="xpanel-resources-heading">
-        <div class="xp-card__header"><h1 id="xpanel-resources-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1></div>
-        <div class="xp-kpi-grid">
-          <div class="xp-field"><span class="xp-label">${isAr ? 'الحساب' : 'Account'}</span><strong><bdi dir="ltr">${escapeHtml(account.username)}</bdi></strong></div>
-          <div class="xp-field"><span class="xp-label">${isAr ? 'النطاق الأساسي' : 'Primary domain'}</span><strong><bdi dir="ltr">${escapeHtml(account.primaryDomain)}</bdi></strong></div>
-          <div class="xp-field"><span class="xp-label">${isAr ? 'الخطة' : 'Plan'}</span><strong>${escapeHtml(plan?.name ? formatDisplayName(plan.name) : (isAr ? 'غير متاحة' : 'Unavailable'))}</strong></div>
-          <div class="xp-field"><span class="xp-label">${isAr ? 'الحالة' : 'Status'}</span>${renderStatusBadge(account.status === 'active' ? 'ok' : 'suspended', account.status)}</div>
-        </div>
-        <p class="xp-prose" role="status" data-resource-metrics="unavailable">${isAr ? 'قياسات الموارد غير متاحة بعد.' : 'Resource measurements are not available yet.'}</p>
-      </section>
-${section === 'overview' ? `<section class="xp-card" aria-labelledby="home-facts"><div class="xp-card__header"><h2 id="home-facts">${isAr ? 'معلومات عامة' : 'General information'}</h2></div><div class="xp-kpi-grid"><div class="xp-field"><span class="xp-label">${isAr ? 'المجلد' : 'Home directory'}</span><strong class="xp-mono"><bdi dir="ltr">${escapeHtml(account.home)}</bdi></strong></div><div class="xp-field"><span class="xp-label">uid</span><strong class="xp-mono"><bdi dir="ltr">${account.uid}</bdi></strong></div><div class="xp-field"><span class="xp-label">${isAr ? 'الصدفة' : 'Shell'}</span><strong><bdi dir="ltr">${escapeHtml(account.shell)}</bdi></strong></div></div></section><section class="xp-card" aria-labelledby="home-changes"><div class="xp-card__header"><h2 id="home-changes">${isAr ? 'آخر التغييرات' : 'Recent changes'}</h2></div><p class="xp-prose" role="status">${isAr ? 'لا تغييرات مسجّلة لهذا الحساب بعد.' : 'No changes are recorded for this account yet.'}</p></section>${renderHomeToolGrid(locale, qualifiedRoutes)}` : ''}
-` : ''}
+${section === 'overview' ? renderAccountHome(locale, {
+        username: account.username,
+        domain: account.primaryDomain,
+        home: account.home,
+        uid: account.uid,
+        shell: account.shell,
+        ipv4: account.ipv4,
+        planName: plan?.name ? formatDisplayName(plan.name) : null,
+        addonDomains: domains.filter(domain => domain.kind === 'addon').length,
+      }, renderHomeToolGrid(locale, qualifiedRoutes)) : ''}
+${section === 'resources' ? renderAccountResources(locale, account.uid, resourceRowsFromPlan(plan?.resources ?? null)) : ''}
       ${section === 'domains' ? `      <!-- 2. Domains & Multi-IP Binding Table -->
       <section class="xp-card" id="xpanel-domains" data-section="domains-multi-ip" aria-labelledby="xpanel-domains-heading">
         <div class="xp-card__header">
@@ -683,7 +683,7 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
         <div class="xp-card__header">
           <div>
             <h1 id="xpanel-ssl-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-            <p class="xp-prose">${isAr ? 'أصدر شهادة أو جدّدها لنطاق على هذا الحساب. يجيب الخادم على فحص HTTP-01 عبر المنفذ 80.' : 'Issue or renew a certificate for a domain on this account. The server answers the HTTP-01 check on port 80.'}</p>
+            <p class="xp-prose">${isAr ? 'أصدر شهادة أو جدّدها لنطاق على هذا الحساب. يجيب الخادم على فحص <bdi dir="ltr">HTTP-01</bdi> عبر المنفذ 80.' : 'Issue or renew a certificate for a domain on this account. The server answers the HTTP-01 check on port 80.'}</p>
           </div>
         </div>
         <div class="xp-table-wrap">
