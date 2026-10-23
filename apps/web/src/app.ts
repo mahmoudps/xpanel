@@ -258,7 +258,7 @@ const renderActivityDrawer = (liveState: LiveEventState, locale: Locale): string
 
 /**
  * Renders the complete, self-contained HTML5 document for any xPanel surface (`login`, `xwhm`, `xpanel`, `xmail`)
- * with bilingual LTR/RTL support (`en` / `ar`), dark/light OKLCH themes, live reconcile pipeline banner,
+ * with bilingual LTR/RTL support (`en` / `ar`), light and navy-ink dark themes, live reconcile pipeline banner,
  * Command Palette (`Cmd/Ctrl+K`), and the embedded WebSocket client script.
  */
 export function renderWebApp(state: WebAppRenderState): string {

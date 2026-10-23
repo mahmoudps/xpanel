@@ -13,7 +13,7 @@ const surfacePageTitles: Record<SurfaceKind, Readonly<Record<string, LocalizedTi
     analytics: ['Website traffic', 'زيارات الموقع'], files: ['Files', 'الملفات'],
     terminal: ['Terminal', 'الطرفية'], databases: ['Databases', 'قواعد البيانات'],
     users: ['Email accounts', 'حسابات البريد'], dns: ['DNS zone editor', 'محرر منطقة DNS'],
-    ssl: ['Certificates', 'الشهادات'],
+    ssl: ['Certificates', 'الشهادات'], security: ['Account security', 'أمان الحساب'],
   },
   xwhm: {
     overview: ['Dashboard', 'لوحة التحكم'], io: ['Disk I/O', 'عمليات القرص'],
@@ -25,11 +25,13 @@ const surfacePageTitles: Record<SurfaceKind, Readonly<Record<string, LocalizedTi
     'mail-ips': ['Outbound mail routing', 'توجيه البريد الصادر'], firewall: ['Firewall', 'جدار الحماية'],
     audit: ['Audit log', 'سجل التدقيق'], generations: ['Configuration history', 'سجل الإعدادات'],
     upgrade: ['Panel upgrade', 'ترقية المنصة'], transfer: ['Account transfers', 'نقل الحسابات'],
+    security: ['Sign-in security', 'أمان تسجيل الدخول'],
   },
   xmail: {
     inbox: ['Inbox', 'البريد الوارد'], compose: ['Compose message', 'إنشاء رسالة'],
     filters: ['Mail filters', 'مرشحات البريد'], autoresponder: ['Auto-responder', 'الرد التلقائي'],
     overview: ['Mail overview', 'نظرة عامة على البريد'],
+    security: ['Mail security', 'أمان البريد'],
   },
 }
 
@@ -77,6 +79,7 @@ const surfaceSections: Record<SurfaceShellProps['surface'], Readonly<Record<stri
     '/files/manager': 'files', '/files/trash': 'files', '/advanced/terminal': 'terminal',
     '/databases/mariadb': 'databases', '/email/accounts': 'users', '/files/ftp': 'users',
     '/security/ssl': 'ssl', '/security/ssl/issue': 'ssl',
+    '/security/account': 'security',
     '/domains/zone-editor': 'dns',
   },
   xwhm: {
@@ -87,10 +90,12 @@ const surfaceSections: Record<SurfaceShellProps['surface'], Readonly<Record<stri
     '/whm/resellers/privileges': 'resellers', '/whm/server/ips': 'ips', '/whm/email/outbound': 'mail-ips',
     '/whm/security/firewall': 'firewall', '/whm/audit': 'audit', '/whm/panel/data': 'generations',
     '/whm/server/upgrade': 'upgrade', '/whm/transfers': 'transfer',
+    '/whm/security/sign-in': 'security',
   },
   xmail: {
     '/mail': 'inbox', '/mail/inbox': 'inbox', '/mail/folders': 'inbox', '/mail/compose': 'compose',
     '/mail/settings/filters': 'filters', '/mail/settings/autoresponder': 'autoresponder',
+    '/mail/settings/security': 'security',
     '/mail/overview': 'overview',
   },
 }

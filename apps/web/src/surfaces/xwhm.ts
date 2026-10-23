@@ -18,6 +18,7 @@ import {
   type AsyncActionBannerProps,
   ensureAccessibleSurfaceHtml,
   escapeHtml,
+  formatAsciiDate,
   formatBytes,
   renderAsyncActionState,
   renderLtrValue,
@@ -130,7 +131,6 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
       <details class="xp-nav-section" ${isExpanded ? 'open' : ''} data-nav-section="${escapeHtml(section.id)}">
         <summary class="xp-nav-section__title">
           <span>${escapeHtml(getSurfaceNavigationLabel('xwhm', 'section', section, locale))}</span>
-          <span class="xp-tabular">(${visiblePages.length})</span>
         </summary>
         <div class="xp-nav-section__items">
           ${visiblePages
@@ -196,7 +196,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
         <a href="/panel?lang=${locale}&amp;theme=${theme}" class="xp-btn xp-btn--ghost">xPanel</a>
         <a href="/mail?lang=${locale}&amp;theme=${theme}" class="xp-btn xp-btn--ghost">xMail</a>
         <div class="xp-account-actions">
-          <span class="xp-mono xp-account-actions__name" aria-label="${isAr ? 'المستخدم الحالي' : 'Current user'}">${escapeHtml(principal.username)}</span>
+          <span class="xp-account-pill"><span class="xp-account-pill__avatar" aria-hidden="true">${escapeHtml(principal.username.slice(0, 1).toLowerCase())}</span><span class="xp-mono xp-account-actions__name" aria-label="${isAr ? 'المستخدم الحالي' : 'Current user'}">${escapeHtml(principal.username)}</span></span>
           <button type="button" class="xp-btn xp-btn--ghost" data-action="logout">${escapeHtml(isAr ? 'تسجيل الخروج' : 'Sign out')}</button>
         </div>
       </div>`,
@@ -469,6 +469,10 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           <input id="new-acc-domain" name="primaryDomain" type="text" class="xp-input xp-mono" dir="ltr" required placeholder="salma.studio" />
           </div>
           <div class="xp-accounts__field">
+          <label class="xp-label" for="new-acc-contact">${isAr ? 'بريد التواصل' : 'Contact email'}</label>
+          <input id="new-acc-contact" name="contactEmail" type="email" class="xp-input" dir="ltr" autocomplete="email" inputmode="email" spellcheck="false" />
+          </div>
+          <div class="xp-accounts__field">
           <label class="xp-label" for="new-acc-plan">${isAr ? 'خطة الاستضافة' : 'Hosting plan'}</label>
           <select id="new-acc-plan" name="planId" class="xp-select" required>${plans.map(plan => `<option value="${escapeHtml(plan.id)}">${escapeHtml(formatDisplayName(plan.name))}</option>`).join('')}</select>
           </div>
@@ -533,7 +537,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
                   <td class="xp-mono xp-tabular">${renderLtrValue(`${plan.resources.ioReadBps === 'unlimited' ? 'unlimited' : formatBytes(plan.resources.ioReadBps)}/s · ${plan.resources.ioWriteBps === 'unlimited' ? 'unlimited' : formatBytes(plan.resources.ioWriteBps)}/s`, 'xp-plan-resource-value')}</td>
                   <td class="xp-mono xp-tabular">${plan.resources.maxProcesses}</td>
                   <td class="xp-mono xp-tabular">${String(plan.caps.addonDomains)}</td>
-                  <td>${renderStatusBadge(plan.shell === 'jailed' ? 'ok' : 'suspended', plan.shell === 'jailed' ? 'jailed' : 'none')}</td>
+                  <td>${renderStatusBadge(plan.shell === 'jailed' ? 'ok' : 'suspended', plan.shell === 'jailed' ? (isAr ? 'معزولة' : 'jailed') : (isAr ? 'بدون' : 'none'))}</td>
                   <td><button type="button" class="xp-btn" data-plan-delete="${escapeHtml(plan.id)}">${isAr ? 'حذف' : 'Delete'}</button></td>
                 </tr>
               `,
@@ -920,7 +924,7 @@ ${section === 'audit' ? `<section class="xp-card" data-section="audit-log">
                     .map(
                       (entry) => `
                     <tr data-audit-id="${escapeHtml(entry.id)}">
-                      <td class="xp-mono xp-tabular"><time datetime="${escapeHtml(entry.at)}">${escapeHtml(entry.at)}</time></td>
+                      <td class="xp-mono xp-tabular"><time datetime="${escapeHtml(entry.at)}">${escapeHtml(formatAsciiDate(entry.at, { includeTime: true }))}</time></td>
                       <td class="xp-mono"><bdi dir="ltr">${escapeHtml(entry.actor)}</bdi></td>
                       <td class="xp-mono"><bdi dir="ltr">${escapeHtml(entry.action)}</bdi></td>
                       <td class="xp-mono"><bdi dir="ltr">${escapeHtml(entry.target)}</bdi></td>
@@ -935,6 +939,7 @@ ${section === 'audit' ? `<section class="xp-card" data-section="audit-log">
           </section>` : ''}
 ${section === 'upgrade' ? `<section class="xp-card" data-section="root-lifecycle"><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1><p class="xp-prose"><bdi dir="ltr">${escapeHtml(version)} → ${escapeHtml(availableVersion)}</bdi></p><p class="xp-prose">${isAr ? 'راجع فحص الترقية قبل تأكيد أي تغيير.' : 'Review the upgrade preflight before confirming any change.'}</p><button type="button" class="xp-btn xp-btn--primary" data-action="start-upgrade" ${isRoot && props.availableVersion ? '' : 'disabled'}>${isAr ? 'فحص الترقية' : 'Check upgrade'}</button></section>` : ''}
 ${section === 'transfer' ? `<section class="xp-card" data-section="root-lifecycle"><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1><p class="xp-prose">${isAr ? 'اختر مصدر النقل وراجع الحسابات قبل الاستيراد.' : 'Choose the transfer source and review its accounts before importing.'}</p><button type="button" class="xp-btn xp-btn--primary" data-action="start-transfer" ${isRoot ? '' : 'disabled'}>${isAr ? 'بدء النقل' : 'Start transfer'}</button></section>` : ''}
+${section === 'security' ? `<section class="xp-card" data-section="account-security"><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1></section>` : ''}
 ${section === undefined || (section === 'io' && !ioSnapshot) || (section === 'mail-ips' && !mailIpConfig) ? renderSurfaceUnavailable(locale, '/whm') : ''}`,
   })
   return ensureAccessibleSurfaceHtml(rawHtml.trim(), locale)

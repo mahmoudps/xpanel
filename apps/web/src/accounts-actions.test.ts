@@ -125,7 +125,7 @@ describe('creation request identity and uncertain outcomes', () => {
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await tick()
     const controls = [...form.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input,select')]
-    expect(controls.length).toBe(6)
+    expect(controls.length).toBe(7)
     expect(controls.every(control => control.disabled)).toBe(true)
     // Scripted DOM mutation cannot silently change the identity shown for an accepted request.
     el<HTMLInputElement>('#new-acc-username').value = 'unsent'
