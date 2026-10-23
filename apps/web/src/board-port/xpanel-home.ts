@@ -848,7 +848,7 @@ export const renderDesktop = (model: HomeDesktopModel): string => {
           <section aria-labelledby="usage-title"${model.metricsUnavailable ? ' data-resource-metrics="unavailable"' : ''} style="display: flex; flex-direction: column; gap: 16px; padding: 20px; border-radius: 12px; background: #FFFFFF; border: 1px solid #E2E6EC">
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
               <h2 id="usage-title" style="margin: 0; font-size: 16px; font-weight: 600">${escapeHtml(model.usageTitle)}</h2>
-              <a href="/resources" style="min-height: 44px; display: inline-flex; align-items: center; font-size: 13px; font-weight: 600">${escapeHtml(model.usageLink)}</a>
+              <a data-usage-link="true" href="/resources" style="min-height: 44px; display: inline-flex; align-items: center; font-size: 13px; font-weight: 600">${escapeHtml(model.usageLink)}</a>
             </div>
             <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px">${meters}</ul>
           </section>
@@ -926,7 +926,7 @@ export const renderPhone = (model: HomePhoneModel): string => {
     <section aria-labelledby="m-usage-title"${model.metricsUnavailable ? ' data-resource-metrics="unavailable"' : ''} style="display: flex; flex-direction: column; gap: 4px">
       <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
         <h2 id="m-usage-title" style="margin: 0; font-size: 15px; font-weight: 600">${ar ? 'الاستخدام' : 'Usage'}</h2>
-        <a href="/resources" style="min-height: 44px; display: inline-flex; align-items: center; font-size: 13px; font-weight: 600">${ar ? 'كل الحدود' : 'All limits'}</a>
+        <a data-usage-link="true" href="/resources" style="min-height: 44px; display: inline-flex; align-items: center; font-size: 13px; font-weight: 600">${ar ? 'كل الحدود' : 'All limits'}</a>
       </div>
       <ul tabindex="0" aria-label="${ar ? 'عدادات الاستخدام، مرّر جانبيًا للمزيد' : 'Usage meters, scroll sideways for more'}" style="list-style: none; margin: 0 -16px; padding: 0 16px 6px; display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: 16px">${meters}</ul>
     </section>

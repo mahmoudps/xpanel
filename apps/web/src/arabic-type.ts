@@ -3,6 +3,15 @@
 export const BOARD_SANS_LTR = "'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif"
 export const BOARD_SANS_RTL = "'IBM Plex Sans Arabic', 'IBM Plex Sans', system-ui, sans-serif"
 
+const ARABIC_LETTER = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFC]/
+
+/** A whole sentence: Arabic words, digits, and punctuation, with no Latin identifier. */
+export const isArabicSentence = (value: string): boolean => {
+  const text = value.trim()
+  if (!ARABIC_LETTER.test(text)) return false
+  return !/[A-Za-z@/\\]/.test(text)
+}
+
 const ar = (selector: string): string => {
   const port = '.xp-board-port'
   const onPort = selector.startsWith(port)
@@ -150,6 +159,28 @@ ${ar('[style*="Plex Mono"]')},
 ${ar('.xp-mono')},
 ${ar('code')} {
   font-family: 'XP Arabic In Mono', 'IBM Plex Mono', monospace !important;
+}
+${ar('.xp-ar-sentence')} {
+  font-family: ${BOARD_SANS_RTL} !important;
+}
+${ar('a[data-usage-link]')} {
+  font-size: 14px !important;
+  line-height: 1.75 !important;
+}
+${ar('[data-board-port="xmail-inbox"] :is([data-mail-addr], [data-mail-mailbox], [data-mail-from], [data-mail-pane="reading-pane"] [style*="999px"]) bdi[dir="ltr"]')} {
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  flex-shrink: 1 !important;
+  min-inline-size: 0 !important;
+  max-inline-size: 100% !important;
+}
+${ar('[data-mail-name] bdi[dir="ltr"]')} {
+  display: block !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  max-inline-size: 100% !important;
+  min-inline-size: 0 !important;
 }
 ${ar('table')} {
   width: 100% !important;

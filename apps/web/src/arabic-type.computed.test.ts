@@ -4,6 +4,7 @@ import { describe, it } from 'vitest'
 import { ARABIC_TYPE_CSS } from './arabic-type.ts'
 import { renderFidelityDocument as renderDashboard, renderWhmDashboard, whmDashboardFromProps } from './board-port/xwhm-dashboard.ts'
 import { renderFidelityDocument as renderHome, renderLiveDocument as renderHomeLive } from './board-port/xpanel-home.fixture.ts'
+import { renderInbox, xmailInboxFromProps } from './board-port/xmail-inbox.ts'
 import { renderFidelityDocument as renderInboxFidelity, renderLiveDocument as renderInboxLive } from './board-port/xmail-inbox.fixture.ts'
 import { renderFidelityDocument as renderComposeFidelity, renderLiveDocument as renderComposeLive } from './board-port/xmail-compose.fixture.ts'
 import { renderMailSurface } from './surfaces/xmail.ts'
@@ -50,7 +51,8 @@ const inboxDocument = (): string => `<!doctype html>
   <li data-tool="true"><a style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 8px; font-size: 14px; text-decoration: none; color: #101828"><span style="flex: 1 1 auto; min-width: 0; font-weight: 500">معالج النسخ الاحتياطي</span><span data-meta title="آخر نسخة 2026-10-21" dir="rtl" style="display: inline-flex; align-items: baseline; gap: 0.35em; flex: 1 1 auto; min-width: 0; font-size: 12px; color: #5D6B7E"><span data-meta-label>آخر نسخة</span><bdi data-meta-value dir="ltr" style="flex: none; flex-shrink: 0; white-space: nowrap">2026-10-21</bdi></span></a></li>
 </ul>
 <p style="margin: 8px 0 0; font-size: 12px; color: #5D6B7E"><bdi dir="ltr">13:48 UTC</bdi></p>
-<pre style="font-family: 'IBM Plex Mono', monospace">سجل داخلي</pre>
+<span class="xp-ar-sentence">لا حسابات قرب الحد</span>
+<pre style="font-family: 'IBM Plex Mono', monospace">mbx سجل</pre>
 </div>
 </body>
 </html>`
@@ -222,12 +224,20 @@ const auditShape = (): { rows: number[]; cells: number[]; pills: number[] } => {
 const monoArabic = (): string[] => {
   const root = globalThis as unknown as Dom
   const bad: string[] = []
+  const arabic = /[\u0600-\u06FF]/
+  const latin = /[A-Za-z@/\\]/
   const walk = (el: DomEl): void => {
     for (const node of Array.from(el.childNodes)) {
-      if (node.nodeType === 3 && /[\u0600-\u06FF]/.test(node.nodeValue ?? '')) {
+      if (node.nodeType === 3 && arabic.test(node.nodeValue ?? '')) {
+        const text = (node.nodeValue ?? '').trim()
+        if (!text) continue
         const font = root.getComputedStyle(el).fontFamily
-        const arabicFace = font.includes('Plex Sans Arabic') || font.includes('XP Arabic In Mono')
-        if (font.includes('Plex Mono') && !arabicFace) bad.push((node.nodeValue ?? '').trim().slice(0, 40))
+        const sentence = !latin.test(text)
+        if (sentence) {
+          if (font.includes('Plex Mono') || !font.includes('Plex Sans Arabic')) bad.push(text.slice(0, 48))
+        } else if (font.includes('Plex Mono') && !font.includes('Plex Sans Arabic') && !font.includes('XP Arabic In Mono')) {
+          bad.push(text.slice(0, 48))
+        }
       } else if (node.nodeType === 1) walk(node as DomEl)
     }
   }
@@ -260,6 +270,55 @@ const productDocument = (body: string, locale: 'ar' | 'en' = 'ar'): string => {
 const pageScroll = (): { scroll: number; inner: number } => {
   const root = globalThis as unknown as Dom
   return { scroll: root.document.documentElement.scrollWidth, inner: root.innerWidth }
+}
+
+const mailEdges = (): { time: string; addr: string } => {
+  const root = globalThis as unknown as Dom
+  const outside = (selector: string): string => {
+    const nodes = Array.from(root.document.querySelectorAll(selector))
+    const boxes: string[] = []
+    for (const node of nodes) {
+      const box = node.getBoundingClientRect()
+      if (box.width < 1 && box.height < 1) continue
+      if (box.left < -1 || box.right > root.innerWidth + 1) boxes.push(`${Math.round(box.left)}..${Math.round(box.right)}`)
+    }
+    return boxes.join(',')
+  }
+  return {
+    time: outside('[data-mail-time]'),
+    addr: outside('[data-mail-pane="reading-pane"] [data-mail-addr]'),
+  }
+}
+
+const detailsSize = (): number => {
+  const root = globalThis as unknown as Dom
+  const link = root.document.querySelector('a[data-usage-link]')
+  return link ? Number.parseFloat(root.getComputedStyle(link).fontSize) : 0
+}
+
+const shapedInbox = (locale: 'ar' | 'en'): string => {
+  const model = xmailInboxFromProps({
+    locale,
+    mailbox: 'owner.with.a.very.long.local.part@department.alice-shop.example.test',
+    messages: [{
+      uid: 7,
+      folder: 'INBOX',
+      from: 'procurement.notices.and.shipping.updates@very-long-vendor-name.example.test',
+      fromName: 'International Procurement Notices Desk for Alice Shop Wholesale Partners',
+      to: 'orders.and.customer.care.desk@alice-shop.example.test, billing.archive.team@alice-shop.example.test',
+      cc: 'karim.mansour.operations.lead@alice-shop.example.test',
+      subject: 'Shipment window',
+      preview: 'The crate leaves on Friday.',
+      body: 'The crate leaves on Friday.',
+      receivedAt: '2026-10-22T14:00:00Z',
+      unread: true,
+      dkimPass: true,
+      spfPass: true,
+      dmarcPass: true,
+    }],
+  })
+  const ar = locale === 'ar'
+  return `<!doctype html><html lang="${ar ? 'ar' : 'en'}" dir="${ar ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>${ARABIC_TYPE_CSS}*{box-sizing:border-box}body{margin:0}</style></head><body>${renderInbox(model)}</body></html>`
 }
 
 const engineBox = (): { left: number; right: number; inner: number } | null => {
@@ -376,6 +435,10 @@ describe('Arabic computed type', () => {
             assert.equal(backup.clipped, false)
             assert.equal(backup.inside, true, `${screen} at ${width} date leaves the row`)
           }
+          if (screen === 'home') {
+            const details = await page.evaluate(detailsSize)
+            assert.ok(details >= 14, `${screen} at ${width} details link ${details}px`)
+          }
         }
       }
       console.log(JSON.stringify({ clips }))
@@ -386,6 +449,8 @@ describe('Arabic computed type', () => {
         return link ? Number.parseFloat(root.getComputedStyle(link).fontSize) : 0
       })
       assert.equal(ltrNav, 14)
+      const ltrDetails = await ltr.evaluate(detailsSize)
+      assert.equal(ltrDetails, 13)
       console.log(JSON.stringify({ measured, tool, ltrNav }))
       await ltr.close()
       for (const [, page] of pages) await page.close()
@@ -413,6 +478,8 @@ describe('Arabic computed type', () => {
       ['inbox-ar', renderInboxLive('ar')],
       ['inbox-en', renderInboxLive('en')],
       ['inbox-fixture', renderInboxFidelity()],
+      ['inbox-shaped-ar', shapedInbox('ar')],
+      ['inbox-shaped-en', shapedInbox('en')],
       ['compose-ar', renderComposeLive('ar')],
       ['compose-en', renderComposeLive('en')],
       ['compose-fixture', renderComposeFidelity()],
@@ -427,6 +494,11 @@ describe('Arabic computed type', () => {
         await page.setViewportSize({ width: 390, height: 844 })
         const box = await page.evaluate(pageScroll)
         assert.ok(box.scroll <= box.inner, `${screen} scrolls sideways ${box.scroll} > ${box.inner}`)
+        if (screen.startsWith('inbox')) {
+          const edges = await page.evaluate(mailEdges)
+          assert.equal(edges.time, '', `${screen} time leaves the viewport ${edges.time}`)
+          assert.equal(edges.addr, '', `${screen} address leaves the viewport ${edges.addr}`)
+        }
         const engine = await page.evaluate(engineBox)
         if (engine) {
           assert.ok(engine.left >= -1 && engine.right <= engine.inner + 1, `${screen} engine ${engine.left}..${engine.right} in ${engine.inner}`)
