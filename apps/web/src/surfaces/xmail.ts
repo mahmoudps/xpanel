@@ -22,11 +22,14 @@ export interface MailMessageItem {
   preview: string
   body: string
   receivedAt: string
-  sizeKb: number
+  sizeKb?: number
   unread: boolean
-  dkimPass: boolean
-  spfPass: boolean
-  dmarcPass: boolean
+  /** Absent when the message was not authenticated by this server. */
+  dkimPass?: boolean
+  spfPass?: boolean
+  dmarcPass?: boolean
+  /** True when the body was not part of this response and must be read by UID. */
+  bodyPending?: boolean
 }
 
 export interface SieveFilterRule {
@@ -54,6 +57,14 @@ export interface MailSurfaceProps {
   messages?: MailMessageItem[]
   sieveRules?: SieveFilterRule[]
   vacationEnabled?: boolean
+  /** The IMAP list was attempted and failed. Distinct from an empty folder. */
+  mailListFailed?: boolean
+  /** Stored DKIM selector sentence. Absent when no email-auth file exists. */
+  identityDkim?: string
+  /** Stored SPF and DMARC sentence. Absent when no email-auth file exists. */
+  identitySpf?: string
+  /** Saved message size limit, labelled by the caller. Absent when settings were never saved. */
+  identitySize?: string
   actionState?: AsyncActionBannerProps
 }
 
@@ -107,11 +118,12 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
       ...(props.quotaLimitMb !== undefined ? { quotaLimitMb: props.quotaLimitMb } : {}),
       activeFolder,
       ...(props.selectedUid !== undefined ? { selectedUid: props.selectedUid } : {}),
-      messages: allMessages,
+      ...(props.messages !== undefined ? { messages: allMessages } : {}),
       realtimeEnabled: props.realtimeEnabled === true,
       ...(props.actionState ? { actionState: props.actionState } : {}),
+      ...(props.mailListFailed ? { mailListFailed: true } : {}),
       ...(props.vacationEnabled !== undefined ? { vacationEnabled: props.vacationEnabled } : {}),
-      ...(props.sieveRules ? { sieveCount: props.sieveRules.length } : {}),
+      ...(props.sieveRules ? { sieveCount: props.sieveRules.filter(rule => rule.enabled).length } : {}),
     })), locale)
   }
 
