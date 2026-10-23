@@ -93,9 +93,49 @@ Chevrons point back toward the start of the line. In RTL the back icon is mirror
 - Login: a centered card, about 440px, padding 32px 28px, 26px stack gap. Audience screens (account, server, mail) replace the generic mark with a small line icon on the soft accent tile. Inputs stay 44px. Labels are 13px on the artboard and follow the product label role here.
 - Status pages: the same card, a tabular status code, the explanation, and one primary action.
 
+## Component states
+
+Premium components is the library every screen is built from. The design system paints the same controls. These states are colour swaps. The source writes no `transition` on hover, press, focus, disabled, empty, or error.
+
+- Hover is the link rule only: `a { color: #1D5BD6 }` and `a:hover { color: #1546A8 }`. The change is immediate. Buttons do not change fill on hover.
+- Focus: `:focus-visible { outline: 2px solid #1D5BD6; outline-offset: 2px }`. Inside `nav[aria-label="xWHM navigation"]` the outline colour is `#6EA0FF`. A focused combobox and the active one-time digit add `border: 1.5px solid #1D5BD6` and `box-shadow: 0 0 0 3px #E8EFFD`. Workspace fields keep the 2px outline and leave the border colour alone, so focus stays one ring.
+- Pressed chip: background `#E8EFFD`, text `#1D5BD6`, border `#C7D7F8`. Idle chip: `#FFFFFF`, `#344054`, `#D0D5DD`. Weight 600.
+- Segmented control, selected: white fill, text `#101828`, shadow `0 1px 2px rgba(16, 24, 40, 0.12)` on a `#EEF0F3` track. Idle text is `#475467`.
+- Switch on: track `#1D5BD6`, thumb at the end. Off: track `#98A2B3`, thumb at the start. The track is 48×28 with 3px padding. The thumb is 22px, white, shadow `0 1px 3px rgba(16, 24, 40, 0.3)`.
+- Radio card, selected: `border: 1.5px solid #1D5BD6`, background `#F3F7FE`. Unselected: border `#E2E6EC`, background `#FFFFFF`. Disabled: border `#E2E6EC`, background `#F8F9FB`, text `#475467`, cursor `not-allowed`.
+- Tab, selected: `border-bottom: 2px solid #1D5BD6`, colour `#1D5BD6`, weight 600. Idle: colour `#475467`, weight 500, transparent bottom border.
+- Buttons are weight 600, min-height 44px, radius 8px. Primary: border and fill `#1D5BD6`, white text, padding `0 18px`. Secondary: border `#D0D5DD`, fill `#FFFFFF`, text `#101828`. Danger: border and fill `#B42318`, white text. Quiet: transparent border and fill, text `#1D5BD6`. Disabled, including hover and press: fill `#F0F2F5`, border `#E2E6EC`, text `#5D6B7E`, cursor `not-allowed`. A confirm button uses those disabled colours until the typed name matches, then the danger fill.
+- Disabled field: fill `#F0F2F5`, border `#E2E6EC`, text `#5D6B7E`.
+- Error field: `border: 1.5px solid #B42318`. The help line is `#B42318` at weight 500.
+- Empty region: dashed border `#C9CFD8`, radius 12px. Drop zone: `1.5px dashed #9AA4B2`, fill `#F8F9FB`.
+- Quota and progress fills: `#1D5BD6` below 80%, `#B54708` from 80%, `#B42318` from 95%. The track is `#E9ECF1`, 8px tall, radius 4px. The compact upload track is 4px tall, radius 2px.
+- Toast, light: white, border `#E2E6EC`, radius 12px, padding 14px, shadow `0 12px 24px -10px rgba(16, 24, 40, 0.18)`. Critical border `#F4B8B2`. Undo toast: fill `#101828`, white text, shadow `0 12px 24px -10px rgba(16, 24, 40, 0.3)`.
+- Alerts: info `#C7D7F8` / `#F3F7FE`, warning `#F9C9A0` / `#FFF6EE`, critical `#F4B8B2` / `#FEF3F2`.
+
 ## Motion
 
-Read from the exported screen styles and from each screen's logic class. No duration was filled in where the source does not write one.
+Premium components binds every keyframe to a duration. Those five declarations are the library timings for skeletons, spinners, progress, quota bars, and the undo drain on every screen:
+
+- Skeleton: `animation: xp-shimmer 1.4s linear infinite`.
+- Spinner: `animation: xp-spin 0.9s linear infinite`.
+- Indeterminate progress: `animation: xp-indet 1.4s ease-in-out infinite`.
+- Undo / toast drain: `animation: xp-drain 8s linear infinite`.
+- Determinate progress and quota bars: `transition: width 0.6s ease`.
+
+The keyframe bodies, written in the same style block, are:
+
+- `xp-indet`: `0% { transform: translateX(-100%) }` to `100% { transform: translateX(260%) }`.
+- `xp-shimmer`: `0% { background-position: -480px 0 }` to `100% { background-position: 480px 0 }`.
+- `xp-spin`: `to { transform: rotate(360deg) }`.
+- `xp-drain`: `from { width: 100% }` to `to { width: 0% }`.
+
+Applied geometry from that board:
+
+- Indeterminate bar: absolute, `inset-block: 0`, width 40%, `#1D5BD6`, radius 4px, inside the 8px `#E9ECF1` track.
+- Determinate fill: `#1D5BD6` on the 8px track. The compact upload fill uses the same `transition: width 0.6s ease` on the 4px track.
+- Skeleton paint: `linear-gradient(90deg, #EEF0F3 0%, #F8F9FB 50%, #EEF0F3 100%)` with `background-size: 960px 100%`.
+- Spinner: the open arc `M21 12a9 9 0 1 1-9-9`, stroke `#1D5BD6`.
+- Drain: 3px tall, background `#6EA0FF`.
 
 Every screen stylesheet sets the same link and focus rules, with no `transition` on either:
 
@@ -103,26 +143,11 @@ Every screen stylesheet sets the same link and focus rules, with no `transition`
 - `:focus-visible { outline: 2px solid #1D5BD6; outline-offset: 2px }`.
 - Inside `nav[aria-label="xWHM navigation"]`, `:focus-visible` uses `outline-color: #6EA0FF`.
 
-The keyframe bodies are:
-
-- `xp-indet`: `0% { transform: translateX(-100%) }` to `100% { transform: translateX(260%) }`.
-- `xp-shimmer`: `0% { background-position: -480px 0 }` to `100% { background-position: 480px 0 }`.
-- `xp-spin`: `to { transform: rotate(360deg) }`.
-- `xp-drain`: `from { width: 100% }` to `to { width: 0% }`.
-
-Premium components is the board that applies them. The timings are written on the elements, not left as unused declarations:
-
-- Indeterminate progress: `animation: xp-indet 1.4s ease-in-out infinite`. The bar is absolute, `inset-block: 0`, 40% wide, `#1D5BD6`, radius 4px, inside an 8px track (`#E9ECF1`, radius 4px).
-- Determinate progress: `transition: width 0.6s ease`. The fill is `#1D5BD6`. The tall track is 8px with radius 4px. The compact upload track is 4px with radius 2px.
-- Skeleton: `linear-gradient(90deg, #EEF0F3 0%, #F8F9FB 50%, #EEF0F3 100%)`, `background-size: 960px 100%`, `animation: xp-shimmer 1.4s linear infinite`.
-- Spinner: `animation: xp-spin 0.9s linear infinite` on the open arc.
-- Undo toast drain: a 3px bar, background `#6EA0FF`, `animation: xp-drain 8s linear infinite`. The light toast shadow is `0 12px 24px -10px rgba(16, 24, 40, 0.18)`. A critical toast uses border `#F4B8B2`. Padding on the toast body is 14px.
-
 Six xWHM screens (Upgrade, Transfer, SSH, Firewall, Panel security, Audit log) declare the same four keyframes and do not apply them. Premium components and those screens end the style block with:
 
 `@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important } }`
 
-No screen declares a spring, stiffness, damping, mass, or a drag physics config. Component styles do not use a custom `cubic-bezier`. Searches of the logic classes found no `setTimeout`, `setInterval`, or `requestAnimationFrame`. Confirm panels, filter chips, the move menu, compose discard, and wizard steps appear and disappear by replacing state. There is no open or close duration on those.
+No screen declares a spring, stiffness, damping, mass, or a drag physics config. Component styles do not use a custom `cubic-bezier`. Premium components advances the sample progress percent with `setInterval` every 900ms. That clock only replaces the sample value. The bar still uses `transition: width 0.6s ease`. Confirm panels, filter chips, the move menu, compose discard, and wizard steps appear and disappear by replacing state. There is no open or close duration on those.
 
 The undo bar on Inbox, when a message is moved, is an instant `role="status"` strip: background `#101828`, text `#FFFFFF`, 13px, padding `8px 8px 8px 16px`, and an Undo button with `min-height: 40px`, transparent background, border `#475467`, white text. The move menu is an instant absolute list: `top: 50px`, `min-width: 200px`, radius 10, border `#E2E6EC`, shadow `0 8px 24px rgba(16, 24, 40, 0.12)`. A selected message row is `#F3F7FE` with `box-shadow: inset 3px 0 0 #1D5BD6`. The Compose control on the Compose screen is fill `#1546A8` with white text. The Inbox Compose control is fill `#1D5BD6`.
 
@@ -132,7 +157,7 @@ The design-tool runtime (`support.js`) is not part of the design. It paints a st
 
 A live read of the Inbox artboard agrees with the source text. Keyboard focus draws `2px solid #1D5BD6` with offset `2px`. `transition-duration` on those controls is `0s` (the initial value; the shorthand reports `all` because no transition was declared). Selecting a message and opening the upgrade confirm panel both replace the markup in the same turn.
 
-The product stylesheet copies the four keyframes and binds the Premium components timings. The usage meter grows on the inline axis, so its fill uses `transition: inline-size 0.6s ease` for the same 0.6s ease the board writes as `transition: width 0.6s ease`. The spinner uses `animation: xp-spin 0.9s linear infinite`. The indeterminate bar uses `animation: xp-indet 1.4s ease-in-out infinite`. Skeleton blocks use `animation: xp-shimmer 1.4s linear infinite` and the 960px gradient. The toast drain uses `animation: xp-drain 8s linear infinite` at 3px and `#6EA0FF`. Unclassed links use the accent and the accent hover with no transition. `prefers-reduced-motion: reduce` sets `animation: none !important; transition: none !important`. The Compose control on the Compose screen uses fill `#1546A8`, white text, and no inset bar. A selected message row uses `#F3F7FE` and `inset 3px 0 0 #1D5BD6`.
+The product stylesheet copies the four keyframes and applies the five Premium components timings wherever those parts render. Quota and progress fills set `width` and `transition: width 0.6s ease`. In Arabic the fill uses `margin-left: auto` so the bar sits on the inline-start edge. The spinner uses `animation: xp-spin 0.9s linear infinite`. The indeterminate bar uses `animation: xp-indet 1.4s ease-in-out infinite`. Skeleton blocks use `animation: xp-shimmer 1.4s linear infinite` and the 960px gradient. The toast drain uses `animation: xp-drain 8s linear infinite` at 3px and `#6EA0FF`. Disabled buttons and fields use `#F0F2F5` / `#E2E6EC` / `#5D6B7E`. An invalid field uses the 1.5px `#B42318` border. Pressed chips, the switch, segmented selection, radio cards, and tabs use the colours in Component states. Unclassed links use the accent and the accent hover with no transition. `prefers-reduced-motion: reduce` sets `animation: none !important; transition: none !important`. The Compose control on the Compose screen uses fill `#1546A8`, white text, and no inset bar. A selected message row uses `#F3F7FE` and `inset 3px 0 0 #1D5BD6`.
 
 The mobile navigation sheet and the command palette are not in the artboards. Their controller stays so a reversal does not jump and so a link navigates in the same event: 200ms for the sheet, 160ms for the palette, easing `cubic-bezier(0.2, 0.8, 0.2, 1)`, fill `both`. Reduced motion skips that controller and leaves no running animation. Those two numbers are the controller's own values. They are not artboard values.
 
