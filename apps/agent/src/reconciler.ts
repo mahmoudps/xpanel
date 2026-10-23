@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { chmod, mkdir, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fail, suspensionEffects } from '@xpanel/core'
 import type {
   ConfigTest,
@@ -209,9 +209,18 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     // Provision Linux group, user, 0750 home dirs, and filesystem quota
     preActions.push(...system.accountProvisionActions(account, plan, os, { quotaFilesystem }))
 
-    // Account systemd slice & logind user slice drop-in
+    // Account systemd slice & logind user slice drop-in. The drop-in directory is
+    // created before the atomic write so user-<uid>.slice.d/.tmp can be published.
     files.push(system.renderAccountSlice(account, plan.resources, ioDevices, { systemdDir: os.paths.systemdDir }))
-    files.push(system.renderLoginSliceDropin(account, plan.resources, ioDevices, { systemdDir: os.paths.systemdDir }))
+    const loginDropin = system.renderLoginSliceDropin(account, plan.resources, ioDevices, { systemdDir: os.paths.systemdDir })
+    files.push(loginDropin)
+    preActions.push({
+      kind: 'ensure-dir',
+      path: dirname(loginDropin.path),
+      mode: 0o755,
+      owner: 'root',
+      group: 'root',
+    })
     postActions.push(
       ...system.sliceUpdateActions(account, plan.resources, ioDevices, { systemdDir: os.paths.systemdDir }),
     )
@@ -590,6 +599,31 @@ class SimulatedProcessCrashWrapper extends Error {
   }
 }
 
+const LOGIN_SLICE_DROPIN_RE = /\/user-\d+\.slice\.d\/50-xpanel\.conf$/
+
+const isEnoent = (err: unknown): boolean => {
+  if ((err as NodeJS.ErrnoException).code === 'ENOENT') return true
+  return err instanceof Error && err.message.includes('ENOENT')
+}
+
+/** A missing atomic temp under a slice drop-in is not a second host failure. */
+const isMissingAtomicTemp = (err: unknown): boolean => {
+  if (!isEnoent(err) || !(err instanceof Error)) return false
+  return err.message.includes('.tmp') || err.message.includes('.slice.d')
+}
+
+/**
+ * PowerDNS units on this host reject `systemctl reload`. `reload-or-restart`
+ * restarts when the unit has no ExecReload. Other units keep their previous verb.
+ */
+export const rollbackReloadAction = (unit: string): HostAction => {
+  if (unit === 'pdns.service' || unit === 'pdns') {
+    return { kind: 'exec', argv: ['/usr/bin/systemctl', 'reload-or-restart', unit] }
+  }
+  const verb = unit.startsWith('xpanel-php-fpm-') ? 'restart' : unit.endsWith('.timer') ? 'start' : 'reload'
+  return { kind: 'systemd', verb, unit }
+}
+
 class StageFailureError extends Error {
   readonly failedUnit: string
   constructor(failedUnit: string, message: string) {
@@ -731,6 +765,47 @@ export class HostReconciler {
   }
 
   /**
+   * Restores one backed-up file. A missing temp under user-<uid>.slice.d is retried
+   * after the drop-in directory is created, and ignored when the live bytes already
+   * match the backup.
+   */
+  private async restoreBackedUpFile(backup: PreviousFileBackup): Promise<void> {
+    if (!backup.existed || backup.content === null) {
+      await this.deps.executor.removePath(backup.path)
+      return
+    }
+    const file: RenderedFile = {
+      path: backup.path,
+      content: backup.content,
+      mode: backup.mode,
+      owner: backup.owner,
+      group: backup.group,
+    }
+    try {
+      await this.deps.executor.writeFile(file)
+    } catch (err) {
+      if (!isMissingAtomicTemp(err)) throw err
+      if (LOGIN_SLICE_DROPIN_RE.test(backup.path)) {
+        await this.deps.executor.runAction({
+          kind: 'ensure-dir',
+          path: dirname(backup.path),
+          mode: 0o755,
+          owner: 'root',
+          group: 'root',
+        })
+      }
+      try {
+        await this.deps.executor.writeFile(file)
+      } catch (retryErr) {
+        if (!isMissingAtomicTemp(retryErr)) throw retryErr
+        const live = await this.deps.executor.readFile(backup.path)
+        if (live === backup.content) return
+        throw retryErr
+      }
+    }
+  }
+
+  /**
    * Restores previous file bytes/mode/owner/group from the persisted journal backup,
    * reloads affected services in reverse dependency order, verifies restored service health,
    * and transitions the generation to `rolled_back` in SQLite.
@@ -751,19 +826,8 @@ export class HostReconciler {
 
     try {
       for (const backup of journalRecord.previousFilesBackup) {
-        if (!backup.existed || backup.content === null) {
-          await this.deps.executor.removePath(backup.path)
-          restoredFiles.push(backup.path)
-        } else {
-          await this.deps.executor.writeFile({
-            path: backup.path,
-            content: backup.content,
-            mode: backup.mode,
-            owner: backup.owner,
-            group: backup.group,
-          })
-          restoredFiles.push(backup.path)
-        }
+        await this.restoreBackedUpFile(backup)
+        restoredFiles.push(backup.path)
       }
 
       for (const unit of [...journalRecord.stoppedObsoleteUnits].reverse()) {
@@ -780,8 +844,7 @@ export class HostReconciler {
 
       for (const unit of unitsToReload) {
         if (reloadedUnits.includes(unit)) continue
-        const verb = unit.startsWith('xpanel-php-fpm-') ? 'restart' : unit.endsWith('.timer') ? 'start' : 'reload'
-        await this.deps.executor.runAction({ kind: 'systemd', verb, unit })
+        await this.deps.executor.runAction(rollbackReloadAction(unit))
         reloadedUnits.push(unit)
       }
 
@@ -940,6 +1003,94 @@ export class HostReconciler {
       restoredFiles: rb.restoredFiles,
       reloadedUnits: rb.reloadedUnits,
       error: reason,
+    }
+  }
+
+  /**
+   * Clears a generation whose rollback failed and left the journal in `needs_attention`.
+   * Verifies live owned files against the journal backup or the failed candidate, marks
+   * that generation failed, and drops the active journal so reconcile can run again.
+   */
+  async resolveFailedGeneration(
+    generationId: number,
+    actor = 'root',
+  ): Promise<{ generationId: number; previousGenerationId: number | null; checkedFiles: number }> {
+    if (!Number.isSafeInteger(generationId) || generationId < 1) {
+      return fail('VALIDATION', 'resolve-failed requires a positive integer generation id')
+    }
+    const journal = await this.journal.readActiveJournal()
+    if (!journal || journal.phase !== 'needs_attention') {
+      return fail('PRECONDITION_FAILED', 'no failed reconciliation is waiting for operator attention')
+    }
+    if (journal.generationId !== generationId) {
+      return fail('PRECONDITION_FAILED', `failed generation ${journal.generationId} is waiting, not ${generationId}`, {
+        generationId: journal.generationId,
+        requested: generationId,
+      })
+    }
+
+    const candidate = await getGeneration(this.deps.db, generationId)
+    if (!candidate) return fail('NOT_FOUND', `config generation ${generationId} not found`)
+    if (candidate.status === 'active' || candidate.status === 'superseded') {
+      return fail('PRECONDITION_FAILED', `generation ${generationId} is ${candidate.status} and cannot be cleared in place`, {
+        generationId,
+        status: candidate.status,
+      })
+    }
+
+    const active = await latestActive(this.deps.db)
+    if ((active?.id ?? null) !== journal.previousActiveGenerationId) {
+      return fail('PRECONDITION_FAILED', 'the active generation does not match the journal backup', {
+        activeGenerationId: active?.id ?? null,
+        previousGenerationId: journal.previousActiveGenerationId,
+      })
+    }
+
+    const mismatches: string[] = []
+    for (const backup of journal.previousFilesBackup) {
+      const live = await this.deps.executor.readFile(backup.path)
+      if (backup.existed ? live === backup.content : live === null) continue
+      const owned = journal.candidateManifest.files.find((entry) => entry.path === backup.path)
+      if (live !== null && owned && sha256Text(live) === owned.sha256) continue
+      const missingSliceTemp = (journal.error ?? '').includes('.slice.d') && (journal.error ?? '').includes('.tmp')
+      if (LOGIN_SLICE_DROPIN_RE.test(backup.path) && live === null && missingSliceTemp) {
+        continue
+      }
+      mismatches.push(backup.path)
+    }
+    if (mismatches.length > 0) {
+      return fail('PRECONDITION_FAILED', 'on-disk state does not match the journal backup or the failed candidate', {
+        generationId,
+        paths: mismatches.slice(0, 20),
+      })
+    }
+
+    const reason = `operator resolved needs_attention after on-disk verification: ${journal.error ?? 'rollback failed'}`.slice(0, 2000)
+    if (candidate.status === 'pending' || candidate.status === 'tested') {
+      await markFailed(this.deps.db, generationId, reason)
+    }
+    journal.phase = 'failed'
+    journal.error = reason
+    await this.journal.saveJournal(journal)
+
+    const scope: LiveEventScope = { accountId: null, resellerId: null }
+    const audit = await appendAudit(this.deps.db, {
+      actor,
+      action: 'reconcile.attention_resolved',
+      target: `generation:${generationId}`,
+      detail: {
+        generationId,
+        previousGenerationId: journal.previousActiveGenerationId,
+        checkedFiles: journal.previousFilesBackup.length,
+      },
+      outcome: 'ok',
+    })
+    this.emit({ id: randomUUID(), at: audit.at, kind: 'audit.entry', scope, data: audit })
+
+    return {
+      generationId,
+      previousGenerationId: journal.previousActiveGenerationId,
+      checkedFiles: journal.previousFilesBackup.length,
     }
   }
 

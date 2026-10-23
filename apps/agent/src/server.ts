@@ -586,6 +586,14 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         return jsonResponse(result, result.status === 'failed' ? 422 : 200)
       }
 
+      const resolveFailedMatch = /^\/generations\/(\d+)\/resolve-failed$/.exec(pathname)
+      if (method === 'POST' && resolveFailedMatch) {
+        await assertRootCaller(caller, `generation:${resolveFailedMatch[1]}:resolve-failed`)
+        const genId = Number(resolveFailedMatch[1])
+        const result = await deps.reconciler.resolveFailedGeneration(genId, caller.actor)
+        return jsonResponse(result)
+      }
+
       const rollbackMatch = /^\/generations\/(\d+)\/rollback$/.exec(pathname)
       if (method === 'POST' && rollbackMatch) {
         await assertRootCaller(caller, `generation:${rollbackMatch[1]}:rollback`)

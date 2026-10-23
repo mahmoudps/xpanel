@@ -598,7 +598,7 @@ describe('B03 source snapshot & receipt verifier (A01, A02)', () => {
 const fs = require('node:fs');
 fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args: process.argv.slice(2), leaked: process.env.XPANEL_UNTRUSTED_INSTALL_TOKEN ?? null }) + '\\n');
 if (process.argv[2] === '--version') process.stdout.write('12.15.0\\n');
-else if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(['install', '--frozen-lockfile'])) process.exit(1);
+else if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(['install', '--frozen-lockfile', '--prefer-offline'])) process.exit(1);
 `)
     const oldMarker = process.env.XPANEL_UNTRUSTED_INSTALL_TOKEN
     process.env.XPANEL_UNTRUSTED_INSTALL_TOKEN = 'must-not-leak'
@@ -610,7 +610,7 @@ else if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(['install', '-
       })
       expect(receipt.runtime.pnpm).toBe('12.15.0')
       const observations = readFileSync(calls, 'utf8').trim().split('\n').map(line => JSON.parse(line))
-      expect(observations.map(call => call.args)).toEqual([['--version'], ['install', '--frozen-lockfile'], ['--version']])
+      expect(observations.map(call => call.args)).toEqual([['--version'], ['install', '--frozen-lockfile', '--prefer-offline'], ['--version']])
       expect(observations.every(call => call.leaked === null)).toBe(true)
       const cli = spawnSync(process.execPath, [resolve(import.meta.dirname, 'vm/verify-source-snapshot.mjs'),
         `--archive=${fixture.archivePath}`, `--manifest=${fixture.manifestPath}`,
@@ -626,6 +626,11 @@ else if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(['install', '-
       if (oldMarker === undefined) delete process.env.XPANEL_UNTRUSTED_INSTALL_TOKEN
       else process.env.XPANEL_UNTRUSTED_INSTALL_TOKEN = oldMarker
     }
+  })
+
+  it('keeps the @xpanel/render workspace link in the lockfile for a frozen install of @xpanel/os', () => {
+    const lock = readFileSync(resolve(import.meta.dirname, '../pnpm-lock.yaml'), 'utf8')
+    expect(lock).toMatch(/packages\/os:[\s\S]*?'@xpanel\/render':\n\s+specifier: workspace:\*\n\s+version: link:\.\.\/render/)
   })
 
   const historicalArchive = resolve(import.meta.dirname, '../.tools/source-snapshots/source-20261022T104858739Z-4c761b30.tar.gz')

@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { describe, afterEach, beforeEach, it } from 'vitest'
-import { defaultFirewallRules, suggestServerSettings } from '@xpanel/core'
+import { defaultFirewallRules, isXpanelError, suggestServerSettings } from '@xpanel/core'
 import type { HostAction, RenderedFile } from '@xpanel/core'
-import { createTestDb, getGeneration, latestActive, type TestDbHandle } from '@xpanel/db'
+import { createGeneration, createTestDb, getGeneration, latestActive, type TestDbHandle } from '@xpanel/db'
 import { profileFor } from '@xpanel/os'
 import { createTestStateStore, type TestStateStoreHandle } from '@xpanel/state'
 import { FakeHostExecutor } from './executor.ts'
-import { HostReconciler, type ReconcileJournalPhase } from './reconciler.ts'
+import { HostReconciler, rollbackReloadAction, sha256Text, type ReconcileJournalPhase } from './reconciler.ts'
 
 const ARGON2 =
   '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g'
@@ -488,4 +488,144 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
       assert.equal(await restartedReconciler.journal.readActiveJournal(), null)
     },
   )
+
+  it('reloads PowerDNS with reload-or-restart and tolerates a missing slice drop-in temp', async () => {
+    assert.deepEqual(rollbackReloadAction('pdns.service'), {
+      kind: 'exec',
+      argv: ['/usr/bin/systemctl', 'reload-or-restart', 'pdns.service'],
+    })
+    assert.deepEqual(rollbackReloadAction('nginx.service'), {
+      kind: 'systemd',
+      verb: 'reload',
+      unit: 'nginx.service',
+    })
+
+    await seedEnvironment()
+    const reconciler = new HostReconciler({
+      store: stateHandle.store,
+      db: dbHandle.db,
+      executor,
+      os,
+    })
+    const first = await reconciler.reconcile({ actor: 'root' })
+    assert.equal(first.status, 'applied')
+    const dropin = [...executor.files.keys()].find((path) => path.endsWith('/user-20000.slice.d/50-xpanel.conf') || path.includes('.slice.d/50-xpanel.conf'))
+    assert.ok(dropin)
+    const dropinDir = dropin.slice(0, dropin.lastIndexOf('/'))
+    assert.ok(executor.executedActions.some((action) => action.kind === 'ensure-dir' && action.path === dropinDir))
+
+    const settings = (await stateHandle.store.getServerSettings())!
+    await stateHandle.store.saveServerSettings({ ...settings, sshPort: 2222 })
+    const origWrite = executor.writeFile.bind(executor)
+    let sliceWrites = 0
+    executor.writeFile = async (file) => {
+      if (file.path === dropin) {
+        sliceWrites += 1
+        if (sliceWrites <= 2) {
+          throw Object.assign(
+            new Error(`ENOENT: no such file or directory, open '${dropinDir}/.missing.tmp'`),
+            { code: 'ENOENT' },
+          )
+        }
+      }
+      return origWrite(file)
+    }
+
+    const failed = await reconciler.reconcile({ actor: 'root' })
+    assert.equal(failed.status, 'failed')
+    if (failed.status === 'failed') assert.equal(failed.rolledBack, true)
+    assert.equal(sliceWrites, 3)
+    assert.equal(await reconciler.journal.readActiveJournal(), null)
+    assert.equal((await latestActive(dbHandle.db))?.id, 1)
+  })
+
+  it('resolve-failed checks the disk, audits the clear, and lets reconcile continue', async () => {
+    await seedEnvironment()
+    const reconciler = new HostReconciler({
+      store: stateHandle.store,
+      db: dbHandle.db,
+      executor,
+      os,
+    })
+    const applied = await reconciler.reconcile({ actor: 'root' })
+    assert.equal(applied.status, 'applied')
+    const manifest = await reconciler.journal.readManifest(1)
+    assert.ok(manifest)
+    const stuck = await createGeneration(dbHandle.db, { checksum: manifest.filesChecksum, actor: 'root' })
+    const backups = [...executor.files.entries()].map(([path, file]) => ({
+      path,
+      existed: true,
+      content: file.content,
+      sha256: sha256Text(file.content),
+      mode: file.mode,
+      owner: file.owner ?? 'root',
+      group: file.group ?? 'root',
+    }))
+    const now = new Date().toISOString()
+    await reconciler.journal.saveJournal({
+      schemaVersion: 1,
+      journalId: randomUUID(),
+      generationId: stuck.id,
+      previousActiveGenerationId: 1,
+      actor: 'root',
+      stateChecksum: manifest.stateChecksum,
+      filesChecksum: manifest.filesChecksum,
+      phase: 'needs_attention',
+      startedAt: now,
+      updatedAt: now,
+      candidateManifest: { ...manifest, generationId: stuck.id },
+      previousManifest: manifest,
+      diff: {
+        added: [],
+        updated: [],
+        unchanged: manifest.files,
+        removed: [],
+        removedUnits: [],
+        affectedServices: [],
+      },
+      previousFilesBackup: backups,
+      completedPreActions: 0,
+      switchedFilePaths: [],
+      removedFilePaths: [],
+      stoppedObsoleteUnits: [],
+      completedPostActions: 0,
+      reloadedUnits: [],
+      verifiedUnits: [],
+      error: "ENOENT: no such file or directory, open '/etc/systemd/system/user-20003.slice.d/.missing.tmp'",
+    })
+
+    await assert.rejects(
+      () => reconciler.reconcile({ actor: 'root' }),
+      (err: unknown) => isXpanelError(err) && err.code === 'PRECONDITION_FAILED',
+    )
+
+    const sample = backups[0]!
+    const original = executor.files.get(sample.path)!
+    executor.files.set(sample.path, { ...original, content: `${original.content}\n# drifted\n` })
+    await assert.rejects(
+      () => reconciler.resolveFailedGeneration(stuck.id, 'root'),
+      (err: unknown) => isXpanelError(err) && err.code === 'PRECONDITION_FAILED',
+    )
+    executor.files.set(sample.path, original)
+    assert.equal((await reconciler.journal.readActiveJournal())?.phase, 'needs_attention')
+
+    await assert.rejects(
+      () => reconciler.resolveFailedGeneration(stuck.id + 9, 'root'),
+      (err: unknown) => isXpanelError(err) && err.code === 'PRECONDITION_FAILED',
+    )
+
+    const resolved = await reconciler.resolveFailedGeneration(stuck.id, 'root')
+    assert.equal(resolved.generationId, stuck.id)
+    assert.equal(resolved.previousGenerationId, 1)
+    assert.equal(await reconciler.journal.readActiveJournal(), null)
+    assert.equal((await getGeneration(dbHandle.db, stuck.id))?.status, 'failed')
+    const audits = await dbHandle.db.query<{ action: string }>(
+      `SELECT action FROM audit_log WHERE action = $1`,
+      ['reconcile.attention_resolved'],
+    )
+    assert.equal(audits.length, 1)
+
+    const continued = await reconciler.reconcile({ actor: 'root' })
+    assert.equal(continued.status, 'noop')
+  })
 })

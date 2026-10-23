@@ -314,8 +314,8 @@ export class MailServiceAdapter {
         path: `${this.os.paths.postfixDir}/xpanel_master.cf`,
         content: [
           '# managed by xPanel — submission (587) & submissions (465)',
-          '587 inet n - y - - smtpd -o syslog_name=postfix/submission -o smtpd_tls_security_level=encrypt -o smtpd_sasl_auth_enable=yes',
-          '465 inet n - y - - smtpd -o syslog_name=postfix/smtps -o smtpd_tls_wrappermode=yes -o smtpd_sasl_auth_enable=yes',
+          '587 inet n - y - - smtpd -o syslog_name=postfix/submission -o smtpd_tls_security_level=encrypt -o smtpd_sasl_auth_enable=yes -o smtpd_tls_auth_only=yes',
+          '465 inet n - y - - smtpd -o syslog_name=postfix/smtps -o smtpd_tls_wrappermode=yes -o smtpd_sasl_auth_enable=yes -o smtpd_tls_auth_only=yes',
           '',
         ].join('\n'),
         mode: 0o644,
