@@ -25,7 +25,6 @@ import {
 } from '../tokens.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, getSurfaceNavigationLabel, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
-export { renderWhmExtendedSections } from './extended-views.ts'
 
 export interface WhmServiceHealthRow {
   name: string
@@ -92,143 +91,6 @@ const ALL_RESELLER_ACLS: readonly ResellerAcl[] = [
   'transfer',
 ]
 
-export const DEFAULT_WHM_IO_SNAPSHOT: IoAnalyticsSnapshot = {
-  at: '2026-10-22T14:05:00Z',
-  current: {
-    at: '2026-10-22T14:05:00Z',
-    readBytesPerSec: 28 * 1024 * 1024,
-    writeBytesPerSec: 16 * 1024 * 1024,
-    readIops: 640,
-    writeIops: 410,
-    awaitMs: 1.8,
-    psiSomeAvg10: 2.4,
-    psiFullAvg10: 0.3,
-    cpuPercent: 34,
-    memoryUsedBytes: 2.4 * 1024 * 1024 * 1024,
-    memoryTotalBytes: 8 * 1024 * 1024 * 1024,
-    loadAvg1m: 0.42,
-  },
-  history: [
-    {
-      at: '2026-10-22T14:01:00Z',
-      readBytesPerSec: 18 * 1024 * 1024,
-      writeBytesPerSec: 11 * 1024 * 1024,
-      readIops: 420,
-      writeIops: 290,
-      awaitMs: 1.2,
-      psiSomeAvg10: 1.4,
-      psiFullAvg10: 0.1,
-      cpuPercent: 26,
-      memoryUsedBytes: 2.2 * 1024 * 1024 * 1024,
-      memoryTotalBytes: 8 * 1024 * 1024 * 1024,
-      loadAvg1m: 0.34,
-    },
-    {
-      at: '2026-10-22T14:02:00Z',
-      readBytesPerSec: 24 * 1024 * 1024,
-      writeBytesPerSec: 14 * 1024 * 1024,
-      readIops: 510,
-      writeIops: 340,
-      awaitMs: 1.5,
-      psiSomeAvg10: 1.9,
-      psiFullAvg10: 0.2,
-      cpuPercent: 31,
-      memoryUsedBytes: 2.3 * 1024 * 1024 * 1024,
-      memoryTotalBytes: 8 * 1024 * 1024 * 1024,
-      loadAvg1m: 0.38,
-    },
-    {
-      at: '2026-10-22T14:03:00Z',
-      readBytesPerSec: 36 * 1024 * 1024,
-      writeBytesPerSec: 21 * 1024 * 1024,
-      readIops: 790,
-      writeIops: 520,
-      awaitMs: 2.3,
-      psiSomeAvg10: 3.1,
-      psiFullAvg10: 0.5,
-      cpuPercent: 42,
-      memoryUsedBytes: 2.5 * 1024 * 1024 * 1024,
-      memoryTotalBytes: 8 * 1024 * 1024 * 1024,
-      loadAvg1m: 0.51,
-    },
-    {
-      at: '2026-10-22T14:04:00Z',
-      readBytesPerSec: 31 * 1024 * 1024,
-      writeBytesPerSec: 18 * 1024 * 1024,
-      readIops: 690,
-      writeIops: 440,
-      awaitMs: 1.9,
-      psiSomeAvg10: 2.6,
-      psiFullAvg10: 0.3,
-      cpuPercent: 37,
-      memoryUsedBytes: 2.4 * 1024 * 1024 * 1024,
-      memoryTotalBytes: 8 * 1024 * 1024 * 1024,
-      loadAvg1m: 0.45,
-    },
-    {
-      at: '2026-10-22T14:05:00Z',
-      readBytesPerSec: 28 * 1024 * 1024,
-      writeBytesPerSec: 16 * 1024 * 1024,
-      readIops: 640,
-      writeIops: 410,
-      awaitMs: 1.8,
-      psiSomeAvg10: 2.4,
-      psiFullAvg10: 0.3,
-      cpuPercent: 34,
-      memoryUsedBytes: 2.4 * 1024 * 1024 * 1024,
-      memoryTotalBytes: 8 * 1024 * 1024 * 1024,
-      loadAvg1m: 0.42,
-    },
-  ],
-  accounts: [
-    {
-      accountId: 'acc-alice',
-      username: 'alice',
-      uid: 20014,
-      readBytesPerSec: 14.2 * 1024 * 1024,
-      writeBytesPerSec: 8.4 * 1024 * 1024,
-      readIops: 310,
-      writeIops: 195,
-      memoryCurrentBytes: 620 * 1024 * 1024,
-      memoryLimitMb: 1024,
-      pidsCurrent: 38,
-      pidsLimit: 128,
-      cpuPercent: 28,
-      statusLevel: 'ok',
-    },
-    {
-      accountId: 'acc-omar',
-      username: 'omar',
-      uid: 20016,
-      readBytesPerSec: 9.8 * 1024 * 1024,
-      writeBytesPerSec: 5.2 * 1024 * 1024,
-      readIops: 220,
-      writeIops: 140,
-      memoryCurrentBytes: 860 * 1024 * 1024,
-      memoryLimitMb: 1024,
-      pidsCurrent: 108,
-      pidsLimit: 128,
-      cpuPercent: 84,
-      statusLevel: 'warn',
-    },
-    {
-      accountId: 'acc-rania',
-      username: 'rania',
-      uid: 20010,
-      readBytesPerSec: 4.0 * 1024 * 1024,
-      writeBytesPerSec: 2.4 * 1024 * 1024,
-      readIops: 110,
-      writeIops: 75,
-      memoryCurrentBytes: 1240 * 1024 * 1024,
-      memoryLimitMb: 4096,
-      pidsCurrent: 42,
-      pidsLimit: 256,
-      cpuPercent: 18,
-      statusLevel: 'ok',
-    },
-  ],
-}
-
 export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
   const locale: Locale = props.locale ?? 'en'
   const isAr = locale === 'ar'
@@ -287,8 +149,6 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
   const switchLangCode = isAr ? 'en' : 'ar'
   const switchLangLabel = isAr ? 'English' : 'العربية'
   const nextTheme = theme === 'dark' ? 'light' : 'dark'
-  const memUsedGb = Number(((ioSnapshot?.current.memoryUsedBytes ?? 0) / (1024 * 1024 * 1024)).toFixed(1))
-  const memTotalGb = Number(((ioSnapshot?.current.memoryTotalBytes ?? 0) / (1024 * 1024 * 1024)).toFixed(1))
   const actionBannerHtml = props.actionState
     ? renderAsyncActionState({ ...props.actionState, locale })
     : ''
@@ -321,9 +181,6 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
         ${generationId !== undefined ? `<span data-generation-chip="${generationId}">
           ${renderStatusBadge('ok', `Gen #${generationId}`)}
         </span>` : ''}
-        ${ioSnapshot ? `<span class="xp-mono xp-tabular" data-load-chip="true">
-          ${renderStatusBadge('ok', `Load ${ioSnapshot.current.loadAvg1m.toFixed(2)} · RAM ${memUsedGb}/${memTotalGb} GB`)}
-        </span>` : ''}
         <a class="xp-btn" href="/whm/jobs">
           <span>${isAr ? 'سجل النشاط والمهام' : 'Activity & Jobs'}</span>
         </a>
@@ -349,7 +206,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           <div class="xp-field"><span class="xp-label">${isAr ? 'الإصدار' : 'Version'}</span><strong><bdi dir="ltr">${escapeHtml(version)}</bdi></strong></div>
           <div class="xp-field"><span class="xp-label">${isAr ? 'المشغل' : 'Operator'}</span><strong><bdi dir="ltr">${escapeHtml(principal.username)}</bdi></strong></div>
         </div>
-        ${!ioSnapshot ? `<p class="xp-prose" role="status">${isAr ? 'قياسات موارد الخادم غير متاحة بعد.' : 'Server resource measurements are not available yet.'}</p>` : `<div class="xp-kpi-grid"><div class="xp-field"><span class="xp-label">CPU</span>${renderThresholdMeter(ioSnapshot.current.cpuPercent, 100, '%')}</div><div class="xp-field"><span class="xp-label">${isAr ? 'الذاكرة' : 'Memory'}</span>${renderThresholdMeter(memUsedGb, memTotalGb, 'GB')}</div></div>`}
+        <p class="xp-prose" role="status" data-host-observation="unavailable">${isAr ? 'قياسات موارد الخادم غير متاحة.' : 'Host resource measurements unavailable.'}</p>
       </section>
 ` : ''}
       ${section === 'io' && ioSnapshot ? `      <!-- Real-Time Server IO & Per-Account cgroup v2 Slice Monitor -->
@@ -357,9 +214,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
         <div class="xp-card__header">
           <div>
             <h1 id="whm-io-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-            <p class="xp-prose">${escapeHtml(t(locale, 'io.subtitle'))}</p>
           </div>
-          ${renderStatusBadge('ok', `PSI some=${ioSnapshot.current.psiSomeAvg10.toFixed(1)}% · full=${ioSnapshot.current.psiFullAvg10.toFixed(1)}%`)}
         </div>
 
         ${renderServerIoMonitorChart(ioSnapshot, locale)}
@@ -685,11 +540,11 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
             <tbody>
               ${resellers
                 .map(
-                  (res, idx) => `
+                  (res) => `
                 <tr data-reseller-row="${escapeHtml(res.username)}">
                   <td><strong class="xp-mono"><bdi dir="ltr">${escapeHtml(res.username)}</bdi></strong></td>
-                  <td>${renderThresholdMeter(idx === 0 ? 18 : 6, res.maxAccounts, 'accounts')}</td>
-                  <td>${renderThresholdMeter(idx === 0 ? 180 : 48, res.totalDiskMb === 'unlimited' ? 'unlimited' : res.totalDiskMb / 1024, 'GB')}</td>
+                  <td>${renderThresholdMeter(undefined, res.maxAccounts, { locale, unit: isAr ? 'حسابات' : 'accounts', label: isAr ? 'عدد حسابات الموزع' : 'Reseller accounts', configuredLimit: true })}</td>
+                  <td>${renderThresholdMeter(undefined, res.totalDiskMb === 'unlimited' ? res.totalDiskMb : Number.isSafeInteger(res.totalDiskMb) ? res.totalDiskMb / 1024 : undefined, { locale, unit: 'GiB', label: isAr ? 'تخصيص القرص' : 'Disk allocation', configuredLimit: true })}</td>
                   <td>
                     <button type="button" role="switch" aria-checked="${res.oversell ? 'true' : 'false'}" class="xp-btn" data-switch="reseller-oversell-${escapeHtml(res.username)}">
                       ${renderStatusBadge(res.oversell ? 'warn' : 'ok', res.oversell ? 'Oversell: ON' : 'Oversell: OFF')}

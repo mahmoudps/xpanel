@@ -3,7 +3,7 @@
 // 1.618:1 main:aside split, compact reference typography, >= 44px ergonomic hit targets,
 // tabular numerals on all metrics/IPs/IDs, and icon + text on every status badge and threshold meter.
 
-import type { Limit } from '@xpanel/core'
+import { resolveResourceUsage, type ResourceQuantityState } from '@xpanel/core'
 import { MAIL_LAYOUT_CSS } from './mail-layout.ts'
 
 export type StatusBadgeKind = 'ok' | 'warn' | 'critical' | 'suspended' | 'reconciling'
@@ -204,54 +204,62 @@ export function renderStatusBadge(status: StatusBadgeKind, label: string): strin
   return `<span class="xp-badge xp-badge--${status}" data-status="${status}" role="status">${svg}<span class="xp-badge__label">${safeText}</span></span>`
 }
 
-/**
- * Renders a unified threshold meter (`<80%` ok, `>=80%` warn, `>=95%` critical)
- * with an inline status icon, tabular numbers, and ARIA progressbar attributes.
- */
-export function renderThresholdMeter(
-  used: number,
-  limit: Limit,
-  unit?: string,
-): string {
-  const safeUsed = Number.isFinite(used) && used >= 0 ? used : 0
-  const unitSuffix = unit ? ` ${escapeHtml(unit.trim())}` : ''
-  const formattedUsed = Number.isInteger(safeUsed) ? String(safeUsed) : safeUsed.toFixed(1)
+export interface ResourceMeterOptions {
+  locale: 'en' | 'ar'
+  label: string
+  unit?: string
+  /** A desired-state cap is not evidence of effective host enforcement. */
+  configuredLimit?: boolean
+}
 
-  if (limit === 'unlimited') {
-    const svg = renderStatusSvg('ok')
-    return (
-      `<div class="xp-meter xp-meter--ok" data-threshold="ok">` +
-      `<div class="xp-meter__header">` +
-      `<span class="xp-meter__status">${svg}<span class="xp-meter__word">OK</span></span>` +
-      `<span class="xp-meter__values xp-tabular"><bdi dir="ltr">${escapeHtml(formattedUsed)}${unitSuffix} / <span class="xp-meter__unlimited">unlimited</span></bdi></span>` +
-      `</div>` +
-      `<div class="xp-meter__track" role="progressbar" aria-valuenow="8" aria-valuemin="0" aria-valuemax="100" aria-label="Unlimited quota">` +
-      `<div class="xp-meter__fill xp-meter__fill--ok" style="inline-size: 8%"></div>` +
-      `</div>` +
-      `</div>`
-    )
+const meterPercentText = (percent: number, threshold: ThresholdLevel, positiveUsage: boolean): string => {
+  if (positiveUsage && percent < 0.05) return '<0.1%'
+  const rounded = percent >= 1e21 ? percent : Math.round(percent * 10) / 10
+  if (threshold === 'ok' && rounded >= 80) return '<80%'
+  if (threshold === 'warn' && rounded >= 95) return '<95%'
+  if (percent > 100 && rounded <= 100) return '>100%'
+  return `${formatAsciiNumber(rounded, { useGrouping: false })}%`
+}
+
+/** Static utilization of supplied same-unit values; no origin or service-health attestation. */
+export function renderThresholdMeter(used: unknown, limit: unknown, options: ResourceMeterOptions): string {
+  if (!options.label.trim()) throw new TypeError('A resource meter requires a nonempty accessible label')
+  const usage = resolveResourceUsage(used, limit)
+  const isAr = options.locale === 'ar'
+  const text = (en: string, ar: string): string => isAr ? ar : en
+  const unavailable = text('Unavailable', 'غير متاح')
+  const unlimited = text('Unlimited', 'غير محدود')
+  const value = (part: ResourceQuantityState): string => part.availability !== 'known' ? unavailable
+    : part.value === 'unlimited' ? unlimited : formatAsciiNumber(part.value as number)
+  const suffix = options.unit?.trim() ? ` ${normalizeAsciiDigits(options.unit.trim())}` : ''
+  const valuesText = `${value(usage.used)} / ${value(usage.limit)}${suffix}`
+  const configured = options.configuredLimit ? `<span class="xp-meter__basis">${text('Configured limit', 'الحد المعيّن')}</span>` : ''
+  let word: string, threshold: ThresholdLevel | undefined
+  switch (usage.kind) {
+    case 'bounded':
+      threshold = usage.threshold
+      word = usage.usedValue > usage.limitValue ? text('Limit exceeded', 'تجاوز الحد')
+        : threshold === 'critical' ? text('Critical', 'حرج')
+          : threshold === 'warn' ? text('Warning', 'تحذير') : text('Within limit', 'ضمن الحد')
+      break
+    case 'zero-limit':
+      threshold = usage.exceeded ? 'critical' : undefined
+      word = usage.exceeded ? text('Limit exceeded', 'تجاوز الحد') : text('No allocation', 'لا تخصيص')
+      break
+    case 'unbounded-allocation': threshold = 'critical'; word = text('Limit exceeded', 'تجاوز الحد'); break
+    case 'unlimited': word = unlimited; break
+    case 'unavailable': word = unavailable; break
   }
-
-  const safeLimit = Number.isFinite(limit) && limit > 0 ? limit : 1
-  const rawPct = (safeUsed / safeLimit) * 100
-  const clampedPct = Math.max(0, Math.min(100, rawPct))
-  const displayPct = Math.round(rawPct * 10) / 10
-  const level = getThresholdLevel(rawPct)
-  const formattedLimit = Number.isInteger(safeLimit) ? String(safeLimit) : safeLimit.toFixed(1)
-  const levelWord = level === 'ok' ? 'OK' : level === 'warn' ? 'Warning >=80%' : 'Critical >=95%'
-  const svg = renderStatusSvg(level)
-
-  return (
-    `<div class="xp-meter xp-meter--${level}" data-threshold="${level}">` +
-    `<div class="xp-meter__header">` +
-    `<span class="xp-meter__status">${svg}<span class="xp-meter__word">${escapeHtml(levelWord)}</span></span>` +
-    `<span class="xp-meter__values xp-tabular"><bdi dir="ltr">${escapeHtml(formattedUsed)} / ${escapeHtml(formattedLimit)}${unitSuffix} <strong class="xp-meter__pct">(${displayPct.toFixed(displayPct % 1 === 0 ? 0 : 1)}%)</strong></bdi></span>` +
-    `</div>` +
-    `<div class="xp-meter__track" role="progressbar" aria-valuenow="${Math.round(clampedPct)}" aria-valuemin="0" aria-valuemax="100">` +
-    `<div class="xp-meter__fill xp-meter__fill--${level}" style="inline-size: ${clampedPct.toFixed(1)}%"></div>` +
-    `</div>` +
-    `</div>`
-  )
+  const percent = usage.kind === 'bounded' && usage.percent !== null ? meterPercentText(usage.percent, usage.threshold, usage.usedValue > 0) : undefined
+  const partHtml = (part: ResourceQuantityState, key: 'used' | 'limit') => `<bdi dir="${isAr && (part.value === 'unlimited' || part.availability !== 'known') ? 'rtl' : 'ltr'}" data-resource-part="${key}">${escapeHtml(value(part))}</bdi>`
+  const valuesHtml = `<bdi dir="ltr">${partHtml(usage.used, 'used')} / ${partHtml(usage.limit, 'limit')}${suffix ? ` <bdi dir="auto">${escapeHtml(suffix.trim())}</bdi>` : ''}${percent ? ` (${escapeHtml(percent)})` : ''}</bdi>`
+  const severity = threshold ? ` xp-meter--${threshold}` : ' xp-meter--neutral'
+  const thresholdAttribute = threshold ? ` data-threshold="${threshold}"` : ''
+  const icon = threshold && threshold !== 'ok' ? renderStatusSvg(threshold) : ''
+  const track = usage.kind === 'bounded'
+    ? `<div class="xp-meter__track" role="meter" aria-label="${escapeHtml(normalizeAsciiDigits(options.label))}" aria-valuemin="0" aria-valuemax="${usage.limitValue}" aria-valuenow="${Math.min(usage.usedValue, usage.limitValue)}" aria-valuetext="${escapeHtml(`${valuesText}${percent ? ` (${percent})` : ''}; ${word}${options.configuredLimit ? `; ${text('Configured limit', 'الحد المعيّن')}` : ''}`)}"><div class="xp-meter__fill xp-meter__fill--${usage.threshold}" style="inline-size: ${usage.fillPercent}%"></div></div>`
+    : ''
+  return `<div class="xp-meter${severity}" data-resource-state="${usage.kind}"${thresholdAttribute} role="group" aria-label="${escapeHtml(normalizeAsciiDigits(options.label))}"><div class="xp-meter__header"><span class="xp-meter__values xp-tabular">${valuesHtml}</span><span class="xp-meter__status">${icon}<span class="xp-meter__word">${escapeHtml(word)}</span></span></div>${track}${configured}</div>`
 }
 
 /**
@@ -1894,7 +1902,7 @@ html[dir="rtl"] .xp-field-value[dir="ltr"] {
 .xp-meter {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--xp-space-sm);
   min-inline-size: 160px;
 }
 
@@ -1917,8 +1925,12 @@ html[dir="rtl"] .xp-field-value[dir="ltr"] {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-weight: 600;
+  font-weight: var(--xp-weight-medium);
 }
+
+.xp-meter--neutral .xp-meter__status,
+.xp-meter__basis { color: var(--xp-text-muted); }
+.xp-meter__basis { font-size: var(--xp-type-caption); line-height: var(--xp-leading-caption); }
 
 .xp-meter--ok .xp-meter__status { color: var(--xp-status-ok-fg); }
 .xp-meter--warn .xp-meter__status { color: var(--xp-status-warn-fg); }
@@ -1942,6 +1954,11 @@ html[dir="rtl"] .xp-field-value[dir="ltr"] {
 .xp-meter__fill--ok { background-color: var(--xp-status-ok-bar); }
 .xp-meter__fill--warn { background-color: var(--xp-status-warn-bar); }
 .xp-meter__fill--critical { background-color: var(--xp-status-critical-bar); }
+
+.xp-io-monitor { display: flex; flex-direction: column; gap: var(--xp-space-card); min-inline-size: 0; }
+.xp-io-monitor > .xp-card__header { margin-block-end: 0; }
+.xp-io-monitor .xp-kpi__value { font-size: var(--xp-type-page); line-height: var(--xp-leading-page); font-weight: var(--xp-weight-semibold); }
+.xp-resource-history-unavailable { color: var(--xp-text-muted); }
 
 /* Reconcile Pipeline Stepper Banner (render -> test -> switch -> reload -> verify) */
 .xp-reconcile-banner {

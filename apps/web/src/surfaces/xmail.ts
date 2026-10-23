@@ -10,8 +10,6 @@ import {
   resolveSurfaceSection,
 } from '../shell.ts'
 
-export { renderMailExtendedSections } from './extended-views.ts'
-
 export interface MailMessageItem {
   uid: number
   folder: string
@@ -79,8 +77,8 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
   const allMessages = (props.messages ?? []).filter(message => Number.isSafeInteger(message.uid) && message.uid > 0)
   const messages = allMessages.filter(message => message.folder === activeFolder)
   const selectedMessage = messages.find(message => message.uid === props.selectedUid) ?? messages[0]
-  const quota = props.quotaUsedMb !== undefined && props.quotaLimitMb !== undefined
-    ? renderThresholdMeter(props.quotaUsedMb, props.quotaLimitMb, 'MB')
+  const quota = props.quotaUsedMb !== undefined || props.quotaLimitMb !== undefined
+    ? renderThresholdMeter(props.quotaUsedMb, props.quotaLimitMb, { unit: 'MiB', locale, label: text('Mailbox quota', 'حصة صندوق البريد') })
     : ''
   const xmailNav = visibleNavigation(props.visibility, props.catalog).find(nav => nav.surface === 'xmail')
   const navSectionsHtml = (xmailNav?.sections ?? []).map(navSection => `

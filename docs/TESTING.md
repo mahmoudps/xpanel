@@ -136,6 +136,18 @@ API regressions use local requests, disposable state/SQLite and declared agent f
 
 Neither a safety refusal nor `configuration_applied` with `targetVerified: false` closes account delivery. Retain failed attempts and bind results to the exact exported source.
 
+## Resource meter component acceptance
+
+```bash
+node scripts/toolchain.mjs node tests/browser/resource-usage-acceptance.mjs --output=test-results/resource-usage
+```
+
+Use a new output directory. The resource harness defines 24 component-preview page views: EN/AR, light/dark, 360/768/1440px and comfortable/compact density. Each view contains 11 supplied meter cases, for 264 component-state observations. It also runs 4 actual-surface renderer diagnostics for unknown reseller usage and known mailbox usage with an unavailable cap. Keep the 28 page outcomes and 264 embedded component states distinct when reporting counts.
+
+Cases cover measured zero, bounded thresholds and over-limit values, explicit unlimited, empty/exceeded zero allocation, unavailable usage/cap and unbounded allocation. Assertions check semantic state, accessible meter attributes, real label/value glyph alignment and compound order, ASCII digits, containment, applied locale heading fonts and automated accessibility. A missing positive cap must not create a fill, percentage or healthy state. The shared technical-value matrix remains separate and uses the updated unavailable IO observation contract.
+
+These are synthetic component and layout observations, not live resource collection, effective kernel limits, quota enforcement, authenticated scale, mail usage or reseller capacity proof. Bind full-suite results to the exact checkout; retain failures and before/after fingerprints.
+
 ## Native Linux tests
 
 Native tests are privileged and may create accounts, groups, systemd resources, mounts, quota filesystems and firewall fixtures. Use only an explicitly disposable native Linux VM with no customer data, useful workloads or shared state. Do not set the acknowledgement on a workstation, shared container, WSL session or production server. The runner does not invoke sudo or provision a missing VM for you.

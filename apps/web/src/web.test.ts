@@ -1,3 +1,4 @@
+import { SYNTHETIC_WEBSITE_ANALYTICS, SYNTHETIC_WHM_IO_SNAPSHOT } from '../../../tests/fixtures/analytics-snapshots.ts'
 import { LOGIN_CLIENT_SCRIPT } from './login-client.ts'
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
@@ -5,14 +6,10 @@ import { defaultPlan, type Account } from '@xpanel/core'
 import {
   BROWSER_REALTIME_SCRIPT,
   createLiveEventStore,
-  DEFAULT_WEBSITE_ANALYTICS,
-  DEFAULT_WHM_IO_SNAPSHOT,
   dirForLocale,
   getThresholdLevel,
   renderLoginSurface,
-  renderMailExtendedSections,
   renderMailSurface,
-  renderPanelExtendedSections,
   renderPanelSurface,
   renderReconcileBanner,
   renderServerIoMonitorChart,
@@ -20,7 +17,6 @@ import {
   renderThresholdMeter,
   renderWebApp,
   renderWebsiteAnalyticsChart,
-  renderWhmExtendedSections,
   renderWhmSurface,
   serveWebUi,
   t,
@@ -42,7 +38,7 @@ const panelFixture: PanelSurfaceProps = {
   domains: [{ id: 'fixture-domain', accountId: fixtureAccount.id, name: fixtureAccount.primaryDomain, kind: 'primary', parentId: null, docRoot: '/home/alice/public_html', siteType: 'php', upstream: null, redirect: null,
     php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 4, startServers: 1, minSpareServers: 1, maxSpareServers: 2, maxRequests: 500, processIdleTimeoutSec: 10 }, ini: {} }, wildcard: false, certificateId: null, suspended: false, expiresAt: null, pathQuotaMb: 'unlimited', ipv4: fixtureAccount.ipv4, ipv6: fixtureAccount.ipv6 }],
   customConfig: { domainId: 'fixture-domain', accountId: fixtureAccount.id, domainName: fixtureAccount.primaryDomain, nginxInclude: '# synthetic include', apacheInclude: '# synthetic include', userIni: { memory_limit: '256M' }, customHeaders: {}, cacheBypassPaths: [], updatedAt: fixtureAt, updatedBy: 'user' },
-  websiteAnalytics: DEFAULT_WEBSITE_ANALYTICS,
+  websiteAnalytics: SYNTHETIC_WEBSITE_ANALYTICS,
   files: [{ name: 'fixture.txt', path: '/home/alice/public_html/fixture.txt', kind: 'file', sizeBytes: 128, modeOctal: '0640', modifiedAt: fixtureAt }, { name: 'trashed-fixture.txt', path: '/home/alice/.trash/trashed-fixture.txt', kind: 'file', sizeBytes: 64, modeOctal: '0640', modifiedAt: fixtureAt, trashed: true }],
   databases: [{ id: 'fixture-db', accountId: fixtureAccount.id, engine: 'mariadb', name: 'alice_fixture', trashedAt: null }],
   serviceUsers: [{ id: 'fixture-user', accountId: fixtureAccount.id, login: 'info@alice-shop.com', services: { email: true, ftp: true, webdisk: false }, mailboxQuotaMb: 1024, ftpDir: 'public_html' }],
@@ -50,7 +46,7 @@ const panelFixture: PanelSurfaceProps = {
 }
 const whmFixture: WhmSurfaceProps = {
   principal: { kind: 'root', id: 'fixture-root', username: 'synthetic-root' }, hostname: 'srv1.xpanel.test', adminSessionIp: '203.0.113.7',
-  ioSnapshot: DEFAULT_WHM_IO_SNAPSHOT, accounts: [fixtureAccount, { ...fixtureAccount, id: 'fixture-other', username: 'omar', uid: 20016, gid: 20016 }], plans: [fixturePlan],
+  ioSnapshot: SYNTHETIC_WHM_IO_SNAPSHOT, accounts: [fixtureAccount, { ...fixtureAccount, id: 'fixture-other', username: 'omar', uid: 20016, gid: 20016 }], plans: [fixturePlan],
   services: ['nginx', 'apache', 'php-fpm', 'mariadb', 'dovecot', 'postfix', 'pdns', 'nftables'].map(name => ({ name, unit: `${name}.service`, version: 'fixture', active: true, enabled: true, rssMb: 24, role: 'Synthetic observation' })),
   resellers: [{ id: 'fixture-reseller', username: 'fixture-reseller', acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 10240, totalBandwidthMb: 102400, oversell: false, nameservers: [], delegatedIps: [] }],
   ipPool: [{ id: 'fixture-ip', address: '10.0.0.12', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: 'Synthetic address' }],
@@ -82,31 +78,6 @@ const assertAllBadgesHaveSvgAndLabel = (html: string): void => {
   }
 }
 
-/**
- * Verifies that every `.xp-meter` in rendered HTML contains an inline `<svg` icon and follows
- * the `<80%` (`ok`), `>=80%` (`warn`), `>=95%` (`critical`) threshold rule.
- */
-const assertAllThresholdMetersFollow80And95Rule = (html: string): void => {
-  const meterPattern = /<div class="xp-meter xp-meter--(ok|warn|critical)" data-threshold="(ok|warn|critical)">([\s\S]*?)<\/div><\/div><\/div>/g
-  const matches = [...html.matchAll(meterPattern)]
-  assert.ok(matches.length > 0, 'Expected at least one .xp-meter in rendered HTML')
-  for (const match of matches) {
-    const classLevel = match[1]
-    const dataLevel = match[2]
-    const inner = match[3] ?? ''
-    assert.equal(classLevel, dataLevel)
-    assert.match(inner, /<svg\b[^>]*class="xp-status-icon[^"]*"[\s\S]*?<\/svg>/)
-    const pctMatch = /\((\d+(?:\.\d+)?)%\)/.exec(inner)
-    if (pctMatch) {
-      const pct = Number(pctMatch[1])
-      assert.equal(dataLevel, getThresholdLevel(pct))
-    } else {
-      assert.match(inner, /unlimited/)
-      assert.equal(dataLevel, 'ok')
-    }
-  }
-}
-
 describe('@xpanel/web — Design Tokens, Threshold Meters, and Bilingual i18n', () => {
   it('enforces the 80% / 95% threshold rule and renders accessible status badges', () => {
     assert.equal(getThresholdLevel(0), 'ok')
@@ -116,22 +87,23 @@ describe('@xpanel/web — Design Tokens, Threshold Meters, and Bilingual i18n', 
     assert.equal(getThresholdLevel(95), 'critical')
     assert.equal(getThresholdLevel(100), 'critical')
 
-    const okMeter = renderThresholdMeter(64, 100, 'GB')
+    const options = { unit: 'GiB', label: 'Disk allocation', locale: 'en' as const }
+    const okMeter = renderThresholdMeter(64, 100, options)
     assert.match(okMeter, /data-threshold="ok"/)
-    assert.match(okMeter, /<svg class="xp-status-icon"/)
+    assert.match(okMeter, /Within limit/)
     assert.match(okMeter, /\(64%\)/)
 
-    const warnMeter = renderThresholdMeter(85, 100, 'GB')
+    const warnMeter = renderThresholdMeter(85, 100, options)
     assert.match(warnMeter, /data-threshold="warn"/)
-    assert.match(warnMeter, /Warning &gt;=80%/)
+    assert.match(warnMeter, /Warning/)
 
-    const critMeter = renderThresholdMeter(97, 100, 'GB')
+    const critMeter = renderThresholdMeter(97, 100, options)
     assert.match(critMeter, /data-threshold="critical"/)
-    assert.match(critMeter, /Critical &gt;=95%/)
+    assert.match(critMeter, /Critical/)
 
-    const unlimitedMeter = renderThresholdMeter(42, 'unlimited', 'GB')
-    assert.match(unlimitedMeter, /data-threshold="ok"/)
-    assert.match(unlimitedMeter, /unlimited/)
+    const unlimitedMeter = renderThresholdMeter(42, 'unlimited', options)
+    assert.doesNotMatch(unlimitedMeter, /data-threshold="ok"|role="meter"/)
+    assert.match(unlimitedMeter, /Unlimited/)
 
     const badge = renderStatusBadge('ok', 'Healthy')
     assertAllBadgesHaveSvgAndLabel(badge)
@@ -385,10 +357,11 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     assert.match(bannerHtml, /Applied in generation #143/)
     assertAllBadgesHaveSvgAndLabel(bannerHtml)
 
-    const ioChartHtml = renderServerIoMonitorChart(DEFAULT_WHM_IO_SNAPSHOT, 'en')
-    assert.match(ioChartHtml, /<svg class="xp-chart-svg"/)
+    const ioChartHtml = renderServerIoMonitorChart(SYNTHETIC_WHM_IO_SNAPSHOT, 'en')
+    assert.match(ioChartHtml, /data-resource-observation-state="incomplete"/)
+    assert.doesNotMatch(ioChartHtml, /xp-chart-svg|data-live-kpi=/)
 
-    const webChartHtml = renderWebsiteAnalyticsChart(DEFAULT_WEBSITE_ANALYTICS, 'ar')
+    const webChartHtml = renderWebsiteAnalyticsChart(SYNTHETIC_WEBSITE_ANALYTICS, 'ar')
     assert.match(webChartHtml, /<svg class="xp-chart-svg"/)
 
     const res = await serveWebUi(new Request('http://localhost/whm?lang=ar&theme=light&density=compact'))
@@ -397,109 +370,7 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     assert.match(body, /<html lang="ar" dir="rtl" data-theme="light" data-density="compact" data-surface="xwhm"[^>]*>/)
   })
 
-  it('preserves extended prototype helper markup with icon labels and thresholds without concatenating it into selected product screens', () => {
-    for (const locale of ['en', 'ar'] as const) {
-      // 1. xWHM Extended Sections
-      const whmExt = renderWhmExtendedSections(locale)
-      const whmHtml = whmExt
-      assert.doesNotMatch(whmAt('/whm', { locale }), /data-section="setup-wizard-hostname-quotas"/)
-      assert.match(whmHtml, /data-section="setup-wizard-hostname-quotas"/)
-      assert.match(whmHtml, /quotacheck -cugm/)
-      assert.match(whmHtml, /quotaon -vug/)
-      assert.match(whmHtml, /hostnamectl/)
-      assert.match(whmHtml, /data-section="operational-dns-suite"/)
-      assert.match(whmHtml, /standard/)
-      assert.match(whmHtml, /simple/)
-      assert.match(whmHtml, /virtualftp/)
-      assert.match(whmHtml, /data-action="batch-dkim-spf-dmarc"/)
-      assert.match(whmHtml, /data-action="cleanup-orphan-zones"/)
-      assert.match(whmHtml, /data-action="sync-dns-cluster"/)
-      assert.match(whmHtml, /data-section="complete-backups-live-transfers"/)
-      for (const dest of ['s3', 'sftp', 'rsync', 'backblaze', 'ftp']) {
-        assert.match(whmHtml, new RegExp(`data-backup-dest="${dest}"`))
-      }
-      assert.match(whmHtml, /data-single-file-restore="true"/)
-      assert.match(whmHtml, /data-action="restore-single-file"/)
-      assert.match(whmHtml, /data-section="live-transfer-session"/)
-      assert.match(whmHtml, /data-section="fine-grained-server-settings"/)
-      assert.match(whmHtml, /\/etc\/logrotate\.d\/xpanel/)
-      assert.match(whmHtml, /zen\.spamhaus\.org/)
-      assert.match(whmHtml, /Greylisting/)
-      assert.match(whmHtml, /data-web-stack-builder="true"/)
-      assert.match(whmHtml, /OpenLiteSpeed/)
-      assert.match(whmHtml, /ModSecurity/)
-      assert.match(whmHtml, /HTTP\/3/)
-      assert.match(whmHtml, /data-section="cluster-branding-languages-whmcs"/)
-      assert.match(whmHtml, /data-cluster-peers-panel="true"/)
-      assert.match(whmHtml, /data-branding-language-form="true"/)
-      assert.match(whmHtml, /data-whmcs-integration="true"/)
-      assertAllBadgesHaveSvgAndLabel(whmExt)
-      assertAllThresholdMetersFollow80And95Rule(whmExt)
-
-      // 2. xPanel Extended Sections
-      const panelExt = renderPanelExtendedSections(locale)
-      const panelHtml = panelExt
-      assert.doesNotMatch(panelAt('/home', { locale }), /data-section="deep-mail-suite"/)
-      assert.match(panelHtml, /data-section="deep-mail-suite"/)
-      assert.match(panelHtml, /data-domain-forwarders="true"/)
-      assert.match(panelHtml, /data-mailman-lists="true"/)
-      assert.match(panelHtml, /data-global-user-sieve="true"/)
-      assert.match(panelHtml, /data-csv-mail-importer="true"/)
-      assert.match(panelHtml, /data-delivery-tracking="true"/)
-      assert.match(panelHtml, /data-caldav-carddav-config="true"/)
-      assert.match(panelHtml, /data-section="extended-file-web-isolation"/)
-      assert.match(panelHtml, /data-directory-privacy="true"/)
-      assert.match(panelHtml, /\.htpasswd/)
-      assert.match(panelHtml, /data-hotlink-protection="true"/)
-      assert.match(panelHtml, /data-web-disk-webdav="true"/)
-      assert.match(panelHtml, /data-git-deploy-panel="true"/)
-      assert.match(panelHtml, /data-action="git-rollback-release"/)
-      assert.match(panelHtml, /data-error-pages-redirects-ipblocker="true"/)
-      assert.match(panelHtml, /data-section="databases-beyond-mariadb-cache"/)
-      assert.match(panelHtml, /PostgreSQL 16/)
-      assert.match(panelHtml, /MongoDB 7\.0/)
-      assert.match(panelHtml, /data-remote-sql-hosts="true"/)
-      assert.match(panelHtml, /data-action="db-check"/)
-      assert.match(panelHtml, /data-action="db-repair"/)
-      assert.match(panelHtml, /data-action="db-optimize"/)
-      assert.match(panelHtml, /\/home\/alice\/\.run\/redis\.sock/)
-      assert.match(panelHtml, /\/home\/alice\/\.run\/memcached\.sock/)
-      assert.match(panelHtml, /data-section="containers-appstore-staging-analytics"/)
-      assert.match(panelHtml, /data-rootless-containers="true"/)
-      assert.match(panelHtml, /data-one-click-app-store="true"/)
-      assert.match(panelHtml, /WordPress/)
-      assert.match(panelHtml, /Laravel/)
-      assert.match(panelHtml, /Drupal/)
-      assert.match(panelHtml, /Ghost/)
-      assert.match(panelHtml, /Nextcloud/)
-      assert.match(panelHtml, /data-action="app-clone-staging"/)
-      assert.match(panelHtml, /data-action="app-push-to-live"/)
-      assert.match(panelHtml, /AWStats/)
-      assert.match(panelHtml, /Webalizer/)
-      assertAllBadgesHaveSvgAndLabel(panelExt)
-      assertAllThresholdMetersFollow80And95Rule(panelExt)
-
-      // 3. xMail Extended Sections
-      const mailExt = renderMailExtendedSections(locale)
-      const mailHtml = mailExt
-      assert.doesNotMatch(mailAt('/mail/inbox', { locale }), /data-section="mail-fulltext-search"/)
-      assert.match(mailHtml, /data-section="mail-fulltext-search"/)
-      assert.match(mailHtml, /data-mail-filter-chips="true"/)
-      assert.match(mailHtml, /data-filter-chip="folder"/)
-      assert.match(mailHtml, /data-filter-chip="sender"/)
-      assert.match(mailHtml, /data-filter-chip="date"/)
-      assert.match(mailHtml, /data-filter-chip="attachment"/)
-      assert.match(mailHtml, /data-section="mail-identities-signatures"/)
-      assert.match(mailHtml, /data-action="save-mail-signature"/)
-      assert.match(mailHtml, /data-section="inbound-sieve-builder"/)
-      assert.match(mailHtml, /data-action="add-sieve-rule"/)
-      assert.match(mailHtml, /data-section="shared-calendars-contacts"/)
-      assert.match(mailHtml, /data-calendar-acl-modal="true"/)
-      assert.match(mailHtml, /read-write/)
-      assert.match(mailHtml, /data-carddav-contacts-list="true"/)
-      assertAllBadgesHaveSvgAndLabel(mailExt)
-    }
-
+  it('preserves the active client request helpers', () => {
     // Verify interactive client script capabilities
     assert.match(BROWSER_REALTIME_SCRIPT, /window\.xpanelApiCall/)
     assert.match(LOGIN_CLIENT_SCRIPT, /x-csrf-token/)

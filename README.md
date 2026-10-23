@@ -51,6 +51,8 @@ The application entrypoint starts one unprivileged process with three immutable 
 
 An authenticated read-only workspace summary can display authorized account/plan fields while hosting tools remain unavailable. The page palette filters every currently available destination for the authorized surface, with Arrow Up/Down selection, Enter navigation and Escape focus return. It lists pages only; it does not grant tool authority or execute commands.
 
+Resource meters distinguish supplied bounded usage, explicit unlimited limits, zero allocation and unavailable observations. They do not assign a percentage or healthy state when a valid positive cap is absent. Configured limits are labelled separately from measured use; this display contract does not establish live host/resource measurements, effective quota enforcement, mailbox usage or reseller allocation.
+
 The mail renderer uses a folder column, message list and reading pane, with a responsive composition workspace. Send is explicitly disabled and does not submit while live delivery remains unqualified. Mailbox authentication, service wiring and end-to-end delivery remain open.
 
 Seven new administrative destinations separate navigation metadata only; they are not implemented screens or delivered service capabilities.

@@ -68,36 +68,110 @@ async function geometry(page) {
   })
 }
 
-async function quotaGate(page) {
-  const observations = await page.evaluate(() => [...document.querySelectorAll('.xp-meter__values > bdi[dir="ltr"]')]
+function inspectQuotaNodes({ controls = false } = {}) {
+  const observe = (value, label) => {
+    if (!label) throw new Error('Quota probe requires a nonempty heading')
+    const walker = document.createTreeWalker(value, NodeFilter.SHOW_TEXT), nodes = []
+    let fullText = '', node
+    while ((node = walker.nextNode())) {
+      const text = node.textContent ?? ''
+      if (text.length) { nodes.push({ node, start: fullText.length, end: fullText.length + text.length }); fullText += text }
+    }
+    const token = text => {
+      const start = fullText.indexOf(text)
+      if (start < 0) throw new Error('Quota probe missing token: ' + text)
+      if (fullText.indexOf(text, start + text.length) >= 0) throw new Error('Quota probe ambiguous token: ' + text)
+      const end = start + text.length
+      const first = nodes.findIndex(part => start >= part.start && start < part.end)
+      const last = nodes.findIndex(part => end > part.start && end <= part.end)
+      if (first < 0 || last < 0) throw new Error('Quota probe cannot map token: ' + text)
+      const range = document.createRange()
+      range.setStart(nodes[first].node, start - nodes[first].start)
+      range.setEnd(nodes[last].node, end - nodes[last].start)
+      if (range.toString() !== text) throw new Error('Quota probe mapped different text: ' + text)
+      const box = range.getBoundingClientRect()
+      if (box.width <= 0 || box.height <= 0) throw new Error('Quota probe token has no glyph geometry: ' + text)
+      return { text: range.toString(), left: box.left, right: box.right, top: box.top, bottom: box.bottom, start_node: first, end_node: last }
+    }
+    // Resolve the complete phrase, not the first descendant text node. Numeric
+    // tokens may span several nested used/limit elements in the rendered meter.
+    const first = token('160'), slash = token('/'), limit = token('1,024')
+    token('MiB')
+    const labelRange = document.createRange(), valueRange = document.createRange()
+    labelRange.selectNodeContents(label); valueRange.selectNodeContents(value)
+    const labelBox = labelRange.getBoundingClientRect(), valueBox = valueRange.getBoundingClientRect()
+    return {
+      label: label.textContent, phrase: fullText.replace(/\s+/g, ' ').trim(), direction: getComputedStyle(value).direction,
+      edge_delta: document.documentElement.dir === 'rtl' ? Math.abs(labelBox.right - valueBox.right) : Math.abs(labelBox.left - valueBox.left),
+      label_bottom: labelBox.bottom, value_top: valueBox.top, text_node_count: nodes.length,
+      first, slash, limit,
+    }
+  }
+  if (controls) {
+    const fixture = document.createElement('div')
+    fixture.setAttribute('data-quota-probe-control', '')
+    fixture.dir = 'ltr'
+    fixture.style.cssText = 'position:fixed;left:-10000px;top:0;width:360px;font:14px "IBM Plex Mono",monospace;'
+    const label = document.createElement('span'), value = document.createElement('bdi')
+    label.textContent = 'Quota probe'; label.style.display = 'block'
+    value.dir = 'ltr'; value.style.display = 'block'
+    fixture.append(label, value); document.body.append(fixture)
+    try {
+      value.innerHTML = '<strong><span>1</span><span>60</span></strong> / <strong><span>1,</span><span>024</span></strong> MiB (15.6%)'
+      const split = observe(value, label)
+      const rejected = []
+      for (const [name, html, expected] of [
+        ['missing-limit', '<strong>160</strong> / <strong>999</strong> MiB (15.6%)', 'Quota probe missing token: 1,024'],
+        ['missing-slash', '<strong>160</strong> <strong>1,024</strong> MiB (15.6%)', 'Quota probe missing token: /'],
+        ['ungrouped-limit', '<strong>160</strong> / <strong>1024</strong> MiB (15.6%)', 'Quota probe missing token: 1,024'],
+        ['malformed-grouping', '<strong>160</strong> / <strong>10,24</strong> MiB (15.6%)', 'Quota probe missing token: 1,024'],
+        ['ambiguous-used', '<strong>160</strong> / <strong>1,024</strong> MiB (15.6%) 160', 'Quota probe ambiguous token: 160'],
+      ]) {
+        value.innerHTML = html
+        let error = null
+        try { observe(value, label) } catch (caught) { error = { name: caught.name, message: caught.message } }
+        rejected.push({ name, expected, error })
+      }
+      return { split, rejected }
+    } finally { fixture.remove() }
+  }
+  return [...document.querySelectorAll('.xp-meter__values > bdi[dir="ltr"]')]
     .filter(value => value.checkVisibility({ checkVisibilityCSS: true }))
     .map(value => {
       const parent = value.closest('.xp-mail-sidebar-quota') ?? value.closest('.xp-card')
-      const label = parent?.querySelector('.xp-label,h2')
-      if (!label) return null
-      const labelRange = document.createRange(), valueRange = document.createRange()
-      labelRange.selectNodeContents(label); valueRange.selectNodeContents(value)
-      const labelBox = labelRange.getBoundingClientRect(), valueBox = valueRange.getBoundingClientRect()
-      const firstText = document.createTreeWalker(value, NodeFilter.SHOW_TEXT).nextNode()
-      const char = index => {
-        const range = document.createRange()
-        range.setStart(firstText, index); range.setEnd(firstText, index + 1)
-        const box = range.getBoundingClientRect()
-        return { left: box.left, right: box.right, top: box.top }
-      }
-      return {
-        label: label.textContent, phrase: value.textContent.replace(/\s+/g, ' ').trim(), direction: getComputedStyle(value).direction,
-        edge_delta: document.documentElement.dir === 'rtl' ? Math.abs(labelBox.right - valueBox.right) : Math.abs(labelBox.left - valueBox.left),
-        label_bottom: labelBox.bottom, value_top: valueBox.top,
-        first: char(0), slash: char(firstText.textContent.indexOf('/')), limit: char(firstText.textContent.indexOf('1024')),
-      }
-    }).filter(Boolean))
+      return observe(value, parent?.querySelector('.xp-label,h2'))
+    })
+}
+
+async function quotaProbeControls(page) {
+  const controls = await page.evaluate(inspectQuotaNodes, { controls: true })
+  assert.equal(controls.split.phrase, '160 / 1,024 MiB (15.6%)')
+  assert.ok(controls.split.text_node_count > 3)
+  assert.ok(controls.split.first.start_node !== controls.split.first.end_node, 'The used token actually spans text nodes')
+  assert.ok(controls.split.limit.start_node !== controls.split.limit.end_node, 'The limit token actually spans text nodes')
+  assert.equal(controls.split.first.text, '160')
+  assert.equal(controls.split.limit.text, '1,024')
+  assert.ok(controls.split.first.right <= controls.split.slash.left && controls.split.slash.right <= controls.split.limit.left, 'Split tokens retain nonoverlapping LTR glyph order')
+  assert.equal(controls.rejected.length, 5)
+  for (const rejected of controls.rejected) {
+    assert.equal(rejected.error?.name, 'Error', 'Invalid token controls must fail explicitly, not with a DOM Range exception')
+    assert.equal(rejected.error.message, rejected.expected)
+  }
+  return controls
+}
+
+async function quotaGate(page) {
+  const observations = await page.evaluate(inspectQuotaNodes)
   for (const observation of observations) {
-    assert.equal(observation.phrase, '160 / 1024 MB (15.6%)', 'The synthetic quota values must not change')
+    assert.equal(observation.phrase, '160 / 1,024 MiB (15.6%)', 'The synthetic quota values and precise binary unit must not change')
     assert.equal(observation.direction, 'ltr')
     assert.ok(observation.edge_delta < 1, 'Actual quota glyphs share the heading edge: ' + observation.label)
     assert.ok(observation.value_top >= observation.label_bottom - 1, 'Quota values sit directly below the heading')
-    assert.ok(observation.first.left < observation.slash.left && observation.slash.left < observation.limit.left, 'The actual quota glyphs keep 160 / 1024 ordering')
+    assert.equal(observation.first.text, '160')
+    assert.equal(observation.slash.text, '/')
+    assert.equal(observation.limit.text, '1,024')
+    assert.ok(observation.first.left < observation.slash.left && observation.slash.left < observation.limit.left, 'The actual quota glyphs keep 160 / 1,024 ordering')
+    assert.ok(observation.first.right <= observation.slash.left && observation.slash.right <= observation.limit.left, 'Numeric tokens and slash must not overlap or reverse')
   }
   return observations
 }
@@ -178,7 +252,7 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
   process.env.PLAYWRIGHT_BROWSERS_PATH ??= join(root, '.tools/playwright-browsers')
   const { chromium } = await import('@playwright/test')
   const fixture = await createVisualFixture()
-  let browser
+  let browser, probeControls
   const outcomes = [], started = Date.now()
   try {
     browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath(), timeout: 20000 })
@@ -207,6 +281,7 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
         assert.equal(await page.locator('[data-ws-indicator="unavailable"]').count(), 1, 'The fixture must retain the unavailable transport state')
         await currentNavigation(page, state)
         outcome.fonts = await fontGate(page, state.locale)
+        if (!probeControls) probeControls = await quotaProbeControls(page)
         outcome.applied_fonts = {}
         for (const [role, selector, family] of [['brand', '.xp-mail-brand strong', 'IBM Plex Sans'], ['heading', 'h1', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans']]) {
           try { outcome.applied_fonts[role] = await assertAppliedFont(page, selector, family) }
@@ -267,6 +342,7 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
     tests: { total: outcomes.length, passed: outcomes.filter(outcome => outcome.status === 'passed').length, failed: outcomes.filter(outcome => outcome.status === 'failed').length },
     source: { before_sha256: before.sha256, after_sha256: after.sha256, files: before.files.length, drift },
     limits: ['Synthetic catalog and mailbox data validate the rendered layout only; they do not authenticate a mailbox or prove SMTP/IMAP, message selection, drafts, attachments or delivery.', 'The non-submitting composer is intentionally unavailable until real mailbox authority and delivery are wired. Enter must never send.', 'Font, keyboard, target and selected geometry checks are scoped accessibility evidence, not complete WCAG certification.', 'Viewport emulation and screenshots do not certify physical devices, every message shape, external design parity or production performance.'],
+    probe_controls: probeControls ?? null,
     outcomes,
   }
   writeFileSync(join(destination, 'results.json'), JSON.stringify(report, null, 2) + '\n')

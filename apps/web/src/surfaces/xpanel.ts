@@ -18,11 +18,9 @@ import {
   formatBytes,
   renderAsyncActionState,
   renderStatusBadge,
-  renderThresholdMeter,
 } from '../tokens.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, getSurfaceNavigationLabel, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
-export { renderPanelExtendedSections } from './extended-views.ts'
 
 export interface JailedFileEntry {
   name: string
@@ -54,118 +52,6 @@ export interface PanelSurfaceProps {
   dnsRecords?: DnsRecord[]
   terminalSessionId?: string
   actionState?: AsyncActionBannerProps
-}
-
-export const DEFAULT_WEBSITE_ANALYTICS: WebsiteAnalyticsSnapshot = {
-  domain: 'alice-shop.com',
-  accountId: 'acc-alice',
-  at: '2026-10-22T14:05:00Z',
-  totals: {
-    requests: 48920,
-    bytes: 1.84 * 1024 * 1024 * 1024,
-    uniqueVisitors: 6410,
-    cacheHitRatioPercent: 84.6,
-    errorRatePercent: 0.12,
-    avgRequestTimeMs: 18.4,
-    p95RequestTimeMs: 62.0,
-    avgUpstreamTimeMs: 14.2,
-    status2xx: 45120,
-    status3xx: 3180,
-    status4xx: 562,
-    status5xx: 58,
-  },
-  series: [
-    {
-      at: '2026-10-22T14:01:00Z',
-      requests: 9200,
-      bytes: 340 * 1024 * 1024,
-      status2xx: 8510,
-      status3xx: 580,
-      status4xx: 98,
-      status5xx: 12,
-      cacheHit: 7780,
-      cacheMiss: 1120,
-      cacheBypass: 300,
-      avgRequestTimeMs: 17.2,
-      p95RequestTimeMs: 58.0,
-      avgUpstreamTimeMs: 13.5,
-    },
-    {
-      at: '2026-10-22T14:02:00Z',
-      requests: 9840,
-      bytes: 375 * 1024 * 1024,
-      status2xx: 9090,
-      status3xx: 620,
-      status4xx: 118,
-      status5xx: 12,
-      cacheHit: 8320,
-      cacheMiss: 1200,
-      cacheBypass: 320,
-      avgRequestTimeMs: 18.0,
-      p95RequestTimeMs: 61.0,
-      avgUpstreamTimeMs: 14.0,
-    },
-    {
-      at: '2026-10-22T14:03:00Z',
-      requests: 10450,
-      bytes: 410 * 1024 * 1024,
-      status2xx: 9640,
-      status3xx: 670,
-      status4xx: 124,
-      status5xx: 16,
-      cacheHit: 8850,
-      cacheMiss: 1240,
-      cacheBypass: 360,
-      avgRequestTimeMs: 19.4,
-      p95RequestTimeMs: 66.0,
-      avgUpstreamTimeMs: 15.1,
-    },
-    {
-      at: '2026-10-22T14:04:00Z',
-      requests: 9610,
-      bytes: 360 * 1024 * 1024,
-      status2xx: 8860,
-      status3xx: 630,
-      status4xx: 110,
-      status5xx: 10,
-      cacheHit: 8140,
-      cacheMiss: 1160,
-      cacheBypass: 310,
-      avgRequestTimeMs: 18.6,
-      p95RequestTimeMs: 63.0,
-      avgUpstreamTimeMs: 14.4,
-    },
-    {
-      at: '2026-10-22T14:05:00Z',
-      requests: 9820,
-      bytes: 370 * 1024 * 1024,
-      status2xx: 9020,
-      status3xx: 680,
-      status4xx: 112,
-      status5xx: 8,
-      cacheHit: 8300,
-      cacheMiss: 1210,
-      cacheBypass: 310,
-      avgRequestTimeMs: 18.1,
-      p95RequestTimeMs: 62.0,
-      avgUpstreamTimeMs: 14.0,
-    },
-  ],
-  topPaths: [
-    { key: '/products/ergonomic-desk', requests: 12480, bytes: 420 * 1024 * 1024, errors5xx: 0 },
-    { key: '/api/v1/cart/summary', requests: 8920, bytes: 64 * 1024 * 1024, errors5xx: 2 },
-    { key: '/static-assets/bundle.js', requests: 7640, bytes: 512 * 1024 * 1024, errors5xx: 0 },
-  ],
-  topReferrers: [
-    { key: 'https://www.google.com/', requests: 18400, bytes: 610 * 1024 * 1024, errors5xx: 0 },
-    { key: 'direct', requests: 14200, bytes: 490 * 1024 * 1024, errors5xx: 0 },
-    { key: 'https://alice-blog.net/', requests: 5120, bytes: 195 * 1024 * 1024, errors5xx: 0 },
-  ],
-  topClientIps: [
-    { key: '198.51.100.42', requests: 640, bytes: 24 * 1024 * 1024, errors5xx: 0 },
-    { key: '203.0.113.88', requests: 510, bytes: 19 * 1024 * 1024, errors5xx: 1 },
-    { key: '2001:db8:85a3::8a2e:370:7334', requests: 430, bytes: 16 * 1024 * 1024, errors5xx: 0 },
-  ],
 }
 
 const ALLOWLISTED_SHELL_BINARIES = [

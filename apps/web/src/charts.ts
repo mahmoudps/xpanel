@@ -3,7 +3,6 @@
 
 import type {
   AccountIoRank,
-  IoAnalyticsPoint,
   IoAnalyticsSnapshot,
   WebsiteAnalyticsSnapshot,
   WebsiteTopEntry,
@@ -12,6 +11,7 @@ import type {
 import { dirForLocale, t, type Locale } from './i18n.ts'
 import {
   escapeHtml,
+  formatAsciiNumber,
   formatBytes,
   getThresholdLevel,
   renderLtrValue,
@@ -59,192 +59,64 @@ function buildSvgPolylineAndArea(
   return { linePoints, areaPoints, coords }
 }
 
-function renderIoAccountRow(rank: AccountIoRank, locale: Locale): string {
-  const sliceUnit = `xpanel-${rank.uid}.slice`
-  const readMbPerSec = Math.round((rank.readBytesPerSec / (1024 * 1024)) * 100) / 100
-  const writeMbPerSec = Math.round((rank.writeBytesPerSec / (1024 * 1024)) * 100) / 100
-  const combinedThroughputMb = Math.round((readMbPerSec + writeMbPerSec) * 100) / 100
-  const memUsedMb = Math.round((rank.memoryCurrentBytes / (1024 * 1024)) * 10) / 10
+const suppliedPositive = (value: number): number | undefined =>
+  Number.isFinite(value) && value > 0 && value <= Number.MAX_SAFE_INTEGER ? value : undefined
 
-  const statusLabel =
-    rank.statusLevel === 'ok'
-      ? t(locale, 'common.status.ok')
-      : rank.statusLevel === 'warn'
-        ? t(locale, 'common.status.warn')
-        : t(locale, 'common.status.critical')
+const suppliedPositiveCounter = (value: number): number | undefined => Number.isSafeInteger(value) ? suppliedPositive(value) : undefined
 
-  return (
-    `<tr data-account-id="${escapeHtml(rank.accountId)}" data-uid="${rank.uid}">` +
-    `<td>` +
-    `<div><strong>${escapeHtml(rank.username)}</strong></div>` +
-    `<div class="xp-mono xp-tabular" style="font-size:0.78rem;color:var(--xp-text-muted);">${renderLtrValue(`${sliceUnit} (UID ${rank.uid})`, 'xp-chart-technical-value')}</div>` +
-    `</td>` +
-    `<td data-numeric="true" class="xp-tabular">` +
-    `<div class="xp-mono" style="margin-block-end:4px;">${renderLtrValue(`R: ${readMbPerSec.toFixed(2)} MB/s · W: ${writeMbPerSec.toFixed(2)} MB/s`, 'xp-chart-technical-value')}</div>` +
-    renderThresholdMeter(combinedThroughputMb, 100, 'MB/s') +
-    `</td>` +
-    `<td data-numeric="true" class="xp-tabular xp-mono">` +
-    `${renderLtrValue(`R: ${Math.round(rank.readIops)} / W: ${Math.round(rank.writeIops)} IOPS`, 'xp-chart-technical-value')}` +
-    `</td>` +
-    `<td data-numeric="true" class="xp-tabular">` +
-    renderThresholdMeter(memUsedMb, rank.memoryLimitMb, 'MB') +
-    `</td>` +
-    `<td data-numeric="true" class="xp-tabular">` +
-    renderThresholdMeter(Math.round(rank.cpuPercent * 10) / 10, 100, '%') +
-    `</td>` +
-    `<td data-numeric="true" class="xp-tabular">` +
-    renderThresholdMeter(rank.pidsCurrent, rank.pidsLimit, 'PIDs') +
-    `</td>` +
-    `<td>${renderStatusBadge(rank.statusLevel, statusLabel)}</td>` +
-    `</tr>`
-  )
+const suppliedRate = (value: number, divisor: number, unit: string, locale: Locale): string => {
+  if (suppliedPositive(value) === undefined) return locale === 'ar' ? 'غير متاح' : 'Unavailable'
+  const scaled = value / divisor
+  // Preserve a positive supplied rate when binary-unit scaling underflows.
+  return scaled === 0 && divisor === 1024 * 1024 ? `${formatAsciiNumber(value)} B/s` : `${formatAsciiNumber(scaled)} ${unit}`
 }
 
-/**
- * Renders the Real-Time Server IO Monitor view:
- * 1. Summary KPI cards (Read MB/s, Write MB/s, IOPS, Disk `await` ms, Linux PSI `some/full avg10`, Host CPU & Memory)
- * 2. Dual-series SVG area/line chart for Read MB/s vs Write MB/s + `await` latency overlay
- * 3. Per-Account cgroup v2 (`xpanel-<uid>.slice`) IO & Resource Ranking table with 80%/95% threshold meters
- */
-export function renderServerIoMonitorChart(
-  snapshot: IoAnalyticsSnapshot,
-  locale: Locale = 'en',
-): string {
-  const dir = dirForLocale(locale)
-  const cur = snapshot.current
-  const points: IoAnalyticsPoint[] =
-    snapshot.history.length > 0 ? snapshot.history : [cur]
+function renderIoAccountRow(rank: AccountIoRank, locale: Locale): string {
+  const text = (en: string, ar: string) => locale === 'ar' ? ar : en
+  const unavailable = text('Unavailable', 'غير متاح')
+  const number = (value: number) => suppliedPositive(value) === undefined ? unavailable : formatAsciiNumber(value)
+  const directional = (read: number, write: number, unit: string) => renderLtrValue(`R: ${number(read)} / W: ${number(write)} ${unit}`, 'xp-chart-technical-value')
+  // Current producer zeroes cannot distinguish missing counters from measured zero.
+  // Its unlimited fallback cannot distinguish a missing plan from explicit policy.
+  const memoryLimit = typeof rank.memoryLimitMb === 'number' && Number.isSafeInteger(rank.memoryLimitMb) ? rank.memoryLimitMb : undefined
+  const pidsLimit = typeof rank.pidsLimit === 'number' && Number.isSafeInteger(rank.pidsLimit) ? rank.pidsLimit : undefined
+  const memory = suppliedPositiveCounter(rank.memoryCurrentBytes)
+  return `<tr data-account-id="${escapeHtml(rank.accountId)}" data-uid="${rank.uid}">
+    <td><strong>${escapeHtml(rank.username)}</strong><div class="xp-mono xp-tabular">${renderLtrValue(`xpanel-${rank.uid}.slice (UID ${rank.uid})`, 'xp-chart-technical-value')}</div></td>
+    <td data-numeric="true" class="xp-tabular"><div class="xp-mono">${renderLtrValue(`R: ${suppliedRate(rank.readBytesPerSec, 1024 * 1024, 'MiB/s', locale)} / W: ${suppliedRate(rank.writeBytesPerSec, 1024 * 1024, 'MiB/s', locale)}`, 'xp-chart-technical-value')}</div></td>
+    <td data-numeric="true" class="xp-tabular xp-mono">${directional(rank.readIops, rank.writeIops, 'IOPS')}</td>
+    <td data-numeric="true" class="xp-tabular">${renderThresholdMeter(memory === undefined ? undefined : memory / (1024 * 1024), memoryLimit, { locale, unit: 'MiB', label: text('Memory', 'الذاكرة'), configuredLimit: true })}</td>
+    <td data-numeric="true" class="xp-tabular">${suppliedPositive(rank.cpuPercent) === undefined ? escapeHtml(unavailable) : renderLtrValue(`${formatAsciiNumber(rank.cpuPercent)}% (1 core)`, 'xp-chart-technical-value')}</td>
+    <td data-numeric="true" class="xp-tabular">${renderThresholdMeter(suppliedPositiveCounter(rank.pidsCurrent), pidsLimit, { locale, unit: 'PIDs', label: text('Processes', 'العمليات'), configuredLimit: true })}</td>
+  </tr>`
+}
 
-  const readMbSeries = points.map((p) => p.readBytesPerSec / (1024 * 1024))
-  const writeMbSeries = points.map((p) => p.writeBytesPerSec / (1024 * 1024))
-  const awaitSeries = points.map((p) => p.awaitMs)
-
-  const maxThroughputMb = Math.max(10, ...readMbSeries, ...writeMbSeries) * 1.15
-  const maxAwaitMs = Math.max(10, ...awaitSeries) * 1.2
-
-  const readGeom = buildSvgPolylineAndArea(readMbSeries, maxThroughputMb)
-  const writeGeom = buildSvgPolylineAndArea(writeMbSeries, maxThroughputMb)
-  const awaitGeom = buildSvgPolylineAndArea(awaitSeries, maxAwaitMs)
-
-  const curReadMb = (cur.readBytesPerSec / (1024 * 1024)).toFixed(2)
-  const curWriteMb = (cur.writeBytesPerSec / (1024 * 1024)).toFixed(2)
-  const curTotalIops = Math.round(cur.readIops + cur.writeIops)
-  const psiLevel = getThresholdLevel(Math.max(cur.psiSomeAvg10, cur.psiFullAvg10) * 2)
-  const awaitLevel = cur.awaitMs >= 50 ? 'critical' : cur.awaitMs >= 20 ? 'warn' : 'ok'
-  const memUsedGb = (cur.memoryUsedBytes / (1024 * 1024 * 1024)).toFixed(2)
-  const memTotalGb = (Math.max(1, cur.memoryTotalBytes) / (1024 * 1024 * 1024)).toFixed(2)
-
-  const accountRows =
-    snapshot.accounts.length > 0
-      ? snapshot.accounts.map((acc) => renderIoAccountRow(acc, locale)).join('')
-      : `<tr><td colspan="7" style="text-align:center;color:var(--xp-text-muted);">${escapeHtml(t(locale, 'io.table.empty'))}</td></tr>`
-
-  const circlesHtml = readGeom.coords
-    .map((pt, idx) => {
-      const wPt = writeGeom.coords[idx]
-      const pointData = points[idx] ?? cur
-      const tooltip = `Read ${pt.value.toFixed(2)} MB/s | Write ${(wPt?.value ?? 0).toFixed(2)} MB/s | await ${pointData.awaitMs.toFixed(1)} ms | PSI ${pointData.psiSomeAvg10.toFixed(1)}%`
-      return `<circle cx="${pt.x}" cy="${pt.y}" r="3.2" fill="var(--xp-chart-read)" data-tooltip="${escapeHtml(tooltip)}"><title>${escapeHtml(tooltip)}</title></circle>`
-    })
-    .join('')
-
-  return (
-    `<section class="xp-io-monitor" dir="${dir}" data-surface-widget="io-monitor" aria-label="${escapeHtml(t(locale, 'io.title'))}">` +
-    `<header class="xp-card__header">` +
-    `<div>` +
-    `<h2 style="margin:0;font-size:1.2rem;">${escapeHtml(t(locale, 'io.title'))}</h2>` +
-    `<p class="xp-prose" style="margin:4px 0 0;color:var(--xp-text-secondary);font-size:0.88rem;">${escapeHtml(t(locale, 'io.subtitle'))}</p>` +
-    `</div>` +
-    `<time class="xp-mono xp-tabular" datetime="${escapeHtml(snapshot.at)}">${renderLtrValue(snapshot.at)}</time>` +
-    `</header>` +
-    `<div class="xp-kpi-grid" style="margin-block-end:var(--xp-space-card);">` +
-    `<div class="xp-card">` +
-    `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'io.kpi.readRate'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" data-live-kpi="io-read" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${renderLtrValue(`${curReadMb} MB/s`)}</div>` +
-    `<div class="xp-mono xp-tabular" style="font-size:0.8rem;color:var(--xp-text-muted);">${renderLtrValue(`${Math.round(cur.readIops)} read IOPS`)}</div>` +
-    `</div>` +
-    `<div class="xp-card">` +
-    `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'io.kpi.writeRate'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" data-live-kpi="io-write" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${renderLtrValue(`${curWriteMb} MB/s`)}</div>` +
-    `<div class="xp-mono xp-tabular" style="font-size:0.8rem;color:var(--xp-text-muted);">${renderLtrValue(`${Math.round(cur.writeIops)} write IOPS`)}</div>` +
-    `</div>` +
-    `<div class="xp-card">` +
-    `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'io.kpi.iops'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" data-live-kpi="io-iops" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${renderLtrValue(`${curTotalIops} IOPS`)}</div>` +
-    `<div class="xp-mono xp-tabular" style="font-size:0.8rem;color:var(--xp-text-muted);">${renderLtrValue(`Load 1m: ${cur.loadAvg1m.toFixed(2)}`)}</div>` +
-    `</div>` +
-    `<div class="xp-card">` +
-    `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'io.kpi.await'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" data-live-kpi="io-await" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${renderLtrValue(`${cur.awaitMs.toFixed(2)} ms`)}</div>` +
-    `<div>${renderStatusBadge(awaitLevel, `${cur.awaitMs.toFixed(1)} ms await`)}</div>` +
-    `</div>` +
-    `<div class="xp-card">` +
-    `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'io.kpi.psi'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" style="font-size:1.35rem;font-weight:700;margin-block:6px;">${renderLtrValue(`${cur.psiSomeAvg10.toFixed(2)}% / ${cur.psiFullAvg10.toFixed(2)}%`)}</div>` +
-    `<div>${renderStatusBadge(psiLevel, `some ${cur.psiSomeAvg10.toFixed(1)}% · full ${cur.psiFullAvg10.toFixed(1)}%`)}</div>` +
-    `</div>` +
-    `<div class="xp-card">` +
-    `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'io.kpi.cpuMemory'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" style="font-size:1.35rem;font-weight:700;margin-block:6px;">${renderLtrValue(`CPU ${cur.cpuPercent.toFixed(1)}%`)}</div>` +
-    `<div class="xp-mono xp-tabular" style="font-size:0.8rem;color:var(--xp-text-muted);">${renderLtrValue(`RAM ${memUsedGb} / ${memTotalGb} GB`)}</div>` +
-    `</div>` +
-    `</div>` +
-    `<div class="xp-card" style="margin-block-end:var(--xp-space-card);">` +
-    `<div class="xp-card__header">` +
-    `<strong>${escapeHtml(t(locale, 'io.chart.title'))}</strong>` +
-    `<div class="xp-chart-legend">` +
-    `<span><span class="xp-chart-swatch" style="background:var(--xp-chart-read);"></span>${escapeHtml(t(locale, 'io.chart.readSeries'))}</span>` +
-    `<span><span class="xp-chart-swatch" style="background:var(--xp-chart-write);"></span>${escapeHtml(t(locale, 'io.chart.writeSeries'))}</span>` +
-    `<span><span class="xp-chart-swatch" style="background:var(--xp-chart-latency);"></span>${escapeHtml(t(locale, 'io.chart.awaitMs'))}</span>` +
-    `</div>` +
-    `</div>` +
-    `<div class="xp-chart-container">` +
-    `<svg class="xp-chart-svg" viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" role="img" aria-label="${escapeHtml(t(locale, 'io.chart.title'))}">` +
-    `<defs>` +
-    `<linearGradient id="xp-io-read-grad" x1="0" y1="0" x2="0" y2="1">` +
-    `<stop offset="0%" stop-color="var(--xp-chart-read)" stop-opacity="0.32"/>` +
-    `<stop offset="100%" stop-color="var(--xp-chart-read)" stop-opacity="0.02"/>` +
-    `</linearGradient>` +
-    `<linearGradient id="xp-io-write-grad" x1="0" y1="0" x2="0" y2="1">` +
-    `<stop offset="0%" stop-color="var(--xp-chart-write)" stop-opacity="0.28"/>` +
-    `<stop offset="100%" stop-color="var(--xp-chart-write)" stop-opacity="0.02"/>` +
-    `</linearGradient>` +
-    `</defs>` +
-    `<line x1="${PAD_LEFT}" y1="${PAD_TOP}" x2="${CHART_WIDTH - PAD_RIGHT}" y2="${PAD_TOP}" stroke="var(--xp-chart-grid)" stroke-dasharray="4 4"/>` +
-    `<line x1="${PAD_LEFT}" y1="${(PAD_TOP + CHART_HEIGHT - PAD_BOTTOM) / 2}" x2="${CHART_WIDTH - PAD_RIGHT}" y2="${(PAD_TOP + CHART_HEIGHT - PAD_BOTTOM) / 2}" stroke="var(--xp-chart-grid)" stroke-dasharray="4 4"/>` +
-    `<line x1="${PAD_LEFT}" y1="${CHART_HEIGHT - PAD_BOTTOM}" x2="${CHART_WIDTH - PAD_RIGHT}" y2="${CHART_HEIGHT - PAD_BOTTOM}" stroke="var(--xp-border-strong)"/>` +
-    `<polygon points="${readGeom.areaPoints}" fill="url(#xp-io-read-grad)"/>` +
-    `<polygon points="${writeGeom.areaPoints}" fill="url(#xp-io-write-grad)"/>` +
-    `<polyline points="${readGeom.linePoints}" fill="none" stroke="var(--xp-chart-read)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>` +
-    `<polyline points="${writeGeom.linePoints}" fill="none" stroke="var(--xp-chart-write)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>` +
-    `<polyline points="${awaitGeom.linePoints}" fill="none" stroke="var(--xp-chart-latency)" stroke-width="1.8" stroke-dasharray="5 3" stroke-linecap="round"/>` +
-    circlesHtml +
-    `</svg>` +
-    `</div>` +
-    `</div>` +
-    `<div class="xp-card">` +
-    `<div class="xp-card__header">` +
-    `<strong>${escapeHtml(t(locale, 'io.table.title'))}</strong>` +
-    `</div>` +
-    `<div class="xp-table-wrap">` +
-    `<table class="xp-table">` +
-    `<thead>` +
-    `<tr>` +
-    `<th>${escapeHtml(t(locale, 'io.table.account'))}</th>` +
-    `<th>${escapeHtml(t(locale, 'io.table.readWrite'))}</th>` +
-    `<th>${escapeHtml(t(locale, 'io.table.iops'))}</th>` +
-    `<th>${escapeHtml(t(locale, 'io.table.memory'))}</th>` +
-    `<th>${escapeHtml(t(locale, 'io.table.cpu'))}</th>` +
-    `<th>${escapeHtml(t(locale, 'io.table.pids'))}</th>` +
-    `<th>${escapeHtml(t(locale, 'io.table.status'))}</th>` +
-    `</tr>` +
-    `</thead>` +
-    `<tbody>${accountRows}</tbody>` +
-    `</table>` +
-    `</div>` +
-    `</div>` +
-    `</section>`
-  )
+/** Supplied account values and configured caps; no host observation or enforcement attestation. */
+export function renderServerIoMonitorChart(snapshot: IoAnalyticsSnapshot, locale: Locale = 'en'): string {
+  const text = (en: string, ar: string) => locale === 'ar' ? ar : en
+  const unavailable = text('Unavailable', 'غير متاح')
+  const rate = (value: number, divisor: number, unit: string) => suppliedRate(value, divisor, unit, locale)
+  const current = snapshot.current
+  const kpi = (label: string, value: string, key?: string) => `<div class="xp-card xp-field"><div class="xp-label">${escapeHtml(label)}</div><div class="xp-kpi__value xp-tabular"${key ? ` data-resource-observation="${key}"` : ''}>${value === unavailable ? escapeHtml(value) : renderLtrValue(value)}</div></div>`
+  const rows = snapshot.accounts.map(account => renderIoAccountRow(account, locale)).join('')
+  // The old wire shape supplies synthetic defaults for host RAM/PSI/await and no
+  // rate-availability metadata. Keep those observations unavailable until cutover.
+  return `<section class="xp-io-monitor" dir="${dirForLocale(locale)}" data-surface-widget="io-monitor" aria-label="${text('Resource usage', 'استخدام الموارد')}">
+    <header class="xp-card__header"><div><h2>${text('Resource usage', 'استخدام الموارد')}</h2><p class="xp-prose">${text('Account resources and configured limits.', 'موارد الحسابات والحدود المعيّنة.')}</p></div><time class="xp-mono xp-tabular" datetime="${escapeHtml(snapshot.at)}">${renderLtrValue(snapshot.at)}</time></header>
+    <p class="xp-help" role="status" data-resource-observation-state="incomplete">${text('Some measurements are unavailable.', 'بعض القياسات غير متاحة.')}</p>
+    <div class="xp-kpi-grid">
+      ${kpi(text('Account read total', 'إجمالي قراءة الحسابات'), rate(current.readBytesPerSec, 1024 * 1024, 'MiB/s'), 'io-read')}
+      ${kpi(text('Account write total', 'إجمالي كتابة الحسابات'), rate(current.writeBytesPerSec, 1024 * 1024, 'MiB/s'), 'io-write')}
+      ${kpi(text('Account IOPS total', 'إجمالي عمليات الحسابات'), current.readIops > 0 && current.writeIops > 0 ? rate(current.readIops + current.writeIops, 1, 'IOPS') : unavailable, 'io-iops')}
+      ${kpi(text('Disk latency', 'زمن استجابة القرص'), unavailable)}
+      ${kpi(text('IO pressure', 'ضغط عمليات القرص'), unavailable)}
+      ${kpi(text('Host CPU and memory', 'معالج الخادم والذاكرة'), unavailable)}
+    </div>
+    <div class="xp-card xp-field"><h3>${text('Read and write history', 'سجل القراءة والكتابة')}</h3><p class="xp-resource-history-unavailable" role="status">${escapeHtml(unavailable)}</p></div>
+    <div class="xp-card"><div class="xp-card__header"><h3>${text('Account resources', 'موارد الحسابات')}</h3></div><div class="xp-table-wrap"><table class="xp-table"><thead><tr>
+      <th>${text('Account', 'الحساب')}</th><th>${text('Read / write', 'القراءة / الكتابة')}</th><th>IOPS</th><th>${text('Memory', 'الذاكرة')}</th><th>${text('CPU (% of 1 core)', 'المعالج (% من نواة واحدة)')}</th><th>${text('Processes', 'العمليات')}</th>
+    </tr></thead><tbody>${rows || `<tr><td colspan="6">${escapeHtml(unavailable)}</td></tr>`}</tbody></table></div></div>
+  </section>`
 }
 
 function renderTopEntriesTable(

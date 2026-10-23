@@ -71,15 +71,21 @@ try {
         const glyph = e => { const range = document.createRange(); range.selectNodeContents(e); const r = range.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom } }
         const rtl = document.documentElement.dir === 'rtl', edgeDelta = (a, b) => Math.abs(rtl ? a.right - b.right : a.left - b.left)
         const pairs = []
-        for (const value of document.querySelectorAll('.xp-kpi__value, #whm-plans [data-plan-row] td')) {
-          const walker = document.createTreeWalker(value, NodeFilter.SHOW_TEXT); let node
-          while (node = walker.nextNode()) {
-            const raw = node.textContent, match = /(\d+(?:\.\d+)?%?)\s*(?:GB|MB|KB|B)?\s*[\/·]\s*(\d+(?:\.\d+)?%?)/.exec(raw)
+        for (const value of document.querySelectorAll('.xp-kpi__value, .xp-meter__values, #whm-plans [data-plan-row] td')) {
+            const raw = value.textContent, match = /(\d+(?:\.\d+)?%?)\s*(?:GiB|MiB|GB|MB|KB|B)?\s*[\/·]\s*(\d+(?:\.\d+)?%?)/.exec(raw)
             if (!match) continue
             const firstAt = match.index, secondAt = firstAt + match[0].lastIndexOf(match[2])
-            const range = (from, to) => { const r = document.createRange(); r.setStart(node, from); r.setEnd(node, to); const b = r.getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom } }
-            pairs.push({ raw, first: range(firstAt, firstAt + match[1].length), second: range(secondAt, secondAt + match[2].length), label: value.previousElementSibling?.textContent.trim(), direction: getComputedStyle(value).direction, isolation: getComputedStyle(node.parentElement).unicodeBidi })
-          }
+            const range = (from, to) => {
+              const walker = document.createTreeWalker(value, NodeFilter.SHOW_TEXT), r = document.createRange(); let node, offset = 0, started = false
+              while (node = walker.nextNode()) {
+                const end = offset + node.textContent.length
+                if (!started && from < end) { r.setStart(node, from - offset); started = true }
+                if (started && to <= end) { r.setEnd(node, to - offset); break }
+                offset = end
+              }
+              const b = r.getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom }
+            }
+            pairs.push({ raw, first: range(firstAt, firstAt + match[1].length), second: range(secondAt, secondAt + match[2].length), label: value.previousElementSibling?.textContent.trim(), direction: getComputedStyle(value).direction })
         }
         const kpis = [...document.querySelectorAll('.xp-kpi__value')].map(e => ({ text: e.textContent.trim(), value_glyph: glyph(e), label_glyph: glyph(e.previousElementSibling), logical_edge_delta: edgeDelta(glyph(e), glyph(e.previousElementSibling)), direction: getComputedStyle(e).direction, unicode_bidi: getComputedStyle(e).unicodeBidi, font_size: getComputedStyle(e).fontSize, line_height: getComputedStyle(e).lineHeight }))
         const wrappers = [...document.querySelectorAll('#main-content .xp-table-wrap')].map((e, index) => ({ index, ...rect(e), client_width: e.clientWidth, scroll_width: e.scrollWidth, overflow_x: getComputedStyle(e).overflowX, role: e.getAttribute('role'), tabindex: e.tabIndex, card: rect(e.closest('.xp-card')) }))
@@ -100,7 +106,9 @@ try {
         }) : []
         const fields = ['mail-outbound-mode', 'mail-default-ipv4', 'mail-default-ipv6', 'mail-default-helo'].map(id => { const c = document.getElementById(id), l = document.querySelector('label[for="' + id + '"]'); return c && l ? { id, gap: rect(c).top - rect(l).bottom, logical_edge_delta: edgeDelta(rect(c), rect(l)), control: rect(c) } : null }).filter(Boolean)
         const label = document.querySelector('#whm-plans label:has(input[name="unlimitedAddonDomains"])'), input = document.getElementById('plan-io-max'), inputLabel = document.querySelector('label[for="plan-io-max"]')
-        return { viewport: innerWidth, document_scroll_width: document.documentElement.scrollWidth, body_overflow_x: getComputedStyle(document.body).overflowX, root_overflow_x: getComputedStyle(document.documentElement).overflowX, pairs, kpis, wrappers, fields, technical_tokens, unlimited_label: label ? rect(label) : null, input: input ? { value: input.value, dir: input.dir, computed_direction: getComputedStyle(input).direction, ...rect(input), label_glyph: glyph(inputLabel), logical_edge_delta: edgeDelta(rect(input), rect(inputLabel)) } : null }
+        const io = document.querySelector('.xp-io-monitor'), ioHeader = io?.querySelector(':scope > .xp-card__header'), ioStatus = io?.querySelector(':scope > [data-resource-observation-state]'), nestedHeader = io?.querySelector(':scope > .xp-card > .xp-card__header')
+        const ioContract = kind === 'io' ? { incomplete: ioStatus?.dataset.resourceObservationState, legacyLive: document.querySelectorAll('.xp-io-monitor [data-live-kpi]').length, supplied: document.querySelectorAll('[data-resource-observation]').length, hostRatio: /RAM\s+\d+\s*\/|Load\s+\d/.test(io.textContent), headerStatusGap: rect(ioStatus).top - rect(ioHeader).bottom, nestedHeaderMargin: parseFloat(getComputedStyle(nestedHeader).marginBlockEnd) } : null
+        return { viewport: innerWidth, document_scroll_width: document.documentElement.scrollWidth, body_overflow_x: getComputedStyle(document.body).overflowX, root_overflow_x: getComputedStyle(document.documentElement).overflowX, pairs, kpis, wrappers, fields, technical_tokens, ioContract, unlimited_label: label ? rect(label) : null, input: input ? { value: input.value, dir: input.dir, computed_direction: getComputedStyle(input).direction, ...rect(input), label_glyph: glyph(inputLabel), logical_edge_delta: edgeDelta(rect(input), rect(inputLabel)) } : null }
       }, sample.kind)
       const g = outcome.geometry
       check('document-fits-viewport', g.document_scroll_width <= sample.width + 1, g.document_scroll_width)
@@ -110,15 +118,19 @@ try {
         check('whole-technical-table-phrase-glyph-order', g.technical_tokens.length === (sample.kind === 'traffic' ? 6 : 3) && g.technical_tokens.every(token => token.characters.length > 1 && token.characters.every((character, i, all) => i === 0 || (Math.abs(character.top - all[0].top) <= 1 && character.left >= all[i - 1].left - 0.5))), g.technical_tokens)
         check('compound-metric-glyph-order', g.pairs.length >= 1 && g.pairs.every(pair => pair.first.left < pair.second.left), g.pairs)
         check('technical-values-retain-direction-after-text-replacement', g.kpis.every(value => value.direction === 'ltr' && ['isolate', 'isolate-override'].includes(value.unicode_bidi)), g.kpis.map(value => [value.direction, value.unicode_bidi]))
-        outcome.live_text_replacement = await page.evaluate(() => {
-          const e = document.querySelector('[data-live-kpi]'), original = e.innerHTML
-          // Match the existing live client's textContent replacement, without a
-          // synthetic WebSocket or any claim of live analytics qualification.
+        if (sample.kind === 'io') {
+          check('unqualified-IO-excludes-legacy-live-and-host-ratios', g.ioContract.incomplete === 'incomplete' && g.ioContract.legacyLive === 0 && g.ioContract.supplied === 3 && !g.ioContract.hostRatio, g.ioContract)
+          check('IO-header-status-gap-24px-with-nested-header-preserved', Math.abs(g.ioContract.headerStatusGap - 24) <= 0.5 && Math.abs(g.ioContract.nestedHeaderMargin - 16) <= 0.5, g.ioContract)
+        }
+        outcome.live_text_replacement = await page.evaluate(kind => {
+          const e = document.querySelector(kind === 'io' ? '[data-resource-observation]' : '[data-live-kpi]'), original = e.innerHTML
+          // Exercise actual textContent replacement geometry. The unqualified IO
+          // wrapper is excluded from the legacy live client until producer cutover.
           e.textContent = '12.50 MB/s'
           const node = e.firstChild, ranges = []
           for (const [from, to] of [[0, 5], [6, 10]]) { const r = document.createRange(); r.setStart(node, from); r.setEnd(node, to); const b = r.getBoundingClientRect(); ranges.push({ left: b.left, right: b.right }) }
           const result = { raw: e.textContent, direction: getComputedStyle(e).direction, number: ranges[0], unit: ranges[1] }; e.innerHTML = original; return result
-        })
+        }, sample.kind)
         check('text-replacement-number-before-unit', outcome.live_text_replacement.number.left < outcome.live_text_replacement.unit.left, outcome.live_text_replacement)
       }
       if (sample.kind === 'traffic') {

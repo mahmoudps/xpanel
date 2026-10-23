@@ -1,3 +1,4 @@
+import { SYNTHETIC_WEBSITE_ANALYTICS, SYNTHETIC_WHM_IO_SNAPSHOT } from '../../../tests/fixtures/analytics-snapshots.ts'
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import { defaultPlan, type Account } from '@xpanel/core'
@@ -13,8 +14,8 @@ import {
   t,
 } from './i18n.ts'
 import { renderMailSurface, type MailSurfaceProps } from './surfaces/xmail.ts'
-import { DEFAULT_WEBSITE_ANALYTICS, renderPanelSurface, type PanelSurfaceProps } from './surfaces/xpanel.ts'
-import { DEFAULT_WHM_IO_SNAPSHOT, renderWhmSurface, type WhmSurfaceProps } from './surfaces/xwhm.ts'
+import { renderPanelSurface, type PanelSurfaceProps } from './surfaces/xpanel.ts'
+import { renderWhmSurface, type WhmSurfaceProps } from './surfaces/xwhm.ts'
 import { createLiveEventStore, renderReconcileBanner } from './ws-client.ts'
 import {
   DESIGN_TOKENS_CSS,
@@ -30,11 +31,11 @@ const syntheticAccount: Account = {
   ipv4: '10.0.0.12', shell: 'none', createdAt: '2026-10-22T14:05:00Z',
 }
 const syntheticWhm: WhmSurfaceProps = {
-  principal: { kind: 'root', id: 'rtl-root', username: 'synthetic-root' }, hostname: 'srv1.xpanel.test', accounts: [syntheticAccount], plans: [syntheticPlan], ioSnapshot: DEFAULT_WHM_IO_SNAPSHOT,
+  principal: { kind: 'root', id: 'rtl-root', username: 'synthetic-root' }, hostname: 'srv1.xpanel.test', accounts: [syntheticAccount], plans: [syntheticPlan], ioSnapshot: SYNTHETIC_WHM_IO_SNAPSHOT,
   ipPool: [{ id: 'rtl-ip', address: '10.0.0.12', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: 'Synthetic RTL sample' }],
 }
 const syntheticPanel: PanelSurfaceProps = {
-  account: syntheticAccount, plan: syntheticPlan, websiteAnalytics: DEFAULT_WEBSITE_ANALYTICS,
+  account: syntheticAccount, plan: syntheticPlan, websiteAnalytics: SYNTHETIC_WEBSITE_ANALYTICS,
   files: [{ name: 'rtl.txt', path: '/home/alice/public_html/rtl.txt', kind: 'file', sizeBytes: 42, modeOctal: '0640', modifiedAt: '2026-10-22T14:05:00Z' }],
   domains: [{ id: 'rtl-domain', accountId: syntheticAccount.id, name: 'alice-shop.com', kind: 'primary', parentId: null, docRoot: '/home/alice/public_html', siteType: 'static', upstream: null, redirect: null,
     php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 1, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 100, processIdleTimeoutSec: 10 }, ini: {} }, wildcard: false, certificateId: null, suspended: false, expiresAt: null, pathQuotaMb: 'unlimited' }],
