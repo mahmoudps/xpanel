@@ -1,6 +1,6 @@
 ---
 name: design-board-pixel-port
-description: Port each design board 1:1 into the app and gate it with pixelmatch. Use for every xWHM, xPanel, and xMail screen. Board export HTML stays out of the repo.
+description: Port each design board 1:1 into the app and gate it with pixelmatch plus a content-truth table. Use for every xWHM, xPanel, and xMail screen. Board export HTML stays out of the repo.
 ---
 
 # Design-board pixel port: mandatory method for every screen
@@ -22,14 +22,14 @@ The board exports themselves stay out of the repo. Read them from the design sto
 
 ## 2. Data binding without layout collapse
 - Bind real data into the SAME tiles, cards and rows.
-- For missing or unknown values, keep the component and show the board's empty treatment ('—', 0, or the board's empty sentence). Never replace a card grid with a plain table or a single "unavailable" line.
+- For a value that was read as empty, or that was not observed, keep the component and show the board's empty treatment ('—', 0, or the board's empty sentence). Where the data exists, show that data. Never replace a card grid with a plain table or a single "unavailable" line.
 - No invented production data. Sample content lives ONLY in a test-fixture harness that is never routed in the product.
 - Unwired actions are rendered exactly as in the board, but disabled, with a subtle 'قيد التفعيل / Coming soon' hint.
 
 ## 3. Pixel gate (mandatory, per screen)
 - Test-only harness: render the app page with a fixture mirroring the board's sample content, at the board's exact viewport and DPR, with fonts loaded and animations paused.
 - pixelmatch at threshold 0.1: **3% or less differing pixels** for LTR, and also for the RTL mirror.
-- Publish board, app and diff images, plus a per-screen table of diff % in the PR. A screen above 3% is NOT done.
+- Publish board, app and diff images, plus a per-screen table of diff % in the PR. A screen above 3% is NOT done. A screen at or under 3% is also not done until the content-truth table in section 7 is attached.
 - Also screenshot the REAL product route with real (possibly empty) data, and confirm that the structure is identical to the board (same regions present).
 
 ## 4. RTL correctness (Arabic)
@@ -49,4 +49,21 @@ The board exports themselves stay out of the repo. Read them from the design sto
 - The RTL bidi check passes.
 - Motion is verified.
 - The real route shows the same structure.
+- The PR includes the content-truth table from section 7, and each bound value matches its source.
 - typecheck and tests pass locally.
+
+## 7. Content truth
+
+Pixel match is not enough. For every screen you port, attach a content-truth table in the pull request. The owner checks every value against the server before merging.
+
+Columns, in this order: **field · shown · real · source**. The source is the API, the database, or the command that produced the value.
+
+One table for the product route. The fidelity fixture is a separate note: its sample numbers are the board's copy, they are not a product route, and they are not evidence that the live page is correct.
+
+Check every bound value:
+
+- **Units are labelled for the unit that is stored and enforced.** A quota or size kept as a count of `n * 1024 * 1024` bytes (Dovecot `storage=<n>M` is 2^20) is MiB, not MB. A decimal gigabyte on the artboard stays on the fixture. Do not relabel the fixture, and do not copy the fixture's GB string onto a MiB field.
+- **Times that are instants carry a labelled timezone.** A parsed mail time is UTC (`HH:MM UTC`, and the full stamp `YYYY-MM-DD HH:MM UTC`). Text that did not parse is shown unchanged. Do not invent a zone for it.
+- **Lists are complete.** A mailbox, an account list, or a filter list is the full result of its read. Do not drop rows to fit the board's sample count. If a pager is real, the page says which slice it is and how many exist.
+- **No raw codes.** Conditions, actions, and statuses are words (From, contains, Discard, File into, paused), not the stored enum.
+- **No fake 0, and no dash where the data exists.** A dash or a zero means the read came back empty, or the value was not observed. An unread list is not "0 messages". An unmeasured quota is not "0 MiB". A missing file is not "Off". A code default that was never saved is not a saved setting.
