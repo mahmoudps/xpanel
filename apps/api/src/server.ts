@@ -107,6 +107,8 @@ import { createExtendedApiRouter } from './extended-routes.ts'
 import { assertAccountAuthorized, assertAccountFeatures, assertApiScope, assertRequestAuthorized, requireDomainAccount, ownedAccounts } from './authorization.ts'
 import { LiveEventHub } from './ws.ts'
 import type { EventSubscriber } from './ws.ts'
+import { renderWebApp } from '../../web/src/app.ts'
+import { requestPrefersHtml } from '../../web/src/status-page.ts'
 import { ENTRY_POINTS, entryPointAllowsApiRoute, entryPointAllowsRole, sessionTokenHash } from './entry-points.ts'
 import type { EntryPoint } from './entry-points.ts'
 import { renderTotpQrSvg } from './totp-qr.ts'
@@ -234,6 +236,8 @@ export interface ApiServerDeps {
   lockoutDurationMs?: number
   homeBaseDir?: string
   webRenderer?: (req: Request) => Promise<Response> | Response
+  /** Exact HTTPS origins of the three panels, used by the misdirected-host page. */
+  publicPanels?: Partial<Record<EntryPoint, string>>
 }
 
 export interface ApiApp {
@@ -292,6 +296,51 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   if (entryPoint && allowedOrigins.size !== 1) return fail('PRECONDITION_FAILED', 'interactive entry points require one exact allowed origin')
   if (entryPoint && [...allowedOrigins].some(origin => { try { const url = new URL(origin); return url.protocol !== 'https:' || url.origin !== origin } catch { return true } })) return fail('PRECONDITION_FAILED', 'interactive origins must be exact HTTPS origins')
   if (publicOrigin && !allowedOrigins.has(publicOrigin)) return fail('PRECONDITION_FAILED', 'publicOrigin must match the configured allowed origin')
+  const publicPanels: Partial<Record<EntryPoint, string>> = {}
+  for (const name of ['xpanel', 'xwhm', 'xmail'] as const) {
+    const origin = deps.publicPanels?.[name]
+    if (origin === undefined) continue
+    let parsed: URL
+    try { parsed = new URL(origin) } catch { return fail('PRECONDITION_FAILED', 'public panel origins must be exact HTTPS origins') }
+    if (parsed.protocol !== 'https:' || parsed.origin !== origin || parsed.username || parsed.password || parsed.hash) {
+      return fail('PRECONDITION_FAILED', 'public panel origins must be exact HTTPS origins')
+    }
+    publicPanels[name] = parsed.origin
+  }
+  const panelLinks = (['xpanel', 'xwhm', 'xmail'] as const).flatMap(surface => {
+    const origin = publicPanels[surface]
+    return origin ? [{ surface, origin }] : []
+  })
+  const prefersDocumentHtml = (request: Request, pathname: string, method: string): boolean =>
+    (method === 'GET' || method === 'HEAD') && !pathname.startsWith('/api/') && requestPrefersHtml(request)
+  const renderTransportStatus = (request: Request, status: 421 | 500 | 503): Response => {
+    const pageUrl = new URL(request.url, 'http://localhost')
+    const locale = pageUrl.searchParams.get('lang') === 'ar' ? 'ar' as const : 'en' as const
+    const theme = pageUrl.searchParams.get('theme') === 'dark' ? 'dark' as const : 'light' as const
+    const density = pageUrl.searchParams.get('density') === 'compact' ? 'compact' as const : 'comfortable' as const
+    const html = renderWebApp({
+      surface: 'xpanel',
+      locale,
+      theme,
+      density,
+      activeRoute: pageUrl.pathname,
+      ...(panelLinks.length ? { panels: panelLinks } : {}),
+      error: {
+        status,
+        surface: 'xpanel',
+        ...(status === 500 || status === 503 ? { retryHref: `${pageUrl.pathname}${pageUrl.search}` } : {}),
+      },
+    })
+    return new Response(html, {
+      status,
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
+        'x-frame-options': 'SAMEORIGIN',
+      },
+    })
+  }
 
   const hasValidIngressSecret = (req: Request): boolean => {
     if (!ingressSecret) return false
@@ -754,7 +803,10 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     }
 
     try {
-      if (publicOrigin && url.host !== new URL(publicOrigin).host) return transportProblem(421, 'MISDIRECTED_REQUEST', 'request host does not match this entry point', pathname)
+      if (publicOrigin && url.host !== new URL(publicOrigin).host) {
+        if (prefersDocumentHtml(req, pathname, method)) return renderTransportStatus(req, 421)
+        return transportProblem(421, 'MISDIRECTED_REQUEST', 'request host does not match this entry point', pathname)
+      }
       if (entryPoint && pathname.startsWith('/api/') && !entryPointAllowsApiRoute(entryPoint, pathname, method)) return transportProblem(404, 'NOT_FOUND', 'route is unavailable on this entry point', pathname)
       if (entryPoint && pathname !== '/api/health' && deps.requireSecureCookies && !isVerifiedHttps(req)) return transportProblem(403, 'FORBIDDEN', 'verified HTTPS ingress is required for this entry point', pathname)
       // ---- Health --------------------------------------------------------------------
@@ -2604,6 +2656,12 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           detail: { error: err instanceof Error ? err.message : String(err) },
           outcome: 'failed',
         }).catch(() => undefined)
+      }
+      const status = isXpanelError(err)
+        ? (err.detail.lockedOut === true ? 429 : (STATUS_BY_CODE[err.code] ?? 400))
+        : 500
+      if ((status === 500 || status === 503) && prefersDocumentHtml(req, pathname, method)) {
+        try { return renderTransportStatus(req, status) } catch { /* keep the problem document */ }
       }
       return problemResponse(err, pathname)
     }

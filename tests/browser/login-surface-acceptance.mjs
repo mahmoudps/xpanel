@@ -153,9 +153,9 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
         assert.equal(metrics.fonts.ready, true, 'Fonts must settle within 5 seconds')
         assert.ok(metrics.fonts.loaded_faces.length > 0, 'Downloadable font faces must actually load')
         assert.equal(metrics.fonts.failed_faces.length, 0)
-        assert.ok(metrics.fonts.loaded_faces.some(face => face.family.includes(state.locale === 'ar' ? 'Noto Sans Arabic' : 'IBM Plex Sans')), 'The locale font must actually load')
+        assert.ok(metrics.fonts.loaded_faces.some(face => face.family.includes(state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')), 'The locale font must actually load')
         metrics.fonts.applied_roles = {}
-        for (const [role, selector, family] of [['brand', '.xp-brand__name', 'IBM Plex Sans'], ['heading', '.xp-login-shell h1', state.locale === 'ar' ? 'Noto Sans Arabic' : 'IBM Plex Sans']]) {
+        for (const [role, selector, family] of [['brand', '.xp-brand__name', 'IBM Plex Sans'], ['heading', '.xp-login-shell h1', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans']]) {
           try { metrics.fonts.applied_roles[role] = await assertAppliedFont(page, selector, family) }
           catch (error) { if (error.appliedFontObservation) metrics.fonts.applied_roles[role] = error.appliedFontObservation; throw error }
         }
@@ -233,7 +233,7 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
   } finally { await browser.close(); await Promise.all(fixtures.map(fixture => fixture.close())) }
   const after = fingerprint(), drift = before.filter((file, index) => file.sha256 !== after[index].sha256).map(file => file.path)
   const report = { schema_version: 1, at: new Date().toISOString(), status: outcomes.every(value => value.status === 'passed') && drift.length === 0 ? 'passed' : 'failed', runtime: process.version, browser: { name: 'Chromium', version: browser.version(), headless: true }, environment: { platform: process.platform, architecture: process.arch }, duration_ms: Date.now() - started,
-    scope: '60 synthetic login states: 3 server-selected audiences, 2 locales, 2 themes, 5 widths (320/360/390/768/1440). Keyboard, toggle, focus, reduced motion, geometry and actual applied Plex English/Noto Arabic custom brand/heading glyph faces on all states; long error wrapping on all 12 narrow states.',
+    scope: '60 synthetic login states: 3 server-selected audiences, 2 locales, 2 themes, 5 widths (320/360/390/768/1440). Keyboard, toggle, focus, reduced motion, geometry and actual applied Plex English/IBM Plex Sans Arabic custom brand/heading glyph faces on all states; long error wrapping on all 12 narrow states.',
     fixture: { synthetic: true, listeners: 3, loopback_only: true, read_only: true, credentials_submitted: 0, live_authentication: false, tls_qualification: false, production_ports_qualification: false },
     tests: { total: outcomes.length, passed: outcomes.filter(value => value.status === 'passed').length, failed: outcomes.filter(value => value.status === 'failed').length },
     source: { before, after, drift },

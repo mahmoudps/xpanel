@@ -665,22 +665,22 @@ export const DESIGN_TOKENS_CSS = /* css */ `
 
 /* Structural layout and spacing tokens; see docs/STANDARDS.md. */
 :root {
-  --xp-font-sans-ltr: 'IBM Plex Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --xp-font-sans-rtl: 'Noto Sans Arabic', 'IBM Plex Sans', 'Inter', Tahoma, sans-serif;
+  --xp-font-sans-ltr: 'IBM Plex Sans', 'IBM Plex Sans Arabic', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --xp-font-sans-rtl: 'IBM Plex Sans Arabic', 'IBM Plex Sans', 'Noto Sans Arabic', Tahoma, sans-serif;
   --xp-font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   /* Typography roles shared by account, administration, mail and sign-in screens. */
-  --xp-type-caption: 12px;
-  --xp-type-label: 13px;
-  --xp-type-body: 14px;
-  --xp-type-card: 16px;
-  --xp-type-page: 22px;
+  --xp-type-caption: 13px;
+  --xp-type-label: 14px;
+  --xp-type-body: 16px;
+  --xp-type-card: 18px;
+  --xp-type-page: 26px;
   --xp-type-input-mobile: 16px;
-  --xp-leading-caption: 18px;
-  --xp-leading-label: 20px;
-  --xp-leading-body: 20px;
-  --xp-leading-card: 24px;
-  --xp-leading-page: 28px;
+  --xp-leading-caption: 20px;
+  --xp-leading-label: 22px;
+  --xp-leading-body: 24px;
+  --xp-leading-card: 28px;
+  --xp-leading-page: 34px;
   --xp-leading-input-mobile: 24px;
   --xp-weight-regular: 400;
   --xp-weight-medium: 500;
@@ -747,11 +747,11 @@ html[dir="rtl"] { font-family: var(--xp-font-sans-rtl); }
 
 /* Arabic glyphs need additional vertical room; direction alone never selects a font. */
 html[lang="ar"] {
-  --xp-leading-caption: 20px;
-  --xp-leading-label: 22px;
-  --xp-leading-body: 22px;
-  --xp-leading-card: 26px;
-  --xp-leading-page: 32px;
+  --xp-leading-caption: 22px;
+  --xp-leading-label: 24px;
+  --xp-leading-body: 26px;
+  --xp-leading-card: 30px;
+  --xp-leading-page: 36px;
 }
 
 /* Enforce tabular numerals on every counter, rate, quota, IP, port, UID, PID, and timestamp */
@@ -1474,7 +1474,7 @@ html[dir="rtl"] .xp-nav-section:not([open]) > .xp-nav-section__title::after { tr
 
 /* Dedicated listener identities share one compact sign-in form contract. */
 .xp-login-shell[data-login-audience] {
-  --xp-login-width: 448px;
+  --xp-login-width: 560px;
   --xp-login-control-size: 48px;
   --xp-login-eye-target: 44px;
   --xp-login-icon-size: 20px;
@@ -1524,7 +1524,32 @@ html[dir="rtl"] .xp-nav-section:not([open]) > .xp-nav-section__title::after { tr
   background: var(--xp-bg-subtle);
   border-color: var(--xp-border);
 }
-.xp-login-theme svg { inline-size: 20px; block-size: 20px; }
+.xp-login-theme { position: relative; }
+.xp-login-theme svg { inline-size: 20px; block-size: 20px; flex: none; }
+.xp-login-theme__label { font-size: var(--xp-type-label); line-height: var(--xp-leading-label); }
+.xp-login-identity__product {
+  margin: 0;
+  font-family: var(--xp-font-sans-ltr);
+  font-size: var(--xp-type-page);
+  font-weight: var(--xp-weight-semibold);
+  letter-spacing: -0.02em;
+  line-height: var(--xp-leading-page);
+  color: var(--xp-text-primary);
+}
+.xp-login-siblings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--xp-space-sm) var(--xp-space-field);
+}
+.xp-login-sibling {
+  color: var(--xp-text-secondary);
+  font-size: var(--xp-type-label);
+  line-height: var(--xp-leading-label);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.xp-login-sibling:hover { color: var(--xp-text-primary); }
 .xp-login-shell[data-login-audience] .xp-login-main {
   display: block;
   max-inline-size: none;
@@ -1564,7 +1589,7 @@ html[dir="rtl"] .xp-nav-section:not([open]) > .xp-nav-section__title::after { tr
   padding-block-start: var(--xp-space-md);
 }
 .xp-login-password { position: relative; display: grid; min-inline-size: 0; }
-.xp-login-password > .xp-input { padding-inline-end: 56px; }
+.xp-login-password > .xp-input { padding-inline-end: 7.75rem; }
 .xp-password-toggle {
   position: absolute;
   inset-block-start: 2px;
@@ -1572,13 +1597,18 @@ html[dir="rtl"] .xp-nav-section:not([open]) > .xp-nav-section__title::after { tr
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  inline-size: 44px;
+  gap: 6px;
+  min-inline-size: 44px;
+  max-inline-size: calc(100% - 8px);
   block-size: 44px;
-  padding: 0;
-  border: 0;
+  padding-inline: 10px;
+  border: 1px solid var(--xp-border);
   border-radius: 8px;
-  background: transparent;
-  color: var(--xp-text-secondary);
+  background: var(--xp-bg-elevated);
+  color: var(--xp-text-primary);
+  font: inherit;
+  font-size: var(--xp-type-label);
+  line-height: var(--xp-leading-label);
   cursor: pointer;
 }
 .xp-password-toggle svg { inline-size: 20px; block-size: 20px; }
@@ -1589,7 +1619,20 @@ html[dir="rtl"] .xp-nav-section:not([open]) > .xp-nav-section__title::after { tr
   outline-offset: 2px;
   background: var(--xp-bg-subtle);
 }
-html[dir="rtl"] .xp-login-password > .xp-input { padding-inline: 56px 12px; }
+html[dir="rtl"] .xp-login-password > .xp-input { padding-inline: 7.75rem 12px; }
+@media (max-width: 479px) {
+  .xp-login-theme__label {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
 html[dir="rtl"] .xp-login-shell[data-login-audience] .xp-label { font-size: 14px; line-height: 22px; }
 html[dir="rtl"] .xp-login-shell[data-login-audience] .xp-page-title { line-height: 32px; }
 html[dir="rtl"] .xp-login-shell[data-login-audience] .xp-help,
@@ -1640,6 +1683,115 @@ html[dir="rtl"] .xp-workspace-summary .xp-field-value > bdi[dir="ltr"] { text-al
 .xp-workspace-summary .xp-prose { margin: 0; }
 .xp-workspace-summary [data-auth-status]:empty { display: none; }
 .xp-workspace-availability > .xp-btn { justify-self: start; }
+.xp-nav-note {
+  margin: 0 0 var(--xp-space-sm);
+  color: var(--xp-text-secondary);
+  font-size: var(--xp-type-body);
+  line-height: var(--xp-leading-body);
+}
+.xp-nav-planned {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.xp-nav-planned__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--xp-space-sm);
+  min-block-size: 44px;
+  padding-inline: 10px;
+  border-radius: var(--xp-radius-sm);
+  color: var(--xp-text-secondary);
+  cursor: not-allowed;
+}
+.xp-nav-planned__name {
+  min-inline-size: 0;
+  font-size: var(--xp-type-body);
+  line-height: var(--xp-leading-body);
+  font-weight: var(--xp-weight-medium);
+}
+.xp-nav-planned__state {
+  flex: none;
+  color: var(--xp-text-muted);
+  font-size: var(--xp-type-caption);
+  line-height: var(--xp-leading-caption);
+}
+.xp-user-menu { position: relative; margin-inline-start: auto; }
+.xp-user-menu__summary {
+  display: flex;
+  align-items: center;
+  min-block-size: 44px;
+  padding-inline: 12px;
+  border: 1px solid var(--xp-border);
+  border-radius: var(--xp-radius-sm);
+  background: var(--xp-bg-surface);
+  cursor: pointer;
+  list-style: none;
+}
+.xp-user-menu__summary::-webkit-details-marker { display: none; }
+.xp-user-menu__summary:focus-visible,
+.xp-menu-choice:focus-visible,
+.xp-login-sibling:focus-visible,
+.xp-back-link:focus-visible {
+  outline: 2px solid var(--xp-border-focus);
+  outline-offset: 2px;
+}
+.xp-user-menu__identity { display: flex; flex-direction: column; align-items: flex-start; min-inline-size: 0; }
+.xp-user-menu__name { font-size: var(--xp-type-body); font-weight: var(--xp-weight-semibold); line-height: var(--xp-leading-body); }
+.xp-user-menu__role { color: var(--xp-text-muted); font-size: var(--xp-type-caption); line-height: var(--xp-leading-caption); }
+.xp-user-menu__panel {
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-start: calc(100% + 8px);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-inline-size: min(280px, 80vw);
+  padding: 8px;
+  border: 1px solid var(--xp-border);
+  border-radius: var(--xp-radius-md);
+  background: var(--xp-bg-surface);
+  box-shadow: var(--xp-shadow-md);
+}
+.xp-menu-choice {
+  display: flex;
+  align-items: center;
+  min-block-size: 44px;
+  padding-inline: 12px;
+  border-radius: var(--xp-radius-sm);
+  color: var(--xp-text-primary);
+  text-decoration: none;
+  font-size: var(--xp-type-body);
+}
+.xp-menu-choice:hover,
+.xp-menu-choice[aria-current="true"] { background: var(--xp-bg-elevated); }
+.xp-menu-density { display: grid; gap: 4px; }
+.xp-menu-signout { justify-content: flex-start; }
+.xp-icon-back { display: block; flex: none; }
+html[dir="rtl"] .xp-icon-back { transform: scaleX(-1); }
+.xp-status-standalone {
+  min-block-size: 100dvh;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: var(--xp-space-card);
+  padding: var(--xp-space-section) var(--xp-space-field);
+}
+.xp-status-main, .xp-status-card { inline-size: min(100%, 640px); }
+.xp-status-card { display: grid; gap: var(--xp-space-field); }
+.xp-status-code {
+  margin: 0;
+  color: var(--xp-text-muted);
+  font-size: var(--xp-type-label);
+  letter-spacing: 0.04em;
+}
+.xp-status-actions { display: flex; flex-wrap: wrap; gap: var(--xp-space-sm); }
+.xp-breadcrumb { font-size: var(--xp-type-body); line-height: var(--xp-leading-body); }
 @media (max-width: 640px) {
   .xp-workspace-summary { gap: 16px; }
   .xp-workspace-summary > .xp-card { padding: 16px; }
@@ -2597,8 +2749,11 @@ html[dir="rtl"] .xp-accounts__technical bdi, html[dir="rtl"] .xp-account-dialog_
   .xp-account-dialog__footer > button { flex: 1 1 auto; }
 }
 
-.xp-totp-qr { display: inline-block; inline-size: max-content; padding: 8px; background: #ffffff; border: 1px solid var(--xp-border); border-radius: var(--xp-radius-sm, 6px); line-height: 0; }
-.xp-totp-qr > svg { display: block; inline-size: 168px; block-size: 168px; }
+.xp-account-security { min-inline-size: 0; }
+.xp-main > .xp-account-security { margin-block-end: var(--xp-space-card); }
+.xp-account-security .xp-help { margin: 0; }
+.xp-totp-qr { display: inline-block; inline-size: max-content; max-inline-size: 100%; padding: 8px; background: #ffffff; border: 1px solid var(--xp-border); border-radius: var(--xp-radius-sm, 6px); line-height: 0; }
+.xp-totp-qr > svg { display: block; inline-size: 168px; block-size: 168px; max-inline-size: 100%; }
 
 ${MAIL_LAYOUT_CSS}
 `

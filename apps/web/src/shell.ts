@@ -1,3 +1,4 @@
+import { renderPlannedNavigation, type PanelId } from './chrome.ts'
 import type { Locale } from './i18n.ts'
 import { escapeHtml, renderStatusBadge } from './tokens.ts'
 import arCatalog from '../../../packages/catalog/src/locales/ar.json' with { type: 'json' }
@@ -133,16 +134,18 @@ export const renderSurfaceShell = (props: SurfaceShellProps): string => `
   </div>
 </div>`
 
+const backIcon = `<svg class="xp-icon-back" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 6 9 12l6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+
 export const renderSurfaceUnavailable = (locale: Locale, homeRoute: string): string => `
 <section class="xp-card xp-screen-state" data-screen="unavailable" role="status">
   <h1 class="xp-page-title">${locale === 'ar' ? 'هذه الصفحة غير متاحة' : 'This page is unavailable'}</h1>
   <p class="xp-prose">${locale === 'ar' ? 'لم تتوفر واجهة مؤهلة لهذه المهمة بعد. يمكنك العودة إلى نظرة عامة.' : 'A qualified screen for this task is not available yet. You can return to the overview.'}</p>
-  <a class="xp-btn" href="${escapeHtml(homeRoute)}">${locale === 'ar' ? 'العودة إلى النظرة العامة' : 'Back to overview'}</a>
+  <a class="xp-btn xp-back-link" href="${escapeHtml(homeRoute)}">${backIcon}<span>${locale === 'ar' ? 'العودة إلى النظرة العامة' : 'Back to overview'}</span></a>
 </section>`
 
 export const renderUnavailableSurfaceShell = (surface: SurfaceShellProps['surface'], locale: Locale): string => renderSurfaceShell({
   surface, locale,
-  sidebar: `<div class="xp-sidebar__brand"><strong>${surface === 'xwhm' ? 'xWHM' : surface === 'xmail' ? 'xMail' : 'xPanel'}</strong></div><nav><p role="status" data-navigation-empty="true">${locale === 'ar' ? 'لا توجد أدوات مثبتة الجاهزية ومتاحة لحسابك.' : 'No verified tools are available for your account.'}</p></nav>`,
+  sidebar: `<div class="xp-sidebar__brand"><strong>${surface === 'xwhm' ? 'xWHM' : surface === 'xmail' ? 'xMail' : 'xPanel'}</strong></div>${renderPlannedNavigation(surface as PanelId, locale)}`,
   topbar: '',
   content: renderSurfaceUnavailable(locale, surface === 'xwhm' ? '/whm' : surface === 'xmail' ? '/mail/inbox' : '/home'),
 })

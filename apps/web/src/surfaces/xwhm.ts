@@ -12,6 +12,7 @@ import type {
   ServerIpEntry,
 } from '@xpanel/core'
 import { renderServerIoMonitorChart } from '../charts.ts'
+import { formatDisplayName } from '../display-name.ts'
 import { type Locale, t } from '../i18n.ts'
 import {
   type AsyncActionBannerProps,
@@ -406,7 +407,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           </div>
           <div class="xp-accounts__field">
           <label class="xp-label" for="new-acc-plan">${isAr ? 'خطة الاستضافة' : 'Hosting plan'}</label>
-          <select id="new-acc-plan" name="planId" class="xp-select" required>${plans.map(plan => `<option value="${escapeHtml(plan.id)}">${escapeHtml(plan.name)}</option>`).join('')}</select>
+          <select id="new-acc-plan" name="planId" class="xp-select" required>${plans.map(plan => `<option value="${escapeHtml(plan.id)}">${escapeHtml(formatDisplayName(plan.name))}</option>`).join('')}</select>
           </div>
           <div class="xp-accounts__field">
             <label class="xp-label" for="new-acc-password">${isAr ? 'كلمة المرور' : 'Password'}</label>
@@ -463,7 +464,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
                 .map(
                   (plan) => `
                 <tr data-plan-row="${escapeHtml(plan.name)}">
-                  <td><strong>${escapeHtml(plan.name)}</strong></td>
+                  <td><strong>${escapeHtml(formatDisplayName(plan.name))}</strong></td>
                   <td class="xp-mono xp-tabular">${renderLtrValue(`${plan.resources.diskMb === 'unlimited' ? 'unlimited' : `${plan.resources.diskMb / 1024} GB`} / ${plan.resources.bandwidthMbMonth === 'unlimited' ? 'unlimited' : `${plan.resources.bandwidthMbMonth / 1024} GB`}`, 'xp-plan-resource-value')}</td>
                   <td class="xp-mono xp-tabular">${renderLtrValue(`${plan.resources.cpuPercent}% / ${plan.resources.memoryMb} MB`, 'xp-plan-resource-value')}</td>
                   <td class="xp-mono xp-tabular">${renderLtrValue(`${plan.resources.ioReadBps === 'unlimited' ? 'unlimited' : formatBytes(plan.resources.ioReadBps)}/s · ${plan.resources.ioWriteBps === 'unlimited' ? 'unlimited' : formatBytes(plan.resources.ioWriteBps)}/s`, 'xp-plan-resource-value')}</td>

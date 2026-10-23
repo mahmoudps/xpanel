@@ -1,6 +1,9 @@
 import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { canSeeAccount, type Account, type Plan } from '@xpanel/core'
+import { panelLabel, renderPlannedNavigation, renderSupportNotice, renderUserMenu, roleLabel, type PanelLink } from './chrome.ts'
+import { formatDisplayName } from './display-name.ts'
 import { dirForLocale, type Locale, SUPPORTED_LOCALES, t } from './i18n.ts'
+import { isStatusCode, renderStatusBody, statusPageCopy, type StatusPageModel } from './status-page.ts'
 import { ACCOUNT_SECURITY_ROUTES, renderAccountSecurityCard } from './surfaces/account-security.ts'
 import { type LoginSurfaceProps, renderLoginSurface } from './surfaces/login.ts'
 import { type MailSurfaceProps, renderMailSurface } from './surfaces/xmail.ts'
@@ -55,6 +58,10 @@ export interface WebAppRenderState {
   whm?: WhmSurfaceProps
   panel?: PanelSurfaceProps
   mail?: MailSurfaceProps
+  /** Present only for an HTTP status screen. It does not invent a workspace. */
+  error?: Omit<StatusPageModel, 'locale' | 'theme' | 'density' | 'surface' | 'path' | 'visibility'> & { surface?: StatusPageModel['surface'] }
+  supportEmail?: string
+  panels?: readonly PanelLink[]
 }
 
 const renderCommandPaletteModal = (
@@ -127,8 +134,7 @@ const renderWorkspaceSummary = (state: WebAppRenderState, locale: Locale): strin
   const isAr = locale === 'ar'
   const field = (key: string, label: string, value: string, ltr = false) =>
     `<div class="xp-field" data-workspace-field="${key}"><span class="xp-label">${escapeHtml(label)}</span><strong class="xp-field-value">${ltr ? `<bdi dir="ltr">${escapeHtml(value)}</bdi>` : escapeHtml(value)}</strong></div>`
-  const role = principal.kind === 'root' ? (isAr ? 'مدير النظام' : 'System administrator')
-    : principal.kind === 'reseller' ? (isAr ? 'موزع' : 'Reseller') : (isAr ? 'مالك الحساب' : 'Account owner')
+  const role = roleLabel(principal.kind, locale)
   const identityFields = field('username', isAr ? 'اسم المستخدم' : 'Username', principal.username, true)
     + field('role', isAr ? 'الدور' : 'Role', role)
   const account = state.surface === 'xpanel' ? (state.workspaceSummary ? state.workspaceSummary.account : state.panel?.account) : undefined
@@ -137,7 +143,7 @@ const renderWorkspaceSummary = (state: WebAppRenderState, locale: Locale): strin
   const accountFields = authorized
     ? (account.username === principal.username ? '' : field('account', isAr ? 'الحساب المحدد' : 'Selected account', account.username, true))
       + field('primary-domain', isAr ? 'النطاق الأساسي' : 'Primary domain', account.primaryDomain, true)
-      + field('plan', isAr ? 'الخطة' : 'Plan', plan?.id === account.planId ? plan.name : (isAr ? 'غير متاحة' : 'Unavailable'))
+      + field('plan', isAr ? 'الخطة' : 'Plan', plan?.id === account.planId ? formatDisplayName(plan.name) : (isAr ? 'غير متاحة' : 'Unavailable'))
       + field('status', isAr ? 'الحالة' : 'Status', account.status === 'active' ? (isAr ? 'نشط' : 'Active')
         : account.status === 'suspended' ? (isAr ? 'معلق' : 'Suspended') : (isAr ? 'قيد الإنهاء' : 'Terminating'))
     : ''
@@ -156,6 +162,9 @@ const renderWorkspaceSummary = (state: WebAppRenderState, locale: Locale): strin
   </section>`
 }
 
+const workspacePath = (surface: WebSurfaceKind, activeRoute?: string): string =>
+  activeRoute ?? (surface === 'xwhm' ? '/whm' : surface === 'xmail' ? '/mail/inbox' : '/home')
+
 const renderUnavailableWorkspace = (
   surface: WebSurfaceKind,
   locale: Locale,
@@ -163,27 +172,47 @@ const renderUnavailableWorkspace = (
   actionState?: AsyncActionBannerProps,
   activeRoute?: string,
   theme: ThemeMode = 'light',
+  density: TableDensity = 'comfortable',
   state?: WebAppRenderState,
-): string => renderSurfaceShell({
-  surface: surface === 'login' ? 'xpanel' : surface,
-  locale,
-  sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${surface === 'xwhm' ? 'xWHM' : surface === 'xmail' ? 'xMail' : 'xPanel'}</strong></div><p class="xp-help" data-navigation-empty="true">${locale === 'ar' ? 'ستظهر الأدوات هنا بعد تأهيلها.' : 'Qualified tools will appear here.'}</p>`,
-  topbar: `<span class="xp-help">${locale === 'ar' ? 'مساحة العمل' : 'Workspace'}</span><div class="xp-topbar__end"><a class="xp-btn xp-btn--ghost" href="${escapeHtml(activeRoute ?? (surface === 'xwhm' ? '/whm' : surface === 'xmail' ? '/mail/inbox' : '/home'))}?lang=${locale === 'ar' ? 'en' : 'ar'}&amp;theme=${theme}" lang="${locale === 'ar' ? 'en' : 'ar'}">${locale === 'ar' ? 'English' : 'العربية'}</a><a class="xp-btn xp-btn--ghost" href="${escapeHtml(activeRoute ?? (surface === 'xwhm' ? '/whm' : surface === 'xmail' ? '/mail/inbox' : '/home'))}?lang=${locale}&amp;theme=${theme === 'dark' ? 'light' : 'dark'}">${theme === 'dark' ? (locale === 'ar' ? 'الوضع الفاتح' : 'Light theme') : (locale === 'ar' ? 'الوضع الداكن' : 'Dark theme')}</a></div>`,
-  content: `<section class="xp-workspace-summary" data-surface="${surface}" data-tool-availability="unverified">
-  <h1 class="xp-page-title">${locale === 'ar' ? 'مساحة العمل' : 'Workspace'}</h1>
+): string => {
+  const panelSurface = surface === 'xwhm' || surface === 'xmail' ? surface : 'xpanel'
+  const path = workspacePath(surface, activeRoute)
+  const principal = state?.visibility?.principal
+  const isAr = locale === 'ar'
+  const heading = isAr ? 'أدواتك ليست على هذا الخادم بعد' : 'Your tools are not on this server yet'
+  const body = isAr
+    ? 'أنت داخل الحساب. النطاقات والبريد والملفات وبقية أدوات الاستضافة ستظهر في القائمة عندما يستطيع هذا الخادم تشغيلها. إلى ذلك الحين تعرض هذه الصفحة حسابك فقط.'
+    : 'You are signed in. Domains, mail, files and the other hosting tools will appear in the sidebar when this server can run them. Until then, this page only shows your account.'
+  const guestBody = isAr
+    ? 'النطاقات والبريد والملفات وبقية أدوات الاستضافة ليست متاحة على هذا الخادم بعد. ستظهر في القائمة عندما يستطيع الخادم تشغيلها.'
+    : 'Domains, mail, files and the other hosting tools are not available on this server yet. They will appear in the sidebar when the server can run them.'
+  return renderSurfaceShell({
+    surface: panelSurface,
+    locale,
+    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${panelLabel(panelSurface)}</strong></div>${renderPlannedNavigation(panelSurface, locale)}`,
+    topbar: renderUserMenu({
+      locale,
+      theme,
+      density,
+      path,
+      ...(state?.accountId ? { accountId: state.accountId } : {}),
+      ...(principal ? { username: principal.username, role: roleLabel(principal.kind, locale) } : {}),
+      signedIn: authenticated && principal !== undefined,
+    }),
+    content: `<section class="xp-workspace-summary" data-surface="${surface}" data-tool-availability="unverified">
+  <h1 class="xp-page-title">${escapeHtml(isAr ? 'مساحة العمل' : 'Workspace')}</h1>
   ${actionState ? renderAsyncActionState({ ...actionState, locale }) : ''}
   ${state ? renderWorkspaceSummary(state, locale) : ''}
   <section class="xp-card xp-workspace-availability" role="status">
-    <h2>${escapeHtml(locale === 'ar' ? 'الأدوات غير متاحة' : 'Tools unavailable')}</h2>
-    <p class="xp-prose">${escapeHtml(locale === 'ar'
-      ? 'لا تتوفر إدارة الخدمات في هذا الإصدار.'
-      : 'Service management is unavailable in this release.')}</p>
+    <h2>${escapeHtml(heading)}</h2>
+    <p class="xp-prose">${escapeHtml(authenticated ? body : guestBody)}</p>
+    ${renderSupportNotice(locale, state?.supportEmail)}
     <div role="alert" data-auth-error hidden></div>
     <p role="status" data-auth-status></p>
-    ${authenticated ? `<button type="button" class="xp-btn" data-action="logout">${escapeHtml(locale === 'ar' ? 'تسجيل الخروج' : 'Sign out')}</button>` : `<a href="/login" class="xp-btn">${escapeHtml(locale === 'ar' ? 'تسجيل الدخول' : 'Sign in')}</a>`}
   </section>
 </section>`,
-})
+  })
+}
 
 const renderActivityDrawer = (liveState: LiveEventState, locale: Locale): string => {
   const isAr = locale === 'ar'
@@ -236,22 +265,43 @@ export function renderWebApp(state: WebAppRenderState): string {
     xwhm: { brand: 'xWHM', en: 'Server sign in', ar: 'دخول إدارة الخادم' },
     xmail: { brand: 'xMail', en: 'Mail sign in', ar: 'دخول البريد' },
   }[loginAudience] : undefined
-  const pageTitle = state.title ?? (loginIdentity
-    ? `${loginIdentity.brand} — ${loginIdentity[locale]}`
-    : `${t(locale, `surface.${state.surface}`)} — ${t(locale, 'app.title')}`)
   const faviconHref = loginAudience ? `/assets/favicon-${loginAudience}.svg` : '/assets/favicon.svg'
 
   let surfaceBodyHtml = ''
   const activeRoute = state.activeRoute ?? (state.surface === 'xwhm' ? '/whm' : state.surface === 'xmail' ? '/mail/inbox' : state.surface === 'login' ? '/login' : '/home')
   const securityPrincipal = state.visibility?.principal.kind
-  const hasVerifiedSurface = visibleNavigation(state.visibility, state.catalog).some(item => item.surface === state.surface && item.sections.some(section => section.pages.some(page => page.route === activeRoute)))
-  if (state.surface !== 'login' && !hasVerifiedSurface)
-    surfaceBodyHtml = renderUnavailableWorkspace(state.surface, locale, state.visibility !== undefined, state.actionState, activeRoute, theme, state)
+  const hasVerifiedSurface = !state.error && visibleNavigation(state.visibility, state.catalog).some(item => item.surface === state.surface && item.sections.some(section => section.pages.some(page => page.route === activeRoute)))
+  const statusSurface = state.error?.surface ?? (state.surface === 'xwhm' || state.surface === 'xmail' ? state.surface : 'xpanel')
+  const pageTitle = state.title ?? (state.error && isStatusCode(state.error.status)
+    ? `${statusPageCopy(state.error.status, locale).title} — ${panelLabel(statusSurface)}`
+    : loginIdentity
+      ? `${loginIdentity.brand} — ${loginIdentity[locale]}`
+      : `${t(locale, `surface.${state.surface}`)} — ${t(locale, 'app.title')}`)
+  if (state.error && isStatusCode(state.error.status)) {
+    const principal = state.visibility?.principal
+    surfaceBodyHtml = renderStatusBody({
+      ...state.error,
+      status: state.error.status,
+      locale,
+      theme,
+      density,
+      surface: statusSurface,
+      path: activeRoute,
+      ...(state.visibility ? { visibility: state.visibility } : {}),
+      ...(principal ? { username: principal.username, role: roleLabel(principal.kind, locale), signedIn: true } : {}),
+      ...(state.accountId ? { accountId: state.accountId } : {}),
+      ...(state.supportEmail ? { supportEmail: state.supportEmail } : {}),
+      ...(state.panels ? { panels: state.panels } : {}),
+    })
+  } else if (state.surface !== 'login' && !hasVerifiedSurface)
+    surfaceBodyHtml = renderUnavailableWorkspace(state.surface, locale, state.visibility !== undefined, state.actionState, activeRoute, theme, density, state)
   else switch (state.surface) {
     case 'login':
       surfaceBodyHtml = renderLoginSurface({
         locale,
         theme,
+        ...(state.panels ? { panels: state.panels } : {}),
+        ...(state.supportEmail ? { supportEmail: state.supportEmail } : {}),
         ...state.login,
       })
       break
@@ -303,7 +353,10 @@ export function renderWebApp(state: WebAppRenderState): string {
       principalKind: securityPrincipal,
       surface: state.surface,
     })
-    surfaceBodyHtml = surfaceBodyHtml.replace(/(<main\b[^>]*\bid="main-content"[^>]*>)/, `$1${card}`)
+    const afterTitle = surfaceBodyHtml.replace(/(<h1\b[^>]*\bclass="[^"]*\bxp-page-title\b[^"]*"[^>]*>[\s\S]*?<\/h1>)/, `$1\n${card}`)
+    surfaceBodyHtml = afterTitle === surfaceBodyHtml
+      ? surfaceBodyHtml.replace(/(<main\b[^>]*\bid="main-content"[^>]*>)/, `$1${card}`)
+      : afterTitle
   }
 
   surfaceBodyHtml = ensureAccessibleSurfaceHtml(surfaceBodyHtml, locale)
@@ -316,7 +369,7 @@ export function renderWebApp(state: WebAppRenderState): string {
       : ''
 
   return `<!doctype html>
-<html lang="${locale}" dir="${dir}" data-theme="${theme}" data-density="${density}" data-surface="${state.surface}" data-realtime-enabled="${hasVerifiedSurface && state.realtimeEnabled !== false}">
+<html lang="${locale}" dir="${dir}" data-theme="${theme}" data-density="${density}" data-surface="${state.error ? statusSurface : state.surface}" data-realtime-enabled="${hasVerifiedSurface && state.realtimeEnabled !== false}"${state.error && isStatusCode(state.error.status) ? ` data-status="${state.error.status}"` : ''}>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -324,7 +377,7 @@ export function renderWebApp(state: WebAppRenderState): string {
   <link rel="icon" type="image/svg+xml" href="${faviconHref}" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style id="xpanel-design-tokens">${DESIGN_TOKENS_CSS}</style>
 </head>
 <body>
@@ -333,7 +386,7 @@ export function renderWebApp(state: WebAppRenderState): string {
   ${hasVerifiedSurface ? contextualizeDocumentLinks(renderCommandPaletteModal(state.surface, locale, state.visibility, state.catalog), context) : ''}
   ${hasVerifiedSurface && state.liveState?.reconcile !== undefined ? renderActivityDrawer(fullLiveState, locale) : ''}
   <script id="xpanel-login-client">${LOGIN_CLIENT_SCRIPT}</script>
-  ${state.surface !== 'login' ? `<script id="xpanel-realtime-client">${BROWSER_REALTIME_SCRIPT}</script>` : ''}
+  ${state.surface !== 'login' && !state.error ? `<script id="xpanel-realtime-client">${BROWSER_REALTIME_SCRIPT}</script>` : ''}
 </body>
 </html>`
 }
@@ -445,6 +498,25 @@ export async function serveWebUi(
   const rawTarget = url.searchParams.get('target')
   const targetSurface = rawTarget === 'xwhm' || rawTarget === 'xmail' || rawTarget === 'xpanel' ? rawTarget : 'xpanel'
 
+  const htmlHeaders = {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'SAMEORIGIN',
+  }
+  if (!stateProvider && !documentRoute) {
+    const fallbackSurface = inferredSurface === 'xwhm' || inferredSurface === 'xmail' ? inferredSurface : 'xpanel'
+    const html = renderWebApp({
+      surface: fallbackSurface,
+      locale,
+      theme,
+      density,
+      activeRoute: path,
+      error: { status: 404, surface: fallbackSurface },
+    })
+    return new Response(html, { status: 404, headers: htmlHeaders })
+  }
+
   const baseState: WebAppRenderState = stateProvider
     ? await stateProvider(url, req)
     : {
@@ -461,16 +533,9 @@ export async function serveWebUi(
     login: { targetSurface, ...baseState.login },
     ...baseState,
     activeRoute: baseState.activeRoute ?? documentRoute?.activeRoute,
-    accountId: baseState.accountId ?? url.searchParams.get('accountId') ?? undefined,
+    accountId: baseState.accountId ?? (baseState.error ? undefined : url.searchParams.get('accountId') ?? undefined),
   })
+  const status = baseState.error && isStatusCode(baseState.error.status) ? baseState.error.status : 200
 
-  return new Response(html, {
-    status: 200,
-    headers: {
-      'content-type': 'text/html; charset=utf-8',
-      'cache-control': 'no-store',
-      'x-content-type-options': 'nosniff',
-      'x-frame-options': 'SAMEORIGIN',
-    },
-  })
+  return new Response(html, { status, headers: htmlHeaders })
 }

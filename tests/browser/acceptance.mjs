@@ -178,9 +178,10 @@ export async function runBrowserAcceptance({ chromium, expect }) {
       expect(csrf).toBe(403)
       expect((await panel.store.listFeatureLists()).length).toBe(before)
       await accessibility(page, record)
+      await page.locator('[data-user-menu] > summary').click()
       const [logout] = await Promise.all([
         page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/logout' && response.request().method() === 'POST'),
-        page.locator('[data-action="logout"]').click(),
+        page.locator('[data-user-menu] [data-action="logout"]').click(),
       ])
       record('ui_logout', { status: logout.status(), json_request: logout.request().headers()['content-type']?.includes('application/json') === true })
       expect(logout.status()).toBe(200)

@@ -134,6 +134,14 @@ describe('three real HTTP listeners with a fixture host agent, not public TLS qu
         expect((await request(name, ENTRY_POINTS[other].home)).status).toBe(404)
       }
       expect((await request(name, '/login', { host: 'attacker.example.test:2083' })).status).toBe(421)
+      const misdirected = await request(name, '/login?lang=ar', { host: '192.0.2.10', accept: 'text/html' })
+      expect(misdirected.status).toBe(421)
+      expect(misdirected.headers.get('content-type')).toContain('text/html')
+      const misdirectedHtml = await misdirected.text()
+      expect(misdirectedHtml).toContain('data-status-page="421"')
+      expect(misdirectedHtml).toContain('dir="rtl"')
+      for (const origin of Object.values(origins)) expect(misdirectedHtml).toContain(origin)
+      expect(misdirectedHtml).not.toContain('MISDIRECTED_REQUEST')
     }
     expect(readSnapshot).not.toHaveBeenCalled()
     const root = await findPrincipalByUsername(server.db, 'root')

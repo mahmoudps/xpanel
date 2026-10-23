@@ -135,7 +135,7 @@ try {
       await expect(selector).toHaveValue('shared')
       if (state.kind === 'native') {
         await ready(page); await page.evaluate(() => document.fonts.ready)
-        result.font = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'Noto Sans Arabic' : 'IBM Plex Sans')
+        result.font = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
         const options = await selector.locator('option').evaluateAll(elements => elements.map(element => ({ value: element.value, text: element.textContent, disabled: element.disabled })))
         assert.equal(options.length, 4); assert.equal(options.some(option => option.text.includes(':')), false, 'Dedicated IPv6 inventory must not appear as a primary IPv4 choice')
         assert.equal(options.some(option => option.text.includes(ids.first) || option.text.includes(ids.second)), false)

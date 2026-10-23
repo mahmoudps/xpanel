@@ -29,13 +29,13 @@ export const renderAccountSecurityCard = (props: AccountSecurityCardProps): stri
   const { locale, totpEnabled, principalKind, surface } = props
   const rootOperator = principalKind === 'root' && surface === 'xwhm'
   if (totpEnabled) {
-    return `<section class="xp-card" data-account-security="two-factor" data-mfa-enabled="true" aria-labelledby="account-security-heading">
+    return `<section class="xp-card xp-account-security" data-account-security="two-factor" data-mfa-enabled="true" aria-labelledby="account-security-heading">
       <h2 id="account-security-heading">${line(locale, 'security.2fa.heading')}</h2>
       <p class="xp-prose" role="status">${line(locale, 'security.2fa.enabled')}</p>
       ${rootOperator ? `<p class="xp-help">${cliHint(locale)}</p>` : ''}
     </section>`
   }
-  return `<section class="xp-card" data-account-security="two-factor" data-auth-state="optional" aria-labelledby="account-security-heading">
+  return `<section class="xp-card xp-account-security" data-account-security="two-factor" data-auth-state="optional" aria-labelledby="account-security-heading">
     <h2 id="account-security-heading">${line(locale, 'security.2fa.heading')}</h2>
     <div role="alert" data-auth-error hidden></div>
     <p class="xp-help" role="status" aria-live="polite" data-auth-status></p>

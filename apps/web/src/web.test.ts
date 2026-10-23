@@ -150,8 +150,9 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     assert.match(html, /pattern="\[0-9\]\{6\}"/)
     assert.doesNotMatch(html, /passkey-login|TLS 1.3 Enforced|203\.0\.113\.7/)
     assert.match(html, /data-lockout-state="locked"/)
-    assert.match(html, /xpanel reset-password &lt;user&gt; --password-stdin/)
-    assert.match(html, /xpanel disable-2fa &lt;user&gt;/)
+    assert.match(html, /data-admin-note/)
+    assert.match(html, /operations runbook/)
+    assert.doesNotMatch(html, /reset-password|disable-2fa/)
   })
 
   it('renders xWHM surface with Server IO Monitor, Plans, Accounts & Slices, Resellers, Multi-IPv4/IPv6 & Mail Outbound IPs, Firewall dead-man switch, and Config Generations', () => {
