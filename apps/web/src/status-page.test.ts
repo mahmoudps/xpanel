@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { qualifyHostTools, tools } from '@xpanel/catalog'
 import type { Principal } from '@xpanel/core'
 import { renderWebApp, serveWebUi } from './app.ts'
 import { formatDisplayName, publicContactEmail } from './display-name.ts'
@@ -72,7 +73,10 @@ describe('styled status pages', () => {
     expect(signedIn).toContain('data-user-menu')
     expect(signedIn).toContain('mahmoud')
     expect(signedIn).toMatch(/<h1 class="xp-page-title">[^<]+<\/h1>/)
-    expect(signedIn).not.toMatch(/data-nav-route=|<form\b/)
+    expect(signedIn).not.toMatch(/<form\b/)
+    expect(signedIn).toContain('data-nav-route="/home"')
+    expect(signedIn).toContain('Not yet available')
+    expect(signedIn).not.toContain('data-nav-route="/domains"')
     if (status === 404) {
       expect(signedIn).toContain('Back to workspace')
       expect(signedIn).toContain('xp-icon-back')
@@ -113,6 +117,33 @@ describe('styled status pages', () => {
     expect(plain).toContain('contact your hosting provider')
     expect(plain).not.toContain('mailto:')
     expect(plain).not.toContain('support@xpanel.internal')
+  })
+
+  it('keeps qualified sections on a signed-in 404', () => {
+    const catalog = qualifyHostTools(tools, {
+      executor: 'linux',
+      probes: { 'control-plane': 'passed', 'host-info': 'passed', audit_log: 'passed' },
+    })
+    const html = renderWebApp({
+      surface: 'xwhm',
+      locale: 'en',
+      visibility: { principal: { kind: 'root', id: 'root-id', username: 'root' } },
+      catalog,
+      error: { status: 404, workspaceHref: '/whm' },
+    })
+    expect(html).toContain('data-nav-route="/whm/audit"')
+    expect(html).toContain('data-nav-route="/whm/monitoring/server-info"')
+    expect(html).toContain('Not yet available')
+    expect(html).not.toContain('data-nav-route="/whm/accounts"')
+    const arabic = renderWebApp({
+      surface: 'xwhm',
+      locale: 'ar',
+      visibility: { principal: { kind: 'root', id: 'root-id', username: 'root' } },
+      catalog,
+      error: { status: 404, workspaceHref: '/whm' },
+    })
+    expect(arabic).toContain('data-nav-route="/whm/audit"')
+    expect(arabic).toContain('غير متاحة بعد')
   })
 
   it('returns HTML 404 for an unknown document and plain text for a missing asset', async () => {

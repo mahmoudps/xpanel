@@ -75,6 +75,17 @@ describe('host qualification', () => {
     expect(hidden).not.toContain('/whm')
   })
 
+  it('verifies the audit log when the log can be read', () => {
+    const report = passed('linux', { 'control-plane': 'passed', audit_log: 'passed' })
+    const qualified = new Set(qualifyHostTools(tools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
+    expect(qualified.has('audit-log')).toBe(true)
+    const root = { principal: { kind: 'root' as const, id: '00000000-0000-4000-8000-000000000001', username: 'root' } }
+    const routes = visibleNavigation(root, qualifyHostTools(tools, report)).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
+    expect(routes).toContain('/whm/audit')
+    const hidden = visibleNavigation(root, qualifyHostTools(tools, passed('linux', { 'control-plane': 'passed' }))).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
+    expect(hidden).not.toContain('/whm/audit')
+  })
+
   it('stays unqualified when the operator turns host qualification off', () => {
     const previous = process.env.XPANEL_HOST_QUALIFICATION
     process.env.XPANEL_HOST_QUALIFICATION = 'off'

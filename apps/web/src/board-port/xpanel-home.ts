@@ -175,7 +175,14 @@ const iconSvg = (name: IconName, size: number, style = ''): string =>
 const bareIcon = (name: IconName, style = ''): string =>
   `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${style}><path d="${ICONS[name]}"></path></svg>`
 
-const arTools = (n: number): string => n === 1 ? 'أداة واحدة' : n === 2 ? 'أداتان' : n <= 10 ? `${n} أدوات` : `${n} أداة`
+const arTools = (n: number): string => {
+  const rule = new Intl.PluralRules('ar').select(n)
+  if (rule === 'zero') return 'لا أدوات'
+  if (rule === 'one') return 'أداة واحدة'
+  if (rule === 'two') return 'أداتان'
+  if (rule === 'few') return `${n} أدوات`
+  return `${n} أداة`
+}
 
 const pill = (label: string, bg: string, fg: string): string =>
   `<span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: ${bg}; color: ${fg}; font-size: 12px; font-weight: 600"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: ${fg}"></span>${escapeHtml(label)}</span>`
@@ -439,8 +446,10 @@ const ratio = (count: number, cap: number | null): string => cap === null ? Stri
 
 const people = (count: number, ar: boolean, one: string, two: string, many: string, enOne: string, enMany: string): string => {
   if (!ar) return `${count} ${count === 1 ? enOne : enMany}`
-  if (count === 1) return one
-  if (count === 2) return two
+  const rule = new Intl.PluralRules('ar').select(count)
+  if (rule === 'zero') return `لا ${many}`
+  if (rule === 'one') return one
+  if (rule === 'two') return two
   return `${count} ${many}`
 }
 
@@ -713,7 +722,7 @@ export const renderDesktop = (model: HomeDesktopModel): string => {
         const pad = model.changes.length === 1 ? '0' : index === 0 ? '0 0 12px' : last ? '12px 0 0' : '12px 0'
         const border = index === 0 ? '' : '; border-top: 1px solid #EEF0F3'
         const action = change.actionHref ? `<a href="${escapeHtml(change.actionHref)}" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 13px; font-weight: 600">${escapeHtml(change.actionLabel ?? '')}</a>` : ''
-        return `<li style="display: flex; flex-direction: column; gap: 4px; padding: ${pad}${border}"><div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">${pill(change.pill, change.pillBg, change.pillFg)}<span style="font-size: 14px; font-weight: 600">${change.titleHtml}</span></div><span style="font-size: 12px; color: #5D6B7E; line-height: ${line}">${change.detailHtml}</span>${action}</li>`
+        return `<li style="display: flex; flex-direction: column; gap: 4px; padding: ${pad}${border}"><div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">${pill(change.pill, change.pillBg, change.pillFg)}<span style="font-size: 14px; font-weight: 600">${change.titleHtml}</span></div>${change.detailHtml ? `<span style="font-size: 12px; color: #5D6B7E; line-height: ${line}">${change.detailHtml}</span>` : ''}${action}</li>`
       }).join('')}</ol>`
     : `<p role="status" style="margin: 0; font-size: 13px; color: #5D6B7E; line-height: ${line}">${escapeHtml(model.emptyChanges)}</p>`
   const banner = model.bannerHtml

@@ -1,6 +1,7 @@
 import { X509Certificate } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { isIP } from 'node:net'
+import tls from 'node:tls'
 import { fileURLToPath } from 'node:url'
 import {
   parseApacheVersion,
@@ -61,6 +62,100 @@ export const certificateFromPem = (pem: string, now = Date.now()): ObservedCerti
 export interface HostIdentityReader {
   readFile(path: string): Promise<string | null>
   runCommand(argv: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }>
+  /** PEM presented by the panel TLS listener. Absent in unit tests that do not dial it. */
+  readServedCertificate?(): Promise<string | null>
+}
+
+/** The panel TLS listener. nginx's catch-all certificate is a different file. */
+export const PANEL_LISTENER_PORT = 8443
+
+/**
+ * `ssl_certificate` inside the server block that listens on `port`.
+ * `ssl_certificate_key` is not a certificate.
+ */
+export const sslCertificateForListen = (config: string, port: number): string | null => {
+  const blocks: string[] = []
+  const opener = /\bserver\s*\{/g
+  let found: RegExpExecArray | null
+  while ((found = opener.exec(config)) !== null) {
+    let depth = 1
+    let index = found.index + found[0].length
+    const start = index
+    while (index < config.length && depth > 0) {
+      const char = config[index]
+      if (char === '{') depth += 1
+      else if (char === '}') depth -= 1
+      index += 1
+    }
+    blocks.push(config.slice(start, index - 1))
+    opener.lastIndex = index
+  }
+  const listen = new RegExp(`\\blisten\\s+[^;]*\\b${port}\\b[^;]*;`, 'i')
+  for (const block of blocks) {
+    if (!listen.test(block)) continue
+    const certificate = /(?:^|[^\w-])ssl_certificate(?!_key)\s+(['"]?)([^'";\s]+)\1\s*;/.exec(block)
+    const path = certificate?.[2]
+    if (path && path.startsWith('/')) return path
+  }
+  return null
+}
+
+/** Peer certificate from a TLS handshake. A closed port returns null. */
+export const readServedCertificatePem = (host: string, port: number, timeoutMs = 2000): Promise<string | null> =>
+  new Promise((resolve) => {
+    let settled = false
+    const done = (value: string | null): void => {
+      if (settled) return
+      settled = true
+      resolve(value)
+    }
+    const socket = tls.connect({ host, port, rejectUnauthorized: false, timeout: timeoutMs }, () => {
+      try {
+        const peer = socket.getPeerCertificate()
+        const raw = peer.raw
+        socket.end()
+        if (!raw || raw.length === 0) {
+          done(null)
+          return
+        }
+        const pem = new X509Certificate(raw).toString()
+        done(pem.includes('BEGIN CERTIFICATE') ? pem : null)
+      } catch {
+        socket.destroy()
+        done(null)
+      }
+    })
+    socket.on('error', () => {
+      socket.destroy()
+      done(null)
+    })
+    socket.on('timeout', () => {
+      socket.destroy()
+      done(null)
+    })
+  })
+
+const readPanelCertificatePem = async (reader: HostIdentityReader): Promise<string | null> => {
+  if (reader.readServedCertificate) {
+    try {
+      const pem = await reader.readServedCertificate()
+      if (pem && pem.includes('BEGIN CERTIFICATE')) return pem
+    } catch { /* The nginx dump is the other way to see the listener. */ }
+  }
+  for (const bin of ['/usr/sbin/nginx', '/usr/bin/nginx']) {
+    let dumped = ''
+    try {
+      const result = await reader.runCommand([bin, '-T'])
+      dumped = `${result.stdout}\n${result.stderr}`
+    } catch {
+      continue
+    }
+    const path = sslCertificateForListen(dumped, PANEL_LISTENER_PORT)
+    if (!path) continue
+    const pem = await readText(reader, path)
+    if (pem && pem.includes('BEGIN CERTIFICATE')) return pem
+  }
+  return null
 }
 
 const NGINX_ARGV = [['/usr/sbin/nginx', '-v'], ['/usr/bin/nginx', '-v']] as const
@@ -142,7 +237,7 @@ export const readHostIdentity = async (reader: HostIdentityReader): Promise<Host
   const versionFile = await readText(reader, '/opt/xpanel/VERSION')
   const version = (versionFile ? parseVersionFile(versionFile) : null) ?? await readAgentPackageVersion()
   if (version) identity.version = version
-  const pem = await readText(reader, '/etc/xpanel/ssl/default/fullchain.pem')
+  const pem = await readPanelCertificatePem(reader)
   const certificate = pem ? certificateFromPem(pem) : null
   if (certificate) {
     identity.certificates = [{ names: certificate.names, notAfter: certificate.notAfter }]

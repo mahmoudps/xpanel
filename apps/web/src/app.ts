@@ -319,6 +319,7 @@ export function renderWebApp(state: WebAppRenderState): string {
       surface: statusSurface,
       path: activeRoute,
       ...(state.visibility ? { visibility: state.visibility } : {}),
+      ...(state.catalog ? { catalog: state.catalog } : {}),
       ...(principal ? { username: principal.username, role: roleLabel(principal.kind, locale), signedIn: true } : {}),
       ...(state.accountId ? { accountId: state.accountId } : {}),
       ...(state.supportEmail ? { supportEmail: state.supportEmail } : {}),

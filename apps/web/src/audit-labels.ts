@@ -32,7 +32,7 @@ export const AUDIT_LABELS: Readonly<Record<string, AuditCopy>> = {
   'account.update.configuration_failed': copy('Account update failed on the host', 'فشل تحديث الحساب على المضيف'),
   'agent.access_denied': copy('Denied agent access', 'رفض وصول الوكيل'),
   'agent.internal_error': copy('Recorded an agent error', 'سجّل خطأ في الوكيل'),
-  'agent.peer_denied': copy('Denied an agent peer', 'رفض نظير الوكيل'),
+  'agent.peer_denied': copy('Agent refused a request from an unauthorized local user', 'رفض الوكيل طلباً من مستخدم محلي غير مصرح'),
   'api.internal_error': copy('Recorded an internal error', 'سجّل خطأ داخلياً'),
   'app.installed': copy('Installed an application', 'ثبّت تطبيقاً'),
   'app.staging.cloned': copy('Cloned a staging site', 'استنسخ موقع تجهيز'),
@@ -162,29 +162,49 @@ export const AUDIT_LABELS: Readonly<Record<string, AuditCopy>> = {
 
 const RECORDED: AuditCopy = copy('Recorded event', 'حدث مسجّل')
 
-export const auditActionLabel = (action: string, locale: Locale): string => {
+export interface AuditLabelSource {
+  actor?: string
+  detail?: Record<string, unknown>
+}
+
+const peerUid = (source?: AuditLabelSource): string | null => {
+  const recorded = source?.detail?.peerUid
+  if (typeof recorded === 'number' && Number.isInteger(recorded) && recorded >= 0 && recorded <= 4_294_967_295) return String(recorded)
+  const match = /^uid:(\d+)$/.exec(source?.actor?.trim() ?? '')
+  return match ? match[1]! : null
+}
+
+export const auditActionLabel = (action: string, locale: Locale, source?: AuditLabelSource): string => {
+  if (action === 'agent.peer_denied') {
+    const uid = peerUid(source)
+    const row = AUDIT_LABELS[action] ?? RECORDED
+    const base = locale === 'ar' ? row.ar : row.en
+    return uid === null ? base : `${base} (uid ${uid})`
+  }
   const row = AUDIT_LABELS[action] ?? RECORDED
   return locale === 'ar' ? row.ar : row.en
 }
 
-const internalRecord = (locale: Locale): string => locale === 'ar' ? 'سجل داخلي' : 'An internal record'
-const mailboxRecord = (locale: Locale): string => locale === 'ar' ? 'صندوق بريد' : 'Mailbox'
+const OPAQUE_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|mbx[0-9a-f]{8,})$/i
 
-/** A target a person can read. Raw principal, generation, and mailbox ids stay off the row. */
+/** A mailbox principal id is not an address. The address is substituted before display. */
+export const auditActorLabel = (actor: string): string => {
+  const value = actor.trim()
+  const body = value.replace(/^user:/i, '')
+  return OPAQUE_ID.test(body) && /^mbx/i.test(body) ? '' : value
+}
+
+/** A target a person can read. An opaque id contributes nothing. */
 export const auditTargetLabel = (target: string, locale: Locale): string => {
   const value = target.trim()
+  if (!value) return ''
   const generation = /^generation:(\d+)$/.exec(value)
   if (generation) return locale === 'ar' ? `الجيل ${generation[1]}` : `Generation ${generation[1]}`
-  const serviceUser = /^service-user:(.+)$/.exec(value)
-  if (serviceUser) {
-    const login = serviceUser[1] ?? ''
-    if (login.length > 0 && !/^mbx/i.test(login) && !/^[0-9a-f-]{32,}$/i.test(login)) return login
-    return mailboxRecord(locale)
-  }
-  if (/^(principal|mbx):/i.test(value) || /\bmbx[0-9a-f]/i.test(value) || /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(value)) {
-    return /mbx|mailbox/i.test(value) ? mailboxRecord(locale) : internalRecord(locale)
-  }
-  return value
+  const prefixed = /^(?:principal|service-user|account|mailbox|mbx):(.+)$/i.exec(value)
+  const body = (prefixed ? prefixed[1] ?? '' : value).trim()
+  if (!body || OPAQUE_ID.test(body) || /^mbx[0-9a-f]/i.test(body)) return ''
+  if (prefixed && /^mbx:/i.test(value)) return body.includes('@') ? body : ''
+  return prefixed ? body : value
 }
 
 /** Sign-in is a sign-in. Other successful rows stay Applied. */
@@ -196,10 +216,13 @@ export const auditOutcomeLabel = (action: string, outcome: string, locale: Local
 }
 
 /** Escaped action sentence. Arabic isolates Latin tokens marked with «». */
-export const auditActionHtml = (action: string, locale: Locale): string => {
-  const label = auditActionLabel(action, locale)
+export const auditActionHtml = (action: string, locale: Locale, source?: AuditLabelSource): string => {
+  const label = auditActionLabel(action, locale, source)
   if (locale === 'ar' && label.includes('«')) {
     return label.split(/«([^»]*)»/).map((part, index) => index % 2 === 1 ? `<bdi dir="ltr">${escapeHtml(part)}</bdi>` : escapeHtml(part)).join('')
+  }
+  if (locale === 'ar' && label.includes('(uid ')) {
+    return label.split(/(\(uid \d+\))/).map((part, index) => index % 2 === 1 ? `<bdi dir="ltr">${escapeHtml(part)}</bdi>` : escapeHtml(part)).join('')
   }
   return escapeHtml(label)
 }

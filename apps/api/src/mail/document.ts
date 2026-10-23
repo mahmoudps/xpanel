@@ -42,6 +42,7 @@ export interface MailDocumentRule {
 export interface MailDocument {
   mailbox: string
   quotaUsedMb?: number
+  quotaUsedBytes?: number
   quotaLimitMb?: Limit
   messages?: MailDocumentMessage[]
   folderCounts?: MailDocumentFolderCount[]
@@ -68,8 +69,30 @@ const withPrefix = (subject: string, prefix: 'Re:' | 'Fwd:'): string => {
   return trimmed.toLowerCase().startsWith(prefix.toLowerCase()) ? trimmed : `${prefix} ${trimmed}`
 }
 
-const splitAddresses = (value: string): string[] =>
-  value.split(/[,;]/).map(part => part.trim()).filter(part => part.includes('@'))
+const addressOf = (value: string): string => {
+  const angle = /<([^>]+)>/.exec(value)
+  return (angle?.[1] ?? value).trim().toLowerCase()
+}
+
+const splitAddresses = (value: string): string[] => {
+  const parts: string[] = []
+  let current = ''
+  let quoted = false
+  let angle = false
+  for (const ch of value) {
+    if (ch === '"') quoted = !quoted
+    else if (!quoted && ch === '<') angle = true
+    else if (!quoted && ch === '>') angle = false
+    if ((ch === ',' || ch === ';') && !quoted && !angle) {
+      if (current.trim()) parts.push(current.trim())
+      current = ''
+      continue
+    }
+    current += ch
+  }
+  if (current.trim()) parts.push(current.trim())
+  return parts.filter(part => part.includes('@'))
+}
 
 /** Reply, reply-all, or forward. The quoted body is the original text. */
 export const composeDraftFromMessage = (input: {
@@ -90,12 +113,20 @@ export const composeDraftFromMessage = (input: {
   if (input.mode === 'forward') {
     return { to: '', cc: '', subject: withPrefix(input.subject, 'Fwd:'), body }
   }
-  const mailbox = input.mailbox.toLowerCase()
-  const senderAddr = input.from.toLowerCase()
-  if (input.mode === 'reply') return { to: input.from, cc: '', subject: withPrefix(input.subject, 'Re:'), body }
+  const mailbox = addressOf(input.mailbox)
+  const senderAddr = addressOf(input.from)
+  if (input.mode === 'reply') return { to: sender, cc: '', subject: withPrefix(input.subject, 'Re:'), body }
   const cc = [...splitAddresses(input.to), ...splitAddresses(input.cc ?? '')]
-    .filter(addr => addr.toLowerCase() !== mailbox && addr.toLowerCase() !== senderAddr)
-  return { to: input.from, cc: cc.join(', '), subject: withPrefix(input.subject, 'Re:'), body }
+    .filter(addr => addressOf(addr) !== mailbox && addressOf(addr) !== senderAddr)
+  return { to: sender, cc: cc.join(', '), subject: withPrefix(input.subject, 'Re:'), body }
+}
+
+/** `postconf -h message_size_limit` prints the compiled value even when main.cf omits the key. */
+export const messageSizeLimitFromPostconf = (stdout: string): number | null => {
+  const text = stdout.trim()
+  if (!/^\d+$/.test(text)) return null
+  const bytes = Number(text)
+  return Number.isSafeInteger(bytes) && bytes > 0 ? bytes : null
 }
 
 /** `message_size_limit` bytes from a Postfix main.cf. */
@@ -218,7 +249,10 @@ export const loadMailDocument = async (input: {
   try {
     if (input.transport.quota) {
       const measured = await input.transport.quota(record.mailbox, password)
-      if (measured) document.quotaUsedMb = measured.usedMb
+      if (measured) {
+        document.quotaUsedMb = measured.usedMb
+        if (typeof measured.usedBytes === 'number') document.quotaUsedBytes = measured.usedBytes
+      }
     }
   } catch { /* usage stays unknown */ }
 

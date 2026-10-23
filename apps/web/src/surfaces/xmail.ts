@@ -52,6 +52,7 @@ export interface MailSurfaceProps {
   mailbox?: string
   domain?: string
   quotaUsedMb?: number
+  quotaUsedBytes?: number
   quotaLimitMb?: number | 'unlimited'
   activeRoute?: string
   activeFolder?: string
@@ -120,6 +121,7 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
       locale,
       mailbox,
       ...(props.quotaUsedMb !== undefined ? { quotaUsedMb: props.quotaUsedMb } : {}),
+      ...(props.quotaUsedBytes !== undefined ? { quotaUsedBytes: props.quotaUsedBytes } : {}),
       ...(props.quotaLimitMb !== undefined ? { quotaLimitMb: props.quotaLimitMb } : {}),
       activeFolder,
       ...(props.selectedUid !== undefined ? { selectedUid: props.selectedUid } : {}),
@@ -138,6 +140,7 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
       locale,
       mailbox,
       ...(props.quotaUsedMb !== undefined ? { quotaUsedMb: props.quotaUsedMb } : {}),
+      ...(props.quotaUsedBytes !== undefined ? { quotaUsedBytes: props.quotaUsedBytes } : {}),
       ...(props.quotaLimitMb !== undefined ? { quotaLimitMb: props.quotaLimitMb } : {}),
       ...(props.messages !== undefined ? { messages: allMessages } : {}),
       realtimeEnabled: props.realtimeEnabled === true,

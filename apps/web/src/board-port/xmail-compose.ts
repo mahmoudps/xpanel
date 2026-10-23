@@ -497,6 +497,7 @@ export interface XmailComposeProps {
   locale?: Locale
   mailbox: string
   quotaUsedMb?: number
+  quotaUsedBytes?: number
   quotaLimitMb?: number | 'unlimited'
   messages?: XmailComposeMessage[]
   realtimeEnabled?: boolean
@@ -520,8 +521,33 @@ export const arabicFileCount = (count: number): string => {
   return `${count} ملفاً`
 }
 
-const addressList = (value: string | undefined): string[] =>
-  (value ?? '').split(/[,;]/).map(part => part.trim()).filter(part => part.includes('@'))
+const addressList = (value: string | undefined): string[] => {
+  const parts: string[] = []
+  let current = ''
+  let quoted = false
+  let angle = false
+  for (const ch of value ?? '') {
+    if (ch === '"') quoted = !quoted
+    else if (!quoted && ch === '<') angle = true
+    else if (!quoted && ch === '>') angle = false
+    if ((ch === ',' || ch === ';') && !quoted && !angle) {
+      if (current.trim()) parts.push(current.trim())
+      current = ''
+      continue
+    }
+    current += ch
+  }
+  if (current.trim()) parts.push(current.trim())
+  return parts.filter(part => part.includes('@'))
+}
+
+const chipOf = (field: 'to' | 'cc', raw: string): { field: 'to' | 'cc'; name: string; addr: string; invalid: boolean } => {
+  const angle = /<([^>]+)>/.exec(raw)
+  if (!angle?.[1]) return { field, name: raw, addr: raw, invalid: false }
+  const addr = angle[1].trim()
+  const name = raw.slice(0, angle.index).replace(/^"(.*)"$/, '$1').trim() || addr
+  return { field, name, addr, invalid: false }
+}
 
 export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel => {
   const locale = props.locale ?? 'en'
@@ -541,7 +567,7 @@ export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel =>
   const custom: FolderLink[] = [...observed].filter(folder => !STANDARD.some(item => item.id === folder)).map(folder => ({
     label: folder, href: folderHref(folder), icon: 'folder' as const, current: false, observed: folder,
   }))
-  const quota = formatMailboxQuota(props.quotaUsedMb, props.quotaLimitMb, locale)
+  const quota = formatMailboxQuota(props.quotaUsedMb, props.quotaLimitMb, locale, props.quotaUsedBytes)
   const rules = props.sieveRules ?? []
   const knownRules = props.sieveRules !== undefined
   const activeRules = rules.filter(rule => rule.enabled !== false).length
@@ -573,8 +599,8 @@ export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel =>
     fromValue: props.mailbox,
     fromAddr: props.mailbox,
     chips: [
-      ...addressList(props.draft?.to).map(addr => ({ field: 'to', name: addr, addr, invalid: false })),
-      ...addressList(props.draft?.cc).map(addr => ({ field: 'cc', name: addr, addr, invalid: false })),
+      ...addressList(props.draft?.to).map(addr => chipOf('to', addr)),
+      ...addressList(props.draft?.cc).map(addr => chipOf('cc', addr)),
     ],
     subject: props.draft?.subject ?? '',
     bodyHtml: props.draft?.body

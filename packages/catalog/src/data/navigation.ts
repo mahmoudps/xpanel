@@ -1929,6 +1929,7 @@ export const navigation: NavSurface[] = [
               "root"
             ],
             "tools": [
+              "audit-log",
               "aapanel-panel-logs",
               "tweak-logging"
             ],

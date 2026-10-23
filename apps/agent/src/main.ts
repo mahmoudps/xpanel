@@ -102,7 +102,13 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
     process.stderr.write(`xpanel-agent ACME webroot: ${error instanceof Error ? error.message : String(error)}\n`)
   })
   if (existsSync('/usr/sbin/postfix') && existsSync('/usr/sbin/dovecot')) {
-    await ensureInstalledMail(executor, os).catch((error: unknown) => {
+    await (async () => {
+      const hostname = await store.readSnapshot()
+        .then((snapshot) => snapshot.server?.settings.hostname)
+        .catch(() => undefined)
+      const owned = await reconciler.ownedChecksums()
+      await ensureInstalledMail(executor, os, hostname, owned)
+    })().catch((error: unknown) => {
       process.stderr.write(`xpanel-agent local mail: ${error instanceof Error ? error.message : String(error)}\n`)
     })
   }

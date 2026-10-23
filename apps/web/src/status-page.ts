@@ -1,8 +1,8 @@
+import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { panelLabel, renderPlannedNavigation, renderSupportNotice, renderUserMenu, safePanelLinks, type DensityChoice, type PanelId, type PanelLink, type ThemeChoice } from './chrome.ts'
 import type { Locale } from './i18n.ts'
 import { renderSurfaceShell } from './shell.ts'
 import { escapeHtml } from './tokens.ts'
-import type { VisibilityContext } from '@xpanel/catalog'
 
 export type StatusCode = 403 | 404 | 421 | 500 | 503
 
@@ -25,6 +25,8 @@ export interface StatusPageModel {
   suggested?: PanelId
   supportEmail?: string
   visibility?: VisibilityContext
+  /** Qualified catalog for this host. The sidebar keeps these sections as links. */
+  catalog?: readonly CatalogTool[]
 }
 
 interface Copy {
@@ -120,7 +122,7 @@ export function renderStatusBody(model: StatusPageModel): string {
   return renderSurfaceShell({
     surface: model.surface,
     locale: model.locale,
-    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${panelLabel(model.surface)}</strong></div>${renderPlannedNavigation(model.surface, model.locale, model.path)}`,
+    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${panelLabel(model.surface)}</strong></div>${renderPlannedNavigation(model.surface, model.locale, model.path, visibleNavigation(model.visibility, model.catalog))}`,
     topbar: renderUserMenu({
       locale: model.locale,
       theme: model.theme,

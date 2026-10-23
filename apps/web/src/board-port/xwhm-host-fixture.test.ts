@@ -145,7 +145,7 @@ describe('lab host command fixture', () => {
     }))
     assert.match(arabic, /<bdi dir="ltr">4<\/bdi> أنوية/)
     assert.match(arabic, /<bdi dir="ltr">8\.13 GB<\/bdi>/)
-    assert.match(arabic, /<bdi dir="ltr">1<\/bdi> يوم و<bdi dir="ltr">11<\/bdi> ساعة/)
+    assert.match(arabic, /يوم واحد و<bdi dir="ltr">11<\/bdi> ساعة/)
     assert.match(arabic, /«\/home» على «\/»|\/home/)
     assert.match(arabic, /<bdi dir="ltr">\/home<\/bdi> على <bdi dir="ltr">\/<\/bdi>/)
   })

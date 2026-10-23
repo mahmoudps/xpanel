@@ -1,7 +1,7 @@
 import type { Account, AuditEntry, Certificate, Plan, ServerIpEntry } from '@xpanel/core'
 import { ARABIC_TYPE_CSS } from '../arabic-type.ts'
 import { isolateLtrRuns } from '../bidi-runs.ts'
-import { auditActionLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
+import { auditActionHtml, auditActionLabel, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
 import type { Locale } from '../i18n.ts'
 import { escapeHtml, formatAsciiDate, formatAsciiNumber, formatBytes, formatUtcClock, formatUtcDay } from '../tokens.ts'
 
@@ -80,6 +80,8 @@ export interface DashboardAuditRow {
   actor: string
   from: string
   action: string
+  /** Escaped action sentence. Fixture rows leave this empty and use `action`. */
+  actionHtml?: string
   target: string
   result: DashboardChip
   detail: string
@@ -206,11 +208,12 @@ const NAV: Array<{ id: string; label: [string, string]; items: Array<{ href: str
 
 const plain = (value: string): string => value.replace(/«|»/g, '')
 
-const arUnit = (n: number, one: string, two: string, few: string, many: string): string => {
-  if (n === 0 || (n >= 3 && n <= 10)) return few
-  if (n === 1) return one
-  if (n === 2) return two
-  return many
+const arCounted = (n: number, forms: { one: string; two: string; few: string; many: string }): string => {
+  const rule = new Intl.PluralRules('ar').select(n)
+  if (rule === 'zero') return `لا ${forms.few}`
+  if (rule === 'one') return forms.one
+  if (rule === 'two') return forms.two
+  return `«${n}» ${rule === 'few' ? forms.few : forms.many}`
 }
 
 const enUnit = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
@@ -222,9 +225,9 @@ const formatUptime = (seconds: number, ar: boolean): string => {
   const minutes = Math.floor((seconds % 3600) / 60)
   if (ar) {
     const parts = [
-      days > 0 ? `«${days}» ${arUnit(days, 'يوم', 'يومين', 'أيام', 'يوماً')}` : '',
-      hours > 0 ? `«${hours}» ${arUnit(hours, 'ساعة', 'ساعتين', 'ساعات', 'ساعة')}` : '',
-      days === 0 && hours === 0 ? `«${minutes}» ${arUnit(minutes, 'دقيقة', 'دقيقتين', 'دقائق', 'دقيقة')}` : '',
+      days > 0 ? arCounted(days, { one: 'يوم واحد', two: 'يومان', few: 'أيام', many: 'يوماً' }) : '',
+      hours > 0 ? arCounted(hours, { one: 'ساعة واحدة', two: 'ساعتان', few: 'ساعات', many: 'ساعة' }) : '',
+      days === 0 && hours === 0 ? arCounted(minutes, { one: 'دقيقة واحدة', two: 'دقيقتان', few: 'دقائق', many: 'دقيقة' }) : '',
     ].filter(part => part.length > 0)
     return parts.join(' و')
   }
@@ -240,7 +243,7 @@ const hostText = (value: string | undefined): string => value && value.length > 
 
 const hardwareLine = (cores: number | null, model: string | null, bytes: string | null, ar: boolean): string => {
   const parts = [
-    cores === null ? '' : ar ? `«${cores}» ${arUnit(cores, 'نواة', 'نواتين', 'أنوية', 'نواة')}` : `${cores} ${cores === 1 ? 'core' : 'cores'}`,
+    cores === null ? '' : ar ? arCounted(cores, { one: 'نواة واحدة', two: 'نواتان', few: 'أنوية', many: 'نواة' }) : `${cores} ${cores === 1 ? 'core' : 'cores'}`,
     model ? (ar ? `«${model}»` : model) : '',
     bytes ? (ar ? `«${bytes}»` : bytes) : '',
   ].filter(part => part.length > 0)
@@ -459,8 +462,8 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
   const auditRows = model.audit.map(row => `<tr style="border-top: 1px solid #EEF0F3; vertical-align: top">
     <td style="padding: 10px 16px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-variant-numeric: tabular-nums; line-height: 1.4"><time datetime="${escapeHtml(row.datetime)}">${show(row.time, ar)}</time></td>
     <td style="padding: 10px 16px; line-height: 1.4"><div style="display: flex; flex-direction: column"><span style="font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 13px">${show(row.actor, ar)}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5D6B7E">${show(row.from, ar)}</span></div></td>
-    <td style="padding: 10px 16px; line-height: 1.4"><div style="display: flex; flex-direction: column"><span>${show(row.action, ar)}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5D6B7E; overflow-wrap: anywhere">${show(row.target, ar)}</span></div></td>
-    <td style="padding: 10px 16px; line-height: 1.4"><div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px">${pill(row.result)}<span style="font-size: 12px; color: #5D6B7E">${show(row.detail, ar)}</span></div></td>
+    <td style="padding: 10px 16px; line-height: 1.4"><div style="display: flex; flex-direction: column"><span>${row.actionHtml ?? show(row.action, ar)}</span>${row.target ? `<span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5D6B7E; overflow-wrap: anywhere">${show(row.target, ar)}</span>` : ''}</div></td>
+    <td style="padding: 10px 16px; line-height: 1.4"><div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px">${pill(row.result)}${row.detail ? `<span style="font-size: 12px; color: #5D6B7E">${show(row.detail, ar)}</span>` : ''}</div></td>
   </tr>`).join('')
   const meters = model.meters.map(meter => `<div style="display: flex; flex-direction: column; gap: 6px">
     <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 13px"><span style="font-weight: 600">${show(meter.label, ar)}</span><span style="color: #475467; font-variant-numeric: tabular-nums">${show(meter.value, ar)}</span></div>
@@ -834,7 +837,7 @@ const arAccountCount = (count: number): string => {
 
 const arDayCount = (count: number): string => {
   const rule = new Intl.PluralRules('ar').select(count)
-  if (rule === 'zero') return '«0» يوم'
+  if (rule === 'zero') return 'لا أيام'
   if (rule === 'one') return 'يوم واحد'
   if (rule === 'two') return 'يومان'
   if (rule === 'few') return `«${count}» أيام`
@@ -937,15 +940,17 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
       : entry.outcome === 'denied'
         ? emptyChip(outcome)
         : badChip(outcome)
+    const actor = auditActorLabel(entry.actor)
     return {
       time: formatUtcClock(entry.at),
       datetime: entry.at,
-      actor: entry.actor,
+      actor: actor || '—',
       from: '—',
-      action: auditActionLabel(entry.action, locale),
+      action: auditActionLabel(entry.action, locale, entry),
+      actionHtml: auditActionHtml(entry.action, locale, entry),
       target,
       result: chip,
-      detail: target,
+      detail: '',
     }
   })
   const sampledAt = props.hostSample?.sampledAt && !Number.isNaN(Date.parse(props.hostSample.sampledAt)) ? props.hostSample.sampledAt : ''
@@ -1018,7 +1023,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
             pct: '0%',
             color: '#1D5BD6',
             note: cores
-              ? (ar ? `«${cores}» ${arUnit(cores, 'نواة', 'نواتين', 'أنوية', 'نواة')}` : `${cores} ${cores === 1 ? 'core' : 'cores'}`)
+              ? (ar ? arCounted(cores, { one: 'نواة واحدة', two: 'نواتان', few: 'أنوية', many: 'نواة' }) : `${cores} ${cores === 1 ? 'core' : 'cores'}`)
               : (ar ? `الحمل «${loadValue}»` : `load ${loadValue}`),
             noteColor: '#5D6B7E',
             showBar: false,

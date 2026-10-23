@@ -59,7 +59,7 @@ export interface PanelSurfaceProps {
   serviceUsers?: ServiceUser[]
   dnsRecords?: DnsRecord[]
   lastSignInAt?: string
-  recentAudit?: Array<{ action: string; target: string }>
+  recentAudit?: Array<{ action: string; target: string; actor?: string; detail?: Record<string, unknown> }>
   terminalSessionId?: string
   actionState?: AsyncActionBannerProps
 }
@@ -144,7 +144,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
         pill: isAr ? 'تدقيق' : 'Audit',
         pillBg: '#EEF0F3',
         pillFg: '#344054',
-        titleHtml: escapeHtml(auditActionLabel(entry.action, locale)),
+        titleHtml: escapeHtml(auditActionLabel(entry.action, locale, entry)),
         detailHtml: escapeHtml(auditTargetLabel(entry.target, locale)),
       })) } : {}),
       signOutLabel: isAr ? 'تسجيل الخروج' : 'Sign out',

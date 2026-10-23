@@ -415,8 +415,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   }
 
   if (mailDomains.length > 0) {
-    const hostname = snapshot.server?.settings.hostname
-    const postmaster = hostname && hostname.includes('.') ? `postmaster@${hostname}` : 'postmaster@localhost.localdomain'
+    const postmaster = services.mailboxPostmaster(snapshot.server?.settings.hostname)
     const domainsDir = services.dovecotDomainsDir(os)
     preActions.push(
       { kind: 'ensure-dir', path: domainsDir.slice(0, domainsDir.lastIndexOf('/')), mode: 0o755, owner: 'root', group: 'root' },
@@ -706,6 +705,14 @@ export class HostReconciler {
   /**
    * Inspects the active generation's owned-file manifest against the live host files.
    */
+  /** Checksums of the active generation's owned files. Empty when no generation is active. */
+  async ownedChecksums(): Promise<Map<string, string>> {
+    const current = await latestActive(this.deps.db)
+    if (!current) return new Map()
+    const manifest = await this.journal.readManifest(current.id)
+    return new Map((manifest?.files ?? []).map(file => [file.path, file.sha256]))
+  }
+
   async checkDrift(): Promise<DriftReport> {
     const currentGen = await latestActive(this.deps.db)
     if (!currentGen) {

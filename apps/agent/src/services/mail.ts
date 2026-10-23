@@ -213,6 +213,8 @@ export class MailServiceAdapter {
 
     // Base Dovecot auth & xPanel LMTP/quota/sieve configuration
     files.push(services.renderDovecotAuthConf(this.os))
+    files.push(services.renderDovecotSpecialUseConf(this.os))
+    files.push(services.renderDovecotQuotaConf(this.os))
     files.push(
       services.renderDovecotXpanelConf(this.os, {
         postmaster: this.postmasterAddress,

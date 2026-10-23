@@ -19,8 +19,8 @@ import type { AgentExecutor } from './executor.ts'
 import { JailedFileManager } from './file-manager.ts'
 import { AcmeCertificateServiceAdapter } from './services/acme.ts'
 import { createHttp01AcmeClient } from './services/acme-client.ts'
-import { probeHostCapabilities, readHostMeasurements } from './host-probes.ts'
-import { readHostConfigChecks, readHostIdentity } from './host-identity.ts'
+import { probeAuditLog, probeHostCapabilities, readHostMeasurements } from './host-probes.ts'
+import { readHostConfigChecks, readHostIdentity, readServedCertificatePem, PANEL_LISTENER_PORT } from './host-identity.ts'
 import { parseDf, parseDfInodes, parseLoadavg, parseMeminfo } from './host-info.ts'
 import { readHostServices, restartHostService } from './host-services.ts'
 import { createAccountBackup, listAccountBackups, restoreAccountBackup, DEFAULT_BACKUP_DIR } from './account-backup.ts'
@@ -456,12 +456,13 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         const linuxExecutor = deps.executor instanceof LinuxHostExecutor ? deps.executor : null
         const executor = linuxExecutor ? 'linux' : deps.executor ? 'fake' : 'unknown'
         const measurements = linuxExecutor ? await readHostMeasurements(linuxExecutor, deps.nginxUser ?? 'nginx') : undefined
+        const auditLog = await probeAuditLog(() => deps.db.query('SELECT id FROM audit_log LIMIT 1'))
         return jsonResponse({
           ok: true,
           os: deps.os,
           currentGeneration: currentGen,
           executor,
-          ...(measurements ? { probes: probeHostCapabilities(Boolean(deps.accountFileRunner), true, measurements) } : {}),
+          ...(measurements ? { probes: probeHostCapabilities(Boolean(deps.accountFileRunner), true, { ...measurements, auditLog }) } : {}),
           ...(verifiedPeer
             ? {
                 peer: {
@@ -530,27 +531,32 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       if (method === 'GET' && pathname === '/host/info') {
         await assertRootCaller(caller, 'host.info')
         if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)
-        const loadText = await deps.executor.readFile('/proc/loadavg')
-        const memText = await deps.executor.readFile('/proc/meminfo')
-        const diskResult = await deps.executor.runCommand(['/usr/bin/df', '-B1', '-P', '/'])
+        const host = deps.executor
+        const loadText = await host.readFile('/proc/loadavg')
+        const memText = await host.readFile('/proc/meminfo')
+        const diskResult = await host.runCommand(['/usr/bin/df', '-B1', '-P', '/'])
         if (!loadText || !memText || !diskResult.ok) return fail('PRECONDITION_FAILED', 'host measurements could not be read')
         try {
           const disk = parseDf(diskResult.stdout)
-          const identity = await readHostIdentity(deps.executor)
+          const identity = await readHostIdentity({
+            readFile: (path) => host.readFile(path),
+            runCommand: (argv) => host.runCommand(argv),
+            readServedCertificate: () => readServedCertificatePem('127.0.0.1', PANEL_LISTENER_PORT),
+          })
           let configChecks: Awaited<ReturnType<typeof readHostConfigChecks>> = {}
           try {
-            configChecks = await readHostConfigChecks(deps.executor)
+            configChecks = await readHostConfigChecks(host)
           } catch { /* A missing test binary leaves that tile empty. */ }
           let homeOnRoot = false
           let inodes: ReturnType<typeof parseDfInodes> | null = null
-          const home = await deps.executor.runCommand(['/usr/bin/df', '-B1', '-P', '/home'])
+          const home = await host.runCommand(['/usr/bin/df', '-B1', '-P', '/home'])
           if (home.ok) {
             try {
               const parsedHome = parseDf(home.stdout)
               homeOnRoot = parsedHome.mount === '/' || parsedHome.filesystem === disk.filesystem
             } catch { /* A missing /home row leaves the inode meter empty. */ }
           }
-          const inodeResult = await deps.executor.runCommand(['/usr/bin/df', '-P', '-i', '/home'])
+          const inodeResult = await host.runCommand(['/usr/bin/df', '-P', '-i', '/home'])
           if (inodeResult.ok) {
             try {
               inodes = parseDfInodes(inodeResult.stdout)

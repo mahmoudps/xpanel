@@ -993,14 +993,35 @@ export class MimeCodecAndSanitizer {
       allowRemoteImages: limits.allowRemoteImages ?? false,
     })
 
+    const splitAddressHeader = (value: string): string[] => {
+      const parts: string[] = []
+      let current = ''
+      let quoted = false
+      let angle = false
+      for (const ch of value) {
+        if (ch === '"') quoted = !quoted
+        else if (!quoted && ch === '<') angle = true
+        else if (!quoted && ch === '>') angle = false
+        if (ch === ',' && !quoted && !angle) {
+          if (current.trim()) parts.push(current.trim())
+          current = ''
+          continue
+        }
+        current += ch
+      }
+      if (current.trim()) parts.push(current.trim())
+      return parts
+    }
     const parseAddressList = (hdr: string | undefined): string[] => {
       if (!hdr) return []
-      return hdr
-        .split(',')
+      return splitAddressHeader(hdr)
         .map((item) => {
           const decoded = decodeRfc2047(item).trim()
           const angle = /<([^>]+)>/.exec(decoded)
-          return (angle ? angle[1]! : decoded).trim().toLowerCase()
+          if (!angle?.[1]) return decoded.toLowerCase()
+          const addr = angle[1].trim().toLowerCase()
+          const name = decoded.slice(0, angle.index).replace(/^"(.*)"$/, '$1').replaceAll('"', '').trim()
+          return name ? `${name} <${addr}>` : addr
         })
         .filter(Boolean)
     }

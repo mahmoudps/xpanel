@@ -6,7 +6,7 @@ import { hashPasswordArgon2id } from './auth.ts'
 import { createApiApp } from './server.ts'
 import { loadMailDocument } from './mail/document.ts'
 import type { InboxMessage, MailboxSendInput, MailboxTransport } from './mail/inbox.ts'
-import { createLocalMailboxTransport, mailboxPrincipalUsername, mailReceivedAtUtc } from './mail/inbox.ts'
+import { auditActorQuery, auditTargetQuery, createLocalMailboxTransport, imapHumanCopy, mailboxAddressIndex, mailboxPrincipalUsername, mailReceivedAtUtc, rewriteMailboxIds } from './mail/inbox.ts'
 
 const SECRET = 'mailbox-inbox-synthetic-server-secret-32b'
 const ORIGIN = 'https://mail.example.test'
@@ -94,6 +94,10 @@ describe('xMail mailbox inbox', () => {
         if (next.length === box.messages.length) fail('NOT_FOUND', 'message not found')
         box.messages = next
       },
+      async move(mailbox, password, uid) {
+        await this.remove(mailbox, password, uid)
+        return { uid: uid + 40 }
+      },
       async send(mailbox, password, input) {
         await this.verify(mailbox, password)
         boxes.get(mailbox)!.sent.push(input)
@@ -161,6 +165,41 @@ describe('xMail mailbox inbox', () => {
     expect(otherList.payload.messages?.map(item => item.subject)).toEqual(['Beta note'])
     const stillEmpty = await call('GET', '/api/webmail/inbox', undefined, session)
     expect(stillEmpty.payload.messages).toEqual([])
+  })
+
+  it('moves a delete into Trash and expunges only after confirmation', async () => {
+    const boxes = new Map<string, Box>([
+      ['inbox@alpha.example.test', { password: 'alpha-secret', messages: [message(7, 'Alpha note', 'Hello from alpha')], sent: [] }],
+    ])
+    let removed = 0
+    let movedTo = ''
+    const transport: MailboxTransport = {
+      async verify() { return undefined },
+      async list(mailbox) { return boxes.get(mailbox)!.messages },
+      async read() { return fail('NOT_FOUND', 'message not found') },
+      async remove() { removed += 1 },
+      async move(_mailbox, _password, uid, _from, to) {
+        movedTo = to
+        boxes.get('inbox@alpha.example.test')!.messages = []
+        return { uid: uid + 9 }
+      },
+      async send() { return { messageId: '<x>' } },
+    }
+    const { call, login, sessionOf } = await harness(transport)
+    const session = sessionOf(await login('inbox@alpha.example.test', 'alpha-secret'))
+    const trashed = await call('DELETE', '/api/webmail/inbox/7?folder=INBOX', undefined, session)
+    expect(trashed.status).toBe(200)
+    expect(movedTo).toBe('Trash')
+    expect(removed).toBe(0)
+    expect(trashed.payload).toMatchObject({ uid: 16, folder: 'Trash' })
+    const blocked = await call('DELETE', '/api/webmail/inbox/7?folder=Trash', undefined, session)
+    expect(blocked.status).toBe(412)
+    expect(blocked.payload.detail).toBe('Deleting a message from Trash removes it permanently.')
+    expect(removed).toBe(0)
+    const gone = await call('DELETE', '/api/webmail/inbox/7?folder=Trash&confirm=delete', undefined, session)
+    expect(gone.status).toBe(200)
+    expect(removed).toBe(1)
+    expect(imapHumanCopy('IMAP UID MOVE/COPY failed: NO [TRYCREATE] Mailbox does not exist').en).toBe('That folder is not on this mailbox yet.')
   })
 
   it('converts a mail date to UTC and keeps text that is not a date', () => {
@@ -343,6 +382,19 @@ describe('xMail mailbox inbox', () => {
     expect(sessions.map(row => row.mailbox)).toEqual(['other@beta.example.test'])
     expect(await state.store.getServiceUserByLogin('inbox@alpha.example.test')).toBeNull()
     expect(await state.store.getServiceUserByLogin('other@beta.example.test')).not.toBeNull()
+  })
+
+  it('shows a mailbox address in place of the stored principal id', () => {
+    const address = 'inbox@alpha.example.test'
+    const username = mailboxPrincipalUsername(address)
+    const index = mailboxAddressIndex([address, 'not-an-address'])
+    expect(rewriteMailboxIds(username, index)).toBe(address)
+    expect(rewriteMailboxIds(`service-user:${username}`, index)).toBe(`service-user:${address}`)
+    expect(rewriteMailboxIds('root', index)).toBe('root')
+    expect(auditActorQuery(address)).toBe(username)
+    expect(auditActorQuery('root')).toBe('root')
+    expect(auditTargetQuery(`mailbox:${address}`)).toBe(`mailbox:${username}`)
+    expect(auditTargetQuery('/health')).toBe('/health')
   })
 
   it('turns a refused local IMAP connection into a mail-server error', async () => {

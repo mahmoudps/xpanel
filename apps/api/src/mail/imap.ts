@@ -68,19 +68,22 @@ const DEFAULT_ATTACHMENT_TTL_MS = 15 * 60 * 1000 // 15 minutes
  * Names and sizes from an IMAP BODYSTRUCTURE. A part counts when it carries a
  * NAME or FILENAME and an octet count. Text parts without a name stay out.
  */
+const decodedBodyOctets = (octets: number, encoding: string): number =>
+  /base64/i.test(encoding) ? Math.floor(octets / 4) * 3 : octets
+
 export const attachmentsFromBodyStructure = (source: string): { name: string; sizeBytes: number }[] => {
   const marker = source.toUpperCase().indexOf('BODYSTRUCTURE')
   const body = marker < 0 ? source : source.slice(marker + 'BODYSTRUCTURE'.length)
   const results: { name: string; sizeBytes: number }[] = []
-  const partRe = /\("([A-Za-z0-9.+-]+)"\s+"([A-Za-z0-9.+-]+)"\s+(\([^)]*\)|NIL)\s+(?:\([^)]*\)|NIL)\s+(?:\([^)]*\)|NIL)\s+"[^"]*"\s+(\d+)/gi
+  const partRe = /\("([A-Za-z0-9.+-]+)"\s+"([A-Za-z0-9.+-]+)"\s+(\([^)]*\)|NIL)\s+(?:\([^)]*\)|NIL)\s+(?:\([^)]*\)|NIL)\s+"([^"]*)"\s+(\d+)/gi
   let match: RegExpExecArray | null
   while ((match = partRe.exec(body)) !== null) {
     const params = match[3] ?? ''
     const name = /"(?:NAME|FILENAME)"\s+"((?:\\"|[^"])+)"/i.exec(params)?.[1]?.replace(/\\"/g, '"')
-    const sizeBytes = Number.parseInt(match[4] ?? '', 10)
-    if (!name || !Number.isFinite(sizeBytes) || sizeBytes < 0) continue
+    const encoded = Number.parseInt(match[5] ?? '', 10)
+    if (!name || !Number.isFinite(encoded) || encoded < 0) continue
     if (match[1]?.toLowerCase() === 'text' && !/name|filename/i.test(params)) continue
-    results.push({ name, sizeBytes })
+    results.push({ name, sizeBytes: decodedBodyOctets(encoded, match[4] ?? '') })
   }
   return results
 }
@@ -634,22 +637,27 @@ export class ImapProtocolClient {
     targetFolder: string,
     operation: 'copy' | 'move',
     requestedMailbox?: string,
-  ): Promise<void> {
+  ): Promise<number | undefined> {
     const mailbox = this.assertAuthenticatedMailbox(requestedMailbox)
     if (this.selectedFolder !== sourceFolder) {
       await this.selectFolder(sourceFolder, mailbox)
+    }
+    const destinationUid = (statusText: string, untagged: readonly string[]): number | undefined => {
+      const match = /\[COPYUID\s+\d+\s+\S+\s+(\d+)\]/i.exec(`${statusText}\n${untagged.join('\n')}`)
+      const parsed = match ? Number.parseInt(match[1]!, 10) : Number.NaN
+      return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
     }
     if (operation === 'copy') {
       const res = await this.sendCommand(`UID COPY ${uid} ${quoteImapString(targetFolder)}`)
       if (res.status !== 'OK') {
         fail('PRECONDITION_FAILED', `IMAP UID COPY failed: ${res.statusText}`)
       }
-      return
+      return destinationUid(res.statusText, res.untagged)
     }
 
     const moveRes = await this.sendCommand(`UID MOVE ${uid} ${quoteImapString(targetFolder)}`)
     if (moveRes.status === 'OK') {
-      return
+      return destinationUid(moveRes.statusText, moveRes.untagged)
     }
     // Fallback to UID COPY + UID STORE \Deleted + EXPUNGE
     const copyRes = await this.sendCommand(`UID COPY ${uid} ${quoteImapString(targetFolder)}`)
@@ -658,6 +666,7 @@ export class ImapProtocolClient {
     }
     await this.storeFlagsByUid(sourceFolder, uid, 'add', ['\\Deleted'], mailbox)
     await this.sendCommand('EXPUNGE')
+    return destinationUid(copyRes.statusText, copyRes.untagged)
   }
 
   /**

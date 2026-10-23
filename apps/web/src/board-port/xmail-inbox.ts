@@ -1,7 +1,7 @@
 import type { Locale } from '../i18n.ts'
-import { escapeHtml, formatAsciiBytes, renderAsyncActionState, type AsyncActionBannerProps } from '../tokens.ts'
+import { escapeHtml, renderAsyncActionState, type AsyncActionBannerProps } from '../tokens.ts'
 import { renderLiveUpdatesIndicator } from '../shell.ts'
-import { formatMailboxQuota, formatMailStamp } from './mail-truth.ts'
+import { formatAttachmentBytes, formatMailboxQuota, formatMailStamp } from './mail-truth.ts'
 
 const MONO = "'IBM Plex Mono', monospace"
 const FONT_EN = "'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif"
@@ -89,6 +89,7 @@ export interface InboxModel {
   listState: 'messages' | 'empty' | 'unread' | 'failed'
   title: string
   countText: string
+  unreadCount?: number
   pager: string
   loaded: number
   total: number
@@ -301,11 +302,23 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
     if (subject) subject.style.fontWeight = '400'
     if (time) { time.style.fontWeight = '400'; time.style.color = '#5D6B7E' }
     if ((root.getAttribute('data-mail-folder') || 'INBOX') !== 'INBOX') return
-    var badge = root.querySelector('[data-mail-count="INBOX"]')
-    if (!badge) return
-    var left = parseInt(badge.textContent || '0', 10)
-    if (left > 1) badge.textContent = String(left - 1)
-    else badge.remove()
+    var dropCount = function (node) {
+      if (!node) return
+      var left = parseInt(node.textContent || '0', 10)
+      if (left > 1) node.textContent = String(left - 1)
+      else node.remove()
+    }
+    dropCount(root.querySelector('[data-mail-count="INBOX"]'))
+    var headers = document.querySelectorAll('.xp-mail-count')
+    for (var h = 0; h < headers.length; h++) dropCount(headers[h])
+    var summary = document.querySelector('[data-mail-unread]')
+    if (!summary) return
+    var nextUnread = Math.max(0, parseInt(summary.getAttribute('data-mail-unread') || '0', 10) - 1)
+    summary.setAttribute('data-mail-unread', String(nextUnread))
+    var sentence = summary.textContent || ''
+    summary.textContent = nextUnread > 0
+      ? sentence.replace(/ · (\d+)( unread| غير مقروء)/, ' · ' + nextUnread + '$2')
+      : sentence.replace(/ · \d+( unread| غير مقروء)/, '')
   }
   var show = function (id) {
     if (!article) return
@@ -450,7 +463,11 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
         }
         var undoText = bar.querySelector('[data-mail-undo-text]')
         var subject = current.querySelector('[data-mail-subject]')
-        if (undoText) undoText.textContent = text('data-moved-prefix') + folder + ': ' + (subject ? subject.textContent : '')
+        var undoBtn = bar.querySelector('[data-mail-action="undo"]')
+        if (undoBtn) undoBtn.hidden = !showUndo
+        if (undoText) undoText.textContent = showUndo
+          ? text('data-moved-prefix') + folder + ': ' + (subject ? subject.textContent : '')
+          : text('data-deleted-label')
         bar.setAttribute('data-removed-id', current.getAttribute('data-mail-open') || '')
         if (next) show(next.getAttribute('data-mail-open'))
         else show(null)
@@ -458,16 +475,38 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
       }
       if (product) {
         if (!uid || typeof window.xpanelSessionRequest !== 'function') return
+        var trashNow = name === 'delete' && fromFolder === 'Trash'
+        if (trashNow && typeof window.confirm === 'function' && !window.confirm(text('data-trash-confirm'))) return
         current.parentNode.setAttribute('data-removed', 'true')
         paint()
         var path = '/api/webmail/inbox/' + encodeURIComponent(uid)
-        var pending = name === 'delete'
-          ? window.xpanelSessionRequest('DELETE', path + '?folder=' + encodeURIComponent(fromFolder))
-          : window.xpanelSessionRequest('POST', path + '/move', { folder: folderId, from: fromFolder })
-        pending.then(function () { finish(false) }).catch(function () {
+        var pending = name === 'move' || (name === 'delete' && !trashNow)
+          ? window.xpanelSessionRequest('POST', path + '/move', { folder: name === 'delete' ? 'Trash' : folderId, from: fromFolder })
+          : window.xpanelSessionRequest('DELETE', path + '?folder=' + encodeURIComponent(fromFolder) + '&confirm=delete')
+        pending.then(function (result) {
+          finish(name === 'move' || (name === 'delete' && !trashNow))
+          var bar = root.querySelector('[data-mail-undo]')
+          if (bar && result && result.uid) {
+            bar.setAttribute('data-undo-uid', String(result.uid))
+            bar.setAttribute('data-undo-from', name === 'delete' ? 'Trash' : folderId)
+            bar.setAttribute('data-undo-to', fromFolder)
+          }
+        }).catch(function (err) {
           current.parentNode.removeAttribute('data-removed')
           var stale = root.querySelector('[data-mail-undo]')
           if (stale) stale.remove()
+          var status = root.querySelector('[data-mail-action-status]')
+          if (!status) {
+            status = document.createElement('p')
+            status.setAttribute('data-mail-action-status', 'true')
+            status.setAttribute('role', 'alert')
+            status.style.cssText = 'margin:0;padding:8px 16px;background:#FEF3F2;color:#B42318;font-size:13px'
+            var slot = root.querySelector('[data-mail-list-slot]')
+            if (slot) slot.insertBefore(status, slot.firstChild)
+          }
+          var arabic = root.getAttribute('data-locale') === 'ar'
+          var detail = err && err.details && arabic && err.details.messageAr ? err.details.messageAr : ''
+          status.textContent = detail || (err && err.message ? err.message : text('data-move-failed'))
           paint()
         })
         return
@@ -477,11 +516,33 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
     if (name === 'undo') {
       var undoBar = root.querySelector('[data-mail-undo]')
       var id = undoBar && undoBar.getAttribute('data-removed-id')
-      var back = id && list && list.querySelector('[data-mail-open="' + id + '"]')
-      if (back) back.parentNode.removeAttribute('data-removed')
-      if (undoBar) undoBar.remove()
-      if (id) show(id)
-      paint()
+      var restoreRow = function () {
+        var back = id && list && list.querySelector('[data-mail-open="' + id + '"]')
+        if (back) back.parentNode.removeAttribute('data-removed')
+        if (undoBar) undoBar.remove()
+        if (id) show(id)
+        paint()
+      }
+      var undoUid = undoBar && undoBar.getAttribute('data-undo-uid')
+      if (root.getAttribute('data-product') === 'true' && undoUid && typeof window.xpanelSessionRequest === 'function') {
+        window.xpanelSessionRequest('POST', '/api/webmail/inbox/' + encodeURIComponent(undoUid) + '/move', {
+          folder: undoBar.getAttribute('data-undo-to') || 'INBOX',
+          from: undoBar.getAttribute('data-undo-from') || 'Trash',
+        }).then(restoreRow).catch(function (err) {
+          var status = root.querySelector('[data-mail-action-status]')
+          if (!status) {
+            status = document.createElement('p')
+            status.setAttribute('data-mail-action-status', 'true')
+            status.setAttribute('role', 'alert')
+            status.style.cssText = 'margin:0;padding:8px 16px;background:#FEF3F2;color:#B42318;font-size:13px'
+            var slot = root.querySelector('[data-mail-list-slot]')
+            if (slot) slot.insertBefore(status, slot.firstChild)
+          }
+          status.textContent = err && err.message ? err.message : text('data-move-failed')
+        })
+        return
+      }
+      restoreRow()
     }
     if (name === 'load-images') {
       var note = action.closest('[data-mail-images]')
@@ -517,7 +578,7 @@ export const renderInbox = (model: InboxModel): string => {
     : model.listState === 'unread'
       ? (ar ? 'لم تُقرأ الرسائل من خادم البريد بعد.' : 'The inbox has not been read from the mail server.')
       : ''
-  return `<div class="xp-board-port" data-board-port="xmail-inbox" data-surface="xmail" data-mail-layout="reference" data-product="${model.product ? 'true' : 'false'}" data-mail-folder="${escapeHtml(model.activeFolder)}" data-pager-of="${escapeHtml(ar ? 'من' : 'of')}" data-pager-latest="${escapeHtml(ar ? 'من أصل' : 'of the latest')}" data-mailbox="${escapeHtml(model.mailbox)}" data-locale="${model.locale}" data-list-state="${model.listState}" data-body-failed="${escapeHtml(ar ? 'تعذر قراءة نص الرسالة.' : 'The message body could not be read.')}" data-move-targets="${escapeHtml(JSON.stringify(model.moveTargets))}" data-move-label="${escapeHtml(copy.moveLabel)}" data-empty-title="${escapeHtml(copy.emptyTitle)}" data-empty-body="${escapeHtml(copy.emptyBody)}" data-empty-clear="${escapeHtml(copy.emptyClear)}" data-undo-label="${escapeHtml(copy.undo)}" data-moved-prefix="${escapeHtml(copy.moved)}" data-trash-label="${escapeHtml(ar ? 'المحذوفات' : 'Trash')}"${ar ? ' dir="rtl"' : ''} style="min-height: 100vh; display: flex; flex-direction: column; background: #F5F6F8; font-family: ${font}; color: #101828">
+  return `<div class="xp-board-port" data-board-port="xmail-inbox" data-surface="xmail" data-mail-layout="reference" data-product="${model.product ? 'true' : 'false'}" data-mail-folder="${escapeHtml(model.activeFolder)}" data-pager-of="${escapeHtml(ar ? 'من' : 'of')}" data-pager-latest="${escapeHtml(ar ? 'من أصل' : 'of the latest')}" data-mailbox="${escapeHtml(model.mailbox)}" data-locale="${model.locale}" data-list-state="${model.listState}" data-body-failed="${escapeHtml(ar ? 'تعذر قراءة نص الرسالة.' : 'The message body could not be read.')}" data-move-targets="${escapeHtml(JSON.stringify(model.moveTargets))}" data-move-label="${escapeHtml(copy.moveLabel)}" data-empty-title="${escapeHtml(copy.emptyTitle)}" data-empty-body="${escapeHtml(copy.emptyBody)}" data-empty-clear="${escapeHtml(copy.emptyClear)}" data-undo-label="${escapeHtml(copy.undo)}" data-moved-prefix="${escapeHtml(copy.moved)}" data-trash-label="${escapeHtml(ar ? 'المحذوفات' : 'Trash')}" data-trash-confirm="${escapeHtml(ar ? 'حذف هذه الرسالة نهائياً؟' : 'Delete this message permanently?')}" data-deleted-label="${escapeHtml(ar ? 'حُذفت' : 'Deleted')}" data-move-failed="${escapeHtml(ar ? 'تعذر نقل الرسالة.' : 'The message could not be moved.')}"${ar ? ' dir="rtl"' : ''} style="min-height: 100vh; display: flex; flex-direction: column; background: #F5F6F8; font-family: ${font}; color: #101828">
 <style>${PORT_CSS}</style>
 <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 12px 24px; background: #FFFFFF; border-bottom: 1px solid #E2E6EC">
   <a href="${escapeHtml(model.inboxHref)}" style="display: flex; align-items: center; gap: 10px; min-height: 44px; text-decoration: none"><span aria-hidden="true" style="width: 36px; height: 36px; border-radius: 8px; background: #0E7A4E; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 18px; font-weight: 600">x</span><span style="font-family: ${MONO}; font-size: 17px; font-weight: 500; color: #0E7A4E">${ar ? `<bdi dir="ltr">xMail</bdi>` : 'xMail'}</span></a>
@@ -539,7 +600,7 @@ export const renderInbox = (model: InboxModel): string => {
     ${model.actionHtml}
     <section aria-labelledby="list-title" data-mail-pane="message-list" style="flex: 1.618 1 320px; min-width: 0; background: #FFFFFF; border-inline-end: 1px solid #E2E6EC; display: flex; flex-direction: column">
       <div style="padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid #E2E6EC">
-        <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap"><h1 id="list-title" style="margin: 0; font-size: 20px; font-weight: 600">${escapeHtml(model.title)}</h1><span style="font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums">${escapeHtml(model.countText)}</span></div>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap"><h1 id="list-title" style="margin: 0; font-size: 20px; font-weight: 600">${escapeHtml(model.title)}</h1><span${model.unreadCount && model.unreadCount > 0 ? ` data-mail-unread="${model.unreadCount}"` : ''} style="font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums">${escapeHtml(model.countText)}</span></div>
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><div role="group" aria-label="${ar ? 'عرض' : 'Show'}" style="display: inline-flex; padding: 2px; border-radius: 10px; background: #EEF0F3; gap: 2px">${filterBtn('all', ar ? 'الكل' : 'All', true)}${filterBtn('unread', ar ? 'غير المقروء' : 'Unread', false)}${filterBtn('attachments', ar ? 'مع مرفقات' : 'With attachments', false)}</div><span style="flex: 1 1 0"></span><button type="button" aria-label="${ar ? 'التحقق من البريد الجديد' : 'Check for new mail'}" style="width: 44px; height: 44px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 4v7h-7"></path></svg></button></div>
       </div>
       <div data-mail-list-slot="true">
@@ -603,6 +664,7 @@ export interface XmailInboxProps {
   locale?: Locale
   mailbox: string
   quotaUsedMb?: number
+  quotaUsedBytes?: number
   quotaLimitMb?: number | 'unlimited'
   activeFolder?: string
   selectedUid?: number
@@ -648,8 +710,8 @@ export const xmailInboxFromProps = (props: XmailInboxProps): InboxModel => {
       datetime: stamp.datetime,
       unread: message.unread,
       auth,
-      attachments: files.map(file => ({ name: file.name, ext: fileExt(file.name), size: formatAsciiBytes(file.sizeBytes) })),
-      ...(files.length ? { attachTotal: formatAsciiBytes(files.reduce((sum, file) => sum + (Number.isFinite(file.sizeBytes) ? file.sizeBytes : 0), 0)) } : {}),
+      attachments: files.map(file => ({ name: file.name, ext: fileExt(file.name), size: formatAttachmentBytes(file.sizeBytes) })),
+      ...(files.length ? { attachTotal: formatAttachmentBytes(files.reduce((sum, file) => sum + (Number.isFinite(file.sizeBytes) ? file.sizeBytes : 0), 0)) } : {}),
       bodyPending: pending,
       blocks: [block(pending ? (ar ? 'لم يُحمّل نص هذه الرسالة بعد.' : 'This message body has not been loaded.') : message.body)],
     }
@@ -684,7 +746,7 @@ export const xmailInboxFromProps = (props: XmailInboxProps): InboxModel => {
     : listState === 'messages'
       ? `${phrase(visible.length, ar, 'رسالة واحدة', 'رسالتان', 'رسائل', 'رسالة', 'message', 'لا رسائل')}${unread ? ` · ${unread} ${ar ? 'غير مقروء' : 'unread'}` : ''}`
       : '—'
-  const quota = formatMailboxQuota(props.quotaUsedMb, props.quotaLimitMb, locale)
+  const quota = formatMailboxQuota(props.quotaUsedMb, props.quotaLimitMb, locale, props.quotaUsedBytes)
   const ofWord = ar ? 'من' : 'of'
   const pager = listState === 'empty' ? (ar ? '0 من 0' : '0 of 0') : listState === 'messages' ? `1\u2013${visible.length} ${ofWord} ${visible.length}` : '—'
   const title = STANDARD.find(item => item.id === activeFolder)?.[ar ? 'ar' : 'en'] ?? activeFolder
@@ -700,6 +762,7 @@ export const xmailInboxFromProps = (props: XmailInboxProps): InboxModel => {
     listState,
     title,
     countText,
+    unreadCount: activeFolder === 'INBOX' ? unread : 0,
     pager,
     loaded: visible.length,
     total: visible.length,

@@ -28,7 +28,10 @@ export const visibleNavigation = (
     if (page.tools.every(id => allowed.has(id))) return true
     // The server dashboard reads the same host sample as Server Information.
     // Its own tools stay on this page, and the page opens once that probe is verified.
-    return page.route === '/whm' && allowed.has('server-information')
+    if (page.route === '/whm' && allowed.has('server-information')) return true
+    // The audit log opens once the audit_log probe can read the log. The page's
+    // other tools stay listed and do not have to be verified first.
+    return page.route === '/whm/audit' && allowed.has('audit-log')
   }
   return design.map(surface => ({
     ...surface,

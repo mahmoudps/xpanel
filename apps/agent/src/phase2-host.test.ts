@@ -46,6 +46,7 @@ describe('host measurements', () => {
     expect(parseNginxVersion('nginx version: nginx/1.24.0\n')).toBe('1.24.0')
     expect(parseApacheVersion('Server version: Apache/2.4.58 (Debian)\n')).toBe('2.4.58')
     expect(parsePackageVersion('{"version":"0.1.0"}')).toBe('0.1.0')
+    expect(parsePackageVersion('{"version":"0.1.0-audit-ar.20261024.1"}')).toBe('0.1.0-audit-ar.20261024.1')
     expect(parsePackageVersion('{"version":"../etc"}')).toBeNull()
     const calls: string[][] = []
     const identity = await readHostIdentity({
