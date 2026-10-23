@@ -2270,11 +2270,17 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           count: visible.length,
         })
       }
-      if (contactExportMatch && method === 'GET') {
+      if (contactExportMatch && (method === 'GET' || method === 'DELETE')) {
         const targetId = contactExportMatch[1]!
         const target = contacts.find((c) => c.id === targetId)
         if (!target) return fail('NOT_FOUND', 'contact not found')
         await resolveContactAccess(target, url.searchParams.get('mailbox'), false)
+        if (method === 'DELETE') {
+          return new Response(JSON.stringify({
+            type: 'about:blank', title: 'Method Not Allowed', status: 405,
+            code: 'METHOD_NOT_ALLOWED', detail: 'contact export routes only support GET', instance: pathname,
+          }), { status: 405, headers: { allow: 'GET', 'content-type': 'application/problem+json; charset=utf-8' } })
+        }
         return jsonResponse({ contactId: target.id, vcard: target.vcard })
       }
       if (method === 'POST' && pathname === '/api/webmail/contacts/import') {
@@ -2415,8 +2421,20 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         return jsonResponse({ contact: target })
       }
       if (method === 'DELETE') {
-        const body = await readJsonBody<{ id?: string }>(req)
-        const targetId = contactDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
+        const body = await readJsonBody<{ id?: unknown }>(req)
+        const invalidSelector = (detail: string): Response => new Response(JSON.stringify({
+          type: 'about:blank', title: 'VALIDATION', status: 400, code: 'VALIDATION', detail, instance: pathname,
+        }), { status: 400, headers: { 'content-type': 'application/problem+json; charset=utf-8' } })
+        const selectors: unknown[] = [
+          ...(contactDeleteMatch ? [contactDeleteMatch[1]!] : []),
+          ...url.searchParams.getAll('id'),
+          ...(Object.hasOwn(body, 'id') ? [body.id] : []),
+        ]
+        if (selectors.length === 0 || selectors.some(id => typeof id !== 'string' || id.trim().length === 0)) {
+          return invalidSelector('a non-empty contact id is required for every explicit selector')
+        }
+        const targetId = selectors[0] as string
+        if (selectors.some(id => id !== targetId)) return invalidSelector('conflicting contact id selectors')
         const target = contacts.find(contact => contact.id === targetId)
         if (!target) return fail('NOT_FOUND', 'contact not found')
         const callerMailbox = await resolveContactAccess(target, url.searchParams.get('mailbox'), false)
