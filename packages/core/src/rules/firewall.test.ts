@@ -5,6 +5,8 @@ import {
   assertNoSelfLockout,
   cidrContains,
   defaultFirewallRules,
+  MANAGEMENT_PUBLIC_PORTS,
+  MANAGEMENT_BACKEND_PORTS,
   evaluateFirewall,
   formatCidr,
   parseCidr,
@@ -199,11 +201,11 @@ describe('validateFirewallRule', () => {
 describe('defaultFirewallRules', () => {
   const rules = defaultFirewallRules(settings)
 
-  it('is valid and opens exactly panel, 80, 443 and SSH to the world', () => {
+  it('is valid and opens management HTTPS, 80, 443 and SSH to the world', () => {
     expect(validateFirewallRules(rules)).toEqual(rules)
     const world = parseIp('198.51.100.7')!
-    for (const port of [22, 80, 443, 2087]) expect(evaluateFirewall(rules, { ip: world, protocol: 'tcp', port }).action).toBe('accept')
-    for (const port of [21, 25, 3306, 5432, 6379, 8080, 8443, 2083]) {
+    for (const port of [22, 80, 443, ...MANAGEMENT_PUBLIC_PORTS]) expect(evaluateFirewall(rules, { ip: world, protocol: 'tcp', port }).action).toBe('accept')
+    for (const port of [21, 25, 3306, 5432, 6379, 8080, 8443, ...MANAGEMENT_BACKEND_PORTS]) {
       expect(evaluateFirewall(rules, { ip: world, protocol: 'tcp', port }).action).toBe('drop')
     }
     expect(evaluateFirewall(rules, { ip: world, protocol: 'udp', port: 53 }).action).toBe('drop')
@@ -231,6 +233,34 @@ describe('defaultFirewallRules', () => {
     { ...settings, sshPort: 70000 },
   ])('rejects conflicting ports %o', (s) => {
     expect(code(() => defaultFirewallRules(s))).toBe('VALIDATION')
+  })
+})
+
+describe('management entry-point firewall boundaries', () => {
+  const ports = [...MANAGEMENT_PUBLIC_PORTS, ...MANAGEMENT_BACKEND_PORTS]
+  const group = { ...settings, managementPorts: MANAGEMENT_PUBLIC_PORTS }
+  const base = defaultFirewallRules(group)
+  it.each(ports)('rejects tenant forwarding takeover of reserved management port %s', (port) => {
+    const forward = r('takeover', { kind: 'forward', port: String(port), forwardTo: '10.0.0.5:9000' })
+    expect(code(() => validateFirewallRuleSet([forward, ...base], { ...group, prefixLists: {} }))).toBe('VALIDATION')
+  })
+  it.each(MANAGEMENT_BACKEND_PORTS)('rejects public accepts on private listener %s', (port) => {
+    expect(code(() => validateFirewallRuleSet([r('expose', { port: String(port) }), ...base], { ...group, prefixLists: {} }))).toBe('VALIDATION')
+  })
+  it.each(MANAGEMENT_PUBLIC_PORTS)('refuses to close configured management port %s for the saving session', (port) => {
+    const closed = base.filter((rule) => rule.port !== String(port))
+    expect(code(() => assertNoSelfLockout(closed, ctx('198.51.100.7', { managementPorts: MANAGEMENT_PUBLIC_PORTS })))).toBe('SELF_LOCKOUT')
+  })
+  it('rejects duplicate management ports and validates a distinct legacy custom panel port', () => {
+    expect(code(() => defaultFirewallRules({ ...settings, managementPorts: [2083, 2083] }))).toBe('VALIDATION')
+    const custom = defaultFirewallRules({ ...settings, panelPort: 9443 })
+    for (const port of [9443, ...MANAGEMENT_PUBLIC_PORTS]) expect(evaluateFirewall(custom, { ip: parseIp('198.51.100.7')!, protocol: 'tcp', port }).action).toBe('accept')
+    expect(() => assertNoSelfLockout(custom, ctx('198.51.100.7', { panelPort: 9443, managementPorts: MANAGEMENT_PUBLIC_PORTS }))).not.toThrow()
+    expect(code(() => assertNoSelfLockout(custom, ctx('198.51.100.7', { managementPorts: [2083, 2083] })))).toBe('VALIDATION')
+    expect(evaluateFirewall(custom, { ip: parseIp('198.51.100.7')!, protocol: 'tcp', port: 9444 }).action).toBe('drop')
+  })
+  it.each(ports)('rejects an Apache backend collision at %s', (port) => {
+    expect(code(() => defaultFirewallRules({ ...settings, backendPort: port }))).toBe('VALIDATION')
   })
 })
 

@@ -139,7 +139,11 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
   function redirectToWorkspace() {
     clearCredentials(); clearEnrollment();
     if (!principal || ['root', 'reseller', 'user'].indexOf(principal.kind) === -1) { message(copy.unexpected, true); return; }
-    var path = principal.kind === 'user' ? '/panel' : '/whm';
+    var audience = shell && shell.getAttribute('data-login-audience');
+    var destinations = { xpanel: { path: '/panel', roles: ['user'] }, xwhm: { path: '/whm', roles: ['root', 'reseller'] }, xmail: { path: '/mail/inbox', roles: ['user'] } };
+    var destination = audience && Object.prototype.hasOwnProperty.call(destinations, audience) ? destinations[audience] : null;
+    if (audience && (!destination || destination.roles.indexOf(principal.kind) === -1)) { message(copy.unexpected, true); return; }
+    var path = destination ? destination.path : (principal.kind === 'user' ? '/panel' : '/whm');
     window.location.assign(path + '?lang=' + (ar ? 'ar' : 'en'));
   }
 

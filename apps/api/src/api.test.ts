@@ -59,6 +59,16 @@ interface SessionClient {
   ): Promise<Response>
 }
 
+// The injected executor proves configuration flow only, never native account readiness.
+const assertConfiguredAccountCreation = async (response: Response, username: string): Promise<void> => {
+  assert.equal(response.status, 201, await response.clone().text())
+  const body = await response.clone().json() as { account: { username: string }; execution: unknown }
+  assert.equal(body.account.username, username)
+  assert.deepEqual(body.execution, {
+    status: 'configuration_applied', scope: 'global_configuration', targetVerified: false, verificationRequired: true,
+  })
+}
+
 const createSessionClient = (app: ApiApp, setCookieHeader: string | null, csrfToken: string): SessionClient => {
   const cookies = parseCookies(
     setCookieHeader
@@ -334,7 +344,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
         ipv4: '203.0.113.10',
       },
     })
-    assert.equal(aliceRes.status, 201)
+    await assertConfiguredAccountCreation(aliceRes, 'alice')
     const aliceData = (await aliceRes.json()) as {
       account: { id: string; username: string; uid: number }
       primaryDomain: { id: string; name: string }
@@ -353,7 +363,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
         ipv4: '203.0.113.10',
       },
     })
-    assert.equal(bobRes.status, 201)
+    await assertConfiguredAccountCreation(bobRes, 'bob')
 
     // Verify rendered files in FakeHostExecutor
     assert.ok(executor.files.has(`${UBUNTU_OS.paths.nginxVhostDir}/xpanel-alice.conf`))
@@ -377,24 +387,28 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     })
     const { plan } = (await planRes.json()) as { plan: { id: string } }
 
-    await root.request('/api/accounts', {
+    const aliceCreateRes = await root.request('/api/accounts', {
       method: 'POST',
       body: {
         username: 'alice',
         password: 'AlicePassword!2026',
         primaryDomain: 'alice.example.com',
         planId: plan.id,
+        ipv4: '203.0.113.10',
       },
     })
-    await root.request('/api/accounts', {
+    await assertConfiguredAccountCreation(aliceCreateRes, 'alice')
+    const bobCreateRes = await root.request('/api/accounts', {
       method: 'POST',
       body: {
         username: 'bob',
         password: 'BobPassword!2026',
         primaryDomain: 'bob.example.com',
         planId: plan.id,
+        ipv4: '203.0.113.10',
       },
     })
+    await assertConfiguredAccountCreation(bobCreateRes, 'bob')
 
     const { res: aliceLoginRes, client: alice } = await loginAs('alice', 'AlicePassword!2026')
     assert.equal(aliceLoginRes.status, 200)
@@ -479,15 +493,17 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     })
     const { plan } = (await planRes.json()) as { plan: { id: string } }
 
-    await root.request('/api/accounts', {
+    const aliceCreateRes = await root.request('/api/accounts', {
       method: 'POST',
       body: {
         username: 'alice',
         password: 'AlicePassword!2026',
         primaryDomain: 'alice.example.com',
         planId: plan.id,
+        ipv4: '203.0.113.10',
       },
     })
+    await assertConfiguredAccountCreation(aliceCreateRes, 'alice')
 
     const { client: alice } = await loginAs('alice', 'AlicePassword!2026')
 
@@ -612,7 +628,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
         ipv6: '2001:db8::25',
       },
     })
-    assert.equal(accRes.status, 201)
+    await assertConfiguredAccountCreation(accRes, 'alice')
 
     // Configure Mail Outbound IP with custom per-domain override
     const mailIpRes = await root.request('/api/mail/ips', {
@@ -658,8 +674,10 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
         password: 'AlicePassword!2026',
         primaryDomain: 'alice.example.com',
         planId: plan.id,
+        ipv4: '203.0.113.10',
       },
     })
+    await assertConfiguredAccountCreation(accRes, 'alice')
     const { primaryDomain } = (await accRes.json()) as {
       primaryDomain: { id: string; docRoot: string }
     }
@@ -724,8 +742,10 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
         password: 'AlicePassword!2026',
         primaryDomain: 'alice.example.com',
         planId: plan.id,
+        ipv4: '203.0.113.10',
       },
     })
+    await assertConfiguredAccountCreation(aliceAccRes, 'alice')
     const aliceAccData = (await aliceAccRes.json()) as {
       account: { id: string }
       primaryDomain: { id: string }
@@ -738,8 +758,10 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
         password: 'BobPassword!2026',
         primaryDomain: 'bob.example.com',
         planId: plan.id,
+        ipv4: '203.0.113.10',
       },
     })
+    await assertConfiguredAccountCreation(bobAccRes, 'bob')
     const bobAccData = (await bobAccRes.json()) as {
       account: { id: string }
       primaryDomain: { id: string }

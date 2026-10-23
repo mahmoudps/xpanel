@@ -15,7 +15,7 @@ const argument = name => process.argv.slice(2).find(value => value.startsWith(`$
 const binaries = ['/usr/bin/systemctl', '/usr/bin/getent', '/usr/sbin/groupadd', '/usr/sbin/groupdel', '/usr/sbin/useradd', '/usr/sbin/userdel', '/usr/sbin/runuser', '/usr/bin/chown']
 const sourcePaths = ['.node-version', 'apps/agent/src/main.ts', 'apps/agent/src/server.ts', 'apps/api/src/main.ts', 'apps/api/src/cli.ts', 'apps/api/src/server.ts', 'apps/api/src/agent-client.ts', 'apps/api/src/auth.ts', 'packages/core/src/errors.ts', 'packages/db/src/client.ts', 'pnpm-lock.yaml', 'package.json', 'scripts/vm/qualify-agent-boundary.mjs']
 
-export function agentBoundaryPreflight(snapshotHash, receiptPath = null) {
+export function agentBoundaryPreflight(snapshotHash, receiptPath = null, sourceHash = null) {
   const reasons = []
   let receipt = null
   if (process.platform !== 'linux') reasons.push('Native Linux is required; no WSL or privilege escalation is started.')
@@ -26,7 +26,9 @@ export function agentBoundaryPreflight(snapshotHash, receiptPath = null) {
     const receiptCheck = verifySnapshotReceipt({
       rootDir: sourceRoot,
       expectedArchiveSha256: snapshotHash,
+      expectedSourceSha256: sourceHash,
       receiptPath,
+      requirePinnedPnpm: true,
     })
     if (!receiptCheck.ok) {
       reasons.push(...receiptCheck.reasons)
@@ -91,8 +93,8 @@ const processIdentity = async pid => {
   return { pid, uid: Number(/^Uid:\s+(\d+)/m.exec(status)?.[1]), gid: Number(/^Gid:\s+(\d+)/m.exec(status)?.[1]) }
 }
 
-export async function qualifyAgentBoundary(snapshotHash) {
-  const preflight = agentBoundaryPreflight(snapshotHash)
+export async function qualifyAgentBoundary(snapshotHash, sourceHash = null) {
+  const preflight = agentBoundaryPreflight(snapshotHash, null, sourceHash)
   if (preflight.status === 'blocked') return { schema_version: 1, scope: 'S03 Linux process and service-credential boundary primitives', status: 'blocked', preflight }
   const startedAt = new Date().toISOString()
   const before = await fingerprint()
@@ -471,6 +473,7 @@ export async function qualifyAgentBoundary(snapshotHash) {
   const report = {
     schema_version: 1, scope: 'S03 root agent / nonroot API, protected credential/socket, real IPC, SQLite WAL and systemd restart primitives. No SO_PEERCRED matcher, installer or workload-isolation claim.',
     status: passed ? 'passed' : 'failed', started_at: startedAt, finished_at: new Date().toISOString(), snapshot_archive_sha256: snapshotHash,
+    coordinator_source_sha256: sourceHash ?? null,
     snapshot_source_sha256: preflight.receipt?.source_sha256 ?? null,
     snapshot_receipt_sha256: preflight.receipt?.receipt_sha256 ?? null,
     snapshot_hash_supplied_by: 'external coordinator', archive_hash_verified_in_fixture: Boolean(preflight.receipt),
@@ -487,7 +490,7 @@ export async function qualifyAgentBoundary(snapshotHash) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const report = await qualifyAgentBoundary(argument('--snapshot-sha256'))
+  const report = await qualifyAgentBoundary(argument('--snapshot-sha256'), argument('--source-sha256'))
   const output = argument('--output')
   if (output && report.status !== 'blocked') {
     const path = resolve(output)

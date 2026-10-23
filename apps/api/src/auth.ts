@@ -17,6 +17,8 @@ import {
   touchSession,
 } from '@xpanel/db'
 import type { Db, PrincipalRecord } from '@xpanel/db'
+import { entryPointAllowsRole, sessionCookieName, sessionTokenHash } from './entry-points.ts'
+import type { EntryPoint } from './entry-points.ts'
 
 export const SESSION_COOKIE_NAME = 'xpanel_session'
 export const HOST_SESSION_COOKIE_NAME = '__Host-xpanel_session'
@@ -360,38 +362,39 @@ export const parseCookies = (cookieHeader: string | null): Record<string, string
 
 export const formatSessionCookie = (
   token: string,
-  opts?: { secure?: boolean; maxAgeSec?: number },
+  opts?: { secure?: boolean; maxAgeSec?: number; entryPoint?: EntryPoint },
 ): string => {
   const secure = opts?.secure ?? false
-  const name = secure ? HOST_SESSION_COOKIE_NAME : SESSION_COOKIE_NAME
+  const name = sessionCookieName(opts?.entryPoint, secure)
   const maxAge = Math.max(0, Math.floor(opts?.maxAgeSec ?? 86_400))
   const attrs = ['HttpOnly', 'SameSite=Strict', 'Path=/', `Max-Age=${maxAge}`]
   if (secure) attrs.push('Secure')
   return `${name}=${encodeURIComponent(token)}; ${attrs.join('; ')}`
 }
 
-export const clearSessionCookie = (opts?: { secure?: boolean }): string => {
+export const clearSessionCookie = (opts?: { secure?: boolean; entryPoint?: EntryPoint }): string => {
   const secure = opts?.secure ?? false
-  const name = secure ? HOST_SESSION_COOKIE_NAME : SESSION_COOKIE_NAME
+  const name = sessionCookieName(opts?.entryPoint, secure)
   const attrs = ['HttpOnly', 'SameSite=Strict', 'Path=/', 'Max-Age=0']
   if (secure) attrs.push('Secure')
   return `${name}=; ${attrs.join('; ')}`
 }
 
-export const deriveCsrfToken = (sessionToken: string, serverSecret: string): string => {
+export const deriveCsrfToken = (sessionToken: string, serverSecret: string, entryPoint?: EntryPoint): string => {
   if (typeof sessionToken !== 'string' || sessionToken.length === 0) {
     fail('VALIDATION', 'sessionToken is required to derive CSRF token')
   }
   if (typeof serverSecret !== 'string' || serverSecret.length === 0) {
     fail('VALIDATION', 'serverSecret is required to derive CSRF token')
   }
-  return createHmac('sha256', serverSecret).update(`csrf:${sessionToken}`).digest('hex')
+  return createHmac('sha256', serverSecret).update(entryPoint ? `csrf:v1:${entryPoint}\0${sessionToken}` : `csrf:${sessionToken}`).digest('hex')
 }
 
 export const verifyCsrfToken = (
   sessionToken: string,
   csrfHeader: string | null,
   serverSecret: string,
+  entryPoint?: EntryPoint,
 ): boolean => {
   if (
     typeof sessionToken !== 'string' ||
@@ -403,7 +406,7 @@ export const verifyCsrfToken = (
   ) {
     return false
   }
-  const expected = Buffer.from(deriveCsrfToken(sessionToken, serverSecret), 'utf8')
+  const expected = Buffer.from(deriveCsrfToken(sessionToken, serverSecret, entryPoint), 'utf8')
   const actual = Buffer.from(csrfHeader.trim(), 'utf8')
   return expected.byteLength === actual.byteLength && timingSafeEqual(expected, actual)
 }
@@ -453,10 +456,12 @@ const isClientIpAllowed = (allowedIps: readonly string[], clientIp: string | nul
 export const authenticateRequest = async (
   db: Db,
   req: Request,
-  opts: { serverSecret: string; clientIp?: string | null; touchSession?: boolean },
+  opts: { serverSecret: string; clientIp?: string | null; touchSession?: boolean; entryPoint?: EntryPoint },
 ): Promise<AuthenticatedCaller | null> => {
   const authHeader = req.headers.get('authorization')
   if (authHeader) {
+    // Interactive listeners have no audience-scoped API token contract yet.
+    if (opts.entryPoint) return null
     const bearerMatch = /^Bearer\s+(\S+)$/i.exec(authHeader.trim())
     if (!bearerMatch) return null
     const rawToken = bearerMatch[1]!
@@ -481,10 +486,12 @@ export const authenticateRequest = async (
   }
 
   const cookies = parseCookies(req.headers.get('cookie'))
-  const sessionToken = cookies[HOST_SESSION_COOKIE_NAME] ?? cookies[SESSION_COOKIE_NAME]
+  const sessionToken = opts.entryPoint
+    ? cookies[sessionCookieName(opts.entryPoint, true)]
+    : cookies[HOST_SESSION_COOKIE_NAME] ?? cookies[SESSION_COOKIE_NAME]
   if (!sessionToken) return null
 
-  const tokenHash = sha256Hex(sessionToken)
+  const tokenHash = sessionTokenHash(sessionToken, opts.entryPoint)
   const session = await findActiveSessionByTokenHash(db, tokenHash)
   if (!session) return null
   const now = Date.now()
@@ -495,10 +502,11 @@ export const authenticateRequest = async (
 
   const principalRecord = await getPrincipal(db, session.principalId)
   if (!principalRecord || principalRecord.disabled) return null
+  if (opts.entryPoint && !entryPointAllowsRole(opts.entryPoint, principalRecord.kind)) return null
 
   if (opts.touchSession !== false) await touchSession(db, session.id)
   const csrfHeader = req.headers.get(CSRF_HEADER_NAME) ?? req.headers.get('x-xsrf-token')
-  const csrfValid = verifyCsrfToken(sessionToken, csrfHeader, opts.serverSecret)
+  const csrfValid = verifyCsrfToken(sessionToken, csrfHeader, opts.serverSecret, opts.entryPoint)
   const mfaSatisfied = !principalRecord.totpEnabled || (principalRecord.totpSecretEnc !== null && session.mfaVerified)
 
   return {

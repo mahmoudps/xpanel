@@ -47,11 +47,21 @@ export const getSurfaceNavigationLabel = (surface: SurfaceKind, kind: 'section' 
 export const normalizeSurfaceRoute = (surface: SurfaceKind, activeRoute: string): string =>
   surface === 'xpanel' && activeRoute === '/panel' ? '/home' : surface === 'xmail' && activeRoute === '/mail' ? '/mail/inbox' : activeRoute
 
+export const renderPageSearchButton = (locale: Locale): string => {
+  const label = locale === 'ar' ? 'ابحث عن صفحة' : 'Find a page'
+  return `<button type="button" class="xp-btn xp-page-search" data-action="open-cmdk" aria-keyshortcuts="Control+K Meta+K" aria-label="${label}" title="${label} (Ctrl K)">
+    <svg class="xp-page-search__icon" aria-hidden="true" focusable="false" viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8.5" cy="8.5" r="5.5" /><path d="m12.5 12.5 4 4" /></svg>
+    <span class="xp-page-search__label">${label}</span><kbd class="xp-mono">Ctrl K</kbd>
+  </button>`
+}
+
 export const renderLiveUpdatesIndicator = (locale: Locale, realtimeEnabled: boolean): string => {
   const label = realtimeEnabled
     ? (locale === 'ar' ? 'جار الاتصال' : 'Connecting')
     : (locale === 'ar' ? 'التحديثات المباشرة غير متاحة' : 'Live updates unavailable')
-  return `<span data-ws-indicator="${realtimeEnabled ? 'disconnected' : 'unavailable'}">${renderStatusBadge('suspended', label)}</span>`
+  const visibleLabel = realtimeEnabled ? label : (locale === 'ar' ? 'التحديث متوقف' : 'Live off')
+  const description = realtimeEnabled ? '' : ` aria-label="${label}" title="${label}"`
+  return `<span data-ws-indicator="${realtimeEnabled ? 'disconnected' : 'unavailable'}" role="status"${description}>${renderStatusBadge('suspended', visibleLabel)}</span>`
 }
 
 const surfaceSections: Record<SurfaceShellProps['surface'], Readonly<Record<string, string>>> = {
@@ -84,7 +94,7 @@ export const resolveSurfaceSection = (surface: SurfaceShellProps['surface'], act
 
 export const renderMobileNavToggle = (locale: Locale): string => `
 <button type="button" class="xp-btn xp-mobile-nav-toggle" data-action="toggle-mobile-nav" aria-controls="xp-sidebar" aria-expanded="false">
-  <span aria-hidden="true">☰</span><span>${locale === 'ar' ? 'القائمة' : 'Menu'}</span>
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>${locale === 'ar' ? 'القائمة' : 'Menu'}</span>
 </button>`
 
 export const renderMobileNavBackdrop = (locale: Locale): string => `

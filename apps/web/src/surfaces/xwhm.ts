@@ -22,7 +22,7 @@ import {
   renderStatusBadge,
   renderThresholdMeter,
 } from '../tokens.ts'
-import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, getSurfaceNavigationLabel, normalizeSurfaceRoute, renderLiveUpdatesIndicator } from '../shell.ts'
+import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, getSurfaceNavigationLabel, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
 export { renderWhmExtendedSections } from './extended-views.ts'
 
@@ -308,17 +308,14 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
       ${(whmNav?.sections ?? []).flatMap(section => section.pages).slice(0, 3).map(page => `<a href="${escapeHtml(page.route)}" class="xp-nav-item">${escapeHtml(getSurfaceNavigationLabel('xwhm', 'page', page, locale))}</a>`).join('')}
     </div>
 
-    <nav aria-label="xWHM sections">
+    <nav aria-label="${isAr ? 'أقسام xWHM' : 'xWHM sections'}">
       ${sidebarSectionsHtml || `<p role="status" data-navigation-empty="true">${escapeHtml(isAr ? 'لا توجد أدوات مثبتة الجاهزية ومتاحة لحسابك.' : 'No verified tools are available for your account.')}</p>`}
     </nav>`,
-    topbar: `      <div class="xp-topbar__start" style="display: flex; align-items: center; gap: 12px;">
-        <button type="button" class="xp-btn" data-action="open-cmdk" aria-keyshortcuts="Control+K Meta+K" aria-label="${isAr ? 'البحث في الأدوات والحسابات' : 'Search tools and accounts'}">
-          <span>${isAr ? 'بحث' : 'Search'}</span>
-          <kbd class="xp-mono">Ctrl K</kbd>
-        </button>
+    topbar: `      <div class="xp-topbar__start">
+        ${renderPageSearchButton(locale)}
       </div>
 
-      <div class="xp-topbar__end" style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+      <div class="xp-topbar__end">
         ${renderLiveUpdatesIndicator(locale, props.realtimeEnabled === true)}
         ${generationId !== undefined ? `<span data-generation-chip="${generationId}">
           ${renderStatusBadge('ok', `Gen #${generationId}`)}
@@ -337,19 +334,21 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
         </a>
         <a href="/panel?lang=${locale}&amp;theme=${theme}" class="xp-btn xp-btn--ghost">xPanel</a>
         <a href="/mail?lang=${locale}&amp;theme=${theme}" class="xp-btn xp-btn--ghost">xMail</a>
-        <span class="xp-mono" aria-label="Active operator">${escapeHtml(principal.username)}</span>
-        <button type="button" class="xp-btn xp-btn--ghost" data-action="logout">${escapeHtml(isAr ? 'تسجيل الخروج' : 'Sign out')}</button>
+        <div class="xp-account-actions">
+          <span class="xp-mono xp-account-actions__name" aria-label="${isAr ? 'المستخدم الحالي' : 'Current user'}">${escapeHtml(principal.username)}</span>
+          <button type="button" class="xp-btn xp-btn--ghost" data-action="logout">${escapeHtml(isAr ? 'تسجيل الخروج' : 'Sign out')}</button>
+        </div>
       </div>`,
     content: `      ${actionBannerHtml}
 ${section === 'overview' ? `      <section class="xp-card" data-section="overview-attention">
         <div class="xp-card__header"><div><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1><p class="xp-prose"><bdi dir="ltr">${escapeHtml(hostname)}</bdi></p></div></div>
         <div class="xp-kpi-grid" data-section="whm-kpi-cards">
-          <div class="xp-form-group"><span class="xp-label">${isAr ? 'الحسابات' : 'Accounts'}</span><strong>${props.accounts ? accounts.length : (isAr ? 'غير متاحة' : 'Unavailable')}</strong></div>
-          <div class="xp-form-group"><span class="xp-label">${isAr ? 'الخطط' : 'Plans'}</span><strong>${props.plans ? plans.length : (isAr ? 'غير متاحة' : 'Unavailable')}</strong></div>
-          <div class="xp-form-group"><span class="xp-label">${isAr ? 'الإصدار' : 'Version'}</span><strong><bdi dir="ltr">${escapeHtml(version)}</bdi></strong></div>
-          <div class="xp-form-group"><span class="xp-label">${isAr ? 'المشغل' : 'Operator'}</span><strong><bdi dir="ltr">${escapeHtml(principal.username)}</bdi></strong></div>
+          <div class="xp-field"><span class="xp-label">${isAr ? 'الحسابات' : 'Accounts'}</span><strong>${props.accounts ? accounts.length : (isAr ? 'غير متاحة' : 'Unavailable')}</strong></div>
+          <div class="xp-field"><span class="xp-label">${isAr ? 'الخطط' : 'Plans'}</span><strong>${props.plans ? plans.length : (isAr ? 'غير متاحة' : 'Unavailable')}</strong></div>
+          <div class="xp-field"><span class="xp-label">${isAr ? 'الإصدار' : 'Version'}</span><strong><bdi dir="ltr">${escapeHtml(version)}</bdi></strong></div>
+          <div class="xp-field"><span class="xp-label">${isAr ? 'المشغل' : 'Operator'}</span><strong><bdi dir="ltr">${escapeHtml(principal.username)}</bdi></strong></div>
         </div>
-        ${!ioSnapshot ? `<p class="xp-prose" role="status">${isAr ? 'لم تتوفر قياسات موارد الخادم بعد.' : 'Server resource measurements are not available yet.'}</p>` : `<div class="xp-kpi-grid"><div class="xp-form-group"><span class="xp-label">CPU</span>${renderThresholdMeter(ioSnapshot.current.cpuPercent, 100, '%')}</div><div class="xp-form-group"><span class="xp-label">${isAr ? 'الذاكرة' : 'Memory'}</span>${renderThresholdMeter(memUsedGb, memTotalGb, 'GB')}</div></div>`}
+        ${!ioSnapshot ? `<p class="xp-prose" role="status">${isAr ? 'قياسات موارد الخادم غير متاحة بعد.' : 'Server resource measurements are not available yet.'}</p>` : `<div class="xp-kpi-grid"><div class="xp-field"><span class="xp-label">CPU</span>${renderThresholdMeter(ioSnapshot.current.cpuPercent, 100, '%')}</div><div class="xp-field"><span class="xp-label">${isAr ? 'الذاكرة' : 'Memory'}</span>${renderThresholdMeter(memUsedGb, memTotalGb, 'GB')}</div></div>`}
       </section>
 ` : ''}
       ${section === 'io' && ioSnapshot ? `      <!-- Real-Time Server IO & Per-Account cgroup v2 Slice Monitor -->
@@ -371,7 +370,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
         <div class="xp-card__header">
           <div>
             <h1 id="whm-services-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-            <p class="xp-prose">${isAr ? 'تعمل فقط الخدمات المفعلة مع استهلاك ذاكرة منخفض ومراقبة فورية.' : 'Only enabled services run; PHP-FPM defaults to pm = ondemand and PowerDNS reads rendered BIND zone files with zero database overhead.'}</p>
+            <p class="xp-prose">${isAr ? 'إصدارات الخدمات واستهلاك الذاكرة وحالة التشغيل.' : 'Service versions, memory use and running status.'}</p>
           </div>
           ${renderStatusBadge('ok', `${services.filter((s) => s.active).length}/${services.length} Healthy`)}
         </div>
@@ -382,8 +381,8 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
                 <th>${isAr ? 'الخدمة' : 'Service'}</th>
                 <th>${isAr ? 'وحدة systemd' : 'systemd Unit'}</th>
                 <th>${isAr ? 'الإصدار' : 'Version'}</th>
-                <th>${isAr ? 'الدور المعماري' : 'Role'}</th>
-                <th>${isAr ? 'الذاكرة RSS' : 'RSS Memory'}</th>
+                <th>${isAr ? 'الدور' : 'Role'}</th>
+                <th>${isAr ? 'الذاكرة (RSS)' : 'Memory (RSS)'}</th>
                 <th>${isAr ? 'الحالة' : 'Status'}</th>
               </tr>
             </thead>
@@ -408,115 +407,167 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
       </section>
 
 ` : ''}
-      ${section === 'accounts' || section === 'create-account' ? `      <!-- Accounts & Isolation Slice Table + Create Account Drawer + Terminate Confirmation -->
-      <section class="xp-card" id="whm-accounts" data-section="accounts-isolation" aria-labelledby="whm-accounts-heading">
-        <div class="xp-card__header">
-          <div>
-            <h1 id="whm-accounts-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-            <p class="xp-prose">${isAr ? 'كل حساب يعمل بمعرّف UID مستقل (20000+) داخل شريحة xpanel-<uid>.slice مع Apache mpm-itk (AssignUserId) وصلاحيات 0750 للمجلد الرئيسي.' : 'Every account owns a dedicated UID (20000+), a 0750 home directory, and an isolated systemd cgroup v2 slice (xpanel-<uid>.slice) with Apache mpm-itk AssignUserId.'}</p>
+      ${section === 'accounts' || section === 'create-account' ? `
+      <section class="xp-card xp-accounts${section === 'create-account' ? ' xp-accounts--create' : ''}" id="whm-accounts" data-section="accounts-isolation" data-accounts-workspace aria-labelledby="whm-accounts-heading">
+        <div class="xp-card__header xp-accounts__header">
+          <h1 id="whm-accounts-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
+          ${section === 'accounts' ? `<span class="xp-help xp-tabular">${isAr ? 'الحسابات: ' + accounts.length : accounts.length + (accounts.length === 1 ? ' account' : ' accounts')}</span>` : ''}
           </div>
-          ${renderStatusBadge('ok', `${accounts.length} ${isAr ? 'حسابات' : 'accounts'}`)}
-        </div>
-
-${section === 'accounts' ? `        <div class="xp-table-wrap">
-          <table class="xp-table">
-            <thead>
-              <tr>
-                <th>${isAr ? 'المستخدم / UID' : 'Username / UID'}</th>
-                <th>${isAr ? 'شريحة cgroup v2' : 'cgroup v2 Slice Unit'}</th>
-                <th>${isAr ? 'النطاق الأساسي' : 'Primary Domain'}</th>
-                <th>${isAr ? 'عناوين IPv4 / IPv6' : 'Bound IPv4 / IPv6'}</th>
-                <th>${isAr ? 'الخطة / الصدفة' : 'Plan & Shell'}</th>
-                <th>${isAr ? 'الحالة' : 'Status'}</th>
-                <th>${isAr ? 'الإجراءات' : 'Actions'}</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${accounts
-                .map(
-                  (acc) => `
-                <tr data-account-row="${escapeHtml(acc.username)}">
-                  <td>
-                    <strong class="xp-mono"><bdi dir="ltr">${escapeHtml(acc.username)}</bdi></strong>
-                    <span class="xp-mono xp-tabular"> (uid ${acc.uid})</span>
-                  </td>
-                  <td><code class="xp-mono"><bdi dir="ltr">xpanel-${acc.uid}.slice</bdi></code></td>
-                  <td><code class="xp-mono"><bdi dir="ltr">${escapeHtml(acc.primaryDomain)}</bdi></code></td>
-                  <td class="xp-mono">
-                    <bdi dir="ltr">${escapeHtml(acc.ipv4)}${acc.ipv6 ? ` · ${escapeHtml(acc.ipv6)}` : ''}${acc.extraIps && acc.extraIps.length > 0 ? ` (+${acc.extraIps.join(', ')})` : ''}</bdi>
-                  </td>
-                  <td>
-                    <span class="xp-mono">${escapeHtml(plans.find(plan => plan.id === acc.planId)?.name ?? (isAr ? 'غير متاحة' : 'Unavailable'))}</span> ·
-                    <code class="xp-mono">shell:${escapeHtml(acc.shell)}</code>
-                  </td>
-                  <td>
-                    ${renderStatusBadge(
-                      acc.status === 'active' ? 'ok' : acc.status === 'suspended' ? 'suspended' : 'critical',
-                      acc.status === 'active' ? t(locale, 'common.status.active') : t(locale, 'common.status.suspended'),
-                    )}
-                  </td>
-                  <td>
-                    <button type="button" class="xp-btn" data-action="suspend-account" data-username="${escapeHtml(acc.username)}">
-                      ${acc.status === 'suspended' ? (isAr ? 'إلغاء التعليق' : 'Unsuspend') : escapeHtml(t(locale, 'accounts.suspend'))}
-                    </button>
-                  </td>
-                </tr>
-              `,
-                )
-                .join('')}
-            </tbody>
+        ${section === 'accounts' ? `
+        <div class="xp-table-wrap xp-accounts__table-wrap">
+          <table class="xp-table xp-accounts__table">
+          <thead>
+          <tr>
+          <th scope="col">${isAr ? 'الحساب' : 'Account'}</th>
+          <th scope="col">${isAr ? 'النطاق الأساسي' : 'Primary domain'}</th>
+          <th scope="col">${isAr ? 'الخطة' : 'Plan'}</th>
+          <th scope="col">${isAr ? 'الحالة' : 'Status'}</th>
+          <th scope="col">${isAr ? 'الإجراءات' : 'Actions'}</th>
+        </tr>
+          </thead>
+          <tbody>${accounts.map(acc => {
+          const canSuspend = isRoot || heldAcls.has('suspend-account')
+          const canTerminate = isRoot || heldAcls.has('terminate-account')
+          const statusLabel = acc.status === 'active' ? t(locale, 'common.status.active') : acc.status === 'suspended' ? t(locale, 'common.status.suspended') : isAr ? 'قيد الإنهاء' : 'Terminating'
+          const attributes = `data-account-id="${escapeHtml(acc.id)}" data-username="${escapeHtml(acc.username)}" data-domain="${escapeHtml(acc.primaryDomain)}"`
+          return `<tr data-account-row="${escapeHtml(acc.username)}">
+          <td>
+          <div class="xp-accounts__identity">
+          <strong>
+          <bdi dir="ltr">${escapeHtml(acc.username)}</bdi>
+          </strong>
+          <details class="xp-accounts__details" data-account-details>
+          <summary>${isAr ? 'التفاصيل' : 'Details'}</summary>
+          <dl class="xp-accounts__technical">
+            <div>
+          <dt>UID</dt>
+          <dd>
+          <bdi dir="ltr">${acc.uid}</bdi>
+          </dd>
+          </div>
+          <div>
+          <dt>${isAr ? 'وحدة الموارد' : 'Resource unit'}</dt>
+          <dd>
+          <bdi dir="ltr">xpanel-${acc.uid}.slice</bdi>
+          </dd>
+          </div>
+          <div>
+          <dt>IPv4</dt>
+          <dd>
+          <bdi dir="ltr">${escapeHtml(acc.ipv4)}</bdi>
+          </dd>
+          </div>${acc.ipv6 ? `<div>
+          <dt>IPv6</dt>
+          <dd>
+          <bdi dir="ltr">${escapeHtml(acc.ipv6)}</bdi>
+          </dd>
+          </div>` : ''}${acc.extraIps?.length ? `<div>
+          <dt>${isAr ? 'عناوين إضافية' : 'Additional IPs'}</dt>
+          <dd>
+          <bdi dir="ltr">${escapeHtml(acc.extraIps.join(', '))}</bdi>
+          </dd>
+          </div>` : ''}<div>
+          <dt>${isAr ? 'الطرفية' : 'Shell'}</dt>
+          <dd>
+          <bdi dir="ltr">${escapeHtml(acc.shell)}</bdi>
+          </dd>
+          </div>
+          </dl>
+          </details>
+          </div>
+          </td>
+          <td>
+          <span class="xp-accounts__mobile-label" aria-hidden="true">${isAr ? 'النطاق الأساسي' : 'Primary domain'}</span>
+          <bdi dir="ltr" class="xp-accounts__domain">${escapeHtml(acc.primaryDomain)}</bdi>
+          </td>
+          <td>
+          <span class="xp-accounts__mobile-label" aria-hidden="true">${isAr ? 'الخطة' : 'Plan'}</span>
+          <span>${escapeHtml(plans.find(plan => plan.id === acc.planId)?.name ?? (isAr ? 'غير متاحة' : 'Unavailable'))}</span>
+          </td>
+          <td>
+          <span class="xp-accounts__mobile-label" aria-hidden="true">${isAr ? 'الحالة' : 'Status'}</span>
+          <span data-account-status>${renderStatusBadge(acc.status === 'active' ? 'ok' : acc.status === 'suspended' ? 'suspended' : 'critical', statusLabel)}</span>
+          </td>
+          <td>
+          <div class="xp-accounts__actions">${canSuspend && acc.status !== 'terminating' ? `<button type="button" class="xp-btn xp-btn--ghost" data-action="${acc.status === 'suspended' ? 'unsuspend-account' : 'suspend-account'}" ${attributes}>${acc.status === 'suspended' ? (isAr ? 'إلغاء التعليق' : 'Unsuspend') : (isAr ? 'تعليق' : 'Suspend')}</button>` : ''}${canTerminate && acc.status !== 'terminating' ? `<button type="button" class="xp-btn xp-btn--ghost xp-accounts__delete" data-action="terminate-account" ${attributes}>${isAr ? 'حذف' : 'Delete'}</button>` : ''}${!canSuspend && !canTerminate ? `<span class="xp-help">${isAr ? 'للعرض فقط' : 'Read only'}</span>` : ''}</div>
+          </td>
+          </tr>`
+        }).join('') || `<tr>
+          <td colspan="5">
+          <p class="xp-accounts__empty">${isAr ? 'لا توجد حسابات.' : 'No accounts.'}</p>
+          </td>
+          </tr>`}</tbody>
           </table>
-        </div>
-
-` : ''}        <!-- Create Account + Type-to-Confirm Terminate Forms -->
-        <div class="xp-golden-grid" style="margin-block-start: var(--xp-space-card);">
-          ${section === 'create-account' ? `<form class="xp-card xp-form-group" id="whm-create-account-drawer" action="/api/whm/accounts" method="post" data-create-account-form="true">
-            <div class="xp-card__header">
-              <h3>${escapeHtml(t(locale, 'accounts.create'))}</h3>
-              ${renderStatusBadge('ok', 'UID >= 20000')}
-            </div>
-            <div>
-              <label class="xp-label" for="new-acc-username">${isAr ? 'اسم مستخدم النظام (Linux Username)' : 'System Username (UID 20000+)'}</label>
-              <input id="new-acc-username" name="username" type="text" class="xp-input xp-mono" dir="ltr" required placeholder="salma" />
-            </div>
-            <div>
-              <label class="xp-label" for="new-acc-domain">${isAr ? 'النطاق الأساسي' : 'Primary Domain'}</label>
-              <input id="new-acc-domain" name="primaryDomain" type="text" class="xp-input xp-mono" dir="ltr" required placeholder="salma.studio" />
-            </div>
-            <div>
-              <label class="xp-label" for="new-acc-plan">${isAr ? 'خطة الاستضافة' : 'Hosting Plan'}</label>
-              <select id="new-acc-plan" name="planId" class="xp-select">
-                ${plans.map(plan => `<option value="${escapeHtml(plan.id)}">${escapeHtml(plan.name)}</option>`).join('')}
-              </select>
-            </div>
-            <div>
-              <label class="xp-label" for="new-acc-ipv4">${isAr ? 'عنوان IPv4' : 'IPv4 Address'}</label>
-              <input id="new-acc-ipv4" name="ipv4" type="text" class="xp-input xp-mono" dir="ltr" value="" />
-            </div>
-            <div>
-              <label class="xp-label" for="new-acc-ipv6">${isAr ? 'عنوان IPv6' : 'IPv6 Address'}</label>
-              <input id="new-acc-ipv6" name="ipv6" type="text" class="xp-input xp-mono" dir="ltr" value="" />
-            </div>
-            <button type="submit" class="xp-btn xp-btn--primary">${escapeHtml(t(locale, 'accounts.create'))}</button>
+          </div>
+        <dialog class="xp-account-dialog" data-account-dialog aria-labelledby="xp-account-dialog-title" aria-describedby="xp-account-dialog-description">
+          <form method="dialog" data-account-action-form novalidate>
+            <div class="xp-account-dialog__header">
+          <h2 id="xp-account-dialog-title" data-account-dialog-title>${isAr ? 'إجراء الحساب' : 'Account action'}</h2>
+          <p id="xp-account-dialog-description" data-account-dialog-description>
+          </p>
+          </div>
+            <dl class="xp-account-dialog__identity">
+          <div class="xp-accounts__field">
+          <dt>${isAr ? 'الحساب' : 'Account'}</dt>
+          <dd>
+          <bdi dir="ltr" data-account-dialog-username>
+          </bdi>
+          </dd>
+          </div>
+          <div class="xp-accounts__field">
+          <dt>${isAr ? 'النطاق الأساسي' : 'Primary domain'}</dt>
+          <dd>
+          <bdi dir="ltr" data-account-dialog-domain>
+          </bdi>
+          </dd>
+          </div>
+          </dl>
+            <div class="xp-accounts__field" data-account-confirm-field hidden>
+          <label class="xp-label" for="terminate-confirm-user">${isAr ? 'اكتب اسم المستخدم للتأكيد' : 'Type the username to confirm'}</label>
+          <input id="terminate-confirm-user" name="confirmUsername" type="text" class="xp-input xp-mono" dir="ltr" autocomplete="off" spellcheck="false" data-type-to-confirm="true" aria-describedby="xp-account-confirm-help" />
+          <span class="xp-help" id="xp-account-confirm-help">${isAr ? 'يجب أن يطابق اسم الحساب أعلاه تمامًا.' : 'Must exactly match the account above.'}</span>
+          </div>
+            <div class="xp-accounts__field" data-account-reason-field hidden>
+          <label class="xp-label" for="account-suspend-reason">${isAr ? 'سبب التعليق' : 'Suspension reason'}</label>
+          <textarea id="account-suspend-reason" name="reason" class="xp-textarea" rows="2" maxlength="500"></textarea>
+          </div>
+            <p class="xp-account-dialog__status" data-account-action-status role="status" aria-live="polite" tabindex="-1" hidden>
+          </p>
+            <div class="xp-account-dialog__footer">
+          <button type="button" class="xp-btn" data-account-action-cancel>${isAr ? 'إلغاء' : 'Cancel'}</button>
+          <button type="submit" class="xp-btn xp-btn--primary" data-account-action-submit disabled>${isAr ? 'تأكيد' : 'Confirm'}</button>
+          </div>
           </form>
-
-          ` : ''}
-          ${section === 'accounts' ? `<!-- Type-to-confirm Account Termination Guard -->
-          <form class="xp-card xp-form-group" action="/api/whm/accounts/terminate" method="post" data-terminate-account-form="true">
-            <div class="xp-card__header">
-              <h3>${escapeHtml(t(locale, 'accounts.terminate'))}</h3>
-              ${renderStatusBadge('critical', isAr ? 'يتطلب كتابة اسم الحساب للتأكيد' : 'Type-to-confirm required')}
-            </div>
-            <p class="xp-prose">
-              ${isAr ? 'سيؤدي الحذف النهائي إلى إزالة المجلد الرئيسي /home/<user> وشريحة xpanel-<uid>.slice وقواعد بيانات MariaDB وصناديق البريد.' : 'Permanent termination removes /home/<user>, stops xpanel-<uid>.slice, deletes Nginx/Apache vhosts, mailboxes, and MariaDB databases.'}
-            </p>
-            <div>
-              <label class="xp-label" for="terminate-confirm-user">${isAr ? 'اكتب اسم المستخدم للتأكيد النهائي' : 'Type the exact username to confirm termination'}</label>
-              <input id="terminate-confirm-user" name="confirmUsername" type="text" class="xp-input xp-mono" dir="ltr" required placeholder="nour" data-type-to-confirm="true" />
-            </div>
-            <button type="submit" class="xp-btn">${escapeHtml(t(locale, 'accounts.terminate'))}</button>
-          </form>` : ''}
-        </div>
+        </dialog>` : ''}
+        ${section === 'create-account' ? `<form class="xp-form-group" id="whm-create-account-drawer" action="/api/accounts" method="post" data-create-account-form="true">
+          <div class="xp-accounts__field">
+          <label class="xp-label" for="new-acc-username">${isAr ? 'اسم المستخدم' : 'Username'}</label>
+          <input id="new-acc-username" name="username" type="text" class="xp-input xp-mono" dir="ltr" required pattern="[a-z][a-z0-9]{2,15}" placeholder="salma" />
+          </div>
+          <div class="xp-accounts__field">
+          <label class="xp-label" for="new-acc-domain">${isAr ? 'النطاق الأساسي' : 'Primary domain'}</label>
+          <input id="new-acc-domain" name="primaryDomain" type="text" class="xp-input xp-mono" dir="ltr" required placeholder="salma.studio" />
+          </div>
+          <div class="xp-accounts__field">
+          <label class="xp-label" for="new-acc-plan">${isAr ? 'خطة الاستضافة' : 'Hosting plan'}</label>
+          <select id="new-acc-plan" name="planId" class="xp-select" required>${plans.map(plan => `<option value="${escapeHtml(plan.id)}">${escapeHtml(plan.name)}</option>`).join('')}</select>
+          </div>
+          <div class="xp-accounts__field">
+            <label class="xp-label" for="new-acc-password">${isAr ? 'كلمة المرور' : 'Password'}</label>
+            <input id="new-acc-password" name="password" type="password" class="xp-input" autocomplete="new-password" minlength="8" required aria-describedby="new-acc-password-help" />
+            <span class="xp-help" id="new-acc-password-help">${isAr ? '8 أحرف على الأقل.' : 'At least 8 characters.'}</span>
+          </div>
+          <div class="xp-accounts__field">
+          <label class="xp-label" for="new-acc-ipv4">${isAr ? 'عنوان IPv4' : 'IPv4 Address'}</label>
+          <input id="new-acc-ipv4" name="ipv4" type="text" class="xp-input xp-mono" dir="ltr" value="" />
+          </div>
+          <div class="xp-accounts__field">
+          <label class="xp-label" for="new-acc-ipv6">${isAr ? 'عنوان IPv6 (اختياري)' : 'IPv6 address (optional)'}</label>
+          <input id="new-acc-ipv6" name="ipv6" type="text" class="xp-input xp-mono" dir="ltr" value="" />
+          </div>
+          <p class="xp-help" data-account-create-status role="status" aria-live="polite" tabindex="-1" hidden></p>
+          <button type="submit" class="xp-btn xp-btn--primary" ${plans.length && (isRoot || heldAcls.has('create-account')) ? '' : 'disabled'}>${escapeHtml(t(locale, 'accounts.create'))}</button>
+        </form>` : ''}
       </section>
 
 ` : ''}
@@ -525,9 +576,9 @@ ${section === 'accounts' ? `        <div class="xp-table-wrap">
         <div class="xp-card__header">
           <div>
             <h1 id="whm-plans-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-            <p class="xp-prose">${isAr ? 'تُطبَّق حدود الموارد مباشرة على شرائح cgroup v2 (CPUQuota, MemoryMax, io.max, TasksMax). القيمة غير المحدودة صريحة دائماً (Unlimited).' : 'Plan limits map directly to systemd cgroup v2 parameters (CPUQuota, MemoryMax, IOReadBandwidthMax, IOWriteBandwidthMax, IOReadIOPSMax, IOWriteIOPSMax, TasksMax). "Unlimited" is always explicit.'}</p>
+            <p class="xp-prose">${isAr ? 'تحدد الخطة حدود موارد كل حساب. اختر «غير محدود» لإزالة حد معين.' : 'A plan sets each account’s resource limits. Choose Unlimited to remove a limit.'}</p>
           </div>
-          ${renderStatusBadge('ok', `${plans.length} Plans · 3 Feature Lists`)}
+          ${renderStatusBadge('ok', `${plans.length} ${isAr ? 'خطة' : 'plans'}`)}
         </div>
 
         <div class="xp-table-wrap">
@@ -535,10 +586,10 @@ ${section === 'accounts' ? `        <div class="xp-table-wrap">
             <thead>
               <tr>
                 <th>${isAr ? 'الخطة' : 'Plan'}</th>
-                <th>${isAr ? 'القرص / الترافيك' : 'Disk / Bandwidth'}</th>
-                <th>${isAr ? 'CPUQuota / MemoryMax' : 'CPUQuota / MemoryMax'}</th>
-                <th>${isAr ? 'حدود io.max (قراءة/كتابة)' : 'io.max Read / Write'}</th>
-                <th>${isAr ? 'العمليات (TasksMax)' : 'TasksMax (PIDs)'}</th>
+                <th>${isAr ? 'القرص / نقل البيانات' : 'Disk / Bandwidth'}</th>
+                <th>${isAr ? 'المعالج / الذاكرة' : 'CPU / Memory'}</th>
+                <th>${isAr ? 'قراءة / كتابة القرص' : 'Disk read / write'}</th>
+                <th>${isAr ? 'العمليات' : 'Processes'}</th>
                 <th>${isAr ? 'النطاقات الإضافية' : 'Addon Domains'}</th>
                 <th>${isAr ? 'الصدفة المعزولة' : 'Jailed Shell'}</th>
               </tr>
@@ -566,42 +617,41 @@ ${section === 'accounts' ? `        <div class="xp-table-wrap">
         <!-- Create / Edit Plan Drawer Form with Explicit Unlimited Checkboxes -->
         <form class="xp-card xp-form-group" style="margin-block-start: var(--xp-space-card);" action="/api/whm/plans" method="post" data-plan-editor-form="true">
           <div class="xp-card__header">
-            <h3>${isAr ? 'محرر خطة الاستضافة وحدود cgroup v2' : 'Create / Edit Plan & cgroup v2 Slice Limits'}</h3>
-            ${renderStatusBadge('ok', 'Explicit Unlimited supported')}
+            <h3>${isAr ? 'إنشاء / تعديل خطة' : 'Create / edit plan'}</h3>
           </div>
           <div class="xp-kpi-grid">
-            <div>
+            <div class="xp-field">
               <label class="xp-label" for="plan-name">${isAr ? 'اسم الخطة' : 'Plan Name'}</label>
               <input id="plan-name" name="name" type="text" class="xp-input" value="Enterprise" />
             </div>
-            <div>
-              <label class="xp-label" for="plan-cpu-quota">CPUQuota (%)</label>
+            <div class="xp-field">
+              <label class="xp-label" for="plan-cpu-quota">${isAr ? 'المعالج (%)' : 'CPU (%)'}</label>
               <input id="plan-cpu-quota" name="cpuPercent" type="number" class="xp-input xp-mono" value="200" />
             </div>
-            <div>
-              <label class="xp-label" for="plan-memory-max">MemoryMax (MB)</label>
+            <div class="xp-field">
+              <label class="xp-label" for="plan-memory-max">${isAr ? 'الذاكرة (MB)' : 'Memory (MB)'}</label>
               <input id="plan-memory-max" name="memoryMb" type="number" class="xp-input xp-mono" value="2048" />
             </div>
-            <div>
-              <label class="xp-label" for="plan-io-max">io.max Read / Write (MB/s)</label>
+            <div class="xp-field">
+              <label class="xp-label" for="plan-io-max">${isAr ? 'قراءة / كتابة القرص (MB/s)' : 'Disk read / write (MB/s)'}</label>
               <input id="plan-io-max" name="ioMaxMbps" type="text" class="xp-input xp-mono" value="100 / 50" />
             </div>
-            <div>
-              <label class="xp-label" for="plan-tasks-max">TasksMax (pids.max)</label>
+            <div class="xp-field">
+              <label class="xp-label" for="plan-tasks-max">${isAr ? 'العمليات' : 'Processes'}</label>
               <input id="plan-tasks-max" name="maxProcesses" type="number" class="xp-input xp-mono" value="128" />
             </div>
-            <div>
-              <label class="xp-label" for="plan-shell-toggle">${isAr ? 'وصول الصدفة المعزولة' : 'Jailed Shell Access'}</label>
+            <div class="xp-field">
+              <label class="xp-label" for="plan-shell-toggle">${isAr ? 'وصول الطرفية المعزولة' : 'Jailed shell access'}</label>
               <select id="plan-shell-toggle" name="shell" class="xp-select">
-                <option value="jailed">jailed (systemd-run isolated slice)</option>
-                <option value="none">none (disabled)</option>
+                <option value="jailed">${isAr ? 'طرفية معزولة' : 'Jailed shell'}</option>
+                <option value="none">${isAr ? 'معطل' : 'Disabled'}</option>
               </select>
             </div>
           </div>
           <div style="display: flex; align-items: center; gap: 16px;">
             <label style="display: inline-flex; align-items: center; gap: 8px;">
               <input type="checkbox" name="unlimitedAddonDomains" value="unlimited" />
-              <span>${isAr ? 'نطاقات إضافية غير محدودة (Explicit Unlimited)' : 'Explicit Unlimited Addon Domains'}</span>
+              <span>${isAr ? 'نطاقات إضافية غير محدودة' : 'Unlimited addon domains'}</span>
             </label>
             <button type="submit" class="xp-btn xp-btn--primary">${escapeHtml(t(locale, 'common.reviewAndApply'))}</button>
           </div>
@@ -614,7 +664,7 @@ ${section === 'accounts' ? `        <div class="xp-table-wrap">
         <div class="xp-card__header">
           <div>
             <h1 id="whm-resellers-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-            <p class="xp-prose">${isAr ? 'عند إيقاف البيع الزائد (Overselling Off)، يُرفض إنشاء أي حساب يتجاوز مجموع خططه السقف الكلي للموزع.' : 'When overselling is off, account creation is refused whenever the sum of assigned plan limits would exceed the reseller’s total disk or bandwidth cap.'}</p>
+            <p class="xp-prose">${isAr ? 'عند تعطيل البيع الزائد، يُرفض إنشاء حساب إذا تجاوز مجموع حدود الخطط حصة الموزع من القرص أو نقل البيانات.' : 'With overselling off, account creation is refused if total plan limits exceed the reseller’s disk or bandwidth cap.'}</p>
           </div>
           ${renderStatusBadge('ok', `${resellers.length} Resellers`)}
         </div>
@@ -655,7 +705,7 @@ ${section === 'accounts' ? `        <div class="xp-table-wrap">
         </div>
 
         <div style="margin-block-start: var(--xp-space-field);" data-reseller-acl-matrix="true">
-          <div class="xp-label" style="margin-block-end: 8px;">${isAr ? 'مصفوفة صلاحيات الموزع (Reseller ACL Matrix)' : 'Reseller ACL Privilege Matrix'}</div>
+          <div class="xp-label" style="margin-block-end: 8px;">${isAr ? 'صلاحيات الموزع' : 'Reseller permissions'}</div>
           <div style="display: flex; flex-wrap: wrap; gap: 8px;">
             ${ALL_RESELLER_ACLS.map((acl) =>
               renderStatusBadge(
@@ -673,7 +723,7 @@ ${section === 'accounts' ? `        <div class="xp-table-wrap">
         <div class="xp-card__header">
           <div>
             <h1 id="whm-ip-pool-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-            <p class="xp-prose">${isAr ? 'إدارة عناوين IPv4 وIPv6 المشتركة والمخصصة وتفويضها للموزعين والحسابات، مع ضبط توجيه البريد الصادر Postfix (sender_dependent_default_transport_maps).' : 'Manage root, reseller-delegated, account-dedicated, and mail-role IPv4/IPv6 addresses, and configure Postfix sender_dependent_default_transport_maps + smtp_bind_address/smtp_helo_name.'}</p>
+            <p class="xp-prose">${isAr ? 'إدارة عناوين IP وتفويضها للحسابات والموزعين وضبط توجيه البريد الصادر.' : 'Manage IP addresses, account and reseller assignments, and outbound mail routing.'}</p>
           </div>
           ${renderStatusBadge('ok', section === 'ips' ? `${ipPool.length} IPs` : mailIpConfig!.mode)}
         </div>
@@ -718,11 +768,10 @@ ${section === 'ips' ? `        <!-- Server IP Pool Table -->
 ${section === 'mail-ips' && mailIpConfig ? `          <form class="xp-card xp-form-group" action="/api/whm/mail-ips" method="post" data-mail-ip-config-form="true">
             <div class="xp-card__header">
               <h3>${escapeHtml(t(locale, 'mailIp.title'))}</h3>
-              ${renderStatusBadge('ok', 'Postfix sender_dependent_default_transport_maps')}
             </div>
 
             <div>
-              <label class="xp-label" for="mail-outbound-mode">${isAr ? 'نمط توجيه البريد الصادر (MailOutboundMode)' : 'Outbound Mail Routing Mode'}</label>
+              <label class="xp-label" for="mail-outbound-mode">${isAr ? 'توجيه البريد الصادر' : 'Outbound mail routing'}</label>
               <select id="mail-outbound-mode" name="mode" class="xp-select">
                 <option value="server-default" ${mailIpConfig.mode === 'server-default' ? 'selected' : ''}>server-default (${escapeHtml(t(locale, 'mailIp.mode.server-default'))})</option>
                 <option value="account-ip" ${mailIpConfig.mode === 'account-ip' ? 'selected' : ''}>account-ip (${escapeHtml(t(locale, 'mailIp.mode.account-ip'))})</option>
@@ -733,22 +782,22 @@ ${section === 'mail-ips' && mailIpConfig ? `          <form class="xp-card xp-fo
 
             <div class="xp-kpi-grid">
               <div>
-                <label class="xp-label" for="mail-default-ipv4">Default Outbound IPv4 (smtp_bind_address)</label>
+                <label class="xp-label" for="mail-default-ipv4">${isAr ? 'عنوان IPv4 الصادر الافتراضي' : 'Default outbound IPv4'}</label>
                 <input id="mail-default-ipv4" name="defaultIpv4" type="text" class="xp-input xp-mono" dir="ltr" value="${escapeHtml(mailIpConfig.defaultIpv4 ?? '')}" />
               </div>
               <div>
-                <label class="xp-label" for="mail-default-ipv6">Default Outbound IPv6 (smtp_bind_address6)</label>
+                <label class="xp-label" for="mail-default-ipv6">${isAr ? 'عنوان IPv6 الصادر الافتراضي' : 'Default outbound IPv6'}</label>
                 <input id="mail-default-ipv6" name="defaultIpv6" type="text" class="xp-input xp-mono" dir="ltr" value="${escapeHtml(mailIpConfig.defaultIpv6 ?? '')}" />
               </div>
               <div>
-                <label class="xp-label" for="mail-default-helo">${escapeHtml(t(locale, 'mailIp.defaultHelo'))} (smtp_helo_name)</label>
+                <label class="xp-label" for="mail-default-helo">${escapeHtml(t(locale, 'mailIp.defaultHelo'))}</label>
                 <input id="mail-default-helo" name="defaultHelo" type="text" class="xp-input xp-mono" dir="ltr" value="${escapeHtml(mailIpConfig.defaultHelo ?? '')}" />
               </div>
             </div>
 
             <div>
               <div class="xp-label">${escapeHtml(t(locale, 'mailIp.overrides'))}</div>
-              <pre class="xp-terminal" dir="ltr"><bdi dir="ltr">${escapeHtml(mailIpConfig.domainOverrides.map(override => [override.domainName, override.ipv4, override.ipv6, override.heloHostname].filter(Boolean).join(' · ')).join('\n') || (isAr ? 'لا توجد تجاوزات للنطاقات.' : 'No domain overrides are configured.'))}</bdi></pre>
+              <pre class="xp-terminal" dir="ltr"><bdi dir="ltr">${escapeHtml(mailIpConfig.domainOverrides.map(override => [override.domainName, override.ipv4, override.ipv6, override.heloHostname].filter(Boolean).join(' · ')).join('\n') || (isAr ? 'لا توجد إعدادات خاصة بالنطاقات.' : 'No domain overrides are configured.'))}</bdi></pre>
             </div>
 
             <button type="submit" class="xp-btn xp-btn--primary">${escapeHtml(t(locale, 'common.reviewAndApply'))}</button>
@@ -766,7 +815,7 @@ ${section === 'mail-ips' && mailIpConfig ? `          <form class="xp-card xp-fo
               <input id="add-ip-address" name="address" type="text" class="xp-input xp-mono" dir="ltr" placeholder="IPv4 / IPv6" />
             </div>
             <div>
-              <label class="xp-label" for="add-ip-prefix">Subnet Prefix Length (CIDR)</label>
+              <label class="xp-label" for="add-ip-prefix">${isAr ? 'طول بادئة الشبكة (CIDR)' : 'Subnet prefix length (CIDR)'}</label>
               <input id="add-ip-prefix" name="prefixLength" type="number" class="xp-input xp-mono" required min="0" max="128" />
             </div>
             <div>
@@ -809,9 +858,9 @@ ${section === 'mail-ips' && mailIpConfig ? `          <form class="xp-card xp-fo
         <div class="xp-reconcile-banner" role="region" aria-label="Firewall dead-man switch" data-firewall-deadman="60s" style="margin-block-end: var(--xp-space-field);">
           <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px;">
             <div>
-              <strong>${isAr ? 'مفتاح الأمان التلقائي (60 ثانية) وحماية الجلسة' : '60-Second Dead-Man’s Switch & Self-Lockout Guard'}</strong>
+              <strong>${isAr ? 'تراجع تلقائي خلال 60 ثانية' : 'Automatic rollback after 60 seconds'}</strong>
               <p style="margin: 4px 0 0; font-size: 0.85rem; color: var(--xp-text-secondary);">
-                ${isAr ? `يرفض النظام أي قاعدة تحظر عنوان جلستك الحالي (${adminSessionIp}) أو منافذ اللوحة/SSH، ويتراجع تلقائياً إلى الإعدادات السابقة إذا لم يتم تأكيد الاتصال خلال 60 ثانية.` : `Rules that would drop active admin session IP (${adminSessionIp}) or panel/SSH ports (:2087, :22) are refused upfront, and applied rules auto-rollback to the previous settings if unconfirmed within 60s.`}
+                ${isAr ? `تُرفض القواعد التي تحظر جلستك الحالية (${adminSessionIp}) أو منافذ الإدارة أو SSH. أكد الاتصال خلال 60 ثانية وإلا ستُستعاد القواعد السابقة.` : `Changes that block your current session (${adminSessionIp}), management ports or SSH are refused. Confirm connectivity within 60 seconds or the previous rules are restored.`}
               </p>
             </div>
             ${renderStatusBadge('warn', '60s Rollback Timer Guard')}
@@ -855,7 +904,7 @@ ${section === 'mail-ips' && mailIpConfig ? `          <form class="xp-card xp-fo
           <div class="xp-card__header">
             <div>
               <h1 id="whm-generations-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-              <p class="xp-prose">${isAr ? 'يتم اختبار كل جيل قبل تفعيله، مع الاحتفاظ بالأجيال السابقة للتراجع الفوري.' : 'Every change renders a numbered host generation, verifies nginx -t / apachectl configtest / nft -c, and keeps prior generations for instant rollback.'}</p>
+              <p class="xp-prose">${isAr ? 'تُفحص الإعدادات قبل التفعيل، وتُحفظ الإصدارات السابقة للتراجع.' : 'Configuration is checked before applying. Previous generations are kept for rollback.'}</p>
             </div>
             ${generationId !== undefined ? renderStatusBadge('ok', `Gen #${generationId}`) : ''}
           </div>
@@ -897,17 +946,16 @@ ${section === 'mail-ips' && mailIpConfig ? `          <form class="xp-card xp-fo
 ${section === 'audit' ? `<section class="xp-card" data-section="audit-log">
             <div class="xp-card__header">
               <h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-              ${renderStatusBadge('ok', 'JSONL + SQLite Index')}
             </div>
             <div class="xp-table-wrap">
               <table class="xp-table">
                 <thead>
                   <tr>
                     <th>UTC</th>
-                    <th>Actor</th>
-                    <th>Action</th>
-                    <th>Target</th>
-                    <th>Outcome</th>
+                    <th>${isAr ? 'المستخدم' : 'User'}</th>
+                    <th>${isAr ? 'الإجراء' : 'Action'}</th>
+                    <th>${isAr ? 'الهدف' : 'Target'}</th>
+                    <th>${isAr ? 'النتيجة' : 'Outcome'}</th>
                   </tr>
                 </thead>
                 <tbody>

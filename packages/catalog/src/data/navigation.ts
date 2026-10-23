@@ -186,7 +186,6 @@ export const navigation: NavSurface[] = [
               "forwarders",
               "domain-forwarders",
               "default-address",
-              "aapanel-mail-bcc",
               "autoresponders"
             ],
             "keywords": [
@@ -197,8 +196,6 @@ export const navigation: NavSurface[] = [
               "Catch-all",
               "Unrouted mail",
               "Mail Forwarding",
-              "Mail BCC Copies",
-              "BCC",
               "Pipe to program",
               "Autoresponders",
               "Auto Responder",
@@ -207,7 +204,7 @@ export const navigation: NavSurface[] = [
               "Out of office",
               "Away message"
             ],
-            "summary": "Decide what happens to an address's mail: forward or BCC-copy it, forward a whole domain, send a scheduled automatic reply, and choose where mail for addresses that do not exist goes."
+            "summary": "Decide what happens to your account's mail: forward one address or a whole domain, send scheduled automatic replies, and choose where mail for addresses that do not exist goes."
           },
           {
             "id": "mailing-lists",
@@ -220,25 +217,16 @@ export const navigation: NavSurface[] = [
               "owner"
             ],
             "tools": [
-              "mailing-lists",
-              "aapanel-mail-subscribers",
-              "aapanel-mail-campaigns",
-              "aapanel-mail-automation"
+              "mailing-lists"
             ],
             "keywords": [
               "Mailing Lists",
               "Mailman",
               "Discussion list",
               "Announcement list",
-              "Newsletter",
-              "Mail Campaigns",
-              "Templates",
-              "Subscribers",
-              "Suppression List",
-              "Mail Automation Flows",
-              "Welcome email"
+              "Subscribers"
             ],
-            "summary": "Run discussion and announcement lists, keep subscriber groups and the suppression list, and send templated campaigns and event-triggered mail within your sending limits."
+            "summary": "Manage your account's discussion and announcement mailing lists, their subscribers and moderation settings."
           },
           {
             "id": "email-filters",
@@ -557,8 +545,7 @@ export const navigation: NavSurface[] = [
             "tools": [
               "ftp-accounts",
               "ftp-connections",
-              "anonymous-ftp",
-              "aapanel-ftp-logs"
+              "anonymous-ftp"
             ],
             "keywords": [
               "FTP Accounts",
@@ -567,10 +554,9 @@ export const navigation: NavSurface[] = [
               "Anonymous FTP",
               "FTP Quota",
               "Change FTP Home Directory",
-              "FTP Logs",
               "SFTP"
             ],
-            "summary": "Create FTP users locked to one folder with optional quota, see and end live sessions, review each user's FTP activity and control anonymous FTP."
+            "summary": "Create FTP users locked to one folder with optional quota, see and end live sessions, and control anonymous FTP for your account."
           },
           {
             "id": "backup",
@@ -1369,18 +1355,16 @@ export const navigation: NavSurface[] = [
               "owner"
             ],
             "tools": [
-              "aapanel-one-click-deploy",
               "app-installer"
             ],
             "keywords": [
               "Site Software",
-              "One-Click App Deploy",
               "One-click install",
               "WordPress installer",
               "Install CMS",
               "App catalog"
             ],
-            "summary": "Install common open-source web applications into a domain from the catalog your provider allows."
+            "summary": "Install common open-source web applications into your account domains from the catalog your provider allows."
           },
           {
             "id": "applications",
@@ -1396,8 +1380,6 @@ export const navigation: NavSurface[] = [
               "nodejs-apps",
               "python-apps",
               "ruby-apps",
-              "aapanel-go-project",
-              "aapanel-java-project",
               "application-manager",
               "web-apps"
             ],
@@ -1411,8 +1393,6 @@ export const navigation: NavSurface[] = [
               "Application Manager",
               "Node.js Projects",
               "Python Projects",
-              "Go Projects",
-              "Java Projects",
               "Web Apps",
               "Passenger",
               "WSGI",
@@ -1420,7 +1400,7 @@ export const navigation: NavSurface[] = [
               "npm install",
               "Virtual environment"
             ],
-            "summary": "Create, deploy and run Node.js, Python, Ruby, Go and Java apps as your account user behind Nginx, from a folder, a Git repository or an archive."
+            "summary": "Create, deploy and manage Node.js, Python and Ruby applications under your account, with the runtime and web-application controls your provider allows."
           },
           {
             "id": "containers",
@@ -1529,18 +1509,15 @@ export const navigation: NavSurface[] = [
             ],
             "tools": [
               "php-pear-packages",
-              "aapanel-composer",
               "perl-modules"
             ],
             "keywords": [
               "PHP PEAR Packages",
               "PEAR",
-              "Composer",
-              "composer install",
               "Perl Modules",
               "CPAN"
             ],
-            "summary": "Install PHP PEAR packages and Perl modules into your private libraries, and run Composer install or update in a site folder."
+            "summary": "Install PHP PEAR packages and Perl modules into your account's private libraries."
           }
         ]
       },
@@ -1631,19 +1608,14 @@ export const navigation: NavSurface[] = [
               "owner"
             ],
             "tools": [
-              "indexes",
-              "aapanel-default-index"
+              "indexes"
             ],
             "keywords": [
               "Indexes",
               "Index Manager",
-              "Directory listing",
-              "Default Index Files",
-              "DirectoryIndex",
-              "index.php",
-              "index.html"
+              "Directory listing"
             ],
-            "summary": "Choose which files serve as a folder's index page and whether folders without one list their contents."
+            "summary": "Choose whether folders without an index page list their contents within your account."
           },
           {
             "id": "error-pages",
@@ -2734,6 +2706,50 @@ export const navigation: NavSurface[] = [
               "mdbox"
             ],
             "summary": "Repair jobs for mail storage: format conversion, ownership and mode repair, and resetting a mailing list's admin password."
+          },
+          {
+            "id": "mail-bcc",
+            "name": "Mail BCC copies",
+            "route": "/whm/email/bcc",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-mail-bcc"
+            ],
+            "keywords": [
+              "Mail BCC Copies",
+              "BCC"
+            ],
+            "summary": "Server administrator BCC copy rules; unavailable until the capability and its task screen are qualified."
+          },
+          {
+            "id": "mail-marketing",
+            "name": "Mail campaigns & automation",
+            "route": "/whm/email/marketing",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-mail-subscribers",
+              "aapanel-mail-campaigns",
+              "aapanel-mail-automation"
+            ],
+            "keywords": [
+              "Mail Campaigns",
+              "Templates",
+              "Subscribers",
+              "Suppression List",
+              "Mail Automation Flows",
+              "Welcome email"
+            ],
+            "summary": "Server administrator subscriber groups, suppression lists, campaigns and automation flows; unavailable until every capability and its task screen are qualified."
           }
         ]
       },
@@ -3520,6 +3536,47 @@ export const navigation: NavSurface[] = [
               "cpsrvd TLS"
             ],
             "summary": "Certificates and TLS protocol and cipher lists for the panels, webmail, mail, FTP and Web Disk services."
+          },
+          {
+            "id": "ftp-log-analysis",
+            "name": "FTP log analysis",
+            "route": "/whm/services/ftp-log-analysis",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-ftp-logs"
+            ],
+            "keywords": [
+              "FTP Logs",
+              "FTP log analysis",
+              "FTP activity"
+            ],
+            "summary": "Server administrator FTP activity and log analysis; unavailable until the capability and its task screen are qualified."
+          },
+          {
+            "id": "default-index",
+            "name": "Default index files",
+            "route": "/whm/services/default-index",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-default-index"
+            ],
+            "keywords": [
+              "Default Index Files",
+              "DirectoryIndex",
+              "index.php",
+              "index.html"
+            ],
+            "summary": "Server administrator ordering of default index filenames; unavailable until the capability and its task screen are qualified."
           }
         ]
       },
@@ -4155,6 +4212,65 @@ export const navigation: NavSurface[] = [
               "Kernel update"
             ],
             "summary": "Operating-system updates with or without the kernel, panel dependency updates, package installs from configured repositories and package database repair, run as jobs."
+          },
+          {
+            "id": "application-deployments",
+            "name": "Application deployments",
+            "route": "/whm/software/deployments",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-one-click-deploy"
+            ],
+            "keywords": [
+              "One-Click App Deploy",
+              "Server app deployment"
+            ],
+            "summary": "Server administrator application deployment; unavailable until the capability and its task screen are qualified."
+          },
+          {
+            "id": "application-projects",
+            "name": "Go & Java projects",
+            "route": "/whm/software/application-projects",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-go-project",
+              "aapanel-java-project"
+            ],
+            "keywords": [
+              "Go Projects",
+              "Java Projects"
+            ],
+            "summary": "Server administrator Go and Java projects; unavailable until both capabilities and their task screen are qualified."
+          },
+          {
+            "id": "composer",
+            "name": "Composer",
+            "route": "/whm/software/composer",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-composer"
+            ],
+            "keywords": [
+              "Composer",
+              "composer install",
+              "composer update"
+            ],
+            "summary": "Server administrator Composer package operations; unavailable until the capability and its task screen are qualified."
           }
         ]
       },

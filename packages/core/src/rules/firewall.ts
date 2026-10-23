@@ -299,7 +299,17 @@ export const validatePrefixList = (name: unknown, entries: unknown): { name: str
 
 // ---- defaults ------------------------------------------------------------------------
 
-type PortSettings = Pick<ServerSettings, 'panelPort' | 'sshPort' | 'backendPort' | 'backendTlsPort'>
+/** Fixed HTTPS entry points and their private loopback listeners. Never tenant upstreams. */
+export const MANAGEMENT_PUBLIC_PORTS: readonly number[] = [2083, 2087, 2096]
+export const MANAGEMENT_BACKEND_PORTS: readonly number[] = [12083, 12087, 12096]
+
+type PortSettings = Pick<ServerSettings, 'panelPort' | 'sshPort' | 'backendPort' | 'backendTlsPort'> & {
+  /** Explicit public management ports; defaults to the fixed HTTPS entry points. */
+  managementPorts?: readonly number[]
+}
+
+const managementPorts = (panelPort: number, ports: readonly number[] = MANAGEMENT_PUBLIC_PORTS): number[] =>
+  [...new Set([panelPort, ...ports])]
 
 const WEB_PORTS: readonly number[] = [80, 443]
 
@@ -310,10 +320,18 @@ const portSettingsErrors = (settings: PortSettings): string[] => {
     .filter(([, v]) => !isPort(v))
     .map(([k]) => `${k} must be 1-65535`)
   if (errors.length > 0) return errors
+  if (settings.managementPorts !== undefined && (!Array.isArray(settings.managementPorts) ||
+      settings.managementPorts.some((p) => !isPort(p)) || new Set(settings.managementPorts).size !== settings.managementPorts.length)) {
+    return ['managementPorts must contain distinct ports within 1-65535']
+  }
   const publicPorts = new Set([...WEB_PORTS, panelPort, sshPort])
   if (publicPorts.size !== 4) errors.push('panelPort and sshPort must differ from each other and from 80/443')
   if (publicPorts.has(backendPort) || publicPorts.has(backendTlsPort)) errors.push('backend ports must not be public ports')
   if (backendPort === backendTlsPort) errors.push('backendPort and backendTlsPort must differ')
+  const management = managementPorts(panelPort, settings.managementPorts)
+  if (management.some((p) => WEB_PORTS.includes(p) || p === sshPort || p === backendPort || p === backendTlsPort || MANAGEMENT_BACKEND_PORTS.includes(p))) errors.push('management ports must differ from SSH, web and private backend ports')
+  if ([panelPort, sshPort, backendPort, backendTlsPort].some((p) => MANAGEMENT_BACKEND_PORTS.includes(p))) errors.push('server ports must not take a private management listener')
+  if ([backendPort, backendTlsPort].some((p) => MANAGEMENT_PUBLIC_PORTS.includes(p))) errors.push('web backend ports must not take management entry points')
   return errors
 }
 
@@ -332,7 +350,7 @@ const rule = (id: string, partial: Partial<FirewallRule>): FirewallRule => ({
 })
 
 /**
- * Panel, HTTP, HTTPS and SSH open; the Apache/OLS backend ports reachable from loopback
+ * Management HTTPS, HTTP and SSH open; the Apache/OLS backend ports reachable from loopback
  * only; ping allowed; everything else falls to the drop policy.
  */
 export const defaultFirewallRules = (settings: PortSettings): FirewallRule[] => {
@@ -351,6 +369,8 @@ export const defaultFirewallRules = (settings: PortSettings): FirewallRule[] => 
     rule('default-http', { port: '80', comment: 'HTTP' }),
     rule('default-https', { port: '443', comment: 'HTTPS' }),
     rule('default-panel', { port: String(panelPort), comment: 'xPanel' }),
+    ...managementPorts(panelPort, settings.managementPorts).filter((p) => p !== panelPort).map((p) =>
+      rule(`default-management-${p}`, { port: String(p), comment: 'management HTTPS' })),
     rule('default-icmp', { kind: 'icmp', protocol: null, comment: 'ping' }),
   ]
 }
@@ -384,8 +404,8 @@ export const firewallRuleSetErrors = (rules: readonly FirewallRule[], ctx: Firew
   const errors = portSettingsErrors(ctx)
   if (errors.length > 0) return errors
   if (!isRecord(ctx.prefixLists)) return ['prefixLists must be an object of list name to CIDRs']
-  const backendPorts = [ctx.backendPort, ctx.backendTlsPort]
-  const reservedPorts = [ctx.panelPort, ctx.sshPort, ...WEB_PORTS, ...backendPorts]
+  const backendPorts = [ctx.backendPort, ctx.backendTlsPort, ...MANAGEMENT_BACKEND_PORTS]
+  const reservedPorts = [...managementPorts(ctx.panelPort, ctx.managementPorts), ...MANAGEMENT_PUBLIC_PORTS, ctx.sshPort, ...WEB_PORTS, ...backendPorts]
   for (const r of rules) {
     const range = r.port === null ? null : parsePortSpec(r.port)
     const source = r.source === null ? null : parseCidr(r.source)
@@ -483,6 +503,8 @@ export interface LockoutContext {
   /** the address of the admin session saving the rules */
   sessionIp: string
   panelPort: number
+  /** Other active public management entry points, checked with the current session address. */
+  managementPorts?: readonly number[]
   /** also kept reachable unless null */
   sshPort: number | null
   prefixLists?: PrefixLists
@@ -499,10 +521,11 @@ export const assertNoSelfLockout = (rules: readonly FirewallRule[], ctx: Lockout
   const ip = parseIp(ctx.sessionIp)
   if (!ip) return invalid('session IP is not a valid address', { sessionIp: String(ctx.sessionIp).slice(0, 64) })
   if (!isPort(ctx.panelPort)) return invalid('panelPort must be 1-65535')
+  if (ctx.managementPorts !== undefined && (!Array.isArray(ctx.managementPorts) || ctx.managementPorts.some((p) => !isPort(p)) || new Set(ctx.managementPorts).size !== ctx.managementPorts.length)) return invalid('managementPorts must contain distinct ports within 1-65535')
   if (ctx.sshPort !== null && !isPort(ctx.sshPort)) return invalid('sshPort must be 1-65535 or null')
   const valid = validateFirewallRules(rules)
   const lists = ctx.prefixLists ?? {}
-  const checks: { service: 'panel' | 'ssh'; port: number }[] = [{ service: 'panel', port: ctx.panelPort }]
+  const checks: { service: 'panel' | 'ssh'; port: number }[] = managementPorts(ctx.panelPort, ctx.managementPorts ?? []).map((port) => ({ service: 'panel', port }))
   if (ctx.sshPort !== null) checks.push({ service: 'ssh', port: ctx.sshPort })
   for (const { service, port } of checks) {
     const verdict = evaluateFirewall(valid, { ip, protocol: 'tcp', port }, lists)

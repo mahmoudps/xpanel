@@ -21,7 +21,9 @@ if (!snapshot || !/^[a-f0-9]{64}$/.test(snapshot)) {
   const receiptCheck = verifySnapshotReceipt({
     rootDir: root,
     expectedArchiveSha256: snapshot,
+    expectedSourceSha256: args['--source-sha256'],
     receiptPath: args['--receipt'] ?? null,
+    requirePinnedPnpm: true,
   })
   if (!receiptCheck.ok) {
     gate.status = 'blocked'
@@ -74,6 +76,7 @@ if (gate.status === 'blocked') {
   const evidence = {
     schema_version: 1, scope: 'Real LinuxHostExecutor primitives on the authorized disposable VM; no fake executor, browser, Apache/PHP workload or live firewall traffic claim.',
     started_at: startedAt, finished_at: new Date().toISOString(), snapshot_archive_sha256: snapshot,
+    coordinator_source_sha256: args['--source-sha256'] ?? null,
     snapshot_source_sha256: verifiedReceipt?.source_sha256 ?? null,
     snapshot_receipt_sha256: verifiedReceipt?.receipt_sha256 ?? null,
     archive_hash_verified_by_receipt: Boolean(verifiedReceipt),

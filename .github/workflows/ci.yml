@@ -50,9 +50,9 @@ jobs:
       - run: pnpm typecheck
 
   browser-acceptance:
-    name: Chromium authentication acceptance (no hosting-service proof)
+    name: Chromium authentication and interface acceptance (no hosting-service proof)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.tools/playwright-browsers
     steps:
@@ -71,6 +71,15 @@ jobs:
         run: node scripts/toolchain.mjs pnpm test:browser
       - name: Exercise 18 synthetic UI states (no hosting-service proof)
         run: node scripts/toolchain.mjs node tests/browser/phase1-acceptance.mjs --output=test-results/phase1-ui-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Exercise navigation and responsive interaction contracts (synthetic data)
+        run: node scripts/toolchain.mjs node tests/browser/navigation-acceptance.mjs --output=test-results/navigation-ui-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Exercise independent login surface visual contracts (synthetic data)
+        run: node scripts/toolchain.mjs node tests/browser/login-surface-acceptance.mjs --output=test-results/login-ui-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Exercise 24 mail layout states (synthetic data, no delivery proof)
+        run: node scripts/toolchain.mjs node tests/browser/mail-layout-acceptance.mjs --output=test-results/mail-layout-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Exercise 24 Accounts workflow states (synthetic API responses)
+        run: node scripts/toolchain.mjs node tests/browser/accounts-acceptance.mjs --output=test-results/accounts-ui-${{ github.run_id }}-${{ github.run_attempt }}
 
   qualification-prerequisites:
     if: github.event_name == 'workflow_dispatch'

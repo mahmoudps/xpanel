@@ -58,7 +58,8 @@ SQLite memory belongs to the processes that use it and must be included in their
 - Confine tenant file operations with the account identity and kernel path controls. Require real helper availability, cgroup/quota enforcement and race/failure tests; no unrestricted root fallback.
 - Preserve Argon2id, session lifetime controls, CSRF, persistent lockout, MFA and atomic credential/session/token revocation. Production root authentication must meet its accepted MFA policy.
 - Never place secrets in source, URLs, browser assets, logs or audit details. Redaction must cover nested structures and failure paths.
-- Treat proxy headers as untrusted unless the immediate peer is explicitly configured. Qualify origin, TLS, backend exposure and renewal behavior on the actual deployment.
+- Treat proxy headers as untrusted unless the ingress is authenticated and the exact public Host/origin matches the immutable listener profile. Preserve audience-bound session credential hashes and CSRF, role/route confinement and required mutation Origin checks. Secure cookie names alone do not isolate ports; Bearer tokens must not authenticate the interactive UI profiles. Qualify public TLS, backend exposure and renewal behavior on the actual deployment.
+- Reserve public management ports `2083/2087/2096` and private loopback listeners `12083/12087/12096` from tenant forwards, proxy upstreams and web backends. A legacy firewall/API environment needs an explicit reviewed additive migration; no background auto-opening or silent environment replacement is permitted.
 - Audit intent and outcome durably. Prove failure behavior under disk exhaustion, crash and recovery; an optional log path or successful DB insert is not an end-to-end append-only guarantee.
 
 ## Protocol and quality targets
@@ -92,10 +93,38 @@ See [TESTING.md](TESTING.md) for executable commands.
 - Support English and Arabic with appropriate direction, logical layout and shared translation catalogs. Keep all displayed digits ASCII `0-9`, including dates, references and percentages.
 - Align values directly beneath their labels on the same field edge. Isolate LTR values inside Arabic fields without moving them to the opposite edge. Measure actual browser geometry on desktop and mobile; extend the same contract to print and exported documents.
 - Use meaningful labels, accessible names, visible focus, keyboard navigation, contrast and touch targets of at least 44 px where required by the interface contract.
-- Dialogs and modal navigation must manage focus, Escape, Tab/Shift+Tab loops, background interaction and focus return. Test native disclosure controls and collapsed content.
-- Show loading, empty, unavailable, error and no-permission states truthfully. Confirm consequential actions and display server-reported outcomes.
+- Dialogs and modal navigation must manage focus, Escape, Tab/Shift+Tab loops, background interaction and focus return. Test native disclosure controls and collapsed content. Reduced-motion styles must make a modal visible before focus entry; disable transitions and animations rather than leaving a tiny visibility-transition window.
+- Show loading, empty, unavailable, error and no-permission states truthfully. Confirm consequential actions and display server-reported outcomes. Keep dedicated login screens compact, with the essential form visible on small screens and a server-selected surface identity.
+- Preserve selected language, theme, density and authorized account context through document navigation, Back/Forward and reload. Test focus return across the `959/960px` shell breakpoint, keyboard shortcuts, long-form scroll and reduced-motion behavior. Laboratory timing samples do not establish production INP or capacity.
+- Page search lists all currently available authorized destinations, with localized filtering, a clear no-match state, Arrow Up/Down selection and Enter navigation. It does not execute arbitrary commands, invent actions or add unavailable capabilities. Keep its list scroll bounded and retain native editing inside inputs and textareas.
+- Mail rendering must distinguish observations from usable operations. Keep Send disabled and non-submitting until the production delivery contract is connected and qualified; an inbox layout alone does not establish mailbox authentication, SMTP or IMAP.
 - Never invent account context, generation numbers, references or successful service outcomes in the browser. User-facing public references must come from their authoritative persisted allocator.
 - Do not claim offline readiness while required fonts or assets remain external. Observe loaded font faces and network failures during acceptance.
+
+### Typography and spacing roles
+
+Use IBM Plex Sans for English interface text and brands, and IBM Plex Sans Arabic for Arabic interface text. Keep ordinary navigation, labels, buttons, headings and values in the interface family. Reserve IBM Plex Mono for code, commands, file paths and technical identifiers; tabular numbers do not by themselves require a monospace family.
+
+| Role | Font size | Latin line height | Arabic line height |
+|---|---|---|---|
+| Caption | 12px | 18px | 20px |
+| Label | 13px | 20px | 22px |
+| Body and ordinary controls | 14px | 20px | 22px |
+| Card heading | 16px | 24px | 26px |
+| Page heading | 22px | 28px | 32px |
+| Mobile input | 16px | 24px | 24px |
+
+Arabic uses additional vertical room for its glyphs; Latin and Arabic line heights are not identical. Brands use proportional Plex Sans with their role line height; technical-only Mono does not change the ordinary interface hierarchy.
+
+The primary layout rhythm uses 8px between a label and its value, 16px between fields, 24px between groups or within desktop cards, and 32px between larger sections. Phone cards use 16px padding. Utility icon spacing is separate from form/group rhythm. Generic controls retain at least 44px height; login inputs use 48px.
+
+Keep the 44px minimum interaction target independently of the text line height. Use shared field/card/section spacing roles and consistent alignment; do not compensate for inconsistent typography with isolated offsets or unrelated gaps. Verify computed font family, loaded font faces, role sizes, line heights, logical edges and clipping in the actual browser. Defined roles are a contract, not a claim that every screen has passed visual acceptance.
+
+### Account actions and table access
+
+Keep dialogs bound to the persisted internal account target while displaying its username/domain for confirmation. Exact confirmation, Escape/focus return, disabled pending inputs, cleared passwords and single-flight submission are required. Unknown outcomes require review before retry, not a success toast or automatic second request. Global acknowledgement with `targetVerified: false` must remain verification-required.
+
+Deletion and contact-email-only PATCH remain explicitly unavailable with HTTP 412 until safe target-bound purge and qualified metadata/index contracts exist. Failures must not remove principal identity or imply native lifecycle success. Tables require scoped headers and named keyboard-reachable scroll regions even when wrappers have multiple CSS classes.
 
 ## Release acceptance
 

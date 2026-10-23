@@ -16,14 +16,53 @@ No credential values belong in commands, process arguments, examples, logs, or r
 | Generations | `/var/lib/xpanel/generations` | Retain together with corresponding desired state and database |
 | Logs | `/var/log/xpanel` and systemd journal | Sanitize diagnostic exports |
 | Shared runtime environment | `/etc/xpanel/runtime.env` | Root-owned configuration, installed group `xpanel`, mode `0640` |
-| API environment | `/etc/xpanel/api.env` | Origins, trusted proxies, bind host/port; preserve operator settings |
+| API environment | `/etc/xpanel/api.env` | Three exact public HTTPS origins, explicit loopback bind and reserved private ports; existing files require explicit migration |
 | Agent credential | `/etc/xpanel/agent.token` | Installer creates/preserves protected credential, not inline configuration |
 | Server sealing secret | `/etc/xpanel/server.secret` | Required for protected authentication material; preserve with identity recovery |
+| Authenticated ingress credential | `/etc/xpanel/ingress.secret` | Protected root-owned, group `xpanel`, mode `0640`; preserve and never print |
 | Agent socket | `/run/xpanel/agent.sock` | Runtime directory `0750 root:xpanel-agent`; kernel peer identity and service credential checks |
 | Account file helper | `/opt/xpanel/bin/xpanel-account-files` | Native confined helper; absence must fail closed |
 | Account backup work/download roots | `/var/lib/xpanel/backups/work`, `/var/lib/xpanel/backups/downloads` | Defaults in `packages/lifecycle/src/backup/plan.ts`; a plan does not prove a connected production executor |
 
 The actual administrative CLI is Node running `apps/api/src/main.ts`, implemented by `apps/api/src/cli.ts`. Its commands are `status`, `reconcile [--force]`, `rollback <generation-id>`, `reindex`, `init-root --password-stdin`, `reset-password <username> --password-stdin`, and `disable-2fa <username>`. Administrative verbs require the operating-system root user on Linux. Reconcile/rollback require an authenticated separate agent. There is no implemented general `xpanel-ctl` command suite for backup, vault, certificate, queue, or release operations.
+
+## Three-profile ingress and existing-installation migration
+
+The API executable starts three immutable profiles in one unprivileged process. It does not terminate public TLS itself or create a production-ready nginx configuration. See the [generic ingress guide](../../deploy/nginx/README.md) and [example configuration](../../deploy/nginx/entrypoints.conf.example); placeholders must be replaced and reviewed before use.
+
+| Profile | Public HTTPS port | Private HTTP listener | Admitted interactive role |
+|---|---|---|---|
+| xPanel | `2083` | `127.0.0.1:12083` | Account user |
+| xWHM | `2087` | `127.0.0.1:12087` | Root or reseller |
+| xMail | `2096` | `127.0.0.1:12096` | Account user; mailbox credentials remain pending |
+
+Configure all of the following in the protected API environment. Values below are generic examples, not an installed deployment:
+
+```dotenv
+XPANEL_HOST=127.0.0.1
+XPANEL_PANEL_PORT=12083
+XPANEL_WHM_PORT=12087
+XPANEL_MAIL_PORT=12096
+XPANEL_PANEL_PUBLIC_ORIGIN=https://panel.example.test:2083
+XPANEL_WHM_PUBLIC_ORIGIN=https://whm.panel.example.test:2087
+XPANEL_MAIL_PUBLIC_ORIGIN=https://mail.panel.example.test:2096
+XPANEL_SERVER_SECRET_FILE=/etc/xpanel/server.secret
+XPANEL_INGRESS_SECRET_FILE=/etc/xpanel/ingress.secret
+```
+
+Origins must be canonical exact HTTPS origins on the profile's required public port, without credentials, path, query, fragment or trailing slash. The production backend ports are fixed and must be distinct from SSH, tenant web backends and other services. The installer preserves an existing `api.env`; it does not populate missing origins or silently convert a legacy shared listener. Startup fails closed on incomplete configuration. TLS certificates must cover every selected hostname; a wildcard covers only one label level.
+
+Before activation on an existing installation:
+
+1. Measure actual listeners, desired firewall state and live rules. Keep an independent OS-root recovery channel. Back up the API environment, nginx/unit configuration and firewall state/rules beside the originals with timestamps; preserve the current release and a tested rollback path. Quiesce competing writers during migration.
+2. Prepare one reviewed **atomic additive offline migration** for a legacy firewall that accepts only `2087`. Preserve existing rule IDs, custom rules, SSH access, source restrictions and unrelated service policy. Add intended management admission for all `2083/2087/2096` together in a staged copy; do not rewrite the whole policy from defaults.
+3. Validate the complete staged desired state through the current guards and render the candidate rules. Run `nft -c -f '<REVIEWED_CANDIDATE_RULESET>'` before activation and review its exact delta. Keep the saved live rules and state available for a coordinated rollback. This is an operator-reviewed maintenance procedure, not an existing migration CLI or automatic feature.
+4. Do not attempt sequential new-API rule creation to repair a legacy `2087`-only state: each firewall mutation now validates admission for all three management ports, so the first partial addition can be rejected. Apply the approved complete additive state/rules transition atomically under maintenance control before enabling the new entrypoints; record actual validation and application separately.
+5. Configure each reviewed TLS ingress, exact public Host including port, replacement forwarded protocol/client identity and the protected ingress credential. Keep its nginx include root-owned and mode `0600`; do not log the directive or pass credential values in shell arguments. Never trust a client-supplied ingress header. Validate `nginx -t` before reload.
+6. Reserve public management ports `2083/2087/2096` and private loopback listeners `12083/12087/12096` from tenant TCP forwards, proxies and web backends. The native firewall path guards all active management ports and drops public access to private listeners; source rendering does not establish the live firewall state. Do not remove the old listener until the new release, origins, trusted TLS, health, login and rollback have passed independent checks.
+7. Verify every public HTTPS surface from an external observer and test wrong Host/origin/role, cross-profile raw-session replay, CSRF, sign-out, MFA, password change and HTTP/WebSocket confinement. Browser cookies can cross same-host ports; audience-bound stored session hashes and CSRF enforce the separation. Bearer tokens do not authenticate these interactive profiles. xMail's current account login is not mailbox authentication or SMTP/IMAP proof.
+
+No migration, port opening or public TLS qualification is inferred from a dry run, a fixture or deployment documentation. Keep the existing installation unchanged until the complete reviewed change and recovery procedure are ready.
 
 ## Runbook 01: Installation
 
@@ -42,7 +81,7 @@ Targets: A26-A28, A59.
 1. Verify artifact authentication and exact file inventory before extraction/provisioning. Review production dependency/native-addon inputs and record their hashes. Place the verified tree at `/opt/xpanel` with trusted ownership and no untrusted writable ancestors.
 2. Inspect the non-mutating installer plan from the reviewed tree, for example `bash scripts/install.sh --dry-run --engine=apache --apache-mpm=itk --php=8.3`. This is a plan, not installation proof.
 3. In the approved maintenance window, invoke that reviewed installer with the selected options and without `--dry-run`. Its privileged path requires Linux/systemd, pinned runtime and installed dependencies, Apache itk, cgroup/quota preconditions, and stopped existing panel services. Back up existing configurations first; retain the install journal and adjacent configuration backups. Optional mail/DNS/FTP/MariaDB installation requires the corresponding `--with-*` option.
-4. Review created identities, permissions, `/etc/xpanel/runtime.env`, `/etc/xpanel/api.env`, units, native peer listener/helper prerequisites, and SQL adapter configuration. The script enables units but does not start them. Configure approved HTTPS origins and proxy trust, then provision root as described below.
+4. Review created identities, permissions, `/etc/xpanel/runtime.env`, `/etc/xpanel/api.env`, units, native peer listener/helper prerequisites, and SQL adapter configuration. The script enables units but does not start them. Complete the three-profile environment, reviewed ingress and any atomic additive legacy-firewall migration above, then provision root as described below.
 
 ### Verification Oracle
 
@@ -50,6 +89,14 @@ Targets: A26-A28, A59.
 - `control.db` is `0660 xpanel:xpanel`; secret/config files follow protected source policy; runtime socket identity/modes match the units and kernel peer checks.
 - Start only after the reviewed prerequisites are satisfied; independently probe health, authentication denial, services, reboot recovery, and actual tenant UID/cgroup/quotas. Enabling systemd units or successful dry-run output does not close A26-A28.
 - Installer source parses Ubuntu 22.04/24.04 and Enterprise Linux 9/10 family plans, while the privileged Apache-itk requirement can reject a plan. No broader distribution/architecture qualification is implied.
+
+## Account workflow availability
+
+Inspect current API execution fields before treating an account operation as completed. Supported configuration paths may change desired state and acknowledge only global reconciliation, with `targetVerified: false` and `verificationRequired: true`. Independently inspect the target/service outcome before retrying, especially after an unknown transport result or revision conflict. A row or global generation is not a target-bound lifecycle receipt.
+
+Account DELETE rechecks authorization and exact username confirmation, then returns HTTP 412 because verified target-bound purge is unavailable. Do not bypass it with direct filesystem or principal deletion. Contact-email-only PATCH also returns 412 before effects until its metadata/index writer is qualified. Native lifecycle and restart/rollback recovery remain open; the existing coordinator is not a qualified drop-in workaround.
+
+Creation requires a password and a real explicit or configured primary IPv4. Preserve all linked-principal revocations and independent manual disables through suspension/unsuspension. If state may have changed but host outcome is unknown, retain verification-required status and use a separately reviewed recovery procedure.
 
 ## Runbook 02: First login and MFA
 
@@ -65,7 +112,7 @@ Targets: A06, A09-A11, A29-A30.
 ### Execution Steps
 
 1. Provision root once through `node /opt/xpanel/apps/api/src/main.ts init-root --password-stdin`, feeding a single password line from a protected input source. Do not use inline-password compatibility modes. The command sets the forced-password-change flag; it does not enroll MFA or complete setup.
-2. Start the verified services only after configuration/native prerequisites are reviewed. Use the actual `/login` form over HTTPS; complete the authorized password-change and MFA enrollment flows. Do not inject cookies or bypass MFA to make onboarding appear successful.
+2. Start the verified services only after configuration/native prerequisites are reviewed. Use the actual server-selected `/login` form on the matching HTTPS profile: root/reseller on xWHM `2087`, account users on xPanel `2083` or xMail `2096`. Complete the authorized password-change and MFA enrollment flows. Do not inject cookies or bypass MFA to make onboarding appear successful.
 3. Protect the TOTP seed and returned single-use recovery codes offline. Count and behavior must follow the current authentication implementation; do not assume a fixed count from an older runbook.
 4. Complete the available setup workflow and verify actual persisted configuration. If a required UI/adapter is unavailable, report blocked and keep the administrative gate; do not fabricate bootstrap URLs or completion records.
 
@@ -85,7 +132,7 @@ Targets: A09-A10, A14-A17, A25.
 ### Preconditions
 
 - A consistent verified backup of the control DB, desired state, configuration, and required decryption/sealing material; protected off-host recovery access.
-- Inventory actual consumers of `/etc/xpanel/agent.token` and `/etc/xpanel/server.secret`. There is no implemented `vault rotate-master-key` CLI or atomic global secret migration command.
+- Inventory actual consumers of `/etc/xpanel/agent.token`, `/etc/xpanel/server.secret` and `/etc/xpanel/ingress.secret`, including the protected nginx ingress include. There is no implemented `vault rotate-master-key` CLI or atomic global secret migration command.
 
 ### Execution Steps
 

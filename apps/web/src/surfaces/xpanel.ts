@@ -20,7 +20,7 @@ import {
   renderStatusBadge,
   renderThresholdMeter,
 } from '../tokens.ts'
-import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, getSurfaceNavigationLabel, normalizeSurfaceRoute, renderLiveUpdatesIndicator } from '../shell.ts'
+import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, getSurfaceNavigationLabel, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
 export { renderPanelExtendedSections } from './extended-views.ts'
 
@@ -271,14 +271,11 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
       ${(xpanelNav?.sections ?? []).flatMap(section => section.pages).slice(0, 3).map(page => `<a href="${escapeHtml(page.route)}" class="xp-nav-item">${escapeHtml(getSurfaceNavigationLabel('xpanel', 'page', page, locale))}</a>`).join('')}
     </div>
 
-    <nav aria-label="xPanel sections">
+    <nav aria-label="${isAr ? 'أقسام xPanel' : 'xPanel sections'}">
       ${sidebarSectionsHtml || `<p role="status" data-navigation-empty="true">${escapeHtml(isAr ? 'لا توجد أدوات مثبتة الجاهزية ومتاحة لحسابك.' : 'No verified tools are available for your account.')}</p>`}
     </nav>`,
-    topbar: `      <div class="xp-topbar__start" style="display: flex; align-items: center; gap: 12px;">
-        <button type="button" class="xp-btn" data-action="open-cmdk" aria-keyshortcuts="Control+K Meta+K">
-          <span>${isAr ? 'بحث' : 'Search'}</span>
-          <kbd class="xp-mono">Ctrl K</kbd>
-        </button>
+    topbar: `      <div class="xp-topbar__start">
+        ${renderPageSearchButton(locale)}
 
         <label class="xp-sr-only" for="xpanel-domain-switcher">${isAr ? 'اختر النطاق' : 'Active domain'}</label>
         <select id="xpanel-domain-switcher" class="xp-select xp-mono" style="width: auto;" data-domain-switcher="true">
@@ -290,7 +287,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
         </select>
       </div>
 
-      <div class="xp-topbar__end" style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+      <div class="xp-topbar__end">
         ${renderLiveUpdatesIndicator(locale, props.realtimeEnabled === true)}
         ${generationId !== undefined ? `<span data-generation-chip="${generationId}">
           ${renderStatusBadge('ok', `Gen #${generationId}`)}
@@ -302,19 +299,21 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
           ${escapeHtml(theme === 'dark' ? t(locale, 'common.theme.light') : t(locale, 'common.theme.dark'))}
         </a>
         <a href="/mail?lang=${locale}&amp;theme=${theme}" class="xp-btn xp-btn--ghost">xMail</a>
-        <span class="xp-mono">${escapeHtml(account.username)}</span>
-        <button type="button" class="xp-btn xp-btn--ghost" data-action="logout">${escapeHtml(isAr ? 'تسجيل الخروج' : 'Sign out')}</button>
+        <div class="xp-account-actions">
+          <span class="xp-mono xp-account-actions__name">${escapeHtml(account.username)}</span>
+          <button type="button" class="xp-btn xp-btn--ghost" data-action="logout">${escapeHtml(isAr ? 'تسجيل الخروج' : 'Sign out')}</button>
+        </div>
       </div>`,
     content: `      ${actionBannerHtml}
-${section === 'overview' || section === 'resources' ? `      <section class="xp-card" data-section="slice-resources" aria-labelledby="xpanel-resources-heading">
+${section === 'overview' || section === 'resources' ? `      <section class="xp-card xp-form-group" data-section="slice-resources" aria-labelledby="xpanel-resources-heading">
         <div class="xp-card__header"><h1 id="xpanel-resources-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1></div>
         <div class="xp-kpi-grid">
-          <div class="xp-form-group"><span class="xp-label">${isAr ? 'الحساب' : 'Account'}</span><strong><bdi dir="ltr">${escapeHtml(account.username)}</bdi></strong></div>
-          <div class="xp-form-group"><span class="xp-label">${isAr ? 'النطاق الأساسي' : 'Primary domain'}</span><strong><bdi dir="ltr">${escapeHtml(account.primaryDomain)}</bdi></strong></div>
-          <div class="xp-form-group"><span class="xp-label">${isAr ? 'الخطة' : 'Plan'}</span><strong>${escapeHtml(plan?.name ?? (isAr ? 'غير متاحة' : 'Unavailable'))}</strong></div>
-          <div class="xp-form-group"><span class="xp-label">${isAr ? 'الحالة' : 'Status'}</span>${renderStatusBadge(account.status === 'active' ? 'ok' : 'suspended', account.status)}</div>
+          <div class="xp-field"><span class="xp-label">${isAr ? 'الحساب' : 'Account'}</span><strong><bdi dir="ltr">${escapeHtml(account.username)}</bdi></strong></div>
+          <div class="xp-field"><span class="xp-label">${isAr ? 'النطاق الأساسي' : 'Primary domain'}</span><strong><bdi dir="ltr">${escapeHtml(account.primaryDomain)}</bdi></strong></div>
+          <div class="xp-field"><span class="xp-label">${isAr ? 'الخطة' : 'Plan'}</span><strong>${escapeHtml(plan?.name ?? (isAr ? 'غير متاحة' : 'Unavailable'))}</strong></div>
+          <div class="xp-field"><span class="xp-label">${isAr ? 'الحالة' : 'Status'}</span>${renderStatusBadge(account.status === 'active' ? 'ok' : 'suspended', account.status)}</div>
         </div>
-        <p class="xp-prose" role="status" data-resource-metrics="unavailable">${isAr ? 'لم تتوفر قياسات استخدام الموارد بعد.' : 'Resource usage measurements are not available yet.'}</p>
+        <p class="xp-prose" role="status" data-resource-metrics="unavailable">${isAr ? 'قياسات الموارد غير متاحة بعد.' : 'Resource measurements are not available yet.'}</p>
       </section>
 ` : ''}
       ${section === 'domains' ? `      <!-- 2. Domains & Multi-IP Binding Table -->
@@ -322,7 +321,7 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
         <div class="xp-card__header">
           <div>
             <h1 id="xpanel-domains-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-            <p class="xp-prose">${isAr ? 'ربط كل نطاق بعنوان IPv4 وIPv6 مخصص أو مشترك، واختيار إصدار PHP (8.1..8.4) والمعالج (fpm / cgi / lsphp) وشهادة ACME SSL.' : 'Bind each primary, addon, subdomain, or alias to dedicated/shared IPv4 & IPv6 addresses, select PHP 8.1..8.4 handler (fpm, cgi, lsphp), and manage ACME HTTP-01/DNS-01 wildcard TLS.'}</p>
+            <p class="xp-prose">${isAr ? 'إدارة النطاقات والمجلدات وعناوين IP وإعدادات PHP والشهادات.' : 'Manage domains, document roots, IP addresses, PHP settings and certificates.'}</p>
           </div>
           ${renderStatusBadge('ok', `${domains.length} ${isAr ? 'نطاقات' : 'domains'}`)}
         </div>
@@ -331,11 +330,11 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
           <table class="xp-table" data-domains-table="true">
             <thead>
               <tr>
-                <th>${isAr ? 'النطاق والنوع' : 'Domain & Kind'}</th>
-                <th>${isAr ? 'مسار الجذر (Document Root)' : 'Document Root'}</th>
-                <th>${isAr ? 'عناوين IPv4 / IPv6 المربوطة' : 'Bound IPv4 & IPv6'}</th>
-                <th>${isAr ? 'إصدار ومعالج PHP / Upstream' : 'PHP Version & Handler / Runtime'}</th>
-                <th>${isAr ? 'شهادة TLS / Wildcard' : 'TLS Certificate'}</th>
+                <th>${isAr ? 'النطاق والنوع' : 'Domain / Type'}</th>
+                <th>${isAr ? 'مجلد الموقع' : 'Document root'}</th>
+                <th>${isAr ? 'عناوين IP' : 'IP addresses'}</th>
+                <th>${isAr ? 'PHP / بيئة التشغيل' : 'PHP / Runtime'}</th>
+                <th>${isAr ? 'شهادة TLS' : 'TLS certificate'}</th>
               </tr>
             </thead>
             <tbody>
@@ -381,9 +380,9 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
         <div class="xp-reconcile-banner" style="margin-block-end: var(--xp-space-field);" data-userdata-guard-notice="true">
           <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px;">
             <div>
-              <strong>${isAr ? 'فحص الأمان والعزل التلقائي قبل إعادة تحميل Nginx وApache' : 'Live Isolation Validator & Atomic Pre-Reload Test (nginx -t & apachectl configtest)'}</strong>
+              <strong>${isAr ? 'فحص الإعدادات قبل التطبيق' : 'Configuration checks before applying'}</strong>
               <p style="margin: 4px 0 0; font-size: 0.85rem; color: var(--xp-text-secondary);">
-                ${isAr ? 'يُمنع مستخدمو الحسابات من تمرير توجيهات الجذر الخطرة مثل user, pid, root, alias, SuexecUserGroup, AssignUserId, LoadModule, Listen. أي خطأ في الصياغة يُبقي الجيل السابق نشطاً.' : 'Tenant drop-ins automatically block privilege/isolation-escaping directives (user, pid, root, alias, include, SuexecUserGroup, AssignUserId, LoadModule, Listen). Syntax failures keep the previous applied generation active.'}
+                ${isAr ? 'توجيهات الصلاحيات والعزل محظورة: user, pid, root, alias, include, SuexecUserGroup, AssignUserId, LoadModule, Listen. عند فشل الفحص تبقى الإعدادات السابقة نشطة.' : 'Privilege and isolation directives are blocked: user, pid, root, alias, include, SuexecUserGroup, AssignUserId, LoadModule, Listen. Failed checks keep the previous configuration active.'}
               </p>
             </div>
             ${renderStatusBadge('ok', 'nginx -t & apachectl configtest')}
@@ -461,8 +460,6 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
             <p class="xp-prose">${escapeHtml(t(locale, 'files.jailNotice'))}</p>
           </div>
           <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-            ${renderStatusBadge('ok', 'O_NOFOLLOW Symlink-Safe')}
-            ${renderStatusBadge('ok', 'Max File 0640 · Dir 0750 (0777 Blocked)')}
           </div>
         </div>
 
@@ -475,7 +472,7 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
             <button type="button" class="xp-btn xp-btn--primary" data-action="upload-file">${escapeHtml(t(locale, 'files.upload'))}</button>
             <button type="button" class="xp-btn" data-action="new-file">${escapeHtml(t(locale, 'files.newFile'))}</button>
             <button type="button" class="xp-btn" data-action="new-folder">${escapeHtml(t(locale, 'files.newFolder'))}</button>
-            <button type="button" class="xp-btn" data-action="empty-trash">${isAr ? 'إفراغ المهملات (.trash)' : 'Empty .trash'}</button>
+            <button type="button" class="xp-btn" data-action="empty-trash">${isAr ? 'إفراغ المهملات' : 'Empty trash'}</button>
           </div>
         </div>
 
@@ -483,11 +480,11 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
           <table class="xp-table" data-file-manager-table="true">
             <thead>
               <tr>
-                <th>${isAr ? 'الاسم والمسار' : 'Name & Jail Path'}</th>
-                <th>${isAr ? 'النوع' : 'Kind'}</th>
+                <th>${isAr ? 'الاسم والمسار' : 'Name / Path'}</th>
+                <th>${isAr ? 'النوع' : 'Type'}</th>
                 <th>${isAr ? 'الحجم' : 'Size'}</th>
-                <th>${isAr ? 'الصلاحيات (Octal)' : 'Permissions (chmod)'}</th>
-                <th>${isAr ? 'آخر تعديل' : 'Modified (UTC)'}</th>
+                <th>${isAr ? 'الصلاحيات' : 'Permissions'}</th>
+                <th>${isAr ? 'آخر تعديل (UTC)' : 'Modified (UTC)'}</th>
                 <th>${isAr ? 'الإجراء' : 'Action'}</th>
               </tr>
             </thead>
@@ -507,7 +504,7 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
                   <td>
                     ${
                       f.trashed
-                        ? `<button type="button" class="xp-btn" data-action="restore-file" data-path="${escapeHtml(f.path)}">${isAr ? 'استعادة من .trash' : 'Restore from .trash'}</button>`
+                        ? `<button type="button" class="xp-btn" data-action="restore-file" data-path="${escapeHtml(f.path)}">${isAr ? 'استعادة' : 'Restore'}</button>`
                         : `<button type="button" class="xp-btn" data-action="chmod-file" data-path="${escapeHtml(f.path)}">${escapeHtml(t(locale, 'files.chmod'))}</button>`
                     }
                   </td>
@@ -523,23 +520,21 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
         <div class="xp-golden-grid" style="margin-block-start: var(--xp-space-card);">
           <div class="xp-card" data-in-browser-editor="true">
             <div class="xp-card__header">
-              <strong>${escapeHtml(t(locale, 'files.editor'))} — <code class="xp-mono"><bdi dir="ltr">${escapeHtml(account.home)}</bdi></code></strong>
-              ${renderStatusBadge('ok', '<= 1 MiB Safe Edit')}
+              <h2>${escapeHtml(t(locale, 'files.editor'))} — <code class="xp-mono"><bdi dir="ltr">${escapeHtml(account.home)}</bdi></code></h2>
             </div>
-            <label class="xp-sr-only" for="jailed-code-editor">File contents</label>
+            <label class="xp-sr-only" for="jailed-code-editor">${isAr ? 'محتوى الملف' : 'File contents'}</label>
             <textarea id="jailed-code-editor" rows="5" class="xp-textarea xp-mono" dir="ltr"></textarea>
           </div>
 
-          <div class="xp-card" data-chmod-policy-modal="true">
+          <div class="xp-card xp-form-group" data-chmod-policy-modal="true">
             <div class="xp-card__header">
-              <strong>${escapeHtml(t(locale, 'files.chmod'))} Guard (0640 / 0750)</strong>
-              ${renderStatusBadge('ok', '0777 Forbidden')}
+              <h2>${escapeHtml(t(locale, 'files.chmod'))} (0640 / 0750)</h2>
             </div>
             <p class="xp-prose">
-              ${isAr ? 'تُفرض صلاحيات ≤ 0640 للملفات و≤ 0750 للمجلدات لمنع قراءة الملفات بين الحسابات المختلفة؛ الصلاحية 0777 محظورة تماماً.' : 'Files are capped at mode <= 0640 and directories at <= 0750. World-writable permissions (0777 / 0666) are blocked to guarantee multi-tenant UID isolation.'}
+              ${isAr ? 'الحد الأقصى للصلاحيات: 0640 للملفات و0750 للمجلدات. الصلاحيات 0777 و0666 محظورة لحماية الحسابات.' : 'Maximum permissions: 0640 for files and 0750 for folders. Modes 0777 and 0666 are blocked to protect accounts.'}
             </p>
-            <div>
-              <label class="xp-label" for="chmod-octal-input">Octal Mode (0600, 0640, 0700, 0750)</label>
+            <div class="xp-field">
+              <label class="xp-label" for="chmod-octal-input">${isAr ? 'الصلاحيات (0600, 0640, 0700, 0750)' : 'Permissions (0600, 0640, 0700, 0750)'}</label>
               <input id="chmod-octal-input" type="text" class="xp-input xp-mono" dir="ltr" value="0640" pattern="0[67][045]0" />
             </div>
           </div>
@@ -554,14 +549,14 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
             <h1 id="xpanel-terminal-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
             <p class="xp-prose">${escapeHtml(t(locale, 'terminal.sliceNotice', { uid: account.uid }))}</p>
           </div>
-          ${renderStatusBadge(shellEnabled ? 'ok' : 'suspended', shellEnabled ? `Jailed (${sliceUnit})` : 'Shell Disabled (plan.shell=none)')}
+          ${renderStatusBadge(shellEnabled ? 'ok' : 'suspended', shellEnabled ? `Jailed (${sliceUnit})` : (isAr ? 'وصول الطرفية معطل' : 'Shell access disabled'))}
         </div>
 
         ${
           shellEnabled
             ? `
           <div style="margin-block-end: 12px;">
-            <span class="xp-label">${isAr ? 'الأوامر المسموحة (Allowlisted Binaries):' : 'Allowlisted Jailed Binaries:'}</span>
+            <span class="xp-label">${isAr ? 'الأوامر المسموحة' : 'Allowed commands'}</span>
             <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-block-start: 6px;">
               ${ALLOWLISTED_SHELL_BINARIES.map((bin) => `<code class="xp-mono">${escapeHtml(bin)}</code>`).join(' · ')}
             </div>
@@ -577,8 +572,8 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
         `
             : `
           <div class="xp-reconcile-banner" role="status" data-terminal-disabled="true">
-            ${renderStatusBadge('suspended', 'Shell Access Disabled (shell: none)')}
-            <p class="xp-prose">${isAr ? 'وصول الطرفية غير مفعل في خطتك الحالية.' : 'Interactive jailed shell access is disabled on your current hosting plan (plan.shell === "none").'}</p>
+            ${renderStatusBadge('suspended', isAr ? 'وصول الطرفية معطل' : 'Shell access disabled')}
+            <p class="xp-prose">${isAr ? 'وصول الطرفية غير مفعل في خطتك الحالية.' : 'Terminal access is disabled on your current plan.'}</p>
           </div>
         `
         }
@@ -598,7 +593,7 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
                 <tr>
                   <th>${isAr ? 'قاعدة البيانات' : 'Database'}</th>
                   <th>${isAr ? 'المحرك' : 'Engine'}</th>
-                  <th>${isAr ? 'الحالة / الاستعادة' : 'State / Trash Recovery'}</th>
+                  <th>${isAr ? 'الحالة / الاستعادة' : 'Status / Recovery'}</th>
                 </tr>
               </thead>
               <tbody>

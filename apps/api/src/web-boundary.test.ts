@@ -11,6 +11,7 @@ import { createTestStateStore } from '@xpanel/state'
 import type { TestStateStoreHandle } from '@xpanel/state'
 import { SESSION_COOKIE_NAME, sha256Hex } from './auth.ts'
 import { createDefaultWebRenderer } from './main.ts'
+import { createApiApp, listenApiServer } from './server.ts'
 
 const hydration = vi.hoisted(() => [] as Record<string, unknown>[])
 vi.mock('../../web/src/index.ts', async (importOriginal) => {
@@ -179,7 +180,7 @@ describe('production web renderer boundary regressions', () => {
     }
   })
 
-  it('hydrates true empty collections and principal without sample identities', async () => {
+  it('hydrates only a bounded identity summary while tools remain unqualified', async () => {
     const principal = await root()
     const cookie = await session(principal.id)
     const render = await renderer()
@@ -187,27 +188,51 @@ describe('production web renderer boundary regressions', () => {
       await observe(`empty-state:${path}`, await render(request(path, cookie)), 200)
       const supplied = hydration.at(-1)
       expect(supplied).toBeDefined()
-      const whm = supplied!.whm as Record<string, unknown>
-      const panel = supplied!.panel as Record<string, unknown>
-      const mail = supplied!.mail as Record<string, unknown>
       const visibility = supplied!.visibility as { principal: { kind: string } }
-      observations.push({
-        id: `hydration:${path}`,
-        visibilityPrincipalKind: visibility.principal.kind,
-        catalogOverridden: supplied!.catalog !== undefined,
-        whmEmptyCollections: ['accounts', 'plans', 'resellers', 'ipPool', 'firewallRules'].filter(key => Array.isArray(whm[key]) && (whm[key] as unknown[]).length === 0),
-        panelEmptyCollections: ['domains', 'databases', 'serviceUsers', 'files'].filter(key => Array.isArray(panel[key]) && (panel[key] as unknown[]).length === 0),
-        mailEmptyCollections: ['messages', 'sieveRules'].filter(key => Array.isArray(mail[key]) && (mail[key] as unknown[]).length === 0),
-        accountSupplied: panel.account !== undefined,
-        planSupplied: panel.plan !== undefined,
+      observations.push({ id: `hydration:${path}`, visibilityPrincipalKind: visibility.principal.kind,
+        catalogOverridden: supplied!.catalog !== undefined, summaryKeys: Object.keys(supplied!.workspaceSummary as object),
+        fullStateSupplied: ['whm', 'panel', 'mail', 'generationId'].some(key => key in supplied!),
       })
-      expect.soft(visibility.principal.kind).toBe('root')
-      expect.soft(supplied!.catalog !== undefined).toBe(false)
-      expect.soft(whm).toMatchObject({ accounts: [], plans: [], resellers: [], ipPool: [], firewallRules: [] })
-      expect.soft(panel).toMatchObject({ domains: [], databases: [], serviceUsers: [], files: [] })
-      expect.soft(panel.account).toBeUndefined()
-      expect.soft(panel.plan).toBeUndefined()
-      expect.soft(mail).toMatchObject({ mailbox: '', domain: '', messages: [], sieveRules: [], quotaUsedMb: 0 })
+      expect(visibility.principal.kind).toBe('root')
+      expect(supplied!.catalog).toBeUndefined()
+      expect(supplied!.workspaceSummary).toEqual({})
+      for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(supplied).not.toHaveProperty(key)
     }
+    expect(snapshotReads).toBe(0)
+  })
+
+  it('serves a real authenticated read-only account overview over HTTP without cross-account or private fields', async () => {
+    const featureList = await state.store.createFeatureList({ name: 'Summary fixture features', ownerId: null, disabled: [] })
+    const plan = await state.store.createPlan({
+      name: 'Summary plan7', ownerId: null, featureListId: featureList.id,
+      resources: { diskMb: 1000, bandwidthMbMonth: 'unlimited', ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
+      caps: { addonDomains: 1, aliasDomains: 1, subdomains: 1, mailboxes: 1, forwarders: 1, mailingLists: 1, ftpAccounts: 1, databases: 1, phpWorkers: 1 },
+      dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100,
+    })
+    const accountInput = { passwordHash: PUBLIC_VECTOR, planId: plan.id, ownerId: null, contactEmail: 'private-summary-contact@example.test', ipv4: '192.0.2.199', shell: 'none' as const,
+      php: { version: '8.3', handler: 'fpm' as const, fpm: { mode: 'ondemand' as const, maxChildren: 1, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} },
+    }
+    const owner = await state.store.createAccount({ ...accountInput, username: 'owner7', primaryDomain: 'owner7.example.test' })
+    const other = await state.store.createAccount({ ...accountInput, username: 'other7', primaryDomain: 'private-other-account.example.test' })
+    const principal = await createUserPrincipal(db.db, { username: owner.username, accountId: owner.id, passwordHash: PUBLIC_VECTOR })
+    const cookie = await session(principal.id)
+    const app = createApiApp({ store: state.store, db: db.db, serverSecret: SERVER_SECRET, webRenderer: await renderer() })
+    const server = await listenApiServer(app, { host: '127.0.0.1', port: 0 })
+    try {
+      const origin = `http://127.0.0.1:${server.port}`
+      for (const locale of ['en', 'ar']) {
+        const response = await fetch(`${origin}/panel?lang=${locale}`, { headers: { cookie }, redirect: 'manual' })
+        const html = await observe(`scoped-summary-http:${locale}`, response, 200)
+        for (const value of [owner.username, owner.primaryDomain, plan.name]) expect(html).toContain(value)
+        expect(html).toContain(locale === 'ar' ? 'مالك الحساب' : 'Account owner')
+        expect(html).toContain(locale === 'ar' ? 'نشط' : 'Active')
+        expect(html).toContain('data-tool-availability="unverified"')
+        expect(html.match(/data-workspace-field=/g)).toHaveLength(5)
+        expect(html).not.toMatch(/data-realtime-enabled="true"|<form\b|data-nav-route=|data-cmdk-item=|[\u0660-\u0669\u06f0-\u06f9]/)
+        for (const value of [owner.id, other.id, principal.id, plan.id, featureList.id, owner.home, owner.contactEmail, owner.ipv4, other.primaryDomain, PUBLIC_VECTOR, 'Resource usage']) expect(html).not.toContain(value)
+      }
+      await observe('scoped-summary-http:other-account', await fetch(`${origin}/panel?accountId=${other.id}`, { headers: { cookie }, redirect: 'manual' }), 404)
+      await observe('scoped-summary-http:anonymous', await fetch(`${origin}/panel`, { redirect: 'manual' }), 303, '/login')
+    } finally { await server.close() }
   })
 })

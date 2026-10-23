@@ -30,6 +30,7 @@ import {
   defaultDocRoot,
   fail,
   isUuid,
+  isXpanelError,
   MAX_ACCOUNT_UID,
   oneOf,
   parseServiceLogin,
@@ -1091,9 +1092,57 @@ export class StateStore {
     })
   }
 
-  async getAccount(id: Id): Promise<Account | null> {
-    const a = await this.findStoredAccountById(id)
-    return a ? toPublicAccount(a) : null
+  /** A principal's username is a fast path hint; the persisted account ID remains authoritative. */
+  async getAccount(id: Id, hint?: { username: string }): Promise<Account | null> {
+    if (!isUuid(id)) return null
+    const target = id.toLowerCase()
+    if (hint !== undefined) {
+      let username: string | null = null
+      try { username = validateUsername(hint.username) } catch (error) {
+        if (!isXpanelError(error) || error.code !== 'VALIDATION') throw error
+      }
+      if (username !== null) {
+        const raw = await readJsonIfExists<unknown>(join(this.accountDir(username), 'account.json'))
+        if (raw !== null) {
+          const account = validateAccountFile(raw)
+          if (account.username === username && account.id === target) return toPublicAccount(account)
+        }
+      }
+    }
+    // Aliases and imported principals may use another login name. Never replace ID authority with a hint.
+    const account = await this.findStoredAccountById(target)
+    if (!account) return null
+    const canonical = await readJsonIfExists<unknown>(join(this.accountDir(account.username), 'account.json'))
+    if (canonical === null) return null
+    const checked = validateAccountFile(canonical)
+    return checked.id === target && checked.username === account.username ? toPublicAccount(checked) : null
+  }
+
+  /**
+   * Reads the linked account, plan and feature list under a real cross-process lease.
+   * This bounded projection neither caches authorization nor scans unrelated service state.
+   * A real lease also avoids authority ABA during an aborted state restore.
+   */
+  readAccountWorkspace(id: Id, hint?: { username: string }): Promise<{
+    account: Account | null
+    plan: Plan | null
+    featureList: FeatureList | null
+  }> {
+    return this.mutex.run(async () => {
+      const lease = await this.writerLock.acquire()
+      try {
+        await lease.assertFencingToken()
+        const account = await this.getAccount(id, hint)
+        const candidatePlan = account ? await this.getPlan(account.planId) : null
+        const plan = candidatePlan?.id === account?.planId ? candidatePlan : null
+        const candidateList = plan ? await this.getFeatureList(plan.featureListId) : null
+        const featureList = candidateList?.id === plan?.featureListId ? candidateList : null
+        await lease.assertFencingToken()
+        return { account, plan, featureList }
+      } finally {
+        await lease.release()
+      }
+    })
   }
 
   async getAccountByUsername(username: string): Promise<Account | null> {

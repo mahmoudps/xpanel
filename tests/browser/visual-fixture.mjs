@@ -42,9 +42,9 @@ const catalog = tools.map(tool => tool.status === 'out-of-scope' ? tool : ({
   ...tool, status: 'verified', delivery: { status: 'verified', reason: 'Synthetic visual fixture only; no production qualification.', evidence: [] },
 }))
 
-const stateFor = route => ({
+const stateFor = (route, qualifiedCatalog) => ({
   surface: route.surface, activeRoute: route.activeRoute, realtimeEnabled: false,
-  title: 'Synthetic visual fixture — xPanel', accountId: account.id, catalog,
+  title: 'Synthetic visual fixture — xPanel', accountId: account.id, catalog: qualifiedCatalog ? catalog : tools,
   visibility: { principal: route.surface === 'xwhm' ? root : owner, disabledFeatures: new Set() },
   whm: {
     principal: root, hostname: 'synthetic-host.example.test', version: '0.1.0-fixture', availableVersion: '0.1.0-fixture',
@@ -78,10 +78,15 @@ const markVisualDocument = html => html
   .replace('<html ', '<html data-visual-fixture="synthetic" ')
   .replace('<body>', '<body data-visual-fixture="synthetic"><div role="note" data-visual-fixture-watermark style="position:sticky;inset-block-start:0;z-index:2000;padding:5px 12px;text-align:center;background:#f4f6f8;color:#384354;border-block-end:1px solid #d5dce4;font:12px/1.4 sans-serif" dir="ltr">Synthetic visual fixture</div>')
 
-/** Loopback-only, read-only visual server. No API authentication, cookies, secrets or host commands. */
-export async function createVisualFixture({ port = 0, host = '127.0.0.1' } = {}) {
+/**
+ * Loopback-only, read-only visual server. No API authentication, cookies, secrets or host commands.
+ * qualifiedCatalog=false retains the original catalog states for unavailable-workspace rendering.
+ * Principals and account data remain synthetic in either case.
+ */
+export async function createVisualFixture({ port = 0, host = '127.0.0.1', qualifiedCatalog = true } = {}) {
   if (!['127.0.0.1', '::1', 'localhost'].includes(host)) throw new Error('The visual fixture must bind to loopback.')
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid visual fixture port.')
+  if (typeof qualifiedCatalog !== 'boolean') throw new Error('The synthetic catalog selection must be explicit.')
   const server = createServer(async (incoming, outgoing) => {
     try {
       if (incoming.method !== 'GET' && incoming.method !== 'HEAD') {
@@ -100,7 +105,7 @@ export async function createVisualFixture({ port = 0, host = '127.0.0.1' } = {})
         outgoing.end(incoming.method === 'HEAD' ? undefined : 'No synthetic visual document exists here.')
         return
       }
-      const response = await serveWebUi(new Request(url, { method: incoming.method }), route ? () => stateFor(route) : undefined)
+      const response = await serveWebUi(new Request(url, { method: incoming.method }), route ? () => stateFor(route, qualifiedCatalog) : undefined)
       const html = response.headers.get('content-type')?.startsWith('text/html')
       const body = html ? markVisualDocument(await response.text()) : await response.text()
       outgoing.writeHead(response.status, { ...Object.fromEntries(response.headers), 'cache-control': 'no-store', 'x-visual-fixture': 'synthetic' })

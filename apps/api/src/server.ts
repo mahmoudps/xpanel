@@ -13,6 +13,8 @@ import {
   parseIp,
   canonicalIp,
   validateDomainCustomConfig,
+  MANAGEMENT_PUBLIC_PORTS,
+  validateUsername,
 } from '@xpanel/core'
 import type {
   Account,
@@ -47,7 +49,6 @@ import {
   createUpgrade,
   createUserPrincipal,
   deletePrincipal,
-  findPrincipalByAccountId,
   findPrincipalByUsername,
   latestActive,
   listAudit,
@@ -58,6 +59,7 @@ import {
   recordLoginAttempt,
   reindexFromState,
   revokeSession,
+  revokeAccountSessionsAndTokens,
   searchIndex,
   recordLoginFailure,
 } from '@xpanel/db'
@@ -104,6 +106,8 @@ import { createExtendedApiRouter } from './extended-routes.ts'
 import { assertAccountAuthorized, assertAccountFeatures, assertApiScope, assertRequestAuthorized, requireDomainAccount, ownedAccounts } from './authorization.ts'
 import { LiveEventHub } from './ws.ts'
 import type { EventSubscriber } from './ws.ts'
+import { ENTRY_POINTS, entryPointAllowsApiRoute, entryPointAllowsRole, sessionTokenHash } from './entry-points.ts'
+import type { EntryPoint } from './entry-points.ts'
 
 // Public PHC fixture used only to equalize unknown-user password work; never an account credential.
 const DUMMY_PASSWORD_HASH = "$argon2id$v=19$m=65536,t=3,p=4$QkJCQkJCQkJCQkJCQkJCQg$02+8XtfLLaSCZqlfA84rmzJ5VytASY+ko8Y0KCBMjk8"
@@ -209,6 +213,8 @@ const problemResponse = (err: unknown, instance: string): Response => {
 const transportProblem = (status: number, code: string, detail: string, instance: string): Response => new Response(JSON.stringify({ type: 'about:blank', title: code, status, code, detail, instance }), { status, headers: { 'content-type': 'application/problem+json; charset=utf-8' } })
 
 export interface ApiServerDeps {
+  entryPoint?: EntryPoint
+  publicOrigin?: string
   db: Db
   store: StateStore
   agentApp?: AgentApp
@@ -264,6 +270,14 @@ const isLocalProxyAddress = (address: string): boolean => {
 }
 
 export const createApiApp = (deps: ApiServerDeps): ApiApp => {
+  // Copy the profile: mutating the caller's dependency object cannot retarget a running listener.
+  const entryPoint = deps.entryPoint
+  if (entryPoint !== undefined && !Object.hasOwn(ENTRY_POINTS, entryPoint)) return fail('PRECONDITION_FAILED', 'invalid entry point')
+  const publicOrigin = deps.publicOrigin
+  if (publicOrigin !== undefined) {
+    const parsed = new URL(publicOrigin)
+    if (parsed.protocol !== 'https:' || parsed.origin !== publicOrigin) return fail('PRECONDITION_FAILED', 'publicOrigin must be an exact HTTPS origin')
+  }
   const serverSecret = deps.serverSecret
   if (typeof serverSecret !== 'string' || Buffer.byteLength(serverSecret, 'utf8') < 32) fail('PRECONDITION_FAILED', 'a protected server secret of at least 32 bytes is required')
   const ingressSecret = deps.ingressSecret
@@ -273,6 +287,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   const trustedProxies = new Set((deps.trustedProxyAddresses ?? []).map(normalizedIp))
   if ([...trustedProxies].some(isLocalProxyAddress)) return fail('PRECONDITION_FAILED', 'trusted proxies must be remote dedicated hosts; local proxy trust requires protected ingress')
   const allowedOrigins = new Set(deps.allowedOrigins ?? [])
+  if (entryPoint && allowedOrigins.size !== 1) return fail('PRECONDITION_FAILED', 'interactive entry points require one exact allowed origin')
+  if (entryPoint && [...allowedOrigins].some(origin => { try { const url = new URL(origin); return url.protocol !== 'https:' || url.origin !== origin } catch { return true } })) return fail('PRECONDITION_FAILED', 'interactive origins must be exact HTTPS origins')
+  if (publicOrigin && !allowedOrigins.has(publicOrigin)) return fail('PRECONDITION_FAILED', 'publicOrigin must match the configured allowed origin')
 
   const hasValidIngressSecret = (req: Request): boolean => {
     if (!ingressSecret) return false
@@ -404,7 +421,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         ownedAccountIds: new Set(owned.filter((a) => a.status === 'active').map((a) => a.id)),
       }
     }
-    const account = await deps.store.getAccount(caller.principal.accountId)
+    const account = await deps.store.getAccount(caller.principal.accountId, { username: caller.principal.username })
     if (!account || account.status !== 'active') {
       return fail('FORBIDDEN', 'hosting account is suspended or terminating')
     }
@@ -417,12 +434,14 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   }
 
   const authenticateUpgrade = async (req: IncomingMessage, context?: TransportContext): Promise<EventSubscriber | null> => {
+    if (entryPoint === 'xmail') return null
     const headers = new Headers()
     for (const [k, v] of Object.entries(req.headers)) {
       if (typeof v === 'string') headers.set(k, v)
       else if (Array.isArray(v)) headers.set(k, v.join(', '))
     }
     const webReq = new Request(`http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`, { headers })
+    if (publicOrigin && new URL(webReq.url).host !== new URL(publicOrigin).host) return null
     const peer = context?.remoteAddress ?? req.socket?.remoteAddress
     const trustedIngress = Boolean(context?.trustedIngress || trustedIngressRequests.has(req))
     const tls = Boolean(context?.tls || ('encrypted' in (req.socket ?? {}) && (req.socket as { encrypted?: boolean }).encrypted))
@@ -434,10 +453,10 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     const origin = headers.get('origin')
     if (origin ? !allowedOrigins.has(origin) : !headers.has('authorization')) return null
     try {
-      if (deps.requireSecureCookies && !deps.secureCookies && !isVerifiedHttps(webReq) && !headers.has('authorization')) {
+      if (deps.requireSecureCookies && !isVerifiedHttps(webReq) && (entryPoint || (!deps.secureCookies && !headers.has('authorization')))) {
         return null
       }
-      const caller = await authenticateRequest(deps.db, webReq, { serverSecret, clientIp: extractClientIp(webReq), touchSession: false })
+      const caller = await authenticateRequest(deps.db, webReq, { serverSecret, clientIp: extractClientIp(webReq), touchSession: false, entryPoint })
       if (!caller || !caller.mfaVerified) return null
       if (caller.apiTokenId !== null) assertApiScope(caller, 'events:read')
       await assertRequestAuthorized(deps.store, caller, new Request(new URL('/api/events/recent', webReq.url), { headers }))
@@ -449,7 +468,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
 
   const requireCaller = async (req: Request, opts?: { allowUnverifiedMfa?: boolean }): Promise<AuthenticatedCaller> => {
     const clientIp = extractClientIp(req)
-    const caller = await authenticateRequest(deps.db, req, { serverSecret, clientIp })
+    const caller = await authenticateRequest(deps.db, req, { serverSecret, clientIp, entryPoint })
     if (!caller) {
       return fail('UNAUTHENTICATED', 'authentication required')
     }
@@ -591,6 +610,100 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     return { ok: res.ok, status: res.status, body }
   }
 
+  const requireAccountHostAgent = (): void => {
+    if (!deps.agentApp || !deps.agentToken) {
+      fail('PRECONDITION_FAILED', 'a protected host agent connection is required for account changes', {
+        verificationRequired: true, reason: 'host_agent_unavailable', stateChanged: false,
+      })
+    }
+  }
+
+  const accountMutationFailure = async (
+    caller: AuthenticatedCaller,
+    account: Account,
+    action: string,
+    outcome: 'failed' | 'unknown' | 'not_applied',
+    reason: string,
+    code: ErrorCode = 'SERVICE_UNAVAILABLE',
+    hostStatus?: number,
+  ): Promise<never> => {
+    const detail = { verificationRequired: true, needsAttention: true, stateChanged: true,
+      hostOutcome: outcome, reason, ...(hostStatus === undefined ? {} : { hostStatus }) }
+    await emitAudit({ actor: caller.principal.username, action: 'account.' + action + '.configuration_failed',
+      target: 'account:' + account.username, detail, outcome: 'failed', principalId: caller.principal.id,
+    }, { accountId: account.id, resellerId: account.ownerId })
+    return fail(code, 'account configuration requires verification before further action', detail)
+  }
+
+  const captureAccountMutation = async (
+    caller: AuthenticatedCaller,
+    targetId: Id,
+    action: string,
+    validate?: (account: Account) => void | Promise<void>,
+    beforeRelease?: (account: Account) => Promise<void>,
+  ): Promise<{ account: Account; expectedRevision: number }> => {
+    const lease = await deps.store.getWriterLock().acquire()
+    try {
+      const account = await deps.store.getAccount(targetId)
+      if (!account) return fail('NOT_FOUND', 'account not found')
+      await assertCanAccessAccount(caller, account, action, { allowUserSelf: false })
+      if (account.status === 'terminating') return fail('PRECONDITION_FAILED', 'account termination requires attention')
+      await validate?.(account)
+      await beforeRelease?.(account)
+      const authority = await lease.assertFencingToken()
+      return { account, expectedRevision: authority.revision }
+    } finally { await lease.release() }
+  }
+
+  const readAccountApplyBody = async (response: Response): Promise<Record<string, unknown> | null> => {
+    if (!response.body) return null
+    const reader = response.body.getReader()
+    const chunks: Uint8Array[] = []
+    let bytes = 0
+    try {
+      for (;;) {
+        const next = await reader.read()
+        if (next.done) break
+        bytes += next.value.byteLength
+        if (bytes > 65_536) { await reader.cancel(); return null }
+        chunks.push(next.value)
+      }
+      const value: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+    } finally { reader.releaseLock() }
+  }
+
+  const applyAccountConfiguration = async (
+    caller: AuthenticatedCaller, account: Account, action: string, expectedRevision: number,
+  ): Promise<{ status: 'applied'; generation: { id: number; status: 'active'; checksum: string }; filesCount: number; durationMs: number }> => {
+    let response: Response
+    try { response = await callAgent('/state/apply', { method: 'POST', caller, body: { force: false } }) }
+    catch { return accountMutationFailure(caller, account, action, 'unknown', 'host_transport_unknown') }
+    if (response.status !== 200) {
+      await response.body?.cancel().catch(() => undefined)
+      return accountMutationFailure(caller, account, action, 'failed', 'host_apply_rejected', response.status === 422 ? 'CONFIG_TEST_FAILED' : 'SERVICE_UNAVAILABLE', response.status)
+    }
+    let body: Record<string, unknown> | null
+    try { body = await readAccountApplyBody(response) }
+    catch { return accountMutationFailure(caller, account, action, 'unknown', 'host_reply_unverified') }
+    if (body?.status === 'failed') return accountMutationFailure(caller, account, action, 'failed', 'host_apply_failed', 'CONFIG_TEST_FAILED')
+    if (body?.status === 'noop') return accountMutationFailure(caller, account, action, 'not_applied', 'host_apply_not_verified', 'PRECONDITION_FAILED')
+    const generation = body?.generation
+    const gen = generation !== null && typeof generation === 'object' && !Array.isArray(generation) ? generation as Record<string, unknown> : null
+    if (body?.status !== 'applied' || !gen || !Number.isSafeInteger(gen.id) || Number(gen.id) < 1 || gen.status !== 'active'
+      || typeof gen.checksum !== 'string' || !/^[a-f0-9]{64}$/.test(gen.checksum)
+      || !Number.isSafeInteger(body.filesCount) || Number(body.filesCount) < 0
+      || typeof body.durationMs !== 'number' || !Number.isFinite(body.durationMs) || body.durationMs < 0) {
+      return accountMutationFailure(caller, account, action, 'unknown', 'host_reply_unverified')
+    }
+    if (await deps.store.getRevision() !== expectedRevision) {
+      return accountMutationFailure(caller, account, action, 'unknown', 'state_changed_during_apply', 'CONFLICT')
+    }
+    return { status: 'applied', generation: { id: Number(gen.id), status: 'active', checksum: gen.checksum }, filesCount: Number(body.filesCount), durationMs: body.durationMs }
+  }
+
+  const accountExecution = () => ({ status: 'configuration_applied', scope: 'global_configuration', targetVerified: false, verificationRequired: true } as const)
+
   const recordFailedLoginAndMaybeLock = async (
     username: string,
     ip: string,
@@ -639,6 +752,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     }
 
     try {
+      if (publicOrigin && url.host !== new URL(publicOrigin).host) return transportProblem(421, 'MISDIRECTED_REQUEST', 'request host does not match this entry point', pathname)
+      if (entryPoint && pathname.startsWith('/api/') && !entryPointAllowsApiRoute(entryPoint, pathname, method)) return transportProblem(404, 'NOT_FOUND', 'route is unavailable on this entry point', pathname)
+      if (entryPoint && pathname !== '/api/health' && deps.requireSecureCookies && !isVerifiedHttps(req)) return transportProblem(403, 'FORBIDDEN', 'verified HTTPS ingress is required for this entry point', pathname)
       // ---- Health --------------------------------------------------------------------
       if (method === 'GET' && pathname === '/api/health') {
         return jsonResponse({ ok: true })
@@ -705,7 +821,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const passwordMatches = await verifyPasswordArgon2id(password, principalRecord?.passwordHash ?? DUMMY_PASSWORD_HASH)
         const passwordValid = principalRecord !== null && !principalRecord.disabled && passwordMatches
 
-        if (!principalRecord || !passwordValid) {
+        if (!principalRecord || !passwordValid || (entryPoint && !entryPointAllowsRole(entryPoint, principalRecord.kind))) {
           await emitAudit({
             actor: username,
             action: 'auth.login_failed',
@@ -720,7 +836,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         }
 
         if (principalRecord.kind === 'user' && principalRecord.accountId) {
-          const account = await deps.store.getAccount(principalRecord.accountId)
+          const account = await deps.store.getAccount(principalRecord.accountId, { username: principalRecord.username })
           if (!account) return fail('UNAUTHENTICATED', 'hosting account is unavailable')
           if (account.status !== 'active') {
             await emitAudit({
@@ -757,7 +873,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         }
 
         const rawToken = randomBytes(32).toString('hex')
-        const tokenHash = sha256Hex(rawToken)
+        const tokenHash = sessionTokenHash(rawToken, entryPoint)
         const expiresAt = new Date(Date.now() + 24 * 3600_000).toISOString()
         const session = await createAuthenticatedSession(deps.db, {
           principalId: principalRecord.id,
@@ -781,8 +897,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         await recordLogin(deps.db, principalRecord.id)
 
 
-        const csrfToken = deriveCsrfToken(rawToken, serverSecret)
+        const csrfToken = deriveCsrfToken(rawToken, serverSecret, entryPoint)
         const cookie = formatSessionCookie(rawToken, {
+          entryPoint,
           secure: useSecureCookies(req),
           maxAgeSec: 86_400,
         })
@@ -818,6 +935,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         return jsonResponse(
           {
             principal,
+            ...(entryPoint ? { entryPoint, home: ENTRY_POINTS[entryPoint].home } : {}),
             session: {
               id: session.id,
               expiresAt: session.expiresAt,
@@ -850,13 +968,14 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           ip: extractClientIp(req),
         })
         return jsonResponse({ ok: true }, 200, {
-          'set-cookie': clearSessionCookie({ secure: useSecureCookies(req) }),
+          'set-cookie': clearSessionCookie({ secure: useSecureCookies(req), entryPoint }),
         })
       }
 
       if (method === 'GET' && pathname === '/api/auth/me') {
         const caller = await requireCaller(req, { allowUnverifiedMfa: true })
         return jsonResponse({
+          ...(entryPoint ? { entryPoint, home: ENTRY_POINTS[entryPoint].home } : {}),
           principal: caller.principal,
           totpEnabled: caller.principalRecord.totpEnabled,
           passwordChangeRequired: caller.principalRecord.forcePasswordChange,
@@ -864,7 +983,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             caller.principal.kind === 'root' &&
             !caller.principalRecord.totpEnabled &&
             process.env.XPANEL_ALLOW_PASSWORD_ONLY_ROOT !== '1',
-          csrfToken: caller.sessionToken ? deriveCsrfToken(caller.sessionToken, serverSecret) : null,
+          csrfToken: caller.sessionToken ? deriveCsrfToken(caller.sessionToken, serverSecret, entryPoint) : null,
         })
       }
 
@@ -895,7 +1014,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         if (!changed) return fail('UNAUTHENTICATED', 'authentication state changed; authenticate again')
         await emitAudit({ actor: caller.principal.username, action: 'auth.password_changed', target: `principal:${caller.principal.username}`, outcome: 'ok', principalId: caller.principal.id, ip })
         return jsonResponse({ ok: true, reauthenticationRequired: true }, 200, {
-          'set-cookie': clearSessionCookie({ secure: useSecureCookies(req) }),
+          'set-cookie': clearSessionCookie({ secure: useSecureCookies(req), entryPoint }),
         })
       }
 
@@ -1374,73 +1493,48 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
 
       if (method === 'POST' && pathname === '/api/accounts') {
         const caller = await requireCaller(req)
-        if (caller.principal.kind === 'user') {
-          return fail('FORBIDDEN', 'user accounts cannot create hosting accounts')
-        }
-        const body = await readJsonBody<
-          Partial<NewAccount> & { username: string; primaryDomain: string; planId: Id; password?: string }
-        >(req)
-
-        const ownerId =
-          caller.principal.kind === 'reseller' ? await resolveResellerId(caller) : (body.ownerId ?? null)
+        if (caller.principal.kind === 'user') return fail('FORBIDDEN', 'user accounts cannot create hosting accounts')
+        const body = await readJsonBody<Partial<NewAccount> & { username: string; primaryDomain: string; planId: Id; password?: string }>(req)
+        requireAccountHostAgent()
+        const username = validateUsername(body.username)
         const passwordHash = await passwordHashFromInput(body)
-
         let ipv4 = body.ipv4
         if (!ipv4) {
           const pool = await deps.store.listServerIps()
-          ipv4 =
-            pool.find((ip) => ip.version === 4 && ip.isPrimary)?.address ??
-            pool.find((ip) => ip.version === 4 && ip.role === 'shared')?.address ??
-            '203.0.113.10'
+          ipv4 = pool.find(ip => ip.version === 4 && ip.isPrimary)?.address
+          if (!ipv4) return fail('PRECONDITION_FAILED', 'select a server IPv4 address before creating an account', { reason: 'account_ipv4_unavailable', stateChanged: false })
         }
-
-        const account = await deps.store.createAccount({
-          username: body.username,
-          passwordHash,
-          primaryDomain: body.primaryDomain,
-          planId: body.planId,
-          ownerId,
-          contactEmail: body.contactEmail ?? `${body.username}@${body.primaryDomain}`,
-          ipv4,
-          ...(body.ipv6 !== undefined && { ipv6: body.ipv6 }),
-          ...(body.extraIps !== undefined && { extraIps: body.extraIps }),
-          shell: body.shell ?? 'jailed',
-          php: body.php ?? defaultPhp('8.3'),
-          ...(body.homeBase !== undefined && { homeBase: body.homeBase }),
-        })
-
-        const existingPrincipal = await findPrincipalByUsername(deps.db, account.username)
-        if (!existingPrincipal) {
-          await createUserPrincipal(deps.db, {
-            username: account.username,
-            passwordHash,
-            accountId: account.id,
-          })
-        }
-
-        const reconcile = await triggerReconcile(caller, {
-          scope: { accountId: account.id, resellerId: account.ownerId },
-        })
-        await emitAudit(
-          {
-            actor: caller.principal.username,
-            action: 'account.created',
-            target: `account:${account.username}`,
-            detail: { accountId: account.id, primaryDomain: account.primaryDomain, planId: account.planId },
-            outcome: 'ok',
-            principalId: caller.principal.id,
-          },
-          { accountId: account.id, resellerId: account.ownerId },
-        )
+        let ownerId: Id | null
+        let expectedRevision: number
+        const lease = await deps.store.getWriterLock().acquire()
+        try {
+          const reseller = caller.principal.kind === 'reseller' ? await resolveResellerForCaller(caller) : null
+          if (caller.principal.kind === 'reseller') {
+            if (!reseller) return fail('FORBIDDEN', 'reseller authorization is unavailable')
+            assertAcl(caller.principal, reseller, 'create-account')
+          }
+          ownerId = caller.principal.kind === 'reseller' ? reseller!.id : body.ownerId ?? null
+          if (await findPrincipalByUsername(deps.db, username) || await deps.store.getAccountByUsername(username)) return fail('CONFLICT', 'the account username is already reserved')
+          expectedRevision = (await lease.assertFencingToken()).revision
+        } finally { await lease.release() }
+        const account = await deps.store.createAccount({ username, passwordHash, primaryDomain: body.primaryDomain, planId: body.planId,
+          ownerId, contactEmail: body.contactEmail ?? username + '@' + body.primaryDomain, ipv4,
+          ...(body.ipv6 !== undefined && { ipv6: body.ipv6 }), ...(body.extraIps !== undefined && { extraIps: body.extraIps }),
+          shell: body.shell ?? 'jailed', php: body.php ?? defaultPhp('8.3'), ...(body.homeBase !== undefined && { homeBase: body.homeBase }),
+        }, { expectedRevision })
+        const reconcile = await applyAccountConfiguration(caller, account, 'create', expectedRevision + 1)
+        try {
+          const existing = await findPrincipalByUsername(deps.db, account.username)
+          if (existing && (existing.kind !== 'user' || existing.accountId !== account.id)) {
+            return accountMutationFailure(caller, account, 'create', 'unknown', 'identity_binding_conflict', 'CONFLICT')
+          }
+          if (!existing) await createUserPrincipal(deps.db, { username: account.username, passwordHash, accountId: account.id })
+        } catch { return accountMutationFailure(caller, account, 'create', 'unknown', 'identity_establishment_unverified') }
+        await emitAudit({ actor: caller.principal.username, action: 'account.desired.created', target: 'account:' + account.username,
+          detail: { accountId: account.id, primaryDomain: account.primaryDomain, planId: account.planId, execution: accountExecution() }, outcome: 'ok', principalId: caller.principal.id,
+        }, { accountId: account.id, resellerId: account.ownerId })
         const primaryDomains = await deps.store.listDomains({ accountId: account.id })
-        return jsonResponse(
-          {
-            account,
-            primaryDomain: primaryDomains[0] ?? null,
-            reconcile: reconcile?.body ?? null,
-          },
-          201,
-        )
+        return jsonResponse({ account, primaryDomain: primaryDomains[0] ?? null, reconcile, execution: accountExecution() }, 201)
       }
 
       const accountSuspendMatch = /^\/api\/accounts\/([^/]+)\/(suspend|unsuspend)$/.exec(pathname)
@@ -1448,29 +1542,28 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const caller = await requireCaller(req)
         const target = await resolveAccountParam(accountSuspendMatch[1]!)
         const verb = accountSuspendMatch[2]!
-        await assertCanAccessAccount(caller, target, `account.${verb}`, { allowUserSelf: false })
-
+        await assertCanAccessAccount(caller, target, 'account.' + verb, { allowUserSelf: false })
         const body = await readJsonBody<{ reason?: string }>(req)
-        const updated =
-          verb === 'suspend'
-            ? await deps.store.suspendAccount(target.id, body.reason || 'Suspended by administrator')
-            : await deps.store.unsuspendAccount(target.id)
-
-        const reconcile = await triggerReconcile(caller, {
-          scope: { accountId: updated.id, resellerId: updated.ownerId },
-        })
-        await emitAudit(
-          {
-            actor: caller.principal.username,
-            action: `account.${verb}ed`,
-            target: `account:${updated.username}`,
-            detail: { status: updated.status, reason: updated.suspendReason },
-            outcome: 'ok',
-            principalId: caller.principal.id,
-          },
-          { accountId: updated.id, resellerId: updated.ownerId },
-        )
-        return jsonResponse({ account: updated, reconcile: reconcile?.body ?? null })
+        requireAccountHostAgent()
+        const captured = await captureAccountMutation(caller, target.id, 'account.' + verb, account => {
+          const expected = verb === 'suspend' ? 'active' : 'suspended'
+          if (account.status !== expected) fail('CONFLICT', 'account is not in the expected state for this transition')
+        }, verb === 'unsuspend' ? async account => {
+          try { await revokeAccountSessionsAndTokens(deps.db, account.id) }
+          catch { fail('SERVICE_UNAVAILABLE', 'account access cleanup requires verification', { reason: 'access_revocation_failed', verificationRequired: true, stateChanged: false }) }
+        } : undefined)
+        const updated = verb === 'suspend'
+          ? await deps.store.suspendAccount(captured.account.id, body.reason || 'Suspended by administrator', { expectedRevision: captured.expectedRevision })
+          : await deps.store.unsuspendAccount(captured.account.id, { expectedRevision: captured.expectedRevision })
+        if (verb === 'suspend') {
+          try { await revokeAccountSessionsAndTokens(deps.db, updated.id) }
+          catch { return accountMutationFailure(caller, updated, verb, 'unknown', 'access_revocation_failed') }
+        }
+        const reconcile = await applyAccountConfiguration(caller, updated, verb, captured.expectedRevision + 1)
+        await emitAudit({ actor: caller.principal.username, action: 'account.desired.' + (verb === 'suspend' ? 'suspended' : 'unsuspended'),
+          target: 'account:' + updated.username, detail: { accountStatus: updated.status, reason: updated.suspendReason, execution: accountExecution() }, outcome: 'ok', principalId: caller.principal.id,
+        }, { accountId: updated.id, resellerId: updated.ownerId })
+        return jsonResponse({ account: updated, reconcile, execution: accountExecution() })
       }
 
       const accountItemMatch = /^\/api\/accounts\/([^/]+)$/.exec(pathname)
@@ -1479,78 +1572,47 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const target = await resolveAccountParam(accountItemMatch[1]!)
         if (method === 'GET') {
           await assertCanAccessAccount(caller, target, 'account.read')
-          const domains = await deps.store.listDomains({ accountId: target.id })
-          return jsonResponse({ account: target, domains })
+          return jsonResponse({ account: target, domains: await deps.store.listDomains({ accountId: target.id }) })
         }
         if (method === 'PATCH') {
           await assertCanAccessAccount(caller, target, 'account.update', { allowUserSelf: false })
-          const patch = await readJsonBody<{
-            planId?: Id
-            ownerId?: Id | null
-            contactEmail?: string
-            ipv4?: string
-            ipv6?: string | null
-            shell?: 'none' | 'jailed'
-          }>(req)
-          let updated = target
-          if (patch.planId && patch.planId !== updated.planId) {
-            if (caller.principal.kind === 'reseller') assertAcl(caller.principal, await resolveResellerForCaller(caller), 'change-plan')
-          }
-          if (patch.ownerId !== undefined && patch.ownerId !== updated.ownerId) await assertRoot(caller, 'account.change_owner')
-          if (patch.planId && patch.planId !== updated.planId) {
-            updated = await deps.store.changePlan(updated.id, patch.planId)
-          }
-          if (patch.ownerId !== undefined && patch.ownerId !== updated.ownerId) {
-            await assertRoot(caller, 'account.change_owner')
-            updated = await deps.store.changeOwner(updated.id, patch.ownerId)
-          }
-          if (
-            patch.contactEmail !== undefined ||
-            patch.ipv4 !== undefined ||
-            patch.ipv6 !== undefined ||
-            patch.shell !== undefined
-          ) {
-            updated = await deps.store.updateAccount(updated.id, patch)
-          }
-          const reconcile = await triggerReconcile(caller, {
-            scope: { accountId: updated.id, resellerId: updated.ownerId },
+          const patch = await readJsonBody<{ planId?: Id; ownerId?: Id | null; contactEmail?: string; ipv4?: string; ipv6?: string | null; shell?: 'none' | 'jailed' }>(req)
+          if (Object.keys(patch).some(key => !['planId', 'ownerId', 'contactEmail', 'ipv4', 'ipv6', 'shell'].includes(key))) return fail('VALIDATION', 'unsupported account setting')
+          const metadataOnly = Object.keys(patch).length === 1 && Object.hasOwn(patch, 'contactEmail')
+          if (metadataOnly) return fail('PRECONDITION_FAILED', 'account contact metadata update requires a qualified index writer', { reason: 'metadata_index_update_unqualified', verificationRequired: true, stateChanged: false })
+          requireAccountHostAgent()
+          const captured = await captureAccountMutation(caller, target.id, 'account.update', async account => {
+            if (patch.planId && patch.planId !== account.planId && caller.principal.kind === 'reseller') assertAcl(caller.principal, await resolveResellerForCaller(caller), 'change-plan')
+            if (patch.ownerId !== undefined && patch.ownerId !== account.ownerId) await assertRoot(caller, 'account.change_owner')
+            if (!Object.entries(patch).some(([key, value]) => value !== undefined && value !== account[key as keyof Account])) return fail('CONFLICT', 'account already has the requested settings')
           })
-          await emitAudit(
-            {
-              actor: caller.principal.username,
-              action: 'account.updated',
-              target: `account:${updated.username}`,
-              outcome: 'ok',
-              principalId: caller.principal.id,
-            },
-            { accountId: updated.id, resellerId: updated.ownerId },
-          )
-          return jsonResponse({ account: updated, reconcile: reconcile?.body ?? null })
+          let updated = captured.account
+          let expectedRevision = captured.expectedRevision
+          if (patch.planId && patch.planId !== updated.planId) { updated = await deps.store.changePlan(updated.id, patch.planId, { expectedRevision }); expectedRevision++ }
+          if (patch.ownerId !== undefined && patch.ownerId !== updated.ownerId) { updated = await deps.store.changeOwner(updated.id, patch.ownerId, { expectedRevision }); expectedRevision++ }
+          if (patch.contactEmail !== undefined || patch.ipv4 !== undefined || patch.ipv6 !== undefined || patch.shell !== undefined) {
+            updated = await deps.store.updateAccount(updated.id, patch, { expectedRevision }); expectedRevision++
+          }
+          const reconcile = await applyAccountConfiguration(caller, updated, 'update', expectedRevision)
+          await emitAudit({ actor: caller.principal.username, action: 'account.desired.updated', target: 'account:' + updated.username,
+            detail: { execution: accountExecution() }, outcome: 'ok', principalId: caller.principal.id,
+          }, { accountId: updated.id, resellerId: updated.ownerId })
+          return jsonResponse({ account: updated, reconcile, execution: accountExecution() })
         }
         if (method === 'DELETE') {
           await assertCanAccessAccount(caller, target, 'account.delete', { allowUserSelf: false })
-          await deps.store.markTerminating(target.id)
-          const reconcile = await triggerReconcile(caller, {
-            scope: { accountId: target.id, resellerId: target.ownerId },
+          const body = await readJsonBody<{ confirmUsername?: unknown }>(req)
+          if (Object.keys(body).some(key => key !== 'confirmUsername') || typeof body.confirmUsername !== 'string' || body.confirmUsername !== target.username) {
+            return fail('VALIDATION', 'confirmation must match the account username')
+          }
+          const current = await deps.store.getAccount(target.id)
+          if (!current) return fail('NOT_FOUND', 'account not found')
+          await assertCanAccessAccount(caller, current, 'account.delete', { allowUserSelf: false })
+          if (body.confirmUsername !== current.username) return fail('CONFLICT', 'account confirmation is no longer current')
+          // Global reconciliation does not prove a target-bound purge and can perform irreversible partial deletion.
+          return fail('PRECONDITION_FAILED', 'account termination requires a verified target-bound purge operation', {
+            verificationRequired: true, reason: 'target_bound_purge_unavailable', stateChanged: false,
           })
-          if (!deps.agentApp) {
-            await deps.store.deleteAccount(target.id)
-          }
-          const userPrincipal = await findPrincipalByAccountId(deps.db, target.id)
-          if (userPrincipal) {
-            await deletePrincipal(deps.db, userPrincipal.id)
-          }
-          await emitAudit(
-            {
-              actor: caller.principal.username,
-              action: 'account.terminated',
-              target: `account:${target.username}`,
-              outcome: 'ok',
-              principalId: caller.principal.id,
-            },
-            { accountId: target.id, resellerId: target.ownerId },
-          )
-          return jsonResponse({ ok: true, reconcile: reconcile?.body ?? null })
         }
       }
 
@@ -2184,6 +2246,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           lockout: {
             sessionIp: extractClientIp(req) ?? fail('PRECONDITION_FAILED', 'trusted transport peer is required for firewall changes'),
             panelPort: settings?.panelPort ?? 2087,
+            managementPorts: MANAGEMENT_PUBLIC_PORTS,
             sshPort: settings?.sshPort ?? 22,
           },
         }
@@ -2209,6 +2272,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           lockout: {
             sessionIp: extractClientIp(req) ?? fail('PRECONDITION_FAILED', 'trusted transport peer is required for firewall changes'),
             panelPort: settings?.panelPort ?? 2087,
+            managementPorts: MANAGEMENT_PUBLIC_PORTS,
             sshPort: settings?.sshPort ?? 22,
           },
         }

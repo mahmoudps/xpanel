@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import type { Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { loadAgentCredentialFile } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
 import { canSeeAccount, fail, hasAcl } from '@xpanel/core'
+import { visibleNavigation } from '@xpanel/catalog'
 import type { OsProfile } from '@xpanel/core'
 import { createDb, latestActive, migrate, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
@@ -13,6 +15,7 @@ import { runCli } from './cli.ts'
 import { createApiApp, ensureRootPrincipal, listenApiServer } from './server.ts'
 import { authenticateRequest } from './auth.ts'
 import { createAgentClient } from './agent-client.ts'
+import { ENTRY_POINTS, entryPointAllowsRole, type EntryPoint } from './entry-points.ts'
 
 export interface PanelServerOptions {
   port?: number
@@ -45,6 +48,7 @@ export const createDefaultWebRenderer = async (deps: {
   store: StateStore
   db: Db
   serverSecret: string
+  entryPoint?: EntryPoint
 }): Promise<(req: Request) => Promise<Response> | Response> => {
   const { serveWebUi, resolveWebDocumentRoute } = await import('../../web/src/index.ts')
   return async (req) => {
@@ -54,34 +58,73 @@ export const createDefaultWebRenderer = async (deps: {
     if (url.pathname === '/favicon.ico' || url.pathname === '/assets' || url.pathname.startsWith('/assets/')) {
       return serveWebUi(req)
     }
-    if (url.pathname === '/login') return serveWebUi(req, async () => ({ surface: 'login' }))
+    if (url.pathname === '/login') return serveWebUi(req, async () => ({
+      surface: 'login',
+      ...(deps.entryPoint ? { login: { audience: deps.entryPoint, targetSurface: deps.entryPoint } } : {}),
+    }))
     const documentRoute = resolveWebDocumentRoute(url.pathname)
     if (!documentRoute) {
       return new Response('Not Found', { status: 404, headers: { ...headers, 'content-type': 'text/plain; charset=utf-8' } })
     }
+    // The listener, never a query parameter or a forwarded header, chooses its HTML surface.
+    if (deps.entryPoint && url.pathname !== '/' && documentRoute.surface !== deps.entryPoint) {
+      return new Response('Not Found', { status: 404, headers })
+    }
 
     // Browser documents require a session; a scoped API token cannot expose an unscoped HTML snapshot.
-    const caller = await authenticateRequest(deps.db, req, { serverSecret: deps.serverSecret, clientIp: null })
+    const caller = await authenticateRequest(deps.db, req, {
+      serverSecret: deps.serverSecret, clientIp: null,
+      ...(deps.entryPoint ? { entryPoint: deps.entryPoint } : {}),
+    })
     if (!caller || !caller.mfaVerified || caller.apiTokenId !== null || caller.principalRecord.forcePasswordChange) {
       return new Response(null, { status: 303, headers: { ...headers, location: '/login' } })
     }
     const principal = caller.principal
+    if (deps.entryPoint && !entryPointAllowsRole(deps.entryPoint, principal.kind)) return new Response(null, { status: 403, headers })
     if (principal.kind === 'root' && !caller.principalRecord.totpEnabled && process.env.XPANEL_ALLOW_PASSWORD_ONLY_ROOT !== '1') {
       return new Response('Multi-factor enrollment is required.', { status: 403, headers })
     }
     const surface = documentRoute.surface
     if (surface === 'xwhm' && principal.kind === 'user') return new Response(null, { status: 403, headers })
     if (url.pathname === '/') {
-      const target = new URL(principal.kind === 'user' ? '/panel' : '/whm', url)
+      const target = new URL(deps.entryPoint ? ENTRY_POINTS[deps.entryPoint].home : principal.kind === 'user' ? '/panel' : '/whm', url)
       for (const key of ['lang', 'theme', 'density', 'accountId']) if (url.searchParams.has(key)) target.searchParams.set(key, url.searchParams.get(key)!)
       return new Response(null, { status: 303, headers: { ...headers, location: `${target.pathname}${target.search}` } })
     }
     const reseller = principal.kind === 'reseller' ? (await deps.store.getReseller(principal.id)) ?? undefined : undefined
     const requiredAcl = surface === 'xmail' ? 'edit-account' : 'list-accounts'
     if (principal.kind === 'reseller' && (!reseller || !hasAcl(principal, reseller, requiredAcl))) return new Response(null, { status: 403, headers })
+    const accountId = url.searchParams.get('accountId')
+    if (principal.kind === 'user' && accountId && accountId !== principal.accountId) return new Response(null, { status: 404, headers })
+    const scoped = principal.kind === 'user'
+      ? await deps.store.readAccountWorkspace(principal.accountId, { username: principal.username })
+      : accountId ? await deps.store.readAccountWorkspace(accountId) : null
+    if (accountId && (!scoped?.account || !canSeeAccount(principal, scoped.account))) return new Response(null, { status: 404, headers })
+    if (principal.kind === 'user' && (!scoped?.account || scoped.account.status !== 'active' || !scoped.plan || !scoped.featureList)) return new Response(null, { status: 403, headers })
+    const scopedVisibility = {
+      principal,
+      ...(reseller ? { reseller } : {}),
+      disabledFeatures: new Set(scoped?.featureList?.disabled ?? []),
+    }
+    const qualifiedRoute = visibleNavigation(scopedVisibility).some(item => item.surface === surface
+      && item.sections.some(section => section.pages.some(page => page.route === documentRoute.activeRoute)))
+    if (!qualifiedRoute) {
+      const summaryAccount = principal.kind === 'user' && surface === 'xpanel' ? scoped?.account : null
+      const summaryPlan = summaryAccount ? scoped?.plan : null
+      return serveWebUi(req, async () => ({
+        surface,
+        activeRoute: documentRoute.activeRoute,
+        visibility: scopedVisibility,
+        workspaceSummary: {
+          ...(summaryAccount ? { account: { id: summaryAccount.id, ownerId: summaryAccount.ownerId, username: summaryAccount.username,
+            primaryDomain: summaryAccount.primaryDomain, status: summaryAccount.status, planId: summaryAccount.planId } } : {}),
+          ...(summaryPlan ? { plan: { id: summaryPlan.id, name: summaryPlan.name } } : {}),
+        },
+      }))
+    }
+    // Qualified screens re-authorize against their fresh full snapshot, not the earlier projection.
     const snap = await deps.store.readSnapshot()
     const ownedAccounts = snap.accounts.filter((account) => canSeeAccount(principal, account))
-    const accountId = url.searchParams.get('accountId')
     const account = accountId ? ownedAccounts.find((a) => a.id === accountId) : ownedAccounts[0]
     if (accountId && !account) return new Response(null, { status: 404, headers })
     if (principal.kind === 'user' && (!account || account.status !== 'active')) return new Response(null, { status: 403, headers })
@@ -181,6 +224,143 @@ export const startPanelServer = async (opts: PanelServerOptions = {}) => {
   }
 }
 
+export interface PanelEntryPointConfig {
+  publicOrigin: string
+  port: number
+}
+
+export interface PanelEntrypointsOptions extends Omit<PanelServerOptions, 'port' | 'allowedOrigins' | 'trustedProxyAddresses' | 'webRenderer'> {
+  entryPoints?: Readonly<Record<EntryPoint, PanelEntryPointConfig>>
+  ingressSecret?: string
+  ingressSecretFile?: string
+}
+
+const ENTRY_POINT_ORDER: readonly EntryPoint[] = ['xpanel', 'xwhm', 'xmail']
+const ENTRY_POINT_ENV = {
+  xpanel: { origin: 'XPANEL_PANEL_PUBLIC_ORIGIN', port: 'XPANEL_PANEL_PORT', defaultPort: 12083 },
+  xwhm: { origin: 'XPANEL_WHM_PUBLIC_ORIGIN', port: 'XPANEL_WHM_PORT', defaultPort: 12087 },
+  xmail: { origin: 'XPANEL_MAIL_PUBLIC_ORIGIN', port: 'XPANEL_MAIL_PORT', defaultPort: 12096 },
+} as const
+
+/** Validate the entire configuration before opening the database or binding any listener. */
+export const resolvePanelEntrypoints = (
+  options: Pick<PanelEntrypointsOptions, 'entryPoints' | 'host'> = {},
+  env: NodeJS.ProcessEnv = process.env,
+): { host: string; entryPoints: Readonly<Record<EntryPoint, PanelEntryPointConfig>> } => {
+  const host = options.host ?? env.XPANEL_HOST ?? '127.0.0.1'
+  if (host !== '127.0.0.1' && host !== '::1') fail('PRECONDITION_FAILED', 'entrypoint listeners must bind an explicit loopback address')
+  const ports = new Set<number>()
+  const entryPoints = {} as Record<EntryPoint, PanelEntryPointConfig>
+  for (const entryPoint of ENTRY_POINT_ORDER) {
+    const config = ENTRY_POINT_ENV[entryPoint]
+    const explicit = options.entryPoints?.[entryPoint]
+    const rawPort = env[config.port]
+    if (!explicit && rawPort !== undefined && !/^[1-9][0-9]{0,4}$/.test(rawPort)) {
+      fail('PRECONDITION_FAILED', `${config.port} must be an integer port`)
+    }
+    const port = explicit?.port ?? (rawPort === undefined ? config.defaultPort : Number(rawPort))
+    if (!Number.isInteger(port) || port < 1 || port > 65535 || ports.has(port)) {
+      fail('PRECONDITION_FAILED', 'entrypoint listener ports must be distinct integers in 1..65535')
+    }
+    ports.add(port)
+    const publicOrigin = explicit?.publicOrigin ?? env[config.origin] ?? fail('PRECONDITION_FAILED', 'each entrypoint requires an exact HTTPS origin')
+    let parsed: URL
+    try { parsed = new URL(publicOrigin ?? '') } catch { return fail('PRECONDITION_FAILED', `${config.origin} must be an exact HTTPS origin`) }
+    if (parsed.protocol !== 'https:' || parsed.origin !== publicOrigin || parsed.port !== String(ENTRY_POINTS[entryPoint].port)) {
+      fail('PRECONDITION_FAILED', `${config.origin} must be an exact HTTPS origin on port ${ENTRY_POINTS[entryPoint].port}`)
+    }
+    entryPoints[entryPoint] = Object.freeze({ publicOrigin, port })
+  }
+  return { host, entryPoints: Object.freeze(entryPoints) }
+}
+
+/**
+ * One unprivileged process owns one SQLite handle, state store and agent client.
+ * Three immutable applications listen privately behind independent HTTPS ingress servers.
+ * Public TLS is terminated by the configured ingress, never by these HTTP listeners.
+ */
+export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) => {
+  const { host, entryPoints } = resolvePanelEntrypoints(opts)
+  if (!opts.agentApp && ENTRY_POINT_ORDER.some(name => entryPoints[name].port !== ENTRY_POINT_ENV[name].defaultPort)) {
+    fail('PRECONDITION_FAILED', 'production entrypoint listeners must use reserved ports 12083, 12087 and 12096')
+  }
+  if (!opts.agentApp && (process.platform !== 'linux' || process.getuid?.() === 0)) {
+    fail('PRECONDITION_FAILED', 'the API must run as an unprivileged Linux service with a separate agent')
+  }
+  const serverSecret = opts.serverSecret ?? await loadAgentCredentialFile(opts.serverSecretFile ?? process.env.XPANEL_SERVER_SECRET_FILE ?? '/etc/xpanel/server.secret')
+  const agentToken = opts.agentToken ?? await loadAgentCredentialFile(opts.agentTokenFile ?? process.env.XPANEL_AGENT_TOKEN_FILE ?? '/etc/xpanel/agent.token')
+  const ingressSecret = opts.ingressSecret ?? await loadAgentCredentialFile(opts.ingressSecretFile ?? process.env.XPANEL_INGRESS_SECRET_FILE ?? '/etc/xpanel/ingress.secret')
+  if (Buffer.byteLength(ingressSecret, 'utf8') < 32) fail('PRECONDITION_FAILED', 'a protected ingress credential of at least 32 bytes is required')
+  const os = opts.os ?? await detectHostOsProfile()
+  const defaultBaseDir = process.platform === 'linux' ? '/var/lib/xpanel' : '.xpanel-data'
+  const dbPath = opts.dbPath ?? process.env.XPANEL_DB_PATH ?? `${defaultBaseDir}/control.db`
+  const stateDir = opts.stateDir ?? process.env.XPANEL_STATE_DIR ?? `${defaultBaseDir}/state`
+  if (dbPath !== ':memory:') await mkdir(dirname(dbPath), { recursive: true })
+  await mkdir(stateDir, { recursive: true })
+  const dbHandle = createDb(dbPath)
+  let client: ReturnType<typeof createAgentClient> | undefined
+  const listeners: Awaited<ReturnType<typeof listenApiServer>>[] = []
+  const agentSubscriptions: (() => void)[] = []
+  const sockets = new Set<Socket>()
+  let closePromise: Promise<void> | undefined
+  const close = (): Promise<void> => {
+    closePromise ??= (async () => {
+      // HTTP closeAllConnections does not include upgraded WebSocket connections.
+      for (const socket of sockets) socket.destroy()
+      const listenerResults = await Promise.allSettled(listeners.map(listener => listener.close()))
+      const subscriptionResults = await Promise.allSettled(agentSubscriptions.map(async unsubscribe => unsubscribe()))
+      const clientResults = await Promise.allSettled([Promise.resolve().then(() => client?.close())])
+      await dbHandle.close()
+      const failed = [...listenerResults, ...subscriptionResults, ...clientResults].find(result => result.status === 'rejected')
+      if (failed?.status === 'rejected') throw failed.reason
+    })()
+    return closePromise
+  }
+  try {
+    await migrate(dbHandle.runner)
+    const store = new StateStore(stateDir)
+    await ensureRootPrincipal(dbHandle.db, { ...(opts.rootPassword ? { password: opts.rootPassword } : {}) })
+    if (!opts.agentApp) client = createAgentClient({ socketPath: opts.agentSocket ?? process.env.XPANEL_AGENT_SOCKET ?? '/run/xpanel/agent.sock', token: agentToken })
+    const sharedAgent = opts.agentApp ?? client!
+    const agentApp: AgentApp = {
+      fetch: request => sharedAgent.fetch(request),
+      subscribe: callback => {
+        const unsubscribe = sharedAgent.subscribe(callback)
+        agentSubscriptions.push(unsubscribe)
+        return unsubscribe
+      },
+    }
+    const apps = {} as Record<EntryPoint, ReturnType<typeof createApiApp>>
+    for (const entryPoint of ENTRY_POINT_ORDER) {
+      const config = entryPoints[entryPoint]
+      const webRenderer = await createDefaultWebRenderer({ store, db: dbHandle.db, serverSecret, entryPoint })
+      const app = createApiApp({
+        db: dbHandle.db, store, agentApp, agentToken, os, serverSecret, webRenderer,
+        entryPoint, publicOrigin: config.publicOrigin, allowedOrigins: [config.publicOrigin],
+        ingressSecret, requireSecureCookies: true, requireOriginHeader: true,
+        ...(opts.homeBaseDir ? { homeBaseDir: opts.homeBaseDir } : {}),
+      })
+      apps[entryPoint] = app
+      const listener = await listenApiServer(app, { port: config.port, host })
+      listener.server.on('connection', socket => {
+        sockets.add(socket)
+        socket.once('close', () => sockets.delete(socket))
+      })
+      listeners.push(listener)
+    }
+    return {
+      apps: Object.freeze(apps), host, entryPoints, db: dbHandle.db, store,
+      listeners: Object.freeze(Object.fromEntries(ENTRY_POINT_ORDER.map((name, index) => [name, {
+        port: listeners[index]!.port, publicOrigin: entryPoints[name].publicOrigin,
+      }])) as Record<EntryPoint, { port: number; publicOrigin: string }>),
+      close,
+    }
+  } catch (error) {
+    await close().catch(() => undefined)
+    throw error
+  }
+}
+
 const CLI_VERBS = new Set(['status', 'reconcile', 'rollback', 'reindex', 'init-root', 'reset-password', 'disable-2fa', 'help', '--help', '-h'])
 
 const readPasswordInput = async (): Promise<string> => {
@@ -255,9 +435,12 @@ if (isMainModule()) {
         process.exit(1)
       })
   } else {
-    startPanelServer()
+    startPanelEntrypoints()
       .then((srv) => {
-        process.stdout.write(`xpanel-api listening on http://${srv.host}:${srv.port}\n`)
+        for (const entryPoint of ENTRY_POINT_ORDER) {
+          const listener = srv.listeners[entryPoint]
+          process.stdout.write(`${entryPoint}: private HTTP listener ${srv.host}:${listener.port}; public HTTPS ingress required at ${listener.publicOrigin}\n`)
+        }
         const shutdown = () => {
           srv.close().finally(() => process.exit(0))
         }

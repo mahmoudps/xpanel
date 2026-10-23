@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { delimiter, dirname, join, resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  buildFrozenInstallEnvironment,
   buildTarArchive,
   computeSourceDigest,
   inspectTarGzArchive,
@@ -64,7 +66,7 @@ function modalOctal(val: number, width: number): string {
 function createValidFixtureSnapshot(baseDir: string, extraFiles: Record<string, string> = {}) {
   const fileMap: Record<string, string> = {
     '.node-version': '26.12.1\n',
-    'package.json': JSON.stringify({ name: 'xpanel-test-fixture', private: true }, null, 2) + '\n',
+    'package.json': JSON.stringify({ name: 'xpanel-test-fixture', private: true, packageManager: 'pnpm@12.15.0' }, null, 2) + '\n',
     'pnpm-lock.yaml': 'lockfileVersion: \'9.0\'\n',
     'pnpm-workspace.yaml': 'packages:\n  - apps/*\n  - packages/*\n',
     'tsconfig.base.json': '{}\n',
@@ -152,6 +154,7 @@ describe('B03 source snapshot & receipt verifier (A01, A02)', () => {
     const receiptCheck = verifySnapshotReceipt({
       rootDir: destination,
       expectedArchiveSha256: fixture.archiveSha256,
+      expectedSourceSha256: fixture.sourceSha256,
     })
     expect(receiptCheck.ok).toBe(true)
     expect(receiptCheck.receipt?.source_sha256).toBe(fixture.sourceSha256)
@@ -384,9 +387,36 @@ describe('B03 source snapshot & receipt verifier (A01, A02)', () => {
     const afterTamper = verifySnapshotReceipt({
       rootDir: destination,
       expectedArchiveSha256: fixture.archiveSha256,
+      expectedSourceSha256: fixture.sourceSha256,
     })
     expect(afterTamper.ok).toBe(false)
     expect(afterTamper.reasons.join(' ')).toMatch(/mismatch|modified|drift/i)
+
+    // A self-hashed receipt can repeat the coordinator archive digest while the tree is different.
+    // The qualifier must reject that tree unless the coordinator source digest also matches.
+    const forged = JSON.parse(readFileSync(join(destination, '.xpanel-snapshot-receipt.json'), 'utf8')) as {
+      receipt_sha256?: string
+      source_sha256: string
+      archive_sha256: string
+      files: Array<{ path: string, bytes: number, sha256: string }>
+    }
+    const forgedBody = Buffer.from('export const ok = false\n')
+    writeFileSync(join(destination, 'apps/api/src/index.ts'), forgedBody)
+    const forgedEntry = forged.files.find(entry => entry.path === 'apps/api/src/index.ts')
+    expect(forgedEntry).toBeTruthy()
+    forgedEntry!.bytes = forgedBody.length
+    forgedEntry!.sha256 = sha256(forgedBody)
+    forged.source_sha256 = computeSourceDigest(forged.files)
+    delete forged.receipt_sha256
+    forged.receipt_sha256 = sha256(JSON.stringify(forged))
+    writeFileSync(join(destination, '.xpanel-snapshot-receipt.json'), `${JSON.stringify(forged, null, 2)}\n`)
+    const forgedCheck = verifySnapshotReceipt({
+      rootDir: destination,
+      expectedArchiveSha256: fixture.archiveSha256,
+      expectedSourceSha256: fixture.sourceSha256,
+    })
+    expect(forgedCheck.ok).toBe(false)
+    expect(forgedCheck.reasons.join(' ')).toMatch(/source digest|source_sha256/i)
 
     // Missing receipt in an unverified directory even with XPANEL_SOURCE_VERIFIED=true
     const unverifiedDir = join(work, 'unverified')
@@ -396,25 +426,217 @@ describe('B03 source snapshot & receipt verifier (A01, A02)', () => {
       const noReceipt = verifySnapshotReceipt({
         rootDir: unverifiedDir,
         expectedArchiveSha256: fixture.archiveSha256,
+        expectedSourceSha256: fixture.sourceSha256,
       })
       expect(noReceipt.ok).toBe(false)
       expect(noReceipt.reasons.join(' ')).toMatch(/receipt/i)
+      const noCoordinatorSource = verifySnapshotReceipt({
+        rootDir: destination,
+        expectedArchiveSha256: fixture.archiveSha256,
+        expectedSourceSha256: '',
+      })
+      expect(noCoordinatorSource.ok).toBe(false)
+      expect(noCoordinatorSource.reasons.join(' ')).toMatch(/source-sha256/i)
     } finally {
       delete process.env.XPANEL_SOURCE_VERIFIED
     }
   })
 
-  it('verifies and extracts the real repository snapshot archive when present in .tools/source-snapshots', () => {
-    const repoRoot = resolve(import.meta.dirname, '..')
-    const realArchive = resolve(repoRoot, '.tools/source-snapshots/source-20261022T104858739Z-4c761b30.tar.gz')
-    const realManifest = resolve(repoRoot, '.tools/source-snapshots/source-20261022T104858739Z-4c761b30.manifest.json')
-    if (!existsSync(realArchive) || !existsSync(realManifest)) return
+  it('rejects a missing archive member and a stale source aggregate before creating a destination', () => {
+    const work = makeTempDir()
+    const fixture = createValidFixtureSnapshot(work)
+    const destination = join(work, 'extracted')
+    const keptPaths = Object.keys(fixture.fileMap).sort().filter(path => path !== 'apps/api/src/index.ts')
+    const missingArchive = createSyntheticTarGz(keptPaths.map(path => ({ path, content: fixture.fileMap[path]! })))
+    const missingArchivePath = join(work, 'missing.tar.gz')
+    writeFileSync(missingArchivePath, missingArchive)
+    const missingArchiveSha = sha256(missingArchive)
+    const missingManifest = { ...fixture.manifest, archive_sha256: missingArchiveSha }
+    writeFileSync(join(work, 'missing.manifest.json'), `${JSON.stringify(missingManifest, null, 2)}\n`)
+
+    expect(() =>
+      verifyAndExtractSourceSnapshot({
+        archivePath: missingArchivePath,
+        manifestPath: join(work, 'missing.manifest.json'),
+        expectedArchiveSha256: missingArchiveSha,
+        expectedSourceSha256: fixture.sourceSha256,
+        destination,
+      }),
+    ).toThrow(/count|missing|mismatch/i)
+    expect(existsSync(destination)).toBe(false)
+
+    const staleBody = 'export const ok = 2\n'
+    const staleMap = { ...fixture.fileMap, 'apps/api/src/index.ts': staleBody }
+    const stalePaths = Object.keys(staleMap).sort()
+    const staleArchive = createSyntheticTarGz(stalePaths.map(path => ({ path, content: staleMap[path]! })))
+    const staleArchivePath = join(work, 'stale.tar.gz')
+    writeFileSync(staleArchivePath, staleArchive)
+    const staleArchiveSha = sha256(staleArchive)
+    const staleFiles = stalePaths.map(path => {
+      const body = Buffer.from(staleMap[path]!, 'utf8')
+      return { path, bytes: body.length, sha256: sha256(body) }
+    })
+    const staleManifest = {
+      ...fixture.manifest,
+      archive_sha256: staleArchiveSha,
+      source_sha256: fixture.sourceSha256,
+      file_count: staleFiles.length,
+      files: staleFiles,
+    }
+    writeFileSync(join(work, 'stale.manifest.json'), `${JSON.stringify(staleManifest, null, 2)}\n`)
+    const staleDestination = join(work, 'stale-extracted')
+    expect(() =>
+      verifyAndExtractSourceSnapshot({
+        archivePath: staleArchivePath,
+        manifestPath: join(work, 'stale.manifest.json'),
+        expectedArchiveSha256: staleArchiveSha,
+        expectedSourceSha256: fixture.sourceSha256,
+        destination: staleDestination,
+      }),
+    ).toThrow(/aggregate source_sha256/i)
+    expect(existsSync(staleDestination)).toBe(false)
+  })
+
+  it('records a pinned pnpm version and refuses a qualification receipt that omits it', () => {
+    const work = makeTempDir()
+    const fixture = createValidFixtureSnapshot(work)
+    const pinned = join(work, 'pinned')
+    const receipt = verifyAndExtractSourceSnapshot({
+      archivePath: fixture.archivePath,
+      manifestPath: fixture.manifestPath,
+      expectedArchiveSha256: fixture.archiveSha256,
+      expectedSourceSha256: fixture.sourceSha256,
+      destination: pinned,
+      installCommand: () => ({ exitCode: 0, stdout: '', stderr: '', pnpmVersion: '12.15.0' }),
+    })
+    expect(receipt.runtime.pnpm).toBe('12.15.0')
+    expect(verifySnapshotReceipt({
+      rootDir: pinned,
+      expectedArchiveSha256: fixture.archiveSha256,
+      expectedSourceSha256: fixture.sourceSha256,
+      requirePinnedPnpm: true,
+    }).ok).toBe(true)
+
+    // A self-hashed version claim cannot replace the source-bound packageManager pin.
+    const forged = { ...receipt, runtime: { ...receipt.runtime, pnpm: '9.0.0' } }
+    const { receipt_sha256: _ignored, ...payload } = forged
+    forged.receipt_sha256 = sha256(JSON.stringify(payload))
+    writeFileSync(join(pinned, '.xpanel-snapshot-receipt.json'), `${JSON.stringify(forged)}\n`)
+    const mismatched = verifySnapshotReceipt({
+      rootDir: pinned,
+      expectedArchiveSha256: fixture.archiveSha256,
+      expectedSourceSha256: fixture.sourceSha256,
+      requirePinnedPnpm: true,
+    })
+    expect(mismatched.ok).toBe(false)
+    expect(mismatched.reasons.join(' ')).toMatch(/source-bound packageManager pin/i)
+
+    const unpinned = join(work, 'unpinned')
+    verifyAndExtractSourceSnapshot({
+      archivePath: fixture.archivePath,
+      manifestPath: fixture.manifestPath,
+      expectedArchiveSha256: fixture.archiveSha256,
+      expectedSourceSha256: fixture.sourceSha256,
+      destination: unpinned,
+      installCommand: () => ({ exitCode: 0, stdout: '', stderr: '', pnpmVersion: 'true' }),
+    })
+    const blocked = verifySnapshotReceipt({
+      rootDir: unpinned,
+      expectedArchiveSha256: fixture.archiveSha256,
+      expectedSourceSha256: fixture.sourceSha256,
+      requirePinnedPnpm: true,
+    })
+    expect(blocked.ok).toBe(false)
+    expect(blocked.reasons.join(' ')).toMatch(/pnpm/i)
+  })
+
+  it('points frozen install at the pinned pnpm and does not copy unrelated environment values', () => {
+    const work = makeTempDir()
+    const snapshot = join(work, 'snapshot')
+    mkdirSync(snapshot)
+    writeFileSync(join(snapshot, '.node-version'), `${process.versions.node}\n`)
+    writeFileSync(join(snapshot, 'package.json'), JSON.stringify({ packageManager: 'pnpm@12.15.0' }))
+    // Self-contained probe fixture; it does not install dependencies or qualify a host.
+    const pnpmPath = join(work, 'coordinator-pnpm.cjs')
+    writeFileSync(pnpmPath, 'process.stdout.write("12.15.0\\n")\n')
+    const marker = 'should-not-pass'
+    process.env.XPANEL_UNTRUSTED_INSTALL_TOKEN = marker
+    try {
+      const built = buildFrozenInstallEnvironment(snapshot, { pnpmPath })
+      expect(built.pnpmVersion).toBe('12.15.0')
+      expect(built.command).toBe(process.execPath)
+      expect(built.args).toEqual([pnpmPath])
+      expect(built.env.PATH.split(delimiter)).toContain(dirname(pnpmPath))
+      expect(built.env.XPANEL_UNTRUSTED_INSTALL_TOKEN).toBeUndefined()
+      expect(JSON.stringify(built.env)).not.toContain(marker)
+    } finally {
+      delete process.env.XPANEL_UNTRUSTED_INSTALL_TOKEN
+    }
+  })
+
+  it('rejects a relative, missing, wrong-version or snapshot-supplied pnpm executable without falling back', () => {
+    const work = makeTempDir()
+    const snapshot = join(work, 'snapshot')
+    mkdirSync(snapshot)
+    writeFileSync(join(snapshot, '.node-version'), `${process.versions.node}\n`)
+    writeFileSync(join(snapshot, 'package.json'), JSON.stringify({ packageManager: 'pnpm@12.15.0' }))
+    const wrong = join(work, 'wrong.cjs')
+    writeFileSync(wrong, 'process.stdout.write("9.0.0\\n")\n')
+    const untrusted = join(snapshot, 'pnpm.cjs')
+    writeFileSync(untrusted, 'process.stdout.write("12.15.0\\n")\n')
+    for (const pnpmPath of ['relative.cjs', join(work, 'missing.cjs'), wrong, untrusted]) {
+      expect(() => buildFrozenInstallEnvironment(snapshot, { pnpmPath })).toThrow(/absolute|Pinned pnpm/i)
+    }
+  })
+
+  it('uses the explicitly selected CLI and a sanitized environment for install and post-install version checks', () => {
+    const work = makeTempDir()
+    const fixture = createValidFixtureSnapshot(work, { '.node-version': `${process.versions.node}\n` })
+    const pnpmPath = join(work, 'synthetic-installer.cjs')
+    const calls = join(work, 'calls.jsonl')
+    writeFileSync(pnpmPath, `
+const fs = require('node:fs');
+fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args: process.argv.slice(2), leaked: process.env.XPANEL_UNTRUSTED_INSTALL_TOKEN ?? null }) + '\\n');
+if (process.argv[2] === '--version') process.stdout.write('12.15.0\\n');
+else if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(['install', '--frozen-lockfile'])) process.exit(1);
+`)
+    const oldMarker = process.env.XPANEL_UNTRUSTED_INSTALL_TOKEN
+    process.env.XPANEL_UNTRUSTED_INSTALL_TOKEN = 'must-not-leak'
+    try {
+      const receipt = verifyAndExtractSourceSnapshot({
+        archivePath: fixture.archivePath, manifestPath: fixture.manifestPath,
+        expectedArchiveSha256: fixture.archiveSha256, expectedSourceSha256: fixture.sourceSha256,
+        destination: join(work, 'extracted'), pnpmPath,
+      })
+      expect(receipt.runtime.pnpm).toBe('12.15.0')
+      const observations = readFileSync(calls, 'utf8').trim().split('\n').map(line => JSON.parse(line))
+      expect(observations.map(call => call.args)).toEqual([['--version'], ['install', '--frozen-lockfile'], ['--version']])
+      expect(observations.every(call => call.leaked === null)).toBe(true)
+      const cli = spawnSync(process.execPath, [resolve(import.meta.dirname, 'vm/verify-source-snapshot.mjs'),
+        `--archive=${fixture.archivePath}`, `--manifest=${fixture.manifestPath}`,
+        `--expected-archive-sha256=${fixture.archiveSha256}`, `--expected-source-sha256=${fixture.sourceSha256}`,
+        `--destination=${join(work, 'cli-extracted')}`, `--pnpm-path=${pnpmPath}`,
+      ], { encoding: 'utf8' })
+      expect(cli.status, cli.stderr).toBe(0)
+      expect(JSON.parse(cli.stdout).source_sha256).toBe(fixture.sourceSha256)
+      const cliObservations = readFileSync(calls, 'utf8').trim().split('\n').map(line => JSON.parse(line))
+      expect(cliObservations).toHaveLength(6)
+      expect(cliObservations.every(call => call.leaked === null)).toBe(true)
+    } finally {
+      if (oldMarker === undefined) delete process.env.XPANEL_UNTRUSTED_INSTALL_TOKEN
+      else process.env.XPANEL_UNTRUSTED_INSTALL_TOKEN = oldMarker
+    }
+  })
+
+  const historicalArchive = resolve(import.meta.dirname, '../.tools/source-snapshots/source-20261022T104858739Z-4c761b30.tar.gz')
+  const historicalManifest = resolve(import.meta.dirname, '../.tools/source-snapshots/source-20261022T104858739Z-4c761b30.manifest.json')
+  it.skipIf(!existsSync(historicalArchive) || !existsSync(historicalManifest))('verifies and extracts the historical repository snapshot archive when that fixture is present', () => {
 
     const work = makeTempDir()
     const destination = join(work, 'real-snapshot-extracted')
     const receipt = verifyAndExtractSourceSnapshot({
-      archivePath: realArchive,
-      manifestPath: realManifest,
+      archivePath: historicalArchive,
+      manifestPath: historicalManifest,
       expectedArchiveSha256: 'aa42db6b7d0e0152e6e92e579b2ffdef80d04ab91d20efd3cbc288dfffbc8df6',
       expectedSourceSha256: 'd84bf97cd85faae1bd63c007d6e839ea94cf73ba0ea39dfcca7f1c7338f72a71',
       destination,
@@ -427,6 +649,7 @@ describe('B03 source snapshot & receipt verifier (A01, A02)', () => {
     const verified = verifySnapshotReceipt({
       rootDir: destination,
       expectedArchiveSha256: 'aa42db6b7d0e0152e6e92e579b2ffdef80d04ab91d20efd3cbc288dfffbc8df6',
+      expectedSourceSha256: 'd84bf97cd85faae1bd63c007d6e839ea94cf73ba0ea39dfcca7f1c7338f72a71',
     })
     expect(verified.ok).toBe(true)
   })

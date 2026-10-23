@@ -116,7 +116,7 @@ describe('H03 & Q02 — Bilingual UX/UI, RTL <bdi dir="ltr"> isolation, ASCII di
         renderPanelSurface({ ...syntheticPanel, activeRoute: '/domains', locale }),
         renderMailSurface({ ...syntheticMail, activeRoute: '/mail/settings/filters', locale }),
       ]) {
-        const tableWraps = [...html.matchAll(/<div class="xp-table-wrap"([^>]*)>/g)]
+        const tableWraps = [...html.matchAll(/<div(?=[^>]*\sclass="(?:[^"]*\s)?xp-table-wrap(?:\s[^"]*)?")([^>]*)>/g)]
         assert.ok(tableWraps.length >= 1, 'Expected at least one .xp-table-wrap in surface')
         for (const match of tableWraps) {
           const attrs = match[1] ?? ''

@@ -6,12 +6,27 @@ import { renderMailSurface } from './surfaces/xmail.ts'
 import { renderPanelSurface } from './surfaces/xpanel.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
 import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
+import type { Account, Plan, Principal } from '@xpanel/core'
+
+const summaryAccount: Account = {
+  id: 'private-account-id', username: 'owner7', uid: 9123456, gid: 9123457,
+  home: '/private-home-marker', primaryDomain: 'owner7.example.test', planId: 'private-plan-id',
+  ownerId: 'private-reseller-id', status: 'active', suspendReason: 'private-suspension-marker',
+  contactEmail: 'private-contact-marker@example.test', ipv4: '192.0.2.199', shell: 'none', createdAt: '2026-10-23T00:00:00Z',
+}
+const summaryPlan: Plan = {
+  id: summaryAccount.planId, name: 'Configured plan7', ownerId: null, featureListId: 'private-feature-id',
+  resources: { diskMb: 1000, bandwidthMbMonth: 'unlimited', ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
+  caps: { addonDomains: 1, aliasDomains: 1, subdomains: 1, mailboxes: 1, forwarders: 1, mailingLists: 1, ftpAccounts: 1, databases: 1, phpWorkers: 1 },
+  dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100,
+}
+const summaryOwner: Principal = { kind: 'user', id: 'private-principal-id', username: 'owner7', accountId: summaryAccount.id }
 
 describe('verified production availability', () => {
   it.each(['xwhm', 'xpanel', 'xmail'] as const)('shows an honest unavailable workspace for %s without publishing service actions', surface => {
     const html = renderWebApp({ surface, locale: 'en' })
     expect(html).toContain('data-tool-availability="unverified"')
-    expect(html).toContain('No verified tools are authorized for this account.')
+    expect(html).toContain('Service management is unavailable in this release.')
     expect(html).not.toMatch(/<form\b|data-nav-route="|data-cmdk-item="/)
     expect(html).not.toContain('alice-shop.com')
     expect(html).not.toContain('data-generation-chip=')
@@ -24,6 +39,88 @@ describe('verified production availability', () => {
     })
     expect(html).toContain('data-tool-availability="unverified"')
     expect(html).not.toContain('private-marker')
+    expect(html).toContain('data-workspace-identity="true"')
+    expect(html).not.toContain('data-workspace-account-overview=')
+  })
+
+  it.each(['en', 'ar'] as const)('shows only scoped account summary fields in %s while tools remain unavailable', locale => {
+    const html = renderWebApp({ surface: 'xpanel', locale, visibility: { principal: summaryOwner }, panel: { account: summaryAccount, plan: summaryPlan } })
+    for (const value of ['owner7', 'owner7.example.test', 'Configured plan7']) expect(html).toContain(value)
+    expect(html).toContain(locale === 'ar' ? 'مالك الحساب' : 'Account owner')
+    expect(html).toContain(locale === 'ar' ? 'نشط' : 'Active')
+    expect(html.match(/data-workspace-field=/g)).toHaveLength(5)
+    expect(html).toContain('<bdi dir="ltr">owner7.example.test</bdi>')
+    expect(html).toContain('data-tool-availability="unverified"')
+    expect(html).not.toMatch(/data-realtime-enabled="true"|<form\b|data-nav-route=|data-cmdk-item=|data-generation-chip=|[\u0660-\u0669\u06f0-\u06f9]/)
+    for (const marker of ['private-', '9123456', '9123457', '192.0.2.199', 'Resource usage', 'quotaUsed', 'unlimited']) expect(html).not.toContain(marker)
+  })
+
+  it.each([
+    { kind: 'root', id: 'private-root', username: 'administrator7' },
+    { kind: 'reseller', id: summaryAccount.ownerId!, username: 'reseller7' },
+  ] satisfies Principal[])('allows the account summary for its authorized $kind principal', principal => {
+    const html = renderWebApp({ surface: 'xpanel', visibility: { principal }, panel: { account: summaryAccount, plan: summaryPlan } })
+    expect(html).toContain('owner7.example.test')
+    expect(html).toContain(principal.username)
+    expect(html.match(/data-workspace-field=/g)).toHaveLength(6)
+    expect(html).toContain('Selected account')
+  })
+
+  it.each([
+    { kind: 'user', id: 'other-user-id', username: 'other-owner', accountId: 'other-account-id' },
+    { kind: 'reseller', id: 'other-reseller-id', username: 'other-reseller' },
+  ] satisfies Principal[])('does not disclose another account to $kind', principal => {
+    const html = renderWebApp({ surface: 'xpanel', visibility: { principal }, panel: { account: summaryAccount, plan: summaryPlan } })
+    expect(html).toContain('data-workspace-account-empty="true"')
+    expect(html).not.toContain('owner7.example.test')
+    expect(html).not.toContain('Configured plan7')
+  })
+
+  it.each([
+    ['active', 'Active', 'نشط'],
+    ['suspended', 'Suspended', 'معلق'],
+    ['terminating', 'Terminating', 'قيد الإنهاء'],
+  ] as const)('localizes the configured account status %s without claiming service health', (status, en, ar) => {
+    for (const locale of ['en', 'ar'] as const) {
+      const html = renderWebApp({ surface: 'xpanel', locale, visibility: { principal: summaryOwner }, panel: { account: { ...summaryAccount, status }, plan: summaryPlan } })
+      expect(html).toContain(locale === 'ar' ? ar : en)
+      expect(html).not.toContain('data-service-row=')
+      expect(html).toContain('data-tool-availability="unverified"')
+    }
+  })
+
+  it.each(['xwhm', 'xmail'] as const)('shows identity without account state on %s', surface => {
+    const html = renderWebApp({ surface, visibility: { principal: summaryOwner }, panel: { account: summaryAccount, plan: summaryPlan } })
+    expect(html).toContain('data-workspace-identity="true"')
+    expect(html).not.toContain('data-workspace-account-overview=')
+    expect(html).not.toContain(summaryAccount.primaryDomain)
+    expect(html).not.toContain(summaryPlan.name)
+  })
+
+  it('ignores account and plan payloads without a signed-in principal', () => {
+    const html = renderWebApp({ surface: 'xpanel', panel: { account: summaryAccount, plan: summaryPlan } })
+    expect(html).not.toContain('data-workspace-identity=')
+    expect(html).not.toContain('data-workspace-account-overview=')
+    expect(html).not.toContain('owner7.example.test')
+  })
+
+  it('uses clear unavailable fields for missing accounts and mismatched plans', () => {
+    const missing = renderWebApp({ surface: 'xpanel', visibility: { principal: summaryOwner } })
+    expect(missing).toContain('No authorized account is available to display.')
+    for (const plan of [undefined, { ...summaryPlan, id: 'unrelated-plan-id', name: 'Hidden unrelated plan' }]) {
+      const html = renderWebApp({ surface: 'xpanel', visibility: { principal: summaryOwner }, panel: { account: summaryAccount, ...(plan ? { plan } : {}) } })
+      expect(html).toMatch(/data-workspace-field="plan"[^]*?Unavailable/)
+      expect(html).not.toContain('Hidden unrelated plan')
+    }
+  })
+
+  it('escapes all externally supplied summary labels and values', () => {
+    const html = renderWebApp({ surface: 'xpanel', visibility: { principal: { ...summaryOwner, username: '<script>identity-marker</script>' } }, panel: { account: { ...summaryAccount, username: '<img src=x onerror=account-marker>', primaryDomain: '<script>domain-marker</script>' }, plan: { ...summaryPlan, name: '<svg onload=plan-marker>' } } })
+    expect(html).toContain('&lt;script&gt;identity-marker&lt;/script&gt;')
+    expect(html).toContain('&lt;img src=x onerror=account-marker&gt;')
+    expect(html).toContain('&lt;script&gt;domain-marker&lt;/script&gt;')
+    expect(html).toContain('&lt;svg onload=plan-marker&gt;')
+    expect(html).not.toMatch(/<script>identity-marker|<img src=x|<svg onload=plan-marker/)
   })
 
   it('keeps login reachable and gives the command palette no privileged static routes', () => {
@@ -35,7 +132,7 @@ describe('verified production availability', () => {
 
   it('renders an Arabic unavailable state with Latin digits', () => {
     const html = renderWebApp({ surface: 'xpanel', locale: 'ar' })
-    expect(html).toContain('الأدوات غير متاحة بعد')
+    expect(html).toContain('الأدوات غير متاحة')
     expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
   })
 
@@ -70,5 +167,50 @@ describe('emitted browser JavaScript syntax', () => {
     const emitted = /<script id="xpanel-login-client">([\s\S]*?)<\/script>/.exec(html)?.[1]
     expect(emitted).toBeTruthy()
     expect(() => new Script(emitted!, { filename: 'xpanel-emitted.js' })).not.toThrow()
+  })
+})
+
+
+describe('bounded workspace summary DTO', () => {
+  const account = { id: summaryAccount.id, ownerId: summaryAccount.ownerId, username: summaryAccount.username, primaryDomain: summaryAccount.primaryDomain, status: summaryAccount.status, planId: summaryAccount.planId }
+  const plan = { id: summaryPlan.id, name: summaryPlan.name }
+
+  it.each(['en', 'ar'] as const)('renders a minimal DTO in %s without service-state fields', locale => {
+    const html = renderWebApp({ surface: 'xpanel', locale, visibility: { principal: summaryOwner }, workspaceSummary: { account, plan } })
+    expect(html).toContain('owner7.example.test')
+    expect(html).toContain('Configured plan7')
+    expect(html.match(/data-workspace-field=/g)).toHaveLength(5)
+    expect(html).not.toMatch(/private-|data-nav-route=|data-realtime-enabled="true"/)
+  })
+
+  it('does not fall back to a larger provider payload when the explicit DTO is empty', () => {
+    const html = renderWebApp({ surface: 'xpanel', visibility: { principal: summaryOwner }, workspaceSummary: {}, panel: { account: summaryAccount, plan: summaryPlan } })
+    expect(html).toContain('data-workspace-account-empty="true"')
+    expect(html).not.toContain(summaryAccount.primaryDomain)
+    expect(html).not.toContain(summaryPlan.name)
+  })
+
+  it.each([
+    { kind: 'user', id: 'foreign-principal', username: 'foreign7', accountId: 'foreign-account' },
+    { kind: 'reseller', id: 'foreign-reseller', username: 'foreign7' },
+  ] satisfies Principal[])('refuses a foreign DTO for $kind without relying on its provider', principal => {
+    const html = renderWebApp({ surface: 'xpanel', visibility: { principal }, workspaceSummary: { account, plan } })
+    expect(html).toContain('data-workspace-account-empty="true"')
+    expect(html).not.toContain(account.primaryDomain)
+    expect(html).not.toContain(plan.name)
+  })
+
+  it('does not label an account with a different plan ID', () => {
+    const html = renderWebApp({ surface: 'xpanel', visibility: { principal: summaryOwner }, workspaceSummary: { account, plan: { id: 'wrong-plan', name: 'Foreign plan marker' } } })
+    expect(html).not.toContain('Foreign plan marker')
+    expect(html).toContain('Unavailable')
+  })
+
+  it('escapes account and plan text in the minimal DTO', () => {
+    const html = renderWebApp({ surface: 'xpanel', visibility: { principal: summaryOwner }, workspaceSummary: { account: { ...account, primaryDomain: '<img src=x onerror=alert(1)>' }, plan: { ...plan, name: '<script>marker</script>' } } })
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    expect(html).toContain('&lt;script&gt;marker&lt;/script&gt;')
+    expect(html).not.toContain('<img src=x')
+    expect(html).not.toContain('<script>marker')
   })
 })

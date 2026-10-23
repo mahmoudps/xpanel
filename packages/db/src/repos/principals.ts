@@ -175,6 +175,59 @@ export const findPrincipalByAccountId = async (db: Db, accountId: Id): Promise<P
   return row ? fromRow(row) : null
 }
 
+export interface AccountAccessRevocationResult {
+  /** Internal identity references for the caller; never public document numbers. */
+  principalIds: Id[]
+  /** Newly revoked rows, including expired rows that had not previously been revoked. */
+  revokedSessions: number
+  revokedApiTokens: number
+  removedTotpEnrollments: number
+}
+
+/**
+ * Revokes every linked identity's sessions, API tokens and pending MFA enrollment together.
+ * The caller must first persist its authorized account suspension/access hold. This helper
+ * does not change identity, password, active MFA or manual-disabled state, and cannot block
+ * a new login by itself. Retrying preserves previous revocation timestamps.
+ */
+export const revokeAccountSessionsAndTokens = (
+  db: Db, accountId: Id,
+): Promise<AccountAccessRevocationResult> =>
+  withSqliteErrors(async () => {
+    const aid = assertId(accountId, 'accountId')
+    return db.transaction(async (tx) => {
+      const principals = await tx.query<{ id: string }>(
+        'SELECT id FROM principals WHERE account_id = $1 ORDER BY id', [aid],
+      )
+      const principalIds = principals.map(principal => principal.id)
+      if (principalIds.length === 0) {
+        return { principalIds, revokedSessions: 0, revokedApiTokens: 0, removedTotpEnrollments: 0 }
+      }
+      const now = nowIso()
+      const enrollments = await tx.query<{ principal_id: string }>(
+        'DELETE FROM totp_enrollments ' +
+        'WHERE principal_id IN (SELECT id FROM principals WHERE account_id = $1) RETURNING principal_id',
+        [aid],
+      )
+      const sessions = await tx.query<{ id: string }>(
+        'UPDATE sessions SET revoked_at = $1 WHERE revoked_at IS NULL ' +
+        'AND principal_id IN (SELECT id FROM principals WHERE account_id = $2) RETURNING id',
+        [now, aid],
+      )
+      const tokens = await tx.query<{ id: string }>(
+        'UPDATE api_tokens SET revoked_at = $1 WHERE revoked_at IS NULL ' +
+        'AND principal_id IN (SELECT id FROM principals WHERE account_id = $2) RETURNING id',
+        [now, aid],
+      )
+      return {
+        principalIds,
+        revokedSessions: sessions.length,
+        revokedApiTokens: tokens.length,
+        removedTotpEnrollments: enrollments.length,
+      }
+    })
+  })
+
 /** Commits the new password, invalidates enrollment, and revokes every previous session and API token together. */
 export const setPasswordHash = (
   db: Db,

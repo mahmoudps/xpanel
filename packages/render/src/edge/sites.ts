@@ -1,6 +1,6 @@
 // How an account's domains become served sites. Shared by the Nginx, Apache and OLS renderers
 // so every engine answers the same names the same way.
-import { domainServingState } from '@xpanel/core'
+import { domainServingState, MANAGEMENT_PUBLIC_PORTS, MANAGEMENT_BACKEND_PORTS } from '@xpanel/core'
 import type { Account, Certificate, Domain, ServerSettings } from '@xpanel/core'
 import {
   assertAccount,
@@ -148,7 +148,7 @@ export const siteUpstream = (d: Domain, settings: ServerSettings, policy: Upstre
   }
   if (u.addressClass === 'loopback') {
     const extra = (policy.reservedPorts ?? []).map((p) => assertPort('reserved port', p))
-    const reserved = [assertBackendPort(settings), settings.backendTlsPort, settings.panelPort, settings.sshPort, ...LOCAL_SERVICE_PORTS, ...extra]
+    const reserved = [assertBackendPort(settings), settings.backendTlsPort, settings.panelPort, settings.sshPort, ...MANAGEMENT_PUBLIC_PORTS, ...MANAGEMENT_BACKEND_PORTS, ...LOCAL_SERVICE_PORTS, ...extra]
     if (reserved.includes(u.port)) return invalid('upstream', d.upstream, 'targets a reserved local port')
     if (u.port < 1024) return invalid('upstream', d.upstream, 'loopback apps must use an unprivileged port')
   }

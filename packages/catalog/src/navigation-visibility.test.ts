@@ -22,6 +22,15 @@ const design: NavSurface[] = [{
 }]
 
 const fileManagerToolIds = ['file-manager', 'file-text-editor', 'html-editor', 'images']
+const ownerContractSplits = [
+  { route: '/email/forwarders', core: ['forwarders', 'domain-forwarders', 'default-address', 'autoresponders'], adminRoute: '/whm/email/bcc', admin: ['aapanel-mail-bcc'] },
+  { route: '/email/mailing-lists', core: ['mailing-lists'], adminRoute: '/whm/email/marketing', admin: ['aapanel-mail-subscribers', 'aapanel-mail-campaigns', 'aapanel-mail-automation'] },
+  { route: '/files/ftp', core: ['ftp-accounts', 'ftp-connections', 'anonymous-ftp'], adminRoute: '/whm/services/ftp-log-analysis', admin: ['aapanel-ftp-logs'] },
+  { route: '/software/installer', core: ['app-installer'], adminRoute: '/whm/software/deployments', admin: ['aapanel-one-click-deploy'] },
+  { route: '/software/apps', core: ['nodejs-apps', 'python-apps', 'ruby-apps', 'application-manager', 'web-apps'], adminRoute: '/whm/software/application-projects', admin: ['aapanel-go-project', 'aapanel-java-project'] },
+  { route: '/software/packages', core: ['php-pear-packages', 'perl-modules'], adminRoute: '/whm/software/composer', admin: ['aapanel-composer'] },
+  { route: '/advanced/indexes', core: ['indexes'], adminRoute: '/whm/services/default-index', admin: ['aapanel-default-index'] },
+]
 const ownerContext = { principal: owner, disabledFeatures: new Set<string>() }
 const routesOf = (surfaces: readonly NavSurface[]): string[] =>
   surfaces.flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
@@ -126,5 +135,68 @@ describe('verified navigation policy', () => {
     expect(JSON.stringify(productionTools)).toBe(before)
     expect(productionTools.filter(entry => entry.status === 'verified')).toEqual([])
     expect(visibleNavigation(ownerContext)).toEqual([])
+  })
+
+  it.each(ownerContractSplits)('keeps $route eligible using only its qualified account capabilities', contract => {
+    const page = navigation.flatMap(surface => surface.sections.flatMap(section => section.pages))
+      .find(entry => entry.route === contract.route)!
+    expect(page.tools).toEqual(contract.core)
+    const fixtures = qualifiedToolFixtures(contract.core)
+    expect(routesOf(visibleNavigation(ownerContext, fixtures))).toContain(contract.route)
+    expect(routesOf(visibleNavigation(ownerContext, fixtures))).not.toContain(contract.adminRoute)
+    expect(routesOf(visibleNavigation({ principal: root }, fixtures))).not.toContain(contract.route)
+    expect(routesOf(visibleNavigation({ principal: reseller, reseller: { acl: [] } }, fixtures))).not.toContain(contract.route)
+  })
+
+  it.each(ownerContractSplits)('still requires every account capability and enabled feature for $route', contract => {
+    const fixtures = qualifiedToolFixtures(contract.core)
+    for (const id of contract.core) {
+      expect(routesOf(visibleNavigation(ownerContext, fixtures.filter(entry => entry.id !== id))), `missing ${id}`)
+        .not.toContain(contract.route)
+      for (const status of ['researched', 'implemented', 'integrated'] as const) {
+        const unqualified = fixtures.map(entry => entry.id === id ? {
+          ...entry, status, delivery: { ...entry.delivery, status },
+        } : entry)
+        expect(routesOf(visibleNavigation(ownerContext, unqualified)), `${id}: ${status}`).not.toContain(contract.route)
+      }
+    }
+    const features = [...new Set(fixtures.flatMap(entry => entry.featureKey === null ? [] : [entry.featureKey]))]
+    expect(features.length).toBeGreaterThan(0)
+    for (const feature of features) {
+      expect(routesOf(visibleNavigation({ principal: owner, disabledFeatures: new Set([feature]) }, fixtures)), feature)
+        .not.toContain(contract.route)
+    }
+  })
+
+  it.each(ownerContractSplits)('keeps $adminRoute root-only and requires every administrative capability', contract => {
+    const fixtures = qualifiedToolFixtures([...contract.core, ...contract.admin])
+    for (const id of contract.admin) {
+      const definition = fixtures.find(entry => entry.id === id)!
+      expect(definition.rootOnly).toBe(true)
+      expect(definition.surface).toBe('aapanel')
+      expect(isVisible(definition, ownerContext)).toBe(false)
+      expect(isVisible(definition, { principal: reseller, reseller: { acl: ['manage-dns', 'edit-account'] } })).toBe(false)
+      expect(routesOf(visibleNavigation({ principal: root }, fixtures.filter(entry => entry.id !== id))), `missing ${id}`)
+        .not.toContain(contract.adminRoute)
+      const unqualified = fixtures.map(entry => entry.id === id ? {
+        ...entry, status: 'researched' as const, delivery: { ...entry.delivery, status: 'researched' as const },
+      } : entry)
+      expect(routesOf(visibleNavigation({ principal: root }, unqualified)), `unqualified ${id}`).not.toContain(contract.adminRoute)
+    }
+    expect(routesOf(visibleNavigation({ principal: root }, fixtures))).toContain(contract.adminRoute)
+    expect(routesOf(visibleNavigation(ownerContext, fixtures))).toContain(contract.route)
+    expect(routesOf(visibleNavigation(ownerContext, fixtures))).not.toContain(contract.adminRoute)
+    expect(routesOf(visibleNavigation({ principal: reseller, reseller: { acl: ['manage-dns', 'edit-account'] } }, fixtures)))
+      .not.toContain(contract.adminRoute)
+  })
+
+  it('keeps the three routes without a bounded owner contract unavailable even in a qualified synthetic catalog', () => {
+    const fixtures = qualifiedToolFixtures(productionTools.filter(entry => entry.status !== 'out-of-scope').map(entry => entry.id))
+    for (const route of ['/domains/site-settings', '/domains/reverse-proxy', '/software/htaccess']) {
+      const page = navigation.flatMap(surface => surface.sections.flatMap(section => section.pages)).find(entry => entry.route === route)!
+      expect(page.tools.length).toBeGreaterThan(0)
+      expect(page.tools.some(id => fixtures.find(entry => entry.id === id)?.rootOnly)).toBe(true)
+      expect(routesOf(visibleNavigation(ownerContext, fixtures))).not.toContain(route)
+    }
   })
 })

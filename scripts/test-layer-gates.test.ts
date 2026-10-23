@@ -50,6 +50,7 @@ describe('Test environment gates', () => {
     const execResult = JSON.parse(execChild.stdout.trim())
     expect(execResult.status).toBe('blocked')
     expect(execResult.reasons.join(' ')).toMatch(/receipt/i)
+    expect(execResult.reasons.join(' ')).toMatch(/source-sha256/i)
 
     const boundaryQualifier = resolve(import.meta.dirname, 'vm/qualify-agent-boundary.mjs')
     const boundaryChild = spawnSync(process.execPath, [boundaryQualifier, `--snapshot-sha256=${'a'.repeat(64)}`], { env, encoding: 'utf8' })
@@ -57,6 +58,7 @@ describe('Test environment gates', () => {
     const boundaryResult = JSON.parse(boundaryChild.stdout.trim())
     expect(boundaryResult.status).toBe('blocked')
     expect(boundaryResult.preflight.reasons.join(' ')).toMatch(/receipt/i)
+    expect(boundaryResult.preflight.reasons.join(' ')).toMatch(/source-sha256/i)
   })
 
   it('keeps the privileged fixture and *.linux.test.ts explicitly separate from portable tests', () => {

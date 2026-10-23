@@ -67,4 +67,34 @@ describe('navigation', () => {
     ])).filter(key => !ar[key]?.trim())
     expect(missing).toEqual([])
   })
+
+  it('represents separated administrator actions as root-only metadata without a task screen or action', () => {
+    const routes = ['/whm/email/bcc', '/whm/email/marketing', '/whm/services/ftp-log-analysis',
+      '/whm/software/deployments', '/whm/software/application-projects', '/whm/software/composer', '/whm/services/default-index']
+    for (const route of routes) {
+      const entry = pages.find(({ page }) => page.route === route)!
+      expect(entry.surface).toBe('xwhm')
+      expect(entry.page.roles).toEqual(['root'])
+      expect(entry.page.artboard).toBeNull()
+      expect(entry.page.primaryAction).toBeNull()
+      expect(entry.page.summary).toContain('unavailable until')
+      expect(entry.page.tools.every(id => tools.find(tool => tool.id === id)?.rootOnly)).toBe(true)
+    }
+  })
+
+  it('removes administrative promises from the separated owner page summaries and search aliases', () => {
+    const excluded = [
+      { route: '/email/forwarders', terms: /\bbcc\b/i },
+      { route: '/email/mailing-lists', terms: /campaign|automation|suppression|templated|event-triggered/i },
+      { route: '/files/ftp', terms: /ftp logs|log analysis|user's ftp activity/i },
+      { route: '/software/installer', terms: /one-click app deploy/i },
+      { route: '/software/apps', terms: /\bgo\b|\bjava\b/i },
+      { route: '/software/packages', terms: /composer/i },
+      { route: '/advanced/indexes', terms: /default index files|directoryindex|index\.php|index\.html|which files serve/i },
+    ]
+    for (const { route, terms } of excluded) {
+      const page = pages.find(entry => entry.page.route === route)!.page
+      expect([page.summary, ...page.keywords].join(' '), route).not.toMatch(terms)
+    }
+  })
 })

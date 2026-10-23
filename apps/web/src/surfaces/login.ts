@@ -4,6 +4,8 @@ export interface LoginSurfaceProps {
   locale?: 'en' | 'ar'
   theme?: 'dark' | 'light'
   targetSurface?: 'xpanel' | 'xwhm' | 'xmail'
+  /** Presentation selected by the server listener; never an authorization claim. */
+  audience?: 'xpanel' | 'xwhm' | 'xmail'
   username?: string
   lockout?: { locked: boolean; lockedUntil?: string; retryAfterSec?: number }
   errorMessage?: string | null
@@ -13,19 +15,22 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
   const isAr = props.locale === 'ar'
   const locale = isAr ? 'ar' : 'en'
   const theme = props.theme === 'light' ? 'light' : 'dark'
-  const targetSurface = props.targetSurface ?? 'xpanel'
+  const isAudience = (value: unknown): value is NonNullable<LoginSurfaceProps['audience']> => value === 'xpanel' || value === 'xwhm' || value === 'xmail'
+  const audience = isAudience(props.audience) ? props.audience : undefined
+  const targetSurface = audience ?? (isAudience(props.targetSurface) ? props.targetSurface : 'xpanel')
+  const brand = audience === 'xwhm' ? 'xWHM' : audience === 'xmail' ? 'xMail' : 'xPanel'
   const text = (en: string, ar: string): string => escapeHtml(isAr ? ar : en)
   const locked = props.lockout?.locked === true
   const retry = props.lockout?.retryAfterSec
   const observedRetry = typeof retry === 'number' && Number.isFinite(retry) && retry > 0 ? Math.ceil(retry) : ''
   return `
-<div class="xp-login-shell" data-surface="login" data-auth-state="${locked ? 'locked' : 'credentials'}" data-locked-until="${escapeHtml(props.lockout?.lockedUntil ?? '')}" data-retry-after="${observedRetry}">
+<div class="xp-login-shell" data-surface="login" ${audience ? `data-login-audience="${audience}"` : ''} data-auth-state="${locked ? 'locked' : 'credentials'}" data-locked-until="${escapeHtml(props.lockout?.lockedUntil ?? '')}" data-retry-after="${observedRetry}">
   <header class="xp-login-topbar" role="banner">
     <div class="xp-brand">
       <span class="xp-brand__mark" aria-hidden="true">x</span>
       <div class="xp-brand__text">
-        <span class="xp-brand__name">xPanel</span>
-        <span class="xp-brand__sub">${text('xWHM · xPanel · xMail', 'xWHM · xPanel · xMail')}</span>
+        <span class="xp-brand__name" dir="ltr">${brand}</span>
+        ${audience ? '' : '<span class="xp-brand__sub">xWHM · xPanel · xMail</span>'}
       </div>
     </div>
     <div class="xp-topbar-actions">
@@ -35,16 +40,16 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
   </header>
   <main class="xp-login-main" aria-labelledby="login-heading">
     <section class="xp-card xp-login-card">
-      <div class="xp-login-step">${text('Step 1 of 2 — Credentials', 'الخطوة 1 من 2 — بيانات الدخول')}</div>
-      <h1 id="login-heading" class="xp-page-title">${text('Sign in to xPanel', 'تسجيل الدخول إلى xPanel')}</h1>
-      <p class="xp-subtitle">${text('Enter your account credentials. Additional verification appears when required.', 'أدخل بيانات حسابك. تظهر خطوات التحقق الإضافية عند طلبها.')}</p>
+      ${audience ? '' : `<div class="xp-login-step">${text('Step 1 of 2 — Credentials', 'الخطوة 1 من 2 — بيانات الدخول')}</div>`}
+      <h1 id="login-heading" class="xp-page-title">${text(`Sign in to ${brand}`, `تسجيل الدخول إلى ${brand}`)}</h1>
+      ${audience ? '' : `<p class="xp-subtitle" id="login-description">${text('Enter your account credentials. Additional verification appears when required.', 'أدخل بيانات حسابك. تظهر خطوات التحقق الإضافية عند طلبها.')}</p>`}
       <div class="xp-alert xp-alert--critical" role="alert" data-auth-error data-lockout-state="${locked ? 'locked' : 'unknown'}" ${props.errorMessage || locked ? '' : 'hidden'}>${escapeHtml(props.errorMessage ?? (locked ? (isAr ? 'تسجيل الدخول مقفل مؤقتًا.' : 'Sign-in is temporarily locked.') : ''))}</div>
       <p class="xp-help" role="status" aria-live="polite" data-auth-status></p>
       <noscript><p>${text('JavaScript is required to submit this sign-in form.', 'يلزم تشغيل JavaScript لإرسال نموذج تسجيل الدخول.')}</p></noscript>
-      <form class="xp-form" method="post" action="/api/auth/login" data-login-form>
+      <form class="xp-form" method="post" action="/api/auth/login" ${audience ? 'aria-labelledby="login-heading"' : 'aria-describedby="login-description"'} data-login-form>
         <div class="xp-field">
-          <label class="xp-label" for="login-username">${text('Username', 'اسم المستخدم')}</label>
-          <input id="login-username" name="username" type="text" class="xp-input" dir="ltr" autocomplete="username" required value="${escapeHtml(props.username ?? '')}" />
+          <label class="xp-label" for="login-username">${audience === 'xmail' ? text('Hosting account username', 'اسم مستخدم الاستضافة') : text('Username', 'اسم المستخدم')}</label>
+          <input id="login-username" name="username" type="text" class="xp-input" dir="ltr" autocomplete="username" autocapitalize="none" spellcheck="false" required value="${escapeHtml(props.username ?? '')}" />
         </div>
         <div class="xp-field">
           <label class="xp-label" for="login-password">${text('Password', 'كلمة المرور')}</label>
@@ -102,15 +107,15 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
         </form>
       </section>
       <button type="button" class="xp-btn" data-action="logout" data-auth-cancel hidden>${text('Cancel and sign out', 'إلغاء وتسجيل الخروج')}</button>
-      <details class="xp-cli-recovery" data-cli-recovery>
-        <summary>${text('Recover access with server administrator help', 'استعادة الوصول بمساعدة مدير الخادم')}</summary>
+      ${audience && audience !== 'xwhm' ? `<details class="xp-cli-recovery" data-account-recovery><summary>${text('Sign-in help', 'مساعدة الدخول')}</summary><p class="xp-help">${text('Contact your hosting administrator.', 'تواصل مع مدير الاستضافة.')}</p></details>` : `<details class="xp-cli-recovery" data-cli-recovery>
+        <summary>${audience ? text('Sign-in help', 'مساعدة الدخول') : text('Recover access with server administrator help', 'استعادة الوصول بمساعدة مدير الخادم')}</summary>
         <p class="xp-help">${text('An administrator with root SSH access can use:', 'يمكن لمدير يملك وصول root عبر SSH استخدام:')}</p>
         <pre class="xp-code-block" dir="ltr"><bdi dir="ltr">xpanel reset-password &lt;user&gt; --password-stdin
 xpanel disable-2fa &lt;user&gt;</bdi></pre>
-      </details>
+      </details>`}
     </section>
 
-    <aside class="xp-login-aside" aria-label="${text('Sign-in information and surfaces', 'معلومات الدخول والواجهات')}">
+    ${audience ? '' : `<aside class="xp-login-aside" aria-label="${text('Sign-in information and surfaces', 'معلومات الدخول والواجهات')}">
       <div class="xp-login-aside-card">
         <h2 class="xp-login-aside-title">${text('Before you sign in', 'قبل تسجيل الدخول')}</h2>
         <dl class="xp-login-dl">
@@ -139,11 +144,11 @@ xpanel disable-2fa &lt;user&gt;</bdi></pre>
           </a>
         </div>
       </div>
-    </aside>
+    </aside>`}
   </main>
-  <footer class="xp-login-footer" role="contentinfo">
+  ${audience ? '' : `  <footer class="xp-login-footer" role="contentinfo">
     <span>${text('xPanel Hosting Control Plane', 'منصة استضافة xPanel')}</span>
     <span>${text('Keyboard accessible · English (LTR) & Arabic (RTL)', 'دعم كامل للوحة المفاتيح · العربية والإنجليزية')}</span>
-  </footer>
+  </footer>`}
 </div>`.trim()
 }

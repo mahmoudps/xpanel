@@ -5,6 +5,8 @@ import { posix } from 'node:path'
 import { isIP } from 'node:net'
 import {
   fail,
+  MANAGEMENT_PUBLIC_PORTS,
+  MANAGEMENT_BACKEND_PORTS,
   MAX_ACCOUNT_UID,
   MIN_ACCOUNT_UID,
   validateDocRoot,
@@ -339,7 +341,7 @@ export const assertRegex = (v: unknown, what = 'pattern'): string => {
 
 export const assertBackendPort = (settings: ServerSettings): number => {
   const p = assertInt('backendPort', settings.backendPort, 1024, 65535)
-  if (p === settings.panelPort || p === settings.sshPort) invalid('backendPort', p, 'collides with the panel or SSH port')
+  if ([settings.panelPort, settings.sshPort, ...MANAGEMENT_PUBLIC_PORTS, ...MANAGEMENT_BACKEND_PORTS].includes(p)) invalid('backendPort', p, 'collides with a management or SSH port')
   return p
 }
 

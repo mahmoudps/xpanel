@@ -13,7 +13,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { dirname, parse, resolve } from 'node:path'
+import { delimiter, dirname, isAbsolute, parse, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gunzipSync, gzipSync } from 'node:zlib'
 import {
@@ -313,6 +313,12 @@ function assertSafeDestinationAncestors(destination) {
   return absDest
 }
 
+function isPathInside(parent, candidate) {
+  const rel = relative(parent, candidate)
+  if (rel === '') return true
+  return !rel.startsWith('..') && !isAbsolute(rel)
+}
+
 function isKnownDependencyDirectory(relPath) {
   if (relPath === 'node_modules' || relPath === '.pnpm-store') return true
   return /^(apps|packages)\/[^/]+\/node_modules$/.test(relPath)
@@ -390,31 +396,111 @@ function computeReceiptDigest(receiptPayload) {
   return sha256Hex(JSON.stringify(canonical))
 }
 
-function defaultInstallCommand(targetDir) {
-  const toolchainScript = resolve(targetDir, 'scripts/toolchain.mjs')
-  const basePath = process.env.PATH ?? '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
-  const pathWithLab = process.platform === 'linux' && !basePath.includes('/opt/xpanel-lab/bin')
-    ? `/opt/xpanel-lab/bin:${basePath}`
-    : basePath
-  const sanitizedEnv = {
-    PATH: pathWithLab,
-    HOME: process.env.HOME ?? '/root',
+const HOST_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
+
+export function buildFrozenInstallEnvironment(targetDir, { pnpmPath: explicitPnpmPath = null } = {}) {
+  const nodePin = readFileSync(resolve(targetDir, '.node-version'), 'utf8').trim()
+  if (!/^\d+\.\d+\.\d+$/.test(nodePin) || process.version !== `v${nodePin}`) {
+    throw new Error(`Frozen install requires the snapshot Node pin ${nodePin}; this process is ${process.version}`)
+  }
+  const manifest = JSON.parse(readFileSync(resolve(targetDir, 'package.json'), 'utf8'))
+  const manager = /^pnpm@(\d+\.\d+\.\d+)$/.exec(manifest.packageManager ?? '')
+  if (!manager) throw new Error('Snapshot packageManager pin is not an exact pnpm version')
+  const wanted = manager[1]
+  const executableName = process.platform === 'win32' ? 'pnpm.exe' : 'pnpm'
+  if (explicitPnpmPath !== null && !isAbsolute(explicitPnpmPath)) {
+    throw new Error('Explicit pnpmPath must be an absolute coordinator-supplied path')
+  }
+  const candidates = explicitPnpmPath !== null ? [explicitPnpmPath] : [
+    resolve(HOST_ROOT, '.tools', `pnpm-v${wanted}`, 'node_modules', 'pnpm', executableName),
+    resolve(HOST_ROOT, '.tools', 'pnpm-runtime', 'node_modules', 'pnpm', executableName),
+    resolve('/opt/xpanel-lab/bin', executableName),
+  ]
+  let pnpmPath = null
+  let pnpmArgs = []
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue
+    const canonical = realpathSync(candidate)
+    if (!lstatSync(canonical).isFile() || isPathInside(realpathSync(targetDir), canonical)) continue
+    // An explicit JavaScript CLI is run by the already pinned Node, never by a shell shim.
+    const args = /\.[cm]js$/.test(canonical) ? [canonical] : []
+    const command = args.length ? process.execPath : canonical
+    const probe = spawnSync(command, [...args, '--version'], { encoding: 'utf8', timeout: 20_000, windowsHide: true,
+      env: { PATH: dirname(process.execPath), LANG: 'C', LC_ALL: 'C', ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot ?? 'C:\\Windows' } : {}) } })
+    if ((probe.status ?? 1) === 0 && (probe.stdout ?? '').trim() === wanted) {
+      pnpmPath = canonical
+      pnpmArgs = args
+      break
+    }
+  }
+  if (!pnpmPath) throw new Error(`Pinned pnpm ${wanted} was not found at the explicit path, beside the verifier or in /opt/xpanel-lab/bin`)
+  const systemPath = process.platform === 'win32'
+    ? [process.env.SystemRoot ? `${process.env.SystemRoot}\\System32` : 'C:\\Windows\\System32']
+    : ['/opt/xpanel-lab/bin', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin']
+  const env = {
+    PATH: [dirname(process.execPath), dirname(pnpmPath), ...systemPath].join(delimiter),
+    HOME: process.env.HOME ?? (process.platform === 'win32' ? process.env.USERPROFILE ?? 'C:\\Users\\Default' : '/root'),
     LANG: 'C',
     LC_ALL: 'C',
     CI: 'true',
   }
-  const child = spawnSync(process.execPath, [toolchainScript, 'pnpm', 'install', '--frozen-lockfile'], {
+  if (process.platform === 'win32') {
+    env.SystemRoot = process.env.SystemRoot ?? 'C:\\Windows'
+    env.PATHEXT = '.EXE'
+  }
+  return { env, pnpmPath, pnpmVersion: wanted, command: pnpmArgs.length ? process.execPath : pnpmPath, args: pnpmArgs }
+}
+
+function defaultInstallCommand(targetDir, options = {}) {
+  let tool
+  try {
+    tool = buildFrozenInstallEnvironment(targetDir, options)
+  } catch (error) {
+    return {
+      exitCode: 1,
+      stdout: '',
+      stderr: error instanceof Error ? error.message : String(error),
+      pnpmVersion: null,
+    }
+  }
+  const child = spawnSync(tool.command, [...tool.args, 'install', '--frozen-lockfile'], {
     cwd: targetDir,
-    env: sanitizedEnv,
+    env: tool.env,
     encoding: 'utf8',
     windowsHide: true,
     timeout: 300_000,
     maxBuffer: 16 * 1024 * 1024,
   })
+  if ((child.status ?? 1) !== 0) {
+    return {
+      exitCode: child.status ?? 1,
+      stdout: child.stdout ?? '',
+      stderr: child.stderr ?? (child.error?.message ?? ''),
+      pnpmVersion: null,
+    }
+  }
+  const version = spawnSync(tool.command, [...tool.args, '--version'], {
+    cwd: targetDir,
+    env: tool.env,
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 60_000,
+    maxBuffer: 1024 * 1024,
+  })
+  const pnpmVersion = (version.stdout ?? '').trim()
+  if ((version.status ?? 1) !== 0 || pnpmVersion !== tool.pnpmVersion) {
+    return {
+      exitCode: 1,
+      stdout: version.stdout ?? '',
+      stderr: version.stderr || version.error?.message || 'Pinned pnpm version probe failed after frozen install',
+      pnpmVersion: null,
+    }
+  }
   return {
-    exitCode: child.status ?? 1,
+    exitCode: 0,
     stdout: child.stdout ?? '',
-    stderr: child.stderr ?? (child.error?.message ?? ''),
+    stderr: child.stderr ?? '',
+    pnpmVersion,
   }
 }
 
@@ -425,6 +511,7 @@ export function verifyAndExtractSourceSnapshot({
   expectedSourceSha256,
   destination,
   receiptOutputPath = null,
+  pnpmPath = null,
   installCommand = defaultInstallCommand,
 }) {
   if (!HEX64_RE.test(expectedArchiveSha256 ?? '')) {
@@ -490,10 +577,11 @@ export function verifyAndExtractSourceSnapshot({
       mkdirSync(parentDir, { recursive: true, mode: 0o755 })
       // Normalize every intermediate directory under absDest
       let cur = parentDir
-      while (cur.startsWith(absDest) && !createdDirs.has(cur)) {
+      while (isPathInside(absDest, cur) && !createdDirs.has(cur)) {
         if (isRootLinux) chownSync(cur, 0, 0)
         chmodSync(cur, 0o755)
         createdDirs.add(cur)
+        if (cur === absDest) break
         cur = dirname(cur)
       }
     }
@@ -506,7 +594,7 @@ export function verifyAndExtractSourceSnapshot({
   verifyExtractedTreeAgainstEntries(absDest, manifest.files, { allowDependencyDirs: false })
 
   // Execute frozen-lockfile install in destination
-  const installResult = installCommand(absDest)
+  const installResult = installCommand(absDest, { pnpmPath })
   if (!installResult || installResult.exitCode !== 0) {
     throw new Error(`Frozen lockfile install failed in ${absDest} (exit=${installResult?.exitCode}): ${installResult?.stderr || ''}`)
   }
@@ -533,6 +621,9 @@ export function verifyAndExtractSourceSnapshot({
       node: process.version,
       platform: process.platform,
       uid: process.getuid?.() ?? null,
+      pnpm: typeof installResult.pnpmVersion === 'string' && /^\d+\.\d+\.\d+$/.test(installResult.pnpmVersion)
+        ? installResult.pnpmVersion
+        : null,
     },
     install: {
       executed: true,
@@ -562,15 +653,24 @@ export function verifyAndExtractSourceSnapshot({
 }
 
 /**
- * Verifies that `rootDir` contains a valid `.xpanel-snapshot-receipt.json` matching
- * `expectedArchiveSha256` and that every file in `receipt.files` on disk is unmodified.
- * Never trusts `XPANEL_SOURCE_VERIFIED=true`.
+ * Verifies that `rootDir` contains a valid `.xpanel-snapshot-receipt.json` matching the
+ * coordinator archive and source digests, and that every receipt file on disk is unmodified.
+ * A receipt self-hash is not a coordinator signature. Never trusts `XPANEL_SOURCE_VERIFIED=true`.
  */
-export function verifySnapshotReceipt({ rootDir, expectedArchiveSha256, receiptPath = null }) {
+export function verifySnapshotReceipt({
+  rootDir,
+  expectedArchiveSha256,
+  expectedSourceSha256,
+  receiptPath = null,
+  requirePinnedPnpm = false,
+}) {
   const reasons = []
   if (!HEX64_RE.test(expectedArchiveSha256 ?? '')) {
     reasons.push('A coordinator supplied --snapshot-sha256=<64 lowercase hex> is required.')
     return { ok: false, reasons, receipt: null }
+  }
+  if (!HEX64_RE.test(expectedSourceSha256 ?? '')) {
+    reasons.push('A coordinator supplied --source-sha256=<64 lowercase hex> is required.')
   }
 
   const absRoot = resolve(rootDir)
@@ -596,6 +696,9 @@ export function verifySnapshotReceipt({ rootDir, expectedArchiveSha256, receiptP
     if (receipt?.archive_sha256 !== expectedArchiveSha256) {
       reasons.push(`Snapshot receipt archive_sha256 (${receipt?.archive_sha256}) does not match expected (${expectedArchiveSha256}).`)
     }
+    if (HEX64_RE.test(expectedSourceSha256 ?? '') && receipt?.source_sha256 !== expectedSourceSha256) {
+      reasons.push(`Snapshot receipt source_sha256 (${receipt?.source_sha256}) does not match coordinator expected source digest (${expectedSourceSha256}).`)
+    }
     const expectedReceiptDigest = computeReceiptDigest(receipt)
     if (!HEX64_RE.test(receipt?.receipt_sha256 ?? '') || receipt.receipt_sha256 !== expectedReceiptDigest) {
       reasons.push('Snapshot receipt self-digest (receipt_sha256) is invalid or tampered.')
@@ -611,6 +714,18 @@ export function verifySnapshotReceipt({ rootDir, expectedArchiveSha256, receiptP
       const currentSourceSha = computeSourceDigest(verifiedEntries)
       if (currentSourceSha !== receipt.source_sha256) {
         reasons.push(`Current source tree digest (${currentSourceSha}) drifted from receipt (${receipt.source_sha256}).`)
+      }
+      if (HEX64_RE.test(expectedSourceSha256 ?? '') && currentSourceSha !== expectedSourceSha256) {
+        reasons.push(`Current source tree digest (${currentSourceSha}) does not match coordinator expected source digest (${expectedSourceSha256}).`)
+      }
+    }
+    if (requirePinnedPnpm && !/^\d+\.\d+\.\d+$/.test(receipt?.runtime?.pnpm ?? '')) {
+      reasons.push('Snapshot receipt is missing the pnpm version recorded by the frozen install.')
+    } else if (requirePinnedPnpm) {
+      const manifest = JSON.parse(readFileSync(resolve(absRoot, 'package.json'), 'utf8'))
+      const pin = /^pnpm@(\d+\.\d+\.\d+)$/.exec(manifest.packageManager ?? '')
+      if (!pin || receipt.runtime.pnpm !== pin[1]) {
+        reasons.push('Snapshot receipt pnpm version does not match the exact source-bound packageManager pin.')
       }
     }
     return { ok: reasons.length === 0, reasons, receipt: reasons.length === 0 ? receipt : null }
@@ -641,6 +756,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       expectedSourceSha256: args['expected-source-sha256'],
       destination: args['destination'],
       receiptOutputPath: args['receipt'] ?? null,
+      pnpmPath: args['pnpm-path'] ?? null,
     })
     process.stdout.write(
       `${JSON.stringify({

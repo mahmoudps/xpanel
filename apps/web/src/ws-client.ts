@@ -449,6 +449,8 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
   var lastKeyPrefixTimer = null;
   var activeOverlay = null;
   var toolbarMobileMode = null;
+  var lastFocusedElement = null;
+  var commandPalette = null;
   var focusableSelector = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), details > summary:first-of-type, [tabindex], [contenteditable="true"]';
 
   function setWsBadgeState(state) {
@@ -585,7 +587,7 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
   }
 
   function isVisibleElement(element) {
-    if (!element || element.closest('[hidden], [inert]') || !element.getClientRects().length) return false;
+    if (!element || !element.isConnected || element.closest('[hidden], [inert]') || !element.getClientRects().length) return false;
     if (typeof element.checkVisibility === 'function') {
       if (!element.checkVisibility()) return false;
     } else {
@@ -626,6 +628,35 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
     return details.querySelector(':scope > summary') || target;
   }
 
+  function responsiveFocusTarget() {
+    var focused = document.activeElement;
+    // CSS can blur a newly hidden control before the resize listener runs.
+    if (focused === document.body && lastFocusedElement && !isVisibleElement(lastFocusedElement)) return lastFocusedElement;
+    return focused;
+  }
+
+  function focusVisibleTarget(target) {
+    if (!target || !target.matches(focusableSelector) || !isVisibleElement(target)) return false;
+    target.focus({ preventScroll: true });
+    return document.activeElement === target;
+  }
+
+  function restoreVisibleFocus(target) {
+    if (focusVisibleTarget(toolbarFocusReturn(target))) return;
+    var toolbar = target && target.closest ? target.closest('details[data-xp-toolbar-options]') : null;
+    if (toolbar) {
+      var toolbarTargets = focusableElements(toolbar);
+      if (focusVisibleTarget(toolbarTargets[0])) return;
+    }
+    var sidebar = document.querySelector('[data-xp-sidebar]');
+    if (window.innerWidth < 960) {
+      if (focusVisibleTarget(document.querySelector('[data-action="toggle-mobile-nav"]'))) return;
+    } else if (sidebar) {
+      if (focusVisibleTarget(sidebar.querySelector('[aria-current="page"]'))) return;
+    }
+    focusVisibleTarget(document.getElementById('main-content'));
+  }
+
   function closeToolbarOptions() {
     if (window.innerWidth >= 960) return;
     var toolbars = document.querySelectorAll('details[data-xp-toolbar-options]');
@@ -639,11 +670,12 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
     var toolbars = document.querySelectorAll('details[data-xp-toolbar-options]');
     for (var i = 0; i < toolbars.length; i++) {
       var toolbar = toolbars[i];
-      var focused = document.activeElement;
+      var focused = responsiveFocusTarget();
       var summary = toolbar.querySelector(':scope > summary');
       toolbar.open = !mobile;
       toolbar.dataset.mobileReady = 'true';
-      if (mobile && summary && focused !== summary && toolbar.contains(focused)) summary.focus({ preventScroll: true });
+      if (mobile && summary && focused !== summary && toolbar.contains(focused)) focusVisibleTarget(summary);
+      else if (!mobile && focused === summary) restoreVisibleFocus(summary);
     }
   }
 
@@ -683,6 +715,7 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
       else overlay.element.setAttribute('aria-modal', overlay.ariaModal);
     } else {
       overlay.element.hidden = true;
+      if (overlay.kind === 'cmdk' && commandPalette) commandPalette.input.setAttribute('aria-expanded', 'false');
     }
     if (overlay.tabIndex === null) overlay.element.removeAttribute('tabindex');
     for (var i = 0; i < overlay.inertElements.length; i++) {
@@ -692,14 +725,14 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
     }
     document.body.style.overflow = overlay.bodyOverflow;
     document.documentElement.style.overflow = overlay.documentOverflow;
-    if (restoreFocus && overlay.returnFocus && overlay.returnFocus.isConnected && isVisibleElement(overlay.returnFocus)) {
-      overlay.returnFocus.focus({ preventScroll: true });
-    }
+    if (restoreFocus) restoreVisibleFocus(overlay.returnFocus);
   }
 
   function openOverlay(element, kind, trigger) {
     if (!element) return;
     if (activeOverlay && activeOverlay.element === element) return;
+    lastKeyPrefix = null;
+    clearTimeout(lastKeyPrefixTimer);
     var returnFocus = trigger || document.activeElement;
     if (activeOverlay) {
       if (activeOverlay.element.contains(returnFocus)) returnFocus = activeOverlay.returnFocus;
@@ -749,8 +782,105 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
     var modal = document.getElementById('xp-cmdk-modal') || document.querySelector('[data-xp-cmdk]');
     if (!modal) return;
     var shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : modal.hidden;
-    if (shouldOpen) openOverlay(modal, 'cmdk', trigger);
+    if (shouldOpen) {
+      var alreadyOpen = activeOverlay && activeOverlay.element === modal;
+      openOverlay(modal, 'cmdk', trigger);
+      if (!alreadyOpen && commandPalette && commandPalette.modal === modal) {
+        commandPalette.input.value = '';
+        commandPalette.input.setAttribute('aria-expanded', 'true');
+        filterCommandPalette();
+        commandPalette.results.scrollTop = 0;
+      }
+    }
     else if (activeOverlay && activeOverlay.element === modal) closeActiveOverlay(true);
+  }
+
+  function normalizeCommandSearch(value) {
+    return value.normalize('NFKD').replace(/[\u0300-\u036f\u064b-\u065f\u0670\u0640]/g, '').toLowerCase();
+  }
+
+  function selectCommandResult(index, scroll) {
+    var palette = commandPalette;
+    if (!palette) return;
+    var items = palette.matches;
+    palette.activeIndex = items.length ? (index + items.length) % items.length : -1;
+    for (var i = 0; i < palette.items.length; i++) palette.items[i].link.setAttribute('aria-selected', 'false');
+    var selected = items[palette.activeIndex];
+    if (!selected) {
+      palette.input.removeAttribute('aria-activedescendant');
+      return;
+    }
+    selected.link.setAttribute('aria-selected', 'true');
+    palette.input.setAttribute('aria-activedescendant', selected.link.id);
+    if (scroll) {
+      // Keep the selected row visible without scrolling the document behind the dialog.
+      var rowRect = selected.row.getBoundingClientRect();
+      var listRect = palette.results.getBoundingClientRect();
+      if (rowRect.top < listRect.top) palette.results.scrollTop += rowRect.top - listRect.top;
+      else if (rowRect.bottom > listRect.bottom) palette.results.scrollTop += rowRect.bottom - listRect.bottom;
+    }
+  }
+
+  function filterCommandPalette() {
+    var palette = commandPalette;
+    if (!palette) return;
+    var terms = normalizeCommandSearch(palette.input.value.trim()).split(/\\s+/).filter(Boolean);
+    palette.matches = [];
+    for (var i = 0; i < palette.items.length; i++) {
+      var item = palette.items[i];
+      item.row.hidden = !terms.every(function (term) { return item.search.indexOf(term) !== -1; });
+      if (!item.row.hidden) palette.matches.push(item);
+    }
+    palette.empty.hidden = palette.matches.length !== 0;
+    palette.status.textContent = palette.matches.length ? palette.status.getAttribute('data-count-label') + ': ' + String(palette.matches.length) : '';
+    for (var j = 0; j < palette.matches.length; j++) {
+      palette.matches[j].link.setAttribute('aria-posinset', String(j + 1));
+      palette.matches[j].link.setAttribute('aria-setsize', String(palette.matches.length));
+    }
+    selectCommandResult(0, false);
+    palette.results.scrollTop = 0;
+  }
+
+  function bindCommandPalette() {
+    var modal = document.getElementById('xp-cmdk-modal') || document.querySelector('[data-xp-cmdk]');
+    if (!modal) return;
+    var input = modal.querySelector('[data-cmdk-search]');
+    var results = modal.querySelector('[data-cmdk-results]');
+    var empty = modal.querySelector('[data-cmdk-empty]');
+    var status = modal.querySelector('[data-cmdk-status]');
+    if (!input || !results || !empty || !status) return;
+    var items = Array.prototype.map.call(results.querySelectorAll('a[data-cmdk-item]'), function (link) {
+      return { link: link, row: link.closest('[data-cmdk-row]'), search: normalizeCommandSearch(link.getAttribute('data-cmdk-search-text') || link.textContent) };
+    }).filter(function (item) { return item.row; });
+    commandPalette = { modal: modal, input: input, results: results, empty: empty, status: status, items: items, matches: [], activeIndex: -1 };
+    input.addEventListener('input', filterCommandPalette);
+    results.addEventListener('pointermove', function (event) {
+      var link = event.target.closest ? event.target.closest('a[data-cmdk-item]') : null;
+      var index = commandPalette.matches.findIndex(function (item) { return item.link === link; });
+      if (index >= 0 && index !== commandPalette.activeIndex) selectCommandResult(index, false);
+    });
+    results.addEventListener('click', function (event) {
+      var link = event.target.closest ? event.target.closest('a[data-cmdk-item]') : null;
+      if (link && results.contains(link) && activeOverlay && activeOverlay.element === modal) closeActiveOverlay(true);
+    });
+    filterCommandPalette();
+  }
+
+  function handleCommandPaletteKey(event) {
+    var palette = commandPalette;
+    if (!palette || activeOverlay.element !== palette.modal || event.target !== palette.input || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return false;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      selectCommandResult(palette.activeIndex + (event.key === 'ArrowDown' ? 1 : -1), true);
+      return true;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      var selected = palette.matches[palette.activeIndex];
+      if (selected) selected.link.click();
+      return true;
+    }
+    return false;
   }
 
   function toggleMobileNavigation(trigger) {
@@ -783,12 +913,20 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
   function bindOverlayFocus() {
     syncResponsiveToolbar();
     document.addEventListener('focusin', function (event) {
+      lastFocusedElement = event.target;
       if (activeOverlay && !activeOverlay.element.contains(event.target)) focusOverlay(activeOverlay);
+    });
+    document.addEventListener('focusout', function (event) {
+      if (!event.relatedTarget && isVisibleElement(event.target)) lastFocusedElement = null;
     });
     window.addEventListener('resize', function () {
       syncResponsiveToolbar();
       if (window.innerWidth >= 960) {
-        if (activeOverlay && activeOverlay.kind === 'mobile-nav') closeActiveOverlay(false);
+        if (activeOverlay && activeOverlay.kind === 'mobile-nav') {
+          var focused = responsiveFocusTarget();
+          closeActiveOverlay(false);
+          if (!isVisibleElement(focused)) restoreVisibleFocus(focused);
+        }
         setMobileNavigationState(false);
       }
     });
@@ -846,6 +984,199 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
     }
     var destination = new URL(routeOrId, window.location.href);
     if (destination.origin === window.location.origin) window.location.assign(destination.href);
+  }
+
+  function bindAccountCreation() {
+    var form = document.querySelector('[data-create-account-form]');
+    if (!form) return;
+    var button = form.querySelector('button[type="submit"]');
+    var feedback = form.querySelector('[data-account-create-status]');
+    var password = form.querySelector('[name="password"]');
+    if (!button || !feedback || !password) return;
+    var busy = false, accepted = false, dirty = false, reviewRequired = false;
+    var controls = Array.prototype.map.call(form.querySelectorAll('input,select'), function (control) {
+      return { element: control, disabled: control.disabled, readOnly: Boolean(control.readOnly) };
+    });
+    var ar = document.documentElement.lang === 'ar';
+    function copy(en, arabic) { return ar ? arabic : en; }
+    function status(message, state) {
+      feedback.textContent = message; feedback.hidden = false;
+      feedback.setAttribute('data-state', state);
+      feedback.setAttribute('role', state === 'failed' ? 'alert' : 'status');
+    }
+    form.addEventListener('input', function () { dirty = true; });
+    window.addEventListener('beforeunload', function (event) {
+      if (!dirty || accepted) return;
+      event.preventDefault(); event.returnValue = '';
+    });
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (busy || accepted || button.disabled || !form.reportValidity()) return;
+      if (typeof window.xpanelSessionRequest !== 'function') {
+        status(copy('Account creation is unavailable. No changes were made.', 'إنشاء الحساب غير متاح. لم تُجرَ تغييرات.'), 'failed'); return;
+      }
+      var value = function (name) { return form.querySelector('[name="' + name + '"]').value.trim(); };
+      var body = { username: value('username'), primaryDomain: value('primaryDomain'), planId: value('planId'), password: password.value };
+      var ipv4 = value('ipv4'), ipv6 = value('ipv6');
+      if (ipv4) body.ipv4 = ipv4;
+      if (ipv6) body.ipv6 = ipv6;
+      var submittedValues = controls.map(function (state) {
+        return state.element.name === 'password' ? '' : state.element.value;
+      });
+      busy = true; button.disabled = true; form.setAttribute('aria-busy', 'true');
+      controls.forEach(function (state) { state.element.disabled = true; });
+      password.value = '';
+      status(copy('Submitting…', 'جارٍ الإرسال…'), 'loading');
+      Promise.resolve().then(function () { return window.xpanelSessionRequest('POST', '/api/accounts', body); }).then(function (result) {
+        var execution = result && result.execution;
+        if (!result || !result.account || result.account.username !== body.username || !result.reconcile || result.reconcile.status !== 'applied' || !execution || execution.status !== 'configuration_applied' || execution.scope !== 'global_configuration' || execution.targetVerified !== false || execution.verificationRequired !== true) {
+          reviewRequired = true;
+          status(copy('The result could not be verified. Review accounts before retrying.', 'تعذر التحقق من النتيجة. راجع الحسابات قبل إعادة المحاولة.'), 'failed'); return;
+        }
+        accepted = true; dirty = false;
+        status(copy('Account configuration created. Hosting verification is still required.', 'أُنشئ إعداد الحساب. ما زال يلزم التحقق من الاستضافة.'), 'pending');
+      }).catch(function (error) {
+        var details = error && error.details || {};
+        reviewRequired = details.stateChanged !== false;
+        var message = reviewRequired
+          ? copy('The request could not be verified. Review accounts before retrying.', 'تعذر التحقق من الطلب. راجع الحسابات قبل إعادة المحاولة.')
+          : copy('Account creation is unavailable. No changes were made.', 'إنشاء الحساب غير متاح. لم تُجرَ تغييرات.');
+        if (!reviewRequired) {
+          if (error && error.status === 401) message = copy('Your session expired. Sign in again.', 'انتهت الجلسة. سجّل الدخول مجددًا.');
+          else if (error && error.status === 403) message = copy('You do not have permission to create accounts.', 'لا تملك صلاحية إنشاء الحسابات.');
+          else if (details.reason === 'account_ipv4_unavailable') message = copy('Choose a server IPv4 address before creating the account.', 'اختر عنوان IPv4 للخادم قبل إنشاء الحساب.');
+        }
+        status(message, 'failed');
+      }).finally(function () {
+        delete body.password;
+        controls.forEach(function (state, index) {
+          var control = state.element;
+          control.value = submittedValues[index];
+          control.disabled = reviewRequired || (accepted && control.tagName === 'SELECT') || state.disabled;
+          if (control.tagName === 'INPUT') control.readOnly = accepted || state.readOnly;
+        });
+        busy = false; form.setAttribute('aria-busy', 'false'); button.disabled = accepted || reviewRequired;
+        feedback.focus();
+      });
+    });
+  }
+
+  function bindAccountActions() {
+    var workspace = document.querySelector('[data-accounts-workspace]');
+    var dialog = workspace && workspace.querySelector('[data-account-dialog]');
+    if (!dialog) return;
+    var form = dialog.querySelector('[data-account-action-form]');
+    var confirmation = dialog.querySelector('[data-type-to-confirm]');
+    var reason = dialog.querySelector('[name="reason"]');
+    var submission = dialog.querySelector('[data-account-action-submit]');
+    var cancel = dialog.querySelector('[data-account-action-cancel]');
+    var feedback = dialog.querySelector('[data-account-action-status]');
+    var target = null, origin = null, busy = false, accepted = false;
+    var ar = document.documentElement.lang === 'ar';
+    function copy(en, arabic) { return ar ? arabic : en; }
+    function status(message, state) {
+      feedback.textContent = message;
+      feedback.hidden = !message;
+      feedback.setAttribute('data-state', state);
+      feedback.setAttribute('role', state === 'failed' ? 'alert' : 'status');
+    }
+    function validate() {
+      submission.disabled = busy || accepted || !target || (target.action === 'terminate-account' && confirmation.value !== target.username);
+    }
+    function close() { if (!busy) dialog.close(); }
+    function clear() {
+      target = null; accepted = false; confirmation.value = ''; reason.value = ''; status('', 'idle');
+      if (origin && origin.isConnected) {
+        var returnTarget = origin.disabled ? origin.closest('[data-account-row]').querySelector('summary,button:not([disabled])') : origin;
+        if (returnTarget) returnTarget.focus();
+      }
+      origin = null; validate();
+    }
+    confirmation.addEventListener('input', validate);
+    cancel.addEventListener('click', close);
+    dialog.addEventListener('cancel', function (event) { if (busy) event.preventDefault(); });
+    dialog.addEventListener('close', clear);
+    // A native modal keeps background content inert. Capture shortcuts while it is open.
+    document.addEventListener('keydown', function (event) {
+      if (!dialog.open) return;
+      event.stopPropagation();
+      if (event.key === 'Escape') { event.preventDefault(); close(); return; }
+      if (event.key === 'Tab') {
+        var fields = Array.prototype.filter.call(dialog.querySelectorAll('button:not([disabled]),input:not([disabled]),textarea:not([disabled]),[tabindex="0"]'), function (element) { return !element.closest('[hidden]'); });
+        var first = fields[0], last = fields[fields.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+      if (event.key === 'Enter' && target && target.action === 'terminate-account' && (busy || confirmation.value !== target.username)) event.preventDefault();
+    }, true);
+    workspace.addEventListener('click', function (event) {
+      var button = event.target.closest && event.target.closest('[data-account-id][data-action]');
+      if (!button || !workspace.contains(button) || busy || dialog.open) return;
+      var action = button.getAttribute('data-action');
+      if (['suspend-account', 'unsuspend-account', 'terminate-account'].indexOf(action) === -1) return;
+      event.preventDefault();
+      var id = button.getAttribute('data-account-id'), username = button.getAttribute('data-username'), domain = button.getAttribute('data-domain');
+      if (!id || !username || !domain || typeof dialog.showModal !== 'function') return;
+      // This target is captured from the originating row, never from the confirmation field or URL.
+      target = Object.freeze({ id: id, username: username, domain: domain, action: action });
+      origin = button; accepted = false; confirmation.value = ''; reason.value = ''; status('', 'idle');
+      var deleting = action === 'terminate-account', suspending = action === 'suspend-account';
+      dialog.querySelector('[data-account-dialog-title]').textContent = deleting ? copy('Delete account', 'حذف الحساب') : suspending ? copy('Suspend account', 'تعليق الحساب') : copy('Unsuspend account', 'إلغاء تعليق الحساب');
+      dialog.querySelector('[data-account-dialog-description]').textContent = deleting ? copy('Permanently removes this account and its data. This cannot be undone.', 'يحذف هذا الحساب وبياناته نهائيًا. لا يمكن التراجع.') : suspending ? copy('Hosting access will be suspended for this account.', 'سيُعلق وصول الاستضافة لهذا الحساب.') : copy('Restore hosting access for this account.', 'استعادة وصول الاستضافة لهذا الحساب.');
+      dialog.querySelector('[data-account-dialog-username]').textContent = username;
+      dialog.querySelector('[data-account-dialog-domain]').textContent = domain;
+      dialog.querySelector('[data-account-confirm-field]').hidden = !deleting;
+      dialog.querySelector('[data-account-reason-field]').hidden = !suspending;
+      confirmation.required = deleting;
+      submission.textContent = deleting ? copy('Delete account', 'حذف الحساب') : suspending ? copy('Suspend', 'تعليق') : copy('Unsuspend', 'إلغاء التعليق');
+      submission.classList.toggle('xp-accounts__delete', deleting);
+      validate(); dialog.showModal();
+      (deleting ? confirmation : suspending ? reason : cancel).focus();
+    });
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (busy || accepted || !target || (target.action === 'terminate-account' && confirmation.value !== target.username)) { validate(); return; }
+      if (typeof window.xpanelSessionRequest !== 'function') { status(copy('Action unavailable. No changes were made.', 'الإجراء غير متاح. لم تُجرَ تغييرات.'), 'failed'); return; }
+      var selected = target;
+      var deleting = selected.action === 'terminate-account';
+      var verb = selected.action === 'suspend-account' ? 'suspend' : 'unsuspend';
+      var endpoint = '/api/accounts/' + encodeURIComponent(selected.id) + (deleting ? '' : '/' + verb);
+      var body = deleting ? { confirmUsername: confirmation.value } : verb === 'suspend' ? { reason: reason.value.trim() } : {};
+      busy = true; cancel.disabled = true; confirmation.readOnly = true; reason.readOnly = true; form.setAttribute('aria-busy', 'true'); validate();
+      status(copy('Submitting…', 'جارٍ الإرسال…'), 'loading');
+      Promise.resolve().then(function () { return window.xpanelSessionRequest(deleting ? 'DELETE' : 'POST', endpoint, body); }).then(function (result) {
+        var expected = verb === 'suspend' ? 'suspended' : 'active';
+        var execution = result && result.execution;
+        if (deleting || !result || !result.account || result.account.id !== selected.id || result.account.status !== expected || !result.reconcile || result.reconcile.status !== 'applied' || !execution || execution.status !== 'configuration_applied' || execution.scope !== 'global_configuration' || execution.targetVerified !== false || execution.verificationRequired !== true) {
+          status(copy('The result could not be verified. Review the account before retrying.', 'تعذر التحقق من النتيجة. راجع الحساب قبل إعادة المحاولة.'), 'failed'); return;
+        }
+        accepted = true;
+        var row = origin && origin.closest('[data-account-row]');
+        var label = row && row.querySelector('[data-account-status] .xp-badge__label');
+        if (label) label.textContent = copy('Verification required', 'يلزم التحقق');
+        var badge = row && row.querySelector('[data-account-status] .xp-badge');
+        if (badge) {
+          badge.className = 'xp-badge xp-badge--warn';
+          badge.setAttribute('data-status', 'warn');
+          var icon = badge.querySelector('svg');
+          if (icon) icon.innerHTML = '<path d="M8 2.2L14.4 13.5H1.6L8 2.2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6.5V9.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.6" r="0.85" fill="currentColor"/>';
+        }
+        if (origin) origin.disabled = true;
+        status(copy('Configuration applied. Hosting verification is still required.', 'طُبق الإعداد. ما زال يلزم التحقق من الاستضافة.'), 'pending');
+      }).catch(function (error) {
+        var details = error && error.details || {};
+        var message = details.stateChanged === false ? copy('Action unavailable. No changes were made.', 'الإجراء غير متاح. لم تُجرَ تغييرات.') : copy('The request could not be verified. Review the account before retrying.', 'تعذر التحقق من الطلب. راجع الحساب قبل إعادة المحاولة.');
+        if (error && error.status === 401) message = copy('Your session expired. Sign in again.', 'انتهت الجلسة. سجّل الدخول مجددًا.');
+        else if (error && error.status === 403) message = copy('You do not have permission for this action.', 'لا تملك صلاحية هذا الإجراء.');
+        else if (error && error.status === 404) message = copy('This account is no longer available.', 'لم يعد هذا الحساب متاحًا.');
+        else if (error && error.status === 409) message = copy('This account changed. Reload before retrying.', 'تغيّر الحساب. أعد تحميل الصفحة قبل المحاولة.');
+        status(message, 'failed');
+      }).finally(function () {
+        busy = false; cancel.disabled = false; confirmation.readOnly = false; reason.readOnly = false; form.setAttribute('aria-busy', 'false');
+        validate();
+        feedback.focus();
+      });
+    });
   }
 
   function bindInteractiveClientActions() {
@@ -988,6 +1319,7 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
   function bindKeyboardShortcuts() {
     if (typeof document === 'undefined') return;
     document.addEventListener('keydown', function (e) {
+      if (e.isComposing) return;
       // Cmd/Ctrl+K -> Quick-bar Command Palette
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -1002,6 +1334,7 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
       }
 
       if (activeOverlay) {
+        if (activeOverlay.kind === 'cmdk' && handleCommandPaletteKey(e)) return;
         if (e.key === 'Tab') trapOverlayFocus(e);
         return;
       }
@@ -1011,16 +1344,24 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
         return;
       }
 
-      if (isEditableTarget(e.target)) return;
+      if (isEditableTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey || e.repeat) {
+        lastKeyPrefix = null;
+        clearTimeout(lastKeyPrefixTimer);
+        return;
+      }
 
       // '/' -> Focus filter or search input
       if (e.key === '/') {
-        var filterInput =
-          document.querySelector('[data-xp-filter-input]') ||
-          document.querySelector('input[type="search"]');
+        var filterInput = Array.prototype.find.call(
+          document.querySelectorAll('[data-xp-filter-input], input[type="search"]'),
+          function (target) { return !target.disabled && target.tabIndex >= 0 && isVisibleElement(target); }
+        );
         if (filterInput) {
           e.preventDefault();
-          filterInput.focus();
+          filterInput.focus({ preventScroll: true });
+        } else if (document.getElementById('xp-cmdk-modal') || document.querySelector('[data-xp-cmdk]')) {
+          e.preventDefault();
+          toggleCommandPalette(true);
         }
         return;
       }
@@ -1039,14 +1380,9 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
       if (lastKeyPrefix === 'g') {
         lastKeyPrefix = null;
         clearTimeout(lastKeyPrefixTimer);
-        var navTarget = null;
-        if (key === 'd') {
-          navTarget = document.querySelector('[data-xp-nav="dashboard"], a[href*="dashboard"], a[href="/home"]');
-        } else if (key === 'a') {
-          navTarget = document.querySelector('[data-xp-nav="accounts"], a[href*="accounts"]');
-        } else if (key === 'f') {
-          navTarget = document.querySelector('[data-xp-nav="files"], a[href*="files"]');
-        }
+        var routes = key === 'd' ? ['/home', '/whm', '/mail/inbox'] : key === 'a' ? ['/whm/accounts'] : key === 'f' ? ['/files/manager'] : [];
+        var navLinks = document.querySelectorAll('[data-xp-sidebar] a[data-nav-route]');
+        var navTarget = Array.prototype.find.call(navLinks, function (link) { return routes.indexOf(link.getAttribute('data-nav-route')) !== -1 && !link.closest('[hidden], [inert]'); });
         if (navTarget && typeof navTarget.click === 'function') {
           e.preventDefault();
           navTarget.click();
@@ -1060,8 +1396,11 @@ export const BROWSER_REALTIME_SCRIPT = /* js */ `
     window.xpanelShowToast = showToast;
     window.xpanelSwitchView = switchTabOrView;
     bindOverlayFocus();
+    bindCommandPalette();
     bindKeyboardShortcuts();
     bindInteractiveClientActions();
+    bindAccountActions();
+    bindAccountCreation();
     if (document.documentElement.dataset.realtimeEnabled !== 'false') connectWebSocket();
   }
 })();

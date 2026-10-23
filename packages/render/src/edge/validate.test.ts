@@ -4,6 +4,7 @@ import { certCovers, certForName, groupSites, siteMode, siteUpstream } from './s
 import { cgiWrapperPath, fpmSocketPath, lsphpBinary, phpCgiBinary } from './paths.ts'
 import {
   assertDocRoot,
+  assertBackendPort,
   assertDomainName,
   assertHome,
   assertRedirectUrl,
@@ -190,6 +191,12 @@ describe('sites', () => {
 })
 
 describe('xPanel paths', () => {
+  it.each([2083, 2087, 2096, 12083, 12087, 12096])('rejects management port %s as a web backend or tenant loopback upstream', (port) => {
+    expect(codeOf(() => assertBackendPort(settings({ backendPort: port })))).toBe('VALIDATION')
+    for (const host of ['127.0.0.1', 'localhost', '[::1]']) {
+      expect(codeOf(() => siteUpstream(domain({ siteType: 'node', upstream: `http://${host}:${port}` }), settings()))).toBe('VALIDATION')
+    }
+  })
   it('builds per-instance socket and wrapper paths from validated names', () => {
     expect(fpmSocketPath('alice', '8.3')).toBe('/run/xpanel/fpm/alice-8.3/php-fpm.sock')
     expect(cgiWrapperPath('alice', '8.3', 'cgi', debianOs)).toBe('/var/www/xpanel-cgi/alice/php8.3.cgi')

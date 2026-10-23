@@ -31,7 +31,7 @@ const EN_MESSAGES: Record<string, string> = {
   'surface.login': 'xPanel Sign In',
 
   // Common Chrome, Theme, Density, Quick-bar
-  'common.search.placeholder': 'Find a tool, domain, account, or IP (Cmd/Ctrl+K)...',
+  'common.search.placeholder': 'Find a page',
   'common.filter.placeholder': 'Press / to filter rows...',
   'common.theme.dark': 'Dark mode',
   'common.theme.light': 'Light mode',
@@ -241,7 +241,7 @@ const AR_MESSAGES: Record<string, string> = {
   'surface.login': 'تسجيل الدخول إلى xPanel',
 
   // Common Chrome, Theme, Density, Quick-bar
-  'common.search.placeholder': 'ابحث عن أداة أو نطاق أو حساب أو عنوان IP (Cmd/Ctrl+K)...',
+  'common.search.placeholder': 'ابحث عن صفحة',
   'common.filter.placeholder': 'اضغط / لتصفية النتائج...',
   'common.theme.dark': 'الوضع الداكن',
   'common.theme.light': 'الوضع الفاتح',

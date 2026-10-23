@@ -224,7 +224,7 @@ export const assertRequestAuthorized = async (store: StateStore, caller: Authent
     if (policy.acl) assertAcl(caller.principal, reseller, policy.acl)
   }
   if (caller.principal.kind === 'user') {
-    const account = await store.getAccount(caller.principal.accountId)
+    const account = await store.getAccount(caller.principal.accountId, { username: caller.principal.username })
     if (!account) return fail('UNAUTHENTICATED', 'hosting account is unavailable')
     if (account.status !== 'active' && !/^\/api\/auth\/(?:me|logout)$/.test(pathname)) return fail('FORBIDDEN', 'hosting account is suspended or terminating')
     await assertAccountFeatures(store, caller, account, policy.toolIds ?? [])

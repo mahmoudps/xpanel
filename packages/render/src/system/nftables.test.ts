@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FirewallRule } from '@xpanel/core'
-import { defaultFirewallRules, evaluateFirewall, parseIp, XpanelError } from '@xpanel/core'
+import { defaultFirewallRules, evaluateFirewall, parseIp, XpanelError, MANAGEMENT_PUBLIC_PORTS, MANAGEMENT_BACKEND_PORTS } from '@xpanel/core'
 import {
   banSetActions,
   exportRules,
@@ -103,7 +103,7 @@ describe('renderNftables', () => {
     const accepted = chain
       .filter((l) => l.includes(' accept') && /dport/.test(l) && !/saddr (127\.|::1 )/.test(l))
       .flatMap((l) => [...(/dport (\{[^}]*\}|\S+)/.exec(l)?.[1] ?? '').matchAll(/\d+(?:-\d+)?/g)].map((m) => m[0]))
-    expect(new Set(accepted)).toEqual(new Set(['546', '3306', '10000-10100', '9000', '22', '80', '443', '2087']))
+    expect(new Set(accepted)).toEqual(new Set(['546', '3306', '10000-10100', '9000', '22', '80', '443', '2083', '2087', '2096']))
     expect(chain).toContain('ip6 daddr fe80::/64 udp dport 546 accept comment "xpanel: dhcpv6 client"')
   })
 
@@ -116,7 +116,7 @@ describe('renderNftables', () => {
 
   it('keeps the backend ports loopback-only, guarded before any rule', () => {
     const lo = chain.indexOf('iif "lo" accept')
-    const guard = chain.indexOf('tcp dport { 8080, 8443 } drop comment "xpanel: backend is loopback-only"')
+    const guard = chain.indexOf('tcp dport { 8080, 8443, 12083, 12087, 12096 } drop comment "xpanel: backend is loopback-only"')
     expect(lo).toBe(1)
     expect(guard).toBeGreaterThan(lo)
     expect(guard).toBeLessThan(chain.findIndex((l) => l.includes('203.0.113.66')))
@@ -437,9 +437,33 @@ describe('export / import', () => {
 })
 
 describe('helpers', () => {
+  it('wires all entry points into the production server adapter and refuses closing any one', () => {
+    const configured = nftSettingsFromServer({ panelPort: 2087, sshPort: 22, backendPort: 8080, backendTlsPort: 8443 }, { banTimeoutSec: 600 })
+    const file = renderNftables(defaults, configured, debianOs)
+    expect(file.content).toContain('tcp dport { 22, 2087, 2083, 2096 } drop')
+    for (const port of MANAGEMENT_PUBLIC_PORTS) {
+      expect(codeOf(() => renderNftables(defaults.filter((r) => r.port !== String(port)), configured, debianOs))).toBe('SELF_LOCKOUT')
+    }
+    expect(file.content).not.toContain('tcp dport 12083 accept')
+  })
+  it.each([...MANAGEMENT_PUBLIC_PORTS, ...MANAGEMENT_BACKEND_PORTS])('rejects forwarding takeover and backend reuse of management port %s', (port) => {
+    expect(codeOf(() => render([rule({ id: 'takeover', kind: 'forward', port: String(port), protocol: 'tcp', forwardTo: '10.0.0.5:9000' })]))).toBe('VALIDATION')
+    expect(codeOf(() => render([], { ...settings, backendPorts: [port] }))).toBe('VALIDATION')
+  })
+  it.each(MANAGEMENT_BACKEND_PORTS)('rejects exposing private listener %s through a public accept', (port) => {
+    expect(codeOf(() => render([rule({ id: 'expose', kind: 'port', port: String(port), protocol: 'tcp' })]))).toBe('VALIDATION')
+  })
+  it('rejects duplicate management ports and protects a custom legacy panel without opening unrelated ports', () => {
+    expect(codeOf(() => renderNftables(defaults, { ...settings, managementPorts: [2083, 2083] }, debianOs))).toBe('VALIDATION')
+    const custom = { panelPort: 9443, sshPort: 22, backendPort: 8080, backendTlsPort: 8443 }
+    const content = renderNftables(defaultFirewallRules(custom), nftSettingsFromServer(custom, { banTimeoutSec: 600 }), debianOs).content
+    expect(content).toContain('tcp dport 9443 accept')
+    expect(content).not.toContain('tcp dport 9444 accept')
+    expect(codeOf(() => renderNftables([rule({ id: 'takeover', kind: 'forward', port: '9443', protocol: 'tcp', forwardTo: '10.0.0.5:9000' }), ...defaultFirewallRules(custom)], nftSettingsFromServer(custom, { banTimeoutSec: 600 }), debianOs))).toBe('VALIDATION')
+  })
   it('builds settings from ServerSettings and a config test', () => {
     const s = nftSettingsFromServer({ panelPort: 2087, sshPort: 22, backendPort: 8080, backendTlsPort: 8443 }, { banTimeoutSec: 600 })
-    expect(s).toEqual({ banTimeoutSec: 600, panelPort: 2087, sshPort: 22, backendPorts: [8080, 8443] })
+    expect(s).toEqual({ banTimeoutSec: 600, panelPort: 2087, managementPorts: MANAGEMENT_PUBLIC_PORTS, sshPort: 22, backendPorts: [8080, 8443] })
     expect(nftConfigTest('/etc/nftables.conf')).toEqual({ name: 'nftables', argv: ['/usr/sbin/nft', '-c', '-f', '/etc/nftables.conf'] })
     expect(() => nftConfigTest('nftables.conf')).toThrowError(XpanelError)
   })

@@ -1,5 +1,5 @@
 [Unit]
-Description=xPanel Control Plane API & Web Panel (:2087)
+Description=xPanel Control Plane API (xPanel / xWHM / xMail private backends)
 After=network-online.target xpanel-agent.service
 Requires=xpanel-agent.service
 

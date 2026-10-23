@@ -1,4 +1,5 @@
 import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
+import { canSeeAccount, type Account, type Plan } from '@xpanel/core'
 import { dirForLocale, type Locale, SUPPORTED_LOCALES, t } from './i18n.ts'
 import { type LoginSurfaceProps, renderLoginSurface } from './surfaces/login.ts'
 import { type MailSurfaceProps, renderMailSurface } from './surfaces/xmail.ts'
@@ -6,7 +7,7 @@ import { type PanelSurfaceProps, renderPanelSurface } from './surfaces/xpanel.ts
 import { renderWhmSurface, type WhmSurfaceProps } from './surfaces/xwhm.ts'
 import { LOGIN_CLIENT_SCRIPT } from './login-client.ts'
 import { contextualizeDocumentLinks, resolveWebDocumentRoute } from './document-routes.ts'
-import { renderSurfaceShell } from './shell.ts'
+import { getSurfaceNavigationLabel, renderSurfaceShell } from './shell.ts'
 import {
   type AsyncActionBannerProps,
   DESIGN_TOKENS_CSS,
@@ -26,9 +27,16 @@ export type WebSurfaceKind = 'login' | 'xwhm' | 'xpanel' | 'xmail'
 export type ThemeMode = 'dark' | 'light'
 export type TableDensity = 'comfortable' | 'compact'
 
+/** Minimal read-only data used only while a route has no qualified tools. */
+export interface WorkspaceSummary {
+  account?: Pick<Account, 'id' | 'ownerId' | 'username' | 'primaryDomain' | 'status' | 'planId'>
+  plan?: Pick<Plan, 'id' | 'name'>
+}
+
 export interface WebAppRenderState {
   surface: WebSurfaceKind
   visibility?: VisibilityContext
+  workspaceSummary?: WorkspaceSummary
   catalog?: readonly CatalogTool[]
   locale?: Locale
   theme?: ThemeMode
@@ -56,51 +64,89 @@ const renderCommandPaletteModal = (
   const navSurfaceId = surface === 'login' ? 'xpanel' : surface
   const navSurface = visibleNavigation(surface === 'login' ? undefined : visibility, catalog).find((n) => n.surface === navSurfaceId)
   const quickPages = (navSurface?.sections ?? []).flatMap((sec) =>
-    sec.pages.slice(0, 2).map((page) => ({
-      section: sec.name,
-      name: page.name,
+    sec.pages.map((page) => ({
+      section: getSurfaceNavigationLabel(navSurfaceId, 'section', sec, locale),
+      name: getSurfaceNavigationLabel(navSurfaceId, 'page', page, locale),
       route: page.route,
-      summary: page.summary,
     })),
   )
-  const emptyMessage = `<li role="status">${escapeHtml(isAr ? 'لا توجد أدوات مثبتة الجاهزية ومتاحة لحسابك.' : 'No verified tools are available for your account.')}</li>`
 
   return `
 <div id="xp-cmdk-modal" class="xp-modal-backdrop" data-xp-cmdk="true" hidden role="dialog" aria-modal="true" aria-labelledby="xp-cmdk-title">
   <div class="xp-cmdk-dialog">
     <div class="xp-card__header" style="padding: var(--xp-space-field) var(--xp-space-card); border-block-end: 1px solid var(--xp-border); margin-block-end: 0;">
-      <strong id="xp-cmdk-title">${escapeHtml(isAr ? 'لوحة الأوامر والبحث السريع (Cmd/Ctrl+K)' : 'Quick Command Palette (Cmd/Ctrl+K)')}</strong>
+      <strong id="xp-cmdk-title">${isAr ? 'الانتقال إلى صفحة' : 'Go to a page'}</strong>
       <button type="button" class="xp-btn" data-action="close-cmdk">${escapeHtml(t(locale, 'common.close'))}</button>
     </div>
     <div style="padding: var(--xp-space-field) var(--xp-space-card);">
-      <label class="xp-sr-only" for="xp-cmdk-input">${escapeHtml(t(locale, 'common.search.placeholder'))}</label>
+      <label class="xp-sr-only" for="xp-cmdk-input">${isAr ? 'ابحث عن صفحة' : 'Find a page'}</label>
       <input
         id="xp-cmdk-input"
         type="search"
         class="xp-input"
         data-xp-filter-input="true"
-        placeholder="${escapeHtml(t(locale, 'common.search.placeholder'))}"
+        data-cmdk-search="true"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-haspopup="listbox"
+        aria-expanded="false"
+        aria-controls="xp-cmdk-results"
+        autocomplete="off"
+        maxlength="160"
+        placeholder="${isAr ? 'ابحث عن صفحة' : 'Find a page'}"
       />
-      <ul style="list-style: none; margin: 12px 0 0; padding: 0; max-block-size: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;">
+      <ul id="xp-cmdk-results" data-cmdk-results role="listbox" aria-label="${isAr ? 'الصفحات' : 'Pages'}" style="list-style: none; margin: 12px 0 0; padding: 0; max-block-size: min(280px, 45dvh); overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 6px;">
         ${quickPages
-          .slice(0, 8)
           .map(
-            (item) => `
-          <li>
-            <a href="${escapeHtml(item.route)}" class="xp-nav-item" data-cmdk-item="${escapeHtml(item.route)}">
+            (item, index) => `
+          <li data-cmdk-row role="presentation">
+            <a id="xp-cmdk-option-${index}" href="${escapeHtml(item.route)}" class="xp-nav-item xp-cmdk-result" data-cmdk-item="${escapeHtml(item.route)}" data-cmdk-search-text="${escapeHtml(`${item.name} ${item.section} ${item.route}`)}" role="option" aria-selected="false" tabindex="-1">
               <strong>${escapeHtml(item.name)}</strong>
-              <span style="color: var(--xp-text-muted); font-size: 0.82rem;">— ${escapeHtml(item.section)}</span>
-              <code class="xp-mono" style="margin-inline-start: auto; font-size: 0.78rem;"><bdi dir="ltr">${escapeHtml(item.route)}</bdi></code>
+              <span class="xp-cmdk-result__section">— ${escapeHtml(item.section)}</span>
+              <code class="xp-mono xp-cmdk-result__route"><bdi dir="ltr">${escapeHtml(item.route)}</bdi></code>
             </a>
           </li>
         `,
           )
-          .join('') || emptyMessage}
+          .join('')}
       </ul>
+      <p data-cmdk-empty role="status"${quickPages.length ? ' hidden' : ''}>${isAr ? 'لا توجد صفحات مطابقة.' : 'No matching pages.'}</p>
+      <p class="xp-sr-only" data-cmdk-status aria-live="polite" aria-atomic="true" data-count-label="${isAr ? 'النتائج' : 'Results'}"></p>
     </div>
   </div>
 </div>
 `.trim()
+}
+
+const renderWorkspaceSummary = (state: WebAppRenderState, locale: Locale): string => {
+  const principal = state.visibility?.principal
+  if (!principal) return ''
+  const isAr = locale === 'ar'
+  const field = (key: string, label: string, value: string, ltr = false) =>
+    `<div class="xp-field" data-workspace-field="${key}"><span class="xp-label">${escapeHtml(label)}</span><strong class="xp-field-value">${ltr ? `<bdi dir="ltr">${escapeHtml(value)}</bdi>` : escapeHtml(value)}</strong></div>`
+  const role = principal.kind === 'root' ? (isAr ? 'مدير النظام' : 'System administrator')
+    : principal.kind === 'reseller' ? (isAr ? 'موزع' : 'Reseller') : (isAr ? 'مالك الحساب' : 'Account owner')
+  const identityFields = field('username', isAr ? 'اسم المستخدم' : 'Username', principal.username, true)
+    + field('role', isAr ? 'الدور' : 'Role', role)
+  const account = state.surface === 'xpanel' ? (state.workspaceSummary ? state.workspaceSummary.account : state.panel?.account) : undefined
+  const plan = state.workspaceSummary ? state.workspaceSummary.plan : state.panel?.plan
+  const authorized = account && canSeeAccount(principal, account)
+  const accountFields = authorized
+    ? (account.username === principal.username ? '' : field('account', isAr ? 'الحساب المحدد' : 'Selected account', account.username, true))
+      + field('primary-domain', isAr ? 'النطاق الأساسي' : 'Primary domain', account.primaryDomain, true)
+      + field('plan', isAr ? 'الخطة' : 'Plan', plan?.id === account.planId ? plan.name : (isAr ? 'غير متاحة' : 'Unavailable'))
+      + field('status', isAr ? 'الحالة' : 'Status', account.status === 'active' ? (isAr ? 'نشط' : 'Active')
+        : account.status === 'suspended' ? (isAr ? 'معلق' : 'Suspended') : (isAr ? 'قيد الإنهاء' : 'Terminating'))
+    : ''
+  const title = state.surface === 'xpanel' ? (isAr ? 'ملخص الحساب' : 'Account overview') : (isAr ? 'الجلسة الحالية' : 'Current session')
+  const emptyAccount = state.surface === 'xpanel' && !authorized
+    ? `<p class="xp-prose" data-workspace-account-empty="true">${isAr ? 'لا يتوفر حساب مصرح به لعرضه.' : 'No authorized account is available to display.'}</p>`
+    : ''
+  return `<section class="xp-card" data-workspace-identity="true"${state.surface === 'xpanel' ? ' data-workspace-account-overview="true"' : ''} aria-labelledby="xp-workspace-summary-title">
+    <h2 id="xp-workspace-summary-title">${title}</h2>
+    <div class="xp-kpi-grid">${identityFields}${accountFields}</div>
+    ${emptyAccount}
+  </section>`
 }
 
 const renderUnavailableWorkspace = (
@@ -110,18 +156,21 @@ const renderUnavailableWorkspace = (
   actionState?: AsyncActionBannerProps,
   activeRoute?: string,
   theme: ThemeMode = 'light',
+  state?: WebAppRenderState,
 ): string => renderSurfaceShell({
   surface: surface === 'login' ? 'xpanel' : surface,
   locale,
   sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${surface === 'xwhm' ? 'xWHM' : surface === 'xmail' ? 'xMail' : 'xPanel'}</strong></div><p class="xp-help" data-navigation-empty="true">${locale === 'ar' ? 'ستظهر الأدوات هنا بعد تأهيلها.' : 'Qualified tools will appear here.'}</p>`,
   topbar: `<span class="xp-help">${locale === 'ar' ? 'مساحة العمل' : 'Workspace'}</span><div class="xp-topbar__end"><a class="xp-btn xp-btn--ghost" href="${escapeHtml(activeRoute ?? (surface === 'xwhm' ? '/whm' : surface === 'xmail' ? '/mail/inbox' : '/home'))}?lang=${locale === 'ar' ? 'en' : 'ar'}&amp;theme=${theme}" lang="${locale === 'ar' ? 'en' : 'ar'}">${locale === 'ar' ? 'English' : 'العربية'}</a><a class="xp-btn xp-btn--ghost" href="${escapeHtml(activeRoute ?? (surface === 'xwhm' ? '/whm' : surface === 'xmail' ? '/mail/inbox' : '/home'))}?lang=${locale}&amp;theme=${theme === 'dark' ? 'light' : 'dark'}">${theme === 'dark' ? (locale === 'ar' ? 'الوضع الفاتح' : 'Light theme') : (locale === 'ar' ? 'الوضع الداكن' : 'Dark theme')}</a></div>`,
-  content: `<section data-surface="${surface}" data-tool-availability="unverified">
+  content: `<section class="xp-workspace-summary" data-surface="${surface}" data-tool-availability="unverified">
+  <h1 class="xp-page-title">${locale === 'ar' ? 'مساحة العمل' : 'Workspace'}</h1>
   ${actionState ? renderAsyncActionState({ ...actionState, locale }) : ''}
-  <section class="xp-card" role="status">
-    <h1 class="xp-page-title">${escapeHtml(locale === 'ar' ? 'الأدوات غير متاحة بعد' : 'Tools are not available yet')}</h1>
+  ${state ? renderWorkspaceSummary(state, locale) : ''}
+  <section class="xp-card xp-workspace-availability" role="status">
+    <h2>${escapeHtml(locale === 'ar' ? 'الأدوات غير متاحة' : 'Tools unavailable')}</h2>
     <p class="xp-prose">${escapeHtml(locale === 'ar'
-      ? 'لا توجد أدوات اجتازت التحقق ومصرح بها لهذا الحساب. لا تتوفر إجراءات إدارة الخدمات في هذا الإصدار.'
-      : 'No verified tools are authorized for this account. Service management actions are unavailable in this release.')}</p>
+      ? 'لا تتوفر إدارة الخدمات في هذا الإصدار.'
+      : 'Service management is unavailable in this release.')}</p>
     <div role="alert" data-auth-error hidden></div>
     <p role="status" data-auth-status></p>
     ${authenticated ? `<button type="button" class="xp-btn" data-action="logout">${escapeHtml(locale === 'ar' ? 'تسجيل الخروج' : 'Sign out')}</button>` : `<a href="/login" class="xp-btn">${escapeHtml(locale === 'ar' ? 'تسجيل الدخول' : 'Sign in')}</a>`}
@@ -182,7 +231,7 @@ export function renderWebApp(state: WebAppRenderState): string {
   const activeRoute = state.activeRoute ?? (state.surface === 'xwhm' ? '/whm' : state.surface === 'xmail' ? '/mail/inbox' : state.surface === 'login' ? '/login' : '/home')
   const hasVerifiedSurface = visibleNavigation(state.visibility, state.catalog).some(item => item.surface === state.surface && item.sections.some(section => section.pages.some(page => page.route === activeRoute)))
   if (state.surface !== 'login' && !hasVerifiedSurface)
-    surfaceBodyHtml = renderUnavailableWorkspace(state.surface, locale, state.visibility !== undefined, state.actionState, activeRoute, theme)
+    surfaceBodyHtml = renderUnavailableWorkspace(state.surface, locale, state.visibility !== undefined, state.actionState, activeRoute, theme, state)
   else switch (state.surface) {
     case 'login':
       surfaceBodyHtml = renderLoginSurface({

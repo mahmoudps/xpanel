@@ -349,13 +349,18 @@ EOF
 
 render_api_env() {
   cat <<'EOF'
-# Configure the exact HTTPS browser origins before allowing cookie WebSocket upgrades.
-XPANEL_ALLOWED_ORIGINS=
-# Forwarded client addresses are ignored unless the immediate proxy is listed here.
-XPANEL_TRUSTED_PROXIES=
+# Configure all exact public HTTPS origins, including their required ports, before starting.
+# Example: https://panel.example.test:2083 / https://whm.panel.example.test:2087 / https://mail.panel.example.test:2096
+XPANEL_PANEL_PUBLIC_ORIGIN=
+XPANEL_WHM_PUBLIC_ORIGIN=
+XPANEL_MAIL_PUBLIC_ORIGIN=
+# Fixed private loopback backends; the public HTTPS ports belong to the TLS ingress.
 XPANEL_HOST=127.0.0.1
-XPANEL_PORT=2087
+XPANEL_PANEL_PORT=12083
+XPANEL_WHM_PORT=12087
+XPANEL_MAIL_PORT=12096
 XPANEL_SERVER_SECRET_FILE=/etc/xpanel/server.secret
+XPANEL_INGRESS_SECRET_FILE=/etc/xpanel/ingress.secret
 EOF
 }
 
@@ -475,7 +480,7 @@ EOF
 render_api_service() {
   cat <<EOF
 [Unit]
-Description=xPanel Control Plane API & Web Panel (:2087)
+Description=xPanel Control Plane API (xPanel / xWHM / xMail private backends)
 After=network-online.target xpanel-agent.service
 Requires=xpanel-agent.service
 
@@ -529,7 +534,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   done
   echo "root:xpanel-agent 0750 /run/xpanel"
   echo "xpanel:xpanel 2770 /var/lib/xpanel; shared control.db mode 0660 for API and agent only"
-  echo "root:xpanel 0750 /etc/xpanel; preserve-or-create agent.token and server.secret at 0640 (values never printed)"
+  echo "root:xpanel 0750 /etc/xpanel; preserve-or-create agent.token, server.secret and ingress.secret at 0640 (values never printed)"
   echo "--- Runtime Environment ($RUNTIME_ENV) ---"
   render_runtime_env
   echo "--- API Environment ($API_ENV; existing operator settings preserved) ---"
@@ -607,6 +612,7 @@ install -d -o root -g xpanel-agent -m 0750 /run/xpanel
 install -d -o root -g root -m 0755 /opt/xpanel/bin
 provision_credential /etc/xpanel/agent.token
 provision_credential /etc/xpanel/server.secret
+provision_credential /etc/xpanel/ingress.secret
 write_config "$RUNTIME_ENV" render_runtime_env 0640 xpanel
 if [[ ! -e "$API_ENV" && ! -L "$API_ENV" ]]; then
   write_config "$API_ENV" render_api_env 0640 xpanel

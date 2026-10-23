@@ -1,0 +1,78 @@
+# Example only. Review with `nginx -t` on the target host before installation.
+# Include this file from the nginx http context. Replace the documentation IP,
+# names and certificate paths with the reviewed deployment configuration.
+# Use an explicit public address, not a wildcard that conflicts with a legacy
+# loopback listener. Never expose private HTTP ports through the firewall.
+map $http_upgrade $xpanel_connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+server {
+    listen 192.0.2.10:2083 ssl;
+    server_name panel.example.test;
+    ssl_certificate /etc/xpanel/tls/fullchain.pem;
+    ssl_certificate_key /etc/xpanel/tls/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    if ($http_host != "panel.example.test:2083") { return 421; }
+    add_header X-Content-Type-Options nosniff always;
+    location / {
+        proxy_pass http://127.0.0.1:12083;
+        include /etc/nginx/xpanel/ingress-secret.conf;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Forwarded-Host "";
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $xpanel_connection_upgrade;
+    }
+}
+
+server {
+    listen 192.0.2.10:2087 ssl;
+    server_name whm.panel.example.test;
+    ssl_certificate /etc/xpanel/tls/fullchain.pem;
+    ssl_certificate_key /etc/xpanel/tls/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    if ($http_host != "whm.panel.example.test:2087") { return 421; }
+    add_header X-Content-Type-Options nosniff always;
+    location / {
+        proxy_pass http://127.0.0.1:12087;
+        include /etc/nginx/xpanel/ingress-secret.conf;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Forwarded-Host "";
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $xpanel_connection_upgrade;
+    }
+}
+
+server {
+    listen 192.0.2.10:2096 ssl;
+    server_name mail.panel.example.test;
+    ssl_certificate /etc/xpanel/tls/fullchain.pem;
+    ssl_certificate_key /etc/xpanel/tls/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    if ($http_host != "mail.panel.example.test:2096") { return 421; }
+    add_header X-Content-Type-Options nosniff always;
+    location / {
+        proxy_pass http://127.0.0.1:12096;
+        include /etc/nginx/xpanel/ingress-secret.conf;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Forwarded-Host "";
+        proxy_set_header Upgrade "";
+        proxy_set_header Connection "";
+    }
+}

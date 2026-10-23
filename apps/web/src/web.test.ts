@@ -195,10 +195,11 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
       assert.match(html, new RegExp(`data-service-row="${svc}"`))
     }
     // Plans & cgroup v2 limits + explicit Unlimited
-    assert.match(html, /CPUQuota/)
-    assert.match(html, /MemoryMax/)
-    assert.match(html, /TasksMax/)
-    assert.match(html, /Explicit Unlimited/)
+    assert.match(html, /for="plan-cpu-quota">CPU \(%\)<\/label>/)
+    assert.match(html, /for="plan-memory-max">Memory \(MB\)<\/label>/)
+    assert.match(html, /for="plan-tasks-max">Processes<\/label>/)
+    assert.match(html, /name="unlimitedAddonDomains" value="unlimited"/)
+    assert.match(html, /Unlimited addon domains/)
     // Accounts & type-to-confirm terminate guard
     assert.match(html, /data-type-to-confirm="true"/)
     // Resellers & 14-privilege ACL matrix
@@ -206,7 +207,7 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     // Multi-IPv4/IPv6 Pool & Postfix Mail Outbound IPs
     assert.match(html, /data-ip-pool-table="true"/)
     assert.match(html, /data-mail-ip-config-form="true"/)
-    assert.match(html, /sender_dependent_default_transport_maps/)
+    assert.match(html, /for="mail-outbound-mode">Outbound mail routing<\/label>/)
     assert.match(html, /name="defaultIpv4"[^>]*value="10\.0\.0\.21"/)
     assert.match(html, /name="defaultHelo"[^>]*value="mail\.alice-shop\.com"/)
     // Firewall & 60s dead-man's switch
@@ -240,11 +241,12 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     // Website Analytics chart
     assert.match(html, /data-surface-widget="website-analytics"/)
     // Jailed File Manager (0640/0750 rules, 0777 blocked, .trash)
-    assert.match(html, /O_NOFOLLOW Symlink-Safe/)
+    assert.match(html, /data-file-manager-table="true"/)
+    assert.doesNotMatch(html, /O_NOFOLLOW Symlink-Safe|Safe Edit/)
     assert.match(html, /0640/)
     assert.match(html, /0750/)
     assert.match(html, /0777/)
-    assert.match(html, /Restore from \.trash/)
+    assert.match(html, /data-action="restore-file"[^>]*>Restore<\/button>/)
     // Jailed Shell Terminal
     assert.match(html, /data-terminal-output=""/)
     assert.match(html, /No terminal session has started/)

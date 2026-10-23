@@ -282,7 +282,10 @@ export async function runPhase1Acceptance({ output } = {}) {
             assert.ok(Math.abs(metrics.header.height - 64) <= 1, 'Mobile/tablet header must be 64px')
             assert.equal(metrics.sidebar_visibility, 'hidden', 'Mobile navigation must begin offcanvas')
             await expect(page.locator('[data-action="toggle-mobile-nav"]')).toBeVisible()
-          } else assert.ok(Math.abs(metrics.sidebar.width - 248) <= 1, 'Desktop rail must be 248px')
+          } else {
+          const expectedRail = state.path.startsWith('/mail/') ? 200 : 248
+          assert.ok(Math.abs(metrics.sidebar.width - expectedRail) <= 1, `Desktop rail must be ${expectedRail}px for the current surface`)
+        }
         }
         breadcrumb('interactions')
         if (state.interactions) await interactions(page, state, fixture.baseUrl, expect, outcome.observations, breadcrumb)

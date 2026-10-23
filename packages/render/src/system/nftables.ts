@@ -2,7 +2,7 @@
 //
 // The operator's rule list is the policy, read exactly as core's evaluateFirewall() reads it: forwards
 // are DNAT in prerouting, every other enabled rule is matched top-down, first match wins, and the input
-// policy is drop. Panel, 80, 443 and SSH are open because core's defaultFirewallRules() seed the list
+// policy is drop. Management HTTPS, 80, 443 and SSH open because defaultFirewallRules() seeds the list
 // with accepts for them, so disabling `default-ssh` really closes SSH and the firewall page shows what
 // the kernel does. In front of the list the renderer adds only the base chain: loopback, invalid state,
 // the brute-force ban sets, established traffic, the backend guard (Apache/OLS ports on lo only) and
@@ -14,6 +14,8 @@
 
 import {
   fail,
+  MANAGEMENT_PUBLIC_PORTS,
+  MANAGEMENT_BACKEND_PORTS,
   formatCidr,
   parseCidr,
   parseForwardTarget,
@@ -45,6 +47,8 @@ export interface FirewallBan {
 
 export interface NftSettings {
   panelPort: number
+  /** Active HTTPS management entry points; legacy direct callers may omit this collection. */
+  managementPorts?: readonly number[]
   sshPort: number
   /** loopback-only ports of Apache/OLS behind Nginx */
   backendPorts: number[]
@@ -78,6 +82,7 @@ interface PrefixSets {
 
 interface NormalSettings {
   panelPort: number
+  managementPorts: number[]
   sshPort: number
   backendPorts: number[]
   webPorts: number[]
@@ -129,11 +134,16 @@ const normalizeSettings = (s: NftSettings): NormalSettings => {
   if (!isPlainObject(s)) return invalid('firewall settings must be an object')
   const panelPort = assertPort('panelPort', s.panelPort)
   const sshPort = assertPort('sshPort', s.sshPort)
+  if (s.managementPorts !== undefined && (!Array.isArray(s.managementPorts) || new Set(s.managementPorts).size !== s.managementPorts.length)) return invalid('managementPorts must be a list of distinct ports')
+  const managementPorts = [...new Set([panelPort, ...(s.managementPorts ?? []).map((p) => assertPort('managementPort', p))])]
   if (!Array.isArray(s.backendPorts) || s.backendPorts.length < 1 || s.backendPorts.length > 4) return invalid('backendPorts must hold 1-4 ports')
-  const backendPorts = s.backendPorts.map((p) => assertPort('backendPort', p))
+  const suppliedBackendPorts = s.backendPorts.map((p) => assertPort('backendPort', p))
+  if (new Set(suppliedBackendPorts).size !== suppliedBackendPorts.length) return invalid('backendPorts must be distinct')
+  const backendPorts = [...new Set([...suppliedBackendPorts, ...MANAGEMENT_BACKEND_PORTS])]
   const webPorts = (s.webPorts ?? DEFAULT_WEB_PORTS).map((p) => assertPort('webPort', p))
-  const all = [panelPort, sshPort, ...webPorts, ...backendPorts]
+  const all = [...managementPorts, sshPort, ...webPorts, ...backendPorts]
   if (new Set(all).size !== all.length) return invalid('panel, ssh, web and backend ports must all differ', { ports: all })
+  if (suppliedBackendPorts.some((p) => [...MANAGEMENT_PUBLIC_PORTS, ...MANAGEMENT_BACKEND_PORTS].includes(p))) return invalid('backend ports must not take management entry points or private listeners')
   const banTimeoutSec = assertInt('banTimeoutSec', s.banTimeoutSec, 60, 30 * 86400)
   const forwardPolicy = s.forwardPolicy ?? 'drop'
   if (forwardPolicy !== 'drop' && forwardPolicy !== 'accept') return invalid('forwardPolicy must be drop or accept')
@@ -146,7 +156,7 @@ const normalizeSettings = (s: NftSettings): NormalSettings => {
     const remaining = assertInt('ban expiresAt', b.expiresAt, 0, 2 ** 40) - now
     return remaining > 0 ? [{ ip, remaining }] : []
   })
-  return { panelPort, sshPort, backendPorts, webPorts, lists: normalizeLists(s.prefixLists), banTimeoutSec, bans, forwardPolicy }
+  return { panelPort, managementPorts, sshPort, backendPorts, webPorts, lists: normalizeLists(s.prefixLists), banTimeoutSec, bans, forwardPolicy }
 }
 
 /** Checks that need the host's ports and lists. Disabled rules never reach the kernel, so they pass. */
@@ -160,7 +170,7 @@ const assertRenderable = (r: NormalRule, ns: NormalSettings): void => {
   if (rule.action === 'accept' && rule.kind !== 'forward' && r.ports && overlaps(r.ports, ns.backendPorts) && !fromLoopback) {
     invalid(`rule ${rule.id} would open a backend port; backend ports are loopback-only`, { id: rule.id })
   }
-  if (r.forward && r.ports && overlaps(r.ports, [ns.panelPort, ns.sshPort, ...ns.webPorts, ...ns.backendPorts])) {
+  if (r.forward && r.ports && overlaps(r.ports, [...ns.managementPorts, ...MANAGEMENT_PUBLIC_PORTS, ns.sshPort, ...ns.webPorts, ...ns.backendPorts])) {
     invalid(`rule ${rule.id} would redirect a panel, ssh, web or backend port`, { id: rule.id })
   }
 }
@@ -171,12 +181,12 @@ const listSize = (ns: NormalSettings, name: string | null): number => {
 }
 
 /** True when the rule lets some remote address open a TCP connection to the panel. */
-const opensPanel = (r: NormalRule, ns: NormalSettings): boolean =>
+const opensPanel = (r: NormalRule, ns: NormalSettings, port: number): boolean =>
   r.rule.enabled &&
   r.rule.action === 'accept' &&
   (r.rule.kind === 'port' || r.rule.kind === 'ip' || r.rule.kind === 'prefix-list') &&
   (r.protocols === null || r.protocols.includes('tcp')) &&
-  (r.ports === null || covers(r.ports, ns.panelPort)) &&
+  (r.ports === null || covers(r.ports, port)) &&
   !(r.source !== null && isLoopbackCidr(r.source)) &&
   (r.rule.kind !== 'prefix-list' || listSize(ns, r.rule.list) > 0)
 
@@ -251,20 +261,20 @@ const chain = (name: string, decl: string, body: string[]): string[] => [`  chai
 
 /**
  * Renders the operator's list (core FirewallRule[], defaults from defaultFirewallRules()). Refuses with
- * SELF_LOCKOUT a list in which no enabled rule opens the panel port at all: on a remote server that
+ * SELF_LOCKOUT a list in which any configured management port has no enabled accept: on a remote server that
  * ruleset could only be undone from the console. The per-session check is core's assertNoSelfLockout().
  */
 export const renderNftables = (rules: readonly FirewallRule[], settings: NftSettings, os: Pick<OsProfile, 'paths'>): RenderedFile => {
   const ns = normalizeSettings(settings)
   const parsed = parseRules(rules)
   for (const r of parsed) assertRenderable(r, ns)
-  if (!parsed.some((r) => opensPanel(r, ns))) {
-    fail('SELF_LOCKOUT', `no enabled rule accepts the panel port ${ns.panelPort}; the ruleset would lock everyone out`, { panelPort: ns.panelPort })
+  for (const port of ns.managementPorts) {
+    if (!parsed.some((r) => opensPanel(r, ns, port))) fail('SELF_LOCKOUT', `no enabled rule accepts the management port ${port}; the ruleset would lock everyone out`, { panelPort: port })
   }
   const active = parsed.filter((r) => r.rule.enabled)
   const filters = active.filter((r) => r.rule.kind !== 'forward')
   const forwards = active.filter((r) => r.rule.kind === 'forward')
-  const guarded = portSet([ns.sshPort, ns.panelPort])
+  const guarded = portSet([ns.sshPort, ...ns.managementPorts])
 
   const usedLists = [...new Set(filters.filter((r) => r.rule.kind === 'prefix-list').map((r) => r.rule.list as string))]
   const sets = [
@@ -382,6 +392,7 @@ export const nftSettingsFromServer = (
 ): NftSettings => ({
   ...extra,
   panelPort: server.panelPort,
+  managementPorts: extra.managementPorts ?? MANAGEMENT_PUBLIC_PORTS,
   sshPort: server.sshPort,
   backendPorts: [...new Set([server.backendPort, server.backendTlsPort])],
 })

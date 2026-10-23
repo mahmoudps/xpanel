@@ -1,11 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { navigation } from '@xpanel/catalog'
+import { resolveSurfaceSection } from './shell.ts'
 import { contextualizeDocumentLinks, contextualizeNavigationHref, resolveWebDocumentRoute } from './document-routes.ts'
 
 describe('product document route identity and context', () => {
   it('recognizes every declared product page without promoting its capability', () => {
     for (const surface of navigation) for (const section of surface.sections) for (const page of section.pages) {
       expect(resolveWebDocumentRoute(page.route)).toEqual({ surface: surface.surface, activeRoute: page.route })
+    }
+  })
+  it('keeps administrative catalog placeholders outside the implemented screen registry', () => {
+    const routes = ['/whm/email/bcc', '/whm/email/marketing', '/whm/software/deployments', '/whm/software/application-projects', '/whm/software/composer', '/whm/services/ftp-log-analysis', '/whm/services/default-index']
+    expect(routes).toHaveLength(7)
+    for (const route of routes) {
+      expect(resolveWebDocumentRoute(route)).toEqual({ surface: 'xwhm', activeRoute: route })
+      expect(resolveSurfaceSection('xwhm', route)).toBeUndefined()
     }
   })
   it('normalizes reviewed entry aliases and rejects invented documents and reference files', () => {
