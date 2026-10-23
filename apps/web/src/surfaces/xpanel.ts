@@ -20,6 +20,7 @@ import {
   renderAsyncActionState,
   renderStatusBadge,
 } from '../tokens.ts'
+import { accountSecurityRoute, renderSecurityNavLink } from '../chrome.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, getSurfaceNavigationLabel, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
 
@@ -119,6 +120,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
     `
     })
     .join('')
+  const securityNavLink = renderSecurityNavLink('xpanel', locale, activeRoute, (xpanelNav?.sections ?? []).some(section => section.pages.some(page => page.route === accountSecurityRoute('xpanel'))))
 
   const switchLangCode = isAr ? 'en' : 'ar'
   const switchLangLabel = isAr ? 'English' : 'العربية'
@@ -160,6 +162,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
 
     <nav aria-label="${isAr ? 'أقسام xPanel' : 'xPanel sections'}">
       ${sidebarSectionsHtml || `<p role="status" data-navigation-empty="true">${escapeHtml(isAr ? 'لا توجد أدوات مثبتة الجاهزية ومتاحة لحسابك.' : 'No verified tools are available for your account.')}</p>`}
+      ${securityNavLink}
     </nav>`,
     topbar: `      <div class="xp-topbar__start">
         ${renderPageSearchButton(locale)}

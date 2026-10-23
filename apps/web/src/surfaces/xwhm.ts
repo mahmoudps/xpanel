@@ -24,6 +24,7 @@ import {
   renderStatusBadge,
   renderThresholdMeter,
 } from '../tokens.ts'
+import { accountSecurityRoute, renderSecurityNavLink } from '../chrome.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, getSurfaceNavigationLabel, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
 
@@ -172,6 +173,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
 
     <nav aria-label="${isAr ? 'أقسام xWHM' : 'xWHM sections'}">
       ${sidebarSectionsHtml || `<p role="status" data-navigation-empty="true">${escapeHtml(isAr ? 'لا توجد أدوات مثبتة الجاهزية ومتاحة لحسابك.' : 'No verified tools are available for your account.')}</p>`}
+      ${renderSecurityNavLink('xwhm', locale, activeRoute, (whmNav?.sections ?? []).some(section => section.pages.some(page => page.route === accountSecurityRoute('xwhm'))))}
     </nav>`,
     topbar: `      <div class="xp-topbar__start">
         ${renderPageSearchButton(locale)}

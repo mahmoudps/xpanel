@@ -134,7 +134,7 @@ export const renderSurfaceShell = (props: SurfaceShellProps): string => `
   </div>
 </div>`
 
-const backIcon = `<svg class="xp-icon-back" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 6 9 12l6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+const backIcon = `<span class="xp-icon-back"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 6 9 12l6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
 
 export const renderSurfaceUnavailable = (locale: Locale, homeRoute: string): string => `
 <section class="xp-card xp-screen-state" data-screen="unavailable" role="status">

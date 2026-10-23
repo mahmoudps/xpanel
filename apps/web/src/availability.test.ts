@@ -31,7 +31,8 @@ describe('verified production availability', () => {
     expect(html).not.toContain('data-action="logout"')
     const sidebar = /<aside class="xp-sidebar"[\s\S]*?<\/aside>/.exec(html)?.[0] ?? ''
     expect(sidebar).toContain('data-planned-group=')
-    expect(sidebar).not.toMatch(/<a\b/)
+    expect(sidebar).toContain('data-security-link="true"')
+    expect(sidebar.replace(/<a\b[^>]*data-security-link="true"[^>]*>[\s\S]*?<\/a>/g, '')).not.toMatch(/<a\b/)
     expect(html).not.toMatch(/<form\b|data-nav-route="|data-cmdk-item="/)
     expect(html).not.toContain('alice-shop.com')
     expect(html).not.toContain('data-generation-chip=')
@@ -139,7 +140,29 @@ describe('verified production availability', () => {
     const html = renderWebApp({ surface: 'xpanel', locale: 'ar' })
     expect(html).toContain('أدواتك ليست على هذا الخادم بعد')
     expect(html).toContain('غير متاحة بعد')
+    expect(html).toContain('<h1 class="xp-page-title">لوحة التحكم</h1>')
+    expect(html).toContain('<title>لوحة التحكم — xPanel</title>')
+    expect(html).not.toContain('مساحة العمل')
+    expect(html).not.toContain('tool groups planned')
     expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+  })
+
+  it('uses the real page heading and keeps security free of the unavailable-tools card', () => {
+    const home = renderWebApp({ surface: 'xwhm', locale: 'en', visibility: { principal: { kind: 'root', id: 'root', username: 'root' } } })
+    expect(home).toContain('<h1 class="xp-page-title">Dashboard</h1>')
+    expect(home).toContain('<title>Dashboard — xWHM</title>')
+    expect(home).not.toContain('>Workspace<')
+    const security = renderWebApp({
+      surface: 'xwhm', locale: 'en', activeRoute: '/whm/security/sign-in',
+      visibility: { principal: { kind: 'root', id: 'root', username: 'root' } },
+      security: { totpEnabled: false },
+    })
+    expect(security).toContain('<h1 class="xp-page-title">Sign-in security</h1>')
+    expect(security).toContain('<title>Sign-in security — xWHM</title>')
+    expect(security).toContain('data-security-page="true"')
+    expect(security).toContain('data-account-security="two-factor"')
+    expect(security).not.toContain('class="xp-card xp-workspace-availability"')
+    expect(security).toContain('data-security-link="true"')
   })
 
   it('does not retain unfiltered favorites or navigation links in direct design renderers', () => {
@@ -147,7 +170,8 @@ describe('verified production availability', () => {
       const html = render({ locale: 'en' })
       const sidebar = /<aside class="xp-sidebar"[\s\S]*?<\/aside>/.exec(html)?.[0] ?? ''
       expect(sidebar).toContain('data-navigation-empty="true"')
-      expect(sidebar).not.toMatch(/<a\b/)
+      expect(sidebar).toContain('data-security-link="true"')
+      expect(sidebar.replace(/<a\b[^>]*data-security-link="true"[^>]*>[\s\S]*?<\/a>/g, '')).not.toMatch(/<a\b/)
       expect(html).toContain('data-screen="unavailable"')
       expect(html).not.toMatch(/data-account-row=|data-mail-uid=|data-service-row=|data-generation-chip=|<form\b/)
       expect(html).not.toContain('alice-shop.com')

@@ -138,9 +138,19 @@ export const createDefaultWebRenderer = async (deps: {
       }))
     }
     const documentRoute = resolveWebDocumentRoute(url.pathname)
+    // Browser documents require a session; a scoped API token cannot expose an unscoped HTML snapshot.
+    const caller = await authenticateRequest(deps.db, req, {
+      serverSecret: deps.serverSecret, clientIp: null,
+      ...(deps.entryPoint ? { entryPoint: deps.entryPoint } : {}),
+    })
+    const sessionReady = Boolean(caller && caller.mfaVerified && caller.apiTokenId === null && !caller.principalRecord.forcePasswordChange)
+    const sessionVisibility = sessionReady && caller
+      ? { principal: caller.principal, disabledFeatures: new Set<string>() }
+      : undefined
     if (!documentRoute) {
       return documentStatus(404, {
         surface: deps.entryPoint ?? 'xpanel',
+        ...(sessionVisibility ? { visibility: sessionVisibility } : {}),
         ...(suggestedPanel(url.pathname, deps.entryPoint) ? { suggested: suggestedPanel(url.pathname, deps.entryPoint) } : {}),
       })
     }
@@ -153,12 +163,7 @@ export const createDefaultWebRenderer = async (deps: {
       })
     }
 
-    // Browser documents require a session; a scoped API token cannot expose an unscoped HTML snapshot.
-    const caller = await authenticateRequest(deps.db, req, {
-      serverSecret: deps.serverSecret, clientIp: null,
-      ...(deps.entryPoint ? { entryPoint: deps.entryPoint } : {}),
-    })
-    if (!caller || !caller.mfaVerified || caller.apiTokenId !== null || caller.principalRecord.forcePasswordChange) {
+    if (!caller || !sessionReady) {
       return new Response(null, { status: 303, headers: { ...headers, location: '/login' } })
     }
     const principal = caller.principal

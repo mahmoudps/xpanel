@@ -58,7 +58,7 @@ export const statusPageCopy = (status: StatusCode, locale: Locale): Copy => {
   }
 }
 
-const backIcon = `<svg class="xp-icon-back" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 6 9 12l6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+const backIcon = `<span class="xp-icon-back"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 6 9 12l6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
 
 const withContext = (href: string, model: StatusPageModel): string => {
   if (!href.startsWith('/')) return href
@@ -120,11 +120,12 @@ export function renderStatusBody(model: StatusPageModel): string {
   return renderSurfaceShell({
     surface: model.surface,
     locale: model.locale,
-    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${panelLabel(model.surface)}</strong></div>${renderPlannedNavigation(model.surface, model.locale)}`,
+    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${panelLabel(model.surface)}</strong></div>${renderPlannedNavigation(model.surface, model.locale, model.path)}`,
     topbar: renderUserMenu({
       locale: model.locale,
       theme: model.theme,
       density: model.density,
+      surface: model.surface,
       path: model.path.startsWith('/') ? model.path : '/',
       ...(model.accountId ? { accountId: model.accountId } : {}),
       ...(model.username ? { username: model.username } : {}),
