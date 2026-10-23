@@ -1,6 +1,6 @@
 import type { Locale } from '../i18n.ts'
 import { ARABIC_TYPE_CSS } from '../arabic-type.ts'
-import { isolateLtrRuns } from '../bidi-runs.ts'
+import { isolateLtrRuns, metaPieces } from '../bidi-runs.ts'
 import { formatDisplayName } from '../display-name.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -341,10 +341,19 @@ const navHtml = (groups: HomeNavView[], ar: boolean, phone: boolean): string => 
       </div>`
 }).join('')
 
+const metaHtml = (text: string, dir: 'ltr' | 'rtl', font: string): string => {
+  const pieces = metaPieces(text)
+  if (pieces.length === 0) return ''
+  const body = pieces.map(piece => piece.kind === 'value'
+    ? `<bdi data-meta-value dir="ltr" style="flex: none; flex-shrink: 0; white-space: nowrap">${escapeHtml(piece.text)}</bdi>`
+    : `<span data-meta-label>${escapeHtml(piece.text)}</span>`).join('')
+  return `<span data-meta title="${escapeHtml(text)}" dir="${dir}" style="display: inline-flex; align-items: baseline; gap: 0.35em; flex: 1 1 auto; min-width: 0; font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums; font-family: ${font}">${body}</span>`
+}
+
 const toolRow = (item: HomeToolView, ar: boolean, phone: boolean): string => {
   const svgStyle = ar ? ` style="transform: ${item.flip ? 'scaleX(-1)' : 'none'}"` : ''
   const hint = ar
-    ? `<bdi dir="${item.hintDir}" style="flex: none; font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums; font-family: ${item.hintFont}">${isolateLtrRuns(item.hint)}</bdi>`
+    ? metaHtml(item.hint, item.hintDir, item.hintFont)
     : `<span style="flex: none; font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums; font-family: ${item.hintFont}">${escapeHtml(item.hint)}</span>`
   const well = phone ? 'width: 32px; height: 32px' : 'width: 30px; height: 30px'
   const row = phone

@@ -84,19 +84,40 @@ ${ar('[data-tool="true"] > a')} {
   font-size: 16px !important;
   line-height: 1.75 !important;
 }
-${ar('[data-tool="true"] > a > span:not([aria-hidden="true"])')} {
+${ar('[data-tool="true"] > a > span:not([aria-hidden="true"]):not([data-meta])')} {
   flex: 0 0 auto !important;
   min-width: max-content !important;
   min-inline-size: max-content !important;
   white-space: nowrap !important;
 }
-${ar('[data-tool="true"] > a > bdi')} {
+${ar('[data-meta]')} {
+  display: inline-flex !important;
+  align-items: baseline;
+  gap: 0.35em;
+  overflow: visible !important;
+}
+${ar('[data-tool="true"] > a > [data-meta]')} {
   flex: 1 1 auto !important;
+  min-width: 0 !important;
+  min-inline-size: 0 !important;
+}
+${ar('[data-meta-label]')} {
+  flex: 0 1 auto !important;
   min-width: 0 !important;
   min-inline-size: 0 !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
+}
+${ar('[data-meta-value]')} {
+  flex: none !important;
+  min-inline-size: max-content !important;
+}
+${ar('bdi[dir="ltr"]')} {
+  flex-shrink: 0 !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
 }
 ${ar('.xp-board-port nav a :is(span, bdi)')},
 ${ar('.xp-nav-item span')} {

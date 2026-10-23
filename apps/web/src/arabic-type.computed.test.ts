@@ -11,6 +11,7 @@ interface Browser {
 }
 interface Page {
   setContent: (html: string, options: { waitUntil: 'domcontentloaded' }) => Promise<void>
+  setViewportSize: (size: { width: number; height: number }) => Promise<void>
   evaluate: <T>(fn: () => T) => Promise<T>
   close: () => Promise<void>
 }
@@ -32,6 +33,10 @@ const inboxDocument = (): string => `<!doctype html>
 </nav>
 <p style="margin: 0; font-size: 14px; font-weight: 600">لم تُقرأ الرسائل من خادم البريد بعد.</p>
 <p style="margin: 0; font-size: 13px; color: #475467">نص الرسالة يظهر هنا عندما يصل من الخادم.</p>
+<ul style="width: 280px; list-style: none; margin: 16px 0 0; padding: 0">
+  <li data-tool="true"><a style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 8px; font-size: 14px; text-decoration: none; color: #101828"><span style="flex: 1 1 auto; min-width: 0; font-weight: 500">معالج النسخ الاحتياطي</span><span data-meta title="آخر نسخة 2026-10-21" dir="rtl" style="display: inline-flex; align-items: baseline; gap: 0.35em; flex: 1 1 auto; min-width: 0; font-size: 12px; color: #5D6B7E"><span data-meta-label>آخر نسخة</span><bdi data-meta-value dir="ltr" style="flex: none; flex-shrink: 0; white-space: nowrap">2026-10-21</bdi></span></a></li>
+</ul>
+<p style="margin: 8px 0 0; font-size: 12px; color: #5D6B7E"><bdi dir="ltr">13:48 UTC</bdi></p>
 </div>
 </body>
 </html>`
@@ -47,12 +52,15 @@ interface Sample {
   face: string
 }
 
+interface DomBox { left: number; right: number; width: number }
 interface DomEl {
   textContent: string | null
   scrollWidth: number
   clientWidth: number
   firstChild: { data: string } | null
   getClientRects: () => ArrayLike<unknown>
+  getBoundingClientRect: () => DomBox
+  getAttribute: (name: string) => string | null
   querySelector: (selector: string) => DomEl | null
 }
 interface DomStyle { fontSize: string; lineHeight: string; fontFamily: string }
@@ -101,7 +109,7 @@ const toolName = (): { lines: number; full: boolean; date: string; ltr: boolean 
   const root = globalThis as unknown as Dom
   const rows = Array.from(root.document.querySelectorAll('[data-tool="true"]'))
   const row = rows.find(item => item.textContent?.includes('معالج النسخ الاحتياطي'))
-  const name = row?.querySelector('a > span:not([aria-hidden="true"])') ?? null
+  const name = row?.querySelector('a > span:not([aria-hidden="true"]):not([data-meta])') ?? null
   const date = row?.querySelector('bdi[dir="ltr"]') ?? null
   const text = date?.firstChild
   if (!name || !date || !text) return { lines: 0, full: false, date: '', ltr: false }
@@ -118,6 +126,33 @@ const toolName = (): { lines: number; full: boolean; date: string; ltr: boolean 
     date: date.textContent ?? '',
     ltr: first < last,
   }
+}
+
+const backupDate = (): { text: string; title: string; clipped: boolean; inside: boolean } => {
+  const root = globalThis as unknown as Dom
+  const row = Array.from(root.document.querySelectorAll('[data-tool="true"]')).find(item => item.textContent?.includes('معالج النسخ الاحتياطي'))
+  const meta = row?.querySelector('[data-meta]') ?? null
+  const date = row?.querySelector('[data-meta-value]') ?? null
+  const anchor = row?.querySelector('a') ?? null
+  if (!meta || !date || !anchor) return { text: '', title: '', clipped: true, inside: false }
+  const dateBox = date.getBoundingClientRect()
+  const rowBox = anchor.getBoundingClientRect()
+  return {
+    text: (date.textContent ?? '').trim(),
+    title: meta.getAttribute('title') ?? '',
+    clipped: date.scrollWidth > date.clientWidth + 1,
+    inside: dateBox.width > 40 && dateBox.left >= rowBox.left - 1 && dateBox.right <= rowBox.right + 1,
+  }
+}
+
+const valueClip = (): { count: number; clipped: string[] } => {
+  const root = globalThis as unknown as Dom
+  const nodes = Array.from(root.document.querySelectorAll('bdi[dir="ltr"], [data-meta-value]'))
+  const clipped: string[] = []
+  for (const node of nodes) {
+    if (node.scrollWidth > node.clientWidth + 1) clipped.push((node.textContent ?? '').trim())
+  }
+  return { count: nodes.length, clipped }
 }
 
 const open = async (browser: Browser, html: string): Promise<Page> => {
@@ -157,6 +192,25 @@ describe('Arabic computed type', () => {
       assert.equal(tool.full, true)
       assert.equal(tool.date, '2026-10-21')
       assert.equal(tool.ltr, true)
+      const widths = [1440, 390]
+      const clips: Array<{ screen: string; width: number; count: number; clipped: string[] }> = []
+      for (const width of widths) {
+        for (const [screen, page] of pages) {
+          await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+          const clip = await page.evaluate(valueClip)
+          clips.push({ screen, width, count: clip.count, clipped: clip.clipped })
+          assert.ok(clip.count > 0, `${screen} at ${width} has no value node`)
+          assert.deepEqual(clip.clipped, [], `${screen} at ${width} clips ${clip.clipped.join(' | ')}`)
+          if (screen === 'home' || screen === 'inbox') {
+            const backup = await page.evaluate(backupDate)
+            assert.equal(backup.text, '2026-10-21')
+            assert.equal(backup.title, 'آخر نسخة 2026-10-21')
+            assert.equal(backup.clipped, false)
+            assert.equal(backup.inside, true, `${screen} at ${width} date leaves the row`)
+          }
+        }
+      }
+      console.log(JSON.stringify({ clips }))
       const ltr = await open(browser, renderHome('ltr'))
       const ltrNav = await ltr.evaluate(() => {
         const root = globalThis as unknown as Dom
