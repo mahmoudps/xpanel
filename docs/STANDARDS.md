@@ -103,7 +103,7 @@ See [TESTING.md](TESTING.md) for executable commands.
 
 ### Typography and spacing roles
 
-Use IBM Plex Sans for English interface text and brands, and IBM Plex Sans Arabic for Arabic interface text. Keep ordinary navigation, labels, buttons, headings and values in the interface family. Reserve IBM Plex Mono for code, commands, file paths and technical identifiers; tabular numbers do not by themselves require a monospace family.
+Use IBM Plex Sans for English interface text and brands, and Noto Sans Arabic for Arabic interface text. Keep ordinary navigation, labels, buttons, headings and values in the interface family. Reserve IBM Plex Mono for code, commands, file paths and technical identifiers; tabular numbers do not by themselves require a monospace family.
 
 | Role | Font size | Latin line height | Arabic line height |
 |---|---|---|---|

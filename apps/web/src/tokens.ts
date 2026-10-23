@@ -666,7 +666,7 @@ export const DESIGN_TOKENS_CSS = /* css */ `
 /* Structural layout and spacing tokens; see docs/STANDARDS.md. */
 :root {
   --xp-font-sans-ltr: 'IBM Plex Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --xp-font-sans-rtl: 'IBM Plex Sans Arabic', 'IBM Plex Sans', 'Inter', Tahoma, sans-serif;
+  --xp-font-sans-rtl: 'Noto Sans Arabic', 'IBM Plex Sans', 'Inter', Tahoma, sans-serif;
   --xp-font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   /* Typography roles shared by account, administration, mail and sign-in screens. */
@@ -1203,7 +1203,7 @@ html[dir="rtl"] .xp-nav-section:not([open]) > .xp-nav-section__title::after { tr
 }
 
 .xp-login-card {
-  flex: 1.618 1 400px;
+  flex: 1 1 400px;
   min-inline-size: min(100%, 320px);
   background-color: var(--xp-bg-surface);
   border: 1px solid var(--xp-border);
@@ -1472,25 +1472,70 @@ html[dir="rtl"] .xp-nav-section:not([open]) > .xp-nav-section__title::after { tr
   color: var(--xp-text-muted);
 }
 
-/* Dedicated sign-in screens prioritize the account access task. */
-.xp-login-shell[data-login-audience] .xp-login-topbar {
-  max-inline-size: 512px;
-  padding-block-start: 24px;
-}
-.xp-login-shell[data-login-audience] .xp-login-main {
+/* Dedicated listener identities share one compact sign-in form contract. */
+.xp-login-shell[data-login-audience] {
+  --xp-login-width: 448px;
+  --xp-login-control-size: 48px;
+  --xp-login-eye-target: 44px;
+  --xp-login-icon-size: 20px;
+  --xp-login-radius: 12px;
+  --xp-login-profile: var(--xp-accent);
+  --xp-login-profile-soft: var(--xp-accent-soft);
   display: grid;
-  grid-template-columns: minmax(0, 448px);
-  gap: 0;
+  grid-template-columns: minmax(0, var(--xp-login-width));
   align-content: center;
-  align-items: start;
   justify-content: center;
-  max-inline-size: 512px;
-  padding-block: 40px 64px;
+  gap: var(--xp-space-card);
+  padding: var(--xp-space-section) var(--xp-space-field);
+}
+.xp-login-shell[data-login-audience="xwhm"] {
+  --xp-login-profile: var(--xp-text-primary);
+  --xp-login-profile-soft: var(--xp-bg-subtle);
+}
+.xp-login-shell[data-login-audience="xmail"] {
+  --xp-login-profile: var(--xp-status-ok-fg);
+  --xp-login-profile-soft: var(--xp-status-ok-bg);
+}
+.xp-login-shell[data-login-audience] .xp-login-topbar {
+  max-inline-size: none;
+  padding: 0;
+  flex-wrap: nowrap;
+  gap: var(--xp-space-md);
+}
+.xp-login-shell[data-login-audience] .xp-brand { gap: var(--xp-space-md); }
+.xp-login-shell[data-login-audience] .xp-brand__mark {
+  color: var(--xp-login-profile);
+  background: var(--xp-login-profile-soft);
+  box-shadow: none;
+}
+.xp-login-shell[data-login-audience] .xp-brand__mark svg {
+  inline-size: 24px;
+  block-size: 24px;
+}
+.xp-login-shell[data-login-audience] .xp-topbar-actions { gap: 4px; flex-shrink: 0; }
+.xp-login-shell[data-login-audience] .xp-topbar-actions .xp-btn {
+  min-inline-size: var(--xp-login-eye-target);
+  min-block-size: var(--xp-login-eye-target);
+  padding-inline: var(--xp-space-sm);
+  background: transparent;
+  border-color: transparent;
+}
+.xp-login-shell[data-login-audience] .xp-topbar-actions .xp-btn:hover {
+  background: var(--xp-bg-subtle);
+  border-color: var(--xp-border);
+}
+.xp-login-theme svg { inline-size: 20px; block-size: 20px; }
+.xp-login-shell[data-login-audience] .xp-login-main {
+  display: block;
+  max-inline-size: none;
+  padding: 0;
 }
 .xp-login-shell[data-login-audience] .xp-login-card {
   min-inline-size: 0;
   padding: var(--xp-space-card);
-  gap: 24px;
+  gap: var(--xp-space-card);
+  border-block-start: 3px solid var(--xp-login-profile);
+  border-radius: var(--xp-login-radius);
   box-shadow: var(--xp-shadow-sm);
 }
 .xp-login-shell[data-login-audience] .xp-page-title {
@@ -1500,24 +1545,59 @@ html[dir="rtl"] .xp-nav-section:not([open]) > .xp-nav-section__title::after { tr
 }
 .xp-login-shell[data-login-audience] .xp-form { gap: var(--xp-space-field); }
 .xp-login-shell[data-login-audience] .xp-input,
-.xp-login-shell[data-login-audience] button[type="submit"] { min-block-size: 48px; }
+.xp-login-shell[data-login-audience] button[type="submit"] {
+  min-block-size: var(--xp-login-control-size);
+}
 .xp-login-shell[data-login-audience] .xp-input { font-size: 16px; }
-.xp-login-shell[data-login-audience] .xp-btn--inline { justify-self: start; }
+.xp-login-shell[data-login-audience] .xp-btn--primary {
+  color: var(--xp-bg-surface);
+  background: var(--xp-text-primary);
+  border-color: var(--xp-text-primary);
+}
+.xp-login-shell[data-login-audience] .xp-btn--primary:hover {
+  background: var(--xp-text-secondary);
+  border-color: var(--xp-text-secondary);
+}
 .xp-login-shell[data-login-audience] .xp-cli-recovery {
   margin-block-start: 0;
-  padding-block-start: 12px;
+  padding-block-start: var(--xp-space-md);
 }
+.xp-login-password { position: relative; display: grid; min-inline-size: 0; }
+.xp-login-password > .xp-input { padding-inline-end: 56px; }
+.xp-password-toggle {
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-end: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 44px;
+  block-size: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--xp-text-secondary);
+  cursor: pointer;
+}
+.xp-password-toggle svg { inline-size: 20px; block-size: 20px; }
+.xp-password-toggle svg[hidden] { display: none; }
+.xp-password-toggle:hover { background: var(--xp-bg-subtle); color: var(--xp-text-primary); }
+.xp-password-toggle:focus-visible {
+  outline: 2px solid var(--xp-border-focus);
+  outline-offset: 2px;
+  background: var(--xp-bg-subtle);
+}
+html[dir="rtl"] .xp-login-password > .xp-input { padding-inline: 56px 12px; }
+html[dir="rtl"] .xp-login-shell[data-login-audience] .xp-label { font-size: 14px; line-height: 22px; }
+html[dir="rtl"] .xp-login-shell[data-login-audience] .xp-page-title { line-height: 32px; }
+html[dir="rtl"] .xp-login-shell[data-login-audience] .xp-help,
+html[dir="rtl"] .xp-login-shell[data-login-audience] .xp-cli-recovery { line-height: 24px; }
 @media (max-width: 479px) {
-  .xp-login-shell[data-login-audience] .xp-login-topbar { gap: 16px; }
-  .xp-login-shell[data-login-audience] .xp-topbar-actions {
-    inline-size: 100%;
-    justify-content: space-between;
-    gap: 8px;
-  }
-  .xp-login-shell[data-login-audience] .xp-topbar-actions .xp-btn { flex: 1; }
-  .xp-login-shell[data-login-audience] .xp-login-main { padding-block: 24px 40px; }
+  .xp-login-shell[data-login-audience] { padding-block: var(--xp-space-card); }
   .xp-login-shell[data-login-audience] .xp-login-card { padding: var(--xp-space-field); }
-  .xp-login-shell[data-login-audience] .xp-page-title { font-size: var(--xp-type-page); }
+  .xp-login-shell[data-login-audience] .xp-brand { gap: var(--xp-space-sm); }
+  .xp-login-shell[data-login-audience] .xp-topbar-actions .xp-btn { font-size: var(--xp-type-label); }
 }
 
 /* Scoped read-only workspace summary. */

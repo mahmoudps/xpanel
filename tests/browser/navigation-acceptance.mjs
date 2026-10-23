@@ -60,7 +60,7 @@ async function currentPage(page, path, expect) {
 
 async function fontGate(page, locale) {
   const result = await page.evaluate(async locale => {
-    const family = locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans'
+    const family = locale === 'ar' ? 'Noto Sans Arabic' : 'IBM Plex Sans'
     const text = locale === 'ar' ? 'الحساب 0123456789' : 'Account 0123456789'
     let ready = false
     await Promise.race([document.fonts.ready.then(() => { ready = true }), new Promise(resolve => setTimeout(resolve, 10000))])

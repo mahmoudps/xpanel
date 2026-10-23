@@ -20,6 +20,16 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
   const targetSurface = audience ?? (isAudience(props.targetSurface) ? props.targetSurface : 'xpanel')
   const brand = audience === 'xwhm' ? 'xWHM' : audience === 'xmail' ? 'xMail' : 'xPanel'
   const text = (en: string, ar: string): string => escapeHtml(isAr ? ar : en)
+  const markPaths = {
+    xpanel: '<circle cx="12" cy="8" r="3"/><path d="M5 20v-2a7 7 0 0 1 14 0v2"/>',
+    xwhm: '<rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01M12 6.5h5M12 17.5h5"/>',
+    xmail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/>',
+  }
+  const profileHeading = audience === 'xwhm' ? text('Server sign in', 'دخول إدارة الخادم') : audience === 'xmail' ? text('Mail sign in', 'دخول البريد') : text('Account sign in', 'دخول الحساب')
+  const profileMark = audience ? '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + markPaths[audience] + '</svg>' : 'x'
+  const themeMark = theme === 'dark'
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M20.7 14.7A9 9 0 0 1 9.3 3.3 9 9 0 1 0 20.7 14.7Z"/></svg>'
   const locked = props.lockout?.locked === true
   const retry = props.lockout?.retryAfterSec
   const observedRetry = typeof retry === 'number' && Number.isFinite(retry) && retry > 0 ? Math.ceil(retry) : ''
@@ -27,7 +37,7 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
 <div class="xp-login-shell" data-surface="login" ${audience ? `data-login-audience="${audience}"` : ''} data-auth-state="${locked ? 'locked' : 'credentials'}" data-locked-until="${escapeHtml(props.lockout?.lockedUntil ?? '')}" data-retry-after="${observedRetry}">
   <header class="xp-login-topbar" role="banner">
     <div class="xp-brand">
-      <span class="xp-brand__mark" aria-hidden="true">x</span>
+      <span class="xp-brand__mark" aria-hidden="true">${profileMark}</span>
       <div class="xp-brand__text">
         <span class="xp-brand__name" dir="ltr">${brand}</span>
         ${audience ? '' : '<span class="xp-brand__sub">xWHM · xPanel · xMail</span>'}
@@ -35,13 +45,13 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
     </div>
     <div class="xp-topbar-actions">
       <a href="/login?lang=${isAr ? 'en' : 'ar'}&amp;theme=${theme}&amp;target=${targetSurface}" class="xp-btn xp-btn--ghost" lang="${isAr ? 'en' : 'ar'}">${text('العربية', 'English')}</a>
-      <a href="/login?lang=${locale}&amp;theme=${theme === 'dark' ? 'light' : 'dark'}&amp;target=${targetSurface}" class="xp-btn xp-btn--ghost">${theme === 'dark' ? text('Light theme', 'الوضع الفاتح') : text('Dark theme', 'الوضع الداكن')}</a>
+      <a href="/login?lang=${locale}&amp;theme=${theme === 'dark' ? 'light' : 'dark'}&amp;target=${targetSurface}" class="xp-btn xp-btn--ghost ${audience ? 'xp-login-theme' : ''}" aria-label="${theme === 'dark' ? text('Light theme', 'الوضع الفاتح') : text('Dark theme', 'الوضع الداكن')}">${audience ? themeMark : theme === 'dark' ? text('Light theme', 'الوضع الفاتح') : text('Dark theme', 'الوضع الداكن')}</a>
     </div>
   </header>
   <main class="xp-login-main" aria-labelledby="login-heading">
     <section class="xp-card xp-login-card">
       ${audience ? '' : `<div class="xp-login-step">${text('Step 1 of 2 — Credentials', 'الخطوة 1 من 2 — بيانات الدخول')}</div>`}
-      <h1 id="login-heading" class="xp-page-title">${text(`Sign in to ${brand}`, `تسجيل الدخول إلى ${brand}`)}</h1>
+      <h1 id="login-heading" class="xp-page-title">${audience ? profileHeading : text(`Sign in to ${brand}`, `تسجيل الدخول إلى ${brand}`)}</h1>
       ${audience ? '' : `<p class="xp-subtitle" id="login-description">${text('Enter your account credentials. Additional verification appears when required.', 'أدخل بيانات حسابك. تظهر خطوات التحقق الإضافية عند طلبها.')}</p>`}
       <div class="xp-alert xp-alert--critical" role="alert" data-auth-error data-lockout-state="${locked ? 'locked' : 'unknown'}" ${props.errorMessage || locked ? '' : 'hidden'}>${escapeHtml(props.errorMessage ?? (locked ? (isAr ? 'تسجيل الدخول مقفل مؤقتًا.' : 'Sign-in is temporarily locked.') : ''))}</div>
       <p class="xp-help" role="status" aria-live="polite" data-auth-status></p>
@@ -53,8 +63,13 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
         </div>
         <div class="xp-field">
           <label class="xp-label" for="login-password">${text('Password', 'كلمة المرور')}</label>
-          <input id="login-password" name="password" type="password" class="xp-input" dir="ltr" autocomplete="current-password" required />
-          <button type="button" class="xp-btn xp-btn--inline" data-action="toggle-password" data-target="login-password" aria-controls="login-password" aria-pressed="false">${text('Show password', 'إظهار كلمة المرور')}</button>
+          <div class="xp-login-password">
+            <input id="login-password" name="password" type="password" class="xp-input" dir="ltr" autocomplete="current-password" required />
+            <button type="button" class="xp-password-toggle" data-action="toggle-password" data-target="login-password" aria-controls="login-password" aria-pressed="false" aria-label="${text('Show password', 'إظهار كلمة المرور')}">
+              <svg data-password-show width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.5" stroke="currentColor" stroke-width="1.6"/></svg>
+              <svg data-password-hide width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" hidden><path d="m4 4 16 16M9.8 6.3A11 11 0 0 1 12 6c6.1 0 9.5 6 9.5 6a17 17 0 0 1-3.2 3.8M6.1 7.6A18 18 0 0 0 2.5 12s3.4 6 9.5 6a11 11 0 0 0 4-0.8M10.2 10.2a2.5 2.5 0 0 0 3.6 3.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
         </div>
         <fieldset class="xp-fieldset" data-auth-mfa-fields data-2fa-step="unknown" hidden>
           <legend class="xp-label">${text('Two-factor verification', 'التحقق الثنائي')}</legend>

@@ -4,6 +4,7 @@ import { renderLoginSurface, type LoginSurfaceProps } from './surfaces/login.ts'
 
 const audiences = ['xpanel', 'xwhm', 'xmail'] as const
 const brands = { xpanel: 'xPanel', xwhm: 'xWHM', xmail: 'xMail' }
+const headings = { xpanel: { en: 'Account sign in', ar: 'دخول الحساب' }, xwhm: { en: 'Server sign in', ar: 'دخول إدارة الخادم' }, xmail: { en: 'Mail sign in', ar: 'دخول البريد' } }
 
 describe('listener-specific sign-in presentation', () => {
   for (const audience of audiences) {
@@ -12,7 +13,18 @@ describe('listener-specific sign-in presentation', () => {
         const html = renderLoginSurface({ audience, locale })
         assert.match(html, new RegExp('data-login-audience="' + audience + '"'))
         const heading = html.match(/<h1[^>]*>(.*?)<\/h1>/s)?.[1]
-        assert.ok(heading?.includes(brands[audience]))
+        assert.equal(heading, headings[audience][locale])
+        assert.match(html, new RegExp('<span class="xp-brand__name" dir="ltr">' + brands[audience] + '</span>'))
+        const reveal = html.match(/<button[^>]+data-action="toggle-password"[\s\S]*?<\/button>/)?.[0]
+        assert.ok(reveal)
+        assert.match(reveal, /type="button"/)
+        assert.match(reveal, /aria-controls="login-password"/)
+        assert.match(reveal, /aria-pressed="false"/)
+        assert.ok(reveal.includes('aria-label="' + (locale === 'ar' ? 'إظهار كلمة المرور' : 'Show password') + '"'))
+        assert.match(reveal, /data-password-show/)
+        assert.match(reveal, /data-password-hide[^>]+hidden/)
+        assert.equal((reveal.match(/<svg\b/g) ?? []).length, 2)
+
         assert.equal((html.match(/<h1\b/g) ?? []).length, 1)
         assert.match(html, /<form[^>]+aria-labelledby="login-heading"[^>]+data-login-form/)
         assert.doesNotMatch(html, /id="login-description"|<aside|<footer|xp-login-step|xp-login-emblem/)
@@ -37,7 +49,7 @@ describe('listener-specific sign-in presentation', () => {
     assert.doesNotMatch(legacy, /data-login-audience/)
     assert.match(legacy, /Sign in to xPanel/)
     const scoped = renderLoginSurface({ audience: 'xmail', targetSurface: 'xwhm' })
-    assert.match(scoped, /Sign in to xMail/)
+    assert.match(scoped, /Mail sign in/)
     const links = scoped.match(/href="[^"]+"/g) ?? []
     assert.equal(links.length, 2)
     assert.ok(links.every(link => link.includes('target=xmail')))

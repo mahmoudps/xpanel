@@ -9,6 +9,7 @@ import { assertAppliedFont } from './applied-font-contract.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const audiences = { xpanel: 'xPanel', xwhm: 'xWHM', xmail: 'xMail' }
+const headings = { xpanel: { en: 'Account sign in', ar: 'دخول الحساب' }, xwhm: { en: 'Server sign in', ar: 'دخول إدارة الخادم' }, xmail: { en: 'Mail sign in', ar: 'دخول البريد' } }
 const widths = [320, 360, 390, 768, 1440]
 const matrix = Object.keys(audiences).flatMap(audience => ['en', 'ar'].flatMap(locale => ['light', 'dark'].flatMap(theme => widths.map(width => ({ audience, locale, theme, width, id: `${audience}-${locale}-${theme}-${width}` })))))
 const inputs = ['apps/web/src/app.ts', 'apps/web/src/tokens.ts', 'apps/web/src/surfaces/login.ts', 'apps/web/src/login-client.ts', 'apps/web/src/document-routes.ts', 'tests/browser/login-surface-acceptance.mjs', 'tests/browser/applied-font-contract.mjs']
@@ -96,7 +97,7 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
         await expect(page.locator('[data-login-audience]')).toHaveAttribute('data-login-audience', state.audience)
         await expect(page.locator('html')).toHaveAttribute('data-login-visual-fixture', 'synthetic')
         assert.equal(await page.locator('h1').count(), 1)
-        await expect(page.locator('h1')).toContainText(audiences[state.audience])
+        await expect(page.locator('h1')).toHaveText(headings[state.audience][state.locale])
         await expect(page.locator('.xp-brand__name')).toHaveText(audiences[state.audience])
         assert.equal(await page.locator('.xp-login-aside,.xp-login-context,.xp-login-footer').count(), 0, 'Dedicated sign-in must stay a functional form without marketing panels or footer prose')
         await expect(page.locator('[data-auth-submit]')).toBeEnabled()
@@ -114,22 +115,46 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
         assert.equal(metrics.fonts.ready, true, 'Fonts must settle within 5 seconds')
         assert.ok(metrics.fonts.loaded_faces.length > 0, 'Downloadable font faces must actually load')
         assert.equal(metrics.fonts.failed_faces.length, 0)
-        assert.ok(metrics.fonts.loaded_faces.some(face => face.family.includes(state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')), 'The locale font must actually load')
+        assert.ok(metrics.fonts.loaded_faces.some(face => face.family.includes(state.locale === 'ar' ? 'Noto Sans Arabic' : 'IBM Plex Sans')), 'The locale font must actually load')
         metrics.fonts.applied_roles = {}
-        for (const [role, selector, family] of [['brand', '.xp-brand__name', 'IBM Plex Sans'], ['heading', '.xp-login-shell h1', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans']]) {
+        for (const [role, selector, family] of [['brand', '.xp-brand__name', 'IBM Plex Sans'], ['heading', '.xp-login-shell h1', state.locale === 'ar' ? 'Noto Sans Arabic' : 'IBM Plex Sans']]) {
           try { metrics.fonts.applied_roles[role] = await assertAppliedFont(page, selector, family) }
           catch (error) { if (error.appliedFontObservation) metrics.fonts.applied_roles[role] = error.appliedFontObservation; throw error }
         }
-        await page.locator('#login-username').focus(); await page.keyboard.press('Tab'); await expect(page.locator('#login-password')).toBeFocused()
+        const password = page.locator('#login-password')
+        const syntheticValue = 'Synthetic visual password 123!'
+        await password.fill(syntheticValue)
+        await page.locator('#login-username').focus(); await page.keyboard.press('Tab'); await expect(password).toBeFocused()
+        await password.evaluate(input => input.setSelectionRange(2, 8, 'forward'))
         await page.keyboard.press('Tab'); const toggle = page.locator('[data-action="toggle-password"]'); await expect(toggle).toBeFocused()
-        await page.keyboard.press('Space'); await expect(page.locator('#login-password')).toHaveAttribute('type', 'text'); await expect(toggle).toHaveAttribute('aria-pressed', 'true')
-        await page.keyboard.press('Space'); await expect(page.locator('#login-password')).toHaveAttribute('type', 'password')
+        const eyeGeometry = await toggle.evaluate(button => {
+          const input = document.getElementById(button.getAttribute('aria-controls')), ir = input.getBoundingClientRect(), br = button.getBoundingClientRect(), style = getComputedStyle(input)
+          return { input: { left: ir.left, right: ir.right, top: ir.top, bottom: ir.bottom }, eye: { left: br.left, right: br.right, top: br.top, bottom: br.bottom, width: br.width, height: br.height }, padding_left: parseFloat(style.paddingLeft), padding_right: parseFloat(style.paddingRight), text_align: style.textAlign, resolved_text_align: style.textAlign === 'start' ? (style.direction === 'rtl' ? 'right' : 'left') : style.textAlign === 'end' ? (style.direction === 'rtl' ? 'left' : 'right') : style.textAlign, direction: style.direction }
+        })
+        assert.ok(eyeGeometry.eye.width >= 44 && eyeGeometry.eye.height >= 44)
+        assert.ok(eyeGeometry.eye.left >= eyeGeometry.input.left && eyeGeometry.eye.right <= eyeGeometry.input.right && eyeGeometry.eye.top >= eyeGeometry.input.top && eyeGeometry.eye.bottom <= eyeGeometry.input.bottom, 'The eye target remains inside the password field')
+        assert.equal(eyeGeometry.direction, 'ltr')
+        assert.equal(eyeGeometry.resolved_text_align, state.locale === 'ar' ? 'right' : 'left')
+        assert.ok((state.locale === 'ar' ? eyeGeometry.padding_left : eyeGeometry.padding_right) >= eyeGeometry.eye.width + 8, 'Credential text reserves the physical space occupied by the eye in either locale')
+        await page.keyboard.press('Space'); await expect(password).toHaveAttribute('type', 'text'); await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+        await expect(toggle).toHaveAttribute('aria-label', state.locale === 'ar' ? 'إخفاء كلمة المرور' : 'Hide password')
+        assert.equal(await page.locator('[data-password-show]').getAttribute('hidden'), '')
+        assert.equal(await page.locator('[data-password-hide]').getAttribute('hidden'), null)
+        await expect(toggle).toBeFocused()
+        assert.deepEqual(await password.evaluate(input => [input.value, input.selectionStart, input.selectionEnd]), [syntheticValue, 2, 8], 'Revealing preserves the exact unsent value and caret selection')
+        await page.keyboard.press('Enter'); await expect(password).toHaveAttribute('type', 'password')
+        await expect(toggle).toHaveAttribute('aria-label', state.locale === 'ar' ? 'إظهار كلمة المرور' : 'Show password')
+        await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+        assert.equal(await page.locator('[data-password-show]').getAttribute('hidden'), null)
+        assert.equal(await page.locator('[data-password-hide]').getAttribute('hidden'), '')
+        assert.deepEqual(await password.evaluate(input => [input.value, input.selectionStart, input.selectionEnd]), [syntheticValue, 2, 8], 'Hiding preserves the value and caret selection without submitting')
+        assert.equal(await page.locator('[data-auth-status]').boundingBox(), null, 'An empty status message reserves no visual space')
         const focus = await toggle.evaluate(element => { const style = getComputedStyle(element); return { outline_width: style.outlineWidth, outline_style: style.outlineStyle } })
         assert.ok(parseFloat(focus.outline_width) >= 2 && focus.outline_style !== 'none', 'Keyboard focus must have a visible outline')
         assert.equal(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches), true)
         const motion = await toggle.evaluate(element => { const style = getComputedStyle(element); return { transition_duration: style.transitionDuration, animation_duration: style.animationDuration } })
         assert.ok([motion.transition_duration, motion.animation_duration].every(value => value.split(',').every(duration => parseFloat(duration) <= 0.00001)), 'Reduced motion must suppress control animation and transitions')
-        outcome.observations.push({ keyboard_order: true, password_toggle: true, focus, reduced_motion: true, motion, server_audience_ignores_query_target: true })
+        outcome.observations.push({ keyboard_order: true, password_toggle: true, in_field_eye: eyeGeometry, preserved_selection: true, focus, reduced_motion: true, motion, server_audience_ignores_query_target: true })
         if (state.width === 320) {
           await page.goto(`${url}&sample=error`, { waitUntil: 'domcontentloaded' })
           await expect(page.locator('[data-auth-error]')).toBeVisible()
@@ -160,7 +185,7 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
   } finally { await browser.close(); await Promise.all(fixtures.map(fixture => fixture.close())) }
   const after = fingerprint(), drift = before.filter((file, index) => file.sha256 !== after[index].sha256).map(file => file.path)
   const report = { schema_version: 1, at: new Date().toISOString(), status: outcomes.every(value => value.status === 'passed') && drift.length === 0 ? 'passed' : 'failed', runtime: process.version, browser: { name: 'Chromium', version: browser.version(), headless: true }, environment: { platform: process.platform, architecture: process.arch }, duration_ms: Date.now() - started,
-    scope: '60 synthetic login states: 3 server-selected audiences, 2 locales, 2 themes, 5 widths (320/360/390/768/1440). Keyboard, toggle, focus, reduced motion, geometry and actual applied custom Plex brand/heading glyph faces on all states; long error wrapping on all 12 narrow states.',
+    scope: '60 synthetic login states: 3 server-selected audiences, 2 locales, 2 themes, 5 widths (320/360/390/768/1440). Keyboard, toggle, focus, reduced motion, geometry and actual applied Plex English/Noto Arabic custom brand/heading glyph faces on all states; long error wrapping on all 12 narrow states.',
     fixture: { synthetic: true, listeners: 3, loopback_only: true, read_only: true, credentials_submitted: 0, live_authentication: false, tls_qualification: false, production_ports_qualification: false },
     tests: { total: outcomes.length, passed: outcomes.filter(value => value.status === 'passed').length, failed: outcomes.filter(value => value.status === 'failed').length },
     source: { before, after, drift },

@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 
-const proportionalFamilies = new Set(['IBM Plex Sans', 'IBM Plex Sans Arabic'])
+const proportionalFamilies = new Set(['IBM Plex Sans', 'IBM Plex Sans Arabic', 'Noto Sans Arabic'])
 const reportedFamily = name => {
   const normalized = name.trim().replace(/\s+/g, ' ')
   // Chromium reports some font weights as part of familyName. Match the whole
   // family and a known style suffix, so Sans Arabic never passes as Sans.
-  const match = /^(IBM Plex Sans Arabic|IBM Plex Sans|IBM Plex Mono)(?: (?:Thin|Extra ?Light|Light|Regular|Text|Medium|Semi ?Bold|Bold|Extra ?Bold)(?: Italic)?| Italic)?$/i.exec(normalized)
+  const match = /^(IBM Plex Sans Arabic|IBM Plex Sans|IBM Plex Mono|Noto Sans Arabic)(?: (?:Thin|Extra ?Light|Light|Regular|Text|Medium|Semi ?Bold|Bold|Extra ?Bold)(?: Italic)?| Italic)?$/i.exec(normalized)
   if (!match) return normalized
-  return ['IBM Plex Sans Arabic', 'IBM Plex Sans', 'IBM Plex Mono'].find(family => family.toLowerCase() === match[1].toLowerCase())
+  return ['IBM Plex Sans Arabic', 'IBM Plex Sans', 'IBM Plex Mono', 'Noto Sans Arabic'].find(family => family.toLowerCase() === match[1].toLowerCase())
 }
 
 /**
@@ -17,7 +17,7 @@ const reportedFamily = name => {
  */
 export async function assertAppliedFont(page, selector, family) {
   assert.ok(typeof selector === 'string' && selector.trim(), 'An explicit CSS selector is required')
-  assert.ok(proportionalFamilies.has(family), 'Expected a supported proportional Plex family')
+  assert.ok(proportionalFamilies.has(family), 'Expected a supported proportional font family')
   const observation = await page.evaluate(selector => {
     const nodes = document.querySelectorAll(selector), element = nodes[0]
     if (!element) return { selector, count: 0, text: '', visible: false }
@@ -47,8 +47,8 @@ export async function assertAppliedFont(page, selector, family) {
     observation.applied_faces = fonts.map(font => ({ ...font, normalized_family: reportedFamily(font.familyName) }))
     const active = observation.applied_faces.filter(font => Number.isFinite(font.glyphCount) && font.glyphCount > 0)
     assert.ok(active.length > 0, 'Chromium must report actual rendered glyphs for the font target')
-    assert.ok(active.every(font => font.normalized_family !== 'IBM Plex Mono'), 'Brand and ordinary headings must use proportional Plex Sans, not Plex Mono')
-    assert.ok(active.every(font => font.isCustomFont === true && font.normalized_family === family), 'All rendered glyphs must use the expected downloadable Plex family; a fallback font does not pass')
+    assert.ok(active.every(font => font.normalized_family !== 'IBM Plex Mono'), 'Brand and ordinary headings must use a proportional font, not Plex Mono')
+    assert.ok(active.every(font => font.isCustomFont === true && font.normalized_family === family), 'All rendered glyphs must use the expected downloadable font family; a fallback font does not pass')
     observation.rendered_glyphs = active.reduce((total, font) => total + font.glyphCount, 0)
     return observation
   } catch (error) {

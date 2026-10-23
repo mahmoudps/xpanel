@@ -229,8 +229,15 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     if (action === 'toggle-password') {
       var input = document.getElementById(button.getAttribute('data-target'));
       if (!input) return;
+      event.preventDefault();
+      var start = input.selectionStart, end = input.selectionEnd, direction = input.selectionDirection;
       var visible = input.type === 'password'; input.type = visible ? 'text' : 'password';
-      button.textContent = visible ? copy.hide : copy.show; button.setAttribute('aria-pressed', String(visible));
+      button.setAttribute('aria-label', visible ? copy.hide : copy.show);
+      button.setAttribute('aria-pressed', String(visible));
+      var showIcon = button.querySelector('[data-password-show]'), hideIcon = button.querySelector('[data-password-hide]');
+      if (showIcon) showIcon.toggleAttribute('hidden', visible);
+      if (hideIcon) hideIcon.toggleAttribute('hidden', !visible);
+      if (typeof start === 'number' && typeof end === 'number') input.setSelectionRange(start, end, direction || 'none');
     } else if (action === 'restart-enrollment') {
       clearEnrollment(); show('[data-auth-enrollment-details]', false); setup.hidden = false; step('enrollment-required'); message(copy.enrollment, false);
     } else if (action === 'acknowledge-recovery') {

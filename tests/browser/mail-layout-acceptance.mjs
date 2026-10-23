@@ -24,7 +24,7 @@ async function fontGate(page, locale) {
   const result = await page.evaluate(async locale => {
     let ready = false
     await Promise.race([document.fonts.ready.then(() => { ready = true }), new Promise(resolve => setTimeout(resolve, 10000))])
-    const family = locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans'
+    const family = locale === 'ar' ? 'Noto Sans Arabic' : 'IBM Plex Sans'
     const faces = [...document.fonts].map(face => ({ family: face.family.replaceAll('"', '').replaceAll("'", ''), status: face.status }))
     return { ready, family, faces, body_family: getComputedStyle(document.body).fontFamily, glyph_check: document.fonts.check('14px "' + family + '"', locale === 'ar' ? 'الحساب 0123456789' : 'Account 0123456789') }
   }, locale)
@@ -283,7 +283,7 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
         outcome.fonts = await fontGate(page, state.locale)
         if (!probeControls) probeControls = await quotaProbeControls(page)
         outcome.applied_fonts = {}
-        for (const [role, selector, family] of [['brand', '.xp-mail-brand strong', 'IBM Plex Sans'], ['heading', 'h1', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans']]) {
+        for (const [role, selector, family] of [['brand', '.xp-mail-brand strong', 'IBM Plex Sans'], ['heading', 'h1', state.locale === 'ar' ? 'Noto Sans Arabic' : 'IBM Plex Sans']]) {
           try { outcome.applied_fonts[role] = await assertAppliedFont(page, selector, family) }
           catch (error) { if (error.appliedFontObservation) outcome.applied_fonts[role] = error.appliedFontObservation; throw error }
         }

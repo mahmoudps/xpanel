@@ -74,7 +74,7 @@ try {
     try {
       await page.goto(`${origin}/?lang=${locale}&theme=${theme}&density=${density}`, { waitUntil: 'networkidle' })
       await page.evaluate(() => document.fonts.ready)
-      outcome.font = await assertAppliedFont(page, 'h1', locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
+      outcome.font = await assertAppliedFont(page, 'h1', locale === 'ar' ? 'Noto Sans Arabic' : 'IBM Plex Sans')
       outcome.geometry = await page.evaluate(() => {
         const rect = element => { const r = element.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, height: r.height, width: r.width } }
         const glyph = element => { const range = document.createRange(); range.selectNodeContents(element); const r = range.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom } }
@@ -128,7 +128,7 @@ try {
       const response = await page.goto(`${origin}/${surface}?lang=${locale}&theme=${theme}`, { waitUntil: 'networkidle' })
       assert.equal(response.status(), 200)
       await page.evaluate(() => document.fonts.ready)
-      outcome.font = await assertAppliedFont(page, 'h1', locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
+      outcome.font = await assertAppliedFont(page, 'h1', locale === 'ar' ? 'Noto Sans Arabic' : 'IBM Plex Sans')
       outcome.geometry = await page.evaluate(() => ({ documentWidth: document.documentElement.scrollWidth, bodyOverflow: getComputedStyle(document.body).overflowX, rootOverflow: getComputedStyle(document.documentElement).overflowX, meters: [...document.querySelectorAll('.xp-meter')].map(group => ({ kind: group.dataset.resourceState, used: group.querySelector('[data-resource-part="used"]').textContent, limit: group.querySelector('[data-resource-part="limit"]').textContent, hasBar: Boolean(group.querySelector('[role="meter"], .xp-meter__fill')), value: group.querySelector('.xp-meter__values').textContent, text: group.textContent })) }))
       check('actual-surface-document-contained-without-concealment', outcome.geometry.documentWidth <= width + 1 && !['hidden', 'clip'].includes(outcome.geometry.bodyOverflow) && !['hidden', 'clip'].includes(outcome.geometry.rootOverflow), outcome.geometry)
       check('unknown-values-have-no-meter-or-healthy-state', outcome.geometry.meters.length > 0 && outcome.geometry.meters.every(meter => meter.kind === 'unavailable' && !meter.hasBar && !/Healthy|Within limit|ضمن الحد/.test(meter.text)), outcome.geometry.meters)
