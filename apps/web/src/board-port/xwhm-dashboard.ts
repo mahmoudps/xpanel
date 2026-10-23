@@ -1,4 +1,6 @@
 import type { Account, AuditEntry, Certificate, Plan, ServerIpEntry } from '@xpanel/core'
+import { ARABIC_TYPE_CSS } from '../arabic-type.ts'
+import { isolateLtrRuns } from '../bidi-runs.ts'
 import { auditActionLabel } from '../audit-labels.ts'
 import type { Locale } from '../i18n.ts'
 import { escapeHtml, formatAsciiDate, formatAsciiNumber, formatBytes, formatUtcClock, formatUtcDay } from '../tokens.ts'
@@ -346,13 +348,13 @@ export const mapAgentServices = (payload: unknown): MappedHostService[] | null =
 
 const ltr = (value: string): string => `<bdi dir="ltr">${escapeHtml(value)}</bdi>`
 
-const rich = (value: string): string => value.split(/«([^»]*)»/).map((part, index) => index % 2 === 1 ? ltr(part) : escapeHtml(part)).join('')
+const rich = (value: string): string => value.split(/«([^»]*)»/).map((part, index) => index % 2 === 1 ? ltr(part) : isolateLtrRuns(part)).join('')
 
-/** English stays escaped text so the approved LTR pixels do not move. Arabic isolates Latin tokens. */
+/** English stays escaped text so the approved LTR pixels do not move. Arabic isolates Latin tokens and dates. */
 const show = (value: string, ar: boolean): string => {
   if (!ar) return escapeHtml(value)
   if (value.includes('«')) return rich(value)
-  if (/[\u0600-\u06FF]/.test(value)) return escapeHtml(value)
+  if (/[\u0600-\u06FF]/.test(value)) return isolateLtrRuns(value)
   return ltr(value)
 }
 
@@ -473,12 +475,13 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
   const lede = ar
     ? `<p style="margin: 0; font-size: 14px; color: #475467; line-height: 1.6; max-width: 68ch"><span style="font-family: 'IBM Plex Mono', monospace">${ltr(model.ledeHost)}</span> ${rich(model.ledeRest)}<time datetime="${escapeHtml(model.ledeDatetime)}"><bdi dir="ltr" style="white-space: nowrap">${escapeHtml(model.ledeTime)}</bdi></time></p>`
     : `<p style="margin: 0; font-size: 14px; color: #475467; line-height: 1.6; max-width: 68ch"><span style="font-family: 'IBM Plex Mono', monospace">${escapeHtml(model.ledeHost)}</span> ${escapeHtml(model.ledeRest)}<time datetime="${escapeHtml(model.ledeDatetime)}">${escapeHtml(model.ledeTime)}</time>.</p>`
-  return `<div class="xp-board-port" data-board-port="xwhm-dashboard" data-section="overview-attention"${ar ? ' dir="rtl"' : ''} style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #F5F6F8; font-family: 'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif; color: #101828">
+  return `<div class="xp-board-port" data-board-port="xwhm-dashboard" data-section="overview-attention"${ar ? ' dir="rtl"' : ''} style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #F5F6F8; color: #101828">
   <style>
     .xp-board-port{line-height:normal;font-size:16px;font-kerning:auto;font-feature-settings:normal;font-synthesis:weight style small-caps;-webkit-font-smoothing:antialiased}
     .xp-board-port a{color:#1D5BD6}.xp-board-port a:hover{color:#1546A8}
     .xp-board-port :focus-visible{outline:2px solid #1D5BD6;outline-offset:2px}
     .xp-board-port nav[aria-label="xWHM navigation"] :focus-visible{outline-color:#6EA0FF}
+    ${ARABIC_TYPE_CSS}
   </style>
   ${navHtml(model)}
   <main id="main-content" style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
@@ -872,7 +875,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
           tone: 'warn',
           html: `<span>${ar
             ? rich(expiring.length === 1 ? '«1» شهادة تُجدَّد خلال «30» يوماً:' : `«${expiring.length}» شهادات تُجدَّد خلال «30» يوماً:`)
-            : escapeHtml(expiring.length === 1 ? '1 certificate renews within 30 days:' : `${expiring.length} certificates renew within 30 days:`)} ${expiring.map(item => `${mono(item.name)} (${mono(item.date)})`).join(', ')}</span>`,
+            : escapeHtml(expiring.length === 1 ? '1 certificate renews within 30 days:' : `${expiring.length} certificates renew within 30 days:`)} ${expiring.map(item => ar ? `<bdi dir="ltr"><span style="font-family: 'IBM Plex Mono', monospace">${escapeHtml(item.name)}</span></bdi> <bdi dir="ltr">(${escapeHtml(item.date)})</bdi>` : `${mono(item.name)} (${mono(item.date)})`).join(', ')}</span>`,
         }
   const planPhrase = planCount === null
     ? ''
@@ -1041,6 +1044,7 @@ body{margin:0;background:#F5F6F8;color:#101828;font-family:'IBM Plex Sans','IBM 
 a{color:#1D5BD6}a:hover{color:#1546A8}
 :focus-visible{outline:2px solid #1D5BD6;outline-offset:2px}
 nav[aria-label="xWHM navigation"] :focus-visible{outline-color:#6EA0FF}
+${ARABIC_TYPE_CSS}
 </style>
 </head>
 <body>
