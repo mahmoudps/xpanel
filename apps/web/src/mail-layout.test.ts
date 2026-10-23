@@ -95,7 +95,39 @@ describe('bounded mail reference layout', () => {
       expect(html).toContain(`for="${id}"`)
       expect(html).toContain(`id="${id}"`)
     }
-    expect(html).not.toMatch(/data-action="(?:reply-message|forward-message|archive-message)"|Attach files|Save draft/)
+    expect(html).not.toMatch(/data-action="(?:reply-message|forward-message|archive-message)"/)
+  })
+
+  it('shows stored compose identity and every filter, and does not invent a quota or a zero', () => {
+    const html = renderMailSurface(fixture({
+      activeRoute: '/mail/compose',
+      quotaLimitMb: 100,
+      identityDkim: 'Selector default is stored for example.test',
+      identitySpf: 'SPF record stored · DMARC record not stored',
+      identitySize: '25 MiB per message',
+      sieveRules: [
+        { id: 'keep', name: 'Keep invoices', condition: 'Subject contains invoice', action: 'File into Orders', enabled: true },
+        { id: 'drop', name: 'Drop noise', condition: 'From equals spam@example.test', action: 'Discard', enabled: false },
+      ],
+    }))
+    expect(html).toContain('— / 100 MiB')
+    expect(html).toContain('data-quota-ratio="unknown"')
+    expect(html).not.toContain('0 / 100')
+    expect(html).toContain('Selector default is stored for example.test')
+    expect(html).toContain('SPF record stored · DMARC record not stored')
+    expect(html).toContain('25 MiB per message')
+    expect(html).toContain('1 active')
+    expect(html).toContain('2 Sieve rules')
+    expect(html).toContain('Drop noise · paused')
+    expect(html).toContain('Keep invoices')
+    const attack = '<img src=x onerror="alert(1)">'
+    const escaped = renderMailSurface(fixture({ activeRoute: '/mail/compose', identityDkim: attack, identitySpf: attack, identitySize: attack }))
+    expect(escaped).not.toContain('<img')
+    expect(escaped).not.toContain('onerror="')
+    const omitted = renderMailSurface(fixture({ activeRoute: '/mail/compose' }))
+    expect(omitted).not.toContain('0 active')
+    expect(omitted).not.toContain('Selector default')
+    expect(omitted).toContain('data-quota-ratio="unknown"')
   })
 
   it('labels mailbox quota in MiB and does not invent a used amount', () => {

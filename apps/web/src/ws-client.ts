@@ -2134,15 +2134,28 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       var to = document.getElementById('compose-to');
       var subject = document.getElementById('compose-subject');
       var body = document.getElementById('compose-body');
+      var addresses = [];
+      document.querySelectorAll('[data-mail-chip="to"]').forEach(function (chip) {
+        var addr = chip.getAttribute('data-addr');
+        if (addr) addresses.push(addr);
+      });
+      if (to && to.value && to.value.trim()) addresses.push(to.value.trim());
+      var text = '';
+      if (body) text = body.tagName === 'TEXTAREA' || body.tagName === 'INPUT' ? body.value : (body.innerText || '');
       sendButton.disabled = true;
       note(status, ar ? 'جار الإرسال.' : 'Sending.');
       window.xpanelSessionRequest('POST', '/api/webmail/send', {
-        to: to ? to.value.trim() : '',
+        to: addresses.join(', '),
         subject: subject ? subject.value.trim() : '',
-        text: body ? body.value : '',
+        text: text.trim(),
       }).then(function () {
         note(status, ar ? 'أُرسلت الرسالة.' : 'The message was sent.');
-        if (body) body.value = '';
+        if (body) {
+          if (body.tagName === 'TEXTAREA' || body.tagName === 'INPUT') body.value = '';
+          else body.textContent = '';
+        }
+        document.querySelectorAll('[data-mail-chip="to"]').forEach(function (chip) { chip.remove(); });
+        if (to) to.value = '';
         sendButton.disabled = false;
       }).catch(function (error) {
         sendButton.disabled = false;
