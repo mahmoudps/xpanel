@@ -3511,6 +3511,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     const mongoDeleteMatch = /^\/api\/databases\/mongo\/([^/]+)$/.exec(pathname)
     if (pathname === '/api/databases/mongo' || mongoDeleteMatch) {
       const caller = await helpers.requireCaller(req)
+      await helpers.assertRoot(caller, 'database.mongo')
       const dbs = await ext.readOrDefault<MongoDatabaseRecord[]>('databases/mongo-dbs.json', [])
       if (method === 'GET' && !mongoDeleteMatch) {
         const accountIdFilter = url.searchParams.get('accountId')

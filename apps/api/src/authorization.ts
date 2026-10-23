@@ -3,6 +3,7 @@ import { assertAcl, assertCanSeeAccount, fail, isUuid } from '@xpanel/core'
 import type { Account, ResellerAcl } from '@xpanel/core'
 import type { StateStore } from '@xpanel/state'
 import type { AuthenticatedCaller } from './auth.ts'
+import { isMongoDatabaseRoute } from './entry-points.ts'
 
 export interface RoutePolicy {
   resource: string
@@ -129,7 +130,7 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   if (/^\/api\/ips(?:\/|$)/.test(pathname)) return { resource: 'ips', rootOnly: !read, acl: 'list-accounts' }
   if (pathname === '/api/mail/ips') return { resource: 'mail', rootOnly: true }
   if (/^\/api\/domains(?:\/|$)/.test(pathname)) return { resource: 'domains', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['domains'] }
-  if (/^\/api\/databases(?:\/|$)/.test(pathname)) return { resource: 'databases', acl: read ? 'list-accounts' : 'edit-account', ...(pathname.endsWith('/mongo') ? { rootOnly: true } : {}), toolIds: [pathname.includes('/postgres') ? 'postgresql-databases' : 'mysql-databases'] }
+  if (/^\/api\/databases(?:\/|$)/.test(pathname)) return { resource: 'databases', acl: read ? 'list-accounts' : 'edit-account', ...(isMongoDatabaseRoute(pathname) ? { rootOnly: true } : {}), toolIds: [pathname.includes('/postgres') ? 'postgresql-databases' : 'mysql-databases'] }
   if (/^\/api\/service-users(?:\/|$)/.test(pathname)) return { resource: 'service-users', acl: read ? 'list-accounts' : 'edit-account' }
   if (/^\/api\/dns(?:\/|$)/.test(pathname)) return { resource: 'dns', acl: 'manage-dns', toolIds: ['zone-editor'] }
   if (/^\/api\/mail(?:\/|$)/.test(pathname)) {

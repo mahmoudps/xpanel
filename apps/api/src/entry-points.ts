@@ -23,6 +23,8 @@ const authRoutes = new Set(['login', 'logout', 'me', 'change-password', '2fa/set
 const ownerFamilies = /^\/api\/(?:domains|databases|service-users|dns|backups|web-features|git|cache|containers|apps|analytics)(?:\/|$)/
 const administratorFamilies = /^\/api\/(?:server|setup|feature-lists|plans|resellers|accounts|ips|domains|databases|service-users|dns|mail|backups|transfers|lifecycle|web-features|git|cache|containers|apps|analytics|firewall|generations|reconcile|cluster|whmcs|audit|branding|languages)(?:\/|$)/
 
+export const isMongoDatabaseRoute = (pathname: string): boolean => /^\/api\/databases\/mongo(?:\/|$)/.test(pathname)
+
 /** Listener confinement is additional to, and never a replacement for, route RBAC and ownership checks. */
 export const entryPointAllowsApiRoute = (entryPoint: EntryPoint, pathname: string, method: string): boolean => {
   if (method === 'GET' && pathname === '/api/health') return true
@@ -32,7 +34,7 @@ export const entryPointAllowsApiRoute = (entryPoint: EntryPoint, pathname: strin
   if (entryPoint === 'xwhm') return pathname === '/api/search' ? method === 'GET' : administratorFamilies.test(pathname)
   if (/^\/api\/accounts(?:\/[^/]+)?$/.test(pathname)) return method === 'GET'
   if (/^\/api\/accounts\/[^/]+\/(?:files|shell)$/.test(pathname)) return true
-  if (ownerFamilies.test(pathname)) return !['/api/databases/mongo', '/api/analytics/io', '/api/analytics/websites/ingest'].includes(pathname)
+  if (ownerFamilies.test(pathname)) return !isMongoDatabaseRoute(pathname) && !['/api/analytics/io', '/api/analytics/websites/ingest'].includes(pathname)
   if (/^\/api\/mail(?:\/|$)/.test(pathname)) return pathname !== '/api/mail/ips' && pathname !== '/api/mail/caldav-carddav'
   return method === 'GET' && ['/api/branding', '/api/languages'].includes(pathname)
 }
