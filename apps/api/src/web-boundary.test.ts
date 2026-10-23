@@ -158,13 +158,19 @@ describe('production web renderer boundary regressions', () => {
     expect(snapshotReads).toBe(0)
   })
 
-  it('requires root MFA enrollment before administrative HTML', async () => {
+  it('opens administrative HTML for root when two-factor authentication is not enrolled', async () => {
     const principal = await root({ enrolled: false })
     const render = await renderer()
     const cookie = await session(principal.id)
     for (const path of ['/whm', '/whm/accounts']) {
-      await observe(`root-mfa-unenrolled:${path}`, await render(request(path, cookie)), 403)
+      const html = await observe(`root-mfa-unenrolled:${path}`, await render(request(path, cookie)), 200)
+      expect(html).toContain('data-mfa-optional-link')
+      expect(html).not.toMatch(/Multi-factor enrollment is required|must complete enrollment/)
     }
+    const security = await observe('root-mfa-unenrolled:security', await render(request('/whm/security/sign-in', cookie)), 200)
+    expect(security).toContain('data-mfa-recommendation')
+    expect(security).toContain('data-auth-setup-form')
+    expect(security).not.toContain('data-mfa-optional-link')
     expect(snapshotReads).toBe(0)
   })
 

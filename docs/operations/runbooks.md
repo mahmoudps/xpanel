@@ -112,16 +112,16 @@ Targets: A06, A09-A11, A29-A30.
 ### Execution Steps
 
 1. Provision root once through `node /opt/xpanel/apps/api/src/main.ts init-root --password-stdin`, feeding a single password line from a protected input source. Do not use inline-password compatibility modes. The command sets the forced-password-change flag; it does not enroll MFA or complete setup.
-2. Start the verified services only after configuration/native prerequisites are reviewed. Use the actual server-selected `/login` form on the matching HTTPS profile: root/reseller on xWHM `2087`, account users on xPanel `2083` or xMail `2096`. Complete the authorized password-change and MFA enrollment flows. Do not inject cookies or bypass MFA to make onboarding appear successful.
+2. Start the verified services only after configuration/native prerequisites are reviewed. Use the actual server-selected `/login` form on the matching HTTPS profile: root/reseller on xWHM `2087`, account users on xPanel `2083` or xMail `2096`. Complete the forced password change. Two-factor enrollment is optional for root, resellers, and users; sign-in uses the password until an authenticator is enabled. When TOTP is enabled, sign-in requires a current code or a single-use recovery code. Do not inject cookies or bypass an enabled second factor to make onboarding appear successful. Root can enroll later from xWHM `/whm/security/sign-in`.
 3. Protect the TOTP seed and returned single-use recovery codes offline. Count and behavior must follow the current authentication implementation; do not assume a fixed count from an older runbook.
-4. Complete the available setup workflow and verify actual persisted configuration. If a required UI/adapter is unavailable, report blocked and keep the administrative gate; do not fabricate bootstrap URLs or completion records.
+4. Complete the available setup workflow and verify actual persisted configuration. If a required UI/adapter is unavailable, report blocked. The forced password change remains a gate. Missing two-factor enrollment does not. Do not fabricate bootstrap URLs or completion records.
 
 ### Verification Oracle
 
-- Missing/old credentials do not authenticate; forced-change/MFA restrictions hold for HTML, REST, and WS.
+- Missing/old credentials do not authenticate. Forced password change holds for HTML, REST, and WS. Enabled TOTP holds on those same surfaces. An account with two-factor authentication disabled, including root after `disable-2fa` or before any enrollment, signs in with its password and opens its workspace.
 - Password change/reset revokes sessions/tokens as required by the credential policy; recovery codes and consumed TOTP windows cannot be replayed.
 - Cookies, CSRF, expiry/logout/revocation, localized inline login failure, and unauthorized HTML redirects are observed in a real browser.
-- Emergency `reset-password` or `disable-2fa` is a sensitive audited local recovery operation, not an onboarding shortcut. Require explicit authorization, restore strong authentication, and review revocation/audit effects before reopening administration.
+- Emergency `reset-password` or `disable-2fa` is a sensitive audited local recovery operation. Require explicit authorization and review revocation and audit effects. After `disable-2fa`, password sign-in opens the workspace again. Re-enable TOTP from the security page when the operator chooses.
 
 ## Runbook 03: Secret rotation
 

@@ -945,10 +945,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             csrfToken,
             totpEnabled: principalRecord.totpEnabled,
             passwordChangeRequired: principalRecord.forcePasswordChange,
-            mfaEnrollmentRequired:
-              principalRecord.kind === 'root' &&
-              !principalRecord.totpEnabled &&
-              process.env.XPANEL_ALLOW_PASSWORD_ONLY_ROOT !== '1',
+            mfaEnrollmentRequired: false,
           },
           200,
           { 'set-cookie': cookie },
@@ -980,10 +977,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           principal: caller.principal,
           totpEnabled: caller.principalRecord.totpEnabled,
           passwordChangeRequired: caller.principalRecord.forcePasswordChange,
-          mfaEnrollmentRequired:
-            caller.principal.kind === 'root' &&
-            !caller.principalRecord.totpEnabled &&
-            process.env.XPANEL_ALLOW_PASSWORD_ONLY_ROOT !== '1',
+          mfaEnrollmentRequired: false,
           csrfToken: caller.sessionToken ? deriveCsrfToken(caller.sessionToken, serverSecret, entryPoint) : null,
         })
       }

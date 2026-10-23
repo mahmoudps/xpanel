@@ -211,7 +211,6 @@ export const assertRequestAuthorized = async (store: StateStore, caller: Authent
   const passwordRecoveryRoute = (method === 'GET' && pathname === '/api/auth/me') ||
     (method === 'POST' && ['/api/auth/logout', '/api/auth/change-password'].includes(pathname))
   if (caller.principalRecord.forcePasswordChange && !passwordRecoveryRoute) return fail('FORBIDDEN', 'password change is required before continuing', { passwordChangeRequired: true })
-  if (caller.principal.kind === 'root' && !caller.principalRecord.totpEnabled && !pathname.startsWith('/api/auth/')) return fail('FORBIDDEN', 'root must complete two-factor enrollment before administration', { mfaEnrollmentRequired: true })
   if (policy.rootOnly && (caller.principal.kind !== 'root' || isMailboxPrincipal(caller))) return fail('FORBIDDEN', 'root role is required for this operation')
   if (isMailboxPrincipal(caller)) {
     if (!/^\/api\/auth\/(?:me|logout)$/.test(pathname)) {

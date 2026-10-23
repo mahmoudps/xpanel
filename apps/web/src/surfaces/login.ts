@@ -85,32 +85,6 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
         </fieldset>
         <button type="submit" class="xp-btn xp-btn--primary" data-auth-submit disabled>${text('Sign in', 'تسجيل الدخول')}</button>
       </form>
-      <section data-auth-enrollment hidden aria-labelledby="enrollment-heading">
-        <h2 id="enrollment-heading">${text('Set up two-factor authentication', 'إعداد التحقق الثنائي')}</h2>
-        <p>${text('This account must complete enrollment before opening its workspace.', 'يجب إكمال إعداد التحقق الثنائي قبل فتح مساحة العمل.')}</p>
-        <form class="xp-form" data-auth-setup-form>
-          <div class="xp-field">
-            <label class="xp-label" for="enrollment-password">${text('Confirm current password', 'تأكيد كلمة المرور الحالية')}</label>
-            <input id="enrollment-password" name="password" type="password" class="xp-input" dir="ltr" autocomplete="current-password" required />
-          </div>
-          <button type="submit" class="xp-btn xp-btn--primary" data-action="setup-2fa">${text('Start enrollment', 'بدء الإعداد')}</button>
-        </form>
-        <div data-auth-enrollment-details hidden>
-          <div class="xp-field"><span class="xp-label">${text('Authenticator setup key', 'مفتاح إعداد تطبيق المصادقة')}</span><div><bdi dir="ltr" class="xp-mono" data-auth-totp-secret></bdi></div></div>
-          <p class="xp-help">${text('Enter this key in your authenticator app, then submit its code.', 'أدخل المفتاح في تطبيق المصادقة ثم أرسل الرمز الذي يولده.')}</p>
-          <form class="xp-form" data-auth-enroll-form>
-            <div class="xp-field"><label class="xp-label" for="enrollment-code">${text('Authenticator code', 'رمز تطبيق المصادقة')}</label><input id="enrollment-code" name="code" class="xp-input xp-mono" dir="ltr" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required /></div>
-            <button type="submit" class="xp-btn xp-btn--primary">${text('Verify and enable', 'التحقق والتفعيل')}</button>
-          </form>
-          <button type="button" class="xp-btn" data-action="restart-enrollment">${text('Restart enrollment', 'إعادة الإعداد')}</button>
-        </div>
-      </section>
-      <section data-auth-recovery hidden aria-labelledby="recovery-heading">
-        <h2 id="recovery-heading">${text('Save your recovery codes', 'احفظ رموز الاسترداد')}</h2>
-        <p>${text('Store these codes safely. Each code can be used once. They disappear when you continue.', 'احفظ الرموز في مكان آمن. يستخدم كل رمز مرة واحدة وتختفي الرموز عند المتابعة.')}</p>
-        <ul data-auth-recovery-codes></ul>
-        <button type="button" class="xp-btn xp-btn--primary" data-action="acknowledge-recovery">${text('I saved the codes — continue', 'حفظت الرموز، متابعة')}</button>
-      </section>
       <section data-auth-password-change hidden aria-labelledby="password-change-heading">
         <h2 id="password-change-heading">${text('Change your password', 'تغيير كلمة المرور')}</h2>
         <p>${text('Your account requires a new password. You will sign in again after changing it.', 'يتطلب الحساب كلمة مرور جديدة. ستسجل الدخول مجددًا بعد تغييرها.')}</p>

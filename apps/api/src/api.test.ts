@@ -28,7 +28,7 @@ import {
 import { runCli } from './cli.ts'
 import { createApiApp, listenApiServer } from './server.ts'
 import type { ApiApp } from './server.ts'
-import { enrollRootSession, TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
+import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
 
 const UBUNTU_OS: OsProfile = profileFor(
   ['ID=ubuntu', 'VERSION_ID="24.04"', 'VERSION_CODENAME=noble', 'NAME="Ubuntu"'].join('\n'),
@@ -117,10 +117,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
   let ioAnalytics: IoAnalyticsEngine
   let websiteAnalytics: WebsiteAnalyticsEngine
   let app: ApiApp
-  let recoveryCodes: string[]
-
   beforeEach(async () => {
-    recoveryCodes = []
     tmpDir = await mkdtemp(join(tmpdir(), 'xpanel-api-test-'))
     dbHandle = await createTestDb()
     stateHandle = await createTestStateStore()
@@ -194,11 +191,10 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
   }
 
   const loginRoot = async () => {
-    const login = await loginAs('root', 'RootPassword!2026', recoveryCodes.length
-      ? { recoveryCode: recoveryCodes.shift()! }
-      : undefined)
+    const login = await loginAs('root', 'RootPassword!2026')
     assert.equal(login.res.status, 200)
-    if (login.body.mfaEnrollmentRequired) recoveryCodes = await enrollRootSession(login.client, 'RootPassword!2026')
+    assert.equal(login.body.mfaEnrollmentRequired, false)
+    assert.equal(login.body.totpEnabled, false)
     return login
   }
 
@@ -207,6 +203,9 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     const { res: loginRes, body: loginBody, client: rootClient } = await loginAs('root', 'RootPassword!2026')
     assert.equal(loginRes.status, 200)
     assert.equal((loginBody.principal as { username: string }).username, 'root')
+    assert.equal(loginBody.totpEnabled, false)
+    assert.equal(loginBody.mfaEnrollmentRequired, false)
+    assert.equal((await rootClient.request('/api/accounts')).status, 200)
     assert.ok(typeof loginBody.csrfToken === 'string' && loginBody.csrfToken.length > 10)
 
     // Mutating request without CSRF token is rejected with 403 FORBIDDEN
@@ -284,13 +283,13 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     const stillIpLocked = await loginAs('root', 'NewRootPassword!2026', undefined, '192.0.2.6')
     assert.equal(stillIpLocked.res.status, 429)
 
-    // A different trusted peer may authenticate, then root must enroll again before administrative actions.
+    // A different trusted peer authenticates with the password alone and can open the workspace.
     const afterCli = await loginAs('root', 'NewRootPassword!2026')
     assert.equal(afterCli.res.status, 200)
     assert.equal(afterCli.body.totpEnabled, false)
-    assert.equal(afterCli.body.mfaEnrollmentRequired, true)
-    const needsEnrollment = await afterCli.client.request('/api/accounts')
-    assert.equal(needsEnrollment.status, 403)
+    assert.equal(afterCli.body.mfaEnrollmentRequired, false)
+    const workspace = await afterCli.client.request('/api/accounts')
+    assert.equal(workspace.status, 200)
   })
 
   it('2. Feature list + Plan creation + Account creation (alice and bob) with host reconciliation and search index', async () => {
