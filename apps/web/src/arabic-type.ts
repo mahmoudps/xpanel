@@ -135,6 +135,17 @@ ${ar('bdi[dir="ltr"]')} {
   overflow: visible !important;
   text-overflow: clip !important;
 }
+${ar('bdi[dir="ltr"][style*="overflow-wrap: anywhere"]')},
+${ar('[aria-labelledby="host-title"] dd bdi[dir="ltr"]')} {
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  flex-shrink: 1 !important;
+  min-inline-size: 0 !important;
+}
+[aria-labelledby="host-title"] dd {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
 ${ar('[style*="Plex Mono"]')},
 ${ar('.xp-mono')},
 ${ar('code')} {

@@ -3,7 +3,9 @@ import { existsSync } from 'node:fs'
 import { describe, it } from 'vitest'
 import { ARABIC_TYPE_CSS } from './arabic-type.ts'
 import { renderFidelityDocument as renderDashboard, renderWhmDashboard, whmDashboardFromProps } from './board-port/xwhm-dashboard.ts'
-import { renderFidelityDocument as renderHome } from './board-port/xpanel-home.fixture.ts'
+import { renderFidelityDocument as renderHome, renderLiveDocument as renderHomeLive } from './board-port/xpanel-home.fixture.ts'
+import { renderFidelityDocument as renderInboxFidelity, renderLiveDocument as renderInboxLive } from './board-port/xmail-inbox.fixture.ts'
+import { renderFidelityDocument as renderComposeFidelity, renderLiveDocument as renderComposeLive } from './board-port/xmail-compose.fixture.ts'
 import { renderMailSurface } from './surfaces/xmail.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
 import { DESIGN_TOKENS_CSS } from './tokens.ts'
@@ -85,15 +87,18 @@ interface DomStyle { fontSize: string; lineHeight: string; fontFamily: string; o
 interface DomRange {
   setStart: (node: unknown, offset: number) => void
   setEnd: (node: unknown, offset: number) => void
-  getBoundingClientRect: () => { left: number }
+  getBoundingClientRect: () => { left: number; right: number }
 }
+interface DomWalker { nextNode: () => { nodeValue: string | null } | null }
 interface Dom {
+  innerWidth: number
   document: {
     body: DomEl
-    documentElement: { clientWidth: number }
+    documentElement: { clientWidth: number; scrollWidth: number }
     querySelector: (selector: string) => DomEl | null
     querySelectorAll: (selector: string) => ArrayLike<DomEl>
     createRange: () => DomRange
+    createTreeWalker: (root: DomEl, whatToShow: number) => DomWalker
     createElement: (tag: string) => DomEl & { style: { fontFamily: string; fontSize: string }; textContent: string }
   }
   getComputedStyle: (el: DomEl) => DomStyle
@@ -230,11 +235,13 @@ const monoArabic = (): string[] => {
   return bad
 }
 
-const liveDashboard = (): string => {
+const liveDashboard = (locale: 'ar' | 'en' = 'ar'): string => {
+  const ar = locale === 'ar'
   const body = renderWhmDashboard(whmDashboardFromProps({
-    locale: 'ar',
+    locale,
     principal: { username: 'root' },
     nearLimits: [],
+    hostSample: { engine: 'nginx 1.24.0 → Apache 2.4.58' },
     auditEntries: [
       { id: '1', at: '2026-10-22T13:48:00Z', actor: 'root', action: 'auth.login', target: 'principal:11111111-1111-4111-8111-111111111111', detail: {}, outcome: 'ok' },
       { id: '2', at: '2026-10-22T13:31:00Z', actor: 'root', action: 'mailbox.created', target: 'service-user:mbxabc', detail: {}, outcome: 'ok' },
@@ -242,16 +249,41 @@ const liveDashboard = (): string => {
       { id: '4', at: '2026-10-22T12:40:00Z', actor: 'alice', action: 'file.write', target: `/home/omar/public_html/${'invoice-'.repeat(12)}final.pdf`, detail: {}, outcome: 'ok' },
     ],
   }))
-  return `<!doctype html><html lang="ar" dir="rtl"><head><style>body{margin:0}*{box-sizing:border-box}</style></head><body>${body}</body></html>`
+  return `<!doctype html><html lang="${ar ? 'ar' : 'en'}" dir="${ar ? 'rtl' : 'ltr'}"><head><style>body{margin:0}*{box-sizing:border-box}</style></head><body>${body}</body></html>`
 }
 
-const productDocument = (body: string): string =>
-  `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>${DESIGN_TOKENS_CSS}</style></head><body>${body}</body></html>`
+const productDocument = (body: string, locale: 'ar' | 'en' = 'ar'): string => {
+  const ar = locale === 'ar'
+  return `<!doctype html><html lang="${ar ? 'ar' : 'en'}" dir="${ar ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>${DESIGN_TOKENS_CSS}</style></head><body>${body}</body></html>`
+}
+
+const pageScroll = (): { scroll: number; inner: number } => {
+  const root = globalThis as unknown as Dom
+  return { scroll: root.document.documentElement.scrollWidth, inner: root.innerWidth }
+}
+
+const engineBox = (): { left: number; right: number; inner: number } | null => {
+  const root = globalThis as unknown as Dom
+  const walker = root.document.createTreeWalker(root.document.body, 4)
+  let node = walker.nextNode()
+  while (node) {
+    const text = node.nodeValue ?? ''
+    if (text.includes('nginx 1.24.0')) {
+      const range = root.document.createRange()
+      range.setStart(node, 0)
+      range.setEnd(node, text.length)
+      const box = range.getBoundingClientRect()
+      return { left: box.left, right: box.right, inner: root.innerWidth }
+    }
+    node = walker.nextNode()
+  }
+  return null
+}
 
 const longTarget = `/home/omar/public_html/${'invoice-'.repeat(12)}final.pdf`
 
-const auditLog = (): string => productDocument(renderWhmSurface({
-  locale: 'ar',
+const auditLog = (locale: 'ar' | 'en' = 'ar'): string => productDocument(renderWhmSurface({
+  locale,
   principal: { kind: 'root', id: 'root', username: 'root' },
   activeRoute: '/whm/audit',
   auditEntries: [
@@ -259,14 +291,14 @@ const auditLog = (): string => productDocument(renderWhmSurface({
     { id: '2', at: '2026-10-22T13:31:00Z', actor: 'root', action: 'mailbox.created', target: 'service-user:mbxabc', detail: {}, outcome: 'ok' },
     { id: '3', at: '2026-10-22T13:02:00Z', actor: 'alice', action: 'file.write', target: longTarget, detail: {}, outcome: 'ok' },
   ],
-}))
+}), locale)
 
-const mailFilters = (): string => productDocument(renderMailSurface({
-  locale: 'ar',
+const mailFilters = (locale: 'ar' | 'en' = 'ar'): string => productDocument(renderMailSurface({
+  locale,
   mailbox: 'info@alice-shop.com',
   activeRoute: '/mail/settings/filters',
   sieveRules: [{ id: '1', name: 'أرشيف الفواتير', condition: `header :contains "Subject" "${'invoice-'.repeat(8)}"`, action: 'fileinto INBOX.Archive', enabled: true }],
-}))
+}), locale)
 
 const open = async (browser: Browser, html: string): Promise<Page> => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
@@ -357,6 +389,50 @@ describe('Arabic computed type', () => {
       console.log(JSON.stringify({ measured, tool, ltrNav }))
       await ltr.close()
       for (const [, page] of pages) await page.close()
+    } finally {
+      await browser.close()
+    }
+  }, 60_000)
+
+  it.skipIf(executable === undefined)('does not scroll sideways at 390', async () => {
+    const browser = await chromium.launch({
+      executablePath: executable as string,
+      args: ['--font-render-hinting=none', '--disable-lcd-text'],
+    })
+    const screens: Array<[string, string]> = [
+      ['home-ar', renderHome('ar')],
+      ['home-en', renderHome('ltr')],
+      ['home-phone', renderHome('phone')],
+      ['home-live-ar', renderHomeLive('ar')],
+      ['home-live-en', renderHomeLive('ltr')],
+      ['home-live-phone', renderHomeLive('phone')],
+      ['dashboard-ar', renderDashboard('rtl')],
+      ['dashboard-en', renderDashboard('ltr')],
+      ['whm-live-ar', liveDashboard('ar')],
+      ['whm-live-en', liveDashboard('en')],
+      ['inbox-ar', renderInboxLive('ar')],
+      ['inbox-en', renderInboxLive('en')],
+      ['inbox-fixture', renderInboxFidelity()],
+      ['compose-ar', renderComposeLive('ar')],
+      ['compose-en', renderComposeLive('en')],
+      ['compose-fixture', renderComposeFidelity()],
+      ['audit-ar', auditLog('ar')],
+      ['audit-en', auditLog('en')],
+      ['filters-ar', mailFilters('ar')],
+      ['filters-en', mailFilters('en')],
+    ]
+    try {
+      for (const [screen, html] of screens) {
+        const page = await open(browser, html)
+        await page.setViewportSize({ width: 390, height: 844 })
+        const box = await page.evaluate(pageScroll)
+        assert.ok(box.scroll <= box.inner, `${screen} scrolls sideways ${box.scroll} > ${box.inner}`)
+        const engine = await page.evaluate(engineBox)
+        if (engine) {
+          assert.ok(engine.left >= -1 && engine.right <= engine.inner + 1, `${screen} engine ${engine.left}..${engine.right} in ${engine.inner}`)
+        }
+        await page.close()
+      }
     } finally {
       await browser.close()
     }
