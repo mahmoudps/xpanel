@@ -1,6 +1,7 @@
 import type { Locale } from '../i18n.ts'
 import { escapeHtml, renderAsyncActionState, type AsyncActionBannerProps } from '../tokens.ts'
 import { renderLiveUpdatesIndicator } from '../shell.ts'
+import { formatMailboxQuota } from './mail-truth.ts'
 
 const MONO = "'IBM Plex Mono', monospace"
 const FONT_EN = "'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif"
@@ -64,6 +65,7 @@ interface ComposeModel {
   mailbox: string
   quotaText: string
   quotaPct: number
+  quotaMeasured: boolean
   composeHref: string
   inboxHref: string
   folders: FolderLink[]
@@ -400,7 +402,7 @@ const renderCompose = (model: ComposeModel): string => {
   <div role="search" aria-label="${t('Search mail', 'البحث في البريد')}" style="flex: 1 1 280px; max-width: 520px; position: relative; display: flex; align-items: center; margin: 0"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5D6B7E" stroke-width="2" stroke-linecap="round" style="position: absolute; inset-inline-start: 12px"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><input type="search" aria-label="${t('Search mail', 'البحث في البريد')}" placeholder="${t('Search sender, subject or text', 'ابحث عن المرسل أو الموضوع أو النص')}" style="width: 100%; min-height: 44px; padding-inline: 38px 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; font-family: inherit; font-size: 14px; color: #101828"></div>
   <span style="flex: 1 1 0; min-width: 0"></span>
   <div style="display: flex; align-items: center; gap: 8px; min-width: 0"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#475467" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 7l9 6 9-6"></path></svg><span style="font-family: ${MONO}; font-size: 13px; color: #101828">${mailbox}</span></div>
-  <div style="display: flex; flex-direction: column; gap: 4px; min-width: 150px"><div style="display: flex; justify-content: space-between; gap: 10px; font-size: 12px"><span style="font-weight: 600; color: #344054">${t('Mailbox', 'صندوق البريد')}</span><span style="color: #475467; font-variant-numeric: tabular-nums">${quota}</span></div><div aria-hidden="true" style="height: 6px; border-radius: 3px; background: #E9ECF1; overflow: hidden"><div style="height: 6px; width: ${model.quotaPct}%; background: #1D5BD6; border-radius: 3px"></div></div></div>
+  <div style="display: flex; flex-direction: column; gap: 4px; min-width: 150px"><div style="display: flex; justify-content: space-between; gap: 10px; font-size: 12px"><span style="font-weight: 600; color: #344054">${t('Mailbox', 'صندوق البريد')}</span><span style="color: #475467; font-variant-numeric: tabular-nums">${quota}</span></div><div data-quota-ratio="${model.quotaMeasured ? 'measured' : 'unknown'}" aria-hidden="true" style="height: 6px; border-radius: 3px; background: #E9ECF1; overflow: hidden"><div style="height: 6px; width: ${model.quotaPct}%; background: #1D5BD6; border-radius: 3px"></div></div></div>
   ${model.wsHtml}
   <button type="button"${model.logoutAttr} style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 14px; font-weight: 600">${t('Sign out', 'تسجيل الخروج')}</button>
 </header>
@@ -484,6 +486,7 @@ const fixtureModel = (): ComposeModel => ({
   mailbox: 'info@alice-shop.com',
   quotaText: '1.2 / 5 GB',
   quotaPct: 24,
+  quotaMeasured: true,
   composeHref: 'MailCompose.dc.html',
   inboxHref: 'MailInbox.dc.html',
   folders: fixtureFolders(),
@@ -575,6 +578,8 @@ export interface XmailComposeRule {
   name: string
   condition: string
   action: string
+  /** Omitted rules in the fixture count as active. An explicit false is a paused stored rule. */
+  enabled?: boolean
 }
 
 export interface XmailComposeProps {
@@ -587,6 +592,9 @@ export interface XmailComposeProps {
   actionState?: AsyncActionBannerProps
   vacationEnabled?: boolean
   sieveRules?: XmailComposeRule[]
+  identityDkim?: string
+  identitySpf?: string
+  identitySize?: string
 }
 
 export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel => {
@@ -604,15 +612,15 @@ export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel =>
   const custom: FolderLink[] = [...observed].filter(folder => !STANDARD.some(item => item.id === folder)).map(folder => ({
     label: folder, href: '/mail/inbox', icon: 'folder' as const, current: false, observed: folder,
   }))
-  let quotaText = '—'
-  let quotaPct = 0
-  if (typeof props.quotaUsedMb === 'number' && typeof props.quotaLimitMb === 'number' && props.quotaLimitMb > 0) {
-    quotaText = `${props.quotaUsedMb} / ${props.quotaLimitMb} MiB`
-    quotaPct = Math.max(0, Math.min(100, Math.round((props.quotaUsedMb / props.quotaLimitMb) * 100)))
-  }
+  const quota = formatMailboxQuota(props.quotaUsedMb, props.quotaLimitMb, locale)
   const rules = props.sieveRules ?? []
   const knownRules = props.sieveRules !== undefined
-  const ruleHtml = rules.map((rule, index) => `<li style="display: flex; gap: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid #E2E6EC; font-size: 13px; line-height: 1.4"><span aria-hidden="true" style="flex: none; width: 22px; height: 22px; border-radius: 50%; background: #EEF0F3; color: #344054; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600">${index + 1}</span><span>${escapeHtml(rule.name)} <code style="font-family: ${MONO}">${ar ? `<bdi dir="ltr">${escapeHtml(rule.condition)}</bdi>` : escapeHtml(rule.condition)}</code> ${ar ? `<bdi dir="ltr">${escapeHtml(rule.action)}</bdi>` : escapeHtml(rule.action)}</span></li>`).join('')
+  const activeRules = rules.filter(rule => rule.enabled !== false).length
+  const ruleHtml = rules.map((rule, index) => {
+    const paused = rule.enabled === false ? (ar ? ' · متوقف' : ' · paused') : ''
+    return `<li style="display: flex; gap: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid #E2E6EC; font-size: 13px; line-height: 1.4"><span aria-hidden="true" style="flex: none; width: 22px; height: 22px; border-radius: 50%; background: #EEF0F3; color: #344054; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600">${index + 1}</span><span>${escapeHtml(rule.name)}${escapeHtml(paused)} <code style="font-family: ${MONO}">${ar ? `<bdi dir="ltr">${escapeHtml(rule.condition)}</bdi>` : escapeHtml(rule.condition)}</code> ${ar ? `<bdi dir="ltr">${escapeHtml(rule.action)}</bdi>` : escapeHtml(rule.action)}</span></li>`
+  }).join('')
+  const shownIdentity = (value: string | undefined): string => value ? `<bdi dir="ltr">${escapeHtml(value)}</bdi>` : '—'
   const vacationKnown = props.vacationEnabled !== undefined
   const vacationOn = props.vacationEnabled === true
   const dash = '—'
@@ -620,8 +628,9 @@ export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel =>
     locale,
     product: true,
     mailbox: props.mailbox,
-    quotaText,
-    quotaPct,
+    quotaText: quota.text,
+    quotaPct: quota.percent ?? 0,
+    quotaMeasured: quota.percent !== null,
     composeHref: '/mail/compose',
     inboxHref: '/mail/inbox',
     folders,
@@ -629,7 +638,7 @@ export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel =>
     vacationHref: '#vacation',
     vacationShort: vacationKnown ? (vacationOn ? (ar ? 'يعمل' : 'On') : (ar ? 'متوقف' : 'Off')) : dash,
     filtersHref: '#filters',
-    filtersShort: knownRules ? (ar ? `${rules.length} نشطة` : `${rules.length} active`) : dash,
+    filtersShort: knownRules ? (ar ? `${activeRules} نشطة` : `${activeRules} active`) : dash,
     savedText: dash,
     fromOptions: [{ value: props.mailbox, label: props.mailbox }],
     fromValue: props.mailbox,
@@ -641,9 +650,9 @@ export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel =>
     attachments: [],
     attachSummary: ar ? '0 ملفات' : '0 files',
     attachHelp: dash,
-    identityDkim: dash,
-    identitySpf: dash,
-    identitySize: dash,
+    identityDkim: shownIdentity(props.identityDkim),
+    identitySpf: shownIdentity(props.identitySpf),
+    identitySize: shownIdentity(props.identitySize),
     vacationStatus: vacationKnown ? (vacationOn ? (ar ? 'يعمل' : 'On') : (ar ? 'متوقف' : 'Off')) : dash,
     vacationOn,
     vacationOpenLabel: ar ? 'إعداد الرد' : 'Set up responder',

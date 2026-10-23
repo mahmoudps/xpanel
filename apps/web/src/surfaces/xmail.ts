@@ -133,11 +133,14 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
       mailbox,
       ...(props.quotaUsedMb !== undefined ? { quotaUsedMb: props.quotaUsedMb } : {}),
       ...(props.quotaLimitMb !== undefined ? { quotaLimitMb: props.quotaLimitMb } : {}),
-      messages: allMessages,
+      ...(props.messages !== undefined ? { messages: allMessages } : {}),
       realtimeEnabled: props.realtimeEnabled === true,
       ...(props.actionState ? { actionState: props.actionState } : {}),
       ...(props.vacationEnabled !== undefined ? { vacationEnabled: props.vacationEnabled } : {}),
-      ...(props.sieveRules ? { sieveRules: props.sieveRules.map(rule => ({ name: rule.name, condition: rule.condition, action: rule.action })) } : {}),
+      ...(props.sieveRules ? { sieveRules: props.sieveRules.map(rule => ({ name: rule.name, condition: rule.condition, action: rule.action, enabled: rule.enabled })) } : {}),
+      ...(props.identityDkim ? { identityDkim: props.identityDkim } : {}),
+      ...(props.identitySpf ? { identitySpf: props.identitySpf } : {}),
+      ...(props.identitySize ? { identitySize: props.identitySize } : {}),
     })), locale)
   }
   const field = (label: string, value: string): string => `<div class="xp-mail-field"><dt class="xp-label">${escapeHtml(label)}</dt><dd><bdi dir="ltr">${escapeHtml(value)}</bdi></dd></div>`
