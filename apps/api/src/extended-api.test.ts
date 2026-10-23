@@ -9,7 +9,7 @@ import { profileFor } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { CSRF_HEADER_NAME, hashPasswordArgon2id, parseCookies, SESSION_COOKIE_NAME } from './auth.ts'
 import { startPanelServer } from './main.ts'
-import { enrollRootSession, TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
+import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
 
 interface HttpSessionClient {
   baseUrl: string
@@ -64,10 +64,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
   let serverHandle: Awaited<ReturnType<typeof startPanelServer>>
   let baseUrl: string
   let agentDb: ReturnType<typeof createDb>
-  let recoveryCodes: string[]
-
   beforeEach(async () => {
-    recoveryCodes = []
     tmpDir = await mkdtemp(join(tmpdir(), 'xpanel-ext-e2e-'))
     const dbPath = join(tmpDir, 'control.db')
     const stateDir = join(tmpDir, 'state')
@@ -108,13 +105,12 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     const res = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username, password, ...(username === 'root' && recoveryCodes.length ? { recoveryCode: recoveryCodes.shift()! } : {}) }),
+      body: JSON.stringify({ username, password }),
     })
     assert.equal(res.status, 200)
     const body = (await res.json()) as { csrfToken: string; mfaEnrollmentRequired?: boolean }
-    const client = createHttpClient(baseUrl, res.headers.get('set-cookie'), body.csrfToken)
-    if (body.mfaEnrollmentRequired) recoveryCodes = await enrollRootSession(client, password)
-    return client
+    assert.equal(body.mfaEnrollmentRequired, false)
+    return createHttpClient(baseUrl, res.headers.get('set-cookie'), body.csrfToken)
   }
 
   it('1. HTTP documents protect anonymous routes and render authenticated English and Arabic surfaces', async () => {
@@ -124,6 +120,8 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     const loginHtml = await loginPage.text()
     assert.match(loginHtml, /data-surface="login"/)
     assert.match(loginHtml, /id="xpanel-design-tokens"/)
+    assert.doesNotMatch(loginHtml, /must complete enrollment/)
+    assert.doesNotMatch(loginHtml, /<form[^>]*data-auth-setup-form/)
 
     for (const path of ['/whm', '/panel', '/mail']) {
       const anonymous = await fetch(`${baseUrl}${path}`, { redirect: 'manual' })
@@ -140,7 +138,14 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.match(whmHtml, /id="xpanel-realtime-client"/)
     assert.match(whmHtml, /<html\b[^>]*data-realtime-enabled="false"/)
     assert.match(whmHtml, /data-tool-availability="unverified"/)
+    assert.match(whmHtml, /data-mfa-optional-link/)
     assert.doesNotMatch(whmHtml, /<form\b|data-nav-route="|data-cmdk-item="/)
+    const securityPage = await root.request('/whm/security/sign-in')
+    assert.equal(securityPage.status, 200)
+    const securityHtml = await securityPage.text()
+    assert.match(securityHtml, /data-mfa-recommendation/)
+    assert.match(securityHtml, /data-auth-setup-form/)
+    assert.doesNotMatch(securityHtml, /must complete enrollment|data-mfa-optional-link/)
 
     const panelPage = await root.request('/panel')
     assert.equal(panelPage.status, 200)

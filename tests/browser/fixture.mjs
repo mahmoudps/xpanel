@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { createAgentApp, FakeHostExecutor, HostReconciler } from '../../apps/agent/src/index.ts'
+import { runCli } from '../../apps/api/src/cli.ts'
 import { startPanelServer } from '../../apps/api/src/main.ts'
 import { hashPasswordArgon2id } from '../../apps/api/src/auth.ts'
 import { createDb, createUserPrincipal, findPrincipalByUsername, migrate } from '../../packages/db/src/index.ts'
@@ -57,7 +58,11 @@ export async function createBrowserFixture() {
       const principal = await findPrincipalByUsername(db.db, 'root')
       return { exists: principal !== null, force_password_change: principal?.forcePasswordChange, mfa_enabled: principal?.totpEnabled }
     }
-    return { baseUrl: `http://127.0.0.1:${server.port}`, rootPassword, replacementPassword, ownerPassword, store: server.store, rootState, close }
+    const disableRoot2fa = async () => {
+      const result = await runCli(['disable-2fa', 'root'], { db: db.db, store })
+      if (result.code !== 0) throw new Error('disable-2fa failed')
+    }
+    return { baseUrl: `http://127.0.0.1:${server.port}`, rootPassword, replacementPassword, ownerPassword, store: server.store, rootState, disableRoot2fa, close }
   } catch (error) {
     await close()
     throw error

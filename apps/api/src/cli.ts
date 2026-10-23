@@ -181,7 +181,7 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
             principalId: root.id,
           })
         })
-        writeOut('Root initialized. Change the password and enroll MFA at first sign-in before administering the server.')
+        writeOut('Root initialized. Change the password at first sign-in before administering the server. Two-factor authentication stays optional until it is enrolled.')
         return {
           code: 0,
           stdout: outLines.join('\n'),

@@ -9,6 +9,7 @@ import { canSeeAccount, fail, hasAcl } from '@xpanel/core'
 import { visibleNavigation } from '@xpanel/catalog'
 import type { VisibilityContext } from '@xpanel/catalog'
 import { publicContactEmail } from '../../web/src/display-name.ts'
+import { ACCOUNT_SECURITY_ROUTES } from '../../web/src/surfaces/account-security.ts'
 import type { OsProfile } from '@xpanel/core'
 import { createDb, latestActive, migrate, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
@@ -161,6 +162,7 @@ export const createDefaultWebRenderer = async (deps: {
       return new Response(null, { status: 303, headers: { ...headers, location: '/login' } })
     }
     const principal = caller.principal
+    const security = { totpEnabled: caller.principalRecord.totpEnabled }
     const roleHome: EntryPoint | undefined = principal.kind === 'user' ? 'xpanel' : 'xwhm'
     const wrongRole = (deps.entryPoint && !entryPointAllowsRole(deps.entryPoint, principal.kind))
       || (documentRoute.surface === 'xwhm' && principal.kind === 'user')
@@ -171,9 +173,6 @@ export const createDefaultWebRenderer = async (deps: {
         visibility: { principal, disabledFeatures: new Set() },
         ...(roleHome !== (deps.entryPoint ?? deniedSurface) ? { suggested: roleHome } : {}),
       })
-    }
-    if (principal.kind === 'root' && !caller.principalRecord.totpEnabled && process.env.XPANEL_ALLOW_PASSWORD_ONLY_ROOT !== '1') {
-      return new Response('Multi-factor enrollment is required.', { status: 403, headers })
     }
     const surface: EntryPoint = documentRoute.surface === 'xwhm' || documentRoute.surface === 'xmail' ? documentRoute.surface : 'xpanel'
     if (url.pathname === '/') {
@@ -222,7 +221,7 @@ export const createDefaultWebRenderer = async (deps: {
     const qualifiedRoute = visibleNavigation(scopedVisibility).some(item => item.surface === surface
       && item.sections.some(section => section.pages.some(page => page.route === documentRoute.activeRoute)))
     if (!qualifiedRoute) {
-      if (!isWorkspaceHome(documentRoute)) {
+      if (!isWorkspaceHome(documentRoute) && !ACCOUNT_SECURITY_ROUTES.has(documentRoute.activeRoute)) {
         return documentStatus(404, {
           surface,
           visibility: scopedVisibility,
@@ -235,6 +234,8 @@ export const createDefaultWebRenderer = async (deps: {
       const summaryPlan = summaryAccount ? scoped?.plan : null
       return serveWebUi(req, async () => ({
         surface,
+        activeRoute: documentRoute.activeRoute,
+        security,
         visibility: scopedVisibility,
         ...(ownAccountId ? { accountId: ownAccountId } : {}),
         ...(email ? { supportEmail: email } : {}),
@@ -288,6 +289,8 @@ export const createDefaultWebRenderer = async (deps: {
     const active = await latestActive(deps.db)
     return serveWebUi(req, async () => ({
       surface,
+      activeRoute: documentRoute.activeRoute,
+      security,
       ...(url.searchParams.has('accountId') && account ? { accountId: account.id } : {}),
       visibility,
       ...(active ? { generationId: active.id } : {}),

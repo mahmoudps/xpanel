@@ -8,7 +8,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     code: 'رمز التحقق غير صحيح أو لم يعد صالحًا.', recovery: 'رمز الاسترداد غير صالح.',
     pending: 'جارٍ التحقق…', mfa: 'أدخل رمز التحقق أو رمز استرداد واحدًا.',
     both: 'أدخل رمز تحقق أو رمز استرداد واحدًا فقط.', locked: 'تسجيل الدخول مقفل مؤقتًا. موعد إعادة المحاولة: ',
-    enrollment: 'يلزم إعداد التحقق الثنائي لهذا الحساب.', confirm: 'أدخل الرمز الذي يولده تطبيق المصادقة.',
+    enrollment: 'التحقق الثنائي اختياري. أكّد كلمة المرور للبدء.', confirm: 'أدخل الرمز الذي يولده تطبيق المصادقة.',
     codes: 'تم تفعيل التحقق الثنائي. احفظ رموز الاسترداد قبل المتابعة.',
     mismatch: 'كلمتا المرور الجديدتان غير متطابقتين.', changed: 'تم تغيير كلمة المرور. سجل الدخول مجددًا.',
     session: 'تعذر التحقق من الجلسة. سجل الدخول مجددًا.', unexpected: 'استجابة غير متوقعة من الخادم.',
@@ -19,7 +19,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     code: 'The verification code is invalid or no longer usable.', recovery: 'The recovery code is invalid.',
     pending: 'Verifying…', mfa: 'Enter an authenticator code or one recovery code.',
     both: 'Enter either an authenticator code or one recovery code.', locked: 'Sign-in is temporarily locked. Retry after: ',
-    enrollment: 'This account requires two-factor enrollment.', confirm: 'Enter the code from your authenticator app.',
+    enrollment: 'Two-factor authentication is optional. Confirm your password to begin.', confirm: 'Enter the code from your authenticator app.',
     codes: 'Two-factor authentication is enabled. Save your recovery codes before continuing.',
     mismatch: 'The new passwords do not match.', changed: 'Password changed. Sign in again.',
     session: 'The session could not be verified. Sign in again.', unexpected: 'Unexpected server response.',
@@ -55,15 +55,28 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     recoveryCodes = [];
     var secret = document.querySelector('[data-auth-totp-secret]');
     var codes = document.querySelector('[data-auth-recovery-codes]');
+    var qr = document.querySelector('[data-auth-totp-qr]');
     if (secret) secret.textContent = '';
     if (codes) codes.replaceChildren();
+    if (qr) qr.replaceChildren();
+    show('[data-auth-totp-qr-field]', false);
+  }
+  function renderQr(svgText) {
+    var target = document.querySelector('[data-auth-totp-qr]');
+    if (!target || typeof svgText !== 'string' || !svgText) return false;
+    var parsed = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+    var svg = parsed.documentElement;
+    if (!svg || svg.nodeName.toLowerCase() !== 'svg' || parsed.querySelector('parsererror, script, foreignObject')) return false;
+    target.replaceChildren(document.importNode(svg, true));
+    show('[data-auth-totp-qr-field]', true);
+    return true;
   }
   function step(name) {
     if (login) login.hidden = name !== 'credentials' && name !== 'mfa-required' && name !== 'locked';
-    show('[data-auth-enrollment]', name === 'enrollment-required' || name === 'enrollment');
+    show('[data-auth-enrollment]', name === 'enrollment');
     show('[data-auth-recovery]', name === 'recovery-codes');
     show('[data-auth-password-change]', name === 'password-change-required');
-    show('[data-auth-cancel]', name === 'enrollment-required' || name === 'enrollment' || name === 'recovery-codes' || name === 'password-change-required');
+    show('[data-auth-cancel]', name === 'enrollment' || name === 'recovery-codes' || name === 'password-change-required');
     setState(name);
   }
 
@@ -171,7 +184,6 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
         if (!data.principal || typeof data.csrfToken !== 'string' || !data.csrfToken || typeof data.mfaEnrollmentRequired !== 'boolean' || typeof data.passwordChangeRequired !== 'boolean') throw new Error(copy.unexpected);
         csrfToken = data.csrfToken; principal = data.principal; clearCredentials();
         if (data.passwordChangeRequired) { step('password-change-required'); message(copy.required, false); document.getElementById('change-current-password').focus(); }
-        else if (data.mfaEnrollmentRequired) { step('enrollment-required'); message(copy.enrollment, false); document.getElementById('enrollment-password').focus(); }
         else { setState('authenticated'); redirectToWorkspace(); }
       } catch (error) { authError(error); }
       finally { busy(login, false); }
@@ -187,6 +199,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
       if (typeof data.secret !== 'string' || !data.secret || !Array.isArray(data.recoveryCodes) || !data.recoveryCodes.length || data.recoveryCodes.some(function (code) { return typeof code !== 'string'; })) throw new Error(copy.unexpected);
       clearEnrollment(); recoveryCodes = data.recoveryCodes.slice();
       document.querySelector('[data-auth-totp-secret]').textContent = data.secret;
+      renderQr(data.qrCodeSvg);
       step('enrollment'); setup.hidden = true; show('[data-auth-enrollment-details]', true);
       message(copy.confirm, false); document.getElementById('enrollment-code').focus();
     } catch (error) { authError(error); }
@@ -241,9 +254,11 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
       if (label) label.textContent = visible ? (ar ? 'إخفاء' : 'Hide') : (ar ? 'إظهار' : 'Show');
       if (typeof start === 'number' && typeof end === 'number') input.setSelectionRange(start, end, direction || 'none');
     } else if (action === 'restart-enrollment') {
-      clearEnrollment(); show('[data-auth-enrollment-details]', false); setup.hidden = false; step('enrollment-required'); message(copy.enrollment, false);
+      clearEnrollment(); show('[data-auth-enrollment-details]', false); if (setup) setup.hidden = false; step('enrollment'); message(copy.enrollment, false);
     } else if (action === 'acknowledge-recovery') {
-      clearEnrollment(); setState('authenticated'); redirectToWorkspace();
+      clearEnrollment();
+      if (principal) { setState('authenticated'); redirectToWorkspace(); }
+      else window.location.reload();
     } else if (action === 'logout') {
       event.preventDefault(); button.disabled = true;
       try {

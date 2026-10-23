@@ -111,6 +111,7 @@ import { renderWebApp } from '../../web/src/app.ts'
 import { requestPrefersHtml } from '../../web/src/status-page.ts'
 import { ENTRY_POINTS, entryPointAllowsApiRoute, entryPointAllowsRole, sessionTokenHash } from './entry-points.ts'
 import type { EntryPoint } from './entry-points.ts'
+import { renderTotpQrSvg } from './totp-qr.ts'
 
 // Public PHC fixture used only to equalize unknown-user password work; never an account credential.
 const DUMMY_PASSWORD_HASH = "$argon2id$v=19$m=65536,t=3,p=4$QkJCQkJCQkJCQkJCQkJCQg$02+8XtfLLaSCZqlfA84rmzJ5VytASY+ko8Y0KCBMjk8"
@@ -997,10 +998,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             csrfToken,
             totpEnabled: principalRecord.totpEnabled,
             passwordChangeRequired: principalRecord.forcePasswordChange,
-            mfaEnrollmentRequired:
-              principalRecord.kind === 'root' &&
-              !principalRecord.totpEnabled &&
-              process.env.XPANEL_ALLOW_PASSWORD_ONLY_ROOT !== '1',
+            mfaEnrollmentRequired: false,
           },
           200,
           { 'set-cookie': cookie },
@@ -1032,10 +1030,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           principal: caller.principal,
           totpEnabled: caller.principalRecord.totpEnabled,
           passwordChangeRequired: caller.principalRecord.forcePasswordChange,
-          mfaEnrollmentRequired:
-            caller.principal.kind === 'root' &&
-            !caller.principalRecord.totpEnabled &&
-            process.env.XPANEL_ALLOW_PASSWORD_ONLY_ROOT !== '1',
+          mfaEnrollmentRequired: false,
           csrfToken: caller.sessionToken ? deriveCsrfToken(caller.sessionToken, serverSecret, entryPoint) : null,
         })
       }
@@ -1080,9 +1075,13 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const secret = generateTotpSecret()
         const recoveryCodes = Array.from({ length: 8 }, () => randomBytes(16).toString('hex'))
         const enrollment = await startTotpEnrollment(deps.db, { principalId: caller.principal.id, sessionId: caller.sessionId, expectedPasswordHash: caller.principalRecord.passwordHash, sealedSecret: sealTotpSecret(secret, serverSecret), recoveryHashes: recoveryCodes.map(sha256Hex) })
+        const otpauthUrl = `otpauth://totp/xPanel:${encodeURIComponent(caller.principal.username)}?secret=${secret}&issuer=xPanel`
+        let qrCodeSvg: string | undefined
+        try { qrCodeSvg = renderTotpQrSvg(otpauthUrl) } catch { qrCodeSvg = undefined }
         return jsonResponse({
           secret,
-          otpauthUrl: `otpauth://totp/xPanel:${encodeURIComponent(caller.principal.username)}?secret=${secret}&issuer=xPanel`,
+          otpauthUrl,
+          ...(qrCodeSvg ? { qrCodeSvg } : {}),
           recoveryCodes,
           expiresAt: enrollment.expiresAt,
         })
