@@ -22,8 +22,9 @@ import {
   renderAsyncActionState,
   renderStatusBadge,
 } from '../tokens.ts'
-import { renderAccountHome, renderAccountResources, resourceRowsFromPlan } from '../board-canvas.ts'
-import { renderDesignMain, renderDesignNav, renderHomeToolGrid } from '../design-board.ts'
+import { renderAccountResources, resourceRowsFromPlan } from '../board-canvas.ts'
+import { renderXpanelHome, xpanelHomeFromProps } from '../board-port/xpanel-home.ts'
+import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
 
@@ -117,6 +118,22 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
     ? renderAsyncActionState({ ...props.actionState, locale })
     : ''
 
+  if (section === 'overview') {
+    return ensureAccessibleSurfaceHtml(renderXpanelHome(xpanelHomeFromProps({
+      locale,
+      account,
+      ...(plan ? { plan } : {}),
+      domains,
+      databases,
+      databaseUsers,
+      serviceUsers: props.serviceUsers ?? [],
+      files: props.files ?? [],
+      dnsRecords,
+      ...(generationId !== undefined ? { generationId } : {}),
+      actionHtml: actionBannerHtml,
+    })), locale)
+  }
+
   const rawHtml = renderSurfaceShell({
     surface: 'xpanel', locale,
     attributes: `data-account="${escapeHtml(account.username)}" data-uid="${account.uid}"`,
@@ -168,16 +185,6 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
         </div>
       </div>`,
     content: `      ${actionBannerHtml}
-${section === 'overview' ? renderAccountHome(locale, {
-        username: account.username,
-        domain: account.primaryDomain,
-        home: account.home,
-        uid: account.uid,
-        shell: account.shell,
-        ipv4: account.ipv4,
-        planName: plan?.name ? formatDisplayName(plan.name) : null,
-        addonDomains: domains.filter(domain => domain.kind === 'addon').length,
-      }, renderHomeToolGrid(locale, qualifiedRoutes)) : ''}
 ${section === 'resources' ? renderAccountResources(locale, account.uid, resourceRowsFromPlan(plan?.resources ?? null)) : ''}
       ${section === 'domains' ? `      <!-- 2. Domains & Multi-IP Binding Table -->
       <section class="xp-card" id="xpanel-domains" data-section="domains-multi-ip" aria-labelledby="xpanel-domains-heading">
