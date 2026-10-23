@@ -907,6 +907,8 @@ export const runUnifiedInstaller = (
     if (services.withMail) {
       writeManagedConfigWithBackup(host, journal, rendered.renderDovecotAuthConf(profile), backupStamp)
       writeManagedConfigWithBackup(host, journal, rendered.renderDovecotMailboxConf(profile), backupStamp)
+      writeManagedConfigWithBackup(host, journal, rendered.renderDovecotSpecialUseConf(profile), backupStamp)
+      writeManagedConfigWithBackup(host, journal, rendered.renderDovecotQuotaConf(profile), backupStamp)
       const maps = rendered.renderPostfixMaps(profile, [])
       for (const action of maps.actions) {
         if (action.kind === 'ensure-dir') host.ensureDir(action.path, { mode: action.mode, owner: action.owner, group: action.group })

@@ -124,7 +124,7 @@ describe('xWHM dashboard board port', () => {
     assert.match(arabic, /غير مثبت/)
     assert.match(arabic, /17:29 UTC/)
     assert.match(arabic, /الأوقات بتوقيت/)
-    assert.match(arabic, /<bdi dir="ltr">2<\/bdi> يومين و<bdi dir="ltr">1<\/bdi> ساعة/)
+    assert.match(arabic, /يومان وساعة واحدة/)
     assert.doesNotMatch(arabic, /service_user\.created/)
     const auditPage = renderWhmSurface({
       principal: { kind: 'root', id: 'root', username: 'root' },

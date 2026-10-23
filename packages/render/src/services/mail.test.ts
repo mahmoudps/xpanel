@@ -13,9 +13,13 @@ import {
   localSubmissionMasterBlock,
   postfixMainSettings,
   probeLocalSubmissionAuth,
+  mailboxPostmaster,
   renderDovecotAuthConf,
   renderDovecotMailboxConf,
+  renderDovecotQuotaConf,
+  renderDovecotSpecialUseConf,
   renderDovecotXpanelConf,
+  resolveMailboxPostmaster,
   replaceManagedBlock,
   renderFilterSieve,
   renderPostfixMaps,
@@ -323,10 +327,19 @@ describe('Dovecot configuration', () => {
     expect(f.content).toContain('quota_warning = storage=95%% quota-warning 95 %u')
     expect(f.content).toContain('quota_warning2 = storage=80%% quota-warning 80 %u')
     expect(f.content).toContain('executable = script /opt/xpanel/libexec/quota-warning')
-    expect(f.content).toContain('auto = subscribe')
-    expect(f.content).toContain('special_use = \\Sent')
-    expect(f.content).toContain('special_use = \\Junk')
-    expect(f.content).toContain('special_use = \\Archive')
+    expect(f.content).not.toContain('namespace inbox')
+    const folders = renderDovecotSpecialUseConf(debian)
+    expect(folders.path).toBe('/etc/dovecot/conf.d/15-mailboxes.conf')
+    expect(folders.content).toContain('auto = subscribe')
+    expect(folders.content.match(/auto = /g)).toHaveLength(5)
+    expect(folders.content).toContain('special_use = \\Sent')
+    expect(folders.content).toContain('special_use = \\Junk')
+    expect(folders.content).toContain('special_use = \\Archive')
+    expect(folders.content.match(/namespace inbox/g)).toHaveLength(1)
+    const quota = renderDovecotQuotaConf(debian)
+    expect(quota.path).toBe('/etc/dovecot/conf.d/99-xpanel-quota.conf')
+    expect(quota.content).toContain('quota = count:User quota')
+    expect(quota.content).toContain('quota_vsizes = yes')
     expect(f.content).toContain('sieve = file:~/mail/%Ld/%Ln/sieve;active=~/mail/%Ld/%Ln/.dovecot.sieve')
     expect(f.content).toContain('postmaster_address = postmaster@host.net')
     rejects(() => renderDovecotXpanelConf(debian, { postmaster: 'a@b.net\nmail_location = /' }))
@@ -495,7 +508,16 @@ describe('dkimDnsRecord', () => {
     expect(master).toContain('smtpd_tls_auth_only=yes')
     expect(master).toContain('smtpd_sasl_auth_enable=yes')
     expect(main).toContain('smtpd_sasl_auth_enable = no')
+    expect(main).toContain('smtpd_milters = local:/run/opendkim/opendkim.sock')
+    expect(main).toContain('non_smtpd_milters = local:/run/opendkim/opendkim.sock')
+    expect(main).toContain('milter_protocol = 6')
+    expect(main).toContain('milter_default_action = accept')
+    expect(main).not.toContain('message_size_limit')
     expect(main).not.toMatch(/smtpd_sasl_auth_enable\s*=\s*yes/)
+    expect(mailboxPostmaster('mail.example.test')).toBe('postmaster@mail.example.test')
+    expect(mailboxPostmaster('localhost')).toBe('postmaster@localhost.localdomain')
+    expect(resolveMailboxPostmaster(undefined, 'postmaster_address = postmaster@mail.example.test\n')).toBe('postmaster@mail.example.test')
+    expect(resolveMailboxPostmaster('other.example.test', 'postmaster_address = postmaster@mail.example.test\n')).toBe('postmaster@other.example.test')
     expect(probeLocalSubmissionAuth(debian)).toEqual({
       port25SaslEnabled: false,
       submissionSaslEnabled: true,

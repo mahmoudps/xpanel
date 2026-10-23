@@ -18,7 +18,7 @@ import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { runCli } from './cli.ts'
 import { loadQualifiedCatalog } from './host-catalog.ts'
-import { loadMailDocument, type MailDocument } from './mail/document.ts'
+import { loadMailDocument, messageSizeLimitBytes, messageSizeLimitFromPostconf, type MailDocument } from './mail/document.ts'
 import { createLocalMailboxTransport, mailFolderName } from './mail/inbox.ts'
 import { createApiApp, ensureRootPrincipal, listenApiServer } from './server.ts'
 import { authenticateRequest } from './auth.ts'
@@ -273,7 +273,9 @@ export const createDefaultWebRenderer = async (deps: {
         listSessionsForPrincipal(deps.db, principal.id).catch(() => []),
         listAudit(deps.db, { mentions: homeAccount.username, limit: 8 }).catch(() => []),
       ])
-      const lastSignInAt = [...sessions].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.createdAt
+      const lastSignInAt = [...sessions]
+        .filter(session => session.id !== caller.sessionId)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.createdAt
       return serveWebUi(req, async () => ({
         surface,
         activeRoute: '/home',
@@ -433,6 +435,13 @@ export const createDefaultWebRenderer = async (deps: {
         if (surface !== 'xmail') return { mailbox: '' }
         let postfixMain: string | null = null
         try { postfixMain = readFileSync('/etc/postfix/main.cf', 'utf8') } catch { postfixMain = null }
+        if (postfixMain !== null && messageSizeLimitBytes(postfixMain) === null) {
+          try {
+            const probed = spawnSync('/usr/sbin/postconf', ['-h', 'message_size_limit'], { encoding: 'utf8', timeout: 2000 })
+            const bytes = probed.status === 0 ? messageSizeLimitFromPostconf(probed.stdout ?? '') : null
+            if (bytes !== null) postfixMain = `${postfixMain}\nmessage_size_limit = ${bytes}\n`
+          } catch { /* The file text stays the only source when postconf cannot run. */ }
+        }
         const requestedFolder = url.searchParams.get('folder')
         let folder = 'INBOX'
         try { folder = mailFolderName(requestedFolder) } catch { folder = 'INBOX' }
@@ -455,6 +464,7 @@ export const createDefaultWebRenderer = async (deps: {
           mailbox: loaded.mailbox,
           ...(folder !== 'INBOX' ? { activeFolder: folder } : {}),
           ...(loaded.quotaUsedMb !== undefined ? { quotaUsedMb: loaded.quotaUsedMb } : {}),
+          ...(loaded.quotaUsedBytes !== undefined ? { quotaUsedBytes: loaded.quotaUsedBytes } : {}),
           ...(loaded.quotaLimitMb !== undefined ? { quotaLimitMb: loaded.quotaLimitMb } : {}),
           ...(loaded.messages !== undefined ? { messages: loaded.messages } : {}),
           ...(loaded.folderCounts ? { folderCounts: loaded.folderCounts } : {}),

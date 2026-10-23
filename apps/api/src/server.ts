@@ -1622,8 +1622,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const body = await readJsonBody<{ folder?: unknown; from?: unknown }>(req)
         const from = mailFolderName(typeof body.from === 'string' ? body.from : 'INBOX')
         const to = mailFolderName(typeof body.folder === 'string' ? body.folder : '')
-        await mailboxTransport.move(opened.record.mailbox, opened.password, Number(moveMatch[1]), from, to)
-        return jsonResponse({ ok: true, uid: Number(moveMatch[1]), folder: to })
+        const moved = await mailboxTransport.move(opened.record.mailbox, opened.password, Number(moveMatch[1]), from, to)
+        const destination = moved && typeof moved.uid === 'number' ? moved.uid : Number(moveMatch[1])
+        return jsonResponse({ ok: true, uid: destination, folder: to })
       }
       if (inboxMatch && (method === 'GET' || method === 'DELETE')) {
         const caller = await requireCaller(req)
@@ -1634,8 +1635,19 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const uid = Number(inboxMatch[1])
         const folder = mailFolderName(url.searchParams.get('folder'))
         if (method === 'DELETE') {
-          await mailboxTransport.remove(opened.record.mailbox, opened.password, uid, folder)
-          return jsonResponse({ ok: true, uid })
+          if (folder === 'Trash') {
+            if (url.searchParams.get('confirm') !== 'delete') {
+              return fail('PRECONDITION_FAILED', 'Deleting a message from Trash removes it permanently.', {
+                messageAr: 'حذف رسالة من المحذوفات يزيلها نهائياً.',
+              })
+            }
+            await mailboxTransport.remove(opened.record.mailbox, opened.password, uid, folder)
+            return jsonResponse({ ok: true, uid, permanent: true })
+          }
+          if (!mailboxTransport.move) return fail('PRECONDITION_FAILED', 'this mail server cannot move messages')
+          const moved = await mailboxTransport.move(opened.record.mailbox, opened.password, uid, folder, 'Trash')
+          const destination = moved && typeof moved.uid === 'number' ? moved.uid : uid
+          return jsonResponse({ ok: true, uid: destination, folder: 'Trash', from: folder })
         }
         const message = await mailboxTransport.read(opened.record.mailbox, opened.password, uid, folder)
         return jsonResponse({ mailbox: opened.record.mailbox, message })

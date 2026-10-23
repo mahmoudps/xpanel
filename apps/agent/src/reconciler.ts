@@ -415,8 +415,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   }
 
   if (mailDomains.length > 0) {
-    const hostname = snapshot.server?.settings.hostname
-    const postmaster = hostname && hostname.includes('.') ? `postmaster@${hostname}` : 'postmaster@localhost.localdomain'
+    const postmaster = services.mailboxPostmaster(snapshot.server?.settings.hostname)
     const domainsDir = services.dovecotDomainsDir(os)
     preActions.push(
       { kind: 'ensure-dir', path: domainsDir.slice(0, domainsDir.lastIndexOf('/')), mode: 0o755, owner: 'root', group: 'root' },

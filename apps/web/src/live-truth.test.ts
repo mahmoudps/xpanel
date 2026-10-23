@@ -6,7 +6,7 @@ import { whmDashboardFromProps } from './board-port/xwhm-dashboard.ts'
 import { xpanelHomeFromProps } from './board-port/xpanel-home.ts'
 import { auditOutcomeLabel, auditTargetLabel } from './audit-labels.ts'
 import { formatAsciiBytes } from './tokens.ts'
-import { certificateFromPem, readHostIdentity } from '../../agent/src/host-identity.ts'
+import { certificateFromPem, readHostIdentity, sslCertificateForListen } from '../../agent/src/host-identity.ts'
 import { parseVersionFile } from '../../agent/src/host-info.ts'
 
 const message = {
@@ -44,6 +44,13 @@ describe('live truth surfaces', () => {
     assert.match(html, /Lina Saleh/)
     assert.match(html, /sam@example.test/)
     assert.match(html, /plan\.pdf/)
+    assert.match(html, /2,048 B/)
+    const decoded = renderInbox(xmailInboxFromProps({
+      mailbox: 'info@example.test',
+      messages: [{ ...message, attachments: [{ name: 'note.txt', sizeBytes: 1240 }] }],
+    }))
+    assert.match(decoded, /1,240 B/)
+    assert.equal(decoded.includes('1.70 KB'), false)
     assert.match(html, /mode=reply/)
     assert.match(html, /<bdi dir="auto">/)
     assert.match(html, /DKIM: not checked/)
@@ -88,6 +95,13 @@ describe('live truth surfaces', () => {
     const rendered = html.subject
     assert.equal(rendered, 'Re: Hello')
     assert.equal(html.chips.map(chip => chip.addr).join(','), 'lina@example.test,sam@example.test')
+    const named = xmailComposeFromProps({
+      mailbox: 'info@example.test',
+      draft: { to: 'Lina Saleh <lina@example.test>', cc: 'Sam Idris <sam@example.test>' },
+    })
+    assert.equal(named.chips[0]?.name, 'Lina Saleh')
+    assert.equal(named.chips[1]?.name, 'Sam Idris')
+    assert.equal(named.chips[1]?.addr, 'sam@example.test')
     assert.match(html.bodyHtml, /&gt; See you/)
     assert.match(html.identitySize, /10 MB/)
     assert.match(html.identityDkim, /not signed/)
@@ -172,18 +186,46 @@ describe('live truth surfaces', () => {
       assert.equal(parsed?.names.includes('panel.example.test'), true)
       assert.ok((parsed?.daysLeft ?? 99) < 30)
     }
+    const stale = certificate
+      ? certificate.replaceAll('panel.example.test', 'panel.xpanel-lab.test')
+      : null
+    const nginx = `
+server {
+  listen 80;
+  ssl_certificate /etc/xpanel/ssl/default/fullchain.pem;
+  ssl_certificate_key /etc/xpanel/ssl/default/privkey.pem;
+}
+server {
+  listen 127.0.0.1:8443 ssl;
+  ssl_certificate /etc/xpanel/ssl/panel/fullchain.pem;
+  ssl_certificate_key /etc/xpanel/ssl/panel/privkey.pem;
+}
+`
+    assert.equal(sslCertificateForListen(nginx, 8443), '/etc/xpanel/ssl/panel/fullchain.pem')
     const identity = await readHostIdentity({
       readFile: async (path) => {
         if (path === '/etc/os-release') return null
         if (path === '/usr/lib/os-release') return 'PRETTY_NAME="Ubuntu 24.04.3 LTS"\n'
         if (path === '/opt/xpanel/VERSION') return '0.1.0-xmail.20261024.1\n'
-        if (path === '/etc/xpanel/ssl/default/fullchain.pem') return certificate
+        if (path === '/etc/xpanel/ssl/default/fullchain.pem') return stale
+        if (path === '/etc/xpanel/ssl/panel/fullchain.pem') return certificate
         return null
       },
-      runCommand: async () => ({ ok: false, stdout: '', stderr: '' }),
+      runCommand: async (argv) => argv[0]?.endsWith('/nginx') && argv[1] === '-T'
+        ? { ok: true, stdout: nginx, stderr: '' }
+        : { ok: false, stdout: '', stderr: '' },
     })
     assert.equal(identity.system, 'Ubuntu 24.04.3 LTS')
     assert.equal(identity.version, '0.1.0-xmail.20261024.1')
-    if (certificate) assert.equal(identity.panelDomain, 'panel.example.test')
+    if (certificate) {
+      assert.equal(identity.panelDomain, 'panel.example.test')
+      assert.equal(identity.panelDomain?.includes('xpanel-lab.test'), false)
+    }
+    const served = await readHostIdentity({
+      readFile: async () => stale,
+      runCommand: async () => ({ ok: false, stdout: '', stderr: '' }),
+      readServedCertificate: async () => certificate,
+    })
+    if (certificate) assert.equal(served.panelDomain, 'panel.example.test')
   })
 })

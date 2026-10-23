@@ -206,11 +206,12 @@ const NAV: Array<{ id: string; label: [string, string]; items: Array<{ href: str
 
 const plain = (value: string): string => value.replace(/«|»/g, '')
 
-const arUnit = (n: number, one: string, two: string, few: string, many: string): string => {
-  if (n === 0 || (n >= 3 && n <= 10)) return few
-  if (n === 1) return one
-  if (n === 2) return two
-  return many
+const arCounted = (n: number, forms: { one: string; two: string; few: string; many: string }): string => {
+  const rule = new Intl.PluralRules('ar').select(n)
+  if (rule === 'zero') return `لا ${forms.few}`
+  if (rule === 'one') return forms.one
+  if (rule === 'two') return forms.two
+  return `«${n}» ${rule === 'few' ? forms.few : forms.many}`
 }
 
 const enUnit = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
@@ -222,9 +223,9 @@ const formatUptime = (seconds: number, ar: boolean): string => {
   const minutes = Math.floor((seconds % 3600) / 60)
   if (ar) {
     const parts = [
-      days > 0 ? `«${days}» ${arUnit(days, 'يوم', 'يومين', 'أيام', 'يوماً')}` : '',
-      hours > 0 ? `«${hours}» ${arUnit(hours, 'ساعة', 'ساعتين', 'ساعات', 'ساعة')}` : '',
-      days === 0 && hours === 0 ? `«${minutes}» ${arUnit(minutes, 'دقيقة', 'دقيقتين', 'دقائق', 'دقيقة')}` : '',
+      days > 0 ? arCounted(days, { one: 'يوم واحد', two: 'يومان', few: 'أيام', many: 'يوماً' }) : '',
+      hours > 0 ? arCounted(hours, { one: 'ساعة واحدة', two: 'ساعتان', few: 'ساعات', many: 'ساعة' }) : '',
+      days === 0 && hours === 0 ? arCounted(minutes, { one: 'دقيقة واحدة', two: 'دقيقتان', few: 'دقائق', many: 'دقيقة' }) : '',
     ].filter(part => part.length > 0)
     return parts.join(' و')
   }
@@ -240,7 +241,7 @@ const hostText = (value: string | undefined): string => value && value.length > 
 
 const hardwareLine = (cores: number | null, model: string | null, bytes: string | null, ar: boolean): string => {
   const parts = [
-    cores === null ? '' : ar ? `«${cores}» ${arUnit(cores, 'نواة', 'نواتين', 'أنوية', 'نواة')}` : `${cores} ${cores === 1 ? 'core' : 'cores'}`,
+    cores === null ? '' : ar ? arCounted(cores, { one: 'نواة واحدة', two: 'نواتان', few: 'أنوية', many: 'نواة' }) : `${cores} ${cores === 1 ? 'core' : 'cores'}`,
     model ? (ar ? `«${model}»` : model) : '',
     bytes ? (ar ? `«${bytes}»` : bytes) : '',
   ].filter(part => part.length > 0)
@@ -834,7 +835,7 @@ const arAccountCount = (count: number): string => {
 
 const arDayCount = (count: number): string => {
   const rule = new Intl.PluralRules('ar').select(count)
-  if (rule === 'zero') return '«0» يوم'
+  if (rule === 'zero') return 'لا أيام'
   if (rule === 'one') return 'يوم واحد'
   if (rule === 'two') return 'يومان'
   if (rule === 'few') return `«${count}» أيام`
@@ -1018,7 +1019,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
             pct: '0%',
             color: '#1D5BD6',
             note: cores
-              ? (ar ? `«${cores}» ${arUnit(cores, 'نواة', 'نواتين', 'أنوية', 'نواة')}` : `${cores} ${cores === 1 ? 'core' : 'cores'}`)
+              ? (ar ? arCounted(cores, { one: 'نواة واحدة', two: 'نواتان', few: 'أنوية', many: 'نواة' }) : `${cores} ${cores === 1 ? 'core' : 'cores'}`)
               : (ar ? `الحمل «${loadValue}»` : `load ${loadValue}`),
             noteColor: '#5D6B7E',
             showBar: false,

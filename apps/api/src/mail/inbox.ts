@@ -64,9 +64,9 @@ export interface MailboxTransport {
   list(mailbox: string, password: string, folder?: string): Promise<InboxSummary[]>
   read(mailbox: string, password: string, uid: number, folder?: string): Promise<InboxMessage>
   remove(mailbox: string, password: string, uid: number, folder?: string): Promise<void>
-  move?(mailbox: string, password: string, uid: number, fromFolder: string, toFolder: string): Promise<void>
+  move?(mailbox: string, password: string, uid: number, fromFolder: string, toFolder: string): Promise<{ uid?: number } | void>
   counts?(mailbox: string, password: string): Promise<MailFolderCount[]>
-  quota?(mailbox: string, password: string): Promise<{ usedMb: number; limitMb?: number } | null>
+  quota?(mailbox: string, password: string): Promise<{ usedMb: number; limitMb?: number; usedBytes?: number } | null>
   send(mailbox: string, password: string, input: MailboxSendInput): Promise<{ messageId: string; savedToSent?: boolean }>
 }
 
@@ -105,10 +105,22 @@ const unsealMailboxPassword = (sealed: Uint8Array, serverSecret: string): string
 
 const RAW_MAIL_ERROR = /SMTP |IMAP |ECONN|ENOTFOUND|ETIMEDOUT|timed out|ServerName|TLS |socket closed|STARTTLS|EHLO|AUTH PLAIN|MAIL FROM|RCPT |recipients rejected/
 
+/** IMAP move and copy failures. A send sentence is the wrong explanation for a folder. */
+export const imapHumanCopy = (raw: string): { en: string; ar: string } => {
+  const text = raw.toLowerCase()
+  if (/timed out|econnrefused|econnreset|enotfound|ehostunreach|enetunreach|socket closed|\beconn/.test(text)) {
+    return { en: 'the mail server could not be reached.', ar: 'تعذر الوصول إلى خادم البريد.' }
+  }
+  if (/trycreate|does not exist|no such mailbox|unknown mailbox|mailbox doesn't exist/.test(text)) {
+    return { en: 'That folder is not on this mailbox yet.', ar: 'هذا المجلد غير موجود في صندوق البريد بعد.' }
+  }
+  return { en: 'The message could not be moved.', ar: 'تعذر نقل الرسالة.' }
+}
+
 const mailFailure = (err: unknown): never => {
   if (isXpanelError(err) && !RAW_MAIL_ERROR.test(err.message)) throw err
   const raw = err instanceof Error ? err.message : 'mail server unavailable'
-  const copy = smtpHumanCopy(raw)
+  const copy = /\bIMAP\b/.test(raw) && !/\bSMTP\b/.test(raw) ? imapHumanCopy(raw) : smtpHumanCopy(raw)
   const code = isXpanelError(err) ? err.code : 'PRECONDITION_FAILED'
   return fail(code, copy.en, { ...(isXpanelError(err) ? err.detail : {}), messageAr: copy.ar })
 }
@@ -139,7 +151,7 @@ const summaryOf = (message: ImapFetchedMessage): InboxSummary => {
     .filter(item => item.disposition !== 'inline' && item.filename.length > 0)
     .map(item => ({ name: item.filename, sizeBytes: item.sizeBytes }))
   const fromStructure = attachmentsFromBodyStructure(message.bodyStructure ?? '')
-  const attachments = fromStructure.length > 0 ? fromStructure : fromMime
+  const attachments = fromMime.length > 0 ? fromMime : fromStructure
   return {
     uid: message.uid,
     from: parsed.from,
@@ -212,7 +224,8 @@ export const createLocalMailboxTransport = (
       const from = mailFolderName(fromFolder)
       const to = mailFolderName(toFolder)
       if (from === to) return
-      await withImap(imapHost, imapPort, mailbox, password, client => client.moveOrCopyByUid(from, uid, to, 'move'), imapTimeout)
+      const destination = await withImap(imapHost, imapPort, mailbox, password, client => client.moveOrCopyByUid(from, uid, to, 'move'), imapTimeout)
+      return typeof destination === 'number' ? { uid: destination } : undefined
     },
     async counts(mailbox, password) {
       return withImap(imapHost, imapPort, mailbox, password, async client => {
@@ -229,9 +242,10 @@ export const createLocalMailboxTransport = (
       return withImap(imapHost, imapPort, mailbox, password, async client => {
         const measured = await client.quotaRoot()
         if (measured) {
+          const usedBytes = measured.usedKb * 1024
           const usedMb = Math.round((measured.usedKb / 1024) * 10) / 10
           const limitMb = measured.limitKb > 0 ? Math.round((measured.limitKb / 1024) * 10) / 10 : undefined
-          return { usedMb, ...(limitMb !== undefined ? { limitMb } : {}) }
+          return { usedMb, usedBytes, ...(limitMb !== undefined ? { limitMb } : {}) }
         }
         let bytes = 0
         for (const folder of MAIL_FOLDERS) {
@@ -240,7 +254,7 @@ export const createLocalMailboxTransport = (
           const fetched = await client.fetchMessagesByUid(folder, uids.join(','))
           bytes += fetched.messages.reduce((sum, item) => sum + item.sizeBytes, 0)
         }
-        return { usedMb: Math.round((bytes / (1024 * 1024)) * 10) / 10 }
+        return { usedMb: Math.round((bytes / (1024 * 1024)) * 10) / 10, usedBytes: bytes }
       }, imapTimeout)
     },
     async send(mailbox, password, input) {

@@ -400,6 +400,10 @@ const LOCAL_DELIVERY_KEYS = [
   'smtpd_sasl_path',
   'smtpd_sender_login_maps',
   'smtpd_recipient_restrictions',
+  'smtpd_milters',
+  'non_smtpd_milters',
+  'milter_protocol',
+  'milter_default_action',
 ] as const
 
 /**
@@ -523,6 +527,36 @@ export const probeLocalSubmissionAuth = (os: OsProfile, o: PostfixMainOptions = 
  */
 const DEFAULT_POSTMASTER = 'postmaster@localhost.localdomain'
 
+/** One postmaster for the reconciler and the agent start path. A dotted hostname wins. */
+export const mailboxPostmaster = (hostname: string | undefined | null): string => {
+  const host = typeof hostname === 'string' ? hostname.trim() : ''
+  if (!host.includes('.') || host.includes('@') || /[\s\r\n]/.test(host)) return DEFAULT_POSTMASTER
+  try {
+    return normalizeHostedEmail(`postmaster@${host}`, 'postmaster address').address
+  } catch {
+    return DEFAULT_POSTMASTER
+  }
+}
+
+/**
+ * Keeps a postmaster already written by the reconciler when this pass has no
+ * dotted hostname. Otherwise every agent restart would reset it to localhost.
+ */
+export const resolveMailboxPostmaster = (
+  hostname: string | undefined | null,
+  existingConf: string | null | undefined,
+): string => {
+  const fromHost = mailboxPostmaster(hostname)
+  if (fromHost !== DEFAULT_POSTMASTER) return fromHost
+  const kept = existingConf?.match(/^[ \t]*postmaster_address\s*=\s*(\S+)\s*$/m)?.[1]
+  if (!kept || kept === DEFAULT_POSTMASTER) return DEFAULT_POSTMASTER
+  try {
+    return normalizeHostedEmail(kept, 'postmaster address').address
+  } catch {
+    return DEFAULT_POSTMASTER
+  }
+}
+
 export const renderDovecotMailboxConf = (
   os: OsProfile,
   o: { postmaster?: string; postfixSpoolDir?: string } = {},
@@ -577,6 +611,56 @@ protocol lmtp {
   }
 }
 
+/**
+ * Replaces the distribution's conf.d/15-mailboxes.conf. One namespace only:
+ * a second `namespace inbox` makes doveconf fail. `auto = subscribe` creates
+ * the folder for a mailbox that already exists and subscribes it.
+ */
+export const renderDovecotSpecialUseConf = (os: OsProfile): RenderedFile => {
+  const mailbox = (name: string, use: string): string => `  mailbox ${name} {
+    auto = subscribe
+    special_use = ${use}
+  }`
+  return {
+    path: `${assertAbsPath('dovecot dir', os.paths.dovecotDir)}/conf.d/15-mailboxes.conf`,
+    content: `# managed by xPanel: special-use folders
+# subscribe creates the folder on the next access and subscribes it.
+namespace inbox {
+  separator = .
+  inbox = yes
+${mailbox('Sent', '\\Sent')}
+${mailbox('Drafts', '\\Drafts')}
+${mailbox('Junk', '\\Junk')}
+${mailbox('Trash', '\\Trash')}
+${mailbox('Archive', '\\Archive')}
+}
+`,
+    mode: 0o644,
+    owner: 'root',
+    group: 'root',
+  }
+}
+
+/** Loaded after the distribution quota file so the count backend wins. */
+export const renderDovecotQuotaConf = (os: OsProfile): RenderedFile => ({
+  path: `${assertAbsPath('dovecot dir', os.paths.dovecotDir)}/conf.d/99-xpanel-quota.conf`,
+  content: `# managed by xPanel: count quota with virtual sizes
+mail_plugins = $mail_plugins quota
+
+protocol imap {
+  mail_plugins = $mail_plugins imap_quota
+}
+
+plugin {
+  quota = count:User quota
+  quota_vsizes = yes
+}
+`,
+  mode: 0o644,
+  owner: 'root',
+  group: 'root',
+})
+
 export const renderDovecotXpanelConf = (os: OsProfile, o: DovecotConfOptions): RenderedFile => {
   const postmaster = normalizeHostedEmail(o.postmaster, 'postmaster address').address
   const spool = assertAbsPath('postfix spool dir', o.postfixSpoolDir ?? '/var/spool/postfix')
@@ -618,31 +702,6 @@ protocol lmtp {
 
 protocol imap {
   mail_plugins = $mail_plugins imap_quota
-}
-
-namespace inbox {
-  separator = .
-  inbox = yes
-  mailbox Sent {
-    auto = subscribe
-    special_use = \\Sent
-  }
-  mailbox Drafts {
-    auto = subscribe
-    special_use = \\Drafts
-  }
-  mailbox Junk {
-    auto = subscribe
-    special_use = \\Junk
-  }
-  mailbox Trash {
-    auto = subscribe
-    special_use = \\Trash
-  }
-  mailbox Archive {
-    auto = subscribe
-    special_use = \\Archive
-  }
 }
 
 plugin {
