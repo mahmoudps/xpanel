@@ -300,7 +300,7 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
       assert.match(html, /data-screen="unavailable"/)
       assert.doesNotMatch(html, /<form\b|data-terminal-output=/)
     }
-    for (const [html, title] of [[panelAt('/home'), 'Dashboard'], [panelAt('/domains'), 'Domains'], [whmAt('/whm/accounts/new'), 'Create account']]) {
+    for (const [html, title] of [[panelAt('/home'), 'Home'], [panelAt('/domains'), 'Domains'], [whmAt('/whm/accounts/new'), 'Create account']]) {
       const headings = [...html!.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/g)].map(match => match[1]!.replace(/<[^>]*>/g, '').trim())
       assert.equal(headings.length, 1, `${title} must have one task heading`)
       assert.equal(headings[0]!.toLowerCase(), title!.toLowerCase())

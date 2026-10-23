@@ -249,6 +249,20 @@ const EN_MESSAGES: Record<string, string> = {
   'common.state.failed': 'Verification failed — previous generation preserved',
   'common.state.unavailable': 'Service or runtime dependency unavailable',
   'common.state.conflict': 'Concurrent modification conflict (HTTP 409)',
+
+  'email.serviceLogins': '{count} service logins',
+  'email.col.login': 'Login',
+  'email.col.services': 'Services',
+  'email.col.quota': 'Mailbox quota',
+  'email.service.email': 'Email',
+  'databases.summary': '{active} active · {trashed} in trash',
+  'dns.zoneBadge': 'PowerDNS BIND zone',
+  'dns.col.name': 'Name',
+  'dns.col.type': 'Type',
+  'dns.col.content': 'Content',
+  'analytics.cacheHitBadge': '{percent}% cache hit',
+  'files.kind.file': 'File',
+  'files.kind.folder': 'Folder',
 }
 
 const AR_MESSAGES: Record<string, string> = {
@@ -478,6 +492,20 @@ const AR_MESSAGES: Record<string, string> = {
   'common.state.failed': 'فشل التحقق — تم الحفاظ على الجيل النشط السابق',
   'common.state.unavailable': 'الخدمة أو الأداة المطلوبة غير متاحة حالياً',
   'common.state.conflict': 'تعارض في تعديل الحالة (HTTP 409)',
+
+  'email.serviceLogins': '{count} تسجيلات دخول للخدمات',
+  'email.col.login': 'تسجيل الدخول',
+  'email.col.services': 'الخدمات',
+  'email.col.quota': 'حصة صندوق البريد',
+  'email.service.email': 'البريد',
+  'databases.summary': '{active} نشطة · {trashed} في المهملات',
+  'dns.zoneBadge': 'منطقة BIND في PowerDNS',
+  'dns.col.name': 'الاسم',
+  'dns.col.type': 'النوع',
+  'dns.col.content': 'المحتوى',
+  'analytics.cacheHitBadge': '{percent}% إصابة التخزين المؤقت',
+  'files.kind.file': 'ملف',
+  'files.kind.folder': 'مجلد',
 }
 
 export const DICTIONARY: Record<Locale, Record<string, string>> = {

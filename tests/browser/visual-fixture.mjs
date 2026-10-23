@@ -44,6 +44,7 @@ const catalog = tools.map(tool => tool.status === 'out-of-scope' ? tool : ({
 
 const stateFor = (route, qualifiedCatalog) => ({
   surface: route.surface, activeRoute: route.activeRoute, realtimeEnabled: false,
+  security: { totpEnabled: true },
   title: 'Synthetic visual fixture — xPanel', accountId: account.id, catalog: qualifiedCatalog ? catalog : tools,
   visibility: { principal: route.surface === 'xwhm' ? root : owner, disabledFeatures: new Set() },
   whm: {

@@ -1,6 +1,6 @@
 import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import {
-  type AsyncActionBannerProps, ensureAccessibleSurfaceHtml, escapeHtml,
+  type AsyncActionBannerProps, ensureAccessibleSurfaceHtml, escapeHtml, formatAsciiDate,
   renderAsyncActionState, renderStatusBadge, renderThresholdMeter,
 } from '../tokens.ts'
 import { accountSecurityRoute, renderSecurityNavLink } from '../chrome.ts'
@@ -89,7 +89,7 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
         const current = page.route === activeRoute
         const compose = page.route === '/mail/compose'
         const unread = page.route === '/mail/inbox' ? allMessages.filter(message => message.folder === 'INBOX' && message.unread).length : 0
-        return `<a href="${escapeHtml(page.route)}" class="xp-nav-item ${current ? 'xp-nav-item--active' : ''} ${compose && section !== 'compose' ? 'xp-mail-compose-link' : ''}" ${current ? 'aria-current="page"' : ''} data-nav-route="${escapeHtml(page.route)}">${compose ? icons.compose : page.route === '/mail/inbox' ? icons.inbox : icons.folder}<span>${escapeHtml(getSurfaceNavigationLabel('xmail', 'page', page, locale))}</span>${unread ? `<span class="xp-mail-count xp-tabular" aria-label="${escapeHtml(text('Unread', 'غير مقروء'))}">${unread}</span>` : ''}</a>`
+        return `<a href="${escapeHtml(page.route)}" class="xp-nav-item ${current ? 'xp-nav-item--active' : ''} ${compose ? 'xp-mail-compose-link' : ''}" ${current ? 'aria-current="page"' : ''} data-nav-route="${escapeHtml(page.route)}">${compose ? icons.compose : page.route === '/mail/inbox' ? icons.inbox : icons.folder}<span>${escapeHtml(getSurfaceNavigationLabel('xmail', 'page', page, locale))}</span>${unread ? `<span class="xp-mail-count xp-tabular" aria-label="${escapeHtml(text('Unread', 'غير مقروء'))}">${unread}</span>` : ''}</a>`
       }).join('')}</div>
     </details>`).join('')
   // Folder observations do not grant a working folder-selection or mutation endpoint.
@@ -103,11 +103,11 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
     <div class="xp-mail-list" role="list" data-live-mail-list="true">${messages.map(message => `
       <article role="listitem" class="xp-mail-row ${message.uid === selectedMessage?.uid ? 'is-selected' : ''} ${message.unread ? 'is-unread' : ''}" data-mail-uid="${message.uid}">
         <span class="xp-mail-read-mark" aria-label="${text(message.unread ? 'Unread' : 'Read', message.unread ? 'غير مقروء' : 'مقروء')}"></span>
-        <div class="xp-mail-row-content"><strong class="xp-mail-sender"><bdi dir="ltr">${escapeHtml(message.from)}</bdi></strong><span class="xp-mail-subject">${escapeHtml(message.subject)}</span><p class="xp-mail-preview">${escapeHtml(message.preview)}</p><time datetime="${escapeHtml(message.receivedAt)}" class="xp-mail-time xp-tabular"><bdi dir="ltr">${escapeHtml(message.receivedAt)}</bdi></time></div>
+        <div class="xp-mail-row-content"><strong class="xp-mail-sender"><bdi dir="ltr">${escapeHtml(message.from)}</bdi></strong><span class="xp-mail-subject">${escapeHtml(message.subject)}</span><p class="xp-mail-preview">${escapeHtml(message.preview)}</p><time datetime="${escapeHtml(message.receivedAt)}" class="xp-mail-time xp-tabular"><bdi dir="ltr">${escapeHtml(formatAsciiDate(message.receivedAt, { includeTime: true }))}</bdi></time></div>
       </article>`).join('')}${messages.length ? '' : `<p class="xp-mail-empty" role="status">${text('No messages in this folder.', 'لا توجد رسائل في هذا المجلد.')}</p>`}</div>
   </section>`
   const readingHtml = selectedMessage ? `<article class="xp-mail-reader" data-mail-pane="reading-pane" aria-labelledby="mail-reading-heading">
-    <header class="xp-mail-message-heading"><h2 id="mail-reading-heading">${escapeHtml(selectedMessage.subject)}</h2><dl class="xp-mail-message-meta">${field(text('From', 'من'), selectedMessage.from)}${field(text('To', 'إلى'), selectedMessage.to)}${field(text('Received', 'الاستلام'), selectedMessage.receivedAt)}</dl></header>
+    <header class="xp-mail-message-heading"><h2 id="mail-reading-heading">${escapeHtml(selectedMessage.subject)}</h2><dl class="xp-mail-message-meta">${field(text('From', 'من'), selectedMessage.from)}${field(text('To', 'إلى'), selectedMessage.to)}${field(text('Received', 'الاستلام'), formatAsciiDate(selectedMessage.receivedAt, { includeTime: true }))}</dl></header>
     <details class="xp-mail-auth-results"><summary>${text('Message authentication', 'التحقق من الرسالة')}</summary><div>${renderStatusBadge(selectedMessage.dkimPass ? 'ok' : 'critical', selectedMessage.dkimPass ? 'DKIM: pass' : 'DKIM: fail')}${renderStatusBadge(selectedMessage.spfPass ? 'ok' : 'critical', selectedMessage.spfPass ? 'SPF: pass' : 'SPF: fail')}${renderStatusBadge(selectedMessage.dmarcPass ? 'ok' : 'critical', selectedMessage.dmarcPass ? 'DMARC: pass' : 'DMARC: fail')}</div></details>
     <div class="xp-mail-message-body" dir="auto">${escapeHtml(selectedMessage.body)}</div>
   </article>` : `<div class="xp-mail-reader xp-mail-empty" data-mail-pane="empty" role="status">${text('No message selected.', 'لم تُحدد رسالة.')}</div>`
@@ -130,6 +130,7 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
     : section === 'filters' ? filtersHtml
     : section === 'autoresponder' ? vacationHtml
     : section === 'overview' ? `<section class="xp-card" data-section="mail-overview"><h2>${text('Mailbox quota', 'حصة صندوق البريد')}</h2>${quota || `<p role="status">${text('Unavailable', 'غير متاحة')}</p>`}</section>`
+    : section === 'security' ? ''
     : renderSurfaceUnavailable(locale, '/mail/inbox')
 
   const rawHtml = `<div class="xp-shell xp-mail-shell" data-surface="xmail" data-mail-layout="reference" data-mailbox="${escapeHtml(mailbox)}">

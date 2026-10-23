@@ -17,12 +17,14 @@ import {
   type AsyncActionBannerProps,
   ensureAccessibleSurfaceHtml,
   escapeHtml,
+  formatAsciiDate,
   formatBytes,
   renderAsyncActionState,
   renderStatusBadge,
 } from '../tokens.ts'
-import { accountSecurityRoute, renderSecurityNavLink } from '../chrome.ts'
-import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, getSurfaceNavigationLabel, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
+import { renderAccountHome, renderAccountResources, resourceRowsFromPlan } from '../board-canvas.ts'
+import { renderDesignMain, renderDesignNav, renderHomeToolGrid } from '../design-board.ts'
+import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
 
 export interface JailedFileEntry {
@@ -99,31 +101,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
   const visibility = props.visibility?.principal.kind === 'user' && props.visibility.principal.accountId === account.id ? props.visibility : undefined
   const xpanelNav = visibleNavigation(visibility, props.catalog).find((n) => n.surface === 'xpanel')
 
-  const sidebarSectionsHtml = (xpanelNav?.sections ?? [])
-    .map((section) => {
-      const isExpanded = section.pages.some((p) => p.route === activeRoute)
-      return `
-      <details class="xp-nav-section" ${isExpanded ? 'open' : ''} data-nav-section="${escapeHtml(section.id)}">
-        <summary class="xp-nav-section__title">
-          <span>${escapeHtml(getSurfaceNavigationLabel('xpanel', 'section', section, locale))}</span>
-          <span class="xp-tabular">(${section.pages.length})</span>
-        </summary>
-        <div class="xp-nav-section__items">
-          ${section.pages
-            .map(
-              (page) => `
-            <a href="${escapeHtml(page.route)}" class="xp-nav-item ${page.route === activeRoute ? 'xp-nav-item--active' : ''}" ${page.route === activeRoute ? 'aria-current="page"' : ''} data-nav-route="${escapeHtml(page.route)}">
-              <span>${escapeHtml(getSurfaceNavigationLabel('xpanel', 'page', page, locale))}</span>
-            </a>
-          `,
-            )
-            .join('')}
-        </div>
-      </details>
-    `
-    })
-    .join('')
-  const securityNavLink = renderSecurityNavLink('xpanel', locale, activeRoute, (xpanelNav?.sections ?? []).some(section => section.pages.some(page => page.route === accountSecurityRoute('xpanel'))))
+  const qualifiedRoutes = new Set((xpanelNav?.sections ?? []).flatMap(section => section.pages.map(page => page.route)))
 
   const switchLangCode = isAr ? 'en' : 'ar'
   const switchLangLabel = isAr ? 'English' : 'العربية'
@@ -143,7 +121,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
     surface: 'xpanel', locale,
     attributes: `data-account="${escapeHtml(account.username)}" data-uid="${account.uid}"`,
     sidebar: `    <div class="xp-sidebar__brand">
-      <span class="xp-brand__mark" aria-hidden="true">xP</span>
+      <span class="xp-brand__mark" aria-hidden="true">x</span>
       <div>
         <strong>xPanel</strong>
         <div><bdi dir="ltr" class="xp-mono">${escapeHtml(account.primaryDomain)}</bdi></div>
@@ -158,15 +136,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
       </div>
     </div>
 
-    <div class="xp-sidebar__favorites" aria-label="${isAr ? 'وصول سريع' : 'Quick access'}">
-      <div class="xp-label">${isAr ? 'وصول سريع' : 'Quick access'}</div>
-      ${(xpanelNav?.sections ?? []).flatMap(section => section.pages).slice(0, 3).map(page => `<a href="${escapeHtml(page.route)}" class="xp-nav-item">${escapeHtml(getSurfaceNavigationLabel('xpanel', 'page', page, locale))}</a>`).join('')}
-    </div>
-
-    <nav aria-label="${isAr ? 'أقسام xPanel' : 'xPanel sections'}">
-      ${sidebarSectionsHtml || `<p role="status" data-navigation-empty="true">${escapeHtml(isAr ? 'لا توجد أدوات مثبتة الجاهزية ومتاحة لحسابك.' : 'No verified tools are available for your account.')}</p>`}
-      ${securityNavLink}
-    </nav>`,
+    ${renderDesignNav('xpanel', locale, activeRoute, qualifiedRoutes)}`,
     topbar: `      <div class="xp-topbar__start">
         ${renderPageSearchButton(locale)}
 
@@ -174,7 +144,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
         <select id="xpanel-domain-switcher" class="xp-select xp-mono" style="width: auto;" data-domain-switcher="true">
           ${domains
             .map(
-              (d) => `<option value="${escapeHtml(d.name)}" ${d.name === activeDomain ? 'selected' : ''}>${escapeHtml(d.name)} (${escapeHtml(d.kind)})</option>`,
+              (d) => `<option value="${escapeHtml(d.name)}" ${d.name === activeDomain ? 'selected' : ''}>${escapeHtml(d.name)} (${escapeHtml(isAr ? (d.kind === 'addon' ? 'إضافي' : d.kind === 'subdomain' ? 'فرعي' : d.kind === 'alias' ? 'اسم بديل' : 'أساسي') : d.kind)})</option>`,
             )
             .join('')}
         </select>
@@ -193,22 +163,22 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
         </a>
         <a href="/mail?lang=${locale}&amp;theme=${theme}" class="xp-btn xp-btn--ghost">xMail</a>
         <div class="xp-account-actions">
-          <span class="xp-mono xp-account-actions__name">${escapeHtml(account.username)}</span>
+          <span class="xp-account-pill"><span class="xp-account-pill__avatar" aria-hidden="true">${escapeHtml(account.username.slice(0, 1).toLowerCase())}</span><span class="xp-mono xp-account-actions__name">${escapeHtml(account.username)}</span></span>
           <button type="button" class="xp-btn xp-btn--ghost" data-action="logout">${escapeHtml(isAr ? 'تسجيل الخروج' : 'Sign out')}</button>
         </div>
       </div>`,
     content: `      ${actionBannerHtml}
-${section === 'overview' || section === 'resources' ? `      <section class="xp-card xp-form-group" data-section="slice-resources" aria-labelledby="xpanel-resources-heading">
-        <div class="xp-card__header"><h1 id="xpanel-resources-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1></div>
-        <div class="xp-kpi-grid">
-          <div class="xp-field"><span class="xp-label">${isAr ? 'الحساب' : 'Account'}</span><strong><bdi dir="ltr">${escapeHtml(account.username)}</bdi></strong></div>
-          <div class="xp-field"><span class="xp-label">${isAr ? 'النطاق الأساسي' : 'Primary domain'}</span><strong><bdi dir="ltr">${escapeHtml(account.primaryDomain)}</bdi></strong></div>
-          <div class="xp-field"><span class="xp-label">${isAr ? 'الخطة' : 'Plan'}</span><strong>${escapeHtml(plan?.name ? formatDisplayName(plan.name) : (isAr ? 'غير متاحة' : 'Unavailable'))}</strong></div>
-          <div class="xp-field"><span class="xp-label">${isAr ? 'الحالة' : 'Status'}</span>${renderStatusBadge(account.status === 'active' ? 'ok' : 'suspended', account.status)}</div>
-        </div>
-        <p class="xp-prose" role="status" data-resource-metrics="unavailable">${isAr ? 'قياسات الموارد غير متاحة بعد.' : 'Resource measurements are not available yet.'}</p>
-      </section>
-` : ''}
+${section === 'overview' ? renderAccountHome(locale, {
+        username: account.username,
+        domain: account.primaryDomain,
+        home: account.home,
+        uid: account.uid,
+        shell: account.shell,
+        ipv4: account.ipv4,
+        planName: plan?.name ? formatDisplayName(plan.name) : null,
+        addonDomains: domains.filter(domain => domain.kind === 'addon').length,
+      }, renderHomeToolGrid(locale, qualifiedRoutes)) : ''}
+${section === 'resources' ? renderAccountResources(locale, account.uid, resourceRowsFromPlan(plan?.resources ?? null)) : ''}
       ${section === 'domains' ? `      <!-- 2. Domains & Multi-IP Binding Table -->
       <section class="xp-card" id="xpanel-domains" data-section="domains-multi-ip" aria-labelledby="xpanel-domains-heading">
         <div class="xp-card__header">
@@ -238,7 +208,7 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
                 <tr data-domain-row="${escapeHtml(dom.name)}">
                   <td>
                     <strong class="xp-mono"><bdi dir="ltr">${escapeHtml(dom.name)}</bdi></strong>
-                    <div>${renderStatusBadge('ok', dom.kind)} ${dom.wildcard ? renderStatusBadge('ok', '*.wildcard') : ''}</div>
+                    <div>${renderStatusBadge('ok', isAr ? (dom.kind === 'addon' ? 'إضافي' : dom.kind === 'subdomain' ? 'فرعي' : dom.kind === 'alias' ? 'اسم بديل' : 'أساسي') : dom.kind)} ${dom.wildcard ? renderStatusBadge('ok', isAr ? 'بدل شامل' : 'Wildcard') : ''}</div>
                   </td>
                   <td><code class="xp-mono"><bdi dir="ltr">${escapeHtml(dom.docRoot)}</bdi></code></td>
                   <td class="xp-mono xp-tabular">
@@ -357,7 +327,7 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
           <div>
             <h1 id="xpanel-analytics-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
           </div>
-          ${renderStatusBadge('ok', `${websiteAnalytics.totals.cacheHitRatioPercent.toFixed(1)}% Cache Hit`)}
+          ${renderStatusBadge('ok', t(locale, 'analytics.cacheHitBadge', { percent: websiteAnalytics.totals.cacheHitRatioPercent.toFixed(1) }))}
         </div>
         ${renderWebsiteAnalyticsChart(websiteAnalytics, locale)}
       </section>
@@ -410,10 +380,10 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
                     <strong class="xp-mono"><bdi dir="ltr">${escapeHtml(f.name)}</bdi></strong>
                     <div class="xp-mono" style="font-size: 0.78rem; color: var(--xp-text-muted);"><bdi dir="ltr">${escapeHtml(f.path)}</bdi></div>
                   </td>
-                  <td>${renderStatusBadge(f.trashed ? 'warn' : 'ok', f.trashed ? '.trash' : f.kind)}</td>
+                  <td>${renderStatusBadge(f.trashed ? 'warn' : 'ok', f.trashed ? '.trash' : t(locale, f.kind === 'folder' ? 'files.kind.folder' : 'files.kind.file'))}</td>
                   <td class="xp-mono xp-tabular" data-numeric="true">${escapeHtml(formatBytes(f.sizeBytes))}</td>
                   <td class="xp-mono xp-tabular"><code>${escapeHtml(f.modeOctal)}</code></td>
-                  <td class="xp-mono xp-tabular"><time datetime="${escapeHtml(f.modifiedAt)}">${escapeHtml(f.modifiedAt)}</time></td>
+                  <td class="xp-mono xp-tabular"><time datetime="${escapeHtml(f.modifiedAt)}">${escapeHtml(formatAsciiDate(f.modifiedAt, { includeTime: true }))}</time></td>
                   <td>
                     ${
                       f.trashed
@@ -500,7 +470,7 @@ ${section === 'overview' || section === 'resources' ? `      <section class="xp-
 ${section === 'databases' ? `        <section class="xp-card" data-section="mariadb-databases" aria-labelledby="xpanel-db-heading">
           <div class="xp-card__header">
             <h1 id="xpanel-db-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-            ${renderStatusBadge('ok', `${databases.filter((d) => !d.trashedAt).length} active · ${databases.filter((d) => d.trashedAt).length} in .trash`)}
+            ${renderStatusBadge('ok', t(locale, 'databases.summary', { active: databases.filter((d) => !d.trashedAt).length, trashed: databases.filter((d) => d.trashedAt).length }))}
           </div>
           <div class="xp-table-wrap">
             <table class="xp-table">
@@ -521,7 +491,7 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
                     <td>
                       ${
                         db.trashedAt
-                          ? `${renderStatusBadge('warn', `Trashed (${db.trashedAt})`)} <button type="button" class="xp-btn" data-action="restore-db" data-db="${escapeHtml(db.name)}">${isAr ? 'استعادة' : 'Restore'}</button>`
+                          ? `${renderStatusBadge('warn', `${isAr ? 'في المهملات' : 'Trashed'} (${formatAsciiDate(db.trashedAt, { includeTime: true })})`)} <button type="button" class="xp-btn" data-action="restore-db" data-db="${escapeHtml(db.name)}">${isAr ? 'استعادة' : 'Restore'}</button>`
                           : `${renderStatusBadge('ok', t(locale, 'common.status.active'))} <button type="button" class="xp-btn" data-remove-database="${escapeHtml(db.id)}" data-database-name="${escapeHtml(db.name)}">${isAr ? 'حذف' : 'Delete'}</button>`
                       }
                     </td>
@@ -583,15 +553,15 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
       ${section === 'users' ? `          <section class="xp-card" data-section="service-users">
             <div class="xp-card__header">
               <h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-              ${renderStatusBadge('ok', `${serviceUsers.length} Service Logins`)}
+              ${renderStatusBadge('ok', t(locale, 'email.serviceLogins', { count: serviceUsers.length }))}
             </div>
             <div class="xp-table-wrap">
               <table class="xp-table">
                 <thead>
                   <tr>
-                    <th>Login</th>
-                    <th>Services</th>
-                    <th>Mailbox Quota</th>
+                    <th>${escapeHtml(t(locale, 'email.col.login'))}</th>
+                    <th>${escapeHtml(t(locale, 'email.col.services'))}</th>
+                    <th>${escapeHtml(t(locale, 'email.col.quota'))}</th>
                     <th>${isAr ? 'الإجراء' : 'Action'}</th>
                   </tr>
                 </thead>
@@ -602,7 +572,7 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
                     <tr data-service-user="${escapeHtml(u.login)}">
                       <td class="xp-mono"><bdi dir="ltr">${escapeHtml(u.login)}</bdi></td>
                       <td>
-                        ${u.services.email ? renderStatusBadge('ok', 'Email') : ''}
+                        ${u.services.email ? renderStatusBadge('ok', t(locale, 'email.service.email')) : ''}
                         ${u.services.ftp ? renderStatusBadge('ok', `FTP (${u.ftpDir})`) : ''}
                       </td>
                       <td class="xp-mono xp-tabular">${String(u.mailboxQuotaMb)} MB</td>
@@ -678,16 +648,16 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
         <aside class="xp-card" data-section="dns-zone-editor" aria-labelledby="xpanel-dns-heading">
           <div class="xp-card__header">
             <h1 id="xpanel-dns-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-            ${renderStatusBadge('ok', 'PowerDNS BIND Zone')}
+            ${renderStatusBadge('ok', t(locale, 'dns.zoneBadge'))}
           </div>
           <div class="xp-table-wrap">
             <table class="xp-table xp-table--compact">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Type</th>
+                  <th>${escapeHtml(t(locale, 'dns.col.name'))}</th>
+                  <th>${escapeHtml(t(locale, 'dns.col.type'))}</th>
                   <th>TTL</th>
-                  <th>Content</th>
+                  <th>${escapeHtml(t(locale, 'dns.col.content'))}</th>
                 </tr>
               </thead>
               <tbody>
@@ -713,7 +683,7 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
         <div class="xp-card__header">
           <div>
             <h1 id="xpanel-ssl-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-            <p class="xp-prose">${isAr ? 'أصدر شهادة أو جدّدها لنطاق على هذا الحساب. يجيب الخادم على فحص HTTP-01 عبر المنفذ 80.' : 'Issue or renew a certificate for a domain on this account. The server answers the HTTP-01 check on port 80.'}</p>
+            <p class="xp-prose">${isAr ? 'أصدر شهادة أو جدّدها لنطاق على هذا الحساب. يجيب الخادم على فحص <bdi dir="ltr">HTTP-01</bdi> عبر المنفذ 80.' : 'Issue or renew a certificate for a domain on this account. The server answers the HTTP-01 check on port 80.'}</p>
           </div>
         </div>
         <div class="xp-table-wrap">
@@ -734,6 +704,8 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
         </form>
         <p class="xp-help">${isAr ? 'يبقى الفحص الفاشل في هذه الصفحة مع رسالة جهة الشهادات.' : 'A failed check stays on this page with the certificate authority message.'}</p>` : `<p class="xp-help">${isAr ? 'أضف نطاقًا قبل إصدار شهادة.' : 'Add a domain before issuing a certificate.'}</p>`}
       </section>` : ''}
+            ${section === 'security' ? `<section class="xp-card" data-section="account-security"><h1 id="xpanel-security-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1></section>` : ''}
+            ${section === 'design' ? renderDesignMain(activeRoute, locale) : ''}
             ${section === undefined || (section === 'config' && !customConfig) || (section === 'analytics' && !websiteAnalytics) ? renderSurfaceUnavailable(locale, '/home') : ''}`,
   })
   return ensureAccessibleSurfaceHtml(rawHtml.trim(), locale)

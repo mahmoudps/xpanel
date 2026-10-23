@@ -92,15 +92,16 @@ describe('styled status pages', () => {
     if (status !== 421) expect(guest).toContain('تسجيل الدخول')
   })
 
-  it('mirrors the back icon in Arabic and does not link planned groups', () => {
+  it('mirrors the back icon in Arabic and lists design pages before their tools are connected', () => {
     expect(DESIGN_TOKENS_CSS).toContain('html[dir="rtl"] .xp-icon-back { transform: scaleX(-1); }')
     const html = renderWebApp({ surface: 'xpanel', locale: 'ar', visibility: { principal: owner }, supportEmail: 'ops@example.test' })
     const sidebar = /<aside class="xp-sidebar"[\s\S]*?<\/aside>/.exec(html)?.[0] ?? ''
-    for (const group of ['domains', 'email', 'files', 'databases', 'security', 'software']) expect(sidebar).toContain(`data-planned-group="${group}"`)
-    expect(sidebar).toContain('غير متاحة بعد')
+    for (const route of ['/domains', '/email/accounts', '/files/manager', '/databases/mariadb', '/security/account', '/software/php']) {
+      expect(sidebar).toContain(`data-nav-route="${route}"`)
+    }
+    expect(sidebar).toContain('قيد التفعيل')
     expect(sidebar).toContain('data-security-link="true"')
-    expect(sidebar).toContain('هذه الأدوات غير متاحة على هذا الخادم بعد.')
-    expect(sidebar.replace(/<a\b[^>]*data-security-link="true"[^>]*>[\s\S]*?<\/a>/g, '')).not.toMatch(/<a\b|href=/)
+    expect(sidebar).not.toContain('data-planned-group=')
     expect(html).toContain('data-user-menu')
     expect(html).toContain('data-action="logout"')
     expect(html).toContain('data-density-option="comfortable" aria-current="true"')

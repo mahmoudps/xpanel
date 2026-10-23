@@ -458,8 +458,20 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
 
   function setWsBadgeState(state) {
     var el = document.querySelector('[data-ws-state]');
-    if (!el) return;
-    el.setAttribute('data-ws-state', state);
+    if (el) el.setAttribute('data-ws-state', state);
+    var indicator = document.querySelector('[data-ws-indicator]');
+    if (!indicator || indicator.getAttribute('data-ws-indicator') === 'unavailable') return;
+    var ar = document.documentElement.lang === 'ar';
+    var connected = state === 'connected';
+    var label = connected ? (ar ? 'مباشر' : 'Live') : state === 'offline' ? (ar ? 'غير متصل' : 'Offline') : (ar ? 'جار الاتصال' : 'Connecting');
+    indicator.setAttribute('data-ws-indicator', connected ? 'connected' : 'disconnected');
+    var badge = indicator.querySelector('.xp-badge');
+    if (!badge) return;
+    var tone = connected ? 'ok' : 'suspended';
+    badge.className = 'xp-badge xp-badge--' + tone;
+    badge.setAttribute('data-status', tone);
+    var text = badge.querySelector('.xp-badge__label');
+    if (text) text.textContent = label;
   }
 
   function updateReconcileDom(event) {
@@ -993,8 +1005,14 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     var toast = document.createElement('div');
     toast.className = 'xp-card xp-toast';
     toast.setAttribute('data-toast-level', level || 'ok');
-    toast.style.cssText = 'padding:12px 16px;border-inline-start:4px solid var(--xp-accent);box-shadow:var(--xp-shadow-md);';
-    toast.textContent = message;
+    var body = document.createElement('div');
+    body.className = 'xp-toast__body';
+    body.textContent = message;
+    var drain = document.createElement('div');
+    drain.className = 'xp-toast__drain';
+    drain.setAttribute('aria-hidden', 'true');
+    toast.appendChild(body);
+    toast.appendChild(drain);
     region.appendChild(toast);
     setTimeout(function () {
       if (toast.parentNode) toast.parentNode.removeChild(toast);
@@ -1191,6 +1209,9 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       var ipAssignment = wantedAssignment === 'shared' ? { mode: 'shared' } : { mode: 'dedicated' };
       if (wantedAssignment !== 'shared' && wantedAssignment !== 'dedicated:auto') ipAssignment.poolId = wantedAssignment.slice('dedicated:'.length);
       var body = { username: value('username'), primaryDomain: value('primaryDomain'), planId: value('planId'), password: password.value, ipAssignment: ipAssignment };
+      var contactField = form.querySelector('[name="contactEmail"]');
+      var contactEmail = contactField && contactField.value ? contactField.value.trim() : '';
+      if (contactEmail) body.contactEmail = contactEmail;
       var ipv6 = value('ipv6');
       if (ipv6) body.ipv6 = ipv6;
       var submittedValues = controls.map(function (state) {
@@ -1217,7 +1238,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
           ipStatus(copy('This address is on the server.', 'هذا العنوان موجود على الخادم.'), 'ready');
           status(copy('Account created.', 'تم إنشاء الحساب.'), 'pending');
         } else {
-          ipStatus(copy('Host binding unverified.', 'لم يُتحقق من ربط العنوان بالخادم.'), 'ready');
+          ipStatus(copy('This address is reserved in configuration. The server has not confirmed it is listening on the host.', 'هذا العنوان محجوز في الإعداد. لم يؤكد الخادم أنه يستمع على المضيف.'), 'ready');
           status(copy('Account configuration created. Hosting verification is still required.', 'أُنشئ إعداد الحساب. ما زال يلزم التحقق من الاستضافة.'), 'pending');
         }
       }).catch(function (error) {
@@ -1484,6 +1505,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         if (activeOverlay && activeOverlay.kind === 'mobile-nav') closeActiveOverlay(true);
         return;
       }
+      if ((action === 'new-file' || action === 'new-folder' || action === 'empty-trash') && target.closest('[data-file-manager]')) return;
       if (action === 'new-file' || action === 'new-folder') {
         e.preventDefault();
         var kind = action === 'new-folder' ? 'folder' : 'file';
@@ -1608,6 +1630,79 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     });
   }
 
+  function ensurePromptDialog() {
+    var dialog = document.querySelector('[data-xp-prompt]');
+    if (dialog) return dialog;
+    dialog = document.createElement('dialog');
+    dialog.className = 'xp-dialog';
+    dialog.setAttribute('data-xp-prompt', '');
+    var form = document.createElement('form');
+    form.method = 'dialog';
+    form.className = 'xp-form-group';
+    form.innerHTML = '<div class="xp-dialog__header"><h2 data-xp-prompt-title></h2><p data-xp-prompt-body></p></div>' +
+      '<div class="xp-field" data-xp-prompt-field><label class="xp-label" for="xp-prompt-input" data-xp-prompt-label></label>' +
+      '<input id="xp-prompt-input" class="xp-input" data-xp-prompt-input autocomplete="off"></div>' +
+      '<div class="xp-dialog__footer">' +
+      '<button type="button" class="xp-btn" value="cancel" data-xp-prompt-cancel></button>' +
+      '<button type="submit" class="xp-btn xp-btn--primary" value="confirm" data-xp-prompt-confirm></button>' +
+      '</div>';
+    dialog.appendChild(form);
+    document.body.appendChild(dialog);
+    dialog.addEventListener('click', function (event) {
+      if (event.target === dialog) dialog.close('cancel');
+    });
+    dialog.querySelector('[data-xp-prompt-cancel]').addEventListener('click', function () {
+      dialog.close('cancel');
+    });
+    dialog.querySelector('form').addEventListener('submit', function (event) {
+      event.preventDefault();
+      var field = dialog.querySelector('[data-xp-prompt-field]');
+      var input = dialog.querySelector('[data-xp-prompt-input]');
+      var entered = input && input.value ? input.value.trim() : '';
+      if (field && !field.hidden && !entered) {
+        input.focus();
+        return;
+      }
+      dialog._xpValue = !field || field.hidden ? true : entered;
+      dialog.close('confirm');
+    });
+    dialog.addEventListener('close', function () {
+      var pending = dialog._xpResolve;
+      dialog._xpResolve = null;
+      if (pending) pending(dialog.returnValue === 'confirm' ? dialog._xpValue : null);
+    });
+    return dialog;
+  }
+
+  function askDialog(options) {
+    var dialog = ensurePromptDialog();
+    var ar = document.documentElement.lang === 'ar';
+    dialog.querySelector('[data-xp-prompt-title]').textContent = options.title || '';
+    dialog.querySelector('[data-xp-prompt-body]').textContent = options.body || '';
+    var field = dialog.querySelector('[data-xp-prompt-field]');
+    var input = dialog.querySelector('[data-xp-prompt-input]');
+    var label = dialog.querySelector('[data-xp-prompt-label]');
+    field.hidden = !options.input;
+    label.textContent = options.label || '';
+    input.value = options.value || '';
+    input.type = options.secret ? 'password' : 'text';
+    input.required = false;
+    dialog.querySelector('[data-xp-prompt-cancel]').textContent = options.cancel || (ar ? 'إلغاء' : 'Cancel');
+    var confirm = dialog.querySelector('[data-xp-prompt-confirm]');
+    confirm.textContent = options.confirm || (ar ? 'تأكيد' : 'Confirm');
+    confirm.className = options.danger ? 'xp-btn xp-btn--danger' : 'xp-btn xp-btn--primary';
+    dialog._xpValue = null;
+    return new Promise(function (resolve) {
+      dialog._xpResolve = function (value) {
+        resolve(options.input ? (typeof value === 'string' && value ? value : null) : Boolean(value));
+      };
+      try { dialog.showModal(); }
+      catch (_err) { dialog.setAttribute('open', ''); }
+      var focusTarget = options.input ? input : confirm;
+      if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
+    });
+  }
+
   function bindPhaseOneTools() {
     if (typeof window.xpanelSessionRequest !== 'function') return;
     var ar = document.documentElement.lang === 'ar';
@@ -1726,7 +1821,15 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     });
     document.querySelectorAll('[data-remove-mailbox]').forEach(function (button) {
       button.addEventListener('click', function () {
-        window.xpanelSessionRequest('DELETE', '/api/service-users/' + button.getAttribute('data-remove-mailbox')).then(reload).catch(function (error) { note(button.parentElement, failText(error)); });
+        askDialog({
+          title: ar ? 'حذف صندوق البريد' : 'Delete mailbox',
+          body: ar ? 'سيُحذف صندوق البريد هذا. لا يمكن التراجع.' : 'This mailbox will be deleted. This cannot be undone.',
+          confirm: ar ? 'حذف' : 'Delete',
+          danger: true,
+        }).then(function (ok) {
+          if (!ok) return;
+          window.xpanelSessionRequest('DELETE', '/api/service-users/' + button.getAttribute('data-remove-mailbox')).then(reload).catch(function (error) { note(button.parentElement, failText(error)); });
+        });
       });
     });
     document.querySelectorAll('[data-database-form]').forEach(function (form) {
@@ -1826,16 +1929,31 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       var fileStatus = filesRoot.querySelector('[data-file-status]');
       var currentPath = '';
       function files(body) { return window.xpanelSessionRequest('POST', '/api/accounts/' + username + '/files', body); }
+      function formatSize(bytes) {
+        var value = Number(bytes) || 0;
+        if (value <= 0) return '0 B';
+        var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        var unit = 0;
+        while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+        var digits = unit === 0 ? 0 : value >= 10 ? 1 : 2;
+        return value.toFixed(digits) + ' ' + units[unit];
+      }
+      function formatWhen(value) {
+        if (!value) return '';
+        var date = new Date(value);
+        if (isNaN(date.getTime())) return String(value);
+        return date.toISOString().slice(0, 19).replace('T', ' ') + ' UTC';
+      }
       function paint(entries) {
         while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
         (entries || []).forEach(function (entry) {
           var row = document.createElement('tr');
           function cell(value) { var td = document.createElement('td'); td.textContent = value; row.appendChild(td); }
           cell(entry.name || '');
-          cell(entry.kind || '');
-          cell(String(entry.sizeBytes || 0));
+          cell(entry.kind === 'directory' ? (ar ? 'مجلد' : 'Folder') : (ar ? 'ملف' : 'File'));
+          cell(formatSize(entry.sizeBytes));
           cell((entry.mode >>> 0).toString(8));
-          cell(entry.mtime || '');
+          cell(formatWhen(entry.mtime));
           var action = document.createElement('td');
           var open = document.createElement('button');
           open.type = 'button'; open.className = 'xp-btn';
@@ -1851,7 +1969,15 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
           remove.type = 'button'; remove.className = 'xp-btn';
           remove.textContent = ar ? 'حذف' : 'Delete';
           remove.addEventListener('click', function () {
-            files({ op: 'trash', path: entry.path }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); });
+            askDialog({
+              title: ar ? 'نقل إلى المهملات' : 'Move to trash',
+              body: ar ? 'سيُنقل هذا العنصر إلى المهملات.' : 'This item will move to trash.',
+              confirm: ar ? 'نقل إلى المهملات' : 'Move to trash',
+              danger: true,
+            }).then(function (ok) {
+              if (!ok) return;
+              files({ op: 'trash', path: entry.path }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); });
+            });
           });
           action.appendChild(open);
           if (entry.kind === 'file') {
@@ -1903,21 +2029,46 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         reader.readAsArrayBuffer(file);
       });
       var newFile = filesRoot.querySelector('[data-action="new-file"]');
-      if (newFile) newFile.addEventListener('click', function () {
-        var name = window.prompt(ar ? 'اسم الملف' : 'File name');
-        if (!name) return;
-        var path = (currentPath ? currentPath.replace(/[/]$/, '') + '/' : '') + name;
-        files({ op: 'write', path: path, content: '' }).then(function () { editor.value = ''; editor.setAttribute('data-editor-path', path); return refresh(); }).catch(function (error) { note(fileStatus, failText(error)); });
+      if (newFile) newFile.addEventListener('click', function (event) {
+        event.stopPropagation();
+        askDialog({
+          title: ar ? 'ملف جديد' : 'New file',
+          label: ar ? 'اسم الملف' : 'File name',
+          input: true,
+          confirm: ar ? 'إنشاء' : 'Create',
+        }).then(function (name) {
+          if (!name) return;
+          var path = (currentPath ? currentPath.replace(/[/]$/, '') + '/' : '') + name;
+          files({ op: 'write', path: path, content: '' }).then(function () { editor.value = ''; editor.setAttribute('data-editor-path', path); return refresh(); }).catch(function (error) { note(fileStatus, failText(error)); });
+        });
       });
       var newFolder = filesRoot.querySelector('[data-action="new-folder"]');
-      if (newFolder) newFolder.addEventListener('click', function () {
-        var name = window.prompt(ar ? 'اسم المجلد' : 'Folder name');
-        if (!name) return;
-        var path = (currentPath ? currentPath.replace(/[/]$/, '') + '/' : '') + name;
-        files({ op: 'mkdir', path: path }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); });
+      if (newFolder) newFolder.addEventListener('click', function (event) {
+        event.stopPropagation();
+        askDialog({
+          title: ar ? 'مجلد جديد' : 'New folder',
+          label: ar ? 'اسم المجلد' : 'Folder name',
+          input: true,
+          confirm: ar ? 'إنشاء' : 'Create',
+        }).then(function (name) {
+          if (!name) return;
+          var path = (currentPath ? currentPath.replace(/[/]$/, '') + '/' : '') + name;
+          files({ op: 'mkdir', path: path }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); });
+        });
       });
       var emptyTrash = filesRoot.querySelector('[data-action="empty-trash"]');
-      if (emptyTrash) emptyTrash.addEventListener('click', function () { files({ op: 'empty-trash' }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); }); });
+      if (emptyTrash) emptyTrash.addEventListener('click', function (event) {
+        event.stopPropagation();
+        askDialog({
+          title: ar ? 'إفراغ المهملات' : 'Empty trash',
+          body: ar ? 'ستُحذف عناصر المهملات نهائيًا.' : 'Items in trash will be deleted for good.',
+          confirm: ar ? 'حذف نهائي' : 'Delete for good',
+          danger: true,
+        }).then(function (ok) {
+          if (!ok) return;
+          files({ op: 'empty-trash' }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); });
+        });
+      });
       var save = filesRoot.querySelector('[data-action="save-file"]');
       if (save) save.addEventListener('click', function () {
         var path = editor.getAttribute('data-editor-path');

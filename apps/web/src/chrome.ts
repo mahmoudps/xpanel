@@ -112,6 +112,7 @@ export function renderUserMenu(model: UserMenuModel): string {
   const themeLabel = nextTheme === 'dark' ? (isAr ? 'الوضع الداكن' : 'Dark theme') : (isAr ? 'الوضع الفاتح' : 'Light theme')
   const summaryName = model.signedIn && model.username ? model.username : (isAr ? 'الحساب' : 'Account')
   const role = model.signedIn && model.role ? model.role : ''
+  const initial = (model.username?.trim().charAt(0) || (isAr ? 'ح' : 'a')).toLocaleLowerCase('en')
   const densityLink = (density: DensityChoice, label: string) => {
     const current = model.density === density
     return `<a class="xp-menu-choice" href="${escapeHtml(menuHref(model, { density }))}" data-density-option="${density}"${current ? ' aria-current="true"' : ''}>${escapeHtml(label)}</a>`
@@ -121,6 +122,7 @@ export function renderUserMenu(model: UserMenuModel): string {
     : `<a class="xp-btn xp-btn--primary" href="${escapeHtml(menuHref({ ...model, path: '/login' }, {}))}">${escapeHtml(isAr ? 'تسجيل الدخول' : 'Sign in')}</a>`
   return `<details class="xp-user-menu" data-user-menu>
     <summary class="xp-user-menu__summary">
+      <span class="xp-user-menu__avatar" aria-hidden="true">${escapeHtml(initial)}</span>
       <span class="xp-user-menu__identity">
         <span class="xp-user-menu__name"${model.username ? ' dir="ltr"' : ''}>${model.username ? `<bdi dir="ltr">${escapeHtml(summaryName)}</bdi>` : escapeHtml(summaryName)}</span>
         ${role ? `<span class="xp-user-menu__role">${escapeHtml(role)}</span>` : ''}

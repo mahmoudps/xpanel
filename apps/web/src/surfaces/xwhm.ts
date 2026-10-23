@@ -18,14 +18,16 @@ import {
   type AsyncActionBannerProps,
   ensureAccessibleSurfaceHtml,
   escapeHtml,
+  formatAsciiDate,
   formatBytes,
   renderAsyncActionState,
   renderLtrValue,
   renderStatusBadge,
   renderThresholdMeter,
 } from '../tokens.ts'
-import { accountSecurityRoute, renderSecurityNavLink } from '../chrome.ts'
-import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, getSurfaceNavigationLabel, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
+import { renderWhmDashboard, whmDashboardFromProps } from '../board-port/xwhm-dashboard.ts'
+import { renderDesignMain, renderDesignNav } from '../design-board.ts'
+import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
 
 export interface WhmServiceHealthRow {
@@ -120,33 +122,8 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
   const auditEntries = props.auditEntries ?? []
 
   const whmNav = visibleNavigation(props.visibility, props.catalog).find((n) => n.surface === 'xwhm')
+  const qualifiedRoutes = new Set((whmNav?.sections ?? []).flatMap(section => section.pages.map(page => page.route)))
   const heldAcls = new Set<ResellerAcl>(props.visibility?.reseller?.acl ?? props.activeReseller?.acl ?? [])
-  const sidebarSectionsHtml = (whmNav?.sections ?? [])
-    .map((section) => {
-      const visiblePages = section.pages
-      if (visiblePages.length === 0) return ''
-      const isExpanded = visiblePages.some((p) => p.route === activeRoute)
-      return `
-      <details class="xp-nav-section" ${isExpanded ? 'open' : ''} data-nav-section="${escapeHtml(section.id)}">
-        <summary class="xp-nav-section__title">
-          <span>${escapeHtml(getSurfaceNavigationLabel('xwhm', 'section', section, locale))}</span>
-          <span class="xp-tabular">(${visiblePages.length})</span>
-        </summary>
-        <div class="xp-nav-section__items">
-          ${visiblePages
-            .map(
-              (page) => `
-            <a href="${escapeHtml(page.route)}" class="xp-nav-item ${page.route === activeRoute ? 'xp-nav-item--active' : ''}" ${page.route === activeRoute ? 'aria-current="page"' : ''} data-nav-route="${escapeHtml(page.route)}">
-              <span>${escapeHtml(getSurfaceNavigationLabel('xwhm', 'page', page, locale))}</span>
-            </a>
-          `,
-            )
-            .join('')}
-        </div>
-      </details>
-    `
-    })
-    .join('')
 
   const switchLangCode = isAr ? 'en' : 'ar'
   const switchLangLabel = isAr ? 'English' : 'العربية'
@@ -154,6 +131,12 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
   const actionBannerHtml = props.actionState
     ? renderAsyncActionState({ ...props.actionState, locale })
     : ''
+
+  if (section === 'overview') return ensureAccessibleSurfaceHtml(renderWhmDashboard(whmDashboardFromProps({
+    locale, principal, hostname: props.hostname, version: props.version, availableVersion: props.availableVersion,
+    generationId: props.generationId, accounts: props.accounts, resellers: props.resellers, ipPool: props.ipPool,
+    services, auditEntries,
+  })), locale)
 
   const rawHtml = renderSurfaceShell({
     surface: 'xwhm', locale,
@@ -166,15 +149,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
       </div>
     </div>
 
-    <div class="xp-sidebar__favorites" aria-label="${isAr ? 'وصول سريع' : 'Quick access'}">
-      <div class="xp-label">${isAr ? 'وصول سريع' : 'Quick access'}</div>
-      ${(whmNav?.sections ?? []).flatMap(section => section.pages).slice(0, 3).map(page => `<a href="${escapeHtml(page.route)}" class="xp-nav-item">${escapeHtml(getSurfaceNavigationLabel('xwhm', 'page', page, locale))}</a>`).join('')}
-    </div>
-
-    <nav aria-label="${isAr ? 'أقسام xWHM' : 'xWHM sections'}">
-      ${sidebarSectionsHtml || `<p role="status" data-navigation-empty="true">${escapeHtml(isAr ? 'لا توجد أدوات مثبتة الجاهزية ومتاحة لحسابك.' : 'No verified tools are available for your account.')}</p>`}
-      ${renderSecurityNavLink('xwhm', locale, activeRoute, (whmNav?.sections ?? []).some(section => section.pages.some(page => page.route === accountSecurityRoute('xwhm'))))}
-    </nav>`,
+    ${renderDesignNav('xwhm', locale, activeRoute, qualifiedRoutes)}`,
     topbar: `      <div class="xp-topbar__start">
         ${renderPageSearchButton(locale)}
       </div>
@@ -196,7 +171,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
         <a href="/panel?lang=${locale}&amp;theme=${theme}" class="xp-btn xp-btn--ghost">xPanel</a>
         <a href="/mail?lang=${locale}&amp;theme=${theme}" class="xp-btn xp-btn--ghost">xMail</a>
         <div class="xp-account-actions">
-          <span class="xp-mono xp-account-actions__name" aria-label="${isAr ? 'المستخدم الحالي' : 'Current user'}">${escapeHtml(principal.username)}</span>
+          <span class="xp-account-pill"><span class="xp-account-pill__avatar" aria-hidden="true">${escapeHtml(principal.username.slice(0, 1).toLowerCase())}</span><span class="xp-mono xp-account-actions__name" aria-label="${isAr ? 'المستخدم الحالي' : 'Current user'}">${escapeHtml(principal.username)}</span></span>
           <button type="button" class="xp-btn xp-btn--ghost" data-action="logout">${escapeHtml(isAr ? 'تسجيل الخروج' : 'Sign out')}</button>
         </div>
       </div>`,
@@ -210,6 +185,22 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           <div class="xp-field"><span class="xp-label">${isAr ? 'المشغل' : 'Operator'}</span><strong><bdi dir="ltr">${escapeHtml(principal.username)}</bdi></strong></div>
         </div>
         <p class="xp-prose" role="status" data-host-observation="unavailable">${isAr ? 'قياسات موارد الخادم غير متاحة.' : 'Host resource measurements unavailable.'}</p>
+        <section class="xp-board-section" aria-labelledby="whm-reconcile">
+          <header class="xp-board-section__head"><h2 id="whm-reconcile">${isAr ? 'الموفّق' : 'Reconciler'}</h2></header>
+          <div class="xp-board-section__body"><p role="status">${generationId !== undefined ? `<bdi dir="ltr">#${generationId}</bdi>` : (isAr ? 'لا جيل مطبَّق بعد.' : 'No generation is applied yet.')}</p></div>
+        </section>
+        <section class="xp-board-section" aria-labelledby="whm-dash-accounts">
+          <header class="xp-board-section__head"><h2 id="whm-dash-accounts">${isAr ? 'الحسابات' : 'Accounts'}</h2></header>
+          <dl class="xp-board-dl">
+            <div class="xp-fact"><dt>${isAr ? 'النشطة' : 'Active'}</dt><dd>${props.accounts ? accounts.filter(account => account.status === 'active').length : (isAr ? 'غير متاحة' : 'Unavailable')}</dd></div>
+            <div class="xp-fact"><dt>${isAr ? 'الموقوفة' : 'Suspended'}</dt><dd>${props.accounts ? accounts.filter(account => account.status === 'suspended').length : (isAr ? 'غير متاحة' : 'Unavailable')}</dd></div>
+            <div class="xp-fact"><dt>${isAr ? 'الموزعون' : 'Resellers'}</dt><dd>${props.resellers ? resellers.length : (isAr ? 'غير متاحة' : 'Unavailable')}</dd></div>
+          </dl>
+        </section>
+        <section class="xp-board-section" aria-labelledby="whm-dash-audit">
+          <header class="xp-board-section__head"><h2 id="whm-dash-audit">${isAr ? 'آخر التدقيق' : 'Recent audit entries'}</h2><a href="/whm/audit">${isAr ? 'افتح السجل' : 'Open the audit log'}</a></header>
+          <div class="xp-table-wrap"><table class="xp-table"><thead><tr><th>${isAr ? 'الوقت' : 'Time'}</th><th>${isAr ? 'الفاعل' : 'Actor'}</th><th>${isAr ? 'الإجراء' : 'Action'}</th><th>${isAr ? 'النتيجة' : 'Result'}</th></tr></thead><tbody>${auditEntries.length ? auditEntries.slice(0, 8).map(entry => `<tr><td><bdi dir="ltr">${escapeHtml(formatAsciiDate(entry.at))}</bdi></td><td><bdi dir="ltr">${escapeHtml(entry.actor)}</bdi></td><td><bdi dir="ltr">${escapeHtml(entry.action)}</bdi></td><td>${escapeHtml(entry.outcome)}</td></tr>`).join('') : `<tr><td colspan="4">${isAr ? 'لا مدخلات تدقيق بعد' : 'No audit entries yet'}</td></tr>`}</tbody></table></div>
+        </section>
       </section>
 ` : ''}
       ${section === 'io' && ioSnapshot ? `      <!-- Real-Time Server IO & Per-Account cgroup v2 Slice Monitor -->
@@ -469,6 +460,10 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           <input id="new-acc-domain" name="primaryDomain" type="text" class="xp-input xp-mono" dir="ltr" required placeholder="salma.studio" />
           </div>
           <div class="xp-accounts__field">
+          <label class="xp-label" for="new-acc-contact">${isAr ? 'بريد التواصل' : 'Contact email'}</label>
+          <input id="new-acc-contact" name="contactEmail" type="email" class="xp-input" dir="ltr" autocomplete="email" inputmode="email" spellcheck="false" />
+          </div>
+          <div class="xp-accounts__field">
           <label class="xp-label" for="new-acc-plan">${isAr ? 'خطة الاستضافة' : 'Hosting plan'}</label>
           <select id="new-acc-plan" name="planId" class="xp-select" required>${plans.map(plan => `<option value="${escapeHtml(plan.id)}">${escapeHtml(formatDisplayName(plan.name))}</option>`).join('')}</select>
           </div>
@@ -533,7 +528,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
                   <td class="xp-mono xp-tabular">${renderLtrValue(`${plan.resources.ioReadBps === 'unlimited' ? 'unlimited' : formatBytes(plan.resources.ioReadBps)}/s · ${plan.resources.ioWriteBps === 'unlimited' ? 'unlimited' : formatBytes(plan.resources.ioWriteBps)}/s`, 'xp-plan-resource-value')}</td>
                   <td class="xp-mono xp-tabular">${plan.resources.maxProcesses}</td>
                   <td class="xp-mono xp-tabular">${String(plan.caps.addonDomains)}</td>
-                  <td>${renderStatusBadge(plan.shell === 'jailed' ? 'ok' : 'suspended', plan.shell === 'jailed' ? 'jailed' : 'none')}</td>
+                  <td>${renderStatusBadge(plan.shell === 'jailed' ? 'ok' : 'suspended', plan.shell === 'jailed' ? (isAr ? 'معزولة' : 'jailed') : (isAr ? 'بدون' : 'none'))}</td>
                   <td><button type="button" class="xp-btn" data-plan-delete="${escapeHtml(plan.id)}">${isAr ? 'حذف' : 'Delete'}</button></td>
                 </tr>
               `,
@@ -920,7 +915,7 @@ ${section === 'audit' ? `<section class="xp-card" data-section="audit-log">
                     .map(
                       (entry) => `
                     <tr data-audit-id="${escapeHtml(entry.id)}">
-                      <td class="xp-mono xp-tabular"><time datetime="${escapeHtml(entry.at)}">${escapeHtml(entry.at)}</time></td>
+                      <td class="xp-mono xp-tabular"><time datetime="${escapeHtml(entry.at)}">${escapeHtml(formatAsciiDate(entry.at, { includeTime: true }))}</time></td>
                       <td class="xp-mono"><bdi dir="ltr">${escapeHtml(entry.actor)}</bdi></td>
                       <td class="xp-mono"><bdi dir="ltr">${escapeHtml(entry.action)}</bdi></td>
                       <td class="xp-mono"><bdi dir="ltr">${escapeHtml(entry.target)}</bdi></td>
@@ -935,6 +930,8 @@ ${section === 'audit' ? `<section class="xp-card" data-section="audit-log">
           </section>` : ''}
 ${section === 'upgrade' ? `<section class="xp-card" data-section="root-lifecycle"><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1><p class="xp-prose"><bdi dir="ltr">${escapeHtml(version)} → ${escapeHtml(availableVersion)}</bdi></p><p class="xp-prose">${isAr ? 'راجع فحص الترقية قبل تأكيد أي تغيير.' : 'Review the upgrade preflight before confirming any change.'}</p><button type="button" class="xp-btn xp-btn--primary" data-action="start-upgrade" ${isRoot && props.availableVersion ? '' : 'disabled'}>${isAr ? 'فحص الترقية' : 'Check upgrade'}</button></section>` : ''}
 ${section === 'transfer' ? `<section class="xp-card" data-section="root-lifecycle"><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1><p class="xp-prose">${isAr ? 'اختر مصدر النقل وراجع الحسابات قبل الاستيراد.' : 'Choose the transfer source and review its accounts before importing.'}</p><button type="button" class="xp-btn xp-btn--primary" data-action="start-transfer" ${isRoot ? '' : 'disabled'}>${isAr ? 'بدء النقل' : 'Start transfer'}</button></section>` : ''}
+${section === 'security' ? `<section class="xp-card" data-section="account-security"><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1></section>` : ''}
+${section === 'design' ? renderDesignMain(activeRoute, locale) : ''}
 ${section === undefined || (section === 'io' && !ioSnapshot) || (section === 'mail-ips' && !mailIpConfig) ? renderSurfaceUnavailable(locale, '/whm') : ''}`,
   })
   return ensureAccessibleSurfaceHtml(rawHtml.trim(), locale)
