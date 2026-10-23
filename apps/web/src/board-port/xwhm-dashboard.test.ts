@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import { renderWhmSurface } from '../surfaces/xwhm.ts'
-import { renderWhmDashboard, whmDashboardFixture, whmDashboardFromProps } from './xwhm-dashboard.ts'
+import { renderWhmDashboard, whmDashboardFixture, whmDashboardFixtureAr, whmDashboardFromProps } from './xwhm-dashboard.ts'
 
 describe('xWHM dashboard board port', () => {
   it('keeps the board regions in the sample fixture', () => {
@@ -27,5 +27,37 @@ describe('xWHM dashboard board port', () => {
     assert.match(product, /data-board-port="xwhm-dashboard"/)
     assert.match(product, /aria-label="Search tools and accounts"/)
     assert.doesNotMatch(product, /Activity & Jobs|Sign out|data-generation-chip=/)
+  })
+
+  it('keeps the approved English dashboard free of bidi isolates', () => {
+    const html = renderWhmDashboard(whmDashboardFixture())
+    assert.equal(html.includes('<bdi'), false)
+    assert.equal(html.includes('dir="rtl"'), false)
+    assert.match(html, /2026-10-22 14:05 UTC<\/time>\./)
+    assert.match(html, /inset 3px 0 0 #6EA0FF/)
+    assert.doesNotMatch(html, /inset -3px/)
+  })
+
+  it('renders Arabic sentences with LTR isolates around numbers, units, and paths', () => {
+    const html = renderWhmDashboard(whmDashboardFixtureAr())
+    for (const marker of [
+      'dir="rtl"',
+      'لوحة الخادم',
+      '<bdi dir="ltr">41 days, 6 hours</bdi>',
+      '<bdi dir="ltr">4 cores · 8 GB</bdi>',
+      '<bdi dir="ltr">6.8.0-45-generic</bdi>',
+      '<bdi dir="ltr">3.4 / 8 GB</bdi>',
+      '<bdi dir="ltr">1.9 M / 26.2 M</bdi>',
+      '<bdi dir="ltr">142 / 400 GB</bdi>',
+      '<bdi dir="ltr">3</bdi> شهادات',
+      '<bdi dir="ltr">44</bdi> حساباً في المجموع.',
+      'كل حدود الخطط مفروضة على هذا المضيف.',
+      'inset -3px 0 0 #6EA0FF',
+      '<bdi dir="ltr">xWHM</bdi></a></li><li aria-hidden="true">/</li><li aria-current="page">اللوحة</li>',
+    ]) {
+      assert.ok(html.includes(marker), marker)
+    }
+    assert.equal(html.includes('days, 6 hours 41'), false)
+    assert.equal(html.includes('>Dashboard<'), false)
   })
 })

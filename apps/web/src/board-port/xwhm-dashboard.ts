@@ -141,7 +141,7 @@ const NAV: Array<{ id: string; label: [string, string]; items: Array<{ href: str
     { href: '/whm/services/web', label: ['Web server', 'خادم الويب'], icon: '<rect x="3" y="4" width="18" height="7" rx="2"></rect><rect x="3" y="13" width="18" height="7" rx="2"></rect><path d="M7 7.5h.01M7 16.5h.01"></path>' },
     { href: '/whm/software/php', label: ['PHP', 'PHP'], icon: '<path d="M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 6l-3 12"></path>' },
     { href: '/whm/ssl', label: ['SSL/TLS', 'SSL/TLS'], icon: '<rect x="4" y="10" width="16" height="11" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path>' },
-    { href: '/whm/dns', label: ['DNS zones', 'مناطق DNS'], icon: '<circle cx="12" cy="5" r="2"></circle><circle cx="5" cy="19" r="2"></circle><circle cx="19" cy="19" r="2"></circle><path d="M12 7v5M12 12l-5.5 5.5M12 12l5.5 5.5"></path>' },
+    { href: '/whm/dns', label: ['DNS zones', 'مناطق «DNS»'], icon: '<circle cx="12" cy="5" r="2"></circle><circle cx="5" cy="19" r="2"></circle><circle cx="19" cy="19" r="2"></circle><path d="M12 7v5M12 12l-5.5 5.5M12 12l5.5 5.5"></path>' },
     { href: '/whm/services', label: ['Services', 'الخدمات'], icon: '<path d="M3 12h4l3-8 4 16 3-8h4"></path>' },
   ] },
   { id: 'nav-g-security', label: ['Security', 'الأمان'], items: [
@@ -157,6 +157,20 @@ const NAV: Array<{ id: string; label: [string, string]; items: Array<{ href: str
   ] },
 ]
 
+const plain = (value: string): string => value.replace(/«|»/g, '')
+
+const ltr = (value: string): string => `<bdi dir="ltr">${escapeHtml(value)}</bdi>`
+
+const rich = (value: string): string => value.split(/«([^»]*)»/).map((part, index) => index % 2 === 1 ? ltr(part) : escapeHtml(part)).join('')
+
+/** English stays escaped text so the approved LTR pixels do not move. Arabic isolates Latin tokens. */
+const show = (value: string, ar: boolean): string => {
+  if (!ar) return escapeHtml(value)
+  if (value.includes('«')) return rich(value)
+  if (/[\u0600-\u06FF]/.test(value)) return escapeHtml(value)
+  return ltr(value)
+}
+
 const pill = (chip: DashboardChip, mono = false): string => {
   const dot = chip.dot ?? chip.fg
   const border = chip.borderedDot ? `border: 1.5px solid ${chip.fg};` : ''
@@ -168,23 +182,30 @@ const linkStyle = 'display: flex; align-items: center; gap: 10px; min-height: 40
 const activeStyle = 'display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; background: #1D2B40; color: #FFFFFF; font-weight: 600; box-shadow: inset 3px 0 0 #6EA0FF; text-decoration: none; font-size: 14px'
 
 const navHtml = (model: WhmDashboardModel): string => {
-  const ar = model.locale === 'ar' ? 1 : 0
+  const ar = model.locale === 'ar'
+  const index = ar ? 1 : 0
+  const active = ar
+    ? 'display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; background: #1D2B40; color: #FFFFFF; font-weight: 600; box-shadow: inset -3px 0 0 #6EA0FF; text-decoration: none; font-size: 14px'
+    : activeStyle
   const groups = NAV.map(group => {
     const items = group.items.map(item => {
       const current = item.href === model.activeHref
-      return `<li><a href="${item.href}"${current ? ' aria-current="page"' : ''} style="${current ? activeStyle : linkStyle}">${svg(item.icon)}${escapeHtml(item.label[ar])}</a></li>`
+      const label = show(item.label[index] ?? '', ar)
+      const labelBody = label.includes('<') ? `<span>${label}</span>` : label
+      return `<li><a href="${item.href}"${current ? ' aria-current="page"' : ''} style="${current ? active : linkStyle}">${svg(item.icon)}${labelBody}</a></li>`
     }).join('')
     return `<div style="display: flex; flex-direction: column; gap: 4px">
-      <span id="${group.id}" style="padding: 0 12px; font-size: 11px; font-weight: 600; color: #8A99AF; line-height: 1.6">${escapeHtml(group.label[ar])}</span>
+      <span id="${group.id}" style="padding: 0 12px; font-size: 11px; font-weight: 600; color: #8A99AF; line-height: 1.6">${show(group.label[index] ?? '', ar)}</span>
       <ul aria-labelledby="${group.id}" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px">${items}</ul>
     </div>`
   }).join('')
+  const brand = ar ? '<bdi dir="ltr">xWHM</bdi>' : 'xWHM'
   return `<nav aria-label="xWHM navigation" style="flex: 1 1 248px; max-width: 100%; background: #0E1726; color: #C9D3E1; padding: 20px 14px; display: flex; flex-direction: column; gap: 18px">
     <div style="display: flex; align-items: center; gap: 10px; padding: 0 6px">
       <span aria-hidden="true" style="flex: none; width: 36px; height: 36px; border-radius: 8px; background: #1D5BD6; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 500">x</span>
       <div style="display: flex; flex-direction: column; min-width: 0">
-        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 17px; font-weight: 500; color: #FFFFFF; line-height: 1.3">xWHM</span>
-        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #8A99AF; line-height: 1.3">${escapeHtml(model.hostname)}</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 17px; font-weight: 500; color: #FFFFFF; line-height: 1.3">${brand}</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #8A99AF; line-height: 1.3">${show(model.hostname, ar)}</span>
       </div>
     </div>
     ${groups}
@@ -192,9 +213,12 @@ const navHtml = (model: WhmDashboardModel): string => {
 }
 
 const headerHtml = (model: WhmDashboardModel): string => {
+  const ar = model.locale === 'ar'
   const genBg = model.generationTone === 'live' ? '#E7F5EE' : '#EEF0F3'
   const genFg = model.generationTone === 'live' ? '#0E7A4E' : '#344054'
   const initial = escapeHtml((model.username.slice(0, 1) || '—').toLowerCase())
+  const generation = show(model.generationLabel, ar)
+  const generationBody = generation.includes('<bdi') ? `<span>${generation}</span>` : generation
   const lang = model.locale === 'ar'
     ? `<a href="?lang=en" lang="en" hreflang="en" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; border-radius: 8px; font-family: 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 500; color: #1D5BD6; text-decoration: none">English</a>`
     : `<a href="?lang=ar" lang="ar" hreflang="ar" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; border-radius: 8px; font-family: 'IBM Plex Sans Arabic', 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 500; color: #1D5BD6; text-decoration: none">العربية</a>`
@@ -205,10 +229,10 @@ const headerHtml = (model: WhmDashboardModel): string => {
         <kbd aria-hidden="true" style="position: absolute; inset-inline-end: 8px; min-width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid #D0D5DD; background: #FFFFFF; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #475467">/</kbd>
       </div>
       <span style="flex: 1 1 0"></span>
-      <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: ${genBg}; color: ${genFg}; font-size: 12px; font-weight: 600"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: ${genFg}"></span>${escapeHtml(model.generationLabel)}</span>
-      <span style="display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: #EEF0F3; color: #344054; font-size: 12px; font-weight: 600; font-family: 'IBM Plex Mono', monospace">${escapeHtml(model.versionLabel)}</span>
+      <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: ${genBg}; color: ${genFg}; font-size: 12px; font-weight: 600"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: ${genFg}"></span>${generationBody}</span>
+      <span style="display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: #EEF0F3; color: #344054; font-size: 12px; font-weight: 600; font-family: 'IBM Plex Mono', monospace">${show(model.versionLabel, ar)}</span>
       ${lang}
-      <button type="button" aria-label="${escapeHtml(model.locale === 'ar' ? `قائمة المستخدم ${model.username}` : `User menu for ${model.username}`)}" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding-block: 0; padding-inline: 6px 12px; border-radius: 999px; border: 1px solid #E2E6EC; background: #FFFFFF; color: #101828; font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; cursor: pointer"><span aria-hidden="true" style="width: 32px; height: 32px; border-radius: 50%; background: #0E1726; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 13px">${initial}</span>${escapeHtml(model.username)}</button>
+      <button type="button" aria-label="${escapeHtml(model.locale === 'ar' ? `قائمة المستخدم ${model.username}` : `User menu for ${model.username}`)}" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding-block: 0; padding-inline: 6px 12px; border-radius: 999px; border: 1px solid #E2E6EC; background: #FFFFFF; color: #101828; font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; cursor: pointer"><span aria-hidden="true" style="width: 32px; height: 32px; border-radius: 50%; background: #0E1726; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 13px">${initial}</span>${show(model.username, ar)}</button>
     </header>`
 }
 
@@ -223,40 +247,47 @@ const noticeHtml = (notice: DashboardNotice): string => {
   return `<div style="flex: 1 1 360px; min-width: 0; display: flex; gap: 10px; padding: 12px 14px; border-radius: 10px; border: 1px solid ${border}; background: ${bg}; font-size: 13px; line-height: 1.6"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px">${icon}</svg>${notice.html}</div>`
 }
 
-const tile = (label: string, value: string, note: string, chip?: DashboardChip, monoLabel = false): string => {
+const tile = (label: string, value: string, note: string, ar: boolean, chip?: DashboardChip, monoLabel = false): string => {
   const labelStyle = monoLabel
     ? "font-size: 12px; font-weight: 600; color: #5D6B7E; font-family: 'IBM Plex Mono', monospace"
     : 'font-size: 12px; font-weight: 600; color: #5D6B7E'
   const valueHtml = chip
     ? pill(chip)
-    : `<dd style="margin: 0; font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums">${escapeHtml(value)}</dd>`
-  return `<div style="display: flex; flex-direction: column; gap: ${chip ? '6px' : '4px'}; padding: 12px 14px; border-radius: 10px; border: 1px solid #EEF0F3; background: #F8F9FB"><dt style="${labelStyle}">${escapeHtml(label)}</dt>${chip ? `<dd style="margin: 0">${valueHtml}</dd>` : valueHtml}<dd style="margin: 0; font-size: 12px; color: #5D6B7E">${escapeHtml(note)}</dd></div>`
+    : `<dd style="margin: 0; font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums">${show(value, ar)}</dd>`
+  return `<div style="display: flex; flex-direction: column; gap: ${chip ? '6px' : '4px'}; padding: 12px 14px; border-radius: 10px; border: 1px solid #EEF0F3; background: #F8F9FB"><dt style="${labelStyle}">${show(label, ar)}</dt>${chip ? `<dd style="margin: 0">${valueHtml}</dd>` : valueHtml}<dd style="margin: 0; font-size: 12px; color: #5D6B7E">${show(note, ar)}</dd></div>`
 }
 
 export const renderWhmDashboard = (model: WhmDashboardModel): string => {
+  const ar = model.locale === 'ar'
   const auditRows = model.audit.map(row => `<tr style="border-top: 1px solid #EEF0F3; vertical-align: top">
-    <td style="padding: 10px 16px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-variant-numeric: tabular-nums; line-height: 1.4"><time datetime="${escapeHtml(row.datetime)}">${escapeHtml(row.time)}</time></td>
-    <td style="padding: 10px 16px; line-height: 1.4"><div style="display: flex; flex-direction: column"><span style="font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 13px">${escapeHtml(row.actor)}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5D6B7E">${escapeHtml(row.from)}</span></div></td>
-    <td style="padding: 10px 16px; line-height: 1.4"><div style="display: flex; flex-direction: column"><span>${escapeHtml(row.action)}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5D6B7E; overflow-wrap: anywhere">${escapeHtml(row.target)}</span></div></td>
-    <td style="padding: 10px 16px; line-height: 1.4"><div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px">${pill(row.result)}<span style="font-size: 12px; color: #5D6B7E">${escapeHtml(row.detail)}</span></div></td>
+    <td style="padding: 10px 16px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-variant-numeric: tabular-nums; line-height: 1.4"><time datetime="${escapeHtml(row.datetime)}">${show(row.time, ar)}</time></td>
+    <td style="padding: 10px 16px; line-height: 1.4"><div style="display: flex; flex-direction: column"><span style="font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 13px">${show(row.actor, ar)}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5D6B7E">${show(row.from, ar)}</span></div></td>
+    <td style="padding: 10px 16px; line-height: 1.4"><div style="display: flex; flex-direction: column"><span>${show(row.action, ar)}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5D6B7E; overflow-wrap: anywhere">${show(row.target, ar)}</span></div></td>
+    <td style="padding: 10px 16px; line-height: 1.4"><div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px">${pill(row.result)}<span style="font-size: 12px; color: #5D6B7E">${show(row.detail, ar)}</span></div></td>
   </tr>`).join('')
   const meters = model.meters.map(meter => `<div style="display: flex; flex-direction: column; gap: 6px">
-    <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 13px"><span style="font-weight: 600">${escapeHtml(meter.label)}</span><span style="color: #475467; font-variant-numeric: tabular-nums">${escapeHtml(meter.value)}</span></div>
-    <div role="meter" aria-label="${escapeHtml(meter.label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${escapeHtml(meter.now)}" aria-valuetext="${escapeHtml(meter.value)}" style="height: 8px; border-radius: 4px; background: #E9ECF1; overflow: hidden"><div style="height: 8px; width: ${escapeHtml(meter.pct)}; background: ${escapeHtml(meter.color)}; border-radius: 4px"></div></div>
-    <span style="font-size: 12px; color: ${escapeHtml(meter.noteColor)}">${escapeHtml(meter.note)}</span>
+    <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 13px"><span style="font-weight: 600">${show(meter.label, ar)}</span><span style="color: #475467; font-variant-numeric: tabular-nums">${show(meter.value, ar)}</span></div>
+    <div role="meter" aria-label="${escapeHtml(plain(meter.label))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${escapeHtml(meter.now)}" aria-valuetext="${escapeHtml(meter.value)}" style="height: 8px; border-radius: 4px; background: #E9ECF1; overflow: hidden"><div style="height: 8px; width: ${escapeHtml(meter.pct)}; background: ${escapeHtml(meter.color)}; border-radius: 4px"></div></div>
+    <span style="font-size: 12px; color: ${escapeHtml(meter.noteColor)}">${show(meter.note, ar)}</span>
   </div>`).join('')
   const accountTiles = model.accountTiles.map(item => `<div style="display: flex; flex-direction: column; gap: 2px">
-    <dt style="display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #475467"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; ${item.ring ? `border: 1.5px solid ${item.dot}` : `background: ${item.dot}`}"></span>${escapeHtml(item.label)}</dt>
-    <dd style="margin: 0; font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums">${escapeHtml(item.value)}</dd>
+    <dt style="display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #475467"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; ${item.ring ? `border: 1.5px solid ${item.dot}` : `background: ${item.dot}`}"></span>${show(item.label, ar)}</dt>
+    <dd style="margin: 0; font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums">${show(item.value, ar)}</dd>
   </div>`).join('')
-  const near = model.near.map((item, index) => `<li style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; font-size: 13px;${index ? ' border-top: 1px solid #EEF0F3' : ''}"><span style="font-family: 'IBM Plex Mono', monospace">${escapeHtml(item.name)}</span><span style="color: ${escapeHtml(item.color)}; font-weight: 600; font-variant-numeric: tabular-nums">${escapeHtml(item.note)}</span></li>`).join('')
-  const hostRows = model.hostRows.map(row => `<dt style="color: #5D6B7E">${escapeHtml(row.label)}</dt><dd style="${row.ddStyle}">${escapeHtml(row.value)}</dd>`).join('')
-  const controllers = model.controllers.map(name => `<li style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: #E7F5EE; color: #0E7A4E; font-size: 12px; font-weight: 600; font-family: 'IBM Plex Mono', monospace"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #0E7A4E"></span>${escapeHtml(name)}</li>`).join('')
+  const near = model.near.map((item, index) => `<li style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; font-size: 13px;${index ? ' border-top: 1px solid #EEF0F3' : ''}"><span style="font-family: 'IBM Plex Mono', monospace">${show(item.name, ar)}</span><span style="color: ${escapeHtml(item.color)}; font-weight: 600; font-variant-numeric: tabular-nums">${show(item.note, ar)}</span></li>`).join('')
+  const hostRows = model.hostRows.map(row => `<dt style="color: #5D6B7E">${show(row.label, ar)}</dt><dd style="${row.ddStyle}">${show(row.value, ar)}</dd>`).join('')
+  const controllers = model.controllers.map(name => `<li style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: #E7F5EE; color: #0E7A4E; font-size: 12px; font-weight: 600; font-family: 'IBM Plex Mono', monospace"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #0E7A4E"></span>${show(name, ar)}</li>`).join('')
   const services = model.services.map((row, index) => `<li style="display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 4px 20px; border-top: 1px solid ${index === 0 ? 'transparent' : '#EEF0F3'}">
-    <span style="display: flex; flex-direction: column; min-width: 0; line-height: 1.4"><span style="font-size: 14px; font-weight: 500">${escapeHtml(row.name)} <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5D6B7E">${escapeHtml(row.version)}</span></span>${row.note ? `<span style="font-size: 12px; color: #5D6B7E">${escapeHtml(row.note)}</span>` : ''}</span>
+    <span style="display: flex; flex-direction: column; min-width: 0; line-height: 1.4"><span style="font-size: 14px; font-weight: 500">${show(row.name, ar)} <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5D6B7E">${show(row.version, ar)}</span></span>${row.note ? `<span style="font-size: 12px; color: #5D6B7E">${show(row.note, ar)}</span>` : ''}</span>
     <span style="flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: ${row.status.bg}; color: ${row.status.fg}; font-size: 12px; font-weight: 600"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: ${row.status.dot ?? row.status.fg}; border: 1.5px solid ${row.status.fg}"></span>${escapeHtml(row.status.label)}</span>
   </li>`).join('')
-  return `<div class="xp-board-port" data-board-port="xwhm-dashboard" data-section="overview-attention" style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #F5F6F8; font-family: 'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif; color: #101828">
+  const crumb = ar
+    ? `<li><a href="/whm" style="color: #475467"><bdi dir="ltr">${escapeHtml(model.crumbRoot)}</bdi></a></li><li aria-hidden="true">/</li><li aria-current="page">${show(model.crumbPage, true)}</li>`
+    : `<li style="display: flex; gap: 6px"><a href="/whm" style="color: #475467">${escapeHtml(model.crumbRoot)}</a><span aria-hidden="true">/</span></li><li aria-current="page">${escapeHtml(model.crumbPage)}</li>`
+  const lede = ar
+    ? `<p style="margin: 0; font-size: 14px; color: #475467; line-height: 1.6; max-width: 68ch"><span style="font-family: 'IBM Plex Mono', monospace">${ltr(model.ledeHost)}</span> ${rich(model.ledeRest)}<time datetime="${escapeHtml(model.ledeDatetime)}"><bdi dir="ltr" style="white-space: nowrap">${escapeHtml(model.ledeTime)}</bdi></time></p>`
+    : `<p style="margin: 0; font-size: 14px; color: #475467; line-height: 1.6; max-width: 68ch"><span style="font-family: 'IBM Plex Mono', monospace">${escapeHtml(model.ledeHost)}</span> ${escapeHtml(model.ledeRest)}<time datetime="${escapeHtml(model.ledeDatetime)}">${escapeHtml(model.ledeTime)}</time>.</p>`
+  return `<div class="xp-board-port" data-board-port="xwhm-dashboard" data-section="overview-attention"${ar ? ' dir="rtl"' : ''} style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #F5F6F8; font-family: 'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif; color: #101828">
   <style>
     .xp-board-port{line-height:normal;font-size:16px;font-kerning:auto;font-feature-settings:normal;font-synthesis:weight style small-caps;-webkit-font-smoothing:antialiased}
     .xp-board-port a{color:#1D5BD6}.xp-board-port a:hover{color:#1546A8}
@@ -271,89 +302,88 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
         <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1 1 420px">
           <nav aria-label="Breadcrumb">
             <ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; color: #5D6B7E">
-              <li style="display: flex; gap: 6px"><a href="/whm" style="color: #475467">${escapeHtml(model.crumbRoot)}</a><span aria-hidden="true">/</span></li>
-              <li aria-current="page">${escapeHtml(model.crumbPage)}</li>
+              ${crumb}
             </ol>
           </nav>
-          <h1 style="margin: 0; font-size: 22px; font-weight: 600; line-height: 1.3">${escapeHtml(model.title)}</h1>
-          <p style="margin: 0; font-size: 14px; color: #475467; line-height: 1.6; max-width: 68ch"><span style="font-family: 'IBM Plex Mono', monospace">${escapeHtml(model.ledeHost)}</span> ${escapeHtml(model.ledeRest)}<time datetime="${escapeHtml(model.ledeDatetime)}">${escapeHtml(model.ledeTime)}</time>.</p>
+          <h1 style="margin: 0; font-size: 22px; font-weight: 600; line-height: 1.3">${show(model.title, ar)}</h1>
+          ${lede}
         </div>
-        <a href="/whm/accounts/new" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #1D5BD6; background: #1D5BD6; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none">${svg('<path d="M12 5v14M5 12h14"></path>', 18, false)}${escapeHtml(model.createLabel)}</a>
+        <a href="/whm/accounts/new" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #1D5BD6; background: #1D5BD6; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none">${svg('<path d="M12 5v14M5 12h14"></path>', 18, false)}${show(model.createLabel, ar)}</a>
       </div>
       <section aria-label="Notices" style="display: flex; flex-wrap: wrap; gap: 16px">${model.notices.map(noticeHtml).join('')}</section>
       <div style="display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start">
         <div style="flex: 1.618 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 26px">
           <section aria-labelledby="rec-title" style="min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 24px; border-radius: 12px; background: #FFFFFF; border: 1px solid #E2E6EC">
             <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px">
-              <h2 id="rec-title" style="margin: 0; font-size: 16px; font-weight: 600">${escapeHtml(model.reconcilerTitle)}</h2>
+              <h2 id="rec-title" style="margin: 0; font-size: 16px; font-weight: 600">${show(model.reconcilerTitle, ar)}</h2>
               ${pill(model.reconcilerStatus)}
             </div>
-            <p style="margin: 0; font-size: 14px; color: #344054; line-height: 1.6; max-width: 68ch">${escapeHtml(model.reconcilerLede)}</p>
-            <dl style="margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px">${model.reconcilerTiles.map(item => tile(item.label, item.value, item.note, item.chip, item.monoLabel)).join('')}</dl>
+            <p style="margin: 0; font-size: 14px; color: #344054; line-height: 1.6; max-width: 68ch">${show(model.reconcilerLede, ar)}</p>
+            <dl style="margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px">${model.reconcilerTiles.map(item => tile(item.label, item.value, item.note, ar, item.chip, item.monoLabel)).join('')}</dl>
             <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: auto">
-              <button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer">${escapeHtml(model.driftButton)}</button>
-              <a href="/whm/audit" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${escapeHtml(model.driftLink)}</a>
-              <span role="status" style="font-size: 12px; font-weight: 500; color: #0E7A4E">${escapeHtml(model.driftStatus)}</span>
+              <button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer">${show(model.driftButton, ar)}</button>
+              <a href="/whm/audit" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.driftLink, ar)}</a>
+              <span role="status" style="font-size: 12px; font-weight: 500; color: #0E7A4E">${show(model.driftStatus, ar)}</span>
             </div>
           </section>
           <section aria-labelledby="res-title" data-host-observation="${model.meters.every(meter => meter.now === '0') ? 'unavailable' : 'observed'}" style="min-width: 0; display: flex; flex-direction: column; gap: 20px; padding: 24px; border-radius: 12px; background: #FFFFFF; border: 1px solid #E2E6EC">
             <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px">
-              <h2 id="res-title" style="margin: 0; font-size: 16px; font-weight: 600">${escapeHtml(model.resourcesTitle)}</h2>
-              <span style="font-size: 12px; color: #5D6B7E">${escapeHtml(model.resourcesSampled)}</span>
+              <h2 id="res-title" style="margin: 0; font-size: 16px; font-weight: 600">${show(model.resourcesTitle, ar)}</h2>
+              <span style="font-size: 12px; color: #5D6B7E">${show(model.resourcesSampled, ar)}</span>
             </div>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 22px 26px">${meters}</div>
             <p style="margin: 0; font-size: 12px; font-weight: 500; color: #5D6B7E; line-height: 1.6">${model.resourcesFoot}</p>
           </section>
           <section aria-labelledby="audit-title" style="min-width: 0; display: flex; flex-direction: column; border-radius: 12px; background: #FFFFFF; border: 1px solid #E2E6EC">
             <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; padding: 20px 24px 16px">
-              <h2 id="audit-title" style="margin: 0; font-size: 16px; font-weight: 600">${escapeHtml(model.auditTitle)}</h2>
-              <span style="font-size: 12px; color: #5D6B7E">${escapeHtml(model.auditWhen)}</span>
+              <h2 id="audit-title" style="margin: 0; font-size: 16px; font-weight: 600">${show(model.auditTitle, ar)}</h2>
+              <span style="font-size: 12px; color: #5D6B7E">${show(model.auditWhen, ar)}</span>
             </div>
             <div style="overflow-x: auto; border-top: 1px solid #E2E6EC">
               <table style="width: 100%; border-collapse: collapse; font-size: 14px; min-width: 620px">
-                <thead><tr style="background: #F8F9FB">${model.auditHeads.map((head, index) => `<th scope="col" style="text-align: start; padding: 10px 16px; font-size: 12px; font-weight: 600; color: #475467;${index === 0 ? ' width: 72px' : ''}">${escapeHtml(head)}</th>`).join('')}</tr></thead>
+                <thead><tr style="background: #F8F9FB">${model.auditHeads.map((head, index) => `<th scope="col" style="text-align: start; padding: 10px 16px; font-size: 12px; font-weight: 600; color: #475467;${index === 0 ? ' width: 72px' : ''}">${show(head, ar)}</th>`).join('')}</tr></thead>
                 <tbody>${auditRows}</tbody>
               </table>
             </div>
             <div style="display: flex; padding: 8px 18px; border-top: 1px solid #EEF0F3">
-              <a href="/whm/audit" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${escapeHtml(model.auditLink)}</a>
+              <a href="/whm/audit" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.auditLink, ar)}</a>
             </div>
           </section>
         </div>
         <div style="flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 26px">
           <section aria-labelledby="acc-title" style="min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 24px; border-radius: 12px; background: #FFFFFF; border: 1px solid #E2E6EC">
-            <h2 id="acc-title" style="margin: 0; font-size: 16px; font-weight: 600">${escapeHtml(model.accountsTitle)}</h2>
+            <h2 id="acc-title" style="margin: 0; font-size: 16px; font-weight: 600">${show(model.accountsTitle, ar)}</h2>
             <dl style="margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">${accountTiles}</dl>
-            <p style="margin: 0; font-size: 13px; color: #475467; line-height: 1.6">${escapeHtml(model.accountsSentence)}</p>
+            <p style="margin: 0; font-size: 13px; color: #475467; line-height: 1.6">${show(model.accountsSentence, ar)}</p>
             <div style="display: flex; flex-direction: column; gap: 8px">
-              <h3 style="margin: 0; font-size: 13px; font-weight: 600">${escapeHtml(model.nearTitle)}</h3>
+              <h3 style="margin: 0; font-size: 13px; font-weight: 600">${show(model.nearTitle, ar)}</h3>
               <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid #EEF0F3; border-radius: 10px">${near}</ul>
             </div>
             <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: auto">
-              <a href="/whm/accounts" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-size: 14px; font-weight: 600; text-decoration: none">${escapeHtml(model.viewAccounts)}</a>
-              <a href="/whm/resellers" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${escapeHtml(model.resellersLink)}</a>
+              <a href="/whm/accounts" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-size: 14px; font-weight: 600; text-decoration: none">${show(model.viewAccounts, ar)}</a>
+              <a href="/whm/resellers" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.resellersLink, ar)}</a>
             </div>
           </section>
           <section aria-labelledby="host-title" style="min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 24px; border-radius: 12px; background: #FFFFFF; border: 1px solid #E2E6EC">
             <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px">
-              <h2 id="host-title" style="margin: 0; font-size: 16px; font-weight: 600">${escapeHtml(model.hostTitle)}</h2>
-              <span style="display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: #EEF0F3; color: #344054; font-size: 12px; font-weight: 600; font-family: 'IBM Plex Mono', monospace">${escapeHtml(model.hostIp)}</span>
+              <h2 id="host-title" style="margin: 0; font-size: 16px; font-weight: 600">${show(model.hostTitle, ar)}</h2>
+              <span style="display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: #EEF0F3; color: #344054; font-size: 12px; font-weight: 600; font-family: 'IBM Plex Mono', monospace">${show(model.hostIp, ar)}</span>
             </div>
             <dl style="margin: 0; display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 8px 16px; font-size: 13px; line-height: 1.4">${hostRows}</dl>
             <div style="display: flex; flex-direction: column; gap: 8px">
-              <span style="font-size: 13px; font-weight: 600">${escapeHtml(model.controllersTitle)}</span>
-              <ul aria-label="${escapeHtml(model.controllersTitle)}" style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px">${controllers}</ul>
-              <span style="font-size: 12px; font-weight: 500; color: #5D6B7E; line-height: 1.6">${escapeHtml(model.controllersNote)}</span>
+              <span style="font-size: 13px; font-weight: 600">${show(model.controllersTitle, ar)}</span>
+              <ul aria-label="${escapeHtml(plain(model.controllersTitle))}" style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px">${controllers}</ul>
+              <span style="font-size: 12px; font-weight: 500; color: #5D6B7E; line-height: 1.6">${show(model.controllersNote, ar)}</span>
             </div>
           </section>
           <section aria-labelledby="svc-title" style="min-width: 0; display: flex; flex-direction: column; border-radius: 12px; background: #FFFFFF; border: 1px solid #E2E6EC">
             <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; padding: 20px 24px 16px">
-              <h2 id="svc-title" style="margin: 0; font-size: 16px; font-weight: 600">${escapeHtml(model.servicesTitle)}</h2>
-              <span style="font-size: 12px; color: #5D6B7E">${escapeHtml(model.servicesMeta)}</span>
+              <h2 id="svc-title" style="margin: 0; font-size: 16px; font-weight: 600">${show(model.servicesTitle, ar)}</h2>
+              <span style="font-size: 12px; color: #5D6B7E">${show(model.servicesMeta, ar)}</span>
             </div>
             <ul style="list-style: none; margin: 0; padding: 0; border-top: 1px solid #E2E6EC">${services}</ul>
             <div style="display: flex; padding: 8px 18px; border-top: 1px solid #EEF0F3">
-              <a href="/whm/services" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${escapeHtml(model.servicesLink)}</a>
+              <a href="/whm/services" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.servicesLink, ar)}</a>
             </div>
           </section>
         </div>
@@ -468,6 +498,109 @@ export const whmDashboardFixture = (): WhmDashboardModel => ({
   servicesLink: 'Manage services',
 })
 
+const domain = (name: string): string => `<bdi dir="ltr"><span style="font-family: 'IBM Plex Mono', monospace">${escapeHtml(name)}</span></bdi>`
+
+export const whmDashboardFixtureAr = (): WhmDashboardModel => ({
+  locale: 'ar',
+  hostname: 'srv1.xpanel.test',
+  username: 'root',
+  versionLabel: 'v1.4.2',
+  generationLabel: 'الجيل «142» · نشط',
+  generationTone: 'live',
+  activeHref: '/whm',
+  title: 'لوحة الخادم',
+  crumbRoot: 'xWHM',
+  crumbPage: 'اللوحة',
+  ledeHost: 'srv1.xpanel.test',
+  ledeRest: 'نظرة على الموفّق والحسابات والموارد والخدمات. آخر تحديث ',
+  ledeTime: '2026-10-22 14:05 UTC.',
+  ledeDatetime: '2026-10-22T14:05Z',
+  createLabel: 'إنشاء حساب',
+  searchLabel: 'ابحث في الأدوات والحسابات',
+  searchPlaceholder: 'ابحث في الأدوات والحسابات',
+  notices: [
+    { tone: 'warn', html: `<span><strong style="font-weight: 600"><bdi dir="ltr">3</bdi> شهادات تُجدَّد خلال <bdi dir="ltr">30</bdi> يوماً:</strong> ${domain('alice-shop.com')} <bdi dir="ltr">(2026-11-04)</bdi>، ${domain('nour.dev')} <bdi dir="ltr">(2026-11-12)</bdi>، ${domain('omar-clinic.net')} <bdi dir="ltr">(2026-11-19)</bdi>. يجددها <bdi dir="ltr">AutoSSL</bdi>؛ راجع أي نطاق لم يعد يشير إلى هنا. <a href="/whm/ssl" style="color: #1D5BD6; font-weight: 600">مراجعة الشهادات</a></span>` },
+    { tone: 'info', html: `<span><strong style="font-weight: 600">الترقية <bdi dir="ltr">v1.5.0</bdi> متاحة</strong> (هذا الخادم يعمل <bdi dir="ltr">v1.4.2</bdi>). تُثبَّت إلى جانب لقطة وفحص سلامة، وتتراجع تلقائياً إذا فشل الفحص. لا تُمس المنازل ولا البريد ولا قواعد بيانات العملاء. <a href="/whm/upgrade" style="color: #1D5BD6; font-weight: 600">مراجعة الترقية</a></span>` },
+  ],
+  reconcilerTitle: 'الموفّق',
+  reconcilerStatus: okChip('متزامن'),
+  reconcilerLede: 'الحالة المطلوبة تساوي الحالة المطبّقة. كل تغيير يُكتب جيلاً جديداً، ويُختبر، ولا يُبدَّل إلا بعد نجاح الاختبارات.',
+  reconcilerTiles: [
+    { label: 'المطلوب والمطبّق', value: '142 = 142', note: 'متساويان' },
+    { label: 'الجيل النشط', value: '142', note: 'طُبّق «13:48 UTC» بواسطة «root»' },
+    { label: 'الانحراف', value: '0', note: 'فُحص «14:04 UTC»' },
+    { label: 'nginx -t', value: '', note: '«13:48 UTC» · الجيل «142»', chip: okChip('نجح'), monoLabel: true },
+    { label: 'apachectl configtest', value: '', note: 'الصياغة سليمة · «13:48 UTC»', chip: okChip('نجح'), monoLabel: true },
+    { label: 'هدف التراجع', value: '141', note: 'محفوظ على القرص' },
+  ],
+  driftButton: 'افحص الانحراف الآن',
+  driftLink: 'الأجيال في سجل التدقيق',
+  driftStatus: '',
+  resourcesTitle: 'موارد الخادم',
+  resourcesSampled: 'العينة «14:05 UTC»',
+  meters: [
+    { label: 'المعالج', value: '28%', now: '28', pct: '28%', color: '#1D5BD6', note: 'الحمل «1.12» على «4» أنوية', noteColor: '#5D6B7E' },
+    { label: 'الذاكرة', value: '3.4 / 8 GB', now: '43', pct: '43%', color: '#1D5BD6', note: '«4.6 GB» متاحة', noteColor: '#5D6B7E' },
+    { label: 'القرص على «/home»', value: '142 / 400 GB', now: '36', pct: '36%', color: '#1D5BD6', note: 'حصص نظام الملفات مفروضة', noteColor: '#5D6B7E' },
+    { label: 'العقد على «/home»', value: '1.9 M / 26.2 M', now: '7', pct: '7%', color: '#1D5BD6', note: '«ext4»', noteColor: '#5D6B7E' },
+  ],
+  resourcesFoot: 'كل حساب محصور داخل شريحته <bdi dir="ltr"><code style="font-family: \'IBM Plex Mono\', monospace">xpanel-&lt;uid&gt;.slice</code></bdi>، فلا يأخذ موقع واحد الخادم كله.',
+  auditTitle: 'آخر التدقيق',
+  auditWhen: 'اليوم، «2026-10-22» · الأوقات بتوقيت «UTC»',
+  auditHeads: ['الوقت', 'الفاعل', 'الإجراء', 'النتيجة'],
+  audit: [
+    { time: '13:48', datetime: '2026-10-22T13:48Z', actor: 'root', from: '203.0.113.7', action: 'غيّر الخطة', target: 'alice: Starter → Business', result: okChip('مطبّق'), detail: 'الجيل «142»' },
+    { time: '13:31', datetime: '2026-10-22T13:31Z', actor: 'reseller1', from: '198.51.100.24', action: 'أنشأ حساباً', target: 'omar · uid 20016 · omar-clinic.net', result: okChip('مطبّق'), detail: 'الجيل «141»' },
+    { time: '13:02', datetime: '2026-10-22T13:02Z', actor: 'root', from: '203.0.113.7', action: 'عدّل تضمين «Nginx»', target: 'nour.dev', result: badChip('فشل الاختبار'), detail: 'فشل «nginx -t»؛ بقي الجيل «140»' },
+    { time: '12:20', datetime: '2026-10-22T12:20Z', actor: 'root', from: '203.0.113.7', action: 'أضاف قاعدة جدار ناري', target: 'drop panel port from 0.0.0.0/0', result: badChip('لم يُحفظ'), detail: 'كانت ستحجب «203.0.113.7»' },
+    { time: '11:05', datetime: '2026-10-22T11:05Z', actor: 'reseller1', from: '198.51.100.24', action: 'أوقف الحساب', target: 'karim', result: okChip('مطبّق'), detail: 'الجيل «140»' },
+  ],
+  auditLink: 'افتح سجل التدقيق',
+  accountsTitle: 'الحسابات',
+  accountTiles: [
+    { label: 'النشطة', value: '41', dot: '#0E7A4E' },
+    { label: 'الموقوفة', value: '3', dot: '#B54708' },
+    { label: 'الموزعون', value: '2', dot: '#344054', ring: true },
+  ],
+  accountsSentence: '«44» حساباً في المجموع. الموزعون يرون الحسابات التي يملكونها فقط.',
+  nearTitle: 'قرب الحد',
+  near: [
+    { name: 'karim', note: '«Disk 92% of 5 GB»', color: '#B42318' },
+    { name: 'yousef', note: '«Disk 89% of 10 GB»', color: '#B54708' },
+  ],
+  viewAccounts: 'عرض الحسابات',
+  resellersLink: 'الموزعون',
+  hostTitle: 'المضيف',
+  hostIp: '10.0.0.12',
+  hostRows: [
+    { label: 'النظام', value: 'Ubuntu 24.04.1 LTS', ddStyle: 'margin: 0' },
+    { label: 'النواة', value: '6.8.0-45-generic', ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace" },
+    { label: 'مدة التشغيل', value: '41 days, 6 hours', ddStyle: 'margin: 0; font-variant-numeric: tabular-nums' },
+    { label: 'العتاد', value: '4 cores · 8 GB', ddStyle: 'margin: 0; font-variant-numeric: tabular-nums' },
+    { label: 'المحرك', value: 'nginx 1.24.0 → apache2 2.4.58 · mpm\u2011itk', ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace" },
+    { label: 'xPanel', value: 'v1.4.2 · control schema 37', ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace" },
+  ],
+  controllersTitle: 'متحكمات «cgroup v2»',
+  controllers: ['cpu', 'io', 'memory', 'pids'],
+  controllersNote: 'كل حدود الخطط مفروضة على هذا المضيف.',
+  servicesTitle: 'الخدمات',
+  servicesMeta: '«10» تعمل · «1» غير مثبّتة',
+  services: [
+    { name: 'Nginx', version: '1.24.0', note: '', status: running('يعمل') },
+    { name: 'Apache', version: '2.4.58 mpm-itk', note: 'العمليات الفرعية تعمل بهوية الحساب', status: running('يعمل') },
+    { name: 'PHP-FPM', version: '8.1 · 8.2 · 8.3', note: '«43» مجمعاً، كل منها داخل شريحة حسابه', status: running('يعمل') },
+    { name: 'MariaDB', version: '10.11.8', note: '', status: running('يعمل') },
+    { name: 'PostgreSQL', version: '16.4', note: 'الحالة المطلوبة للوحة', status: running('يعمل') },
+    { name: 'Postfix', version: '3.8.6', note: '', status: running('يعمل') },
+    { name: 'Dovecot', version: '2.3.21', note: '', status: running('يعمل') },
+    { name: 'PowerDNS', version: '4.8.3', note: '', status: running('يعمل') },
+    { name: 'Redis', version: '7.0.15', note: '', status: running('يعمل') },
+    { name: 'xpanel-agent', version: 'v1.4.2', note: 'الموفّق', status: running('يعمل') },
+    { name: 'ModSecurity', version: '', note: 'تُربط «OWASP CRS» بعد التثبيت', status: { label: 'غير مثبّت', bg: '#EEF0F3', fg: '#344054', dot: 'transparent', borderedDot: true } },
+  ],
+  servicesLink: 'إدارة الخدمات',
+})
+
 const countAccounts = (accounts: Account[] | undefined, status: Account['status']): string =>
   accounts ? String(accounts.filter(account => account.status === status).length) : '0'
 
@@ -507,7 +640,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     hostname,
     username: props.principal?.username ?? '—',
     versionLabel: version,
-    generationLabel: generationId !== undefined ? (ar ? `الجيل ${generationId} · نشط` : `Generation ${generationId} · active`) : '—',
+    generationLabel: generationId !== undefined ? (ar ? `الجيل «${generationId}» · نشط` : `Generation ${generationId} · active`) : '—',
     generationTone: generationId !== undefined ? 'live' : 'empty',
     activeHref: '/whm',
     title: ar ? 'لوحة الخادم' : 'Server dashboard',
@@ -521,7 +654,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     searchLabel: ar ? 'ابحث في الأدوات والحسابات' : 'Search tools and accounts',
     searchPlaceholder: ar ? 'ابحث في الأدوات والحسابات' : 'Search tools and accounts',
     notices: [
-      { tone: 'warn', html: `<span>${escapeHtml(ar ? 'لا شهادات تُجدَّد خلال 30 يوماً.' : 'No certificates renew within 30 days.')}</span>` },
+      { tone: 'warn', html: `<span>${ar ? rich('لا شهادات تُجدَّد خلال «30» يوماً.') : escapeHtml('No certificates renew within 30 days.')}</span>` },
       { tone: 'info', html: `<span>${escapeHtml(ar ? 'لا ترقية منشورة.' : 'No upgrade is published.')} ${props.availableVersion ? mono(props.availableVersion) : ''}</span>` },
     ],
     reconcilerTitle: ar ? 'الموفّق' : 'Reconciler',
@@ -540,9 +673,9 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     driftStatus: '',
     resourcesTitle: ar ? 'موارد الخادم' : 'Server resources',
     resourcesSampled: '—',
-    meters: [meter(ar ? 'المعالج' : 'CPU'), meter(ar ? 'الذاكرة' : 'Memory'), meter(ar ? 'القرص على /home' : 'Disk on /home'), meter(ar ? 'العقد على /home' : 'Inodes on /home')],
+    meters: [meter(ar ? 'المعالج' : 'CPU'), meter(ar ? 'الذاكرة' : 'Memory'), meter(ar ? 'القرص على «/home»' : 'Disk on /home'), meter(ar ? 'العقد على «/home»' : 'Inodes on /home')],
     resourcesFoot: ar
-      ? 'كل حساب محصور داخل شريحته، فلا يأخذ موقع واحد الخادم كله.'
+      ? 'كل حساب محصور داخل شريحته <bdi dir="ltr"><code style="font-family: \'IBM Plex Mono\', monospace">xpanel-&lt;uid&gt;.slice</code></bdi>، فلا يأخذ موقع واحد الخادم كله.'
       : 'Each account is limited inside its own <code style="font-family: \'IBM Plex Mono\', monospace">xpanel-&lt;uid&gt;.slice</code>, so one busy site cannot take the whole server.',
     auditTitle: ar ? 'آخر التدقيق' : 'Recent audit entries',
     auditWhen: '—',
@@ -555,7 +688,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
       { label: ar ? 'الموقوفة' : 'Suspended', value: suspended, dot: '#B54708' },
       { label: ar ? 'الموزعون' : 'Resellers', value: resellerCount, dot: '#344054', ring: true },
     ],
-    accountsSentence: ar ? `${total} حساباً في المجموع.` : `${total} accounts in total. Resellers see only the accounts they own.`,
+    accountsSentence: ar ? `«${total}» حساباً في المجموع. الموزعون يرون الحسابات التي يملكونها فقط.` : `${total} accounts in total. Resellers see only the accounts they own.`,
     nearTitle: ar ? 'قرب الحد' : 'Near a limit',
     near: [{ name: '—', note: '—', color: '#5D6B7E' }],
     viewAccounts: ar ? 'عرض الحسابات' : 'View accounts',
@@ -570,23 +703,23 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
       { label: ar ? 'المحرك' : 'Engine', value: '—', ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace; overflow-wrap: anywhere" },
       { label: 'xPanel', value: version, ddStyle: "margin: 0; font-family: 'IBM Plex Mono', monospace" },
     ],
-    controllersTitle: ar ? 'متحكمات cgroup v2' : 'cgroup v2 controllers',
+    controllersTitle: ar ? 'متحكمات «cgroup v2»' : 'cgroup v2 controllers',
     controllers: ['cpu', 'io', 'memory', 'pids'],
     controllersNote: ar ? 'حدود الخطط تُفرَض على هذا المضيف عندما يبلغ عنها.' : 'All plan limits are enforced on this host.',
     servicesTitle: ar ? 'الخدمات' : 'Services',
-    servicesMeta: services.length ? `${services.filter(service => service.status.fg === '#0E7A4E').length} / ${services.length}` : '—',
+    servicesMeta: services.length ? (ar ? `«${services.filter(service => service.status.fg === '#0E7A4E').length} / ${services.length}»` : `${services.filter(service => service.status.fg === '#0E7A4E').length} / ${services.length}`) : '—',
     services: services.length ? services : [emptyService],
     servicesLink: ar ? 'إدارة الخدمات' : 'Manage services',
   }
 }
 
-export const renderFidelityDocument = (dir: 'ltr' | 'rtl' = 'ltr'): string => {
-  const model = whmDashboardFixture()
+const documentShell = (model: WhmDashboardModel): string => {
+  const ar = model.locale === 'ar'
   return `<!doctype html>
-<html lang="en" dir="${dir}">
+<html lang="${ar ? 'ar' : 'en'}" dir="${ar ? 'rtl' : 'ltr'}">
 <head>
 <meta charset="utf-8">
-<title>Server dashboard — xWHM</title>
+<title>${ar ? 'لوحة الخادم — xWHM' : 'Server dashboard — xWHM'}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
 <style>
@@ -602,3 +735,9 @@ ${renderWhmDashboard(model)}
 </body>
 </html>`
 }
+
+export const renderFidelityDocument = (dir: 'ltr' | 'rtl' = 'ltr'): string =>
+  documentShell(dir === 'rtl' ? whmDashboardFixtureAr() : whmDashboardFixture())
+
+export const renderLiveDocument = (dir: 'ltr' | 'rtl' = 'ltr'): string =>
+  documentShell(whmDashboardFromProps({ locale: dir === 'rtl' ? 'ar' : 'en', principal: { username: 'root' } }))

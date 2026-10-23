@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import playwright from '../node_modules/@playwright/test/index.js'
-import { renderFidelityDocument } from '../apps/web/src/board-port/xwhm-dashboard.ts'
+import { renderFidelityDocument, renderLiveDocument } from '../apps/web/src/board-port/xwhm-dashboard.ts'
 import { PNG } from 'pngjs'
 import pixelmatch from 'pixelmatch'
 
@@ -15,8 +15,10 @@ const outDir = '/opt/cursor/artifacts/board-fidelity'
 const boardFile = '/cursor/stores/bot/xpanel-design/claude-export/Home · Dashboard/WhmDashboard.dc.html'
 const viewport = { width: 1440, height: 1820 }
 
-const serveHtml = (html) => new Promise((resolve) => {
-  const server = createServer((_req, res) => {
+const servePages = (pages) => new Promise((resolve) => {
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+    const html = pages[url.pathname] ?? pages['/']
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
     res.end(html)
   })
@@ -40,10 +42,10 @@ const serveDir = (dir) => new Promise((resolve) => {
   server.listen(0, '127.0.0.1', () => resolve(server))
 })
 
-const shoot = async (browser, url, dir) => {
+const shoot = async (browser, url, dir, flip = false) => {
   const page = await browser.newPage({ viewport, deviceScaleFactor: 1 })
   await page.goto(url, { waitUntil: 'networkidle' })
-  if (dir === 'rtl') await page.evaluate(() => { document.documentElement.dir = 'rtl' })
+  if (flip && dir === 'rtl') await page.evaluate(() => { document.documentElement.dir = 'rtl' })
   await page.evaluate(async () => {
     document.documentElement.style.overflow = 'hidden'
     document.body.style.overflow = 'hidden'
@@ -69,21 +71,33 @@ const diffRatio = (boardBuf, appBuf) => {
 const main = async () => {
   await mkdir(outDir, { recursive: true })
   const boardServer = await serveDir(path.dirname(boardFile))
-  const appServer = await serveHtml(renderFidelityDocument('ltr'))
+  const appServer = await servePages({
+    '/': renderFidelityDocument('ltr'),
+    '/ltr': renderFidelityDocument('ltr'),
+    '/rtl': renderFidelityDocument('rtl'),
+    '/live': renderLiveDocument('ltr'),
+    '/live-rtl': renderLiveDocument('rtl'),
+  })
   const boardPort = boardServer.address().port
   const appPort = appServer.address().port
   const browser = await chromium.launch({ executablePath: '/opt/google/chrome/chrome', args: ['--font-render-hinting=none'] })
   const rows = []
   for (const dir of ['ltr', 'rtl']) {
-    const boardPng = await shoot(browser, `http://127.0.0.1:${boardPort}/WhmDashboard.dc.html`, dir)
-    const appPng = await shoot(browser, `http://127.0.0.1:${appPort}/`, dir)
+    const boardPng = await shoot(browser, `http://127.0.0.1:${boardPort}/WhmDashboard.dc.html`, dir, true)
+    const appPng = await shoot(browser, `http://127.0.0.1:${appPort}/${dir}`, dir, false)
     const result = diffRatio(boardPng, appPng)
     const id = `xwhm-dashboard-${dir}`
     await writeFile(path.join(outDir, `${id}-board.png`), boardPng)
     await writeFile(path.join(outDir, `${id}-app.png`), appPng)
     await writeFile(path.join(outDir, `${id}-diff.png`), result.diff)
-    rows.push({ screen: 'xWHM Dashboard', dir, diff: `${(result.ratio * 100).toFixed(2)}%`, mismatched: result.mismatched, total: result.total })
+    rows.push({ screen: 'xWHM Dashboard', dir, diff: `${(result.ratio * 100).toFixed(2)}%`, mismatched: result.mismatched, total: result.total, note: dir === 'rtl' ? 'Arabic copy against the English artboard; bidi is judged visually' : 'LTR pixel gate' })
     console.log(id, rows.at(-1).diff, result.mismatched, '/', result.total)
+  }
+  for (const dir of ['ltr', 'rtl']) {
+    const live = await shoot(browser, `http://127.0.0.1:${appPort}/${dir === 'rtl' ? 'live-rtl' : 'live'}`, dir, false)
+    const name = `xwhm-dashboard-live-${dir}.png`
+    await writeFile(path.join(outDir, name), live)
+    console.log(name)
   }
   await browser.close()
   boardServer.close()
