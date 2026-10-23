@@ -179,7 +179,7 @@ const jsonResponse = (body: unknown, status = 200, extraHeaders?: Record<string,
  * Formats an RFC 7807 Problem Details response.
  * Never leaks internal `err.message` on 500 responses — always returns constant `"Internal server error"`.
  */
-const problemResponse = (err: unknown, instance: string): Response => {
+const problemResponse = (err: unknown, instance: string, method = ''): Response => {
   if (isXpanelError(err)) {
     const isLockedOut = err.detail.lockedOut === true
     const status = isLockedOut ? 429 : (STATUS_BY_CODE[err.code] ?? 400)
@@ -200,6 +200,8 @@ const problemResponse = (err: unknown, instance: string): Response => {
       },
     )
   }
+  const stack = err instanceof Error ? err.stack ?? err.message : String(err)
+  console.error(`[xpanel-api] unexpected error ${method || 'UNKNOWN'} ${instance}\n${stack}`)
   return new Response(
     JSON.stringify({
       type: 'https://xpanel.dev/problems/internal-error',
@@ -208,6 +210,7 @@ const problemResponse = (err: unknown, instance: string): Response => {
       detail: 'Internal server error',
       code: 'INTERNAL_ERROR',
       instance,
+      details: { stateChanged: false },
     }),
     {
       status: 500,
@@ -1742,7 +1745,12 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const body = await readJsonBody<{ password?: string }>(req)
         const passwordHash = await passwordHashFromInput({ password: body.password })
         const identities = await deps.db.query<{ id: string }>('SELECT id FROM principals WHERE account_id = $1 ORDER BY id', [target.id])
-        if (identities.length === 0) return fail('PRECONDITION_FAILED', 'account has no login identity', { stateChanged: false })
+        if (identities.length === 0) {
+          const taken = await findPrincipalByUsername(deps.db, target.username)
+          if (taken) return fail('CONFLICT', 'login identity is not bound to this account', { stateChanged: false })
+          const created = await createUserPrincipal(deps.db, { username: target.username, passwordHash, accountId: target.id })
+          identities.push({ id: created.id })
+        }
         for (const identity of identities) await setPasswordHash(deps.db, identity.id, passwordHash)
         await emitAudit({ actor: caller.principal.username, action: 'account.password.changed', target: 'account:' + target.username,
           detail: { principals: identities.length }, outcome: 'ok', principalId: caller.principal.id,
@@ -2180,6 +2188,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const account = await deps.store.getAccount(existing.accountId)
         if (!account) return fail('NOT_FOUND', `account "${existing.accountId}" not found`)
         await assertCanAccessAccount(caller, account, 'database.purge')
+        if (existing.trashedAt === null) await deps.store.trashDatabase(dbId)
         await deps.store.purgeDatabase(dbId)
         const reconcile = await triggerReconcile(caller, {
           scope: { accountId: account.id, resellerId: account.ownerId },
@@ -2816,7 +2825,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if ((status === 500 || status === 503) && prefersDocumentHtml(req, pathname, method)) {
         try { return renderTransportStatus(req, status) } catch { /* keep the problem document */ }
       }
-      return problemResponse(err, pathname)
+      return problemResponse(err, pathname, method)
     }
   }
 
@@ -2897,7 +2906,7 @@ export const listenApiServer = async (
           }),
         )
       } catch (error) {
-        await writeResponse(problemResponse(error, '/')).catch(() => res.destroy())
+        await writeResponse(problemResponse(error, req.url ?? '/', req.method ?? '')).catch(() => res.destroy())
       }
     })
     srv.requestTimeout = 30_000

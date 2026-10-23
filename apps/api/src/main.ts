@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -19,7 +20,9 @@ import { loadQualifiedCatalog } from './host-catalog.ts'
 import { createApiApp, ensureRootPrincipal, listenApiServer } from './server.ts'
 import { authenticateRequest } from './auth.ts'
 import { createAgentClient } from './agent-client.ts'
+import { classifyCliInvocation, xpanelServiceUid } from './cli-privilege.ts'
 import { ENTRY_POINTS, entryPointAllowsRole, type EntryPoint } from './entry-points.ts'
+import { assertStateWritable } from './state-access.ts'
 
 export interface PanelServerOptions {
   port?: number
@@ -351,6 +354,7 @@ export const startPanelServer = async (opts: PanelServerOptions = {}) => {
     await mkdir(dirname(dbPath), { recursive: true })
   }
   await mkdir(stateDir, { recursive: true })
+  await assertStateWritable(stateDir)
 
   const dbHandle = createDb(dbPath)
   let client: ReturnType<typeof createAgentClient> | undefined
@@ -455,6 +459,7 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
   const stateDir = opts.stateDir ?? process.env.XPANEL_STATE_DIR ?? `${defaultBaseDir}/state`
   if (dbPath !== ':memory:') await mkdir(dirname(dbPath), { recursive: true })
   await mkdir(stateDir, { recursive: true })
+  await assertStateWritable(stateDir)
   const dbHandle = createDb(dbPath)
   let client: ReturnType<typeof createAgentClient> | undefined
   const listeners: Awaited<ReturnType<typeof listenApiServer>>[] = []
@@ -523,7 +528,7 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
   }
 }
 
-const CLI_VERBS = new Set(['status', 'reconcile', 'rollback', 'reindex', 'init-root', 'reset-password', 'disable-2fa', 'help', '--help', '-h'])
+const CLI_VERBS = new Set(['status', 'reconcile', 'rollback', 'reindex', 'init-root', 'reset-password', 'disable-2fa', 'repair-state-ownership', 'help', '--help', '-h'])
 
 const readPasswordInput = async (): Promise<string> => {
   if (process.stdin.isTTY) {
@@ -557,13 +562,49 @@ const isMainModule = (): boolean => {
   }
 }
 
+const repairStateOwnership = (stateDir: string, dbPath: string): void => {
+  const targets = [stateDir, dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`]
+  for (const target of targets) {
+    const result = spawnSync('chown', target === stateDir ? ['-R', 'xpanel:xpanel', target] : ['xpanel:xpanel', target], { encoding: 'utf8' })
+    if (result.status !== 0 && target === stateDir) {
+      process.stderr.write(`state ownership repair failed: ${result.stderr || result.error?.message || 'chown failed'}\n`)
+      process.exit(result.status ?? 1)
+    }
+  }
+  process.stdout.write(`state ownership repaired for ${stateDir}\n`)
+  process.exit(0)
+}
+
+const dropCliToXpanel = (args: readonly string[]): void => {
+  const result = spawnSync('runuser', ['-u', 'xpanel', '--', process.execPath, process.argv[1] ?? '', ...args], {
+    stdio: 'inherit',
+    env: process.env,
+  })
+  if (result.error || result.status === null) {
+    process.stderr.write(`refusing to write panel state as root: ${result.error?.message ?? 'runuser -u xpanel failed'}\n`)
+    process.exit(1)
+  }
+  process.exit(result.status)
+}
+
 if (isMainModule()) {
   const args = process.argv.slice(2)
   const firstArg = args[0] === 'xpanel' ? args[1] : args[0]
   if (firstArg && CLI_VERBS.has(firstArg)) {
-    if (process.platform === 'linux' && process.getuid?.() !== 0 && !['status', 'help', '--help', '-h'].includes(firstArg)) {
-      fail('FORBIDDEN', 'local administrative commands require the operating-system root user')
+    const invocation = classifyCliInvocation({
+      platform: process.platform,
+      uid: process.getuid?.(),
+      command: firstArg,
+      serviceUid: xpanelServiceUid(),
+    })
+    if (invocation === 'refuse') {
+      fail('FORBIDDEN', 'administrative commands must run as the xpanel service user. Root invocations are re-executed with runuser -u xpanel.')
     }
+    const defaultPaths = process.platform === 'linux' ? '/var/lib/xpanel' : '.xpanel-data'
+    if (invocation === 'repair-as-root') {
+      repairStateOwnership(process.env.XPANEL_STATE_DIR ?? `${defaultPaths}/state`, process.env.XPANEL_DB_PATH ?? `${defaultPaths}/control.db`)
+    }
+    if (invocation === 'drop-to-xpanel') dropCliToXpanel(args)
     // Keep CLI-created SQLite sidecars private to the same trusted daemon group.
     process.umask(0o007)
     const defaultBaseDir = process.platform === 'linux' ? '/var/lib/xpanel' : '.xpanel-data'

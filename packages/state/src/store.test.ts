@@ -169,16 +169,18 @@ describe('state files on disk and atomic snapshot validation', () => {
 })
 
 describe('accounts, plans, resellers and UID allocator invariants', () => {
-  it('rolls everything back when username clashes with a reseller, keeping the UID burnt', async () => {
+  it('rolls a clashing username back and releases the reserved UID', async () => {
     const plan = await seedPlan()
-    const ok = await seedAccount(plan.id, { primaryDomain: 'taken.example.com' })
+    await seedAccount(plan.id, { primaryDomain: 'taken.example.com' })
     await h.store.createReseller(resellerInput('bobx'))
     const before = await h.store.countAccounts()
+    const beforeUid = await h.store.maxAllocatedUid()
     expect(await code(h.store.createAccount(accountInput(plan.id, { username: 'bobx' })))).toBe('CONFLICT')
     expect(await h.store.countAccounts()).toBe(before)
     expect(await h.store.getAccountByUsername('bobx')).toBeNull()
+    expect(await h.store.maxAllocatedUid()).toBe(beforeUid)
     const bob = await h.store.createAccount(accountInput(plan.id, { username: 'bob' }))
-    expect(bob.uid).toBeGreaterThan(ok.uid + 1)
+    expect(bob.uid).toBe((beforeUid ?? 19999) + 1)
   })
 
   it('refuses a primary domain that overlaps another account before any UID is burnt', async () => {

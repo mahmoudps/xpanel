@@ -1094,7 +1094,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       assignment.setCustomValidity(available ? '' : shared ? copy('No default shared IPv4 is configured.', 'لم يُضبط عنوان IPv4 مشترك افتراضي.') : copy('This dedicated IPv4 selection is unavailable. Choose another assignment.', 'العنوان المخصص المحدد غير متاح. اختر تعيينًا آخر.'));
       ipAddress.textContent = current && (shared ? current.shared && current.shared.address : selected && selected.address) || '';
       ipAddress.parentElement.hidden = !ipAddress.textContent;
-      if (current) ipStatus(available ? copy('Host binding unverified.', 'لم يُتحقق من ربط العنوان بالخادم.') : assignment.validationMessage, available ? 'ready' : 'unavailable');
+      if (current) ipStatus(available ? copy('Checked on the server after creation.', 'يُفحص على الخادم بعد الإنشاء.') : assignment.validationMessage, available ? 'ready' : 'unavailable');
       return available;
     }
     function renderIpOptions() {
@@ -1221,8 +1221,11 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         }
       }).catch(function (error) {
         var details = error && error.details || {};
-        reviewRequired = details.stateChanged !== false;
-        var message = reviewRequired
+        var serverFailed = error && (error.status === 500 || error.code === 'INTERNAL_ERROR');
+        reviewRequired = serverFailed ? details.stateChanged === true : details.stateChanged !== false;
+        var message = serverFailed
+          ? copy('The server could not complete this request.', 'تعذر على الخادم إكمال هذا الطلب.')
+          : reviewRequired
           ? copy('The request could not be verified. Review accounts before retrying.', 'تعذر التحقق من الطلب. راجع الحسابات قبل إعادة المحاولة.')
           : copy('Account creation is unavailable. No changes were made.', 'إنشاء الحساب غير متاح. لم تُجرَ تغييرات.');
         if (!reviewRequired) {
@@ -1335,9 +1338,19 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       busy = true; cancel.disabled = true; confirmation.readOnly = true; reason.readOnly = true; form.setAttribute('aria-busy', 'true'); validate();
       status(copy('Submitting…', 'جارٍ الإرسال…'), 'loading');
       Promise.resolve().then(function () { return window.xpanelSessionRequest(deleting ? 'DELETE' : 'POST', endpoint, body); }).then(function (result) {
+        if (deleting) {
+          if (!result || result.ok !== true || result.purged !== true) {
+            status(copy('The result could not be verified. Review the account before retrying.', 'تعذر التحقق من النتيجة. راجع الحساب قبل إعادة المحاولة.'), 'failed'); return;
+          }
+          accepted = true;
+          var removed = origin && origin.closest('[data-account-row]');
+          if (removed) removed.hidden = true;
+          status(copy('Account removed.', 'تم حذف الحساب.'), 'pending');
+          return;
+        }
         var expected = verb === 'suspend' ? 'suspended' : 'active';
         var execution = result && result.execution;
-        if (deleting || !result || !result.account || result.account.id !== selected.id || result.account.status !== expected || !result.reconcile || result.reconcile.status !== 'applied' || !execution || execution.status !== 'configuration_applied' || execution.scope !== 'global_configuration' || execution.targetVerified !== false || execution.verificationRequired !== true) {
+        if (!result || !result.account || result.account.id !== selected.id || result.account.status !== expected || !result.reconcile || result.reconcile.status !== 'applied' || !execution || execution.status !== 'configuration_applied' || execution.scope !== 'global_configuration' || execution.targetVerified !== false || execution.verificationRequired !== true) {
           status(copy('The result could not be verified. Review the account before retrying.', 'تعذر التحقق من النتيجة. راجع الحساب قبل إعادة المحاولة.'), 'failed'); return;
         }
         accepted = true;
@@ -1352,10 +1365,13 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
           if (icon) icon.innerHTML = '<path d="M8 2.2L14.4 13.5H1.6L8 2.2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6.5V9.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.6" r="0.85" fill="currentColor"/>';
         }
         if (origin) origin.disabled = true;
-        status(copy('Configuration applied. Hosting verification is still required.', 'طُبق الإعداد. ما زال يلزم التحقق من الاستضافة.'), 'pending');
+        status(copy(verb === 'suspend' ? 'Account suspended. Hosting verification is still required.' : 'Account restored. Hosting verification is still required.', verb === 'suspend' ? 'تم تعليق الحساب. ما زال يلزم التحقق من الاستضافة.' : 'أُعيد الحساب. ما زال يلزم التحقق من الاستضافة.'), 'pending');
       }).catch(function (error) {
         var details = error && error.details || {};
-        var message = details.stateChanged === false ? copy('Action unavailable. No changes were made.', 'الإجراء غير متاح. لم تُجرَ تغييرات.') : copy('The request could not be verified. Review the account before retrying.', 'تعذر التحقق من الطلب. راجع الحساب قبل إعادة المحاولة.');
+        var serverFailed = error && (error.status === 500 || error.code === 'INTERNAL_ERROR');
+        var message = serverFailed
+          ? copy('The server could not complete this request.', 'تعذر على الخادم إكمال هذا الطلب.')
+          : details.stateChanged === false ? copy('Action unavailable. No changes were made.', 'الإجراء غير متاح. لم تُجرَ تغييرات.') : copy('The request could not be verified. Review the account before retrying.', 'تعذر التحقق من الطلب. راجع الحساب قبل إعادة المحاولة.');
         if (error && error.status === 401) message = copy('Your session expired. Sign in again.', 'انتهت الجلسة. سجّل الدخول مجددًا.');
         else if (error && error.status === 403) message = copy('You do not have permission for this action.', 'لا تملك صلاحية هذا الإجراء.');
         else if (error && error.status === 404) message = copy('This account is no longer available.', 'لم يعد هذا الحساب متاحًا.');
@@ -1595,6 +1611,10 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     if (typeof window.xpanelSessionRequest !== 'function') return;
     var ar = document.documentElement.lang === 'ar';
     function note(el, message) { if (!el) return; el.hidden = false; el.textContent = message; }
+    function dialogInput(selector, name) {
+      var dialog = document.querySelector(selector);
+      return dialog ? dialog.querySelector('[name="' + name + '"]') : null;
+    }
     function failText(error) { return (error && error.message) || (ar ? 'تعذر إكمال الطلب.' : 'The request could not be completed.'); }
     function reload() { window.location.reload(); }
     document.querySelectorAll('[data-domain-form]').forEach(function (form) {
@@ -1627,11 +1647,62 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         window.xpanelSessionRequest('POST', '/api/service-users', body).then(reload).catch(function (error) { note(status, failText(error)); });
       });
     });
-    document.querySelectorAll('[data-mailbox-password]').forEach(function (button) {
-      button.addEventListener('click', function () {
-        var password = window.prompt(ar ? 'كلمة المرور الجديدة' : 'New password');
-        if (!password) return;
-        window.xpanelSessionRequest('PATCH', '/api/service-users/' + button.getAttribute('data-mailbox-password'), { password: password }).then(reload).catch(function (error) { note(button.parentElement, failText(error)); });
+    function bindToolDialog(selector, onOpen) {
+      var dialog = document.querySelector(selector);
+      if (!dialog || typeof dialog.showModal !== 'function') return;
+      var form = dialog.querySelector('form');
+      var status = dialog.querySelector('[data-dialog-status]');
+      var cancel = dialog.querySelector('[data-dialog-cancel]');
+      var busy = false;
+      var run = function () { return Promise.resolve(); };
+      function show(message, state) {
+        if (!status) return;
+        status.hidden = !message;
+        status.textContent = message || '';
+        status.setAttribute('data-state', state || 'idle');
+      }
+      if (cancel) cancel.addEventListener('click', function () { if (!busy) dialog.close(); });
+      dialog.addEventListener('close', function () { busy = false; show('', 'idle'); });
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        if (busy || (typeof form.reportValidity === 'function' && !form.reportValidity())) return;
+        busy = true;
+        show(ar ? 'جارٍ الإرسال…' : 'Submitting…', 'loading');
+        Promise.resolve().then(run).then(function () {
+          show(ar ? 'تم الحفظ.' : 'Saved.', 'pending');
+          reload();
+        }).catch(function (error) {
+          busy = false;
+          show(failText(error), 'failed');
+        });
+      });
+      onOpen(function (next) {
+        run = next;
+        show('', 'idle');
+        dialog.showModal();
+      });
+    }
+    bindToolDialog('[data-mailbox-password-dialog]', function (open) {
+      document.querySelectorAll('[data-mailbox-password]').forEach(function (button) {
+        button.addEventListener('click', function () {
+          var input = dialogInput('[data-mailbox-password-dialog]', 'password');
+          if (input) input.value = '';
+          open(function () {
+            var password = input ? input.value : '';
+            return window.xpanelSessionRequest('PATCH', '/api/service-users/' + button.getAttribute('data-mailbox-password'), { password: password });
+          });
+        });
+      });
+    });
+    bindToolDialog('[data-mailbox-quota-dialog]', function (open) {
+      document.querySelectorAll('[data-mailbox-quota]').forEach(function (button) {
+        button.addEventListener('click', function () {
+          var input = dialogInput('[data-mailbox-quota-dialog]', 'mailboxQuotaMb');
+          if (input) input.value = button.getAttribute('data-mailbox-quota-value') || '';
+          open(function () {
+            return window.xpanelSessionRequest('PATCH', '/api/service-users/' + button.getAttribute('data-mailbox-quota'), { mailboxQuotaMb: Number(input.value) });
+          });
+        });
       });
     });
     document.querySelectorAll('[data-remove-mailbox]').forEach(function (button) {
@@ -1708,9 +1779,24 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         window.xpanelSessionRequest('POST', '/api/plans', body).then(reload).catch(function (error) { note(status, failText(error)); });
       });
     });
-    document.querySelectorAll('[data-plan-delete]').forEach(function (button) {
-      button.addEventListener('click', function () {
-        window.xpanelSessionRequest('DELETE', '/api/plans/' + button.getAttribute('data-plan-delete')).then(reload).catch(function (error) { note(button.parentElement, failText(error)); });
+    bindToolDialog('[data-database-delete-dialog]', function (open) {
+      document.querySelectorAll('[data-remove-database]').forEach(function (button) {
+        button.addEventListener('click', function () {
+          var name = document.querySelector('[data-database-delete-name]');
+          if (name) name.textContent = button.getAttribute('data-database-name') || '';
+          open(function () {
+            return window.xpanelSessionRequest('DELETE', '/api/databases/' + button.getAttribute('data-remove-database'));
+          });
+        });
+      });
+    });
+    bindToolDialog('[data-plan-delete-dialog]', function (open) {
+      document.querySelectorAll('[data-plan-delete]').forEach(function (button) {
+        button.addEventListener('click', function () {
+          open(function () {
+            return window.xpanelSessionRequest('DELETE', '/api/plans/' + button.getAttribute('data-plan-delete'));
+          });
+        });
       });
     });
     var filesRoot = document.querySelector('[data-file-manager="browse"]');

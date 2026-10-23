@@ -248,16 +248,16 @@ export class WriterLock {
     } catch (error) { await handle?.close().catch(() => undefined); await rm(temp, { force: true }).catch(() => undefined); throw error }
   }
   private async recoverGeneric(journal: WriteIntentRecord): Promise<void> {
+    // A crash journal that only lists the allocator as a created path keeps that burn.
+    // A journaled preimage is restored so a failed account create releases its reservation.
     for (const rel of journal.createdRelPaths) if (rel.toLowerCase() !== 'uid-allocator.json') await atomicRemove(await this.confinedPath(rel))
     for (const backup of journal.backups) {
-      if (backup.relPath.toLowerCase() === 'uid-allocator.json') continue
       const target = await this.confinedPath(backup.relPath)
       if (!backup.existed) await atomicRemove(target)
       else await this.writeBackupBytes(target, backup.contentBase64!)
     }
     for (const rel of journal.createdRelPaths) if (rel.toLowerCase() !== 'uid-allocator.json' && await lstat(await this.confinedPath(rel)).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })) return fail('CONFLICT', 'rollback removal could not be verified')
     for (const backup of journal.backups) {
-      if (backup.relPath.toLowerCase() === 'uid-allocator.json') continue
       const target = await this.confinedPath(backup.relPath)
       if (backup.existed) { if (!(await readFile(target)).equals(Buffer.from(backup.contentBase64!, 'base64'))) return fail('CONFLICT', 'rollback preimage could not be verified') }
       else if (await lstat(target).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })) return fail('CONFLICT', 'rollback absence could not be verified')

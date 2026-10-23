@@ -270,7 +270,7 @@ describe('H04 Account Lifecycle Coordinator (Plans, Resellers, Provisioning, Sus
     }
   })
 
-  it('handles mid-create failures without orphaned state, permanently burns failed UIDs, and resumes checkpointed jobs', async () => {
+  it('handles mid-create failures without orphaned state, releases the reserved UID, and resumes checkpointed jobs', async () => {
     const h = await createTestHarness()
     try {
       // Case A: Failure mid-create inside StateStore after UID 20000 is allocated
@@ -292,11 +292,10 @@ describe('H04 Account Lifecycle Coordinator (Plans, Resellers, Provisioning, Sus
         /injected failure before account\.json commit/,
       )
 
-      // Partial state must be rolled back, but UID 20000 must remain permanently burnt
+      // Partial state is rolled back and the reserved UID is released for the retry.
       assert.equal(await h.store.getAccountByUsername('midcrash'), null)
-      assert.equal(await h.store.maxAllocatedUid(), 20000)
+      assert.equal(await h.store.maxAllocatedUid(), null)
 
-      // Retrying the same durable job succeeds cleanly and allocates fresh UID 20001 (never reuses 20000)
       const recovered = await h.coordinator.provisionAccount({
         actor: ROOT_ACTOR,
         username: 'midcrash',
@@ -310,7 +309,7 @@ describe('H04 Account Lifecycle Coordinator (Plans, Resellers, Provisioning, Sus
         passwordHash: TEST_ARGON2_HASH,
       })
       assert.equal(recovered.account.username, 'midcrash')
-      assert.equal(recovered.account.uid, 20001)
+      assert.equal(recovered.account.uid, 20000)
       assert.equal(recovered.job.status, 'succeeded')
 
       // Case B: Worker crash after Step 2 (ensure_principal_and_zone) before host reconciliation
@@ -334,10 +333,9 @@ describe('H04 Account Lifecycle Coordinator (Plans, Resellers, Provisioning, Sus
           err.step === 'ensure_principal_and_zone',
       )
 
-      // Account state was created at UID 20002, but host reconciliation has not yet applied
       const partialAcc = await h.store.getAccountByUsername('stepresume')
       assert.ok(partialAcc)
-      assert.equal(partialAcc.uid, 20002)
+      assert.equal(partialAcc.uid, 20001)
       assert.equal(h.executor.users.has('stepresume'), false)
 
       // Resuming the durable job picks up from step 2 without allocating a new UID, and reconciles the host
@@ -355,10 +353,10 @@ describe('H04 Account Lifecycle Coordinator (Plans, Resellers, Provisioning, Sus
       })
       assert.equal(resumed.resumedFromStep, 2)
       assert.equal(resumed.account.id, partialAcc.id)
-      assert.equal(resumed.account.uid, 20002)
+      assert.equal(resumed.account.uid, 20001)
       assert.equal(resumed.job.status, 'succeeded')
       assert.equal(h.executor.users.has('stepresume'), true)
-      assert.ok(h.executor.files.has('/etc/systemd/system/xpanel-20002.slice'))
+      assert.ok(h.executor.files.has('/etc/systemd/system/xpanel-20001.slice'))
     } finally {
       await h.cleanup()
     }
