@@ -12,6 +12,7 @@ import {
   localDeliveryMainBlock,
   localSubmissionMasterBlock,
   postfixMainSettings,
+  probeLocalSubmissionAuth,
   renderDovecotAuthConf,
   renderDovecotMailboxConf,
   renderDovecotXpanelConf,
@@ -299,12 +300,16 @@ describe('Postfix main.cf', () => {
 })
 
 describe('Dovecot configuration', () => {
-  it('replaces 10-auth.conf with passwd-file passdb/userdb keyed by %Ld (no PAM)', () => {
-    const f = renderDovecotAuthConf(rhel)
-    expect(f.path).toBe('/opt/test/dovecot/conf.d/10-auth.conf')
-    expect(f.content).toContain('args = username_format=%Lu /opt/test/dovecot/xpanel/domains/%Ld.passwd')
-    expect(f.content).not.toContain('auth-system')
-    expect(f.content).not.toMatch(/auth_username_chars = .*\//)
+  it('disables PAM in 10-auth.conf and leaves passdb/userdb to 11-xpanel-mailboxes.conf', () => {
+    const auth = renderDovecotAuthConf(rhel)
+    expect(auth.path).toBe('/opt/test/dovecot/conf.d/10-auth.conf')
+    expect(auth.content).not.toMatch(/^passdb \{/m)
+    expect(auth.content).not.toMatch(/^userdb \{/m)
+    expect(auth.content).not.toContain('auth-system')
+    expect(auth.content).not.toMatch(/auth_username_chars = .*\//)
+    const mailbox = renderDovecotMailboxConf(rhel)
+    expect(mailbox.content.match(/^passdb \{/gm)).toHaveLength(1)
+    expect(mailbox.content.match(/^userdb \{/gm)).toHaveLength(1)
   })
 
   it('wires LMTP/auth sockets, quota warnings and per-mailbox sieve', () => {
@@ -480,7 +485,17 @@ describe('dkimDnsRecord', () => {
     expect(master).toContain('127.0.0.1:587 inet n - n - - smtpd')
     expect(master).toContain('smtpd_sender_restrictions=reject_sender_login_mismatch')
     expect(master).toContain('smtpd_tls_security_level=may')
-    expect(master).toContain('smtpd_tls_auth_only=no')
+    expect(master).toContain('smtpd_tls_auth_only=yes')
+    expect(master).toContain('smtpd_sasl_auth_enable=yes')
+    expect(main).toContain('smtpd_sasl_auth_enable = no')
+    expect(main).not.toMatch(/smtpd_sasl_auth_enable\s*=\s*yes/)
+    expect(probeLocalSubmissionAuth(debian)).toEqual({
+      port25SaslEnabled: false,
+      submissionSaslEnabled: true,
+      submissionTlsAuthOnly: true,
+      submissionRejectsSenderLoginMismatch: true,
+      ok: true,
+    })
     const once = replaceManagedBlock('queue_directory = /var/spool/postfix\n', main)
     expect(replaceManagedBlock(once, main)).toBe(once)
     expect(once).toContain('queue_directory = /var/spool/postfix')

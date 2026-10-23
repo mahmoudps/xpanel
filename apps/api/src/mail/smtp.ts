@@ -7,7 +7,10 @@ import type { MimeAttachmentInput } from './mime.ts'
 export interface SmtpConnectionConfig {
   host: string
   port: number
+  /** Implicit TLS (SMTPS). Mutually exclusive with `starttls`. */
   tls?: boolean
+  /** Upgrade with STARTTLS before AUTH. Required when submission sets smtpd_tls_auth_only. */
+  starttls?: boolean
   rejectUnauthorized?: boolean
   clientHostname?: string
   timeoutMs?: number
@@ -291,6 +294,31 @@ export class SmtpSubmissionClient {
       socket.write(`${line}\r\n`)
     }
 
+    const attachIo = (target: net.Socket | tls.TLSSocket): void => {
+      target.on('error', (err) => {
+        if (pendingWaiter) {
+          const w = pendingWaiter
+          pendingWaiter = null
+          w.reject(err)
+        }
+      })
+      target.on('data', (chunk: Buffer) => {
+        receiveBuffer = Buffer.concat([receiveBuffer, chunk])
+        if (pendingWaiter) {
+          const w = pendingWaiter
+          pendingWaiter = null
+          w.resolve()
+        }
+      })
+      target.on('close', () => {
+        if (pendingWaiter) {
+          const w = pendingWaiter
+          pendingWaiter = null
+          w.reject(new Error('SMTP socket closed unexpectedly'))
+        }
+      })
+    }
+
     try {
       socket = await new Promise<net.Socket | tls.TLSSocket>((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -313,28 +341,9 @@ export class SmtpSubmissionClient {
 
         s.on('error', (err) => {
           clearTimeout(timer)
-          if (pendingWaiter) {
-            const w = pendingWaiter
-            pendingWaiter = null
-            w.reject(err)
-          }
           reject(err)
         })
-        s.on('data', (chunk: Buffer) => {
-          receiveBuffer = Buffer.concat([receiveBuffer, chunk])
-          if (pendingWaiter) {
-            const w = pendingWaiter
-            pendingWaiter = null
-            w.resolve()
-          }
-        })
-        s.on('close', () => {
-          if (pendingWaiter) {
-            const w = pendingWaiter
-            pendingWaiter = null
-            w.reject(new Error('SMTP socket closed unexpectedly'))
-          }
-        })
+        attachIo(s)
       })
 
       const greeting = await readSmtpResponse()
@@ -347,6 +356,45 @@ export class SmtpSubmissionClient {
       const ehloRes = await readSmtpResponse()
       if (ehloRes.code !== 250) {
         throw new Error(`SMTP EHLO failed (${ehloRes.code}): ${ehloRes.message}`)
+      }
+
+      if (this.config.starttls) {
+        if (this.config.tls) throw new Error('SMTP STARTTLS is not used on an implicit TLS connection')
+        if (!ehloRes.lines.some((line) => /^250[- ]STARTTLS$/i.test(line))) {
+          throw new Error('SMTP server does not advertise STARTTLS')
+        }
+        sendLine('STARTTLS')
+        const ready = await readSmtpResponse()
+        if (ready.code !== 220) throw new Error(`SMTP STARTTLS refused (${ready.code}): ${ready.message}`)
+        const plain = socket
+        if (!plain) throw new Error('SMTP socket is closed')
+        plain.removeAllListeners('data')
+        plain.removeAllListeners('error')
+        plain.removeAllListeners('close')
+        const loopback = this.config.host === '127.0.0.1' || this.config.host === '::1' || this.config.host === 'localhost'
+        const secure = tls.connect({
+          socket: plain,
+          servername: this.config.host,
+          rejectUnauthorized: this.config.rejectUnauthorized ?? !loopback,
+        })
+        socket = secure
+        attachIo(secure)
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error(`SMTP STARTTLS timed out after ${timeoutMs}ms`)), timeoutMs)
+          secure.once('secureConnect', () => {
+            clearTimeout(timer)
+            resolve()
+          })
+          secure.once('error', (err) => {
+            clearTimeout(timer)
+            reject(err)
+          })
+        })
+        sendLine(`EHLO ${ehloHost}`)
+        const secured = await readSmtpResponse()
+        if (secured.code !== 250) {
+          throw new Error(`SMTP EHLO after STARTTLS failed (${secured.code}): ${secured.message}`)
+        }
       }
 
       // Authenticate using SASL PLAIN (\0username\0password)

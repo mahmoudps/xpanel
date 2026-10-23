@@ -451,6 +451,18 @@ export function buildFrozenInstallEnvironment(targetDir, { pnpmPath: explicitPnp
   return { env, pnpmPath, pnpmVersion: wanted, command: pnpmArgs.length ? process.execPath : pnpmPath, args: pnpmArgs }
 }
 
+/**
+ * Official offline stage install.
+ * `--frozen-lockfile` refuses a lockfile that drifted from the snapshot.
+ * `--prefer-offline` is the supported way for this stage to satisfy pnpm's
+ * supply-chain checks (minimumReleaseAge and trust metadata) from the local
+ * store when the qualification host cannot reach the registry. A cold store
+ * still needs one earlier online install to populate package metadata.
+ * The lockfile must record `@xpanel/os` -> `@xpanel/render` as `workspace:*`
+ * (`link:../render`); without that link a frozen install cannot build.
+ */
+export const FROZEN_STAGE_INSTALL_ARGS = ['install', '--frozen-lockfile', '--prefer-offline']
+
 function defaultInstallCommand(targetDir, options = {}) {
   let tool
   try {
@@ -463,7 +475,7 @@ function defaultInstallCommand(targetDir, options = {}) {
       pnpmVersion: null,
     }
   }
-  const child = spawnSync(tool.command, [...tool.args, 'install', '--frozen-lockfile'], {
+  const child = spawnSync(tool.command, [...tool.args, ...FROZEN_STAGE_INSTALL_ARGS], {
     cwd: targetDir,
     env: tool.env,
     encoding: 'utf8',

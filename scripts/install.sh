@@ -341,21 +341,12 @@ NODE
 
 render_dovecot_auth() {
   cat <<'EOF'
-# managed by xPanel: virtual mailboxes only, one passwd-file per domain
+# managed by xPanel: disable the distribution PAM passdb
+# Mailbox passdb and userdb are owned by conf.d/11-xpanel-mailboxes.conf.
 disable_plaintext_auth = yes
 auth_mechanisms = plain login
 auth_username_format = %Lu
 auth_username_chars = abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890.-_@
-
-passdb {
-  driver = passwd-file
-  args = username_format=%Lu /etc/dovecot/xpanel/domains/%Ld.passwd
-}
-
-userdb {
-  driver = passwd-file
-  args = username_format=%Lu /etc/dovecot/xpanel/domains/%Ld.passwd
-}
 EOF
 }
 
@@ -407,7 +398,7 @@ virtual_mailbox_maps = texthash:/etc/postfix/xpanel/virtual_mailboxes
 virtual_alias_maps = texthash:/etc/postfix/xpanel/virtual_aliases
 virtual_transport = lmtp:unix:private/dovecot-lmtp
 transport_maps = texthash:/etc/postfix/xpanel/transport
-smtpd_sasl_auth_enable = yes
+smtpd_sasl_auth_enable = no
 smtpd_sasl_type = dovecot
 smtpd_sasl_path = private/auth
 smtpd_sender_login_maps = texthash:/etc/postfix/xpanel/sender_logins
@@ -420,7 +411,7 @@ render_master_block() {
 127.0.0.1:587 inet n - n - - smtpd
   -o syslog_name=postfix/submission
   -o smtpd_tls_security_level=may
-  -o smtpd_tls_auth_only=no
+  -o smtpd_tls_auth_only=yes
   -o smtpd_sasl_auth_enable=yes
   -o smtpd_sasl_type=dovecot
   -o smtpd_sasl_path=private/auth

@@ -141,7 +141,16 @@ export const createLocalMailboxTransport = (
       await withImap(imapHost, imapPort, mailbox, password, client => client.deleteByUid('INBOX', uid), imapTimeout)
     },
     async send(mailbox, password, input) {
-      const smtp = new SmtpSubmissionClient({ host: smtpHost, port: smtpPort, tls: false, timeoutMs: smtpTimeout })
+      const loopback = smtpHost === '127.0.0.1' || smtpHost === '::1' || smtpHost === 'localhost'
+      const smtp = new SmtpSubmissionClient({
+        host: smtpHost,
+        port: smtpPort,
+        tls: false,
+        starttls: true,
+        // Loopback submission presents the public certificate name. The peer is local Postfix.
+        rejectUnauthorized: loopback ? false : true,
+        timeoutMs: smtpTimeout,
+      })
       try {
         const result = await smtp.submitMessage({ username: mailbox, password }, {
           idempotencyKey: input.idempotencyKey,

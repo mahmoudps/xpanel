@@ -316,7 +316,7 @@ export const postfixMainSettings = (os: OsProfile, o: PostfixMainOptions = {}): 
     message_size_limit: String(size),
     // Debian ships mailbox_size_limit = 0, EL keeps the default, which is below 50 MB
     mailbox_size_limit: String(Math.max(POSTFIX_DEFAULT_MAILBOX_LIMIT, size)),
-    smtpd_sasl_auth_enable: 'yes',
+    // SASL stays off in main.cf. Port 25 must not advertise AUTH; submission turns it on.
     smtpd_sasl_type: 'dovecot',
     smtpd_sasl_path: 'private/auth',
     smtpd_sender_login_maps: `${t}:${p.senders}`,
@@ -368,6 +368,7 @@ export const postfixClientServices = (os: OsProfile): HostAction[] => {
       syslog_name: `postfix/${name}`,
       smtpd_tls_security_level: 'encrypt',
       smtpd_sasl_auth_enable: 'yes',
+      smtpd_tls_auth_only: 'yes',
       smtpd_client_restrictions: saslOnly,
       smtpd_relay_restrictions: saslOnly,
       ...extra,
@@ -411,15 +412,18 @@ export const replaceManagedBlock = (existing: string, body: string): string => {
   return `${base}${block}`
 }
 
-/** Virtual mailbox maps and LMTP delivery. Sender mismatch is enforced on submission, not port 25. */
+/**
+ * Virtual mailbox maps and LMTP delivery. Port 25 explicitly disables SASL.
+ * Sender mismatch is enforced on submission, not port 25.
+ */
 export const localDeliveryMainBlock = (os: OsProfile, o: PostfixMainOptions = {}): string => {
-  const settings = postfixMainSettings(os, o)
+  const settings: Record<string, string> = { ...postfixMainSettings(os, o), smtpd_sasl_auth_enable: 'no' }
   return LOCAL_DELIVERY_KEYS.map((key) => `${key} = ${settings[key]}`).join('\n')
 }
 
 /**
- * Loopback submission for webmail AUTH PLAIN without TLS. `smtpd_tls_security_level=may`
- * keeps plaintext available on 127.0.0.1; sender login mismatch is rejected here only.
+ * Loopback submission. SASL is enabled only here, and only after STARTTLS.
+ * Sender login mismatch stays on this service.
  */
 export const localSubmissionMasterBlock = (os: OsProfile, o: PostfixOptions = {}): string => {
   const senders = postfixMainSettings(os, o).smtpd_sender_login_maps
@@ -427,7 +431,7 @@ export const localSubmissionMasterBlock = (os: OsProfile, o: PostfixOptions = {}
     '127.0.0.1:587 inet n - n - - smtpd',
     '  -o syslog_name=postfix/submission',
     '  -o smtpd_tls_security_level=may',
-    '  -o smtpd_tls_auth_only=no',
+    '  -o smtpd_tls_auth_only=yes',
     '  -o smtpd_sasl_auth_enable=yes',
     '  -o smtpd_sasl_type=dovecot',
     '  -o smtpd_sasl_path=private/auth',
@@ -454,26 +458,18 @@ export const QUOTA_WARNING_SCRIPT = '/opt/xpanel/libexec/quota-warning'
 /**
  * Replaces the distribution's conf.d/10-auth.conf so the stock PAM/system passdb
  * (auth-system.conf.ext) is gone: Linux account passwords never open IMAP.
+ * passdb and userdb are owned only by 11-xpanel-mailboxes.conf.
  */
 export const renderDovecotAuthConf = (os: OsProfile): RenderedFile => {
-  const dir = dovecotDomainsDir(os)
+  const dir = assertAbsPath('dovecot dir', os.paths.dovecotDir)
   return {
-    path: `${assertAbsPath('dovecot dir', os.paths.dovecotDir)}/conf.d/10-auth.conf`,
-    content: `# managed by xPanel: virtual mailboxes only, one passwd-file per domain
+    path: `${dir}/conf.d/10-auth.conf`,
+    content: `# managed by xPanel: disable the distribution PAM passdb
+# Mailbox passdb and userdb are owned by conf.d/11-xpanel-mailboxes.conf.
 disable_plaintext_auth = yes
 auth_mechanisms = plain login
 auth_username_format = %Lu
 auth_username_chars = abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890.-_@
-
-passdb {
-  driver = passwd-file
-  args = username_format=%Lu ${dir}/%Ld.passwd
-}
-
-userdb {
-  driver = passwd-file
-  args = username_format=%Lu ${dir}/%Ld.passwd
-}
 `,
     mode: 0o644,
     owner: 'root',
@@ -481,10 +477,44 @@ userdb {
   }
 }
 
+export interface SubmissionAuthProbe {
+  /** main.cf managed block enables SASL, which would advertise AUTH on port 25. */
+  port25SaslEnabled: boolean
+  submissionSaslEnabled: boolean
+  submissionTlsAuthOnly: boolean
+  submissionRejectsSenderLoginMismatch: boolean
+  ok: boolean
+}
+
 /**
- * Additive Dovecot drop-in: per-domain passwd-file, the Postfix SASL socket, and LMTP
- * delivery into the account maildir. `result_success = return-ok` stops after a mailbox
- * password matches so a later system passdb cannot override it.
+ * Reads the rendered main.cf and submission blocks. Port 25 must not offer AUTH.
+ * The 587 service must enable SASL only after STARTTLS and keep sender-login-mismatch.
+ */
+export const probeLocalSubmissionAuth = (os: OsProfile, o: PostfixMainOptions = {}): SubmissionAuthProbe => {
+  const main = localDeliveryMainBlock(os, o)
+  const master = localSubmissionMasterBlock(os, o)
+  const port25SaslEnabled = /(?:^|\n)smtpd_sasl_auth_enable\s*=\s*yes\b/.test(main)
+  const submissionSaslEnabled = master.includes('smtpd_sasl_auth_enable=yes')
+  const submissionTlsAuthOnly = master.includes('smtpd_tls_auth_only=yes')
+  const submissionRejectsSenderLoginMismatch = master.includes('reject_sender_login_mismatch')
+  const port25Mismatch = main.includes('reject_sender_login_mismatch')
+  return {
+    port25SaslEnabled,
+    submissionSaslEnabled,
+    submissionTlsAuthOnly,
+    submissionRejectsSenderLoginMismatch,
+    ok: !port25SaslEnabled
+      && !port25Mismatch
+      && main.includes('smtpd_sasl_auth_enable = no')
+      && submissionSaslEnabled
+      && submissionTlsAuthOnly
+      && submissionRejectsSenderLoginMismatch,
+  }
+}
+
+/**
+ * Single owner of the mailbox passdb and userdb, plus the Postfix SASL socket and LMTP
+ * delivery. `result_success = return-ok` stops after a mailbox password matches.
  */
 const DEFAULT_POSTMASTER = 'postmaster@localhost.localdomain'
 

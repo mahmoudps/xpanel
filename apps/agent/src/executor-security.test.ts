@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, it } from 'vitest'
@@ -118,6 +118,21 @@ describe('generated host file target authorization', () => {
     const executor = new LinuxHostExecutor({ trustedHostTargets: [{ path: marker, operations }] })
     operations.push('write')
     await assert.rejects(() => executor.writeFile({ path: marker, content: 'changed', mode: 0o600 }), preconditionFailure)
+  })
+
+  it('creates a missing systemd slice drop-in directory and publishes the file without a temp leftover', async () => {
+    if (process.platform === 'win32') return
+    const dir = join(fixture, 'user-20003.slice.d')
+    const target = join(dir, '50-xpanel.conf')
+    const executor = new LinuxHostExecutor({
+      trustedHostTargets: [
+        { path: target, operations: ['read', 'write'] },
+        { path: dir, operations: ['ensure-directory'] },
+      ],
+    })
+    await executor.writeFile({ path: target, content: '[Slice]\nTasksMax=10\n', mode: 0o644 })
+    assert.equal(await readFile(target, 'utf8'), '[Slice]\nTasksMax=10\n')
+    assert.deepEqual(await readdir(dir), ['50-xpanel.conf'])
   })
 
   it('does not create ungranted missing parents for an approved file', async () => {

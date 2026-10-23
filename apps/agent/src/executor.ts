@@ -305,6 +305,14 @@ const SYSTEM_EXACT_TARGETS = new Set<string>([
 /** Read-only host measurements. Existence is not a grant, and no other /proc path is readable. */
 const HOST_MEASUREMENT_READS = new Set<string>(['/proc/loadavg', '/proc/meminfo'])
 
+/** systemd drop-in directories such as user-<uid>.slice.d. The parent unit dir already exists. */
+const SYSTEMD_DROPIN_DIR_RE = /\/[^/]+\.(?:slice|service|socket|timer)\.d$/
+
+const isEnoent = (err: unknown): boolean => {
+  if ((err as NodeJS.ErrnoException).code === 'ENOENT') return true
+  return err instanceof Error && err.message.includes('ENOENT')
+}
+
 const ACCOUNT_HOME_DIR_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}(?:\/(?:public_html|logs|tmp|mail|etc|ssl|\.ssh|cgi-bin))?$/
 const ACCOUNT_MANAGED_WRAPPER_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/(?:cgi-bin\/php\.cgi|(?:public_html\/)?\.user\.ini)$/
 
@@ -488,11 +496,34 @@ export class LinuxHostExecutor implements AgentExecutor {
     return { uid, gid }
   }
 
-  async writeFile(file: RenderedFile): Promise<void> {
-    this.requireHostTarget(file.path, 'write')
-    assertMode(file.mode)
-    if (typeof file.content !== 'string') fail('VALIDATION', 'rendered host file content must be a string')
-    const ownership = await this.resolveOwnership(file.owner, file.group)
+  /**
+   * Creates a systemd drop-in directory (for example user-<uid>.slice.d) before the
+   * atomic publish. The directory must already be an allowed ensure-directory target.
+   */
+  private async ensureSystemdDropInDir(dir: string): Promise<void> {
+    this.requireHostTarget(dir, 'ensure-directory')
+    try {
+      await mkdir(dir, { mode: 0o755 })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    }
+    const directory = await open(dir, constants.O_RDONLY | constants.O_DIRECTORY | (constants.O_NOFOLLOW ?? 0))
+    try {
+      await directory.chmod(0o755)
+    } finally {
+      await directory.close()
+    }
+  }
+
+  /**
+   * Publishes one file by writing a sibling temp, fsyncing it, and renaming it onto
+   * the destination. A vanished temp under a drop-in directory is success when the
+   * destination already has the intended bytes.
+   */
+  private async publishAtomicFile(
+    file: RenderedFile,
+    ownership: { uid: number; gid: number } | undefined,
+  ): Promise<void> {
     const dir = dirname(file.path)
     const tmp = join(dir, `.${randomUUID()}.tmp`)
     let published = false
@@ -508,8 +539,39 @@ export class LinuxHostExecutor implements AgentExecutor {
       }
       await rename(tmp, file.path)
       published = true
+    } catch (err) {
+      if (isEnoent(err) && SYSTEMD_DROPIN_DIR_RE.test(dir)) {
+        try {
+          const current = await this.readFile(file.path)
+          if (current === file.content) {
+            published = true
+            await rm(tmp, { force: true })
+            return
+          }
+        } catch {
+          // The destination was not readable; the original missing-temp error stands.
+        }
+      }
+      throw err
     } finally {
       if (!published) await rm(tmp, { force: true })
+    }
+  }
+
+  async writeFile(file: RenderedFile): Promise<void> {
+    this.requireHostTarget(file.path, 'write')
+    assertMode(file.mode)
+    if (typeof file.content !== 'string') fail('VALIDATION', 'rendered host file content must be a string')
+    const ownership = await this.resolveOwnership(file.owner, file.group)
+    const dir = dirname(file.path)
+    const dropIn = SYSTEMD_DROPIN_DIR_RE.test(dir)
+    if (dropIn) await this.ensureSystemdDropInDir(dir)
+    try {
+      await this.publishAtomicFile(file, ownership)
+    } catch (err) {
+      if (!dropIn || !isEnoent(err)) throw err
+      await this.ensureSystemdDropInDir(dir)
+      await this.publishAtomicFile(file, ownership)
     }
   }
 

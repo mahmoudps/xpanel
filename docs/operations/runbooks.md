@@ -24,7 +24,7 @@ No credential values belong in commands, process arguments, examples, logs, or r
 | Account file helper | `/opt/xpanel/bin/xpanel-account-files` | Native confined helper; absence must fail closed |
 | Account backup work/download roots | `/var/lib/xpanel/backups/work`, `/var/lib/xpanel/backups/downloads` | Defaults in `packages/lifecycle/src/backup/plan.ts`; a plan does not prove a connected production executor |
 
-The actual administrative CLI is Node running `apps/api/src/main.ts`, implemented by `apps/api/src/cli.ts`. Its commands are `status`, `reconcile [--force]`, `rollback <generation-id>`, `reindex`, `init-root --password-stdin`, `reset-password <username> --password-stdin`, and `disable-2fa <username>`. Administrative verbs require the operating-system root user on Linux. Reconcile/rollback require an authenticated separate agent. There is no implemented general `xpanel-ctl` command suite for backup, vault, certificate, queue, or release operations.
+The actual administrative CLI is Node running `apps/api/src/main.ts`, implemented by `apps/api/src/cli.ts`. Its commands are `status`, `reconcile [--force]`, `reconcile --resolve-failed <generation-id>`, `rollback <generation-id>`, `reindex`, `init-root --password-stdin`, `reset-password <username> --password-stdin`, and `disable-2fa <username>`. Administrative verbs require the operating-system root user on Linux. Reconcile, resolve-failed, and rollback require an authenticated separate agent. There is no implemented general `xpanel-ctl` command suite for backup, vault, certificate, queue, or release operations.
 
 ## Three-profile ingress and existing-installation migration
 
@@ -236,6 +236,14 @@ Targets: A19-A21, A53.
 2. Configuration rollback uses the actual `node /opt/xpanel/apps/api/src/main.ts rollback <generation-id>` command with a positive existing generation ID, OS-root authorization, and authenticated separate agent. It must fail closed when the agent is unavailable.
 3. Release rollback follows the reviewed upgrade ports/procedure and its saved release/state/schema compatibility plan; there is no general `upgrade rollback` CLI in this source. Never reactivate a known security-vulnerable release for public access.
 4. Run independent syntax/service/tenant probes and reconcile observed state with the recorded active generation. Preserve failed attempts and recovery diagnostics.
+5. When `xpanel reconcile` returns HTTP 412 because a generation's rollback failed and the journal phase is `needs_attention`, do not delete the journal by hand. The command below checks that live owned files match the journal backup or the failed candidate, writes an audit row `reconcile.attention_resolved`, marks that generation failed, and drops the active journal. It does not apply a new generation. Run it as root, then reconcile:
+
+   ```bash
+   node /opt/xpanel/apps/api/src/main.ts reconcile --resolve-failed 25
+   node /opt/xpanel/apps/api/src/main.ts reconcile
+   ```
+
+   Replace `25` with the generation id from the 412 detail. A mismatch between the disk and the journal refuses the clear and leaves the journal in place. After a deploy that includes this command, generation 25 on the lab is cleared with the first command, and the second command writes the mail maps.
 
 ### Verification Oracle
 
