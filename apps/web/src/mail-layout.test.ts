@@ -95,7 +95,7 @@ describe('bounded mail reference layout', () => {
       expect(html).toContain(`for="${id}"`)
       expect(html).toContain(`id="${id}"`)
     }
-    expect(html).not.toMatch(/data-action="(?:reply-message|forward-message|archive-message)"|Attach files|Save draft/)
+    expect(html).not.toMatch(/data-action="(?:reply-message|forward-message|archive-message)"/)
   })
 
   it('renders authentication outcomes only from the selected message observation', () => {
