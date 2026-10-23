@@ -1571,8 +1571,43 @@ html[dir="rtl"] .xp-workspace-summary .xp-field-value > bdi[dir="ltr"] { text-al
 
 .xp-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
   gap: var(--xp-space-field);
+}
+
+.xp-kpi-grid > * {
+  min-inline-size: 0;
+}
+
+/* Technical KPI text must survive the live client's textContent replacement. */
+:is(.xp-io-monitor, .xp-website-analytics) .xp-kpi__value {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
+}
+
+html[dir="rtl"] :is(.xp-io-monitor, .xp-website-analytics) .xp-kpi__value {
+  text-align: right;
+}
+
+.xp-plan-resource-value,
+.xp-chart-technical-value {
+  white-space: nowrap;
+}
+
+.xp-plan-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--xp-space-field);
+}
+
+.xp-plan-cap-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--xp-space-sm);
+  min-block-size: 44px;
+  cursor: pointer;
 }
 
 .xp-card {
@@ -2323,7 +2358,7 @@ html[dir="rtl"] .xp-field-value[dir="ltr"] {
 
 @media (max-width: 480px) {
   .xp-kpi-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .xp-card {
     padding: var(--xp-space-field);

@@ -14,6 +14,7 @@ import {
   escapeHtml,
   formatBytes,
   getThresholdLevel,
+  renderLtrValue,
   renderStatusBadge,
   renderThresholdMeter,
 } from './tokens.ts'
@@ -76,14 +77,14 @@ function renderIoAccountRow(rank: AccountIoRank, locale: Locale): string {
     `<tr data-account-id="${escapeHtml(rank.accountId)}" data-uid="${rank.uid}">` +
     `<td>` +
     `<div><strong>${escapeHtml(rank.username)}</strong></div>` +
-    `<div class="xp-mono xp-tabular" style="font-size:0.78rem;color:var(--xp-text-muted);">${escapeHtml(sliceUnit)} (UID ${rank.uid})</div>` +
+    `<div class="xp-mono xp-tabular" style="font-size:0.78rem;color:var(--xp-text-muted);">${renderLtrValue(`${sliceUnit} (UID ${rank.uid})`, 'xp-chart-technical-value')}</div>` +
     `</td>` +
     `<td data-numeric="true" class="xp-tabular">` +
-    `<div class="xp-mono" style="margin-block-end:4px;">R: ${readMbPerSec.toFixed(2)} MB/s · W: ${writeMbPerSec.toFixed(2)} MB/s</div>` +
+    `<div class="xp-mono" style="margin-block-end:4px;">${renderLtrValue(`R: ${readMbPerSec.toFixed(2)} MB/s · W: ${writeMbPerSec.toFixed(2)} MB/s`, 'xp-chart-technical-value')}</div>` +
     renderThresholdMeter(combinedThroughputMb, 100, 'MB/s') +
     `</td>` +
     `<td data-numeric="true" class="xp-tabular xp-mono">` +
-    `R: ${Math.round(rank.readIops)} / W: ${Math.round(rank.writeIops)} IOPS` +
+    `${renderLtrValue(`R: ${Math.round(rank.readIops)} / W: ${Math.round(rank.writeIops)} IOPS`, 'xp-chart-technical-value')}` +
     `</td>` +
     `<td data-numeric="true" class="xp-tabular">` +
     renderThresholdMeter(memUsedMb, rank.memoryLimitMb, 'MB') +
@@ -154,38 +155,38 @@ export function renderServerIoMonitorChart(
     `<h2 style="margin:0;font-size:1.2rem;">${escapeHtml(t(locale, 'io.title'))}</h2>` +
     `<p class="xp-prose" style="margin:4px 0 0;color:var(--xp-text-secondary);font-size:0.88rem;">${escapeHtml(t(locale, 'io.subtitle'))}</p>` +
     `</div>` +
-    `<time class="xp-mono xp-tabular" datetime="${escapeHtml(snapshot.at)}">${escapeHtml(snapshot.at)}</time>` +
+    `<time class="xp-mono xp-tabular" datetime="${escapeHtml(snapshot.at)}">${renderLtrValue(snapshot.at)}</time>` +
     `</header>` +
     `<div class="xp-kpi-grid" style="margin-block-end:var(--xp-space-card);">` +
     `<div class="xp-card">` +
     `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'io.kpi.readRate'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" data-live-kpi="io-read" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${curReadMb} MB/s</div>` +
-    `<div class="xp-mono xp-tabular" style="font-size:0.8rem;color:var(--xp-text-muted);">${Math.round(cur.readIops)} read IOPS</div>` +
+    `<div class="xp-kpi__value xp-tabular" data-live-kpi="io-read" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${renderLtrValue(`${curReadMb} MB/s`)}</div>` +
+    `<div class="xp-mono xp-tabular" style="font-size:0.8rem;color:var(--xp-text-muted);">${renderLtrValue(`${Math.round(cur.readIops)} read IOPS`)}</div>` +
     `</div>` +
     `<div class="xp-card">` +
     `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'io.kpi.writeRate'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" data-live-kpi="io-write" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${curWriteMb} MB/s</div>` +
-    `<div class="xp-mono xp-tabular" style="font-size:0.8rem;color:var(--xp-text-muted);">${Math.round(cur.writeIops)} write IOPS</div>` +
+    `<div class="xp-kpi__value xp-tabular" data-live-kpi="io-write" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${renderLtrValue(`${curWriteMb} MB/s`)}</div>` +
+    `<div class="xp-mono xp-tabular" style="font-size:0.8rem;color:var(--xp-text-muted);">${renderLtrValue(`${Math.round(cur.writeIops)} write IOPS`)}</div>` +
     `</div>` +
     `<div class="xp-card">` +
     `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'io.kpi.iops'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" data-live-kpi="io-iops" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${curTotalIops} IOPS</div>` +
-    `<div class="xp-mono xp-tabular" style="font-size:0.8rem;color:var(--xp-text-muted);">Load 1m: ${cur.loadAvg1m.toFixed(2)}</div>` +
+    `<div class="xp-kpi__value xp-tabular" data-live-kpi="io-iops" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${renderLtrValue(`${curTotalIops} IOPS`)}</div>` +
+    `<div class="xp-mono xp-tabular" style="font-size:0.8rem;color:var(--xp-text-muted);">${renderLtrValue(`Load 1m: ${cur.loadAvg1m.toFixed(2)}`)}</div>` +
     `</div>` +
     `<div class="xp-card">` +
     `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'io.kpi.await'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" data-live-kpi="io-await" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${cur.awaitMs.toFixed(2)} ms</div>` +
+    `<div class="xp-kpi__value xp-tabular" data-live-kpi="io-await" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${renderLtrValue(`${cur.awaitMs.toFixed(2)} ms`)}</div>` +
     `<div>${renderStatusBadge(awaitLevel, `${cur.awaitMs.toFixed(1)} ms await`)}</div>` +
     `</div>` +
     `<div class="xp-card">` +
     `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'io.kpi.psi'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" style="font-size:1.35rem;font-weight:700;margin-block:6px;">${cur.psiSomeAvg10.toFixed(2)}% / ${cur.psiFullAvg10.toFixed(2)}%</div>` +
+    `<div class="xp-kpi__value xp-tabular" style="font-size:1.35rem;font-weight:700;margin-block:6px;">${renderLtrValue(`${cur.psiSomeAvg10.toFixed(2)}% / ${cur.psiFullAvg10.toFixed(2)}%`)}</div>` +
     `<div>${renderStatusBadge(psiLevel, `some ${cur.psiSomeAvg10.toFixed(1)}% · full ${cur.psiFullAvg10.toFixed(1)}%`)}</div>` +
     `</div>` +
     `<div class="xp-card">` +
     `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'io.kpi.cpuMemory'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" style="font-size:1.35rem;font-weight:700;margin-block:6px;">CPU ${cur.cpuPercent.toFixed(1)}%</div>` +
-    `<div class="xp-mono xp-tabular" style="font-size:0.8rem;color:var(--xp-text-muted);">RAM ${memUsedGb} / ${memTotalGb} GB</div>` +
+    `<div class="xp-kpi__value xp-tabular" style="font-size:1.35rem;font-weight:700;margin-block:6px;">${renderLtrValue(`CPU ${cur.cpuPercent.toFixed(1)}%`)}</div>` +
+    `<div class="xp-mono xp-tabular" style="font-size:0.8rem;color:var(--xp-text-muted);">${renderLtrValue(`RAM ${memUsedGb} / ${memTotalGb} GB`)}</div>` +
     `</div>` +
     `</div>` +
     `<div class="xp-card" style="margin-block-end:var(--xp-space-card);">` +
@@ -262,9 +263,9 @@ function renderTopEntriesTable(
                 : renderStatusBadge('ok', '0 5xx')
             return (
               `<tr>` +
-              `<td class="xp-mono xp-tabular">${escapeHtml(item.key)}</td>` +
+              `<td class="xp-mono xp-tabular">${renderLtrValue(item.key, 'xp-chart-technical-value')}</td>` +
               `<td data-numeric="true" class="xp-tabular">${item.requests.toLocaleString('en-US')}</td>` +
-              `<td data-numeric="true" class="xp-tabular">${escapeHtml(formatBytes(item.bytes))}</td>` +
+              `<td data-numeric="true" class="xp-tabular">${renderLtrValue(formatBytes(item.bytes), 'xp-chart-technical-value')}</td>` +
               `<td data-numeric="true" class="xp-tabular">${errBadge}</td>` +
               `</tr>`
             )
@@ -375,41 +376,41 @@ export function renderWebsiteAnalyticsChart(
     `<section class="xp-website-analytics" dir="${dir}" data-surface-widget="website-analytics" data-domain="${escapeHtml(snapshot.domain)}" aria-label="${escapeHtml(t(locale, 'analytics.title'))}">` +
     `<header class="xp-card__header">` +
     `<div>` +
-    `<h2 style="margin:0;font-size:1.2rem;">${escapeHtml(t(locale, 'analytics.title'))} — <span class="xp-mono">${escapeHtml(snapshot.domain)}</span></h2>` +
+    `<h2 style="margin:0;font-size:1.2rem;">${escapeHtml(t(locale, 'analytics.title'))} — <span class="xp-mono">${renderLtrValue(snapshot.domain)}</span></h2>` +
     `<p class="xp-prose" style="margin:4px 0 0;color:var(--xp-text-secondary);font-size:0.88rem;">${escapeHtml(t(locale, 'analytics.subtitle'))}</p>` +
     `</div>` +
-    `<time class="xp-mono xp-tabular" datetime="${escapeHtml(snapshot.at)}">${escapeHtml(snapshot.at)}</time>` +
+    `<time class="xp-mono xp-tabular" datetime="${escapeHtml(snapshot.at)}">${renderLtrValue(snapshot.at)}</time>` +
     `</header>` +
     `<div class="xp-kpi-grid" style="margin-block-end:var(--xp-space-card);">` +
     `<div class="xp-card">` +
     `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'analytics.kpi.requests'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" data-live-kpi="web-requests" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${totals.requests.toLocaleString('en-US')}</div>` +
-    `<div class="xp-mono xp-tabular" style="font-size:0.78rem;color:var(--xp-text-muted);">2xx: ${totals.status2xx} · 3xx: ${totals.status3xx} · 4xx: ${totals.status4xx} · 5xx: ${totals.status5xx}</div>` +
+    `<div class="xp-kpi__value xp-tabular" data-live-kpi="web-requests" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${renderLtrValue(`${totals.requests.toLocaleString('en-US')}`)}</div>` +
+    `<div class="xp-mono xp-tabular" style="font-size:0.78rem;color:var(--xp-text-muted);">${renderLtrValue(`2xx: ${totals.status2xx} · 3xx: ${totals.status3xx} · 4xx: ${totals.status4xx} · 5xx: ${totals.status5xx}`)}</div>` +
     `</div>` +
     `<div class="xp-card">` +
     `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'analytics.kpi.bandwidth'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${escapeHtml(formatBytes(totals.bytes))}</div>` +
-    `<div class="xp-mono xp-tabular" style="font-size:0.78rem;color:var(--xp-text-muted);">${totals.bytes.toLocaleString('en-US')} B</div>` +
+    `<div class="xp-kpi__value xp-tabular" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${renderLtrValue(`${formatBytes(totals.bytes)}`)}</div>` +
+    `<div class="xp-mono xp-tabular" style="font-size:0.78rem;color:var(--xp-text-muted);">${renderLtrValue(`${totals.bytes.toLocaleString('en-US')} B`)}</div>` +
     `</div>` +
     `<div class="xp-card">` +
     `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'analytics.kpi.visitors'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${totals.uniqueVisitors.toLocaleString('en-US')}</div>` +
+    `<div class="xp-kpi__value xp-tabular" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${renderLtrValue(`${totals.uniqueVisitors.toLocaleString('en-US')}`)}</div>` +
     `<div class="xp-mono xp-tabular" style="font-size:0.78rem;color:var(--xp-text-muted);">Edge log cardinality</div>` +
     `</div>` +
     `<div class="xp-card">` +
     `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'analytics.kpi.cacheHit'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" data-live-kpi="web-cache-hit" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${totals.cacheHitRatioPercent.toFixed(1)}%</div>` +
+    `<div class="xp-kpi__value xp-tabular" data-live-kpi="web-cache-hit" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${renderLtrValue(`${totals.cacheHitRatioPercent.toFixed(1)}%`)}</div>` +
     `<div>${renderStatusBadge(cacheLevel, `Hit ${totalCacheHit} · Miss ${totalCacheMiss} · Bypass ${totalCacheBypass}`)}</div>` +
     `</div>` +
     `<div class="xp-card">` +
     `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'analytics.kpi.errorRate'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${totals.errorRatePercent.toFixed(2)}%</div>` +
+    `<div class="xp-kpi__value xp-tabular" style="font-size:1.45rem;font-weight:700;margin-block:6px;">${renderLtrValue(`${totals.errorRatePercent.toFixed(2)}%`)}</div>` +
     `<div>${renderStatusBadge(errorLevel, `${totals.status5xx} 5xx responses`)}</div>` +
     `</div>` +
     `<div class="xp-card">` +
     `<div style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(t(locale, 'analytics.kpi.latency'))}</div>` +
-    `<div class="xp-kpi__value xp-tabular" data-live-kpi="web-p95" style="font-size:1.35rem;font-weight:700;margin-block:6px;">${totals.avgRequestTimeMs.toFixed(1)} / ${totals.p95RequestTimeMs.toFixed(1)} ms</div>` +
-    `<div class="xp-mono xp-tabular" style="font-size:0.78rem;color:var(--xp-text-muted);">Upstream avg: ${totals.avgUpstreamTimeMs.toFixed(1)} ms</div>` +
+    `<div class="xp-kpi__value xp-tabular" data-live-kpi="web-p95" style="font-size:1.35rem;font-weight:700;margin-block:6px;">${renderLtrValue(`${totals.avgRequestTimeMs.toFixed(1)} / ${totals.p95RequestTimeMs.toFixed(1)} ms`)}</div>` +
+    `<div class="xp-mono xp-tabular" style="font-size:0.78rem;color:var(--xp-text-muted);">${renderLtrValue(`Upstream avg: ${totals.avgUpstreamTimeMs.toFixed(1)} ms`)}</div>` +
     `</div>` +
     `</div>` +
     `<div class="xp-card" style="margin-block-end:var(--xp-space-card);">` +

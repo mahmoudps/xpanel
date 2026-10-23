@@ -135,7 +135,8 @@ describe('H03 & Q02 — Bilingual UX/UI, RTL <bdi dir="ltr"> isolation, ASCII di
 
     // Verify responsive CSS collapses multi-column shells and tri-pane webmail at <= 960px and <= 480px (360px mobile & 200% zoom)
     assert.match(DESIGN_TOKENS_CSS, /@media\s*\(max-width:\s*960px\)[\s\S]*?\.xp-mail-tri-pane[\s\S]*?grid-template-columns:\s*1fr/)
-    assert.match(DESIGN_TOKENS_CSS, /@media\s*\(max-width:\s*480px\)[\s\S]*?\.xp-kpi-grid[\s\S]*?grid-template-columns:\s*1fr/)
+    // Both forms are a single flexible track; minmax(0, 1fr) also contains wide children.
+    assert.match(DESIGN_TOKENS_CSS, /@media\s*\(max-width:\s*480px\)[\s\S]*?\.xp-kpi-grid[\s\S]*?grid-template-columns:\s*(?:1fr|minmax\(\s*0\s*,\s*1fr\s*\))\s*;/)
   })
 
   it('A30, A57 & A58: classifies HTTP 202 / queued / unverified responses as pending (never deceptive success) and renders accessible action states in en and ar', () => {

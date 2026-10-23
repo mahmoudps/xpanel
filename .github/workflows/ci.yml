@@ -81,6 +81,9 @@ jobs:
       - name: Exercise 24 Accounts workflow states (synthetic API responses)
         run: node scripts/toolchain.mjs node tests/browser/accounts-acceptance.mjs --output=test-results/accounts-ui-${{ github.run_id }}-${{ github.run_attempt }}
 
+      - name: Exercise 96 technical-value and contained-table layout states (synthetic data)
+        run: node scripts/toolchain.mjs node tests/browser/technical-values-acceptance.mjs --output=test-results/technical-values-${{ github.run_id }}-${{ github.run_attempt }}
+
   qualification-prerequisites:
     if: github.event_name == 'workflow_dispatch'
     name: Read-only Linux prerequisite report (qualification not run)

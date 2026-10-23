@@ -19,6 +19,7 @@ import {
   escapeHtml,
   formatBytes,
   renderAsyncActionState,
+  renderLtrValue,
   renderStatusBadge,
   renderThresholdMeter,
 } from '../tokens.ts'
@@ -600,9 +601,9 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
                   (plan) => `
                 <tr data-plan-row="${escapeHtml(plan.name)}">
                   <td><strong>${escapeHtml(plan.name)}</strong></td>
-                  <td class="xp-mono xp-tabular">${plan.resources.diskMb === 'unlimited' ? 'unlimited' : `${plan.resources.diskMb / 1024} GB`} / ${plan.resources.bandwidthMbMonth === 'unlimited' ? 'unlimited' : `${plan.resources.bandwidthMbMonth / 1024} GB`}</td>
-                  <td class="xp-mono xp-tabular">${plan.resources.cpuPercent}% / ${plan.resources.memoryMb} MB</td>
-                  <td class="xp-mono xp-tabular">${plan.resources.ioReadBps === 'unlimited' ? 'unlimited' : formatBytes(plan.resources.ioReadBps)}/s · ${plan.resources.ioWriteBps === 'unlimited' ? 'unlimited' : formatBytes(plan.resources.ioWriteBps)}/s</td>
+                  <td class="xp-mono xp-tabular">${renderLtrValue(`${plan.resources.diskMb === 'unlimited' ? 'unlimited' : `${plan.resources.diskMb / 1024} GB`} / ${plan.resources.bandwidthMbMonth === 'unlimited' ? 'unlimited' : `${plan.resources.bandwidthMbMonth / 1024} GB`}`, 'xp-plan-resource-value')}</td>
+                  <td class="xp-mono xp-tabular">${renderLtrValue(`${plan.resources.cpuPercent}% / ${plan.resources.memoryMb} MB`, 'xp-plan-resource-value')}</td>
+                  <td class="xp-mono xp-tabular">${renderLtrValue(`${plan.resources.ioReadBps === 'unlimited' ? 'unlimited' : formatBytes(plan.resources.ioReadBps)}/s · ${plan.resources.ioWriteBps === 'unlimited' ? 'unlimited' : formatBytes(plan.resources.ioWriteBps)}/s`, 'xp-plan-resource-value')}</td>
                   <td class="xp-mono xp-tabular">${plan.resources.maxProcesses}</td>
                   <td class="xp-mono xp-tabular">${String(plan.caps.addonDomains)}</td>
                   <td>${renderStatusBadge(plan.shell === 'jailed' ? 'ok' : 'suspended', plan.shell === 'jailed' ? 'jailed' : 'none')}</td>
@@ -634,7 +635,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
             </div>
             <div class="xp-field">
               <label class="xp-label" for="plan-io-max">${isAr ? 'قراءة / كتابة القرص (MB/s)' : 'Disk read / write (MB/s)'}</label>
-              <input id="plan-io-max" name="ioMaxMbps" type="text" class="xp-input xp-mono" value="100 / 50" />
+              <input id="plan-io-max" name="ioMaxMbps" type="text" class="xp-input xp-mono" dir="ltr" value="100 / 50" />
             </div>
             <div class="xp-field">
               <label class="xp-label" for="plan-tasks-max">${isAr ? 'العمليات' : 'Processes'}</label>
@@ -648,8 +649,8 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
               </select>
             </div>
           </div>
-          <div style="display: flex; align-items: center; gap: 16px;">
-            <label style="display: inline-flex; align-items: center; gap: 8px;">
+          <div class="xp-plan-editor-actions">
+            <label class="xp-plan-cap-option">
               <input type="checkbox" name="unlimitedAddonDomains" value="unlimited" />
               <span>${isAr ? 'نطاقات إضافية غير محدودة' : 'Unlimited addon domains'}</span>
             </label>
@@ -770,7 +771,7 @@ ${section === 'mail-ips' && mailIpConfig ? `          <form class="xp-card xp-fo
               <h3>${escapeHtml(t(locale, 'mailIp.title'))}</h3>
             </div>
 
-            <div>
+            <div class="xp-field">
               <label class="xp-label" for="mail-outbound-mode">${isAr ? 'توجيه البريد الصادر' : 'Outbound mail routing'}</label>
               <select id="mail-outbound-mode" name="mode" class="xp-select">
                 <option value="server-default" ${mailIpConfig.mode === 'server-default' ? 'selected' : ''}>server-default (${escapeHtml(t(locale, 'mailIp.mode.server-default'))})</option>
@@ -781,15 +782,15 @@ ${section === 'mail-ips' && mailIpConfig ? `          <form class="xp-card xp-fo
             </div>
 
             <div class="xp-kpi-grid">
-              <div>
+              <div class="xp-field">
                 <label class="xp-label" for="mail-default-ipv4">${isAr ? 'عنوان IPv4 الصادر الافتراضي' : 'Default outbound IPv4'}</label>
                 <input id="mail-default-ipv4" name="defaultIpv4" type="text" class="xp-input xp-mono" dir="ltr" value="${escapeHtml(mailIpConfig.defaultIpv4 ?? '')}" />
               </div>
-              <div>
+              <div class="xp-field">
                 <label class="xp-label" for="mail-default-ipv6">${isAr ? 'عنوان IPv6 الصادر الافتراضي' : 'Default outbound IPv6'}</label>
                 <input id="mail-default-ipv6" name="defaultIpv6" type="text" class="xp-input xp-mono" dir="ltr" value="${escapeHtml(mailIpConfig.defaultIpv6 ?? '')}" />
               </div>
-              <div>
+              <div class="xp-field">
                 <label class="xp-label" for="mail-default-helo">${escapeHtml(t(locale, 'mailIp.defaultHelo'))}</label>
                 <input id="mail-default-helo" name="defaultHelo" type="text" class="xp-input xp-mono" dir="ltr" value="${escapeHtml(mailIpConfig.defaultHelo ?? '')}" />
               </div>
