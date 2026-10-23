@@ -25,7 +25,6 @@ import {
   MEMINFO,
   NGINX_V,
   OS_RELEASE,
-  PANEL_DOMAIN,
   PROC_UPTIME,
   UNAME_R,
   labHostDashboard,
@@ -51,7 +50,14 @@ describe('lab host command fixture', () => {
     const inodes = parseDfInodes(DF_INODES)
     assert.deepEqual({ used: inodes.used, total: inodes.total, mount: inodes.mount }, { used: 148410, total: 9732496, mount: '/' })
 
-    const model = await labHostDashboard()
+    const { spawnSync } = await import('node:child_process')
+    const cert = (name: string): string | null => {
+      const pem = spawnSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-keyout', `/tmp/xpanel-fixture-${name}.pem`, '-out', '/dev/stdout', '-days', '30', '-nodes', '-subj', `/CN=${name}`, '-addext', `subjectAltName=${name.includes('.') ? `DNS:${name}` : `IP:${name}`}`], { encoding: 'utf8' })
+      return pem.status === 0 && pem.stdout.includes('BEGIN CERTIFICATE') ? pem.stdout : null
+    }
+    const named = cert('panel.example.test')
+    const plain = cert('127.0.0.1')
+    const model = await labHostDashboard('en', { plain, named, origin: named ? 'https://panel.example.test' : null })
     assert.equal(model.hostname, 'host.example.test')
     assert.equal(model.ledeHost, 'host.example.test')
     assert.equal(model.hostRows.find(row => row.label === 'System')?.value, 'Ubuntu 24.04.3 LTS')
@@ -60,7 +66,7 @@ describe('lab host command fixture', () => {
     assert.equal(model.hostRows.find(row => row.label === 'Hardware')?.value, '4 cores · AMD EPYC-Rome · 8.13 GB')
     assert.equal(model.hostRows.find(row => row.label === 'Engine')?.value, 'nginx 1.24.0 → Apache 2.4.58')
     assert.equal(model.hostRows.find(row => row.label === 'xPanel')?.value, '0.1.0')
-    assert.equal(model.hostRows.find(row => row.label === 'Panel domain')?.value, PANEL_DOMAIN)
+    if (named) assert.equal(model.hostRows.find(row => row.label === 'Panel domain')?.value, 'panel.example.test')
     assert.equal(model.meters[0]?.value, '0.00 / 0.02 / 0.00')
     assert.equal(model.meters[0]?.note, '4 cores')
     assert.equal(model.meters[0]?.showBar, false)
@@ -91,8 +97,7 @@ describe('lab host command fixture', () => {
     const html = renderWhmDashboard(model)
     for (const marker of [
       'host.example.test',
-      'Panel domain',
-      PANEL_DOMAIN,
+      ...(named ? ['Panel domain', 'panel.example.test'] : []),
       'Ubuntu 24.04.3 LTS',
       '6.8.0-90-generic',
       '1 day, 11 hours',
@@ -122,7 +127,7 @@ describe('lab host command fixture', () => {
     ]) {
       assert.ok(html.includes(marker), marker)
     }
-    assert.ok(html.indexOf('host.example.test') < html.indexOf(PANEL_DOMAIN))
+    if (named) assert.ok(html.indexOf('host.example.test') < html.indexOf('panel.example.test'))
     assert.equal(html.includes('aria-label="CPU"'), false)
     assert.equal(html.includes('aria-valuenow="0"'), false)
     assert.equal(html.includes('7.57'), false)

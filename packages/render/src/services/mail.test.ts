@@ -264,8 +264,8 @@ describe('Postfix main.cf', () => {
       smtpd_recipient_restrictions: 'check_recipient_access texthash:/etc/postfix/xpanel/recipient_access',
       smtpd_tls_cert_file: '/etc/xpanel/ssl/host.net/fullchain.pem',
       message_size_limit: String(50 * 1024 * 1024),
-      smtpd_milters: 'local:/run/opendkim/opendkim.sock',
-      non_smtpd_milters: 'local:/run/opendkim/opendkim.sock',
+      smtpd_milters: 'local:opendkim/opendkim.sock',
+      non_smtpd_milters: 'local:opendkim/opendkim.sock',
       milter_default_action: 'accept',
     })
     const a = postconfAction(rhel, s)
@@ -508,8 +508,8 @@ describe('dkimDnsRecord', () => {
     expect(master).toContain('smtpd_tls_auth_only=yes')
     expect(master).toContain('smtpd_sasl_auth_enable=yes')
     expect(main).toContain('smtpd_sasl_auth_enable = no')
-    expect(main).toContain('smtpd_milters = local:/run/opendkim/opendkim.sock')
-    expect(main).toContain('non_smtpd_milters = local:/run/opendkim/opendkim.sock')
+    expect(main).toContain('smtpd_milters = local:opendkim/opendkim.sock')
+    expect(main).toContain('non_smtpd_milters = local:opendkim/opendkim.sock')
     expect(main).toContain('milter_protocol = 6')
     expect(main).toContain('milter_default_action = accept')
     expect(main).not.toContain('message_size_limit')

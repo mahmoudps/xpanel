@@ -75,8 +75,10 @@ describe('styled status pages', () => {
     expect(signedIn).toMatch(/<h1 class="xp-page-title">[^<]+<\/h1>/)
     expect(signedIn).not.toMatch(/<form\b/)
     expect(signedIn).toContain('data-nav-route="/home"')
-    expect(signedIn).toContain('Not yet available')
-    expect(signedIn).not.toContain('data-nav-route="/domains"')
+    expect(signedIn).toContain('Coming soon')
+    expect(signedIn).toContain('data-nav-route="/domains"')
+    expect(signedIn).toContain('aria-current="page"')
+    expect(signedIn).not.toContain('Not yet available')
     if (status === 404) {
       expect(signedIn).toContain('Back to workspace')
       expect(signedIn).toContain('xp-icon-back')
@@ -129,21 +131,25 @@ describe('styled status pages', () => {
       locale: 'en',
       visibility: { principal: { kind: 'root', id: 'root-id', username: 'root' } },
       catalog,
-      error: { status: 404, workspaceHref: '/whm' },
+      error: { status: 404, workspaceHref: '/whm', hostname: 'host.example.test' },
     })
-    expect(html).toContain('data-nav-route="/whm/audit"')
+    expect(html).toContain('data-nav-route="/whm/audit" data-nav-wiring="live"')
     expect(html).toContain('data-nav-route="/whm/monitoring/server-info"')
-    expect(html).toContain('Not yet available')
-    expect(html).not.toContain('data-nav-route="/whm/accounts"')
+    expect(html).toContain('data-nav-route="/whm/accounts" data-nav-wiring="soon"')
+    expect(html).toContain('Coming soon')
+    expect(html).toContain('aria-current="page"')
+    expect(html).toContain('host.example.test')
+    expect(html).not.toContain('Not yet available')
     const arabic = renderWebApp({
       surface: 'xwhm',
       locale: 'ar',
       visibility: { principal: { kind: 'root', id: 'root-id', username: 'root' } },
       catalog,
-      error: { status: 404, workspaceHref: '/whm' },
+      error: { status: 404, workspaceHref: '/whm', hostname: 'host.example.test' },
     })
     expect(arabic).toContain('data-nav-route="/whm/audit"')
-    expect(arabic).toContain('غير متاحة بعد')
+    expect(arabic).toContain('قيد التفعيل')
+    expect(arabic).not.toContain('غير متاحة بعد')
   })
 
   it('returns HTML 404 for an unknown document and plain text for a missing asset', async () => {

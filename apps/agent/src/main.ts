@@ -12,6 +12,7 @@ import { IoAnalyticsEngine, WebsiteAnalyticsEngine } from './analytics.ts'
 import { createProductionHostTargetMatcher, LinuxHostExecutor } from './executor.ts'
 import { ensureAcmeWebRoot } from './host-access.ts'
 import { ensureInstalledMail } from './services/local-mail.ts'
+import { readOpenDkimPublished, writeOpenDkimPublished } from './services/opendkim-live.ts'
 import { HostReconciler } from './reconciler.ts'
 import { createAgentApp, listenAgentSocket, loadAgentCredentialFile } from './server.ts'
 import { createMariaDbSqlRunner, DEFAULT_MARIADB_ADMIN_CNF, MariaDbServiceAdapter } from './services/mariadb.ts'
@@ -103,11 +104,23 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
   })
   if (existsSync('/usr/sbin/postfix') && existsSync('/usr/sbin/dovecot')) {
     await (async () => {
-      const hostname = await store.readSnapshot()
-        .then((snapshot) => snapshot.server?.settings.hostname)
-        .catch(() => undefined)
+      const snapshot = await store.readSnapshot().catch(() => null)
+      const hostname = snapshot?.server?.settings.hostname
+      const domains = [
+        ...(snapshot?.domains.map(domain => domain.name) ?? []),
+        ...(snapshot?.serviceUsers.flatMap(user => {
+          if (!user.services.email) return []
+          const at = user.login.lastIndexOf('@')
+          return at > 0 ? [user.login.slice(at + 1)] : []
+        }) ?? []),
+      ]
       const owned = await reconciler.ownedChecksums()
-      await ensureInstalledMail(executor, os, hostname, owned)
+      const signing = await ensureInstalledMail(executor, os, hostname, owned, domains)
+      const published = (await readOpenDkimPublished(executor).catch(() => null))?.trim() ?? ''
+      if (signing.stamp && published !== signing.stamp) {
+        await reconciler.reconcile({ force: true, actor: 'agent', mailAuth: signing.signing })
+        await writeOpenDkimPublished(executor, signing.stamp)
+      }
     })().catch((error: unknown) => {
       process.stderr.write(`xpanel-agent local mail: ${error instanceof Error ? error.message : String(error)}\n`)
     })

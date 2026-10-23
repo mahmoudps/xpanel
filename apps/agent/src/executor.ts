@@ -250,6 +250,7 @@ const SYSTEM_CONFIG_PREFIXES: readonly string[] = [
   '/etc/nftables.d/',
   '/etc/dovecot/',
   '/etc/postfix/',
+  '/etc/opendkim/',
   '/etc/pure-ftpd/',
   '/etc/powerdns/',
   '/var/lib/powerdns/',
@@ -274,6 +275,8 @@ const SYSTEM_EXACT_TARGETS = new Set<string>([
   '/etc/apache2',
   '/etc/dovecot',
   '/etc/postfix',
+  '/etc/opendkim',
+  '/etc/opendkim.conf',
   '/etc/pure-ftpd',
   '/etc/powerdns',
   '/etc/xpanel/php-fpm',
@@ -329,6 +332,10 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
   return (path: string, operation: HostTargetOperation): boolean => {
     if (HOST_MEASUREMENT_READS.has(path)) return operation === 'read'
     if (path === '/home') return operation === 'ensure-directory'
+    if (path === '/var/spool/postfix/opendkim') return operation === 'ensure-directory'
+    if (path === '/etc/opendkim.conf' || path.startsWith('/etc/opendkim.conf.bak.')) {
+      return operation === 'read' || operation === 'write'
+    }
     if (SYSTEM_EXACT_TARGETS.has(path)) return true
     if (SYSTEM_CONFIG_PREFIXES.some((prefix) => path.startsWith(prefix))) return true
     if (ACCOUNT_HOME_DIR_RE.test(path)) {

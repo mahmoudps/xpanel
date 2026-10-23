@@ -30,7 +30,6 @@ export const DF_INODES = 'Filesystem       Inodes   IUsed    IFree IUse% Mounted
 export const NGINX_T = 'nginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful\n'
 export const APACHE_T = 'Syntax OK\n'
 export const SAMPLED_AT = '2026-10-23T13:48:00.000Z'
-export const PANEL_DOMAIN = 'panel.xpanel-lab.test'
 
 const SAFE_ARG = /^[A-Za-z0-9@+=:./_-]+$/
 const ACTIVE = new Set([
@@ -56,7 +55,10 @@ const serviceText = (unit: string): string => {
 }
 
 /** Dashboard model produced by parsing the lab command output. */
-export const labHostDashboard = async (locale: 'en' | 'ar' = 'en'): Promise<WhmDashboardModel> => {
+export const labHostDashboard = async (
+  locale: 'en' | 'ar' = 'en',
+  served?: { plain: string | null; named: string | null; origin: string | null },
+): Promise<WhmDashboardModel> => {
   const argv: string[][] = []
   const identity = await readHostIdentity({
     readFile: async (path) => {
@@ -77,6 +79,8 @@ export const labHostDashboard = async (locale: 'en' | 'ar' = 'en'): Promise<WhmD
       if (command[1] === 'configtest') return { ok: false, stdout: '', stderr: 'spawn ENOENT' }
       return { ok: false, stdout: '', stderr: '' }
     },
+    readServedCertificate: async (servername) => servername ? (served?.named ?? null) : (served?.plain ?? null),
+    publicOrigin: () => served?.origin ?? null,
   })
   const configChecks = await readHostConfigChecks({
     readFile: async () => null,
@@ -114,8 +118,7 @@ export const labHostDashboard = async (locale: 'en' | 'ar' = 'en'): Promise<WhmD
   return whmDashboardFromProps({
     locale,
     principal: { username: 'root' },
-    hostname: sample.hostname ?? PANEL_DOMAIN,
-    ...(sample.hostname && sample.hostname !== PANEL_DOMAIN ? { panelHostname: PANEL_DOMAIN } : {}),
+    ...(sample.hostname ? { hostname: sample.hostname } : {}),
     hostSample: sample,
     services: rows,
     generationId: 142,

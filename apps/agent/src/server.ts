@@ -20,7 +20,9 @@ import { JailedFileManager } from './file-manager.ts'
 import { AcmeCertificateServiceAdapter } from './services/acme.ts'
 import { createHttp01AcmeClient } from './services/acme-client.ts'
 import { probeAuditLog, probeHostCapabilities, readHostMeasurements } from './host-probes.ts'
+import { readAccountUsage } from './account-usage.ts'
 import { readHostConfigChecks, readHostIdentity, readServedCertificatePem, PANEL_LISTENER_PORT } from './host-identity.ts'
+import { probeOpenDkimAsPostfix } from './services/dkim-probe.ts'
 import { parseDf, parseDfInodes, parseLoadavg, parseMeminfo } from './host-info.ts'
 import { readHostServices, restartHostService } from './host-services.ts'
 import { createAccountBackup, listAccountBackups, restoreAccountBackup, DEFAULT_BACKUP_DIR } from './account-backup.ts'
@@ -480,6 +482,20 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
 
       const caller = await authenticateCaller(req)
 
+      if (method === 'GET' && pathname === '/host/dkim-probe') {
+        return jsonResponse({ status: probeOpenDkimAsPostfix() })
+      }
+
+      if (method === 'GET' && pathname === '/host/account-usage') {
+        const username = url.searchParams.get('username') ?? ''
+        const account = await deps.store.getAccountByUsername(username)
+        if (!account) return fail('NOT_FOUND', 'account not found')
+        await assertAccountCaller(caller, account, 'host.account-usage')
+        if (!deps.executor) return jsonResponse({ available: false }, 404)
+        const usage = await readAccountUsage(deps.executor, { username: account.username, uid: account.uid, home: account.home })
+        return jsonResponse(usage)
+      }
+
       const purgeMatch = /^\/accounts\/([a-z][a-z0-9]{2,15})\/purge$/.exec(pathname)
       if ((method === 'GET' || method === 'POST') && purgeMatch) {
         await assertRootCaller(caller, 'account.purge')
@@ -541,7 +557,8 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
           const identity = await readHostIdentity({
             readFile: (path) => host.readFile(path),
             runCommand: (argv) => host.runCommand(argv),
-            readServedCertificate: () => readServedCertificatePem('127.0.0.1', PANEL_LISTENER_PORT),
+            readServedCertificate: (servername?: string) => readServedCertificatePem('127.0.0.1', PANEL_LISTENER_PORT, 2000, servername),
+            publicOrigin: () => process.env.XPANEL_WHM_PUBLIC_ORIGIN || process.env.XPANEL_PANEL_PUBLIC_ORIGIN || null,
           })
           let configChecks: Awaited<ReturnType<typeof readHostConfigChecks>> = {}
           try {
@@ -586,6 +603,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
           hasDrift: report.hasDrift,
           count: report.items.length,
           generationId: report.generationId,
+          checkedAt: new Date().toISOString(),
         })
       }
 

@@ -118,6 +118,30 @@ export const createDefaultWebRenderer = async (deps: {
     ) => {
       const email = await supportEmail()
       const catalog = model.catalog ?? (model.visibility ? await qualifiedDocumentCatalog() : undefined)
+      let hostname: string | undefined
+      if (model.surface === 'xwhm' && model.visibility?.principal.kind === 'root' && deps.agent) {
+        try {
+          const response = await deps.agent.fetch(new Request('http://agent.local/host/info', {
+            headers: agentCallerHeaders({ principalId: model.visibility.principal.id, token: deps.agent.token }),
+          }))
+          if (response.ok) {
+            const probed = mapAgentHostInfo(await response.json())?.hostname
+            if (probed) hostname = probed
+          }
+        } catch { /* The settings hostname is the other source. */ }
+      }
+      if (!hostname && model.surface === 'xwhm') {
+        try {
+          const settings = await deps.store.getServerSettings()
+          if (settings?.hostname) hostname = settings.hostname
+        } catch { /* A status page can render without a host subtitle. */ }
+      }
+      if (!hostname && model.surface === 'xpanel' && model.accountId) {
+        try {
+          const account = await deps.store.getAccount(model.accountId)
+          if (account?.primaryDomain) hostname = account.primaryDomain
+        } catch { /* The brand stays the panel name. */ }
+      }
       return serveWebUi(req, async () => ({
         surface: model.surface,
         activeRoute: url.pathname,
@@ -129,6 +153,7 @@ export const createDefaultWebRenderer = async (deps: {
         error: {
           status,
           surface: model.surface,
+          ...(hostname ? { hostname } : {}),
           ...(model.workspaceHref ? { workspaceHref: model.workspaceHref } : {}),
           ...(model.suggested ? { suggested: model.suggested } : {}),
         },
@@ -274,10 +299,39 @@ export const createDefaultWebRenderer = async (deps: {
     const homePlan = scoped?.plan
     if (surface === 'xpanel' && documentRoute.activeRoute === '/home' && principal.kind === 'user' && homeAccount?.status === 'active' && homePlan) {
       const email = await supportEmail()
-      const [ownedUsers, sessions, homeAudit] = await Promise.all([
+      const [ownedUsers, sessions, homeAudit, homeDomains, homeUsage] = await Promise.all([
         deps.store.listOwnedServiceUsers(homeAccount.username).catch(() => []),
         listSessionsForPrincipal(deps.db, principal.id).catch(() => []),
         listAudit(deps.db, { mentions: homeAccount.username, limit: 8 }).catch(() => []),
+        deps.store.listDomains({ accountId: homeAccount.id }).catch(() => []),
+        (async () => {
+          if (!deps.agent) return null
+          try {
+            const response = await deps.agent.fetch(new Request(`http://agent.local/host/account-usage?username=${encodeURIComponent(homeAccount.username)}`, {
+              headers: agentCallerHeaders({ principalId: principal.id, token: deps.agent.token }),
+            }))
+            if (!response.ok) return null
+            const body = await response.json() as {
+              phpVersion?: unknown
+              diskBytes?: unknown
+              memoryBytes?: unknown
+              processCount?: unknown
+              bandwidth?: unknown
+            }
+            if (body.bandwidth !== 'unmeasured') return null
+            const numberOrNull = (value: unknown): number | null =>
+              typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+            return {
+              phpVersion: typeof body.phpVersion === 'string' && /^\d+\.\d+$/.test(body.phpVersion) ? body.phpVersion : null,
+              diskBytes: numberOrNull(body.diskBytes),
+              memoryBytes: numberOrNull(body.memoryBytes),
+              processCount: numberOrNull(body.processCount),
+              bandwidth: 'unmeasured' as const,
+            }
+          } catch {
+            return null
+          }
+        })(),
       ])
       const homeAddresses = mailboxAddressIndex(ownedUsers.flatMap(user => user.services.email && user.login.includes('@') ? [user.login] : []))
       const lastSignInAt = [...sessions]
@@ -295,7 +349,8 @@ export const createDefaultWebRenderer = async (deps: {
         panel: {
           account: homeAccount,
           plan: homePlan,
-          domains: [],
+          domains: homeDomains,
+          ...(homeUsage ? { usage: homeUsage } : {}),
           databases: [],
           databaseUsers: [],
           serviceUsers: ownedUsers.map(user => ({ ...user, passwordHash: '' })),
@@ -379,7 +434,8 @@ export const createDefaultWebRenderer = async (deps: {
       return [...found.values()].sort((a, b) => Number(b.id) - Number(a.id))
     }
     const readAgentJson = async (path: string): Promise<unknown> => {
-      if (!dashboardRoute || !deps.agent) return null
+      const allowed = path === '/host/info' ? dashboardRoute || auditRoute : dashboardRoute
+      if (!allowed || !deps.agent) return null
       try {
         const response = await deps.agent.fetch(new Request(`http://agent.local${path}`, {
           headers: agentCallerHeaders({ principalId: principal.id, token: deps.agent.token }),
@@ -391,7 +447,7 @@ export const createDefaultWebRenderer = async (deps: {
       }
     }
     const [hostInfo, hostServices, hostDrift, overviewAudit, rollbackGeneration, auditListed] = await Promise.all([
-      dashboardRoute ? readAgentJson('/host/info') : null,
+      dashboardRoute || auditRoute ? readAgentJson('/host/info') : null,
       dashboardRoute ? readAgentJson('/host/services') : null,
       dashboardRoute ? readAgentJson('/host/drift') : null,
       dashboardRoute ? listAudit(deps.db, { limit: 8 }).catch(() => []) : [],
@@ -422,6 +478,9 @@ export const createDefaultWebRenderer = async (deps: {
     const driftRecord = asRecord(hostDrift)
     const driftCount = typeof driftRecord?.count === 'number' && Number.isSafeInteger(driftRecord.count) && driftRecord.count >= 0
       ? driftRecord.count
+      : null
+    const driftCheckedAt = typeof driftRecord?.checkedAt === 'string' && !Number.isNaN(Date.parse(driftRecord.checkedAt))
+      ? driftRecord.checkedAt
       : null
     const hostInfoRecord = asRecord(hostInfo)
     const hostCertificates = Array.isArray(hostInfoRecord?.certificates)
@@ -480,6 +539,7 @@ export const createDefaultWebRenderer = async (deps: {
             ? [...hostCertificates, ...snap.certificates.map(certificate => ({ names: certificate.names, notAfter: certificate.notAfter }))]
             : (snap.certificates.length > 0 ? snap.certificates : undefined),
           driftCount,
+          ...(driftCheckedAt ? { driftCheckedAt } : {}),
           nearLimits,
           ...(active?.activatedAt ? { generationActivatedAt: active.activatedAt } : {}),
           ...(rollbackGeneration ? { rollbackGenerationId: rollbackGeneration.id } : {}),
@@ -500,6 +560,29 @@ export const createDefaultWebRenderer = async (deps: {
         if (surface !== 'xmail') return { mailbox: '' }
         let postfixMain: string | null = null
         try { postfixMain = readFileSync('/etc/postfix/main.cf', 'utf8') } catch { postfixMain = null }
+        let dkimProbe: 'signing' | 'refused' | 'unknown' = 'unknown'
+        if (deps.agent) {
+          try {
+            const response = await deps.agent.fetch(new Request('http://agent.local/host/dkim-probe', {
+              headers: agentCallerHeaders({ principalId: principal.id, token: deps.agent.token }),
+            }))
+            if (response.ok) {
+              const body = await response.json() as { status?: unknown }
+              if (body.status === 'signing' || body.status === 'refused' || body.status === 'unknown') dkimProbe = body.status
+            }
+          } catch { /* An unread probe stays unknown. It is not a connection. */ }
+        }
+        const dkimByDomain: Record<string, { selector: string; dnsTxt: string }> = {}
+        try {
+          const parsed = JSON.parse(readFileSync('/etc/opendkim/signing.json', 'utf8')) as {
+            domains?: Record<string, { selector?: unknown; dnsTxt?: unknown }>
+          }
+          for (const [name, row] of Object.entries(parsed.domains ?? {})) {
+            if (row && typeof row.selector === 'string' && typeof row.dnsTxt === 'string') {
+              dkimByDomain[name] = { selector: row.selector, dnsTxt: row.dnsTxt }
+            }
+          }
+        } catch { /* No published signing material. The probe line stays the label. */ }
         if (postfixMain !== null && messageSizeLimitBytes(postfixMain) === null) {
           try {
             const probed = spawnSync('/usr/sbin/postconf', ['-h', 'message_size_limit'], { encoding: 'utf8', timeout: 2000 })
@@ -521,6 +604,13 @@ export const createDefaultWebRenderer = async (deps: {
           transport: createLocalMailboxTransport(),
           folder,
           postfixMain,
+          dkimProbe,
+          dkimByDomain,
+          zones: snap.zones.map(zone => ({
+            name: zone.name,
+            records: zone.records.map(record => ({ name: record.name, type: record.type, content: record.content })),
+          })),
+          locale: url.searchParams.get('lang') === 'ar' ? 'ar' : 'en',
           ...(replyMode && documentRoute.activeRoute === '/mail/compose' && Number.isInteger(replyUid) && replyUid > 0
             ? { reply: { mode: replyMode, uid: replyUid } }
             : {}),

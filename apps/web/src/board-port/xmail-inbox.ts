@@ -315,10 +315,8 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
     if (!summary) return
     var nextUnread = Math.max(0, parseInt(summary.getAttribute('data-mail-unread') || '0', 10) - 1)
     summary.setAttribute('data-mail-unread', String(nextUnread))
-    var sentence = summary.textContent || ''
-    summary.textContent = nextUnread > 0
-      ? sentence.replace(/ · (\d+)( unread| غير مقروء)/, ' · ' + nextUnread + '$2')
-      : sentence.replace(/ · \d+( unread| غير مقروء)/, '')
+    var arabic = root.getAttribute('data-locale') === 'ar'
+    summary.textContent = nextUnread > 0 ? (' · ' + nextUnread + (arabic ? ' غير مقروء' : ' unread')) : ''
   }
   var show = function (id) {
     if (!article) return
@@ -552,6 +550,8 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
     }
   })
   if (query) query.addEventListener('input', paint)
+  var opened = list && list.querySelector('[aria-current="true"]')
+  if (opened) markRead(opened)
 })()
 </script>`
 
@@ -600,7 +600,7 @@ export const renderInbox = (model: InboxModel): string => {
     ${model.actionHtml}
     <section aria-labelledby="list-title" data-mail-pane="message-list" style="flex: 1.618 1 320px; min-width: 0; background: #FFFFFF; border-inline-end: 1px solid #E2E6EC; display: flex; flex-direction: column">
       <div style="padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid #E2E6EC">
-        <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap"><h1 id="list-title" style="margin: 0; font-size: 20px; font-weight: 600">${escapeHtml(model.title)}</h1><span${model.unreadCount && model.unreadCount > 0 ? ` data-mail-unread="${model.unreadCount}"` : ''} style="font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums">${escapeHtml(model.countText)}</span></div>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap"><h1 id="list-title" style="margin: 0; font-size: 20px; font-weight: 600">${escapeHtml(model.title)}</h1><span style="font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums">${escapeHtml(model.countText.replace(/ · \d+ (?:unread|غير مقروء)$/, ''))}<span data-mail-unread="${model.unreadCount ?? 0}">${escapeHtml((model.unreadCount ?? 0) > 0 ? model.countText.match(/ · \d+ (?:unread|غير مقروء)$/)?.[0] ?? '' : '')}</span></span></div>
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><div role="group" aria-label="${ar ? 'عرض' : 'Show'}" style="display: inline-flex; padding: 2px; border-radius: 10px; background: #EEF0F3; gap: 2px">${filterBtn('all', ar ? 'الكل' : 'All', true)}${filterBtn('unread', ar ? 'غير المقروء' : 'Unread', false)}${filterBtn('attachments', ar ? 'مع مرفقات' : 'With attachments', false)}</div><span style="flex: 1 1 0"></span><button type="button" aria-label="${ar ? 'التحقق من البريد الجديد' : 'Check for new mail'}" style="width: 44px; height: 44px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 4v7h-7"></path></svg></button></div>
       </div>
       <div data-mail-list-slot="true">

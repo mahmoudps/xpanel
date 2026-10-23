@@ -40,8 +40,8 @@ describe('live mail writer', () => {
     await applyPostfixLocalDelivery(executor, os)
 
     const written = executor.files.get(main)?.content ?? ''
-    expect(written).toContain('smtpd_milters = local:/run/opendkim/opendkim.sock')
-    expect(written).toContain('non_smtpd_milters = local:/run/opendkim/opendkim.sock')
+    expect(written).toContain('smtpd_milters = local:opendkim/opendkim.sock')
+    expect(written).toContain('non_smtpd_milters = local:opendkim/opendkim.sock')
     expect(written).toContain('milter_protocol = 6')
     expect(written).toContain('milter_default_action = accept')
     expect(written).toContain('smtpd_sasl_auth_enable = no')
@@ -81,7 +81,7 @@ describe('live mail writer', () => {
 
     await ensureInstalledMail(executor, os)
     expect(executor.files.get(mailbox)?.content).toContain('postmaster_address = postmaster@mail.example.test')
-    expect(executor.files.get('/etc/postfix/main.cf')?.content).toContain('smtpd_milters = local:/run/opendkim/opendkim.sock')
+    expect(executor.files.get('/etc/postfix/main.cf')?.content).toContain('smtpd_milters = local:opendkim/opendkim.sock')
 
     const before = backups(executor, '/etc/postfix/main.cf').length
     await ensureInstalledMail(executor, os, 'localhost')

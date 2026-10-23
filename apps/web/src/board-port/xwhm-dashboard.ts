@@ -55,6 +55,8 @@ interface DashboardProps {
   hostSample?: DashboardHostSample | null
   /** Null when drift was not read. A number is the count reported by the host. */
   driftCount?: number | null
+  /** When the host last answered the drift check. Empty when that read failed. */
+  driftCheckedAt?: string | null
   /** Previous superseded generation, the rollback target. */
   rollbackGenerationId?: number
   /** When the active generation was activated. */
@@ -894,6 +896,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
   const runningServices = existingServices.filter(service => service.active).length
   const driftKnown = typeof props.driftCount === 'number' && Number.isSafeInteger(props.driftCount) && props.driftCount >= 0
   const driftValue = driftKnown ? String(props.driftCount) : '—'
+  const driftChecked = props.driftCheckedAt && !Number.isNaN(Date.parse(props.driftCheckedAt)) ? props.driftCheckedAt : ''
   const inSync = driftKnown && props.driftCount === 0 && generationId !== undefined
   const memory = props.hostSample?.memory
   const disk = props.hostSample?.disk
@@ -1009,7 +1012,15 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     reconcilerTiles: [
       { label: ar ? 'المطلوب والمطبّق' : 'Desired and applied', value: inSync ? `${generationId} = ${generationId}` : '—', note: inSync ? (ar ? 'متساويان' : 'Equal') : '—' },
       { label: ar ? 'الجيل النشط' : 'Active generation', value: generationId !== undefined ? String(generationId) : '—', note: props.generationActivatedAt && !Number.isNaN(Date.parse(props.generationActivatedAt)) ? (ar ? `فُعّل «${clock(props.generationActivatedAt)}»` : `Activated ${clock(props.generationActivatedAt)}`) : '—' },
-      { label: ar ? 'الانحراف' : 'Drift', value: driftValue, note: '—' },
+      {
+        label: ar ? 'الانحراف' : 'Drift',
+        value: driftValue,
+        note: !driftKnown || !driftChecked
+          ? '—'
+          : props.driftCount === 0
+            ? (ar ? `فُحص «${clock(driftChecked)}»` : `Checked ${clock(driftChecked)}`)
+            : (ar ? `«${props.driftCount}» انحراف · «${clock(driftChecked)}»` : `${props.driftCount} drifted · ${clock(driftChecked)}`),
+      },
       configTile('nginx -t', props.hostSample?.nginxTest, 'nginx'),
       configTile('apachectl configtest', props.hostSample?.apacheTest, 'apache'),
       { label: ar ? 'هدف التراجع' : 'Rollback target', value: rollbackId ? String(rollbackId) : '—', note: rollbackId ? (ar ? 'الجيل السابق' : 'Previous generation') : '—' },

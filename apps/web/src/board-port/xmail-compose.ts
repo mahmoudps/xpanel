@@ -575,7 +575,7 @@ export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel =>
     const paused = rule.enabled === false ? (ar ? ' · متوقف' : ' · paused') : ''
     return `<li style="display: flex; gap: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid #E2E6EC; font-size: 13px; line-height: 1.4"><span aria-hidden="true" style="flex: none; width: 22px; height: 22px; border-radius: 50%; background: #EEF0F3; color: #344054; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600">${index + 1}</span><span>${escapeHtml(rule.name)}${escapeHtml(paused)} <code style="font-family: ${MONO}">${ar ? `<bdi dir="ltr">${escapeHtml(rule.condition)}</bdi>` : escapeHtml(rule.condition)}</code> ${ar ? `<bdi dir="ltr">${escapeHtml(rule.action)}</bdi>` : escapeHtml(rule.action)}</span></li>`
   }).join('')
-  const shownIdentity = (value: string | undefined): string => value ? `<bdi dir="ltr">${escapeHtml(value)}</bdi>` : '—'
+  const shownIdentity = (value: string | undefined): string => value ? `<bdi dir="auto">${escapeHtml(value)}</bdi>` : '—'
   const vacationKnown = props.vacationEnabled !== undefined
   const vacationOn = props.vacationEnabled === true
   const dash = '—'
