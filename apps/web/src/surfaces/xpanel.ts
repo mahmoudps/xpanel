@@ -24,7 +24,8 @@ import {
   renderStatusBadge,
 } from '../tokens.ts'
 import { renderAccountResources, resourceRowsFromPlan } from '../board-canvas.ts'
-import { renderXpanelHome, xpanelHomeFromProps, type HomeDesktopModel, type HomePhoneModel } from '../board-port/xpanel-home.ts'
+import { boardGateFixture } from '../board-port/gate-fixture.ts'
+import { renderXpanelHome, xpanelHomeFromProps } from '../board-port/xpanel-home.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
@@ -70,8 +71,6 @@ export interface PanelSurfaceProps {
   }
   terminalSessionId?: string
   actionState?: AsyncActionBannerProps
-  /** Harness only. Board-sample model for the pixel gate. Production leaves this unset. */
-  homePort?: { desktop: HomeDesktopModel; phone: HomePhoneModel }
 }
 
 const ALLOWLISTED_SHELL_BINARIES = [
@@ -136,7 +135,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
 
   if (section === 'overview') {
     const homePlan = plan && plan.id === account.planId ? plan : undefined
-    const homeModel = props.homePort ?? xpanelHomeFromProps({
+    const homeModel = boardGateFixture()?.homePort ?? xpanelHomeFromProps({
       locale,
       account,
       ...(homePlan ? { plan: homePlan } : {}),

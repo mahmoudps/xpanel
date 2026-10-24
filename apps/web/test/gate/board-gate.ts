@@ -1,5 +1,17 @@
+/// <reference path="./pngjs.d.ts" />
 import pixelmatch from 'pixelmatch'
 import { PNG } from 'pngjs'
+
+/**
+ * Shared board pixel gate. This file is outside `apps/web/src`, so
+ * `scripts/package-release.mjs` does not ship it. `pixelmatch` and `pngjs`
+ * stay root devDependencies.
+ *
+ * Stable exports: `scoreGate`, `gateAccepts`, `sameCapture`, `padPort`,
+ * `PAGE_LIMIT`, `TILE_LIMIT`, `TILE`.
+ * Stable fixture fields, set by the test server through `installBoardGateFixture`:
+ * `homePort`, `dashboardPort`, `inboxPort`, `composePort`.
+ */
 
 /** Whole page. A 1px shift of a full screen is about 1.2%, so 3% could not see it. */
 export const PAGE_LIMIT = 0.005

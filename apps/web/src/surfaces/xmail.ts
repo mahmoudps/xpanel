@@ -10,8 +10,9 @@ import {
   renderMobileNavToggle, renderSurfaceUnavailable, renderUnavailableSurfaceShell,
   resolveSurfaceSection,
 } from '../shell.ts'
-import { renderXmailCompose, xmailComposeFromProps, type ComposeModel } from '../board-port/xmail-compose.ts'
-import { renderXmailInbox, xmailInboxFromProps, type InboxModel } from '../board-port/xmail-inbox.ts'
+import { boardGateFixture } from '../board-port/gate-fixture.ts'
+import { renderXmailCompose, xmailComposeFromProps } from '../board-port/xmail-compose.ts'
+import { renderXmailInbox, xmailInboxFromProps } from '../board-port/xmail-inbox.ts'
 
 export interface MailMessageItem {
   uid: number
@@ -72,9 +73,6 @@ export interface MailSurfaceProps {
   folderCounts?: Array<{ folder: string; total: number; unread: number }>
   composeDraft?: { to: string; cc: string; subject: string; body: string }
   actionState?: AsyncActionBannerProps
-  /** Harness only. Board-sample models for the pixel gate. Production leaves these unset. */
-  inboxPort?: InboxModel
-  composePort?: ComposeModel
 }
 
 
@@ -119,8 +117,9 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
   const observedFolderHtml = observedFolders.length ? `<section class="xp-mail-nav-section" aria-labelledby="mail-observed-folders"><h2 id="mail-observed-folders" class="xp-label">${text('Folders', 'المجلدات')}</h2><ul class="xp-mail-observed-folders">${observedFolders.map(folder => `<li data-mail-folder="${escapeHtml(folder)}">${icons.folder}<span>${escapeHtml(folder)}</span></li>`).join('')}</ul></section>` : ''
   const actionBanner = props.actionState ? renderAsyncActionState({ ...props.actionState, locale }) : ''
 
+  const gate = boardGateFixture()
   if (section === 'inbox') {
-    return ensureAccessibleSurfaceHtml(renderXmailInbox(props.inboxPort ?? xmailInboxFromProps({
+    return ensureAccessibleSurfaceHtml(renderXmailInbox(gate?.inboxPort ?? xmailInboxFromProps({
       locale,
       mailbox,
       ...(props.quotaUsedMb !== undefined ? { quotaUsedMb: props.quotaUsedMb } : {}),
@@ -139,7 +138,7 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
   }
 
   if (section === 'compose') {
-    return ensureAccessibleSurfaceHtml(renderXmailCompose(props.composePort ?? xmailComposeFromProps({
+    return ensureAccessibleSurfaceHtml(renderXmailCompose(gate?.composePort ?? xmailComposeFromProps({
       locale,
       mailbox,
       ...(props.quotaUsedMb !== undefined ? { quotaUsedMb: props.quotaUsedMb } : {}),

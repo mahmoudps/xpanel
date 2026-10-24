@@ -1,6 +1,7 @@
+/// <reference path="../../test/gate/pngjs.d.ts" />
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -11,7 +12,9 @@ import { qualifyHostTools, tools } from '@xpanel/catalog'
 import { defaultPlan } from '@xpanel/core'
 import playwright from '../../../../node_modules/@playwright/test/index.js'
 import { renderWebApp } from '../app.ts'
-import { PAGE_LIMIT, TILE_LIMIT, gateAccepts, padPort, sameCapture, scoreGate } from './board-gate.ts'
+import { type PanelSurfaceProps, renderPanelSurface } from '../surfaces/xpanel.ts'
+import { PAGE_LIMIT, TILE_LIMIT, gateAccepts, padPort, sameCapture, scoreGate } from '../../test/gate/board-gate.ts'
+import { installBoardGateFixture, type BoardGateFixture } from './gate-fixture.ts'
 import { xpanelHomeFixture, xpanelHomeFixturePhone } from './xpanel-home.fixture.ts'
 import { whmDashboardFixture } from './xwhm-dashboard.ts'
 import { inboxBoardModel } from './xmail-inbox.fixture.ts'
@@ -100,6 +103,32 @@ describe('board gate thresholds', () => {
     assert.match(padPort(html, 'xpanel-home'), /style="padding-top:1px;min-height:100vh"/)
     assert.throws(() => padPort(html, 'missing'), /data-board-port="missing"/)
   })
+
+  it('keeps pixelmatch and pngjs out of release source', () => {
+    const root = path.resolve(import.meta.dirname, '../../../..')
+    assert.equal(existsSync(path.join(root, 'apps/web/src/board-port/board-gate.ts')), false)
+    assert.equal(existsSync(path.join(root, 'apps/web/test/gate/board-gate.ts')), true)
+    const offenders: string[] = []
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        const abs = path.join(dir, entry)
+        if (statSync(abs).isDirectory()) {
+          walk(abs)
+          continue
+        }
+        if (!abs.endsWith('.ts') || abs.endsWith('.test.ts') || abs.endsWith('.d.ts')) continue
+        const text = readFileSync(abs, 'utf8')
+        if (/(?:from|import)\s+['"](?:pixelmatch|pngjs)['"]/.test(text)) offenders.push(path.relative(root, abs))
+      }
+    }
+    for (const group of ['apps', 'packages']) {
+      for (const name of readdirSync(path.join(root, group))) {
+        const src = path.join(root, group, name, 'src')
+        if (existsSync(src)) walk(src)
+      }
+    }
+    assert.deepEqual(offenders, [])
+  })
 })
 
 const plan = defaultPlan({ id: 'fixture-plan', name: 'Business', featureListId: 'fixture-features' })
@@ -115,25 +144,58 @@ const homeCatalog = qualifyHostTools(tools, { executor: 'linux', probes: { 'cont
 const dashCatalog = qualifyHostTools(tools, { executor: 'linux', probes: { 'control-plane': 'passed', 'host-info': 'passed' } })
 const mailCatalog = qualifyHostTools(tools, { executor: 'linux', probes: { 'control-plane': 'passed', mail: 'passed' } })
 
-const homeHtml = () => renderWebApp({
-  surface: 'xpanel', locale: 'en', theme: 'light', activeRoute: '/home', realtimeEnabled: false,
+const withFixture = (fixture: BoardGateFixture, render: () => string): string => {
+  installBoardGateFixture(fixture)
+  try {
+    return render()
+  } finally {
+    installBoardGateFixture(undefined)
+  }
+}
+const homeState = {
+  surface: 'xpanel' as const, locale: 'en' as const, theme: 'light' as const, activeRoute: '/home', realtimeEnabled: false,
   visibility: userVisibility, catalog: homeCatalog,
-  panel: { account, plan, homePort: { desktop: xpanelHomeFixture(), phone: xpanelHomeFixturePhone() } },
-})
-const dashboardHtml = () => renderWebApp({
-  surface: 'xwhm', locale: 'en', theme: 'light', activeRoute: '/whm', realtimeEnabled: false,
-  visibility: rootVisibility, catalog: dashCatalog,
-  whm: { principal: rootVisibility.principal, hostname: 'srv1.xpanel.test', version: '1.4.2', generationId: 142, dashboardPort: whmDashboardFixture() },
-})
-const inboxHtml = () => renderWebApp({
-  surface: 'xmail', locale: 'en', theme: 'light', activeRoute: '/mail/inbox', realtimeEnabled: false,
-  visibility: userVisibility, catalog: mailCatalog,
-  mail: { mailbox: 'info@alice-shop.com', inboxPort: inboxBoardModel() },
-})
-const composeHtml = () => renderWebApp({
-  surface: 'xmail', locale: 'en', theme: 'light', activeRoute: '/mail/compose', realtimeEnabled: false,
-  visibility: userVisibility, catalog: mailCatalog,
-  mail: { mailbox: 'info@alice-shop.com', composePort: composeBoardModel() },
+  panel: { account, plan },
+}
+const homeHtml = () => withFixture(
+  { homePort: { desktop: xpanelHomeFixture(), phone: xpanelHomeFixturePhone() } },
+  () => renderWebApp(homeState),
+)
+const dashboardHtml = () => withFixture(
+  { dashboardPort: whmDashboardFixture() },
+  () => renderWebApp({
+    surface: 'xwhm', locale: 'en', theme: 'light', activeRoute: '/whm', realtimeEnabled: false,
+    visibility: rootVisibility, catalog: dashCatalog,
+    whm: { principal: rootVisibility.principal, hostname: 'srv1.xpanel.test', version: '1.4.2', generationId: 142 },
+  }),
+)
+const inboxHtml = () => withFixture(
+  { inboxPort: inboxBoardModel() },
+  () => renderWebApp({
+    surface: 'xmail', locale: 'en', theme: 'light', activeRoute: '/mail/inbox', realtimeEnabled: false,
+    visibility: userVisibility, catalog: mailCatalog,
+    mail: { mailbox: 'info@alice-shop.com' },
+  }),
+)
+const composeHtml = () => withFixture(
+  { composePort: composeBoardModel() },
+  () => renderWebApp({
+    surface: 'xmail', locale: 'en', theme: 'light', activeRoute: '/mail/compose', realtimeEnabled: false,
+    visibility: userVisibility, catalog: mailCatalog,
+    mail: { mailbox: 'info@alice-shop.com' },
+  }),
+)
+
+describe('board fixture injection', () => {
+  it('serves the sample only while the test server has installed it', () => {
+    assert.match(homeHtml(), /3\.2 \/ 10 GB/)
+    assert.equal(renderWebApp(homeState).includes('3.2 / 10 GB'), false)
+    const props: PanelSurfaceProps = {
+      account, plan, activeRoute: '/home', locale: 'en', theme: 'light', visibility: userVisibility, catalog: homeCatalog,
+    }
+    Object.assign(props, { homePort: { desktop: xpanelHomeFixture(), phone: xpanelHomeFixturePhone() } })
+    assert.equal(renderPanelSurface(props).includes('3.2 / 10 GB'), false)
+  })
 })
 
 interface GateScreen {
