@@ -38,30 +38,33 @@ async function fontGate(page, locale) {
 
 async function geometry(page) {
   return page.evaluate(() => {
+    const visible = element => element?.checkVisibility({ checkVisibilityCSS: true }) && !element.closest('[hidden],[inert]')
     const rect = selector => {
       const element = document.querySelector(selector)
       if (!element) return null
       const box = element.getBoundingClientRect()
-      return { x: box.x, y: box.y, width: box.width, height: box.height, visible: element.checkVisibility({ checkVisibilityCSS: true }) }
+      return { x: box.x, y: box.y, width: box.width, height: box.height, visible: Boolean(visible(element)) }
     }
-    const fields = [...document.querySelectorAll('.xp-mail-field')].map(element => {
-      const label = element.querySelector('dt,label'), value = element.querySelector('dd>bdi,input,textarea')
-      if (!label || !value) return null
-      const labelBox = label.getBoundingClientRect(), valueBox = value.getBoundingClientRect()
-      let glyphEdgeDelta = null
-      if (value.tagName === 'BDI') {
-        const labelRange = document.createRange(), valueRange = document.createRange()
-        labelRange.selectNodeContents(label); valueRange.selectNodeContents(value)
-        const labelGlyphs = labelRange.getBoundingClientRect(), valueGlyphs = valueRange.getBoundingClientRect()
-        glyphEdgeDelta = document.documentElement.dir === 'rtl' ? Math.abs(labelGlyphs.right - valueGlyphs.right) : Math.abs(labelGlyphs.left - valueGlyphs.left)
-      }
-      return { label: label.textContent.trim(), edge_delta: Math.abs(labelBox.left - valueBox.left), glyph_edge_delta: glyphEdgeDelta, below: valueBox.top >= labelBox.bottom - 1 }
-    }).filter(Boolean)
-    const targets = [...document.querySelectorAll('a[href],button,input,textarea,summary')]
-      .filter(element => element.checkVisibility({ checkVisibilityCSS: true }) && (!element.classList.contains('xp-skip-link') || document.activeElement === element))
+    const pairs = [
+      ...[...document.querySelectorAll('[data-mail-layout] label[for]')].map(label => ({ label, value: document.getElementById(label.htmlFor) })),
+      ...[...document.querySelectorAll('[data-mail-layout] dl > div')].map(field => ({ label: field.querySelector('dt'), value: field.querySelector('dd') })),
+    ]
+    const fields = pairs.filter(({ label, value }) => visible(label) && visible(value)).map(({ label, value }) => {
+      const labelRange = document.createRange(), valueRange = document.createRange()
+      labelRange.selectNodeContents(label); valueRange.selectNodeContents(value)
+      const labelBox = labelRange.getBoundingClientRect(), box = value.getBoundingClientRect(), style = getComputedStyle(value)
+      const control = /^(INPUT|SELECT|TEXTAREA)$/.test(value.tagName) || value.isContentEditable
+      const valueBox = control
+        ? { left: box.left + parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth), right: box.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth) }
+        : valueRange.getBoundingClientRect()
+      const edge = document.documentElement.dir === 'rtl' ? 'right' : 'left'
+      return { label: label.textContent.trim(), id: value.id || null, control, edge_delta: Math.abs(labelBox[edge] - valueBox[edge]), glyph_edge_delta: control ? null : Math.abs(labelBox[edge] - valueBox[edge]), below: box.top >= labelBox.bottom - 1 }
+    })
+    const targets = [...document.querySelectorAll('a[href],button,input,select,textarea,summary,[contenteditable="true"]')]
+      .filter(element => visible(element) && (!element.classList.contains('xp-skip-link') || document.activeElement === element))
       .map(element => { const box = element.getBoundingClientRect(); return { tag: element.tagName, label: (element.getAttribute('aria-label') || element.textContent || element.id).trim().slice(0, 80), width: box.width, height: box.height } })
     return {
-      header: rect('.xp-mail-topbar'), folder: rect('[data-mail-pane="folders"]'), list: rect('[data-mail-pane="message-list"]'), reader: rect('[data-mail-pane="reading-pane"]'),
+      header: rect('[data-mail-layout="reference"] > header'), folder: rect('[data-mail-pane="folders"]'), list: rect('[data-mail-pane="message-list"]'), reader: rect('[data-mail-pane="reading-pane"]'),
       fields, targets, scroll_width: document.documentElement.scrollWidth, viewport_width: innerWidth,
       ascii_digits: !/[\u0660-\u0669\u06f0-\u06f9]/.test(document.body.innerText),
     }
@@ -95,7 +98,7 @@ function inspectQuotaNodes({ controls = false } = {}) {
     }
     // Resolve the complete phrase, not the first descendant text node. Numeric
     // tokens may span several nested used/limit elements in the rendered meter.
-    const first = token('160'), slash = token('/'), limit = token('1,024')
+    const first = token('160'), slash = token('/'), limit = token('1024')
     token('MiB')
     const labelRange = document.createRange(), valueRange = document.createRange()
     labelRange.selectNodeContents(label); valueRange.selectNodeContents(value)
@@ -117,15 +120,15 @@ function inspectQuotaNodes({ controls = false } = {}) {
     value.dir = 'ltr'; value.style.display = 'block'
     fixture.append(label, value); document.body.append(fixture)
     try {
-      value.innerHTML = '<strong><span>1</span><span>60</span></strong> / <strong><span>1,</span><span>024</span></strong> MiB (15.6%)'
+      value.innerHTML = '<strong><span>1</span><span>60</span></strong> / <strong><span>10</span><span>24</span></strong> MiB'
       const split = observe(value, label)
       const rejected = []
       for (const [name, html, expected] of [
-        ['missing-limit', '<strong>160</strong> / <strong>999</strong> MiB (15.6%)', 'Quota probe missing token: 1,024'],
-        ['missing-slash', '<strong>160</strong> <strong>1,024</strong> MiB (15.6%)', 'Quota probe missing token: /'],
-        ['ungrouped-limit', '<strong>160</strong> / <strong>1024</strong> MiB (15.6%)', 'Quota probe missing token: 1,024'],
-        ['malformed-grouping', '<strong>160</strong> / <strong>10,24</strong> MiB (15.6%)', 'Quota probe missing token: 1,024'],
-        ['ambiguous-used', '<strong>160</strong> / <strong>1,024</strong> MiB (15.6%) 160', 'Quota probe ambiguous token: 160'],
+        ['missing-limit', '<strong>160</strong> / <strong>999</strong> MiB', 'Quota probe missing token: 1024'],
+        ['missing-slash', '<strong>160</strong> <strong>1024</strong> MiB', 'Quota probe missing token: /'],
+        ['grouped-limit', '<strong>160</strong> / <strong>1,024</strong> MiB', 'Quota probe missing token: 1024'],
+        ['malformed-grouping', '<strong>160</strong> / <strong>10,24</strong> MiB', 'Quota probe missing token: 1024'],
+        ['ambiguous-used', '<strong>160</strong> / <strong>1024</strong> MiB 160', 'Quota probe ambiguous token: 160'],
       ]) {
         value.innerHTML = html
         let error = null
@@ -135,22 +138,23 @@ function inspectQuotaNodes({ controls = false } = {}) {
       return { split, rejected }
     } finally { fixture.remove() }
   }
-  return [...document.querySelectorAll('.xp-meter__values > bdi[dir="ltr"]')]
+  return [...document.querySelectorAll('[data-mail-quota-value]')]
     .filter(value => value.checkVisibility({ checkVisibilityCSS: true }))
     .map(value => {
-      const parent = value.closest('.xp-mail-sidebar-quota') ?? value.closest('.xp-card')
-      return observe(value, parent?.querySelector('.xp-label,h2'))
+      const parent = value.closest('[data-mail-quota]'), isolated = value.querySelector(':scope > bdi[dir="ltr"]')
+      if (isolated && value.textContent.trim() !== isolated.textContent.trim()) throw new Error('The isolated quota must contain the complete visible value')
+      return observe(isolated ?? value, parent?.querySelector('[data-mail-quota-label]'))
     })
 }
 
 async function quotaProbeControls(page) {
   const controls = await page.evaluate(inspectQuotaNodes, { controls: true })
-  assert.equal(controls.split.phrase, '160 / 1,024 MiB (15.6%)')
+  assert.equal(controls.split.phrase, '160 / 1024 MiB')
   assert.ok(controls.split.text_node_count > 3)
   assert.ok(controls.split.first.start_node !== controls.split.first.end_node, 'The used token actually spans text nodes')
   assert.ok(controls.split.limit.start_node !== controls.split.limit.end_node, 'The limit token actually spans text nodes')
   assert.equal(controls.split.first.text, '160')
-  assert.equal(controls.split.limit.text, '1,024')
+  assert.equal(controls.split.limit.text, '1024')
   assert.ok(controls.split.first.right <= controls.split.slash.left && controls.split.slash.right <= controls.split.limit.left, 'Split tokens retain nonoverlapping LTR glyph order')
   assert.equal(controls.rejected.length, 5)
   for (const rejected of controls.rejected) {
@@ -163,14 +167,14 @@ async function quotaProbeControls(page) {
 async function quotaGate(page) {
   const observations = await page.evaluate(inspectQuotaNodes)
   for (const observation of observations) {
-    assert.equal(observation.phrase, '160 / 1,024 MiB (15.6%)', 'The synthetic quota values and precise binary unit must not change')
+    assert.equal(observation.phrase, '160 / 1024 MiB', 'The synthetic quota values and precise binary unit must not change')
     assert.equal(observation.direction, 'ltr')
     assert.ok(observation.edge_delta < 1, 'Actual quota glyphs share the heading edge: ' + observation.label)
     assert.ok(observation.value_top >= observation.label_bottom - 1, 'Quota values sit directly below the heading')
     assert.equal(observation.first.text, '160')
     assert.equal(observation.slash.text, '/')
-    assert.equal(observation.limit.text, '1,024')
-    assert.ok(observation.first.left < observation.slash.left && observation.slash.left < observation.limit.left, 'The actual quota glyphs keep 160 / 1,024 ordering')
+    assert.equal(observation.limit.text, '1024')
+    assert.ok(observation.first.left < observation.slash.left && observation.slash.left < observation.limit.left, 'The actual quota glyphs keep 160 / 1024 ordering')
     assert.ok(observation.first.right <= observation.slash.left && observation.slash.right <= observation.limit.left, 'Numeric tokens and slash must not overlap or reverse')
   }
   return observations
@@ -191,21 +195,28 @@ async function keyboardGate(page) {
   assert.ok(focus.width >= 44 && focus.height >= 44 && focus.outline >= 2 && focus.style !== 'none')
   await page.keyboard.press('Enter')
   assert.equal(await page.locator('#main-content').evaluate(element => document.activeElement === element), true, 'The skip link must reach the main landmark')
-  const content = await page.evaluate(() => ({ heading_top: document.querySelector('h1').getBoundingClientRect().top, header_bottom: document.querySelector('.xp-mail-topbar').getBoundingClientRect().bottom }))
-  assert.ok(content.heading_top >= content.header_bottom - 1, 'The focused main heading must remain below the sticky header')
+  const content = await page.evaluate(() => ({ heading_top: document.querySelector('h1').getBoundingClientRect().top, header_bottom: document.querySelector('[data-mail-layout="reference"] > header').getBoundingClientRect().bottom }))
+  assert.ok(content.heading_top >= content.header_bottom - 1, 'The focused main heading must remain below the header')
   return { ...focus, ...content }
 }
 
 async function composerGate(page, state) {
-  assert.equal(await page.locator('form').count(), 0, 'An unavailable composer must have no native submission path')
-  const send = page.locator('[data-compose-form] button')
+  assert.equal(await page.locator('form').count(), 0, 'The composer has no native implicit submission path')
+  const composer = page.locator('[data-compose-form]'), send = composer.locator('[data-mail-send="true"]')
+  assert.equal(await composer.getAttribute('data-mail-send-availability'), 'available')
   assert.equal(await send.count(), 1)
-  assert.equal(await send.isDisabled(), true)
+  assert.equal(await send.isDisabled(), false)
   assert.equal(await send.getAttribute('type'), 'button')
+  const from = page.locator('#compose-from'), mailbox = await page.locator('[data-mail-layout="reference"]').getAttribute('data-mailbox')
+  assert.equal(await from.evaluate(element => element.tagName), 'SELECT')
+  assert.deepEqual(await from.locator('option').evaluateAll(options => options.map(option => ({ value: option.value, selected: option.selected }))), [{ value: mailbox, selected: true }])
+  await from.selectOption(mailbox)
+  assert.equal(await from.inputValue(), mailbox, 'The configured sender remains the sole native option')
+  assert.equal(await composer.locator('[data-mail-action="save-draft"][disabled]').count(), 1)
   await page.locator('#compose-to').fill('recipient@example.test')
-  const directions = async () => page.locator('[data-compose-form]').evaluate(element => ['compose-subject', 'compose-body'].map(id => {
+  const directions = async () => composer.evaluate(element => ['compose-subject', 'compose-body'].map(id => {
     const input = element.querySelector('#' + id), style = getComputedStyle(input)
-    return { id, value: input.value, dir: input.getAttribute('dir'), direction: style.direction, alignment: style.textAlign }
+    return { id, value: input.isContentEditable ? input.innerText : input.value, dir: input.getAttribute('dir'), direction: style.direction, alignment: style.textAlign }
   }))
   await page.locator('#compose-subject').fill('رسالة تجريبية. الاختبار رقم 1.')
   await page.locator('#compose-body').fill('نص عربي مع test@example.test. السطر التالي.')
@@ -218,23 +229,43 @@ async function composerGate(page, state) {
   await page.locator('#compose-subject').press('Enter')
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   assert.equal(await page.locator('#compose-subject').inputValue(), 'Synthetic unsent input')
-  assert.equal(await page.locator('#compose-body').inputValue(), 'Synthetic preview. This must never send.')
+  assert.equal(await page.locator('#compose-body').innerText(), 'Synthetic preview. This must never send.')
   assert.equal(new URL(page.url()).pathname, '/mail/compose')
-  return { unavailable_send: true, arabic, english, input_preserved_after_enter: true }
+  return { explicit_send_available: true, send_clicked: false, native_form: false, configured_sender_option: mailbox, arabic, english, input_preserved_after_enter: true }
 }
 
 async function mobileGate(page, state) {
-  await page.locator('[data-action="toggle-mobile-nav"]').click()
-  const sidebar = page.locator('[data-xp-sidebar]')
-  assert.equal(await sidebar.getAttribute('aria-modal'), 'true')
-  assert.equal(await sidebar.getAttribute('role'), 'dialog')
+  const sidebar = page.locator('[data-xp-sidebar]'), toggle = page.locator('[data-action="toggle-mobile-nav"]:visible')
+  if (await toggle.count()) {
+    await toggle.click()
+    assert.equal(await sidebar.getAttribute('aria-modal'), 'true')
+    assert.equal(await sidebar.getAttribute('role'), 'dialog')
+    const quota = await quotaGate(page)
+    assert.ok(quota.length > 0, 'Actual quota text remains measurable while navigation is open')
+    await page.keyboard.press('Escape')
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'false')
+    assert.equal(await toggle.evaluate(element => document.activeElement === element), true)
+    return { navigation: 'modal', escape_returns_focus: true, quota }
+  }
+  assert.equal(await page.locator('[data-mail-layout="reference"]').getAttribute('data-board-port'), 'xmail-' + state.screen, 'Inline navigation is limited to the actual current mail board')
+  assert.equal(await sidebar.evaluate(element => element.tagName), 'NAV')
+  assert.equal(await sidebar.isVisible(), true, 'The current inline folder navigation remains visible')
+  assert.notEqual(await sidebar.getAttribute('role'), 'dialog')
+  assert.notEqual(await sidebar.getAttribute('aria-modal'), 'true')
+  const links = sidebar.locator('a[href]')
+  assert.ok(await links.count() > 1, 'Inline navigation exposes real keyboard destinations')
+  await links.first().focus()
+  const focused = await links.first().evaluate(element => {
+    const box = element.getBoundingClientRect(), style = getComputedStyle(element)
+    return { focused: document.activeElement === element, width: box.width, height: box.height, outline: parseFloat(style.outlineWidth), outline_style: style.outlineStyle }
+  })
+  assert.ok(focused.focused && focused.width >= 44 && focused.height >= 44 && focused.outline >= 2 && focused.outline_style !== 'none')
+  await page.keyboard.press('Tab')
+  assert.equal(await sidebar.evaluate(element => element.contains(document.activeElement) && document.activeElement.tagName === 'A'), true, 'Tab visits the next actual folder destination')
+  assert.equal(await page.locator('[data-xp-shell-content]').evaluate(element => element.inert), false)
   const quota = await quotaGate(page)
-  if (state.screen === 'inbox') assert.ok(quota.length > 0, 'The open navigation sheet quota is actually measured')
-  await page.keyboard.press('Escape')
-  const toggle = page.locator('[data-action="toggle-mobile-nav"]')
-  assert.equal(await toggle.getAttribute('aria-expanded'), 'false')
-  assert.equal(await toggle.evaluate(element => document.activeElement === element), true)
-  return { modal_navigation: true, escape_returns_focus: true, quota }
+  assert.ok(quota.length > 0, 'Visible header quota is measured in the inline layout')
+  return { navigation: 'inline', visible: true, native_tab_order: true, modal: false, quota }
 }
 
 /** Synthetic, loopback-only mail geometry and non-submission checks. No mailbox authentication or SMTP/IMAP service is exercised. */
@@ -283,8 +314,8 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
         outcome.fonts = await fontGate(page, state.locale)
         if (!probeControls) probeControls = await quotaProbeControls(page)
         outcome.applied_fonts = {}
-        for (const [role, selector, family] of [['brand', '.xp-mail-brand strong', 'IBM Plex Sans'], ['heading', 'h1', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans']]) {
-          try { outcome.applied_fonts[role] = await assertAppliedFont(page, selector, family) }
+        for (const [role, selector, family, typographyRole] of [['brand', '[data-mail-layout="reference"] > header > a:first-child > span:last-child', 'IBM Plex Mono', 'mail-wordmark'], ['heading', state.screen === 'inbox' ? '#list-title' : '#compose-title', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans', 'ordinary']]) {
+          try { outcome.applied_fonts[role] = await assertAppliedFont(page, selector, family, { role: typographyRole }) }
           catch (error) { if (error.appliedFontObservation) outcome.applied_fonts[role] = error.appliedFontObservation; throw error }
         }
         outcome.geometry = await geometry(page)
@@ -300,7 +331,7 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
         }
         if (state.screen === 'inbox') {
           if (state.width >= 960) { assert.equal(observed.folder.visible, true); assert.ok(Math.abs(observed.folder.width - 200) < 1); assert.ok(observed.list.height >= 700, 'The continuous inbox fills the desktop workspace') }
-          else assert.equal(observed.folder.visible, false)
+          else { assert.equal(observed.folder.visible, true); assert.ok(observed.folder.width <= state.width + 1, 'Inline folder navigation fits the narrow viewport') }
           if (state.width >= 640) assert.ok(Math.abs(observed.list.y - observed.reader.y) < 1, 'Tablet and desktop keep list and reader side by side')
           else assert.ok(observed.reader.y >= observed.list.y + observed.list.height - 1, 'Phone panes stack in reading order')
         }
@@ -341,7 +372,7 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
     fixture: { synthetic: true, loopback_only: true, read_only: true, authentication: false, smtp_imap: false, service_qualification: false },
     tests: { total: outcomes.length, passed: outcomes.filter(outcome => outcome.status === 'passed').length, failed: outcomes.filter(outcome => outcome.status === 'failed').length },
     source: { before_sha256: before.sha256, after_sha256: after.sha256, files: before.files.length, drift },
-    limits: ['Synthetic catalog and mailbox data validate the rendered layout only; they do not authenticate a mailbox or prove SMTP/IMAP, message selection, drafts, attachments or delivery.', 'The non-submitting composer is intentionally unavailable until real mailbox authority and delivery are wired. Enter must never send.', 'Font, keyboard, target and selected geometry checks are scoped accessibility evidence, not complete WCAG certification.', 'Viewport emulation and screenshots do not certify physical devices, every message shape, external design parity or production performance.'],
+    limits: ['Synthetic catalog and mailbox data validate the rendered layout only; they do not authenticate a mailbox or prove SMTP/IMAP, message selection, drafts, attachments or delivery.', 'The current composer uses an explicit send button and no native form. This suite never clicks Send; Enter must not submit, and no mailbox authority or delivery qualification is implied.', 'Font, keyboard, target and selected geometry checks are scoped accessibility evidence, not complete WCAG certification.', 'Viewport emulation and screenshots do not certify physical devices, every message shape, external design parity or production performance.'],
     probe_controls: probeControls ?? null,
     outcomes,
   }

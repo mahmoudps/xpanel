@@ -82,12 +82,15 @@ const markVisualDocument = html => html
 /**
  * Loopback-only, read-only visual server. No API authentication, cookies, secrets or host commands.
  * qualifiedCatalog=false retains the original catalog states for unavailable-workspace rendering.
+ * resolvedAccount=false exercises the standalone workspace-summary DTO renderer
+ * without a loaded account record. It is not an authenticated missing-account HTTP path.
  * Principals and account data remain synthetic in either case.
  */
-export async function createVisualFixture({ port = 0, host = '127.0.0.1', qualifiedCatalog = true } = {}) {
+export async function createVisualFixture({ port = 0, host = '127.0.0.1', qualifiedCatalog = true, resolvedAccount = true } = {}) {
   if (!['127.0.0.1', '::1', 'localhost'].includes(host)) throw new Error('The visual fixture must bind to loopback.')
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid visual fixture port.')
   if (typeof qualifiedCatalog !== 'boolean') throw new Error('The synthetic catalog selection must be explicit.')
+  if (typeof resolvedAccount !== 'boolean') throw new Error('The synthetic account projection must be explicit.')
   const server = createServer(async (incoming, outgoing) => {
     try {
       if (incoming.method !== 'GET' && incoming.method !== 'HEAD') {
@@ -111,7 +114,17 @@ export async function createVisualFixture({ port = 0, host = '127.0.0.1', qualif
         outgoing.end(incoming.method === 'HEAD' ? undefined : 'No synthetic visual document exists here.')
         return
       }
-      const response = await serveWebUi(new Request(url, { method: incoming.method }), route ? () => stateFor(route, qualifiedCatalog) : undefined)
+      const response = await serveWebUi(new Request(url, { method: incoming.method }), route ? () => {
+        const state = stateFor(route, qualifiedCatalog)
+        if (!resolvedAccount && route.surface === 'xpanel') {
+          state.panel = {}
+          state.workspaceSummary = {
+            account: { id: account.id, ownerId: account.ownerId, username: account.username, primaryDomain: account.primaryDomain, status: account.status, planId: account.planId },
+            plan: { id: plan.id, name: plan.name },
+          }
+        }
+        return state
+      } : undefined)
       const html = response.headers.get('content-type')?.startsWith('text/html')
       const body = html ? markVisualDocument(await response.text()) : await response.text()
       outgoing.writeHead(response.status, { ...Object.fromEntries(response.headers), 'cache-control': 'no-store', 'x-visual-fixture': 'synthetic' })

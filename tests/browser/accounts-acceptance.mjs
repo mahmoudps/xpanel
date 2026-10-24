@@ -11,6 +11,15 @@ import { collectSnapshotFiles, computeSourceDigest } from '../../scripts/vm/sour
 import { assertAppliedFont } from './applied-font-contract.mjs'
 
 const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
+const creationFieldContract = [
+  { id: 'new-acc-username', name: 'username', tag: 'INPUT', type: 'text', required: true },
+  { id: 'new-acc-domain', name: 'primaryDomain', tag: 'INPUT', type: 'text', required: true },
+  { id: 'new-acc-contact', name: 'contactEmail', tag: 'INPUT', type: 'email', required: false },
+  { id: 'new-acc-plan', name: 'planId', tag: 'SELECT', type: 'select-one', required: true },
+  { id: 'new-acc-password', name: 'password', tag: 'INPUT', type: 'password', required: true },
+  { id: 'new-acc-ipv4', name: 'ipAssignment', tag: 'SELECT', type: 'select-one', required: true },
+  { id: 'new-acc-ipv6', name: 'ipv6', tag: 'INPUT', type: 'text', required: false },
+]
 const states = ['en', 'ar'].flatMap(locale => ['light', 'dark'].flatMap(theme => [360, 768, 1440].flatMap(width => ['accounts', 'create'].map(screen => ({ id: screen + '-' + locale + '-' + theme + '-' + width, locale, theme, width, screen })))))
 const plan = defaultPlan({ id: 'fixture-plan', name: 'Standard', featureListId: 'fixture-features' })
 const alpha = { id: 'internal-alpha', username: 'alpha', uid: 20001, gid: 20001, home: '/home/alpha', primaryDomain: 'alpha.example.test', planId: plan.id, ownerId: null, status: 'active', suspendReason: null, contactEmail: 'owner@example.test', ipv4: '192.0.2.10', ipv6: '2001:db8::10', extraIps: ['192.0.2.11'], shell: 'jailed', createdAt: '2026-10-23T00:00:00Z' }
@@ -112,9 +121,24 @@ async function createAccountGate(page, host, state, result, destination, expect)
   const fields = await form.evaluate(form => [...form.querySelectorAll('.xp-accounts__field')].map(field => {
     const label = field.querySelector('label'), value = field.querySelector('input,select')
     const a = label.getBoundingClientRect(), b = value.getBoundingClientRect()
-    return { gap: b.top - a.bottom, left: Math.abs(a.left - b.left), width: b.width, height: b.height }
+    return {
+      id: value.id, name: value.name, tag: value.tagName, type: value.type, required: value.required,
+      labelFor: label.htmlFor, associatedLabels: value.labels.length,
+      labelAssociated: value.labels[0] === label && label.textContent.trim().length > 0,
+      gap: b.top - a.bottom, left: Math.abs(a.left - b.left), width: b.width, height: b.height,
+    }
   }))
-  assert.equal(fields.length, 6)
+  assert.deepEqual(fields.map(({ id, name, tag, type, required }) => ({ id, name, tag, type, required })), creationFieldContract)
+  for (const field of fields) {
+    assert.equal(field.labelFor, field.id)
+    assert.equal(field.associatedLabels, 1)
+    assert.equal(field.labelAssociated, true)
+  }
+  const contact = form.locator('[name="contactEmail"]')
+  await expect(contact).toHaveValue('')
+  await expect(contact).toHaveAttribute('autocomplete', 'email')
+  await expect(contact).toHaveAttribute('inputmode', 'email')
+  await expect(contact).toHaveAttribute('dir', 'ltr')
   assert.ok(await form.evaluate(form => form.getBoundingClientRect().width <= 640.5), 'The single-column form stays within a readable desktop measure')
   for (const field of fields) assert.ok(Math.abs(field.gap - 8) < 1 && field.left < 1 && field.width >= 44 && field.height >= 44)
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
@@ -127,6 +151,13 @@ async function createAccountGate(page, host, state, result, destination, expect)
   await submit.click()
   assert.equal(host.requests.length, initial)
   await password.fill('synthetic-' + 'x'.repeat(16))
+  await contact.fill('not-an-email')
+  assert.equal(await contact.evaluate(control => control.validity.typeMismatch), true)
+  await submit.click()
+  assert.equal(host.requests.length, initial, 'An invalid optional contact email must not submit a create request')
+  await contact.fill('new-contact@example.test')
+  assert.equal(await contact.evaluate(control => control.validity.valid), true)
+  result.contactEmail = { optional: true, invalidEmailBlockedBeforeRequest: true }
   const refused = page.waitForResponse(response => new URL(response.url()).pathname === '/api/accounts' && response.request().method() === 'POST')
   await submit.click()
   await form.evaluate(form => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
@@ -139,6 +170,7 @@ async function createAccountGate(page, host, state, result, destination, expect)
   assert.equal(host.requests.length, initial + 1)
   assert.equal(host.requests.at(-1).password_supplied, true)
   assert.equal(host.requests.at(-1).body.password, undefined)
+  assert.equal(host.requests.at(-1).body.contactEmail, 'new-contact@example.test')
   await form.locator('[name="username"]').fill('newowner')
   await password.fill('synthetic-' + 'y'.repeat(16))
   const created = page.waitForResponse(response => new URL(response.url()).pathname === '/api/accounts' && response.request().method() === 'POST')
@@ -156,6 +188,7 @@ async function createAccountGate(page, host, state, result, destination, expect)
   await expect(form.locator('[name="username"]')).toHaveValue('newowner')
   result.requests = host.requests.slice(initial)
   assert.equal(result.requests.length, 2)
+  assert.equal(result.requests.every(request => request.body.contactEmail === 'new-contact@example.test'), true)
   assert.equal(result.requests.every(request => request.path === '/api/accounts' && request.method === 'POST' && request.csrf === 'synthetic-ui-fixture-csrf'), true)
   assert.equal(result.requests.every(request => request.body.ipAssignment?.mode === 'shared' && request.body.ipv4 === undefined && request.body.ipv6 === undefined), true)
   await page.screenshot({ path: join(destination, 'screenshots/' + state.id + '-pending.png'), fullPage: true })
@@ -174,6 +207,7 @@ async function createAccountGate(page, host, state, result, destination, expect)
   assert.equal(host.requests.length, count)
   result.requests = host.requests.slice(initial)
   assert.equal(result.requests.length, 3)
+  assert.equal(result.requests.at(-1).body.contactEmail, undefined, 'An omitted optional contact email stays absent from the request')
   result.delayed_response_identity_preserved = true
   result.unknown_outcome_requires_review = true
 
