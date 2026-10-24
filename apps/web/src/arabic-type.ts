@@ -194,9 +194,9 @@ ${ar('th')} {
   white-space: nowrap !important;
   overflow-wrap: normal !important;
 }
-${ar('table span[style*="overflow-wrap: anywhere"] bdi[dir="ltr"]')},
-${ar('table div[style*="align-items: flex-start"] span bdi[dir="ltr"]')},
-${ar('.xp-table td bdi[dir="ltr"]')} {
+${ar('table span[style*="overflow-wrap: anywhere"] bdi[dir="ltr"]:not(.xp-chart-technical-value):not(.xp-plan-resource-value)')},
+${ar('table div[style*="align-items: flex-start"] span bdi[dir="ltr"]:not(.xp-chart-technical-value):not(.xp-plan-resource-value)')},
+${ar('.xp-table td bdi[dir="ltr"]:not(.xp-chart-technical-value):not(.xp-plan-resource-value)')} {
   white-space: normal !important;
   overflow-wrap: anywhere !important;
   flex-shrink: 1 !important;
@@ -234,12 +234,7 @@ html[lang="ar"] .xp-board-port[data-home-phone="true"],
   overflow-y: auto !important;
 }
 @media (max-width: 390px) {
-  ${ar('table')},
-  ${ar('thead')},
-  ${ar('tbody')},
-  ${ar('tr')},
-  ${ar('th')},
-  ${ar('td')} {
+  ${ar(':is(table, thead, tbody, tr, th, td):not(.xp-table):not(.xp-table *):not(.xp-accounts__table):not(.xp-accounts__table *)')} {
     display: block !important;
     width: 100% !important;
     min-width: 0 !important;
