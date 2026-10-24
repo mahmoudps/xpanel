@@ -86,26 +86,26 @@ Update this file in every PR that changes a row. Names, routes, and status only.
 | — | xPanel | /domains/site-publisher | Blocked: no exported board | — | not measured | — | — |
 | — | xPanel | /domains/site-settings | Blocked: no exported board (catalog name PanelSite) | — | not measured | — | — |
 | — | xPanel | /domains/staging | Blocked: no exported board (catalog name PanelStaging) | — | not measured | — | — |
-| — | xPanel | /email/archive | Composed from design system (template: PanelEmail) | — | not measured | empty-state coming soon | — |
-| — | xPanel | /email/calendars-contacts | Composed from design system (template: PanelEmail) | — | not measured | partial: mailboxes real, tools empty | — |
-| — | xPanel | /email/deliverability | Composed from design system (template: PanelEmail) | — | not measured | partial: domains real, probes empty | — |
-| — | xPanel | /email/encryption | Composed from design system (template: PanelEmail) | — | not measured | partial: mailboxes real, tools empty | — |
-| — | xPanel | /email/filters | Composed from design system (template: PanelEmail) | — | not measured | partial: mailboxes real, rules empty | — |
-| — | xPanel | /email/forwarders | Composed from design system (template: PanelEmail) | — | not measured | partial: plan cap real, rows empty | — |
-| — | xPanel | /email/mailing-lists | Composed from design system (template: Mail Inbox) | — | not measured | partial: plan cap real, rows empty | — |
-| — | xPanel | /email/spam-filters | Composed from design system (template: PanelEmail) | — | not measured | partial: mailboxes real, policy empty | — |
-| — | xPanel | /email/spam-quarantine | Composed from design system (template: Mail Inbox) | — | not measured | empty-state coming soon | — |
+| — | xPanel | /email/archive | Composed from design system (template: PanelEmail) | — | not measured | empty-state coming soon | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
+| — | xPanel | /email/calendars-contacts | Composed from design system (template: PanelEmail) | — | not measured | partial: mailboxes real, tools empty | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
+| — | xPanel | /email/deliverability | Composed from design system (template: PanelEmail) | — | not measured | partial: domains real, probes empty | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
+| — | xPanel | /email/encryption | Composed from design system (template: PanelEmail) | — | not measured | partial: mailboxes real, tools empty | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
+| — | xPanel | /email/filters | Composed from design system (template: PanelEmail) | — | not measured | partial: mailboxes real, rules empty | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
+| — | xPanel | /email/forwarders | Composed from design system (template: PanelEmail) | — | not measured | partial: plan cap real, rows empty | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
+| — | xPanel | /email/mailing-lists | Composed from design system (template: Mail Inbox) | — | not measured | partial: plan cap real, rows empty | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
+| — | xPanel | /email/spam-filters | Composed from design system (template: PanelEmail) | — | not measured | partial: mailboxes real, policy empty | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
+| — | xPanel | /email/spam-quarantine | Composed from design system (template: Mail Inbox) | — | not measured | empty-state coming soon | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
 | — | xPanel | /files/ftp | Blocked: no exported board (catalog name PanelFtp) | — | not measured | — | — |
 | — | xPanel | /files/git | Blocked: no exported board (catalog name PanelGit) | — | not measured | — | — |
 | — | xPanel | /files/trash | Blocked: no exported board (catalog name PanelFiles) | — | not measured | — | — |
 | — | xPanel | /files/web-disk | Blocked: no exported board | — | not measured | — | — |
-| — | xPanel | /health | Composed from design system (template: PanelEmail) | — | not measured | partial: account status real, checks empty | — |
+| — | xPanel | /health | Composed from design system (template: PanelEmail) | — | not measured | partial: account status real, checks empty | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
 | — | xPanel | /metrics/logs | Blocked: no exported board (catalog name PanelLogs) | — | not measured | — | — |
 | — | xPanel | /metrics/web-stats | Blocked: no exported board | — | not measured | — | — |
-| — | xPanel | /preferences | Composed from design system (template: PanelPreferences) | — | not measured | partial: contact and theme real, save empty | — |
-| — | xPanel | /preferences/language | Composed from design system (template: PanelPreferences) | — | not measured | real | — |
-| — | xPanel | /preferences/team | Composed from design system (template: PanelPreferences) | — | not measured | empty-state coming soon | — |
-| — | xPanel | /preferences/users | Composed from design system (template: PanelEmail) | — | not measured | partial: service users real, create empty | — |
+| — | xPanel | /preferences | Composed from design system (template: PanelPreferences) | — | not measured | partial: contact and theme real, save empty | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
+| — | xPanel | /preferences/language | Composed from design system (template: PanelPreferences) | — | not measured | real | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
+| — | xPanel | /preferences/team | Composed from design system (template: PanelPreferences) | — | not measured | empty-state coming soon | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
+| — | xPanel | /preferences/users | Composed from design system (template: PanelEmail) | — | not measured | partial: service users real, create empty | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
 | — | xPanel | /security/hotlink | Blocked: no exported board (catalog name PanelSite) | — | not measured | — | — |
 | — | xPanel | /security/ip-blocker | Blocked: no exported board (catalog name PanelSite) | — | not measured | — | — |
 | — | xPanel | /security/ssh | Blocked: no exported board | — | not measured | — | — |
@@ -233,11 +233,11 @@ Update this file in every PR that changes a row. Names, routes, and status only.
 | — | xMail | /mail/tools/disk-usage | Blocked: no exported board | — | not measured | — | — |
 | — | xMail | /mail/tools/mailing-lists | Blocked: no exported board | — | not measured | — | — |
 | — | xMail | /mail/tools/track-delivery | Blocked: no exported board | — | not measured | — | — |
-| — | error | HTTP 403 | Composed from design system (template: Design system) | — | not measured | real | — |
-| — | error | HTTP 404 | Composed from design system (template: Design system) | — | not measured | real | — |
-| — | error | HTTP 421 | Composed from design system (template: Design system) | — | not measured | real | — |
-| — | error | HTTP 500 | Composed from design system (template: Design system) | — | not measured | real | — |
-| — | error | HTTP 503 | Composed from design system (template: Design system) | — | not measured | real | — |
+| — | error | HTTP 403 | Composed from design system (template: Design system) | — | not measured | real | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
+| — | error | HTTP 404 | Composed from design system (template: Design system) | — | not measured | real | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
+| — | error | HTTP 421 | Composed from design system (template: Design system) | — | not measured | real | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
+| — | error | HTTP 500 | Composed from design system (template: Design system) | — | not measured | real | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
+| — | error | HTTP 503 | Composed from design system (template: Design system) | — | not measured | real | [#60](https://github.com/mahmoudps/xpanel/pull/60) |
 
 ## Queue
 
