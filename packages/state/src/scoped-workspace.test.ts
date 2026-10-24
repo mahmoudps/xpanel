@@ -84,6 +84,42 @@ describe('fresh scoped account reads', () => {
   })
 })
 
+describe('scoped database metadata reads', () => {
+  const databases = () => handle.store.readAccountDatabases(account.id, { username: account.username })
+
+  it('reads active databases and public users despite corrupt unrelated state, without allocating references', async () => {
+    const trashed = await handle.store.createDatabase({ accountId: account.id, name: 'owner7_trashed' })
+    const user = await handle.store.createDatabaseUser({ accountId: account.id, name: 'owner7_app', authPlugin: 'ed25519', authString: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq' })
+    const granted = await handle.store.setGrant({ databaseUserId: user.id, databaseId: trashed.id, privileges: ['SELECT'] })
+    await handle.store.trashDatabase(trashed.id)
+    const live = await handle.store.createDatabase({ accountId: account.id, name: 'owner7_live' })
+    const unrelated = join(handle.store.rootDir, 'accounts', 'unrelated7')
+    await mkdir(unrelated)
+    await writeFile(join(unrelated, 'account.json'), '{corrupt unrelated fixture')
+    const before = await handle.store.getAuthorityMetadata()
+    expect(await databases()).toEqual({ databases: [live], databaseUsers: [granted] })
+    expect(JSON.stringify(await databases())).not.toMatch(/authString|authPlugin|passwordHash/)
+    const after = await handle.store.getAuthorityMetadata()
+    expect(after.revision).toBe(before.revision)
+    expect(after.references).toEqual(before.references)
+    expect(after.allocatedReferences).toEqual(before.allocatedReferences)
+    expect(await handle.store.getWriterLock().readLockHolder()).toBeNull()
+  })
+
+  it('keeps the account ID authoritative for incorrect hints and missing accounts', async () => {
+    const live = await handle.store.createDatabase({ accountId: account.id, name: 'owner7_live' })
+    expect(await handle.store.readAccountDatabases(account.id, { username: 'alias7' })).toEqual({ databases: [live], databaseUsers: [] })
+    expect(await handle.store.readAccountDatabases(randomUUID(), { username: account.username })).toEqual({ databases: [], databaseUsers: [] })
+  })
+
+  it('rejects corrupt owned metadata instead of reporting an empty database count', async () => {
+    await mkdir(join(handle.store.rootDir, 'accounts', account.username, 'databases'))
+    await writeFile(join(handle.store.rootDir, 'accounts', account.username, 'databases', 'broken.json'), '{corrupt owned fixture')
+    await expect(databases()).rejects.toMatchObject({ code: 'VALIDATION' })
+    expect(await handle.store.getWriterLock().readLockHolder()).toBeNull()
+  })
+})
+
 describe('workspace read lease consistency', () => {
   it('waits for a same-instance active mutation instead of treating activeLease as request ownership', async () => {
     let resume!: () => void

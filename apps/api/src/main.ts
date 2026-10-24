@@ -299,11 +299,12 @@ export const createDefaultWebRenderer = async (deps: {
     const homePlan = scoped?.plan
     if (surface === 'xpanel' && documentRoute.activeRoute === '/home' && principal.kind === 'user' && homeAccount?.status === 'active' && homePlan) {
       const email = await supportEmail()
-      const [ownedUsers, sessions, homeAudit, homeDomains, homeUsage] = await Promise.all([
+      const [ownedUsers, sessions, homeAudit, homeDomains, homeDatabaseState, homeUsage] = await Promise.all([
         deps.store.listOwnedServiceUsers(homeAccount.username).catch(() => []),
         listSessionsForPrincipal(deps.db, principal.id).catch(() => []),
         listAudit(deps.db, { mentions: homeAccount.username, limit: 8 }).catch(() => []),
         deps.store.listDomains({ accountId: homeAccount.id }).catch(() => []),
+        deps.store.readAccountDatabases(homeAccount.id, { username: homeAccount.username }),
         (async () => {
           if (!deps.agent) return null
           try {
@@ -353,8 +354,8 @@ export const createDefaultWebRenderer = async (deps: {
           plan: homePlan,
           domains: homeDomains,
           ...(homeUsage ? { usage: homeUsage } : {}),
-          databases: [],
-          databaseUsers: [],
+          databases: homeDatabaseState.databases,
+          databaseUsers: homeDatabaseState.databaseUsers.map(user => ({ id: user.id, name: user.name, grants: user.grants })),
           serviceUsers: ownedUsers.map(user => ({ ...user, passwordHash: '' })),
           files: [],
           ...(lastSignInAt ? { lastSignInAt } : {}),
