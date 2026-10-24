@@ -6,7 +6,7 @@ import { whmDashboardFromProps } from './board-port/xwhm-dashboard.ts'
 import { xpanelHomeFromProps } from './board-port/xpanel-home.ts'
 import { auditActionHtml, auditActionLabel, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from './audit-labels.ts'
 import { formatAsciiBytes } from './tokens.ts'
-import { certificateFromPem, readHostIdentity, sslCertificateForListen } from '../../agent/src/host-identity.ts'
+import { certificateFromPem, readHostIdentity, serverNamesForListen, sslCertificateForListen } from '../../agent/src/host-identity.ts'
 import { parseVersionFile } from '../../agent/src/host-info.ts'
 
 const message = {
@@ -166,16 +166,24 @@ describe('live truth surfaces', () => {
       lastSignInAt: '2026-10-23T18:04:00.000Z',
       recentChanges: [{ pill: 'Audit', pillBg: '#EEF0F3', pillFg: '#344054', titleHtml: 'Signed in', detailHtml: 'demohost' }],
     }).desktop
-    assert.match(home.meters.find(meter => meter.label === 'IO write cap')?.value ?? '', /50\.0 MB\/s/)
+    assert.equal(home.meters.find(meter => meter.label === 'IO write cap')?.value, '—')
     assert.equal(home.meters.find(meter => meter.label === 'Mailboxes')?.value, '1 / 20')
     const sampled = xpanelHomeFromProps({
       account: { username: 'demohost', uid: 20000, home: '/home/demohost', primaryDomain: 'demo.example.test', ipv4: '192.0.2.10' },
       plan: { name: 'Demo', resources: { diskMb: 5120, bandwidthMbMonth: 1024, memoryMb: 512, maxProcesses: 20, ioWriteBps: 50_000_000 }, caps: { addonDomains: 5, mailboxes: 20, databases: 5 } },
-      usage: { phpVersion: '8.3', diskBytes: 1_500_000_000, memoryBytes: 120_000_000, processCount: 4, bandwidth: 'unmeasured' },
+      usage: { phpVersion: '8.3', diskBytes: 1_500_000_000, memoryBytes: 120_000_000, processCount: 4, bandwidth: 'unmeasured', ioEnforced: false },
     }).desktop
     assert.match(sampled.info.map(row => row.valueHtml).join(' '), /8\.3 · PHP-FPM/)
     assert.match(sampled.meters.find(meter => meter.label === 'Disk')?.value ?? '', /1\.50 GB \/ 5 GB/)
-    assert.match(sampled.meters.find(meter => meter.label === 'Memory')?.value ?? '', /120 MB \/ 512 MB/)
+    assert.match(sampled.meters.find(meter => meter.label === 'Memory')?.value ?? '', /120 MB \/ 537 MB/)
+    assert.equal(sampled.meters.find(meter => meter.label === 'IO write cap')?.value, 'not enforced')
+    const capped = xpanelHomeFromProps({
+      account: { username: 'demohost', uid: 20000, home: '/home/demohost', primaryDomain: 'demo.example.test', ipv4: '192.0.2.10' },
+      plan: { name: 'Demo', resources: { diskMb: 5120, bandwidthMbMonth: 1024, memoryMb: 1024, maxProcesses: 20, ioWriteBps: 50_000_000 }, caps: { addonDomains: 5, mailboxes: 20, databases: 5 } },
+      usage: { phpVersion: '8.3', diskBytes: 1_500_000_000, memoryBytes: 120_000_000, processCount: 4, bandwidth: 'unmeasured', ioEnforced: true },
+    }).desktop
+    assert.equal(capped.meters.find(meter => meter.label === 'IO write cap')?.value, '50.0 MB/s')
+    assert.match(capped.meters.find(meter => meter.label === 'Memory')?.value ?? '', /120 MB \/ 1\.07 GB/)
     assert.equal(sampled.meters.find(meter => meter.label === 'Processes')?.value, '4 / 20')
     assert.match(sampled.meters.find(meter => meter.label === 'Monthly bandwidth')?.value ?? '', /not measured yet/)
     assert.equal(sampled.metricsUnavailable, false)
@@ -185,6 +193,22 @@ describe('live truth surfaces', () => {
     assert.match(moved.reconcilerTiles.find(tile => tile.label === 'الانحراف')?.note ?? '', /انحراف/)
     assert.match(moved.reconcilerTiles.find(tile => tile.label === 'الانحراف')?.note ?? '', /14:04 UTC/)
     assert.equal(whmDashboardFromProps({}).reconcilerTiles.find(tile => tile.label === 'Drift')?.note, '—')
+    assert.equal(whmDashboardFromProps({}).controllersNote, '—')
+    assert.equal(whmDashboardFromProps({ hostSample: { enforcedLimits: { cpu: true, memory: true, io: true, pids: true } } }).controllersNote, 'All plan limits are enforced on this host.')
+    assert.equal(whmDashboardFromProps({ hostSample: { enforcedLimits: { cpu: true, memory: true, io: false, pids: true } } }).controllersNote, 'IO write limits are not enforced on this host.')
+    assert.equal(whmDashboardFromProps({ locale: 'ar', hostSample: { enforcedLimits: { cpu: false, memory: true, io: true, pids: true } } }).controllersNote, 'بعض حدود الخطط غير مفروضة على هذا المضيف.')
+    const arabicHome = xpanelHomeFromProps({
+      locale: 'ar',
+      account: { username: 'demohost', uid: 20000, home: '/home/demohost', primaryDomain: 'demo.example.test', ipv4: '192.0.2.10' },
+      plan: { name: 'Demo', resources: { diskMb: 1024, bandwidthMbMonth: 1024, memoryMb: 1024, maxProcesses: 20, ioWriteBps: 50_000_000 }, caps: { addonDomains: 5, mailboxes: 20, databases: 5 } },
+      domains: [
+        { kind: 'primary', name: 'demo.example.test' },
+        { kind: 'addon', name: 'a.example.test' },
+        { kind: 'addon', name: 'b.example.test' },
+      ],
+    })
+    const addonHints = [...arabicHome.desktop.groups, ...arabicHome.phone.groups].flatMap(group => group.tools.map(tool => tool.hint))
+    assert.equal(addonHints.filter(hint => hint.includes('2 / 5 الإضافية')).length, 2)
     assert.match(home.info.map(row => row.valueHtml).join(' '), /18:04 UTC/)
     assert.equal(home.changes.length, 1)
     assert.match(home.changes[0]?.titleHtml ?? '', /Signed in/)
@@ -271,6 +295,28 @@ server {
       assert.equal(named.certificates?.length, 2)
       assert.equal(named.certificates?.some(row => row.names.includes('other.example.test')), true)
       assert.equal(named.certificates?.some(row => row.names.includes('panel.example.test')), true)
+      const notice = whmDashboardFromProps({ certificates: named.certificates, now: Date.parse('2026-10-24T00:00:00.000Z') })
+      const noticeText = notice.notices.map(item => item.html).join(' ')
+      assert.match(noticeText, /panel\.example\.test/)
+      assert.match(noticeText, /other\.example\.test/)
+      assert.match(noticeText, /days/)
+    }
+    const layered = `
+server { listen 127.0.0.1:8443 ssl; server_name _; }
+server { listen 127.0.0.1:8443 ssl; server_name panel.example.test; }
+`
+    assert.deepEqual(serverNamesForListen(layered, 8443), ['panel.example.test'])
+    const both = await readHostIdentity({
+      readFile: async (path) => path === '/sys/fs/cgroup/xpanel.slice/cgroup.subtree_control' ? 'cpu memory pids\n' : null,
+      runCommand: async (argv) => argv[0]?.endsWith('/nginx') && argv[1] === '-T'
+        ? { ok: true, stdout: layered, stderr: '' }
+        : { ok: false, stdout: '', stderr: '' },
+      readServedCertificate: async (servername) => servername === 'panel.example.test' ? certificate : stale,
+    })
+    if (certificate && stale) {
+      assert.equal(both.panelDomain, 'panel.example.test')
+      assert.equal(both.certificates?.length, 2)
+      assert.deepEqual(both.enforcedLimits, { cpu: true, memory: true, io: false, pids: true })
     }
   })
 })

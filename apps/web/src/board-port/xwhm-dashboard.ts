@@ -35,6 +35,8 @@ export interface DashboardHostSample {
   sampledAt?: string
   nginxTest?: { ok: boolean; at: string }
   apacheTest?: { ok: boolean; at: string }
+  /** Plan controllers present in cgroup.subtree_control. Absent when that file was not read. */
+  enforcedLimits?: { cpu: boolean; memory: boolean; io: boolean; pids: boolean }
 }
 
 interface DashboardProps {
@@ -297,6 +299,15 @@ export const mapAgentHostInfo = (info: unknown): DashboardHostSample | null => {
   const sampledAt = agentText(record, 'sampledAt')
   const nginxTest = configCheck('nginx')
   const apacheTest = configCheck('apache')
+  const limits = agentRecord(identity?.enforcedLimits)
+  const limitFlag = (key: string): boolean | undefined => typeof limits?.[key] === 'boolean' ? limits[key] as boolean : undefined
+  const cpuEnforced = limitFlag('cpu')
+  const memoryEnforced = limitFlag('memory')
+  const ioEnforced = limitFlag('io')
+  const pidsEnforced = limitFlag('pids')
+  const enforcedLimits = cpuEnforced !== undefined && memoryEnforced !== undefined && ioEnforced !== undefined && pidsEnforced !== undefined
+    ? { cpu: cpuEnforced, memory: memoryEnforced, io: ioEnforced, pids: pidsEnforced }
+    : undefined
   const sample: DashboardHostSample = {
     ...(agentNumber(load, 'load1') !== undefined ? { load1: agentNumber(load, 'load1') } : {}),
     ...(agentNumber(load, 'load5') !== undefined ? { load5: agentNumber(load, 'load5') } : {}),
@@ -320,6 +331,7 @@ export const mapAgentHostInfo = (info: unknown): DashboardHostSample | null => {
     ...(sampledAt && !Number.isNaN(Date.parse(sampledAt)) ? { sampledAt } : {}),
     ...(nginxTest ? { nginxTest } : {}),
     ...(apacheTest ? { apacheTest } : {}),
+    ...(enforcedLimits ? { enforcedLimits } : {}),
   }
   return sample
 }
@@ -826,6 +838,20 @@ const meterPercent = (used: number, total: number): { now: string; pct: string }
   return { now: String(value), pct: `${value}%` }
 }
 
+const controllersNoteFromLimits = (
+  limits: DashboardHostSample['enforcedLimits'],
+  ar: boolean,
+): string => {
+  if (!limits) return '—'
+  if (limits.cpu && limits.memory && limits.io && limits.pids) {
+    return ar ? 'كل حدود الخطط مفروضة على هذا المضيف.' : 'All plan limits are enforced on this host.'
+  }
+  if (limits.cpu && limits.memory && limits.pids && !limits.io) {
+    return ar ? 'حد الكتابة على القرص غير مفروض على هذا المضيف.' : 'IO write limits are not enforced on this host.'
+  }
+  return ar ? 'بعض حدود الخطط غير مفروضة على هذا المضيف.' : 'Some plan limits are not enforced on this host.'
+}
+
 const certificateRows = (
   certificates: readonly Pick<Certificate, 'names' | 'notAfter'>[],
   now: number,
@@ -1105,7 +1131,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     ],
     controllersTitle: ar ? 'متحكمات «cgroup v2»' : 'cgroup v2 controllers',
     controllers: ['cpu', 'io', 'memory', 'pids'],
-    controllersNote: ar ? 'حدود الخطط تُفرَض على هذا المضيف عندما يبلغ عنها.' : 'All plan limits are enforced on this host.',
+    controllersNote: controllersNoteFromLimits(props.hostSample?.enforcedLimits, ar),
     servicesTitle: ar ? 'الخدمات' : 'Services',
     servicesMeta: serviceRoster.length ? (ar ? `«${runningServices} / ${existingServices.length}»` : `${runningServices} / ${existingServices.length}`) : '—',
     services: services.length ? services : [emptyService],

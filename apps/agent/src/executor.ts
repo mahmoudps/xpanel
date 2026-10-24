@@ -21,6 +21,8 @@ export interface AccountSliceMetrics {
   ioReadBytes: number
   ioWriteBytes: number
   pidsCurrent: number
+  /** Raw `io.max`. Null when the file is absent. `wbps=max` is not a plan cap. */
+  ioMax?: string | null
 }
 
 export interface AgentExecutor {
@@ -219,6 +221,7 @@ export class FakeHostExecutor implements AgentExecutor {
         ioReadBytes: 0,
         ioWriteBytes: 0,
         pidsCurrent: 0,
+        ioMax: null,
       }
     )
   }
@@ -309,6 +312,8 @@ const SYSTEM_EXACT_TARGETS = new Set<string>([
 const HOST_MEASUREMENT_READS = new Set<string>([
   '/proc/loadavg', '/proc/meminfo', '/proc/uptime', '/proc/cpuinfo',
   '/etc/os-release', '/usr/lib/os-release', '/opt/xpanel/VERSION',
+  '/sys/fs/cgroup/xpanel.slice/cgroup.subtree_control',
+  '/sys/fs/cgroup/cgroup.subtree_control',
 ])
 
 /** systemd drop-in directories such as user-<uid>.slice.d. The parent unit dir already exists. */
@@ -331,6 +336,10 @@ const ACCOUNT_MANAGED_WRAPPER_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/(?:cgi-bin\
 export const createProductionHostTargetMatcher = (): ((path: string, operation: HostTargetOperation) => boolean) => {
   return (path: string, operation: HostTargetOperation): boolean => {
     if (HOST_MEASUREMENT_READS.has(path)) return operation === 'read'
+    if (path === '/etc/xpanel/runtime.env' || path.startsWith('/etc/xpanel/runtime.env.bak.')) {
+      return operation === 'read' || operation === 'write'
+    }
+    if (path === '/etc/xpanel/api.env') return operation === 'read'
     if (path === '/home') return operation === 'ensure-directory'
     if (path === '/var/spool/postfix/opendkim') return operation === 'ensure-directory'
     if (path === '/etc/opendkim.conf' || path.startsWith('/etc/opendkim.conf.bak.')) {
@@ -743,24 +752,42 @@ export class LinuxHostExecutor implements AgentExecutor {
 
   async readSliceMetrics(uid: number): Promise<AccountSliceMetrics | null> {
     if (!Number.isSafeInteger(uid) || uid <= 0 || uid >= 0xffff_ffff) fail('VALIDATION', 'account cgroup metrics require a valid non-root UID')
-    const base = `/sys/fs/cgroup/xpanel.slice/xpanel-${uid}.slice`
-    try {
-      await stat(base)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-      throw error
+    const candidates = [
+      `/sys/fs/cgroup/xpanel.slice/xpanel-${uid}.slice`,
+      `/sys/fs/cgroup/xpanel-${uid}.slice`,
+    ]
+    let base: string | null = null
+    for (const candidate of candidates) {
+      try {
+        await stat(`${candidate}/memory.current`)
+        base = candidate
+        break
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+        throw error
+      }
     }
-    const readText = async (name: 'cpu.stat' | 'memory.current' | 'io.stat' | 'pids.current'): Promise<string> => readFile(`${base}/${name}`, 'utf8')
-    const [cpuStat, memCur, ioStat, pidsCur] = await Promise.all([
+    if (!base) return null
+    const readText = async (name: string): Promise<string | null> => {
+      try {
+        return await readFile(`${base}/${name}`, 'utf8')
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+        throw error
+      }
+    }
+    const [cpuStat, memCur, ioStat, pidsCur, ioMax] = await Promise.all([
       readText('cpu.stat'),
       readText('memory.current'),
       readText('io.stat'),
       readText('pids.current'),
+      readText('io.max'),
     ])
+    if (cpuStat === null || memCur === null || pidsCur === null) return null
     const cpuMatch = /^usage_usec\s+(\d+)/m.exec(cpuStat)
     let ioReadBytes = 0
     let ioWriteBytes = 0
-    for (const line of ioStat.split('\n')) {
+    for (const line of (ioStat ?? '').split('\n')) {
       const r = /\brbytes=(\d+)/.exec(line)
       const w = /\bwbytes=(\d+)/.exec(line)
       if (r) ioReadBytes += Number(r[1])
@@ -773,6 +800,7 @@ export class LinuxHostExecutor implements AgentExecutor {
       ioReadBytes,
       ioWriteBytes,
       pidsCurrent: Number(pidsCur.trim()) || 0,
+      ioMax,
     }
   }
 }

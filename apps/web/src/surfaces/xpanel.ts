@@ -66,6 +66,7 @@ export interface PanelSurfaceProps {
     memoryBytes: number | null
     processCount: number | null
     bandwidth: 'unmeasured'
+    ioEnforced?: boolean | null
   }
   terminalSessionId?: string
   actionState?: AsyncActionBannerProps

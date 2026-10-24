@@ -317,6 +317,7 @@ export const createDefaultWebRenderer = async (deps: {
               memoryBytes?: unknown
               processCount?: unknown
               bandwidth?: unknown
+              ioEnforced?: unknown
             }
             if (body.bandwidth !== 'unmeasured') return null
             const numberOrNull = (value: unknown): number | null =>
@@ -327,6 +328,7 @@ export const createDefaultWebRenderer = async (deps: {
               memoryBytes: numberOrNull(body.memoryBytes),
               processCount: numberOrNull(body.processCount),
               bandwidth: 'unmeasured' as const,
+              ...(typeof body.ioEnforced === 'boolean' ? { ioEnforced: body.ioEnforced } : {}),
             }
           } catch {
             return null

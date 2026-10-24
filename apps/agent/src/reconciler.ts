@@ -32,6 +32,7 @@ import type { AgentExecutor } from './executor.ts'
 import { applyPostfixLocalDelivery, retirePostfixLocalDelivery } from './services/local-mail.ts'
 import { ensureOpenDkimSigning, mailAuthZoneAdditions, type OpenDkimSigning } from './services/opendkim-live.ts'
 import { removedMaildirPaths } from './services/mail.ts'
+import { chooseZoneSerial } from './zone-serial.ts'
 import {
   buildGenerationManifest,
   computeFilesChecksum,
@@ -69,6 +70,8 @@ export interface CompileOptions {
   now?: Date
   /** DKIM material already written by the live mail writer. Absent leaves the zone unchanged. */
   mailAuth?: OpenDkimSigning | null
+  /** Existing zone files, keyed by absolute path. Absent keeps each zone's state serial. */
+  previousZones?: ReadonlyMap<string, string>
 }
 
 const DEFAULT_ZONE_DIR = '/var/lib/powerdns/zones'
@@ -471,14 +474,14 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   for (const zone of snapshot.zones) {
     const primaryNs = snapshot.server?.settings.nameservers[0] ?? `ns1.${zone.name}`
     const rname = `hostmaster.${zone.name}.`
-    const soaContent = `${primaryNs.replace(/\.$/, '')}. ${rname} ${zone.serial} 3600 1800 1209600 3600`
-    const content = services.renderBindZone([
+    const path = `${zoneDir}/${zone.name}.zone`
+    const renderZone = (serial: number): string => services.renderBindZone([
       {
         zone: zone.name,
         name: '@',
         type: 'SOA',
         ttl: 3600,
-        content: soaContent,
+        content: `${primaryNs.replace(/\.$/, '')}. ${rname} ${serial} 3600 1800 1209600 3600`,
         priority: null,
       },
       ...zone.records.map((r) => ({
@@ -491,8 +494,12 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       })),
       ...(opts.mailAuth ? mailAuthZoneAdditions(zone.name, zone.records, opts.mailAuth) : []),
     ])
+    const drafted = renderZone(zone.serial)
+    const previous = opts.previousZones ? (opts.previousZones.get(path) ?? null) : null
+    const serial = chooseZoneSerial(zone.serial, previous, drafted, now)
+    const content = serial === zone.serial ? drafted : renderZone(serial)
     files.push({
-      path: `${zoneDir}/${zone.name}.zone`,
+      path,
       content,
       mode: 0o644,
       owner: 'root',
@@ -1140,13 +1147,15 @@ export class HostReconciler {
     ]
     const previousManifest = currentGen ? await this.journal.readManifest(currentGen.id) : null
     const appliedSnapshot = currentGen ? await this.deps.store.readGenerationSnapshot(currentGen.id) : null
-    const compileMail = (mailAuth: OpenDkimSigning | null) => {
+    const compileMail = (mailAuth: OpenDkimSigning | null, previousZones?: ReadonlyMap<string, string>) => {
       const next = compileDesiredGeneration(snapshot, {
         os: this.deps.os,
         quotaFilesystem: this.deps.quotaFilesystem ?? null,
         ...(this.deps.ioDevices && { ioDevices: this.deps.ioDevices }),
         ...(this.deps.zoneDir && { zoneDir: this.deps.zoneDir }),
         ...(mailAuth ? { mailAuth } : {}),
+        ...(previousZones ? { previousZones } : {}),
+        now: new Date(),
       })
       if (appliedSnapshot) {
         for (const path of removedMaildirPaths(appliedSnapshot, snapshot)) {
@@ -1185,13 +1194,22 @@ export class HostReconciler {
       try {
         mailAuth = (await ensureOpenDkimSigning(this.deps.executor, mailDomains)).signing
       } catch { /* A missing OpenDKIM user leaves the zone as it was. */ }
-      const refreshed = compileMail(mailAuth)
-      const nextChecksum = computeFilesChecksum(refreshed.files)
-      if (nextChecksum !== filesChecksum) {
-        compiled = refreshed
-        filesChecksum = nextChecksum
-        await this.deps.executor.preflight(preflightOf(compiled, filesChecksum))
-      }
+    }
+    const zoneDir = this.deps.zoneDir ?? '/var/lib/powerdns/zones'
+    const previousZones = new Map<string, string>()
+    for (const zone of snapshot.zones) {
+      const path = `${zoneDir}/${zone.name}.zone`
+      try {
+        const text = await this.deps.executor.readFile(path)
+        if (text !== null) previousZones.set(path, text)
+      } catch { /* An unreadable zone file keeps the serial already in state. */ }
+    }
+    const refreshed = compileMail(mailAuth, previousZones)
+    const nextChecksum = computeFilesChecksum(refreshed.files)
+    if (nextChecksum !== filesChecksum) {
+      compiled = refreshed
+      filesChecksum = nextChecksum
+      await this.deps.executor.preflight(preflightOf(compiled, filesChecksum))
     }
 
     let repairedDriftCount = 0

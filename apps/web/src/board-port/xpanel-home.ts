@@ -466,7 +466,10 @@ const liveHint = (item: ToolDef, facts: LiveFacts, phone: boolean): Hint => {
     case 'files.trash': return { text: people(facts.trashFiles, ar, 'عنصر واحد', 'عنصران', 'عناصر', 'item', 'items'), mono: false, dir: ar ? 'rtl' : 'ltr' }
     case 'db.list': return num(ratio(facts.databases, facts.databaseCap))
     case 'db.users': return { text: people(facts.databaseUsers, ar, 'مستخدم واحد', 'مستخدمان', 'مستخدمين', 'user', 'users'), mono: false, dir: ar ? 'rtl' : 'ltr' }
-    case 'domains.list': return num(phone ? ratio(facts.addonDomains, facts.addonCap) : (facts.addonCap === null ? String(facts.addonDomains) : `${facts.addonDomains} / ${facts.addonCap}${ar ? '' : ' addon'}`))
+    case 'domains.list': {
+      const suffix = facts.addonCap === null ? '' : (ar ? ' الإضافية' : ' addon')
+      return num(`${ratio(facts.addonDomains, facts.addonCap)}${suffix}`)
+    }
     case 'domains.site': return { text: people(facts.sites, ar, 'موقع واحد', 'موقعان', 'مواقع', 'site', 'sites'), mono: false, dir: ar ? 'rtl' : 'ltr' }
     case 'domains.zone': return { text: people(facts.zones, ar, 'منطقة واحدة', 'منطقتان', 'مناطق', 'zone', 'zones'), mono: false, dir: ar ? 'rtl' : 'ltr' }
     case 'email.accounts': return num(ratio(facts.mailboxes, facts.mailboxCap))
@@ -507,6 +510,8 @@ interface LiveFacts {
   memoryLimit: string | null
   processLimit: string | null
   ioLimit: string | null
+  /** False when the slice has no io.max cap. Null when usage was not sampled. */
+  ioEnforced: boolean | null
   sampled: boolean
   diskBytes: number | null
   memoryBytes: number | null
@@ -520,6 +525,13 @@ interface LiveFacts {
 }
 
 const blankMeter = (label: string, value: string, pct = 0): HomeMeter => ({ label, value, pct, note: '—' })
+
+const ioLine = (facts: LiveFacts): string => {
+  if (!facts.sampled) return '—'
+  if (facts.ioEnforced === false) return facts.ar ? 'غير مفروض' : 'not enforced'
+  if (facts.ioEnforced === true && facts.ioLimit) return facts.ioLimit
+  return '—'
+}
 
 const resourceLine = (facts: LiveFacts, kind: 'disk' | 'memory' | 'processes' | 'bandwidth'): string => {
   const limit = kind === 'disk' ? facts.diskLimit : kind === 'memory' ? facts.memoryLimit : kind === 'processes' ? facts.processLimit : facts.bandwidthLimit
@@ -547,7 +559,7 @@ const liveDesktopMeters = (facts: LiveFacts): HomeMeter[] => {
   return [
     blankMeter(ar ? 'القرص' : 'Disk', resourceLine(facts, 'disk'), resourcePct(facts, 'disk')),
     blankMeter(ar ? 'حركة البيانات الشهرية' : 'Monthly bandwidth', resourceLine(facts, 'bandwidth')),
-    blankMeter(ar ? 'سقف الكتابة على القرص' : 'IO write cap', facts.ioLimit ? `— / ${facts.ioLimit}` : '—'),
+    blankMeter(ar ? 'سقف الكتابة على القرص' : 'IO write cap', ioLine(facts)),
     blankMeter(ar ? 'الذاكرة' : 'Memory', resourceLine(facts, 'memory'), resourcePct(facts, 'memory')),
     blankMeter(ar ? 'العمليات' : 'Processes', resourceLine(facts, 'processes'), resourcePct(facts, 'processes')),
     blankMeter(ar ? 'النطاقات الإضافية' : 'Addon domains', ratio(facts.addonDomains, facts.addonCap)),
@@ -665,6 +677,7 @@ export interface XpanelHomeProps {
     memoryBytes: number | null
     processCount: number | null
     bandwidth: 'unmeasured'
+    ioEnforced?: boolean | null
   }
 }
 
@@ -706,9 +719,10 @@ const factsFromProps = (props: XpanelHomeProps): LiveFacts => {
     sites: domains.length,
     diskLimit: diskMb === null ? null : storage(diskMb),
     bandwidthLimit: finite(resources?.bandwidthMbMonth) === null ? null : storage(finite(resources?.bandwidthMbMonth) ?? 0),
-    memoryLimit: memoryMb === null ? null : `${memoryMb} MB`,
+    memoryLimit: memoryMb === null ? null : formatAsciiBytes(memoryMb * 1024 * 1024),
     processLimit: finite(resources?.maxProcesses) === null ? null : String(finite(resources?.maxProcesses)),
     ioLimit: io === null ? null : `${formatAsciiBytes(io)}/s`,
+    ioEnforced: typeof props.usage?.ioEnforced === 'boolean' ? props.usage.ioEnforced : null,
     sampled: props.usage !== undefined,
     diskBytes: props.usage?.diskBytes ?? null,
     memoryBytes: props.usage?.memoryBytes ?? null,

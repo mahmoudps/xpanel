@@ -11,7 +11,9 @@ import { NativeAccountFileRunner, verifyHelperBinary } from './account-file-runn
 import { IoAnalyticsEngine, WebsiteAnalyticsEngine } from './analytics.ts'
 import { createProductionHostTargetMatcher, LinuxHostExecutor } from './executor.ts'
 import { ensureAcmeWebRoot } from './host-access.ts'
+import { syncRuntimePublicOrigin } from './agent-origin.ts'
 import { ensureInstalledMail } from './services/local-mail.ts'
+import { enableMailWebsocketProxy } from './services/mail-websocket.ts'
 import { readOpenDkimPublished, writeOpenDkimPublished } from './services/opendkim-live.ts'
 import { HostReconciler } from './reconciler.ts'
 import { createAgentApp, listenAgentSocket, loadAgentCredentialFile } from './server.ts'
@@ -96,6 +98,12 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
     os,
     quotaFilesystem,
     ioDevices,
+  })
+  await syncRuntimePublicOrigin(executor).catch((error: unknown) => {
+    process.stderr.write(`xpanel-agent public origin: ${error instanceof Error ? error.message : String(error)}\n`)
+  })
+  await enableMailWebsocketProxy(executor).catch((error: unknown) => {
+    process.stderr.write(`xpanel-agent mail websocket: ${error instanceof Error ? error.message : String(error)}\n`)
   })
   await reconciler.recoverInterruptedReconciliation().catch(() => undefined)
 

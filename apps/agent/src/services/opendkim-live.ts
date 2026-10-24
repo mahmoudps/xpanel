@@ -199,13 +199,30 @@ export const ensureOpenDkimSigning = async (
   ].join('\n')
   const existingConf = (await executor.readFile(OPENDKIM_CONF)) ?? ''
   const nextConf = services.replaceManagedBlock(existingConf, managed)
-  if (await writeOwned(executor, { path: OPENDKIM_CONF, content: nextConf, mode: 0o644, owner: 'root', group: 'root' })) changed = true
+  const wantedSocket = `local:${OPENDKIM_SOCKET_PATH}`
+  let previousSocket: string | null = null
+  for (const line of existingConf.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const match = /^Socket\s+(\S+)\s*$/.exec(trimmed)
+    if (match?.[1]) previousSocket = match[1]
+  }
+  const socketChanged = previousSocket !== wantedSocket
+  const confWritten = await writeOwned(executor, { path: OPENDKIM_CONF, content: nextConf, mode: 0o644, owner: 'root', group: 'root' })
+  if (confWritten) changed = true
 
   try {
     await executor.runAction({ kind: 'exec', argv: ['/usr/sbin/usermod', '-a', '-G', 'opendkim', 'postfix'] })
   } catch { /* The postfix account is absent on a host that has not installed mail. */ }
   try {
-    await executor.runAction({ kind: 'systemd', verb: 'reload', unit: 'opendkim.service' })
+    if (socketChanged && confWritten) {
+      await executor.runAction({ kind: 'systemd', verb: 'restart', unit: 'opendkim.service' })
+      try {
+        await executor.runCommand(['/usr/bin/systemctl', 'is-active', 'opendkim.service'])
+      } catch { /* milter_default_action stays accept when the health check cannot run. */ }
+    } else if (changed) {
+      await executor.runAction({ kind: 'systemd', verb: 'reload', unit: 'opendkim.service' })
+    }
   } catch { /* A missing OpenDKIM unit must not stop the rest of the mail stack. */ }
 
   return { changed, stamp: stampOf(signing), signing }

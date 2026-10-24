@@ -106,7 +106,7 @@ import {
 } from './auth.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 import { createExtendedApiRouter } from './extended-routes.ts'
-import { assertAccountAuthorized, assertAccountFeatures, assertApiScope, assertRequestAuthorized, requireDomainAccount, ownedAccounts } from './authorization.ts'
+import { assertAccountAuthorized, assertAccountFeatures, assertApiScope, assertRequestAuthorized, isMailboxPrincipal, requireDomainAccount, ownedAccounts } from './authorization.ts'
 import { LiveEventHub } from './ws.ts'
 import type { EventSubscriber } from './ws.ts'
 import { renderWebApp } from '../../web/src/app.ts'
@@ -507,7 +507,6 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   }
 
   const authenticateUpgrade = async (req: IncomingMessage, context?: TransportContext): Promise<EventSubscriber | null> => {
-    if (entryPoint === 'xmail') return null
     const headers = new Headers()
     for (const [k, v] of Object.entries(req.headers)) {
       if (typeof v === 'string') headers.set(k, v)
@@ -532,6 +531,10 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       const caller = await authenticateRequest(deps.db, webReq, { serverSecret, clientIp: extractClientIp(webReq), touchSession: false, entryPoint })
       if (!caller || !caller.mfaVerified) return null
       if (caller.apiTokenId !== null) assertApiScope(caller, 'events:read')
+      if (isMailboxPrincipal(caller)) {
+        if (caller.principal.kind !== 'user' || !caller.principal.accountId) return null
+        return buildSubscriberForCaller(caller)
+      }
       await assertRequestAuthorized(deps.store, caller, new Request(new URL('/api/events/recent', webReq.url), { headers }))
       return buildSubscriberForCaller(caller)
     } catch {
@@ -1670,7 +1673,23 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         if (caller.principal.kind === 'user' && caller.principal.accountId !== opened.record.accountId) {
           return fail('NOT_FOUND', 'mailbox not found')
         }
-        const sent = await mailboxTransport.send(opened.record.mailbox, opened.password, parseMailboxSend(await readJsonBody(req)))
+        const signSent = deps.agentApp && deps.agentToken
+          ? async (mailbox: string, rawMime: string): Promise<string | null> => {
+              const response = await deps.agentApp!.fetch(new Request('http://agent.local/host/dkim-sign', {
+                method: 'POST',
+                headers: {
+                  'content-type': 'application/json',
+                  ...agentCallerHeaders({ principalId: caller.principal.id, token: deps.agentToken! }),
+                },
+                body: JSON.stringify({ mailbox, rawMime }),
+              }))
+              if (!response.ok) return null
+              const body = await response.json() as { rawMime?: unknown }
+              return typeof body.rawMime === 'string' ? body.rawMime : null
+            }
+          : undefined
+        const sending = deps.mailboxTransport ?? createLocalMailboxTransport(process.env, signSent ? { signSent } : {})
+        const sent = await sending.send(opened.record.mailbox, opened.password, parseMailboxSend(await readJsonBody(req)))
         return jsonResponse({ mailbox: opened.record.mailbox, messageId: sent.messageId, savedToSent: sent.savedToSent === true }, 201)
       }
       if (method === 'GET' && pathname === '/api/server/info') {

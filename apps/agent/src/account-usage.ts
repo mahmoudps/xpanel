@@ -10,6 +10,17 @@ export interface AccountUsageSample {
   processCount: number | null
   /** Access logs are not parsed. The panel says so instead of showing a dash. */
   bandwidth: 'unmeasured'
+  /** False when `io.max` is missing or `wbps=max`. Null when the slice was not read. */
+  ioEnforced: boolean | null
+}
+
+/** A numeric `wbps=` is a real cap. `wbps=max` and a missing file are not. */
+export const ioWriteEnforced = (ioMax: string | null | undefined): boolean => {
+  if (!ioMax) return false
+  return ioMax.split('\n').some(line => {
+    const match = /\bwbps=(\d+|max)\b/.exec(line)
+    return match !== null && match[1] !== 'max'
+  })
 }
 
 const activeUnit = async (executor: AgentExecutor, unit: string): Promise<boolean> => {
@@ -35,6 +46,7 @@ export const readAccountUsage = async (
     memoryBytes: null,
     processCount: null,
     bandwidth: 'unmeasured',
+    ioEnforced: null,
   }
   if (!USERNAME.test(input.username) || input.home !== `/home/${input.username}`) return sample
   for (const version of PHP_VERSIONS) {
@@ -54,6 +66,7 @@ export const readAccountUsage = async (
     if (slice) {
       sample.memoryBytes = slice.memoryCurrentBytes
       sample.processCount = slice.pidsCurrent
+      sample.ioEnforced = ioWriteEnforced(slice.ioMax ?? null)
     }
   } catch { /* A missing slice stays null. */ }
   return sample

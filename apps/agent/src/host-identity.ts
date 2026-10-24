@@ -27,6 +27,8 @@ export interface HostIdentity {
   /** First DNS name on the panel certificate. */
   panelDomain?: string
   certificates?: Array<{ names: string[]; notAfter: string }>
+  /** Controllers enabled on the account-slice parent. Absent when the file was not read. */
+  enforcedLimits?: { cpu: boolean; memory: boolean; io: boolean; pids: boolean }
 }
 
 export interface ObservedCertificate {
@@ -102,7 +104,7 @@ export const sslCertificateForListen = (config: string, port: number): string | 
   return null
 }
 
-/** DNS names on the server block that listens on `port`. `_` and IP addresses are skipped. */
+/** DNS names on every server block that listens on `port`. `_` and IP addresses are skipped. */
 export const serverNamesForListen = (config: string, port: number): string[] => {
   const blocks: string[] = []
   const opener = /\bserver\s*\{/g
@@ -121,13 +123,31 @@ export const serverNamesForListen = (config: string, port: number): string[] => 
     opener.lastIndex = index
   }
   const listen = new RegExp(`\\blisten\\s+[^;]*\\b${port}\\b[^;]*;`, 'i')
+  const names: string[] = []
+  const seen = new Set<string>()
   for (const block of blocks) {
     if (!listen.test(block)) continue
     const named = /(?:^|[^\w-])server_name\s+([^;]+);/.exec(block)
     if (!named?.[1]) continue
-    return named[1].split(/\s+/).map(name => name.trim().toLowerCase()).filter(name => name.length > 0 && name !== '_' && isIP(name) === 0)
+    for (const name of named[1].split(/\s+/)) {
+      const clean = name.trim().toLowerCase()
+      if (!clean || clean === '_' || isIP(clean) !== 0 || seen.has(clean)) continue
+      seen.add(clean)
+      names.push(clean)
+    }
   }
-  return []
+  return names
+}
+
+/** cgroup v2 controllers delegated to children. A controller is enforced only when it is listed. */
+export const enforcedLimitsFromSubtree = (text: string): { cpu: boolean; memory: boolean; io: boolean; pids: boolean } => {
+  const controllers = new Set(text.split(/\s+/).map(part => part.trim()).filter(Boolean))
+  return {
+    cpu: controllers.has('cpu'),
+    memory: controllers.has('memory'),
+    io: controllers.has('io'),
+    pids: controllers.has('pids'),
+  }
 }
 
 const originHost = (value: string | null | undefined): string | null => {
@@ -285,6 +305,13 @@ export const readHostIdentity = async (reader: HostIdentityReader): Promise<Host
   const versionFile = await readText(reader, '/opt/xpanel/VERSION')
   const version = (versionFile ? parseVersionFile(versionFile) : null) ?? await readAgentPackageVersion()
   if (version) identity.version = version
+  for (const path of ['/sys/fs/cgroup/xpanel.slice/cgroup.subtree_control', '/sys/fs/cgroup/cgroup.subtree_control']) {
+    const subtree = await readText(reader, path)
+    if (subtree !== null) {
+      identity.enforcedLimits = enforcedLimitsFromSubtree(subtree)
+      break
+    }
+  }
   const certificates = await readPanelCertificates(reader)
   if (certificates.rows.length > 0) identity.certificates = certificates.rows
   if (certificates.panelDomain) identity.panelDomain = certificates.panelDomain
@@ -309,8 +336,10 @@ const readPanelCertificates = async (
     }
   }
   const origin = originHost(reader.publicOrigin?.() ?? null)
-  const serverName = origin ?? serverNamesForListen(dumped, PANEL_LISTENER_PORT)[0] ?? null
+  const serverNames = serverNamesForListen(dumped, PANEL_LISTENER_PORT)
+  const sniNames = [...new Set([...(origin ? [origin] : []), ...serverNames])]
   const pems: string[] = []
+  const seenPem = new Set<string>()
   const take = async (servername?: string): Promise<string | null> => {
     if (!reader.readServedCertificate) return null
     try {
@@ -320,21 +349,39 @@ const readPanelCertificates = async (
       return null
     }
   }
+  const remember = (pem: string | null): void => {
+    if (!pem || seenPem.has(pem)) return
+    seenPem.add(pem)
+    pems.push(pem)
+  }
   const plain = await take()
-  const named = serverName ? await take(serverName) : null
-  if (plain) pems.push(plain)
-  if (named && named !== plain) pems.push(named)
+  remember(plain)
+  const namedByHost = new Map<string, string>()
+  for (const name of sniNames) {
+    const pem = await take(name)
+    if (pem) namedByHost.set(name, pem)
+    remember(pem)
+  }
   if (pems.length === 0) {
     const path = dumped ? sslCertificateForListen(dumped, PANEL_LISTENER_PORT) : null
     const file = path ? await readText(reader, path) : null
-    if (file && file.includes('BEGIN CERTIFICATE')) pems.push(file)
+    if (file && file.includes('BEGIN CERTIFICATE')) remember(file)
   }
   const rows: Array<{ names: string[]; notAfter: string }> = []
   const seen = new Set<string>()
   let panelDomain: string | undefined
-  const namedCert = named ? certificateFromPem(named) : null
-  const namedDns = namedCert?.names.find(name => isIP(name) === 0)
-  if (namedDns) panelDomain = namedDns
+  const originPem = origin ? namedByHost.get(origin) : undefined
+  const originCert = originPem ? certificateFromPem(originPem) : null
+  if (origin && originCert?.names.includes(origin)) panelDomain = origin
+  if (!panelDomain) {
+    for (const pem of namedByHost.values()) {
+      const dns = certificateFromPem(pem)?.names.find(name => isIP(name) === 0)
+      if (dns) {
+        panelDomain = dns
+        break
+      }
+    }
+  }
   for (const pem of pems) {
     const parsed = certificateFromPem(pem)
     if (!parsed) continue

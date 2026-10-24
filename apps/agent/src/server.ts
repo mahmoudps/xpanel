@@ -21,8 +21,10 @@ import { AcmeCertificateServiceAdapter } from './services/acme.ts'
 import { createHttp01AcmeClient } from './services/acme-client.ts'
 import { probeAuditLog, probeHostCapabilities, readHostMeasurements } from './host-probes.ts'
 import { readAccountUsage } from './account-usage.ts'
+import { readPublicOriginSync } from './agent-origin.ts'
 import { readHostConfigChecks, readHostIdentity, readServedCertificatePem, PANEL_LISTENER_PORT } from './host-identity.ts'
-import { probeOpenDkimAsPostfix } from './services/dkim-probe.ts'
+import { probeDkimOutcome } from './services/dkim-probe.ts'
+import { signMailboxSubmission } from './services/dkim-sign.ts'
 import { parseDf, parseDfInodes, parseLoadavg, parseMeminfo } from './host-info.ts'
 import { readHostServices, restartHostService } from './host-services.ts'
 import { createAccountBackup, listAccountBackups, restoreAccountBackup, DEFAULT_BACKUP_DIR } from './account-backup.ts'
@@ -483,7 +485,27 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       const caller = await authenticateCaller(req)
 
       if (method === 'GET' && pathname === '/host/dkim-probe') {
-        return jsonResponse({ status: probeOpenDkimAsPostfix() })
+        const outcome = probeDkimOutcome()
+        return jsonResponse(outcome.selector ? outcome : { status: outcome.status })
+      }
+
+      if (method === 'POST' && pathname === '/host/dkim-sign') {
+        const body = await readObjectBody(req)
+        const mailbox = typeof body.mailbox === 'string' ? body.mailbox.trim().toLowerCase() : ''
+        const rawMime = typeof body.rawMime === 'string' ? body.rawMime : ''
+        if (!/^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(mailbox) || mailbox.length > 254) {
+          return fail('VALIDATION', 'mailbox address is invalid')
+        }
+        if (rawMime.length === 0 || rawMime.length > 12_000_000) return fail('VALIDATION', 'submitted message is empty or too large')
+        const user = await deps.store.getServiceUserByLogin(mailbox)
+        if (!user?.services.email) return fail('NOT_FOUND', 'mailbox not found')
+        const account = await deps.store.getAccount(user.accountId)
+        if (!account) return fail('NOT_FOUND', 'account not found')
+        await assertAccountCaller(caller, account, 'host.dkim-sign')
+        if (!deps.executor) return jsonResponse({ signed: false }, 404)
+        const signed = await signMailboxSubmission(deps.executor, mailbox, rawMime)
+        if (!signed) return jsonResponse({ signed: false })
+        return jsonResponse({ rawMime: signed })
       }
 
       if (method === 'GET' && pathname === '/host/account-usage') {
@@ -558,7 +580,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
             readFile: (path) => host.readFile(path),
             runCommand: (argv) => host.runCommand(argv),
             readServedCertificate: (servername?: string) => readServedCertificatePem('127.0.0.1', PANEL_LISTENER_PORT, 2000, servername),
-            publicOrigin: () => process.env.XPANEL_WHM_PUBLIC_ORIGIN || process.env.XPANEL_PANEL_PUBLIC_ORIGIN || null,
+            publicOrigin: () => readPublicOriginSync(),
           })
           let configChecks: Awaited<ReturnType<typeof readHostConfigChecks>> = {}
           try {

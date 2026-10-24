@@ -29,7 +29,10 @@ export const isMongoDatabaseRoute = (pathname: string): boolean => /^\/api\/data
 export const entryPointAllowsApiRoute = (entryPoint: EntryPoint, pathname: string, method: string): boolean => {
   if (method === 'GET' && pathname === '/api/health') return true
   if (pathname.startsWith('/api/auth/')) return authRoutes.has(pathname.slice('/api/auth/'.length))
-  if (entryPoint === 'xmail') return /^\/api\/webmail(?:\/|$)/.test(pathname)
+  if (entryPoint === 'xmail') {
+    if (method === 'GET' && pathname === '/api/ws') return true
+    return /^\/api\/webmail(?:\/|$)/.test(pathname)
+  }
   if (['/api/catalog', '/api/events/recent'].includes(pathname)) return method === 'GET'
   if (entryPoint === 'xwhm') return pathname === '/api/search' ? method === 'GET' : administratorFamilies.test(pathname)
   if (/^\/api\/accounts(?:\/[^/]+)?$/.test(pathname)) return method === 'GET'

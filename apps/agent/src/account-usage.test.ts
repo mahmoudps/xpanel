@@ -22,10 +22,31 @@ describe('account usage sample', () => {
       memoryBytes: 120_000_000,
       processCount: 4,
       bandwidth: 'unmeasured',
+      ioEnforced: false,
     })
     const wrongHome = await readAccountUsage(executor, { username: 'demohost', uid: 20000, home: '/tmp/demohost' })
     expect(wrongHome.diskBytes).toBeNull()
     expect(wrongHome.phpVersion).toBeNull()
     expect(wrongHome.bandwidth).toBe('unmeasured')
+    executor.sliceMetrics.set(20000, {
+      uid: 20000,
+      cpuUsageUsec: 0,
+      memoryCurrentBytes: 120_000_000,
+      ioReadBytes: 0,
+      ioWriteBytes: 0,
+      pidsCurrent: 4,
+      ioMax: '8:0 rbps=max wbps=50000000\n',
+    })
+    expect((await readAccountUsage(executor, { username: 'demohost', uid: 20000, home: '/home/demohost' })).ioEnforced).toBe(true)
+    executor.sliceMetrics.set(20000, {
+      uid: 20000,
+      cpuUsageUsec: 0,
+      memoryCurrentBytes: 120_000_000,
+      ioReadBytes: 0,
+      ioWriteBytes: 0,
+      pidsCurrent: 4,
+      ioMax: '8:0 wbps=max\n',
+    })
+    expect((await readAccountUsage(executor, { username: 'demohost', uid: 20000, home: '/home/demohost' })).ioEnforced).toBe(false)
   })
 })

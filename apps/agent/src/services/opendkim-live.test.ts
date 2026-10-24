@@ -12,8 +12,10 @@ describe('live OpenDKIM writer', () => {
     const executor = new FakeHostExecutor()
     const argv: string[][] = []
     const run = executor.runAction.bind(executor)
+    const verbs: string[] = []
     executor.runAction = async (action: HostAction) => {
       if (action.kind === 'exec') argv.push(action.argv)
+      if (action.kind === 'systemd') verbs.push(`${action.verb} ${action.unit}`)
       await run(action)
     }
     executor.files.set('/etc/opendkim.conf', { path: '/etc/opendkim.conf', content: 'Syslog yes\n', mode: 0o644, owner: 'root', group: 'root' })
@@ -43,12 +45,16 @@ describe('live OpenDKIM writer', () => {
     expect(executor.dirs.get('/var/spool/postfix/opendkim')).toEqual({ mode: 0o750, owner: 'opendkim', group: 'postfix' })
     expect(argv).toContainEqual(['/usr/sbin/usermod', '-a', '-G', 'opendkim', 'postfix'])
     expect(executor.units.get('opendkim.service')?.active).toBe(true)
+    expect(verbs).toContain('restart opendkim.service')
+    expect(verbs).not.toContain('reload opendkim.service')
+    expect(executor.executedCommands.some(command => command[0] === '/usr/bin/systemctl' && command[1] === 'is-active' && command[2] === 'opendkim.service')).toBe(true)
     expect(backups(executor, '/etc/opendkim.conf')).toHaveLength(1)
 
     const again = await ensureOpenDkimSigning(executor, ['demo.example.test'], new Date('2026-11-02T00:00:00.000Z'))
     expect(again.signing.domains['demo.example.test']?.selector).toBe(selector)
     expect(backups(executor, '/etc/opendkim.conf')).toHaveLength(1)
     expect(executor.files.get(keyPath)?.content).toBe(key?.content)
+    expect(verbs.filter(verb => verb === 'restart opendkim.service')).toHaveLength(1)
   })
 
   it('adds DKIM, SPF, and DMARC without replacing records the zone already has', () => {

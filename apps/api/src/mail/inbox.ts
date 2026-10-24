@@ -216,8 +216,18 @@ const withImap = async <T>(host: string, port: number, mailbox: string, password
   }
 }
 
+/** The Sent copy is the signed submission. An unsigned pre-image is not stored. */
+export const mimeForSent = (_submitted: string, signed: string | null | undefined): string | null =>
+  typeof signed === 'string' && /DKIM-Signature:/i.test(signed) ? signed : null
+
+export interface MailboxTransportOptions {
+  /** Returns the submitted MIME plus DKIM-Signature. Null skips the Sent APPEND. */
+  signSent?: (mailbox: string, rawMime: string) => Promise<string | null>
+}
+
 export const createLocalMailboxTransport = (
   env: NodeJS.ProcessEnv = process.env,
+  options: MailboxTransportOptions = {},
 ): MailboxTransport => {
   const imapHost = env.XPANEL_IMAP_HOST || '127.0.0.1'
   const imapPort = Number(env.XPANEL_IMAP_PORT || '143')
@@ -315,11 +325,17 @@ export const createLocalMailboxTransport = (
           textBody: input.text,
         })
         let savedToSent = false
-        try {
-          await withImap(imapHost, imapPort, mailbox, password, client => client.appendMessage('Sent', result.rawMime, ['\\Seen']), imapTimeout)
-          savedToSent = true
-        } catch {
-          savedToSent = false
+        const submitted = result.rawMime
+        const copy = options.signSent
+          ? mimeForSent(submitted, await options.signSent(mailbox, submitted).catch(() => null))
+          : submitted
+        if (copy) {
+          try {
+            await withImap(imapHost, imapPort, mailbox, password, client => client.appendMessage('Sent', copy, ['\\Seen']), imapTimeout)
+            savedToSent = true
+          } catch {
+            savedToSent = false
+          }
         }
         return { messageId: result.messageId, savedToSent }
       } catch (err) {

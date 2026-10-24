@@ -179,13 +179,13 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
     }
   })
 
-  it('authorizes same-profile WebSockets and denies renamed replay, wrong origin and all xMail upgrades', async () => {
+  it('authorizes same-profile WebSockets, including xMail, and denies renamed replay and a wrong origin', async () => {
     const panel = await f.login('xpanel'); const mail = await f.login('xmail')
     assert.equal(await f.websocketStatus('xpanel', panel.cookie), 101)
     assert.equal(await f.websocketStatus('xpanel', `${sessionCookieName('xpanel', true)}=${mail.raw}`), 401)
     assert.equal(await f.websocketStatus('xpanel', panel.cookie, { origin: origin('xmail') }), 401)
     assert.equal(await f.websocketStatus('xpanel', panel.cookie, { authorization: 'Bearer xp_unsupported_fixture' }), 401)
-    assert.equal(await f.websocketStatus('xmail', mail.cookie), 401)
+    assert.equal(await f.websocketStatus('xmail', mail.cookie), 101)
     assert.equal(await f.websocketStatus('xwhm', `${sessionCookieName('xwhm', true)}=${panel.raw}`), 401)
   })
 
