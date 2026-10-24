@@ -9,6 +9,7 @@ type LocalizedTitle = readonly [english: string, arabic: string]
 const surfacePageTitles: Record<SurfaceKind, Readonly<Record<string, LocalizedTitle>>> = {
   xpanel: {
     overview: ['Home', 'الرئيسية'], resources: ['Resources & quotas', 'الموارد والحصص'],
+    store: ['App store', 'متجر التطبيقات'],
     domains: ['Domains', 'النطاقات'], config: ['Site settings', 'إعدادات الموقع'],
     analytics: ['Metrics', 'القياسات'], files: ['File manager', 'مدير الملفات'],
     terminal: ['Terminal', 'الطرفية'], databases: ['MariaDB', 'MariaDB'],
@@ -37,6 +38,13 @@ const surfacePageTitles: Record<SurfaceKind, Readonly<Record<string, LocalizedTi
 
 const routePageTitles: Readonly<Record<string, LocalizedTitle>> = {
   '/files/trash': ['Trash', 'المهملات'], '/files/ftp': ['FTP accounts', 'حسابات FTP'],
+  '/software/store': ['App store', 'متجر التطبيقات'],
+  '/software/store/app': ['Application', 'التطبيق'],
+  '/software/store/install': ['Install', 'تثبيت'],
+  '/software/store/progress': ['Progress', 'التقدّم'],
+  '/software/store/installed': ['Installed', 'المثبتة'],
+  '/software/store/updates': ['Updates', 'التحديثات'],
+  '/software/store/error': ['Status', 'الحالة'],
   '/security/ssl/issue': ['Issue certificate', 'إصدار شهادة'],
   '/whm/plans/features': ['Feature lists', 'قوائم الميزات'],
   '/whm/backups': ['Server backups', 'نسخ الخادم'],
@@ -84,6 +92,9 @@ const surfaceSections: Record<SurfaceShellProps['surface'], Readonly<Record<stri
     '/domains/zone-editor': 'dns',
     '/files/backup': 'design', '/files/directory-privacy': 'design',
     '/software/php': 'design', '/software/htaccess': 'design', '/advanced/cron': 'design',
+    '/software/store': 'store', '/software/store/app': 'store', '/software/store/install': 'store',
+    '/software/store/progress': 'store', '/software/store/installed': 'store',
+    '/software/store/updates': 'store', '/software/store/error': 'store',
     '/design/system': 'design', '/design/components': 'design', '/design/navigation': 'design',
   },
   xwhm: {

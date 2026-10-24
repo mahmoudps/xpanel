@@ -475,7 +475,7 @@ export const tools: ToolDefinition[] = [
     "rootOnly": false,
     "entity": "domain",
     "status": "out-of-scope",
-    "outOfScopeReason": "Marketplace/store purchase flow excluded by project rules."
+    "outOfScopeReason": "Domain registrar checkout stays out of scope. The original signed app catalog and installer are in scope."
   },
   {
     "id": "email-accounts",
@@ -1182,13 +1182,12 @@ export const tools: ToolDefinition[] = [
     "surface": "xpanel",
     "groupId": "software",
     "name": "Site Software (cPAddons)",
-    "summary": "Legacy catalog of installable site scripts (blogs, forums, shops) with one-click or advanced install, instance management, upgrade, uninstall and update notices.",
+    "summary": "Account app store for the signed catalog a provider enables: browse, review permissions, and install into a domain. Install actions stay unavailable until the installer is connected. Third-party commercial installers stay out of scope.",
     "featureKey": "addoncgi",
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "app-installer-instance",
-    "status": "out-of-scope",
-    "outOfScopeReason": "Removed by cPanel in version 126; one-click script installers (Softaculous/Installatron) are out of scope. Can come back later as an original app catalog."
+    "status": "researched"
   },
   {
     "id": "rubygems",
@@ -2362,7 +2361,7 @@ export const tools: ToolDefinition[] = [
     "rootOnly": true,
     "entity": "service",
     "status": "out-of-scope",
-    "outOfScopeReason": "Store/Marketplace is excluded by project rules."
+    "outOfScopeReason": "Vendor licence storefronts stay out of scope. The original signed app catalog and installer are in scope."
   },
   {
     "id": "vendor-usage-analytics",
@@ -2598,13 +2597,12 @@ export const tools: ToolDefinition[] = [
     "surface": "xwhm",
     "groupId": "whm-tweak-settings",
     "name": "Site Software Catalog Settings",
-    "summary": "Settings for the vendor's legacy one-click site application catalog.",
+    "summary": "Root settings for the signed application catalog: sources, trust keys, which applications are offered, and per-plan feature keys.",
     "featureKey": null,
     "resellerAcl": null,
     "rootOnly": true,
     "entity": "tweak-setting",
-    "status": "out-of-scope",
-    "outOfScopeReason": "App-installer catalogs (same class as Softaculous/Installatron) are excluded."
+    "status": "researched"
   },
   {
     "id": "web-server-status",
@@ -5637,7 +5635,7 @@ export const tools: ToolDefinition[] = [
     "rootOnly": true,
     "entity": "market-provider",
     "status": "out-of-scope",
-    "outOfScopeReason": "cPanel Store/Marketplace."
+    "outOfScopeReason": "Vendor product storefront providers stay out of scope. The original signed app catalog is separate and in scope."
   },
   {
     "id": "support-center",
