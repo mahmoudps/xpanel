@@ -502,6 +502,36 @@ export const createDefaultWebRenderer = async (deps: {
       ]
       return checks.flatMap(([label, used, cap]) => cap !== null && used / cap >= 0.8 ? [{ name: accountRow.username, note: `${used} / ${cap} ${label}` }] : [])
     })
+    const resourcesAccount = account?.status === 'active' ? account : null
+    const resourcesUsage = surface === 'xpanel' && documentRoute.activeRoute === '/resources' && resourcesAccount && deps.agent
+      ? await (async () => {
+          try {
+            const response = await deps.agent!.fetch(new Request(`http://agent.local/host/account-usage?username=${encodeURIComponent(resourcesAccount.username)}`, {
+              headers: agentCallerHeaders({ principalId: principal.id, token: deps.agent!.token }),
+            }))
+            if (!response.ok) return null
+            const body = await response.json() as {
+              phpVersion?: unknown
+              diskBytes?: unknown
+              memoryBytes?: unknown
+              processCount?: unknown
+              bandwidth?: unknown
+            }
+            if (body.bandwidth !== 'unmeasured') return null
+            const numberOrNull = (value: unknown): number | null =>
+              typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+            return {
+              phpVersion: typeof body.phpVersion === 'string' && /^\d+\.\d+$/.test(body.phpVersion) ? body.phpVersion : null,
+              diskBytes: numberOrNull(body.diskBytes),
+              memoryBytes: numberOrNull(body.memoryBytes),
+              processCount: numberOrNull(body.processCount),
+              bandwidth: 'unmeasured' as const,
+            }
+          } catch {
+            return null
+          }
+        })()
+      : null
     return serveWebUi(req, async () => ({
       surface,
       activeRoute: documentRoute.activeRoute,
@@ -555,6 +585,7 @@ export const createDefaultWebRenderer = async (deps: {
         databaseUsers: accountDatabaseUsers,
         serviceUsers: accountServiceUsers,
         files: [],
+        ...(resourcesUsage ? { usage: resourcesUsage } : {}),
       },
       mail: await (async () => {
         if (surface !== 'xmail') return { mailbox: '' }

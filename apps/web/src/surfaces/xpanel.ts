@@ -23,8 +23,9 @@ import {
   renderAsyncActionState,
   renderStatusBadge,
 } from '../tokens.ts'
-import { renderAccountResources, resourceRowsFromPlan } from '../board-canvas.ts'
+import { boardGateFixture } from '../board-port/gate-fixture.ts'
 import { renderXpanelHome, xpanelHomeFromProps } from '../board-port/xpanel-home.ts'
+import { renderXpanelResources, xpanelResourcesFromProps } from '../board-port/xpanel-resources.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
@@ -131,6 +132,18 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
     ? renderAsyncActionState({ ...props.actionState, locale })
     : ''
 
+  if (section === 'resources') {
+    const resourcesPlan = plan && plan.id === account.planId ? plan : undefined
+    const model = boardGateFixture()?.resourcesPort ?? xpanelResourcesFromProps({
+      locale,
+      account,
+      ...(resourcesPlan ? { plan: resourcesPlan } : {}),
+      ...(props.usage ? { usage: props.usage } : {}),
+      ...(generationId !== undefined ? { generationId } : {}),
+    })
+    return ensureAccessibleSurfaceHtml(renderXpanelResources(model), locale)
+  }
+
   if (section === 'overview') {
     const homePlan = plan && plan.id === account.planId ? plan : undefined
     return ensureAccessibleSurfaceHtml(renderXpanelHome(xpanelHomeFromProps({
@@ -210,8 +223,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
         </div>
       </div>`,
     content: `      ${actionBannerHtml}
-${section === 'resources' ? renderAccountResources(locale, account.uid, resourceRowsFromPlan(plan?.resources ?? null)) : ''}
-      ${section === 'domains' ? `      <!-- 2. Domains & Multi-IP Binding Table -->
+${section === 'domains' ? `      <!-- 2. Domains & Multi-IP Binding Table -->
       <section class="xp-card" id="xpanel-domains" data-section="domains-multi-ip" aria-labelledby="xpanel-domains-heading">
         <div class="xp-card__header">
           <div>
