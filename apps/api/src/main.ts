@@ -516,8 +516,14 @@ export const createDefaultWebRenderer = async (deps: {
         principal,
         activeReseller: reseller ?? null,
         accounts: listedAccounts,
-        plans: visiblePlans,
+        plans: (() => {
+          const chosenId = url.searchParams.get('plan') ?? ''
+          const chosen = documentRoute.activeRoute === '/whm/plans' ? visiblePlans.find(plan => plan.id === chosenId) : undefined
+          return chosen ? [chosen, ...visiblePlans.filter(plan => plan.id !== chosen.id)] : visiblePlans
+        })(),
         resellers: visibleResellers,
+        featureLists: snap.featureLists.filter(list => principal.kind === 'root' || list.ownerId === principal.id || visiblePlans.some(plan => plan.featureListId === list.id)),
+        domains: snap.domains.filter(domain => listedAccounts.some(account => account.id === domain.accountId)),
         ipPool: visibleIpPool,
         firewallRules: visibleFirewall,
         ...(principal.kind === 'root' && snap.server ? {
