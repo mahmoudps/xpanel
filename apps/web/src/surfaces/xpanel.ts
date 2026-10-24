@@ -26,6 +26,7 @@ import {
 import { renderAccountResources, resourceRowsFromPlan } from '../board-canvas.ts'
 import { renderXpanelHome, xpanelHomeFromProps } from '../board-port/xpanel-home.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
+import { renderComposedPage } from '../board-port/composed-pages.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
 
@@ -739,6 +740,15 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
       </section>` : ''}
             ${section === 'security' ? `<section class="xp-card" data-section="account-security"><h1 id="xpanel-security-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1></section>` : ''}
             ${section === 'design' ? renderDesignMain(activeRoute, locale) : ''}
+            ${section === 'composed' ? renderComposedPage({
+              locale,
+              route: activeRoute,
+              account,
+              theme,
+              ...(plan && plan.id === account.planId ? { plan } : {}),
+              domains,
+              serviceUsers: props.serviceUsers ?? [],
+            }) : ''}
             ${section === undefined || (section === 'config' && !customConfig) || (section === 'analytics' && !websiteAnalytics) ? renderSurfaceUnavailable(locale, '/home') : ''}`,
   })
   return ensureAccessibleSurfaceHtml(rawHtml.trim(), locale)
