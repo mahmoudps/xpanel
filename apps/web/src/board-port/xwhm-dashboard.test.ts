@@ -1,10 +1,22 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import type { Account, AuditEntry, Plan } from '@xpanel/core'
+import { resolveWebDocumentRoute } from '../document-routes.ts'
 import { renderWhmSurface } from '../surfaces/xwhm.ts'
 import { renderWhmDashboard, whmDashboardFixture, whmDashboardFixtureAr, whmDashboardFromProps } from './xwhm-dashboard.ts'
 
 describe('xWHM dashboard board port', () => {
+  it('links Upgrade to the canonical registered server document', () => {
+    const target = '/whm/server/upgrade'
+    assert.deepEqual(resolveWebDocumentRoute(target), { surface: 'xwhm', activeRoute: target })
+    assert.equal(resolveWebDocumentRoute('/whm/upgrade'), null)
+    for (const locale of ['en', 'ar'] as const) {
+      const html = renderWhmDashboard(whmDashboardFromProps({ locale, principal: { username: 'root' } }))
+      assert.ok(html.includes(`href="${target}"`))
+      assert.equal(html.includes('href="/whm/upgrade"'), false)
+    }
+  })
+
   it('keeps the board regions in the sample fixture', () => {
     const html = renderWhmDashboard(whmDashboardFixture())
     for (const marker of ['Search tools and accounts', '>Create account</a>', 'id="rec-title"', 'Server resources', 'role="meter"', 'id="acc-title"', 'id="host-title"', 'Recent audit entries', 'Check for drift now', 'Generation 142 · active']) {
