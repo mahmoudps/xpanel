@@ -14,6 +14,8 @@ import { basename, dirname, join, posix, relative, resolve } from 'node:path'
 import { isBuiltin, stripTypeScriptTypes } from 'node:module'
 import { gunzipSync, gzipSync } from 'node:zlib'
 import { init, parse as parseModules } from 'es-module-lexer'
+import { withAuthenticatedReleaseArchive, stageAuthenticatedReleaseArchive } from './release-verifier.mjs'
+import { REQUIRED_LIFECYCLE_CONTROL_FILES } from './release-verifier.mjs'
 
 // The parser is a pinned development dependency; no parser or test tool enters the release.
 await init()
@@ -35,7 +37,16 @@ export const REQUIRED_ROOT_FILES = Object.freeze([
   'package.json',
   'pnpm-lock.yaml',
   'pnpm-workspace.yaml',
+  'LICENSE',
+  'README.md',
+  'SECURITY.md',
+  'CONTRIBUTING.md',
+  'CODE_OF_CONDUCT.md',
+  'CLA.md',
   'scripts/install.sh',
+  'scripts/management-tls.mjs',
+  'scripts/release-verifier.mjs',
+  'scripts/release-verifier.d.mts',
   'helpers/account-files/build.mjs',
   'helpers/account-files/xpanel-account-files.c',
 ])
@@ -220,6 +231,7 @@ export const parseSystemdUnitContract = (unitName, content) => {
 const isIncludedRuntimeSource = (relPath) => {
   if (isDesignReference(relPath)) return false
   if (REQUIRED_ROOT_FILES.includes(relPath)) return true
+  if (REQUIRED_LIFECYCLE_CONTROL_FILES.includes(relPath)) return true
   if (REQUIRED_SYSTEMD_UNITS.includes(relPath)) return true
   if (/^(?:apps|packages)\/[^/]+\/package\.json$/.test(relPath)) return true
   if (/^packages\/db\/src\/migrations\/\d{4}_[a-z0-9_]+\.sql$/.test(relPath)) return true
@@ -588,8 +600,11 @@ const readOctalField = (buf, offset, length) => {
   return raw.length === 0 ? 0 : Number.parseInt(raw, 8)
 }
 
-export const parseTarGzBuffer = (gzBuffer) => {
-  const tarBuf = gunzipSync(gzBuffer)
+export const parseTarGzBuffer = (gzBuffer, maximumTarBytes = 512 * 1024 * 1024) => {
+  if (!Number.isSafeInteger(maximumTarBytes) || maximumTarBytes < 1 || maximumTarBytes > 512 * 1024 * 1024) {
+    failRelease('ARCHIVE_LIMIT', 'Tar expansion bounds can only reduce the hard ceiling')
+  }
+  const tarBuf = gunzipSync(gzBuffer, { maxOutputLength: maximumTarBytes })
   if (tarBuf.byteLength % 512 !== 0) {
     failRelease('CORRUPT_ARCHIVE', 'Decompressed tar stream is not a multiple of 512 bytes')
   }
@@ -736,7 +751,7 @@ export const buildReleaseArtifact = async (options) => {
         failRelease('SECRET_LEAK_DETECTED', `Web source file contains forbidden credential pattern: ${relPath}`, { path: relPath })
       }
     }
-    const mode = relPath.endsWith('.sh') ? 0o755 : 0o644
+    const mode = relPath.endsWith('.sh') || relPath === 'bin/xpanel-ctl' ? 0o755 : 0o644
     stagedFiles.set(relPath, {
       bytes: normalized,
       sha256: sha256Hex(normalized),
@@ -1307,6 +1322,8 @@ export const verifyReleaseArtifact = async (options) => {
  * }} options
  */
 export const unpackVerifiedRelease = async (options) => {
+  // Portable build diagnostics. Privileged lifecycle consumers use the
+  // authenticated retained-descriptor staging API below and its runtime module.
   // Step 1: Full pre-unpack verification in memory before touching target or staging directories
   const precheck = await verifyReleaseArchive(options.archivePath, {
     expectedArchiveSha256: options.expectedArchiveSha256,
@@ -1349,6 +1366,23 @@ export const unpackVerifiedRelease = async (options) => {
     }
     throw err
   }
+}
+
+/**
+ * Stage an authenticated source archive from its retained actual read-only FD.
+ * There are no caller validators or writer hooks, no activation and no target
+ * replacement. A failed/uncertain attempt retains its private staging for review.
+ * Actual Linux root ancestry is mandatory; runtime dependencies remain unqualified.
+ */
+export const unpackAuthenticatedRelease = async (options) => {
+  const allowed = ['archivePath', 'expectedArchiveSha256', 'signingKey', 'keyId', 'stagingRoot', 'bounds']
+  if (!options || typeof options !== 'object' || Object.keys(options).some(key => !allowed.includes(key)) || typeof options.stagingRoot !== 'string') {
+    failRelease('AUTHENTICATED_OPTIONS', 'Authenticated staging accepts only explicit trust and staging inputs')
+  }
+  const trust = { signingKey: options.signingKey, keyId: options.keyId, ...(options.bounds ? { bounds: options.bounds } : {}) }
+  const { value } = await withAuthenticatedReleaseArchive(options.archivePath, { ...trust, expectedArchiveSha256: options.expectedArchiveSha256 },
+    ({ report }) => stageAuthenticatedReleaseArchive(options.stagingRoot, { ...trust, authenticatedArchive: report }))
+  return value
 }
 
 if (import.meta.url === `file://${process.argv[1]?.replaceAll('\\', '/')}`) {

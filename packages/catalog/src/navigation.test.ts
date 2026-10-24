@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { tools } from './data/index.ts'
 import { navigation } from './data/navigation.ts'
+import { canonicalNavigationRoute, registeredDocumentAliases, canOpenRegisteredRoute, visibleNavigation, visibleRegisteredNavigation } from './navigation.ts'
+import type { VisibilityContext } from './visibility.ts'
 import { catalogKeys } from './i18n.ts'
 import type { NavSurfaceId, Surface } from './types.ts'
 import arCatalog from './locales/ar.json' with { type: 'json' }
@@ -14,6 +16,52 @@ const ACLS = new Set([
 const pages = navigation.flatMap(s => s.sections.flatMap(sec => sec.pages.map(p => ({ surface: s.surface, section: sec, page: p }))))
 
 describe('navigation', () => {
+  it('binds store subdocuments to existing capability pages without duplicating tools or changing roles', () => {
+    expect(registeredDocumentAliases).toHaveLength(10)
+    expect(new Set(registeredDocumentAliases.map(row => row.route)).size).toBe(10)
+    const owner: VisibilityContext = { principal: { kind: 'user', id: 'owner', username: 'owner', accountId: 'account' }, disabledFeatures: new Set() }
+    const root: VisibilityContext = { principal: { kind: 'root', id: 'root', username: 'root' }, disabledFeatures: new Set() }
+    const reseller: VisibilityContext = { principal: { kind: 'reseller', id: 'reseller', username: 'reseller' }, reseller: { acl: ['list-accounts'] }, disabledFeatures: new Set() }
+    for (const row of registeredDocumentAliases) {
+      expect(canonicalNavigationRoute(row.route)).toBe(row.parentRoute)
+      expect(pages.some(({ page }) => page.route === row.parentRoute)).toBe(true)
+      for (const context of [owner, root, reseller]) expect(canOpenRegisteredRoute(row.route, context)).toBe(canOpenRegisteredRoute(row.parentRoute, context))
+      expect(visibleNavigation(owner, tools).some(surface => surface.sections.some(section => section.pages.some(page => page.route === row.route)))).toBe(false)
+    }
+    expect(canOpenRegisteredRoute('/software/store/unknown', owner)).toBe(false)
+    expect(canonicalNavigationRoute('/software/apps')).toBe('/software/apps')
+  })
+
+  it('denies registered document admission without a caller and never admits an unknown route', () => {
+    expect(visibleRegisteredNavigation()).toEqual([])
+    expect(canOpenRegisteredRoute('/whm')).toBe(false)
+    expect(canOpenRegisteredRoute('/not-registered', { principal: { kind: 'root', id: 'fixture-root', username: 'root' } })).toBe(false)
+  })
+
+  it.each([
+    { kind: 'root', acl: [], allow: ['/whm', '/whm/accounts', '/whm/accounts/new', '/whm/server/setup', '/whm/server/upgrade', '/whm/audit'], deny: ['/home', '/mail/inbox', '/security/account'] },
+    { kind: 'reseller', acl: ['list-accounts'], allow: ['/whm', '/whm/accounts'], deny: ['/whm/accounts/new', '/whm/server/setup', '/whm/server/upgrade', '/whm/resellers', '/whm/audit', '/whm/security/firewall', '/home'] },
+    { kind: 'reseller', acl: ['create-account'], allow: ['/whm', '/whm/accounts/new'], deny: ['/whm/accounts', '/whm/server/upgrade', '/whm/audit'] },
+    { kind: 'user', acl: [], allow: ['/home', '/resources', '/advanced/terminal', '/mail/inbox', '/security/account'], deny: ['/whm', '/whm/accounts', '/whm/server/setup', '/whm/server/upgrade'] },
+  ] as const)('admits $kind $acl only to registry roles and explicit ACLs', row => {
+    const principal = row.kind === 'user'
+      ? { kind: 'user' as const, id: 'fixture-user', username: 'owner', accountId: 'fixture-account' }
+      : { kind: row.kind, id: 'fixture-' + row.kind, username: row.kind }
+    const context: VisibilityContext = { principal, ...(row.kind === 'reseller' ? { reseller: { acl: [...row.acl] } } : {}), disabledFeatures: new Set() }
+    const admitted = visibleRegisteredNavigation(context).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
+    for (const route of row.allow) { expect(canOpenRegisteredRoute(route, context), route).toBe(true); expect(admitted).toContain(route) }
+    for (const route of row.deny) { expect(canOpenRegisteredRoute(route, context), route).toBe(false); expect(admitted).not.toContain(route) }
+  })
+
+  it('keeps role admission separate from qualification and leaves registry and tool status unchanged', () => {
+    const context: VisibilityContext = { principal: { kind: 'user', id: 'fixture-owner', username: 'owner', accountId: 'fixture-account' }, disabledFeatures: new Set(['terminal', 'domains']) }
+    const before = JSON.stringify({ navigation, tools })
+    expect(canOpenRegisteredRoute('/advanced/terminal', context)).toBe(true)
+    expect(visibleRegisteredNavigation(context).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))).toContain('/resources')
+    expect(visibleNavigation(context, tools).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))).not.toContain('/resources')
+    expect(JSON.stringify({ navigation, tools })).toBe(before)
+  })
+
   it('delivers every in-scope tool on exactly one page', () => {
     const placed = pages.flatMap(({ page }) => page.tools)
     const inScope = tools.filter(t => t.status !== 'out-of-scope').map(t => t.id)

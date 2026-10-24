@@ -3,6 +3,7 @@ import { publicContactEmail } from '../display-name.ts'
 import { escapeHtml } from '../tokens.ts'
 
 export interface LoginSurfaceProps {
+  mfaMode?: MfaRuntimeMode
   locale?: 'en' | 'ar'
   theme?: 'dark' | 'light'
   targetSurface?: 'xpanel' | 'xwhm' | 'xmail'
@@ -40,6 +41,7 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
   const contact = publicContactEmail(props.supportEmail)
   const siblingPanels = safePanelLinks(props.panels).filter(panel => panel.surface !== (audience ?? targetSurface))
   const locked = props.lockout?.locked === true
+  const mfaDisabled = props.mfaMode === 'disabled'
   const retry = props.lockout?.retryAfterSec
   const observedRetry = typeof retry === 'number' && Number.isFinite(retry) && retry > 0 ? Math.ceil(retry) : ''
   return `
@@ -59,10 +61,11 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
   </header>
   <main class="xp-login-main" aria-labelledby="login-heading">
     <section class="xp-card xp-login-card">
-      ${audience ? '' : `<div class="xp-login-step">${text('Step 1 of 2 — Credentials', 'الخطوة 1 من 2 — بيانات الدخول')}</div>`}
+      ${audience ? '' : `<div class="xp-login-step">${mfaDisabled ? text('Credentials', 'بيانات الدخول') : text('Step 1 of 2 — Credentials', 'الخطوة 1 من 2 — بيانات الدخول')}</div>`}
       <p class="xp-login-identity__product" dir="ltr" data-login-product="${audience ?? 'xpanel'}">${brand}</p>
       <h1 id="login-heading" class="xp-page-title">${audience ? profileHeading : text(`Sign in to ${brand}`, `تسجيل الدخول إلى ${brand}`)}</h1>
-      ${audience ? '' : `<p class="xp-subtitle" id="login-description">${text('Enter your account credentials. Additional verification appears when required.', 'أدخل بيانات حسابك. تظهر خطوات التحقق الإضافية عند طلبها.')}</p>`}
+      ${mfaDisabled ? `<p class="xp-help" role="status" data-mfa-disabled>${text('Two-factor verification is disabled in development. Saved factors stay unchanged.', 'التحقق الثنائي معطّل في بيئة التطوير. تبقى عوامل التحقق المحفوظة دون تغيير.')}</p>` : ''}
+      ${audience ? '' : `<p class="xp-subtitle" id="login-description">${mfaDisabled ? text('Enter your account username and password.', 'أدخل اسم المستخدم وكلمة المرور لحسابك.') : text('Enter your account credentials. Additional verification appears when required.', 'أدخل بيانات حسابك. تظهر خطوات التحقق الإضافية عند طلبها.')}</p>`}
       <div class="xp-alert xp-alert--critical" role="alert" data-auth-error data-lockout-state="${locked ? 'locked' : 'unknown'}" ${props.errorMessage || locked ? '' : 'hidden'}>${escapeHtml(props.errorMessage ?? (locked ? (isAr ? 'تسجيل الدخول مقفل مؤقتًا.' : 'Sign-in is temporarily locked.') : ''))}</div>
       <p class="xp-help" role="status" aria-live="polite" data-auth-status></p>
       <noscript><p>${text('JavaScript is required to submit this sign-in form.', 'يلزم تشغيل البرمجة في المتصفح لإرسال نموذج تسجيل الدخول.')}</p></noscript>
@@ -82,7 +85,7 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
             </button>
           </div>
         </div>
-        <fieldset class="xp-fieldset" data-auth-mfa-fields data-2fa-step="unknown" hidden>
+        ${mfaDisabled ? '' : `<fieldset class="xp-fieldset" data-auth-mfa-fields data-2fa-step="unknown" hidden>
           <legend class="xp-label">${text('Two-factor verification', 'التحقق الثنائي')}</legend>
           <p class="xp-help">${text('Enter a fresh authenticator code or one recovery code, not both.', 'أدخل رمزًا جديدًا من تطبيق المصادقة أو رمز استرداد واحدًا.')}</p>
           <div class="xp-field">
@@ -93,7 +96,7 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
             <label class="xp-label" for="login-recovery-code">${text('Recovery code', 'رمز الاسترداد')}</label>
             <input id="login-recovery-code" name="recoveryCode" type="text" class="xp-input xp-mono" dir="ltr" autocomplete="off" />
           </div>
-        </fieldset>
+        </fieldset>`}
         <button type="submit" class="xp-btn xp-btn--primary" data-auth-submit disabled>${text('Sign in', 'تسجيل الدخول')}</button>
       </form>
       <section data-auth-password-change hidden aria-labelledby="password-change-heading">
@@ -151,3 +154,4 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
   </footer>`}
 </div>`.trim()
 }
+import type { MfaRuntimeMode } from '@xpanel/core'

@@ -102,6 +102,7 @@ describe('three real HTTP listeners with a fixture host agent, not public TLS qu
     const entryPoints = await configs()
     const server = await startPanelEntrypoints({ ...options, entryPoints })
     cleanups.push(() => server.close())
+    if (server.quarantined) throw new Error('The ordinary startup fixture unexpectedly entered lifecycle quarantine')
     expect(subscriptions.opened).toBe(3)
     expect(new Set(names.map(name => server.listeners[name].port)).size).toBe(3)
     const readSnapshot = vi.spyOn(server.store, 'readSnapshot')

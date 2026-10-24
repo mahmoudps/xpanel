@@ -144,7 +144,7 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   if (/^\/api\/webmail\/inbox\/[1-9]\d*\/move$/.test(pathname) && method === 'POST') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-message-read'] }
   if (pathname === '/api/webmail/send' && method === 'POST') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-compose'] }
   if (/^\/api\/webmail(?:\/|$)/.test(pathname)) return { resource: 'webmail', acl: 'edit-account', toolIds: ['email-accounts'] }
-  if (/^\/api\/backups\/accounts\/[a-z][a-z0-9]{2,15}$/.test(pathname)) return { resource: 'backups', rootOnly: true, toolIds: ['backup-restoration'] }
+  if (/^\/api\/backups\/accounts\/[a-z][a-z0-9]{0,15}$/.test(pathname)) return { resource: 'backups', rootOnly: true, toolIds: ['backup-restoration'] }
   if (/^\/api\/backups(?:\/|$)/.test(pathname)) return { resource: 'backups', acl: 'transfer', toolIds: ['backup'] }
   if (/^\/api\/(?:transfers|lifecycle)(?:\/|$)/.test(pathname)) return { resource: 'lifecycle', rootOnly: true }
   if (/^\/api\/web-features(?:\/|$)/.test(pathname)) return { resource: 'files', acl: 'edit-account', toolIds: [pathname.split('/').at(-1) === 'extras' ? 'file-manager' : pathname.split('/').at(-1)!] }

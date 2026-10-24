@@ -743,6 +743,8 @@ export const pruneExpiredOperationalRecords = async (
                  AND finished_at IS NOT NULL
                  AND finished_at < $1
                  AND id NOT IN (SELECT job_id FROM job_runtime_leases WHERE needs_attention = 1)
+                  AND NOT EXISTS (SELECT 1 FROM reconcile_operations o WHERE o.job_id = jobs.id)
+                  AND NOT EXISTS (SELECT 1 FROM legacy_reference_repairs r WHERE r.job_id = jobs.id AND r.state = 'awaiting_intent')
                RETURNING id`,
               [jobsCutoff],
             )

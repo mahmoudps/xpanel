@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import { defaultPlan } from '@xpanel/core'
 import { renderPanelSurface } from '../surfaces/xpanel.ts'
+import { renderWebApp } from '../app.ts'
 import { readdirSync, readFileSync } from 'node:fs'
 import { renderXpanelHome, xpanelHomeFromProps } from './xpanel-home.ts'
 import { renderFidelityDocument } from './xpanel-home.fixture.ts'
@@ -98,13 +99,14 @@ describe('xPanel home board port', () => {
       locale: 'en',
       account: { username: 'owner', uid: 1000, home: '/home/owner', primaryDomain: 'example.test', ipv4: '192.0.2.10' },
       qualifiedRoutes: qualified,
+      xmailOrigin: 'https://messages.example.test:12443',
       signOutLabel: 'Sign out',
     }))
     const rows = (source: string) => source.match(/<li data-tool="true"[\s\S]*?<\/li>/g)?.join('\n') ?? ''
     const tools = rows(html)
     assert.match(html, /35 tools in 9 groups/)
     assert.match(tools, /<a href="\/files\/manager"/)
-    assert.match(tools, /<a href="\/mail\/inbox"/)
+    assert.match(tools, /<a href="https:\/\/messages\.example\.test:12443\/mail\/inbox\?lang=en&amp;theme=dark"/)
     assert.match(tools, /<a href="\/security\/account"/)
     assert.match(html, /href="\?lang=ar"/)
     assert.match(html, /data-action="logout"/)
@@ -124,6 +126,56 @@ describe('xPanel home board port', () => {
     assert.doesNotMatch(arabicTools, /<a href="\/files\/manager"/)
     const specimen = renderFidelityDocument('ltr')
     assert.doesNotMatch(specimen, /aria-disabled="true"|Coming soon/)
+  })
+  it('uses the configured mail origin consistently in desktop, phone and qualified tools', () => {
+    for (const locale of ['en', 'ar'] as const) for (const theme of ['dark', 'light'] as const) {
+      const model = xpanelHomeFromProps({ locale, theme, account, xmailOrigin: 'https://messages.example.test:12443', qualifiedRoutes: new Set(['/mail/inbox']) })
+      const expected = `https://messages.example.test:12443/mail/inbox?lang=${locale}&theme=${theme}`
+      for (const view of [model.desktop, model.phone]) {
+        assert.equal(view.nav.flatMap(group => group.items).find(item => item.icon === 'inbox')?.href, expected)
+        assert.equal(view.groups.flatMap(group => group.tools).find(item => item.icon === 'inbox')?.href, expected)
+        assert.equal(view.groups.flatMap(group => group.tools).find(item => item.icon === 'inbox')?.enabled, true)
+      }
+      const html = renderPanelSurface({ account, activeRoute: '/home', locale, theme, xmailOrigin: 'https://messages.example.test:12443' })
+      assert.ok(html.includes(expected.replace('&', '&amp;')))
+      assert.match(html, /data-nav-route="\/mail\/inbox"/)
+      assert.doesNotMatch(html, /href="\/mail(?:\/inbox)?(?:\?|"|&)/)
+    }
+  })
+
+  it('does not invent a destination or bypass tool qualification when mail is unavailable', () => {
+    for (const locale of ['en', 'ar'] as const) for (const xmailOrigin of [undefined, 'http://messages.example.test', 'https://messages.example.test/path']) {
+      const model = xpanelHomeFromProps({ account, locale, xmailOrigin, qualifiedRoutes: new Set(['/mail/inbox']) })
+      for (const view of [model.desktop, model.phone]) assert.equal(view.groups.flatMap(group => group.tools).find(item => item.icon === 'inbox')?.enabled, false)
+      const html = renderXpanelHome(model)
+      assert.doesNotMatch(html, /href="\/mail(?:\/inbox)?(?:\?|"|&)/)
+      assert.match(html, locale === 'ar' ? /غير متاح/ : /Unavailable/)
+    }
+    const unqualified = xpanelHomeFromProps({ account, xmailOrigin: 'https://messages.example.test', qualifiedRoutes: new Set() })
+    assert.equal(unqualified.desktop.groups.flatMap(group => group.tools).find(item => item.icon === 'inbox')?.enabled, false)
+  })
+
+  it('takes the full-document destination only from validated sibling configuration without account context', () => {
+    const state = {
+      surface: 'xpanel' as const, activeRoute: '/home', locale: 'ar' as const, theme: 'light' as const,
+      accountId: account.id,
+      visibility: { principal: { kind: 'user' as const, id: 'owner', username: account.username, accountId: account.id } },
+      panel: { account, xmailOrigin: 'https://untrusted.example.test' },
+    }
+    const html = renderWebApp({ ...state, panels: [{ surface: 'xmail', origin: 'https://messages.example.test:12443' }] })
+    const mailLinks = [...html.matchAll(/href="(https:\/\/messages\.example\.test:12443[^\"]*)"/g)].map(match => new URL(match[1]!.replaceAll('&amp;', '&')))
+    assert.ok(mailLinks.length >= 1)
+    for (const link of mailLinks) {
+      assert.equal(link.pathname, '/mail/inbox')
+      assert.deepEqual([...link.searchParams], [['lang', 'ar'], ['theme', 'light']])
+    }
+    assert.doesNotMatch(html, /href="https:\/\/untrusted\.example\.test/)
+    assert.match(html, /href="\/resources\?lang=ar&amp;theme=light&amp;density=comfortable&amp;accountId=home-account"/)
+    for (const panels of [undefined, [{ surface: 'xpanel' as const, origin: 'https://panel.example.test' }], [{ surface: 'xmail' as const, origin: 'https://messages.example.test?token=secret' }]]) {
+      const unavailable = renderWebApp({ ...state, panels })
+      assert.doesNotMatch(unavailable, /href="(?:\/mail|https:\/\/untrusted|https:\/\/messages)/)
+      assert.match(unavailable, /غير متاح/)
+    }
   })
   it('keeps board sample data out of product code', () => {
     for (const name of ['./xpanel-home.ts', './xmail-inbox.ts', './xmail-compose.ts']) {

@@ -3,13 +3,15 @@ import {
   MIN_ARGON2_MEMORY_KIB,
   SESSION_ABSOLUTE_TIMEOUT_MS,
   SESSION_IDLE_TIMEOUT_MS,
+  DEFAULT_MFA_RUNTIME_POLICY,
+  bindMfaRuntimePolicy,
   assertArgon2Hash,
   cidrContains,
   fail,
   parseCidr,
   parseIp,
 } from '@xpanel/core'
-import type { Principal } from '@xpanel/core'
+import type { MfaRuntimePolicy, Principal } from '@xpanel/core'
 import {
   findActiveApiTokenByHash,
   findActiveSessionByTokenHash,
@@ -456,7 +458,7 @@ const isClientIpAllowed = (allowedIps: readonly string[], clientIp: string | nul
 export const authenticateRequest = async (
   db: Db,
   req: Request,
-  opts: { serverSecret: string; clientIp?: string | null; touchSession?: boolean; entryPoint?: EntryPoint },
+  opts: { serverSecret: string; clientIp?: string | null; touchSession?: boolean; entryPoint?: EntryPoint; mfaRuntimePolicy?: MfaRuntimePolicy },
 ): Promise<AuthenticatedCaller | null> => {
   const authHeader = req.headers.get('authorization')
   if (authHeader) {
@@ -507,7 +509,9 @@ export const authenticateRequest = async (
   if (opts.touchSession !== false) await touchSession(db, session.id)
   const csrfHeader = req.headers.get(CSRF_HEADER_NAME) ?? req.headers.get('x-xsrf-token')
   const csrfValid = verifyCsrfToken(sessionToken, csrfHeader, opts.serverSecret, opts.entryPoint)
-  const mfaSatisfied = !principalRecord.totpEnabled || (principalRecord.totpSecretEnc !== null && session.mfaVerified)
+  const policy = opts.mfaRuntimePolicy === undefined ? DEFAULT_MFA_RUNTIME_POLICY : bindMfaRuntimePolicy(opts.mfaRuntimePolicy)
+  const mfaSatisfied = policy.mode === 'disabled' ||
+    !principalRecord.totpEnabled || (principalRecord.totpSecretEnc !== null && session.mfaVerified)
 
   return {
     principal: principalRecordToPrincipal(principalRecord),

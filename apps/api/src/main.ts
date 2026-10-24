@@ -6,12 +6,11 @@ import type { Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { agentCallerHeaders, loadAgentCredentialFile } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
-import { canSeeAccount, fail, hasAcl, type AuditEntry, type OsProfile } from '@xpanel/core'
-import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
+import { bindMfaRuntimePolicy, canSeeAccount, captureMfaRuntimePolicy, fail, hasAcl, type AuditEntry, type MfaRuntimePolicy, type OsProfile } from '@xpanel/core'
+import { canOpenRegisteredRoute, canonicalNavigationRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { mapAgentHostInfo, mapAgentServices } from '../../web/src/board-port/xwhm-dashboard.ts'
 import { publicContactEmail } from '../../web/src/display-name.ts'
-import { ACCOUNT_SECURITY_ROUTES } from '../../web/src/surfaces/account-security.ts'
-import { createDb, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, type AuditQuery, type Db } from '@xpanel/db'
+import { createDb, initializeOperationalMetadata, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, type AuditQuery, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { runCli } from './cli.ts'
@@ -24,6 +23,63 @@ import { createAgentClient } from './agent-client.ts'
 import { classifyCliInvocation, xpanelServiceUid } from './cli-privilege.ts'
 import { ENTRY_POINTS, entryPointAllowsRole, type EntryPoint } from './entry-points.ts'
 import { assertStateWritable } from './state-access.ts'
+import { LiveEventHub } from './ws.ts'
+import type { ApiApp } from './server.ts'
+import {
+  awaitLifecycleWriterDrain,
+  createLifecycleBackgroundResources,
+  isLifecycleManaged,
+  readLifecycleBarrier,
+  readLifecyclePublicStatus,
+  startLifecycleWriterParticipant,
+  withLifecycleWriterAdmission,
+} from '../../../scripts/lifecycle-admission.mjs'
+
+type ApiLifecycleParticipant = Awaited<ReturnType<typeof startLifecycleWriterParticipant>>
+
+/** IPC is established before startup writers; an unsafe canonical namespace is quarantined. */
+const prepareApiLifecycleStartup = async (): Promise<{ managed: boolean; quarantined: boolean; participant?: ApiLifecycleParticipant }> => {
+  let managed: boolean
+  let quarantined = false
+  try { managed = await isLifecycleManaged() }
+  catch { managed = true; quarantined = true }
+  try {
+    if (await readLifecycleBarrier() !== null) { managed = true; quarantined = true }
+  } catch { managed = true; quarantined = true }
+  if (!managed) return { managed: false, quarantined: false }
+  const participant = await createLifecycleBackgroundResources(() => startLifecycleWriterParticipant('api'))
+  try {
+    try { quarantined ||= await readLifecycleBarrier() !== null }
+    catch { quarantined = true }
+    return { managed: true, quarantined, participant }
+  } catch (error) {
+    await participant.close()
+    throw error
+  }
+}
+
+/** Frozen until restart: no database, state renderer, authentication or promotion callback exists. */
+const createQuarantinedApiApp = (): ApiApp => ({
+  hub: createLifecycleBackgroundResources(() => new LiveEventHub()),
+  fetch: async request => {
+    const url = new URL(request.url)
+    const health = request.method === 'GET' && url.pathname === '/api/health' && url.search === ''
+    return new Response(JSON.stringify(health
+      ? { ok: true, lifecycle: 'quarantined', writable: false }
+      : { error: 'Lifecycle maintenance requires attention before this request can run.' }), {
+      status: health ? 200 : 503,
+      headers: { 'content-type': health ? 'application/json' : 'application/problem+json', 'cache-control': 'no-store', ...(health ? {} : { 'retry-after': '5' }) },
+    })
+  },
+  authenticateUpgrade: async () => null,
+  watchMailbox: () => {},
+})
+
+const closeApiLifecycleParticipant = async (participant?: ApiLifecycleParticipant): Promise<void> => {
+  if (!participant) return
+  await awaitLifecycleWriterDrain()
+  await participant.close()
+}
 
 export interface PanelServerOptions {
   port?: number
@@ -52,11 +108,6 @@ const detectHostOsProfile = async (): Promise<OsProfile> => {
  * Loads `serveWebUi` from `@xpanel/web` dynamically so visiting `/`, `/login`, `/whm`, `/panel`, `/mail`
  * renders the full bilingual HTML5 UI hydrated with live state from `StateStore` and `Db` when available.
  */
-const WORKSPACE_HOME: Record<EntryPoint, string> = { xpanel: '/home', xwhm: '/whm', xmail: '/mail/inbox' }
-
-const isWorkspaceHome = (route: { surface: string; activeRoute: string }): boolean =>
-  WORKSPACE_HOME[route.surface as EntryPoint] === route.activeRoute
-
 const suggestedPanel = (pathname: string, current?: EntryPoint): EntryPoint | undefined => {
   const path = pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
   const guess: EntryPoint | undefined = path === '/whm' || path.startsWith('/whm/') ? 'xwhm'
@@ -70,12 +121,15 @@ export const createDefaultWebRenderer = async (deps: {
   store: StateStore
   db: Db
   serverSecret: string
+  /** Internal startup policy, shared with API and WebSocket authentication. */
+  mfaRuntimePolicy?: MfaRuntimePolicy
   entryPoint?: EntryPoint
   /** Exact public origins. Missing origins are not linked. */
   panels?: Partial<Record<EntryPoint, string>>
   /** Connected agent. Implemented tools qualify only when its Linux probes pass. */
   agent?: { fetch: AgentApp['fetch']; token: string } | null
 }): Promise<(req: Request) => Promise<Response> | Response> => {
+  const mfaRuntimePolicy = bindMfaRuntimePolicy(deps.mfaRuntimePolicy)
   const { serveWebUi, resolveWebDocumentRoute } = await import('../../web/src/index.ts')
   const panelLinks = (['xpanel', 'xwhm', 'xmail'] as const).flatMap(surface => {
     const origin = deps.panels?.[surface]
@@ -144,6 +198,7 @@ export const createDefaultWebRenderer = async (deps: {
       }
       return serveWebUi(req, async () => ({
         surface: model.surface,
+        mfaRuntimeMode: mfaRuntimePolicy.mode,
         activeRoute: url.pathname,
         ...(model.visibility ? { visibility: model.visibility } : {}),
         ...(catalog ? { catalog } : {}),
@@ -167,6 +222,7 @@ export const createDefaultWebRenderer = async (deps: {
       const email = await supportEmail()
       return serveWebUi(req, async () => ({
         surface: 'login',
+        mfaRuntimeMode: mfaRuntimePolicy.mode,
         ...(email ? { supportEmail: email } : {}),
         ...(panelLinks.length ? { panels: panelLinks } : {}),
         login: {
@@ -179,7 +235,7 @@ export const createDefaultWebRenderer = async (deps: {
     const documentRoute = resolveWebDocumentRoute(url.pathname)
     // Browser documents require a session; a scoped API token cannot expose an unscoped HTML snapshot.
     const caller = await authenticateRequest(deps.db, req, {
-      serverSecret: deps.serverSecret, clientIp: null,
+      serverSecret: deps.serverSecret, clientIp: null, mfaRuntimePolicy,
       ...(deps.entryPoint ? { entryPoint: deps.entryPoint } : {}),
     })
     const sessionReady = Boolean(caller && caller.mfaVerified && caller.apiTokenId === null && !caller.principalRecord.forcePasswordChange)
@@ -225,6 +281,24 @@ export const createDefaultWebRenderer = async (deps: {
       return new Response(null, { status: 303, headers: { ...headers, location: `${target.pathname}${target.search}` } })
     }
     const reseller = principal.kind === 'reseller' ? (await deps.store.getReseller(principal.id)) ?? undefined : undefined
+    // Self-service factor management is independent of administrative document permissions.
+    if (principal.kind === 'reseller' && surface === 'xwhm' && documentRoute.activeRoute === '/whm/security/sign-in') {
+      if (!reseller || reseller.id !== principal.id || reseller.username !== principal.username) {
+        return serveWebUi(req, async () => ({
+          surface,
+          mfaRuntimeMode: mfaRuntimePolicy.mode,
+          activeRoute: documentRoute.activeRoute,
+          error: { status: 403, surface },
+        }))
+      }
+      return serveWebUi(req, async () => ({
+        surface,
+        mfaRuntimeMode: mfaRuntimePolicy.mode,
+        activeRoute: documentRoute.activeRoute,
+        security,
+        visibility: { principal },
+      }))
+    }
     const requiredAcl = surface === 'xmail' ? 'edit-account' : 'list-accounts'
     if (principal.kind === 'reseller' && (!reseller || !hasAcl(principal, reseller, requiredAcl))) {
       return documentStatus(403, {
@@ -262,25 +336,25 @@ export const createDefaultWebRenderer = async (deps: {
       ...(reseller ? { reseller } : {}),
       disabledFeatures: new Set(scoped?.featureList?.disabled ?? []),
     }
+    if (!canOpenRegisteredRoute(documentRoute.activeRoute, scopedVisibility)) {
+      return documentStatus(403, {
+        surface,
+        visibility: scopedVisibility,
+        ...(ownAccountId ? { accountId: ownAccountId } : {}),
+        workspaceHref: ENTRY_POINTS[surface].home,
+      })
+    }
     const catalog = await loadQualifiedCatalog(deps.agent ?? null)
     const qualifiedCatalog = catalog.some(tool => tool.status === 'verified') ? catalog : undefined
     const qualifiedRoute = visibleNavigation(scopedVisibility, catalog).some(item => item.surface === surface
-      && item.sections.some(section => section.pages.some(page => page.route === documentRoute.activeRoute)))
+      && item.sections.some(section => section.pages.some(page => page.route === canonicalNavigationRoute(documentRoute.activeRoute))))
     if (!qualifiedRoute) {
-      if (!isWorkspaceHome(documentRoute) && !ACCOUNT_SECURITY_ROUTES.has(documentRoute.activeRoute)) {
-        return documentStatus(404, {
-          surface,
-          visibility: scopedVisibility,
-          ...(qualifiedCatalog ? { catalog: qualifiedCatalog } : {}),
-          ...(ownAccountId ? { accountId: ownAccountId } : {}),
-          workspaceHref: ENTRY_POINTS[surface].home,
-        })
-      }
       const email = await supportEmail()
       const summaryAccount = principal.kind === 'user' && surface === 'xpanel' ? scoped?.account : null
       const summaryPlan = summaryAccount ? scoped?.plan : null
       return serveWebUi(req, async () => ({
         surface,
+        mfaRuntimeMode: mfaRuntimePolicy.mode,
         activeRoute: documentRoute.activeRoute,
         security,
         visibility: scopedVisibility,
@@ -343,6 +417,7 @@ export const createDefaultWebRenderer = async (deps: {
       return serveWebUi(req, async () => ({
         surface,
         activeRoute: '/home',
+        mfaRuntimeMode: mfaRuntimePolicy.mode,
         security,
         visibility: scopedVisibility,
         ...(qualifiedCatalog ? { catalog: qualifiedCatalog } : {}),
@@ -402,6 +477,13 @@ export const createDefaultWebRenderer = async (deps: {
     const listedPlanIds = new Set(listedAccounts.map((a) => a.planId))
     const visiblePlans = snap.plans.filter((p) => principal.kind === 'root' || p.ownerId === principal.id || listedPlanIds.has(p.id))
     const visibleResellers = snap.resellers.filter((r) => principal.kind === 'root' || r.id === principal.id)
+    const visibleFeatureLists = snap.featureLists
+      .filter(item => principal.kind === 'root' || (principal.kind === 'reseller' && (item.ownerId === null || item.ownerId === principal.id)))
+      .map(({ id, name }) => ({ id, name }))
+    const requestedPlanId = url.searchParams.has('planId') ? url.searchParams.get('planId') : null
+    const selectedEditPlan = requestedPlanId !== null ? visiblePlans.find(item => item.id === requestedPlanId) : undefined
+    const planEditorState = requestedPlanId === null ? { kind: 'create' as const }
+      : selectedEditPlan ? { kind: 'edit' as const, plan: selectedEditPlan } : { kind: 'unavailable' as const }
     const visibleIpPool = principal.kind === 'root' ? snap.ipPool ?? [] : []
     const visibleFirewall = principal.kind === 'root' ? snap.firewall.rules : []
     const accountDomains = snap.domains.filter((d) => d.accountId === account?.id)
@@ -508,7 +590,9 @@ export const createDefaultWebRenderer = async (deps: {
     return serveWebUi(req, async () => ({
       surface,
       activeRoute: documentRoute.activeRoute,
+      mfaRuntimeMode: mfaRuntimePolicy.mode,
       security,
+      ...(panelLinks.length ? { panels: panelLinks } : {}),
       ...(url.searchParams.has('accountId') && account ? { accountId: account.id } : {}),
       visibility,
       ...(qualifiedCatalog ? { catalog: qualifiedCatalog } : {}),
@@ -518,7 +602,10 @@ export const createDefaultWebRenderer = async (deps: {
         activeReseller: reseller ?? null,
         accounts: listedAccounts,
         plans: visiblePlans,
+        featureLists: visibleFeatureLists,
+        planEditorState,
         resellers: visibleResellers,
+        ...(principal.kind === 'root' && snap.mailIpConfig ? { mailIpConfig: snap.mailIpConfig } : {}),
         ipPool: visibleIpPool,
         firewallRules: visibleFirewall,
         ...(principal.kind === 'root' && snap.server ? {
@@ -600,6 +687,7 @@ export const createDefaultWebRenderer = async (deps: {
         const replyUid = Number(url.searchParams.get('uid'))
         const replyMode = mode === 'reply' || mode === 'reply-all' || mode === 'forward' ? mode : null
         const loaded = await loadMailDocument({
+          readFirst: req.headers.get('x-xpanel-mail-refresh') !== 'list',
           db: deps.db,
           store: deps.store,
           serverSecret: deps.serverSecret,
@@ -643,6 +731,7 @@ export const createDefaultWebRenderer = async (deps: {
  * Starts the `xpanel-api` HTTP + WebSocket server with integrated Web UI renderer (`@xpanel/web`).
  */
 export const startPanelServer = async (opts: PanelServerOptions = {}) => {
+  const mfaRuntimePolicy = captureMfaRuntimePolicy()
   const port = opts.port ?? (Number(process.env.XPANEL_PORT ?? '2087') || 2087)
   const host = opts.host ?? process.env.XPANEL_HOST ?? '127.0.0.1'
   const defaultBaseDir = process.platform === 'linux' ? '/var/lib/xpanel' : '.xpanel-data'
@@ -651,42 +740,62 @@ export const startPanelServer = async (opts: PanelServerOptions = {}) => {
   if (!opts.agentApp && (process.platform !== 'linux' || process.getuid?.() === 0)) {
     fail('PRECONDITION_FAILED', 'the API must run as an unprivileged Linux service with a separate agent')
   }
-  const serverSecret = opts.serverSecret ?? await loadAgentCredentialFile(opts.serverSecretFile ?? process.env.XPANEL_SERVER_SECRET_FILE ?? '/etc/xpanel/server.secret')
-  const agentToken = opts.agentToken ?? await loadAgentCredentialFile(opts.agentTokenFile ?? process.env.XPANEL_AGENT_TOKEN_FILE ?? '/etc/xpanel/agent.token')
-  const os = opts.os ?? await detectHostOsProfile()
-
-  if (dbPath !== ':memory:') {
-    await mkdir(dirname(dbPath), { recursive: true })
-  }
-  await mkdir(stateDir, { recursive: true })
-  await assertStateWritable(stateDir)
-
-  const dbHandle = createDb(dbPath)
+  const lifecycle = await prepareApiLifecycleStartup()
+  let dbHandle: ReturnType<typeof createDb> | undefined
   let client: ReturnType<typeof createAgentClient> | undefined
+  let listener: Awaited<ReturnType<typeof listenApiServer>> | undefined
+  let closePromise: Promise<void> | undefined
+  const close = (): Promise<void> => {
+    closePromise ??= (async () => {
+      const errors: unknown[] = []
+      try { await listener?.close() } catch (error) { errors.push(error) }
+      try { client?.close() } catch (error) { errors.push(error) }
+      try { await awaitLifecycleWriterDrain() } catch (error) { errors.push(error) }
+      try { await dbHandle?.close() } catch (error) { errors.push(error) }
+      try { await closeApiLifecycleParticipant(lifecycle.participant) } catch (error) { errors.push(error) }
+      if (errors.length) throw new AggregateError(errors, 'API shutdown requires operational inspection')
+    })()
+    return closePromise
+  }
   try {
-    await migrate(dbHandle.runner)
+    if (lifecycle.quarantined) {
+      const app = createQuarantinedApiApp()
+      listener = await createLifecycleBackgroundResources(() => listenApiServer(app, { port, host }))
+      return { quarantined: true as const, app, port: listener.port, host, close }
+    }
+    const serverSecret = opts.serverSecret ?? await loadAgentCredentialFile(opts.serverSecretFile ?? process.env.XPANEL_SERVER_SECRET_FILE ?? '/etc/xpanel/server.secret')
+    const agentToken = opts.agentToken ?? await loadAgentCredentialFile(opts.agentTokenFile ?? process.env.XPANEL_AGENT_TOKEN_FILE ?? '/etc/xpanel/agent.token')
+    const os = opts.os ?? await detectHostOsProfile()
+    const handle = await withLifecycleWriterAdmission(async () => {
+      if (dbPath !== ':memory:') await mkdir(dirname(dbPath), { recursive: true })
+      await mkdir(stateDir, { recursive: true })
+      await assertStateWritable(stateDir)
+      const opened = createDb(dbPath, lifecycle.managed ? { durability: 'strict' } : {})
+      dbHandle = opened
+      await migrate(opened.runner)
+      await initializeOperationalMetadata(opened.db)
+      await ensureRootPrincipal(opened.db, { ...(opts.rootPassword ? { password: opts.rootPassword } : {}) })
+      return opened
+    })
     const store = new StateStore(stateDir)
-    await ensureRootPrincipal(dbHandle.db, { ...(opts.rootPassword ? { password: opts.rootPassword } : {}) })
-    if (!opts.agentApp) client = createAgentClient({ socketPath: opts.agentSocket ?? process.env.XPANEL_AGENT_SOCKET ?? '/run/xpanel/agent.sock', token: agentToken })
+    if (!opts.agentApp) client = createLifecycleBackgroundResources(() => createAgentClient({ socketPath: opts.agentSocket ?? process.env.XPANEL_AGENT_SOCKET ?? '/run/xpanel/agent.sock', token: agentToken }))
     const agentApp = opts.agentApp ?? client!
     const webRenderer = opts.webRenderer ?? await createDefaultWebRenderer({
-      store, db: dbHandle.db, serverSecret, agent: { fetch: request => agentApp.fetch(request), token: agentToken },
+      store, db: handle.db, serverSecret, mfaRuntimePolicy, agent: { fetch: request => agentApp.fetch(request), token: agentToken },
     })
-    const app = createApiApp({
-      db: dbHandle.db, store, agentApp, agentToken, os, webRenderer, serverSecret,
+    const app = createLifecycleBackgroundResources(() => createApiApp({
+      db: handle.db, store, agentApp, agentToken, os, webRenderer, serverSecret, mfaRuntimePolicy,
       secureCookies: !opts.agentApp,
       allowedOrigins: opts.allowedOrigins ?? (process.env.XPANEL_ALLOWED_ORIGINS?.split(',').filter(Boolean) ?? []),
       trustedProxyAddresses: opts.trustedProxyAddresses ?? (process.env.XPANEL_TRUSTED_PROXIES?.split(',').filter(Boolean) ?? []),
       ...(opts.homeBaseDir ? { homeBaseDir: opts.homeBaseDir } : {}),
-    })
-    const listener = await listenApiServer(app, { port, host })
+    }))
+    listener = await createLifecycleBackgroundResources(() => listenApiServer(app, { port, host }))
     return {
-      app, port: listener.port, host, db: dbHandle.db, store,
-      close: async () => { client?.close(); await listener.close(); await dbHandle.close() },
+      quarantined: false as const, app, port: listener.port, host, db: handle.db, store, close,
     }
   } catch (error) {
-    client?.close()
-    await dbHandle.close()
+    await close().catch(() => undefined)
     throw error
   }
 }
@@ -747,6 +856,7 @@ export const resolvePanelEntrypoints = (
  * Public TLS is terminated by the configured ingress, never by these HTTP listeners.
  */
 export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) => {
+  const mfaRuntimePolicy = captureMfaRuntimePolicy()
   const { host, entryPoints } = resolvePanelEntrypoints(opts)
   if (!opts.agentApp && ENTRY_POINT_ORDER.some(name => entryPoints[name].port !== ENTRY_POINT_ENV[name].defaultPort)) {
     fail('PRECONDITION_FAILED', 'production entrypoint listeners must use reserved ports 12083, 12087 and 12096')
@@ -754,22 +864,16 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
   if (!opts.agentApp && (process.platform !== 'linux' || process.getuid?.() === 0)) {
     fail('PRECONDITION_FAILED', 'the API must run as an unprivileged Linux service with a separate agent')
   }
-  const serverSecret = opts.serverSecret ?? await loadAgentCredentialFile(opts.serverSecretFile ?? process.env.XPANEL_SERVER_SECRET_FILE ?? '/etc/xpanel/server.secret')
-  const agentToken = opts.agentToken ?? await loadAgentCredentialFile(opts.agentTokenFile ?? process.env.XPANEL_AGENT_TOKEN_FILE ?? '/etc/xpanel/agent.token')
-  const ingressSecret = opts.ingressSecret ?? await loadAgentCredentialFile(opts.ingressSecretFile ?? process.env.XPANEL_INGRESS_SECRET_FILE ?? '/etc/xpanel/ingress.secret')
-  if (Buffer.byteLength(ingressSecret, 'utf8') < 32) fail('PRECONDITION_FAILED', 'a protected ingress credential of at least 32 bytes is required')
-  const os = opts.os ?? await detectHostOsProfile()
   const defaultBaseDir = process.platform === 'linux' ? '/var/lib/xpanel' : '.xpanel-data'
   const dbPath = opts.dbPath ?? process.env.XPANEL_DB_PATH ?? `${defaultBaseDir}/control.db`
   const stateDir = opts.stateDir ?? process.env.XPANEL_STATE_DIR ?? `${defaultBaseDir}/state`
-  if (dbPath !== ':memory:') await mkdir(dirname(dbPath), { recursive: true })
-  await mkdir(stateDir, { recursive: true })
-  await assertStateWritable(stateDir)
-  const dbHandle = createDb(dbPath)
+  const lifecycle = await prepareApiLifecycleStartup()
+  let dbHandle: ReturnType<typeof createDb> | undefined
   let client: ReturnType<typeof createAgentClient> | undefined
   const listeners: Awaited<ReturnType<typeof listenApiServer>>[] = []
   const agentSubscriptions: (() => void)[] = []
   const sockets = new Set<Socket>()
+  const apps = {} as Record<EntryPoint, ReturnType<typeof createApiApp>>
   let closePromise: Promise<void> | undefined
   const close = (): Promise<void> => {
     closePromise ??= (async () => {
@@ -778,17 +882,47 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
       const listenerResults = await Promise.allSettled(listeners.map(listener => listener.close()))
       const subscriptionResults = await Promise.allSettled(agentSubscriptions.map(async unsubscribe => unsubscribe()))
       const clientResults = await Promise.allSettled([Promise.resolve().then(() => client?.close())])
-      await dbHandle.close()
-      const failed = [...listenerResults, ...subscriptionResults, ...clientResults].find(result => result.status === 'rejected')
-      if (failed?.status === 'rejected') throw failed.reason
+      const errors: unknown[] = [...listenerResults, ...subscriptionResults, ...clientResults].flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+      try { await awaitLifecycleWriterDrain() } catch (error) { errors.push(error) }
+      try { await dbHandle?.close() } catch (error) { errors.push(error) }
+      try { await closeApiLifecycleParticipant(lifecycle.participant) } catch (error) { errors.push(error) }
+      if (errors.length) throw new AggregateError(errors, 'API entrypoint shutdown requires operational inspection')
     })()
     return closePromise
   }
   try {
-    await migrate(dbHandle.runner)
+    if (lifecycle.quarantined) {
+      for (const entryPoint of ENTRY_POINT_ORDER) {
+        const app = createQuarantinedApiApp()
+        apps[entryPoint] = app
+        const listener = await createLifecycleBackgroundResources(() => listenApiServer(app, { port: entryPoints[entryPoint].port, host }))
+        listener.server.on('connection', socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)) })
+        listeners.push(listener)
+      }
+      return {
+        quarantined: true as const, apps: Object.freeze(apps), host, entryPoints,
+        listeners: Object.freeze(Object.fromEntries(ENTRY_POINT_ORDER.map((name, index) => [name, { port: listeners[index]!.port, publicOrigin: entryPoints[name].publicOrigin }])) as Record<EntryPoint, { port: number; publicOrigin: string }>),
+        close,
+      }
+    }
+    const serverSecret = opts.serverSecret ?? await loadAgentCredentialFile(opts.serverSecretFile ?? process.env.XPANEL_SERVER_SECRET_FILE ?? '/etc/xpanel/server.secret')
+    const agentToken = opts.agentToken ?? await loadAgentCredentialFile(opts.agentTokenFile ?? process.env.XPANEL_AGENT_TOKEN_FILE ?? '/etc/xpanel/agent.token')
+    const ingressSecret = opts.ingressSecret ?? await loadAgentCredentialFile(opts.ingressSecretFile ?? process.env.XPANEL_INGRESS_SECRET_FILE ?? '/etc/xpanel/ingress.secret')
+    if (Buffer.byteLength(ingressSecret, 'utf8') < 32) fail('PRECONDITION_FAILED', 'a protected ingress credential of at least 32 bytes is required')
+    const os = opts.os ?? await detectHostOsProfile()
+    const handle = await withLifecycleWriterAdmission(async () => {
+      if (dbPath !== ':memory:') await mkdir(dirname(dbPath), { recursive: true })
+      await mkdir(stateDir, { recursive: true })
+      await assertStateWritable(stateDir)
+      const opened = createDb(dbPath, lifecycle.managed ? { durability: 'strict' } : {})
+      dbHandle = opened
+      await migrate(opened.runner)
+      await initializeOperationalMetadata(opened.db)
+      await ensureRootPrincipal(opened.db, { ...(opts.rootPassword ? { password: opts.rootPassword } : {}) })
+      return opened
+    })
     const store = new StateStore(stateDir)
-    await ensureRootPrincipal(dbHandle.db, { ...(opts.rootPassword ? { password: opts.rootPassword } : {}) })
-    if (!opts.agentApp) client = createAgentClient({ socketPath: opts.agentSocket ?? process.env.XPANEL_AGENT_SOCKET ?? '/run/xpanel/agent.sock', token: agentToken })
+    if (!opts.agentApp) client = createLifecycleBackgroundResources(() => createAgentClient({ socketPath: opts.agentSocket ?? process.env.XPANEL_AGENT_SOCKET ?? '/run/xpanel/agent.sock', token: agentToken }))
     const sharedAgent = opts.agentApp ?? client!
     const agentApp: AgentApp = {
       fetch: request => sharedAgent.fetch(request),
@@ -798,22 +932,21 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
         return unsubscribe
       },
     }
-    const apps = {} as Record<EntryPoint, ReturnType<typeof createApiApp>>
     for (const entryPoint of ENTRY_POINT_ORDER) {
       const config = entryPoints[entryPoint]
       const publicPanels = Object.fromEntries(ENTRY_POINT_ORDER.map(name => [name, entryPoints[name].publicOrigin])) as Record<EntryPoint, string>
       const webRenderer = await createDefaultWebRenderer({
-        store, db: dbHandle.db, serverSecret, entryPoint, panels: publicPanels,
+        store, db: handle.db, serverSecret, mfaRuntimePolicy, entryPoint, panels: publicPanels,
         agent: { fetch: request => agentApp.fetch(request), token: agentToken },
       })
-      const app = createApiApp({
-        db: dbHandle.db, store, agentApp, agentToken, os, serverSecret, webRenderer,
+      const app = createLifecycleBackgroundResources(() => createApiApp({
+        db: handle.db, store, agentApp, agentToken, os, serverSecret, mfaRuntimePolicy, webRenderer,
         entryPoint, publicOrigin: config.publicOrigin, publicPanels, allowedOrigins: [config.publicOrigin],
         ingressSecret, requireSecureCookies: true, requireOriginHeader: true,
         ...(opts.homeBaseDir ? { homeBaseDir: opts.homeBaseDir } : {}),
-      })
+      }))
       apps[entryPoint] = app
-      const listener = await listenApiServer(app, { port: config.port, host })
+      const listener = await createLifecycleBackgroundResources(() => listenApiServer(app, { port: config.port, host }))
       listener.server.on('connection', socket => {
         sockets.add(socket)
         socket.once('close', () => sockets.delete(socket))
@@ -821,7 +954,7 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
       listeners.push(listener)
     }
     return {
-      apps: Object.freeze(apps), host, entryPoints, db: dbHandle.db, store,
+      quarantined: false as const, apps: Object.freeze(apps), host, entryPoints, db: handle.db, store,
       listeners: Object.freeze(Object.fromEntries(ENTRY_POINT_ORDER.map((name, index) => [name, {
         port: listeners[index]!.port, publicOrigin: entryPoints[name].publicOrigin,
       }])) as Record<EntryPoint, { port: number; publicOrigin: string }>),
@@ -867,17 +1000,44 @@ const isMainModule = (): boolean => {
   }
 }
 
-const repairStateOwnership = (stateDir: string, dbPath: string): void => {
+const repairStateOwnership = (stateDir: string, dbPath: string): number => {
   const targets = [stateDir, dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`]
   for (const target of targets) {
     const result = spawnSync('chown', target === stateDir ? ['-R', 'xpanel:xpanel', target] : ['xpanel:xpanel', target], { encoding: 'utf8' })
     if (result.status !== 0 && target === stateDir) {
       process.stderr.write(`state ownership repair failed: ${result.stderr || result.error?.message || 'chown failed'}\n`)
-      process.exit(result.status ?? 1)
+      return result.status ?? 1
     }
   }
   process.stdout.write(`state ownership repaired for ${stateDir}\n`)
-  process.exit(0)
+  return 0
+}
+
+/** The canonical help renderer has no database or state capability to acquire. */
+const runCliHelp = (args: readonly string[]) => runCli(args, {
+  get db(): never { return fail('PRECONDITION_FAILED', 'help cannot access the control database') },
+  get store(): never { return fail('PRECONDITION_FAILED', 'help cannot access desired state') },
+  stdout: line => process.stdout.write(`${line}\n`),
+  stderr: line => process.stderr.write(`${line}\n`),
+})
+
+const cliLifecycleQuarantined = async (): Promise<{ managed: boolean; quarantined: boolean }> => {
+  try {
+    const managed = await isLifecycleManaged()
+    return { managed, quarantined: await readLifecycleBarrier() !== null }
+  } catch { return { managed: true, quarantined: true } }
+}
+
+const printQuarantinedCliStatus = async (): Promise<number> => {
+  let phase = 'unavailable'
+  let reference: string | null = null
+  try {
+    const status = await readLifecyclePublicStatus()
+    if (status.active && ['pending', 'retirement_pending', 'attention'].includes(String(status.phase))) phase = String(status.phase)
+    if (typeof status.reference === 'string' && /^XP-JOB-(?:[0-9]{4}-)?[0-9]{6,16}$/.test(status.reference)) reference = status.reference
+  } catch { /* Unsafe lifecycle evidence is attention, never normal panel status. */ }
+  process.stdout.write(`Lifecycle status: ${phase}; reference=${reference ?? 'unissued'}. Normal panel startup requires a restart after the barrier is retired.\n`)
+  return 6
 }
 
 const dropCliToXpanel = (args: readonly string[]): void => {
@@ -905,42 +1065,47 @@ if (isMainModule()) {
     if (invocation === 'refuse') {
       fail('FORBIDDEN', 'administrative commands must run as the xpanel service user. Root invocations are re-executed with runuser -u xpanel.')
     }
-    const defaultPaths = process.platform === 'linux' ? '/var/lib/xpanel' : '.xpanel-data'
-    if (invocation === 'repair-as-root') {
-      repairStateOwnership(process.env.XPANEL_STATE_DIR ?? `${defaultPaths}/state`, process.env.XPANEL_DB_PATH ?? `${defaultPaths}/control.db`)
+    const executeCli = async (): Promise<number> => {
+      if (invocation === 'help') return (await runCliHelp(args)).code
+      const defaultPaths = process.platform === 'linux' ? '/var/lib/xpanel' : '.xpanel-data'
+      if (invocation === 'repair-as-root') {
+        return withLifecycleWriterAdmission(() => repairStateOwnership(process.env.XPANEL_STATE_DIR ?? `${defaultPaths}/state`, process.env.XPANEL_DB_PATH ?? `${defaultPaths}/control.db`))
+      }
+      if (invocation === 'drop-to-xpanel') dropCliToXpanel(args)
+      // Keep CLI-created SQLite sidecars private to the same trusted daemon group.
+      process.umask(0o007)
+      const dbPath = process.env.XPANEL_DB_PATH ?? `${defaultPaths}/control.db`
+      const stateDir = process.env.XPANEL_STATE_DIR ?? `${defaultPaths}/state`
+      const lifecycle = await cliLifecycleQuarantined()
+      if (firstArg === 'status' && lifecycle.quarantined) return printQuarantinedCliStatus()
+      return withLifecycleWriterAdmission(async () => {
+        const dbHandle = createDb(dbPath, lifecycle.managed ? { durability: 'strict' } : {})
+        let client: ReturnType<typeof createAgentClient> | undefined
+        try {
+          await migrate(dbHandle.runner)
+          await initializeOperationalMetadata(dbHandle.db)
+          const requiresAgent = firstArg === 'reconcile' || firstArg === 'rollback'
+          const agentToken = requiresAgent ? await loadAgentCredentialFile(process.env.XPANEL_AGENT_TOKEN_FILE ?? '/etc/xpanel/agent.token') : undefined
+          if (agentToken) client = createAgentClient({ socketPath: process.env.XPANEL_AGENT_SOCKET ?? '/run/xpanel/agent.sock', token: agentToken })
+          return (await runCli(args, {
+            db: dbHandle.db,
+            store: new StateStore(stateDir),
+            ...(client && agentToken ? { agentApp: client, agentToken } : {}),
+            readPassword: readPasswordInput,
+            stdout: line => process.stdout.write(`${line}\n`),
+            stderr: line => process.stderr.write(`${line}\n`),
+          })).code
+        } finally {
+          client?.close()
+          await dbHandle.close()
+        }
+      })
     }
-    if (invocation === 'drop-to-xpanel') dropCliToXpanel(args)
-    // Keep CLI-created SQLite sidecars private to the same trusted daemon group.
-    process.umask(0o007)
-    const defaultBaseDir = process.platform === 'linux' ? '/var/lib/xpanel' : '.xpanel-data'
-    const dbPath = process.env.XPANEL_DB_PATH ?? `${defaultBaseDir}/control.db`
-    const stateDir = process.env.XPANEL_STATE_DIR ?? `${defaultBaseDir}/state`
-    const dbHandle = createDb(dbPath)
-    let client: ReturnType<typeof createAgentClient> | undefined
-    migrate(dbHandle.runner)
-      .then(async () => {
-        const requiresAgent = firstArg === 'reconcile' || firstArg === 'rollback'
-        const agentToken = requiresAgent ? await loadAgentCredentialFile(process.env.XPANEL_AGENT_TOKEN_FILE ?? '/etc/xpanel/agent.token') : undefined
-        if (agentToken) client = createAgentClient({ socketPath: process.env.XPANEL_AGENT_SOCKET ?? '/run/xpanel/agent.sock', token: agentToken })
-        return runCli(args, {
-          db: dbHandle.db,
-          store: new StateStore(stateDir),
-          ...(client && agentToken ? { agentApp: client, agentToken } : {}),
-          readPassword: readPasswordInput,
-          stdout: (line) => process.stdout.write(`${line}\n`),
-          stderr: (line) => process.stderr.write(`${line}\n`),
-        })
-      })
-      .then(async (res) => {
-        client?.close()
-        await dbHandle.close()
-        process.exit(res.code)
-      })
-      .catch(async (err) => {
-        client?.close()
-        process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`)
-        await dbHandle.close()
-        process.exit(1)
+    executeCli()
+      .then(code => { process.exitCode = code })
+      .catch(error => {
+        process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+        process.exitCode = 1
       })
   } else {
     startPanelEntrypoints()

@@ -1,3 +1,4 @@
+import { withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
 import { randomUUID } from 'node:crypto'
 import { chmod, mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -32,7 +33,8 @@ import type { AgentExecutor } from './executor.ts'
 import { applyPostfixLocalDelivery, retirePostfixLocalDelivery } from './services/local-mail.ts'
 import { ensureOpenDkimSigning, mailAuthZoneAdditions, type OpenDkimSigning } from './services/opendkim-live.ts'
 import { removedMaildirPaths } from './services/mail.ts'
-import { chooseZoneSerial } from './zone-serial.ts'
+import { chooseZoneSerial, stampZoneContent } from './zone-serial.ts'
+import { resolveAccountIoDevices } from './io-device.ts'
 import {
   buildGenerationManifest,
   computeFilesChecksum,
@@ -66,6 +68,7 @@ export interface CompileOptions {
   os: OsProfile
   quotaFilesystem?: string | null
   ioDevices?: string[]
+  ioDevicesByAccount?: ReadonlyMap<string, readonly string[]>
   zoneDir?: string
   now?: Date
   /** DKIM material already written by the live mail writer. Absent leaves the zone unchanged. */
@@ -218,8 +221,9 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
 
     // Account systemd slice & logind user slice drop-in. The drop-in directory is
     // created before the atomic write so user-<uid>.slice.d/.tmp can be published.
-    files.push(system.renderAccountSlice(account, plan.resources, ioDevices, { systemdDir: os.paths.systemdDir }))
-    const loginDropin = system.renderLoginSliceDropin(account, plan.resources, ioDevices, { systemdDir: os.paths.systemdDir })
+    const accountDevices = opts.ioDevicesByAccount ? [...(opts.ioDevicesByAccount.get(account.id) ?? [])] : ioDevices
+    files.push(system.renderAccountSlice(account, plan.resources, accountDevices, { systemdDir: os.paths.systemdDir }))
+    const loginDropin = system.renderLoginSliceDropin(account, plan.resources, accountDevices, { systemdDir: os.paths.systemdDir })
     files.push(loginDropin)
     preActions.push({
       kind: 'ensure-dir',
@@ -229,7 +233,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       group: 'root',
     })
     postActions.push(
-      ...system.sliceUpdateActions(account, plan.resources, ioDevices, { systemdDir: os.paths.systemdDir }),
+      ...system.sliceUpdateActions(account, plan.resources, accountDevices, { systemdDir: os.paths.systemdDir }),
     )
     needsDaemonReload = true
 
@@ -497,7 +501,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     const drafted = renderZone(zone.serial)
     const previous = opts.previousZones ? (opts.previousZones.get(path) ?? null) : null
     const serial = chooseZoneSerial(zone.serial, previous, drafted, now)
-    const content = serial === zone.serial ? drafted : renderZone(serial)
+    const content = stampZoneContent(serial === zone.serial ? drafted : renderZone(serial))
     files.push({
       path,
       content,
@@ -936,7 +940,11 @@ export class HostReconciler {
    * (`stage`, `test`, `activate`, `reload`, `verify`) and deterministically recovers
    * the host and SQLite generation state so no partial files or false `active` rows remain.
    */
-  async recoverInterruptedReconciliation(
+  async recoverInterruptedReconciliation(scope: LiveEventScope = { accountId: null, resellerId: null }): Promise<ReconciliationRecoveryResult> {
+    return withLifecycleWriterAdmission(() => this.recoverInterruptedReconciliationAdmitted(scope))
+  }
+
+  private async recoverInterruptedReconciliationAdmitted(
     scope: LiveEventScope = { accountId: null, resellerId: null },
   ): Promise<ReconciliationRecoveryResult> {
     const activeJournal = await this.journal.readActiveJournal()
@@ -1030,7 +1038,11 @@ export class HostReconciler {
    * Verifies live owned files against the journal backup or the failed candidate, marks
    * that generation failed, and drops the active journal so reconcile can run again.
    */
-  async resolveFailedGeneration(
+  async resolveFailedGeneration(generationId: number, actor = 'root'): Promise<{ generationId: number; previousGenerationId: number | null; checkedFiles: number }> {
+    return withLifecycleWriterAdmission(() => this.resolveFailedGenerationAdmitted(generationId, actor))
+  }
+
+  private async resolveFailedGenerationAdmitted(
     generationId: number,
     actor = 'root',
   ): Promise<{ generationId: number; previousGenerationId: number | null; checkedFiles: number }> {
@@ -1120,6 +1132,10 @@ export class HostReconciler {
    * atomically and updates the SQLite index.
    */
   async reconcile(opts: { force?: boolean; scope?: LiveEventScope; actor?: string; mailAuth?: OpenDkimSigning | null } = {}): Promise<ReconcileResult> {
+    return withLifecycleWriterAdmission(() => this.reconcileAdmitted(opts))
+  }
+
+  private async reconcileAdmitted(opts: { force?: boolean; scope?: LiveEventScope; actor?: string; mailAuth?: OpenDkimSigning | null } = {}): Promise<ReconcileResult> {
     const startMs = Date.now()
     const scope: LiveEventScope = opts.scope ?? { accountId: null, resellerId: null }
     const actor = opts.actor ?? 'agent'
@@ -1147,11 +1163,13 @@ export class HostReconciler {
     ]
     const previousManifest = currentGen ? await this.journal.readManifest(currentGen.id) : null
     const appliedSnapshot = currentGen ? await this.deps.store.readGenerationSnapshot(currentGen.id) : null
+    let accountIoDevices: ReadonlyMap<string, readonly string[]> | undefined
     const compileMail = (mailAuth: OpenDkimSigning | null, previousZones?: ReadonlyMap<string, string>) => {
       const next = compileDesiredGeneration(snapshot, {
         os: this.deps.os,
         quotaFilesystem: this.deps.quotaFilesystem ?? null,
         ...(this.deps.ioDevices && { ioDevices: this.deps.ioDevices }),
+        ...(accountIoDevices ? { ioDevicesByAccount: accountIoDevices } : {}),
         ...(this.deps.zoneDir && { zoneDir: this.deps.zoneDir }),
         ...(mailAuth ? { mailAuth } : {}),
         ...(previousZones ? { previousZones } : {}),
@@ -1190,6 +1208,8 @@ export class HostReconciler {
     let compiled = compileMail(mailAuth)
     let filesChecksum = computeFilesChecksum(compiled.files)
     await this.deps.executor.preflight(preflightOf(compiled, filesChecksum))
+    if (!this.deps.ioDevices?.length) accountIoDevices = await resolveAccountIoDevices(this.deps.executor, snapshot.accounts, this.deps.quotaFilesystem ?? '/home')
+      ?? new Map(snapshot.accounts.map(account => [account.id, []]))
     if (!('mailAuth' in opts)) {
       try {
         mailAuth = (await ensureOpenDkimSigning(this.deps.executor, mailDomains)).signing
@@ -1575,6 +1595,10 @@ export class HostReconciler {
    * Restores the desired-state tree of a previous generation and reconciles the host to it.
    */
   async rollbackToGeneration(genId: number, actor = 'root'): Promise<ReconcileResult> {
+    return withLifecycleWriterAdmission(() => this.rollbackToGenerationAdmitted(genId, actor))
+  }
+
+  private async rollbackToGenerationAdmitted(genId: number, actor = 'root'): Promise<ReconcileResult> {
     await this.deps.store.restoreGenerationSnapshot(genId)
     return this.reconcile({ force: true, actor })
   }
@@ -1584,6 +1608,10 @@ export class HostReconciler {
    * `metrics_history`, and broadcasts `metrics.tick` live events for WebSocket subscribers.
    */
   async collectMetrics(): Promise<number> {
+    return withLifecycleWriterAdmission(() => this.collectMetricsAdmitted())
+  }
+
+  private async collectMetricsAdmitted(): Promise<number> {
     const accounts = await this.deps.store.listAccounts({ status: 'active' })
     let count = 0
     for (const acc of accounts) {

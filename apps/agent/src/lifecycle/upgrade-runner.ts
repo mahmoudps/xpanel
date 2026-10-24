@@ -1,5 +1,4 @@
 import { createHmac, timingSafeEqual, verify as cryptoVerify } from 'node:crypto'
-import { posix } from 'node:path'
 import { fail } from '@xpanel/core'
 import type { AuditEntry, HostAction, OsProfile, Principal } from '@xpanel/core'
 import {
@@ -42,8 +41,10 @@ import type {
   UpgradePlan,
   UpgradePorts,
   UpgradeResult,
+  UpgradeSafetyPort,
 } from '@xpanel/lifecycle'
 import type { OsRelease } from '@xpanel/os'
+import { createNativeUpgradeSafety } from '../../../../scripts/lifecycle-root-safety.mjs'
 
 export interface SignedReleaseManifest {
   version: string
@@ -127,20 +128,20 @@ export interface ProductionUpgradeDependencies {
   probeOsRelease: () => Promise<OsRelease>
   /** Counts active transfers from the durable transfer store. */
   probeActiveTransfers: () => Promise<number>
-  /** Performs an authenticated control-plane login probe against the running release. */
-  probePanelLogin: () => Promise<boolean>
+  /** Independently verifies native control-plane service/process and private IPC readiness; not user login or MFA. */
+  probeQualifiedControlPlane: () => Promise<boolean>
   /** Performs an HTTP canary request and verifies the serving worker UID, cgroup slice, and active unit. */
   probeCanaryHttp: (canaryUsername: string) => Promise<CanaryHttpProbeResult>
-  /** Takes a consistent WAL-safe SQLite control DB & secrets backup alongside the state tarball. */
+  /** Legacy composition field. Native safety independently owns consistent control-plane backup. */
   snapshotControlPlaneDb?: (snapshotPath: string) => Promise<void>
-  /** Restores the WAL-safe SQLite control DB & secrets backup on rollback (preserving the upgrades history table). */
+  /** Legacy composition field. Automatic authority rewind is never invoked by the upgrade engine. */
   restoreControlPlaneDb?: (snapshotPath: string) => Promise<void>
   trustedReleaseKeys: readonly ReleaseVerificationKey[]
 }
 
 /**
- * Builds the production `UpgradePorts` backed by `@xpanel/db` repositories, real OS/disk probes,
- * cgroup-verified canary health checks, and WAL-safe control-plane snapshots.
+ * Composes repository and observation ports. These callbacks are not native admission;
+ * the production runner separately constructs exact-operation safety from the canonical producer.
  */
 export const createProductionUpgradePorts = (deps: ProductionUpgradeDependencies): UpgradePorts => {
   if (!deps.db || !deps.fs || !deps.host || !deps.clock || !deps.reconciler) {
@@ -206,8 +207,8 @@ export const createProductionUpgradePorts = (deps: ProductionUpgradeDependencies
       }
       return probe.servedByUid
     },
-    async panelLogin() {
-      return deps.probePanelLogin()
+    async qualifiedControlPlane() {
+      return deps.probeQualifiedControlPlane()
     },
   }
 
@@ -239,23 +240,18 @@ export const createProductionUpgradePorts = (deps: ProductionUpgradeDependencies
       },
     }
 
-  const wrappedHost: HostPort = {
-    async apply(action: HostAction): Promise<ExecResult> {
-      const res = await deps.host.apply(action)
-      if (res.code === 0 && action.kind === 'exec' && action.argv[0]?.endsWith('/tar')) {
-        const fileFlag = action.argv.find((a) => a.startsWith('--file='))?.slice('--file='.length)
-        if (fileFlag && action.argv.includes('--create') && action.argv.includes('state') && deps.snapshotControlPlaneDb) {
-          await deps.snapshotControlPlaneDb(fileFlag)
-        } else if (fileFlag && action.argv.includes('--extract') && action.argv.some((a) => a.startsWith('--directory=')) && deps.restoreControlPlaneDb) {
-          await deps.restoreControlPlaneDb(fileFlag)
-        }
-      }
-      return res
-    },
+  const denied = async (): Promise<never> => fail('PRECONDITION_FAILED', 'native lifecycle safety must be composed for the exact operation')
+  // A structural adapter or a legacy callback never authorizes production effects.
+  const safety: UpgradeSafetyPort = {
+    withExclusive: denied, assertOwnedExecution: denied, assertWritersQuiescent: denied,
+    assertWriteBarrier: denied, verifyRelease: denied, unpackVerifiedRelease: denied,
+    verifyStagedRelease: denied, assertCompatibility: denied, snapshotControlPlane: denied,
+    syncPath: denied,
   }
 
   return {
-    host: wrappedHost,
+    safety,
+    host: deps.host,
     fs: deps.fs,
     reconciler: deps.reconciler,
     migrator,
@@ -295,43 +291,21 @@ export class PanelUpgradeRunner {
       fail('VALIDATION', 'signed release manifest fields do not match upgrade plan release info')
     }
     verifyReleaseArtifactSignature(signedManifest, this.deps.trustedReleaseKeys)
-    return runUpgrade(this.ports, plan)
+    const safety = await createNativeUpgradeSafety({ db: this.deps.db, actorId: plan.actor.id, operation: 'upgrade', release: plan.release, ...(plan.layout ? { layout: plan.layout } : {}) })
+    return runUpgrade({ ...this.ports, safety }, plan)
   }
 
   /**
    * Recovers an interrupted upgrade after a crash or failed rollback (`recoverUpgrade`),
-   * repairing the `/opt/xpanel/current` release symlink to the last healthy release if needed,
-   * closing the stale in-flight row in SQLite `upgrades`, and releasing `upgrade.lock` and
-   * `maintenance.json` so a subsequent valid upgrade can run cleanly.
+   * observing current authority under native ownership. Historical state and generations are
+   * never restored by a caller-supplied fallback parameter; retirement remains separately owned.
    */
   async recoverInterruptedUpgrade(
     input: RecoverInput & { fallbackVersion?: string; fallbackGenerationId?: GenerationId },
   ): Promise<RecoverResult> {
-    const layout: UpgradeLayout = { ...DEFAULT_LAYOUT, ...(input.layout ?? {}) }
-    if (input.fallbackVersion) {
-      const fallbackTarget = posix.join(layout.releasesDir, input.fallbackVersion)
-      if (await this.deps.fs.exists(fallbackTarget)) {
-        const curTarget = await this.deps.fs.readlink(layout.currentLink)
-        if (curTarget !== fallbackTarget) {
-          const tmp = `${layout.currentLink}.recover.tmp`
-          if (await this.deps.fs.exists(tmp)) await this.deps.fs.remove(tmp)
-          await this.deps.fs.symlink(fallbackTarget, tmp)
-          await this.deps.fs.rename(tmp, layout.currentLink)
-        }
-      }
-      // Clean up leftover partial target release directory if currentLink points back to fallbackVersion
-      const latest = await this.ports.history.latest()
-      if (latest && latest.toVersion !== input.fallbackVersion) {
-        const partialReleaseDir = posix.join(layout.releasesDir, latest.toVersion)
-        if (await this.deps.fs.exists(partialReleaseDir)) {
-          await this.deps.fs.remove(partialReleaseDir)
-        }
-      }
-    }
-    if (input.fallbackGenerationId !== undefined) {
-      await this.ports.reconciler.activate(input.fallbackGenerationId)
-    }
-    return recoverUpgrade(this.ports, input)
+    if (input.fallbackVersion !== undefined || input.fallbackGenerationId !== undefined) return fail('PRECONDITION_FAILED', 'automatic recovery pointer or generation mutation is unsupported; admit current-authority repair separately')
+    const safety = await createNativeUpgradeSafety({ db: this.deps.db, actorId: input.actor.id, operation: 'recover', ...(input.layout ? { layout: input.layout } : {}) })
+    return recoverUpgrade({ ...this.ports, safety }, input)
   }
 }
 

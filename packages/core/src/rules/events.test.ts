@@ -55,7 +55,7 @@ describe('canReceiveLiveEvent RBAC scoping', () => {
     const owned = new Set(['acc-a'])
     expect(canReceiveLiveEvent(res1, serverEvent, owned)).toBe(false)
     expect(canReceiveLiveEvent(res1, accountAEvent, owned)).toBe(true)
-    expect(canReceiveLiveEvent(res1, mailEvent, owned)).toBe(true)
+    expect(canReceiveLiveEvent(res1, mailEvent, owned)).toBe(false)
     expect(canReceiveLiveEvent(res2, accountAEvent, new Set(['acc-b']))).toBe(false)
   })
 
@@ -64,8 +64,28 @@ describe('canReceiveLiveEvent RBAC scoping', () => {
     const bob = { kind: 'user' as const, id: 'u-2', accountId: 'acc-b', username: 'bob' }
     expect(canReceiveLiveEvent(alice, serverEvent)).toBe(false)
     expect(canReceiveLiveEvent(alice, accountAEvent)).toBe(true)
-    expect(canReceiveLiveEvent(alice, mailEvent)).toBe(true)
+    expect(canReceiveLiveEvent(alice, mailEvent)).toBe(false)
+    expect(canReceiveLiveEvent({ ...alice, mailboxLogin: 'billing@alice-shop.com' }, mailEvent)).toBe(true)
+    expect(canReceiveLiveEvent({ ...alice, mailboxLogin: 'sales@alice-shop.com' }, mailEvent)).toBe(false)
+    expect(canReceiveLiveEvent({ ...alice, mailboxLogin: 'billing@alice-shop.com' }, accountAEvent)).toBe(false)
     expect(canReceiveLiveEvent(bob, accountAEvent)).toBe(false)
+  })
+
+  it('keeps mailbox invalidations scoped during live delivery and replay', () => {
+    const event: LiveEvent = { id: 'changed', at: mailEvent.at, kind: 'mail.changed', scope: mailEvent.scope, data: { folder: 'INBOX' } }
+    expect(canReceiveLiveEvent({ kind: 'user', accountId: 'acc-a', mailboxLogin: 'billing@alice-shop.com' }, event)).toBe(true)
+    expect(canReceiveLiveEvent({ kind: 'user', accountId: 'acc-a' }, event)).toBe(false)
+    expect(canReceiveLiveEvent({ kind: 'reseller', id: 'res-1' }, event, new Set(['acc-a']))).toBe(false)
+    expect(canReceiveLiveEvent({ kind: 'root' }, { ...event, scope: { accountId: 'acc-a' } })).toBe(false)
+  })
+
+  it('refuses invalid UID and mismatched mailbox flag events even for root', () => {
+    const event: LiveEvent = { id: 'flags', at: mailEvent.at, kind: 'mail.flags', scope: mailEvent.scope, data: { mailbox: 'billing@alice-shop.com', folder: 'INBOX', uid: 42, flags: ['\\Seen'] } }
+    expect(canReceiveLiveEvent({ kind: 'root' }, event)).toBe(true)
+    for (const uid of [0, -1, 0x1_0000_0000, 1.5, Number.NaN]) expect(canReceiveLiveEvent({ kind: 'root' }, { ...event, data: { ...event.data, uid } })).toBe(false)
+    expect(canReceiveLiveEvent({ kind: 'root' }, { ...event, data: { ...event.data, mailbox: 'other@example.test' } })).toBe(false)
+    expect(canReceiveLiveEvent({ kind: 'root' }, { ...event, data: null } as unknown as LiveEvent)).toBe(false)
+    expect(canReceiveLiveEvent({ kind: 'root' }, { ...event, data: { ...event.data, unexpected: 'synthetic' } } as unknown as LiveEvent)).toBe(false)
   })
 
   it('scopes service (xMail) events strictly to their own mailbox login', () => {

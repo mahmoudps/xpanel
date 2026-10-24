@@ -2,6 +2,7 @@ import { X509Certificate } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { isIP } from 'node:net'
 import tls from 'node:tls'
+import type { HostLimitObservation } from '@xpanel/core'
 import { fileURLToPath } from 'node:url'
 import {
   parseApacheVersion,
@@ -27,8 +28,9 @@ export interface HostIdentity {
   /** First DNS name on the panel certificate. */
   panelDomain?: string
   certificates?: Array<{ names: string[]; notAfter: string }>
-  /** Controllers enabled on the account-slice parent. Absent when the file was not read. */
+  /** Controller availability only. This does not prove any assigned account limit. */
   enforcedLimits?: { cpu: boolean; memory: boolean; io: boolean; pids: boolean }
+  observedLimits?: HostLimitObservation
 }
 
 export interface ObservedCertificate {
@@ -139,7 +141,7 @@ export const serverNamesForListen = (config: string, port: number): string[] => 
   return names
 }
 
-/** cgroup v2 controllers delegated to children. A controller is enforced only when it is listed. */
+/** cgroup v2 controller delegation; this is not evidence of an assigned account cap. */
 export const enforcedLimitsFromSubtree = (text: string): { cpu: boolean; memory: boolean; io: boolean; pids: boolean } => {
   const controllers = new Set(text.split(/\s+/).map(part => part.trim()).filter(Boolean))
   return {

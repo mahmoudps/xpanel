@@ -31,6 +31,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
   var recoveryCodes = [];
   var shell = document.querySelector('[data-auth-state]');
   var login = document.querySelector('[data-login-form]');
+  var mfaDisabled = document.documentElement.getAttribute('data-mfa-mode') === 'disabled';
   var errorBox = document.querySelector('[data-auth-error]');
   var statusBox = document.querySelector('[data-auth-status]');
   var lockedUntil = 0;
@@ -143,7 +144,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     if (details.lockedOut && typeof details.lockedUntil === 'string' && Date.parse(details.lockedUntil) > Date.now()) {
       lock(Date.parse(details.lockedUntil)); return;
     }
-    if (details.mfaRequired === true) {
+    if (details.mfaRequired === true && !mfaDisabled) {
       step('mfa-required'); show('[data-auth-mfa-fields]', true);
       var fields = document.querySelector('[data-auth-mfa-fields]'); if (fields) fields.setAttribute('data-2fa-step', 'required');
       message(copy.mfa, false); var otp = document.getElementById('login-otp'); if (otp) otp.focus(); return;
@@ -173,8 +174,8 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     login.addEventListener('submit', async function (event) {
       event.preventDefault();
       if (login.getAttribute('aria-busy') === 'true' || !login.reportValidity() || lockedUntil > Date.now()) return;
-      var totpCode = value(login, 'totpCode').trim();
-      var recoveryCode = value(login, 'recoveryCode').trim();
+      var totpCode = mfaDisabled ? '' : value(login, 'totpCode').trim();
+      var recoveryCode = mfaDisabled ? '' : value(login, 'recoveryCode').trim();
       if (totpCode && recoveryCode) { message(copy.both, true); return; }
       var body = { username: value(login, 'username').trim(), password: value(login, 'password') };
       if (totpCode) body.totpCode = totpCode;
@@ -254,6 +255,8 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
       if (hideIcon) hideIcon.toggleAttribute('hidden', !visible);
       if (label) label.textContent = visible ? (ar ? 'إخفاء' : 'Hide') : (ar ? 'إظهار' : 'Show');
       if (typeof start === 'number' && typeof end === 'number') input.setSelectionRange(start, end, direction || 'none');
+      // Revealing a longer LTR value must keep its caret-end view on the RTL field edge.
+      if (visible && document.documentElement.dir === 'rtl' && getComputedStyle(input).textAlign === 'right' && start === end && end === input.value.length) input.scrollLeft = input.scrollWidth;
     } else if (action === 'restart-enrollment') {
       clearEnrollment(); show('[data-auth-enrollment-details]', false); if (setup) setup.hidden = false; step('enrollment'); message(copy.enrollment, false);
     } else if (action === 'acknowledge-recovery') {

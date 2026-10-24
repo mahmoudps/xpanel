@@ -63,7 +63,7 @@ describe('R04 (A23, A21) — Durable jobs with leases, fencing tokens, idempoten
     })
 
     expect(first.deduplicated).toBe(false)
-    expect(first.referenceCode).toBe('XP-JOB-000001')
+    expect(first.referenceCode).toBe(`XP-JOB-${new Date().getUTCFullYear()}-000001`)
     expect(first.detail.secretAccessKey).toBe('[REDACTED]')
     expect(String(first.detail.dsn)).toContain('[REDACTED]@')
 
@@ -83,7 +83,7 @@ describe('R04 (A23, A21) — Durable jobs with leases, fencing tokens, idempoten
 
     expect(replay.deduplicated).toBe(true)
     expect(replay.id).toBe(first.id)
-    expect(replay.referenceCode).toBe('XP-JOB-000001')
+    expect(replay.referenceCode).toBe(first.referenceCode)
     expect(await listJobs(h.db)).toHaveLength(1)
 
     // Reusing the same idempotencyKey with different parameters fails with CONFLICT

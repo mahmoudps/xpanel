@@ -4,6 +4,7 @@ import { isolateLtrRuns, metaPieces } from '../bidi-runs.ts'
 import { formatDisplayName } from '../display-name.ts'
 import { escapeHtml, formatAsciiBytes, formatUtcClock } from '../tokens.ts'
 import { renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
+import { mailInboxHref } from '../mail-origin.ts'
 
 type IconName = keyof typeof ICONS
 
@@ -241,7 +242,7 @@ export interface HomeGroupView {
 export interface HomeNavView {
   id: string
   label: string
-  items: Array<{ href: string; label: string; icon: IconName; current: boolean }>
+  items: Array<{ href: string; route?: string; label: string; icon: IconName; current: boolean; enabled?: boolean }>
 }
 
 export interface HomeDesktopModel {
@@ -354,7 +355,7 @@ export const totalCount = (groups: HomeGroupView[], ar: boolean, phone: boolean)
 }
 
 const linkStyle = (current: boolean, ar: boolean, phone: boolean): string => {
-  const base = `display: flex; align-items: center; gap: 10px; min-height: ${phone ? 44 : 40}px; padding: 0 12px; border-radius: 8px; font-size: ${phone ? 15 : 14}px; text-decoration: none; color: ${current ? '#1D5BD6' : '#344054'}; background: ${current ? '#E8EFFD' : 'transparent'}; font-weight: ${current ? 600 : 500}`
+  const base = `display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; font-size: ${phone ? 15 : 14}px; text-decoration: none; color: ${current ? '#1D5BD6' : '#344054'}; background: ${current ? '#E8EFFD' : 'transparent'}; font-weight: ${current ? 600 : 500}`
   return ar ? `${base}; box-shadow: ${current ? 'inset -3px 0 0 #1D5BD6' : 'none'}` : base
 }
 
@@ -362,7 +363,9 @@ const navHtml = (groups: HomeNavView[], ar: boolean, phone: boolean): string => 
   const labelStyle = ar
     ? 'padding: 0 12px; font-size: 12px; font-weight: 600; color: #5D6B7E'
     : 'padding: 0 12px; font-size: 11px; font-weight: 600; color: #5D6B7E; letter-spacing: 0.02em'
-  const items = group.items.map(item => `<li><a href="${escapeHtml(item.href)}" data-nav-route="${escapeHtml(item.href)}" aria-current="${item.current ? 'page' : 'false'}" style="${linkStyle(item.current, ar, phone)}">${iconSvg(item.icon, 18, ' style="flex: none"')}<span>${escapeHtml(item.label)}</span></a></li>`).join('')
+  const items = group.items.map(item => item.enabled === false
+    ? `<li><span aria-disabled="true" style="${linkStyle(false, ar, phone)}; color: #98A2B3; cursor: not-allowed">${iconSvg(item.icon, 18, ' style="flex: none"')}<span>${escapeHtml(item.label)} · ${ar ? 'غير متاح' : 'Unavailable'}</span></span></li>`
+    : `<li><a href="${escapeHtml(item.href)}" data-nav-route="${escapeHtml(item.route ?? item.href)}" aria-current="${item.current ? 'page' : 'false'}" style="${linkStyle(item.current, ar, phone)}">${iconSvg(item.icon, 18, ' style="flex: none"')}<span>${escapeHtml(item.label)}</span></a></li>`).join('')
   return `<div style="display: flex; flex-direction: column; gap: ${phone ? 2 : 4}px">
         <span id="${group.id}" style="${labelStyle}">${escapeHtml(group.label)}</span>
         <ul aria-labelledby="${group.id}" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px">${items}</ul>
@@ -648,6 +651,7 @@ export interface XpanelHomeProps {
   locale?: Locale
   theme?: 'dark' | 'light'
   realtimeEnabled?: boolean
+  xmailOrigin?: string
   account: { username: string; uid: number; home: string; primaryDomain: string; ipv4: string }
   plan?: {
     name: string
@@ -746,9 +750,26 @@ const factsFromProps = (props: XpanelHomeProps): LiveFacts => {
 export const xpanelHomeFromProps = (props: XpanelHomeProps): { desktop: HomeDesktopModel; phone: HomePhoneModel } => {
   const facts = factsFromProps(props)
   const actionHtml = props.actionHtml ?? ''
+  const theme = props.theme ?? 'dark'
+  const mailHref = mailInboxHref(props.xmailOrigin, { locale: facts.ar ? 'ar' : 'en', theme })
+  const nav = (groups: HomeNavView[]): HomeNavView[] => groups.map(group => ({
+    ...group,
+    items: group.items.map(item => item.href === '/mail/inbox' ? { ...item, route: item.href, href: mailHref ?? '', enabled: Boolean(mailHref) } : item),
+  }))
+  const tools = (groups: HomeGroupView[]): HomeGroupView[] => groups.map(group => ({
+    ...group,
+    tools: group.tools.map(item => item.href === '/mail/inbox' ? {
+      ...item,
+      href: mailHref ?? '',
+      enabled: item.enabled && Boolean(mailHref),
+      ...(!mailHref ? { hint: facts.ar ? 'غير متاح' : 'Unavailable', hintFont: 'inherit', hintDir: facts.ar ? 'rtl' as const : 'ltr' as const } : {}),
+    } : item),
+  }))
+  const desktop = desktopFromFacts(facts, actionHtml, props.qualifiedRoutes, props.signOutLabel)
+  const phone = phoneFromFacts(facts, actionHtml, 'div', props.qualifiedRoutes, props.signOutLabel)
   return {
-    desktop: { ...desktopFromFacts(facts, actionHtml, props.qualifiedRoutes, props.signOutLabel), theme: props.theme ?? 'dark', realtimeEnabled: props.realtimeEnabled === true },
-    phone: { ...phoneFromFacts(facts, actionHtml, 'div', props.qualifiedRoutes, props.signOutLabel), theme: props.theme ?? 'dark', realtimeEnabled: props.realtimeEnabled === true },
+    desktop: { ...desktop, nav: nav(desktop.nav), groups: tools(desktop.groups), theme, realtimeEnabled: props.realtimeEnabled === true },
+    phone: { ...phone, nav: nav(phone.nav), groups: tools(phone.groups), theme, realtimeEnabled: props.realtimeEnabled === true },
   }
 }
 

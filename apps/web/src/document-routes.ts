@@ -1,9 +1,14 @@
-import { navigation } from '@xpanel/catalog'
+import { navigation, registeredDocumentAliases } from '@xpanel/catalog'
 import { designReferenceRoutesEnabled } from './design-board.ts'
 
 export type DocumentSurface = 'login' | 'xwhm' | 'xpanel' | 'xmail'
 export interface WebDocumentRoute { surface: DocumentSurface; activeRoute: string }
 const routes = new Map(navigation.flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => [page.route, surface.surface] as const))))
+
+for (const alias of registeredDocumentAliases) {
+  const surface = routes.get(alias.parentRoute)
+  if (surface) routes.set(alias.route, surface)
+}
 
 /** Recognizes product documents only. It does not grant a capability or authorize an account. */
 export function resolveWebDocumentRoute(pathname: string): WebDocumentRoute | null {

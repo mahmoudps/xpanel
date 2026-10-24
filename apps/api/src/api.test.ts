@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { access, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, it } from 'vitest'
+import { afterEach, beforeEach, describe, it, vi } from 'vitest'
 import {
   createAgentApp,
   FakeHostExecutor,
@@ -774,14 +774,18 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     }
 
     // Global IO analytics require administrative authority; account users cannot read the global endpoint.
+    const ioRead = vi.spyOn(executor, 'readSliceMetrics')
     const rootIoRes = await root.request('/api/analytics/io')
-    assert.equal(rootIoRes.status, 200)
-    const rootIo = (await rootIoRes.json()) as { accounts: { username: string }[] }
-    assert.equal(rootIo.accounts.length, 2)
+    assert.equal(rootIoRes.status, 503)
+    assert.deepEqual(await rootIoRes.json(), {
+      available: false, snapshot: null, reason: 'not-sampled', fieldReasons: {}, observedAt: null,
+    })
 
     const { client: alice } = await loginAs('alice', 'AlicePassword!2026')
     const aliceIoRes = await alice.request('/api/analytics/io')
     assert.equal(aliceIoRes.status, 403)
+    assert.equal(ioRead.mock.calls.length, 0)
+    ioRead.mockRestore()
 
     // Ingest structured website access logs as root
     const nowIso = new Date().toISOString()

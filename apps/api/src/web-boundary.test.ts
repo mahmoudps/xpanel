@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { tools } from '@xpanel/catalog'
+import { canOpenRegisteredRoute, registeredDocumentAliases, tools } from '@xpanel/catalog'
 import {
-  createApiToken, createRootPrincipal, createSession, createTestDb, createUserPrincipal, setTotpSecret,
+  createApiToken, createResellerPrincipal, createRootPrincipal, createSession, createTestDb, createUserPrincipal, setTotpSecret,
 } from '@xpanel/db'
 import type { TestDbHandle } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
@@ -32,7 +32,7 @@ const SERVER_SECRET = 'web-boundary-fixture-secret-for-tests-only'
 const PUBLIC_DB_AUTH = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq'
 const observations: Record<string, unknown>[] = []
 const future = () => new Date(Date.now() + 60_000).toISOString()
-const protectedPaths = ['/', '/whm', '/panel', '/mail', '/home', '/resources', '/files/manager', '/panel/files/manager', '/whm/accounts', '/mail/inbox']
+const protectedPaths = ['/', '/whm', '/panel', '/mail', '/home', '/resources', '/files/manager', '/panel/files/manager', '/whm/accounts', '/whm/security/sign-in', '/mail/inbox']
 
 afterAll(async () => {
   const path = process.env.XPANEL_WEB_BOUNDARY_EVIDENCE
@@ -129,9 +129,97 @@ describe('production web renderer boundary regressions', () => {
     const principal = await createUserPrincipal(db.db, { username: 'owner', passwordHash: PUBLIC_VECTOR, accountId: '10000000-0000-4000-8000-000000000001' })
     const render = await renderer()
     const cookie = await session(principal.id)
-    for (const path of ['/whm', '/whm/accounts']) {
+    for (const path of ['/whm', '/whm/accounts', '/whm/security/sign-in']) {
       await observe(`owner-crosses-whm:${path}`, await render(request(path, cookie)), 403)
     }
+    expect(snapshotReads).toBe(0)
+  })
+
+  it.each(['no-acl', 'root-only', 'route-acl'] as const)('denies reseller document admission before a hosting snapshot: %s', async condition => {
+    const reseller = await state.store.createReseller({ username: 'boundaryreseller', passwordHash: PUBLIC_VECTOR,
+      acl: condition === 'no-acl' ? [] : ['list-accounts'], maxAccounts: 2, totalDiskMb: 1024,
+      totalBandwidthMb: 2048, oversell: false, nameservers: [], delegatedIps: [],
+    })
+    const principal = await createResellerPrincipal(db.db, { id: reseller.id, username: reseller.username, passwordHash: PUBLIC_VECTOR })
+    const cookie = await session(principal.id)
+    const render = await renderer()
+    const path = condition === 'no-acl' ? '/whm/accounts' : condition === 'root-only' ? '/whm/accounts/health' : '/whm/accounts/new'
+    snapshotReads = 0
+    const html = await observe(`reseller-admission:${condition}:${path}`, await render(request(path, cookie)), 403)
+    expect(html).toContain('data-status-page="403"')
+    expect(html).not.toContain('data-tool-availability="unverified"')
+    const supplied = hydration.at(-1)
+    expect(supplied?.error).toMatchObject({ status: 403 })
+    for (const key of ['whm', 'panel', 'mail', 'generationId', 'workspaceSummary']) expect(supplied).not.toHaveProperty(key)
+    expect(snapshotReads).toBe(0)
+  })
+
+  it.each([false, true])('hydrates only the authenticated reseller security model with list-accounts=%s', async listAccounts => {
+    const reseller = await state.store.createReseller({ username: 'selfreseller', passwordHash: PUBLIC_VECTOR,
+      acl: listAccounts ? ['list-accounts'] : [], maxAccounts: 2, totalDiskMb: 1024,
+      totalBandwidthMb: 2048, oversell: false, nameservers: [], delegatedIps: [],
+    })
+    const principal = await createResellerPrincipal(db.db, { id: reseller.id, username: reseller.username, passwordHash: PUBLIC_VECTOR })
+    if (listAccounts) await setTotpSecret(db.db, principal.id, new Uint8Array(32))
+    const other = await root({ enrolled: !listAccounts })
+    const getSettings = vi.spyOn(state.store, 'getServerSettings')
+    const readWorkspace = vi.spyOn(state.store, 'readAccountWorkspace')
+    const hostFetch = vi.fn(async () => new Response(null, { status: 503 }))
+    const render = await createDefaultWebRenderer({ store: state.store, db: db.db, serverSecret: SERVER_SECRET, agent: { fetch: hostFetch, token: 'synthetic-agent-token' } })
+    const cookie = await session(principal.id)
+    const html = await observe(`reseller-self-security:${listAccounts}`, await render(request(`/whm/security/sign-in?principalId=${other.id}&accountId=foreign-account-marker&surface=xpanel`, cookie)), 200)
+    expect(hydration.at(-1)).toEqual({
+      surface: 'xwhm', mfaRuntimeMode: 'optional', activeRoute: '/whm/security/sign-in',
+      security: { totpEnabled: listAccounts },
+      visibility: { principal: { kind: 'reseller', id: principal.id, username: principal.username } },
+    })
+    expect(html).toContain('data-account-security="two-factor"')
+    expect(html).toContain(listAccounts ? 'data-mfa-enabled="true"' : 'data-auth-state="optional"')
+    expect(html).not.toMatch(/data-mfa-recommendation|data-realtime-enabled="true"|data-workspace-account-overview=|data-account-row=|data-service-row=|data-cmdk-item=/)
+    for (const marker of [other.id, 'Multi-factor enrollment is required']) expect(html).not.toContain(marker)
+    // Account URL context may persist in links; it never selects a self-service actor or read model.
+    expect(html).toContain('accountId=foreign-account-marker')
+    expect(html.replace(/href="[^"]*"/g, '')).not.toContain('foreign-account-marker')
+    expect(getSettings).not.toHaveBeenCalled()
+    expect(readWorkspace).not.toHaveBeenCalled()
+    expect(hostFetch).not.toHaveBeenCalled()
+    expect(snapshotReads).toBe(0)
+    // This self-service exception does not grant the global operator document role.
+    expect(canOpenRegisteredRoute('/whm/security/sign-in', { principal: { kind: 'reseller', id: principal.id, username: principal.username }, reseller })).toBe(false)
+    for (const path of ['/whm/security/firewall', '/whm/server/setup', '/whm/accounts/health']) {
+      expect((await render(request(path, cookie))).status).toBe(403)
+    }
+    expect(snapshotReads).toBe(0)
+  })
+
+  it.each(['missing', 'mismatched', 'disabled', 'password-change', 'revoked', 'expired', 'mfa-pending', 'api-token'] as const)('does not open reseller self security for a %s actor or session', async condition => {
+    const reseller = condition === 'missing' ? undefined : await state.store.createReseller({ username: 'guardreseller', passwordHash: PUBLIC_VECTOR,
+      acl: [], maxAccounts: 2, totalDiskMb: 1024, totalBandwidthMb: 2048, oversell: false, nameservers: [], delegatedIps: [],
+    })
+    const principal = await createResellerPrincipal(db.db, {
+      ...(reseller ? { id: reseller.id } : {}), username: condition === 'mismatched' ? 'differentactor' : 'guardreseller', passwordHash: PUBLIC_VECTOR,
+      disabled: condition === 'disabled', forcePasswordChange: condition === 'password-change',
+    })
+    if (condition === 'mfa-pending') await setTotpSecret(db.db, principal.id, new Uint8Array(32))
+    const cookie = await session(principal.id, condition !== 'mfa-pending')
+    let authorization: string | undefined
+    if (condition === 'api-token') {
+      const token = 'reseller-self-security-api-token-fixture'
+      await createApiToken(db.db, { principalId: principal.id, name: 'Self security fixture', tokenHash: sha256Hex(token), scopes: ['*'], expiresAt: future() })
+      authorization = `Bearer ${token}`
+    }
+    if (condition === 'revoked') await db.db.query('UPDATE sessions SET revoked_at = $1 WHERE principal_id = $2', [new Date().toISOString(), principal.id])
+    if (condition === 'expired') await db.db.query('UPDATE sessions SET last_seen_at = $1 WHERE principal_id = $2', [new Date(Date.now() - 2 * 3600_000).toISOString(), principal.id])
+    const getSettings = vi.spyOn(state.store, 'getServerSettings')
+    const readWorkspace = vi.spyOn(state.store, 'readAccountWorkspace')
+    const render = await renderer()
+    const expectedStatus = condition === 'missing' || condition === 'mismatched' ? 403 : 303
+    const html = await observe(`reseller-self-security-rejected:${condition}`, await render(request('/whm/security/sign-in', condition === 'api-token' ? undefined : cookie, authorization)), expectedStatus, expectedStatus === 303 ? '/login' : undefined)
+    expect(html).not.toContain('data-account-security="two-factor"')
+    if (expectedStatus === 303) expect(hydration).toEqual([])
+    else expect(hydration.at(-1)).not.toHaveProperty('security')
+    expect(getSettings).not.toHaveBeenCalled()
+    expect(readWorkspace).not.toHaveBeenCalled()
     expect(snapshotReads).toBe(0)
   })
 
@@ -166,8 +254,10 @@ describe('production web renderer boundary regressions', () => {
     const home = await observe('root-mfa-unenrolled:/whm', await render(request('/whm', cookie)), 200)
     expect(home).toContain('data-mfa-optional-link')
     expect(home).not.toMatch(/Multi-factor enrollment is required|must complete enrollment/)
-    const accounts = await observe('root-mfa-unenrolled:/whm/accounts', await render(request('/whm/accounts', cookie)), 404)
-    expect(accounts).toContain('data-status-page="404"')
+    const accounts = await observe('root-mfa-unenrolled:/whm/accounts', await render(request('/whm/accounts', cookie)), 200)
+    expect(accounts).toContain('data-tool-availability="unverified"')
+    expect(accounts).toContain('disabled data-wiring="soon"')
+    expect(accounts).not.toContain('data-status-page="404"')
     expect(accounts).not.toMatch(/Multi-factor enrollment is required|must complete enrollment/)
     const security = await observe('root-mfa-unenrolled:security', await render(request('/whm/security/sign-in', cookie)), 200)
     expect(security).toContain('data-mfa-recommendation')
@@ -184,41 +274,50 @@ describe('production web renderer boundary regressions', () => {
     const home = await observe('unverified-catalog:/whm', await render(request('/whm', cookie)), 200)
     expect.soft(home.includes('data-tool-availability="unverified"')).toBe(true)
     expect.soft(/alice-shop\.com|srv1\.xpanel\.test/.test(home)).toBe(false)
-    const accounts = await observe('unverified-catalog:/whm/accounts', await render(request('/whm/accounts', cookie)), 404)
-    expect.soft(accounts.includes('data-status-page="404"')).toBe(true)
-    expect.soft(accounts.includes('data-tool-availability="unverified"')).toBe(false)
+    const accounts = await observe('unverified-catalog:/whm/accounts', await render(request('/whm/accounts', cookie)), 200)
+    expect.soft(accounts.includes('data-status-page="404"')).toBe(false)
+    expect.soft(accounts.includes('data-tool-availability="unverified"')).toBe(true)
+    expect(accounts).toContain('disabled data-wiring="soon"')
+    expect(hydration.at(-1)?.workspaceSummary).toEqual({})
+    for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(hydration.at(-1)).not.toHaveProperty(key)
     expect.soft(/alice-shop\.com|srv1\.xpanel\.test/.test(accounts)).toBe(false)
+    expect(snapshotReads).toBe(0)
   })
 
   it('hydrates only a bounded identity summary while tools remain unqualified', async () => {
     const principal = await root()
     const cookie = await session(principal.id)
     const render = await renderer()
-    await observe('empty-state:/mail/inbox', await render(request('/mail/inbox', cookie)), 200)
-    const inbox = hydration.at(-1)
-    expect(inbox).toBeDefined()
-    expect((inbox!.visibility as { principal: { kind: string } }).principal.kind).toBe('root')
-    expect(inbox!.catalog).toBeUndefined()
-    expect(inbox!.workspaceSummary).toEqual({})
-    for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(inbox).not.toHaveProperty(key)
-    for (const path of ['/whm/accounts', '/panel/files/manager']) {
-      await observe(`empty-state:${path}`, await render(request(path, cookie)), 404)
+    await observe('empty-state:/whm', await render(request('/whm', cookie)), 200)
+    const workspace = hydration.at(-1)
+    expect(workspace).toBeDefined()
+    expect((workspace!.visibility as { principal: { kind: string } }).principal.kind).toBe('root')
+    expect(workspace!.catalog).toBeUndefined()
+    expect(workspace!.workspaceSummary).toEqual({})
+    for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(workspace).not.toHaveProperty(key)
+    for (const path of ['/whm/accounts', '/whm/accounts/health', ...registeredDocumentAliases.filter(row => row.parentRoute === '/whm/software/site-software').map(row => row.route)]) {
+      const html = await observe(`empty-state:${path}`, await render(request(path, cookie)), 200)
+      expect(html).toContain('data-tool-availability="unverified"')
+      expect(html).toContain('disabled data-wiring="soon"')
       const supplied = hydration.at(-1)
       expect(supplied).toBeDefined()
       const visibility = supplied!.visibility as { principal: { kind: string } }
       observations.push({ id: `hydration:${path}`, visibilityPrincipalKind: visibility.principal.kind,
         catalogOverridden: supplied!.catalog !== undefined,
-        fullStateSupplied: ['whm', 'panel', 'mail', 'generationId', 'workspaceSummary'].some(key => key in supplied!),
+        fullStateSupplied: ['whm', 'panel', 'mail', 'generationId'].some(key => key in supplied!),
+        workspaceSummaryKeys: Object.keys(supplied!.workspaceSummary as Record<string, unknown>),
       })
       expect(visibility.principal.kind).toBe('root')
       expect(supplied!.catalog).toBeUndefined()
-      expect(supplied!.error).toMatchObject({ status: 404 })
-      for (const key of ['whm', 'panel', 'mail', 'generationId', 'workspaceSummary']) expect(supplied).not.toHaveProperty(key)
+      expect(supplied!.activeRoute).toBe(path)
+      expect(supplied!.workspaceSummary).toEqual({})
+      expect(supplied).not.toHaveProperty('error')
+      for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(supplied).not.toHaveProperty(key)
     }
     expect(snapshotReads).toBe(0)
   })
 
-  it('uses a styled 404 for unknown and unqualified routes and keeps the workspace on home', async () => {
+  it('distinguishes unknown documents from role-denied pages and unqualified registered workspaces', async () => {
     const principal = await root()
     const cookie = await session(principal.id)
     const render = await renderer()
@@ -231,13 +330,13 @@ describe('production web renderer boundary regressions', () => {
     expect(signedUnknown).toContain('data-user-menu')
     expect(signedUnknown).toContain('data-action="logout"')
     expect(signedUnknown).not.toContain('>Sign in<')
-    const domains = await observe('route-404:domains', await render(request('/panel/domains', cookie)), 404)
-    expect(domains).toContain('data-status-page="404"')
-    expect(domains).toContain('Back to workspace')
-    expect(domains).toContain('data-nav-route="/domains" data-nav-wiring="soon"')
-    expect(domains).toContain('Coming soon')
-    expect(domains).not.toContain('Not yet available')
-    const home = await observe('route-home:/panel', await render(request('/panel', cookie)), 200)
+    for (const path of ['/panel', '/panel/domains', '/panel/files/manager', '/mail', '/mail/inbox']) {
+      const denied = await observe(`root-owner-only:${path}`, await render(request(path, cookie)), 403)
+      expect(denied).toContain('data-status-page="403"')
+      expect(denied).not.toContain('data-tool-availability="unverified"')
+      expect(hydration.at(-1)).not.toHaveProperty('workspaceSummary')
+    }
+    const home = await observe('route-home:/whm', await render(request('/whm', cookie)), 200)
     expect(home).toContain('data-tool-availability="unverified"')
     expect(home).toContain('Coming soon')
     const crossedRender = await createDefaultWebRenderer({
@@ -282,6 +381,7 @@ describe('production web renderer boundary regressions', () => {
     const cookie = await session(principal.id)
     const app = createApiApp({ store: state.store, db: db.db, serverSecret: SERVER_SECRET, webRenderer: await renderer() })
     const server = await listenApiServer(app, { host: '127.0.0.1', port: 0 })
+    snapshotReads = 0
     try {
       const origin = `http://127.0.0.1:${server.port}`
       for (const locale of ['en', 'ar']) {
@@ -305,8 +405,37 @@ describe('production web renderer boundary regressions', () => {
         }
         for (const value of [owner.id, other.id, principal.id, plan.id, featureList.id, owner.contactEmail, other.primaryDomain, PUBLIC_VECTOR]) expect(html).not.toContain(value)
       }
+      for (const [path, canonicalRoute] of [
+        ['/domains', '/domains'], ['/panel/domains', '/domains'],
+        ['/files/manager', '/files/manager'], ['/panel/files/manager', '/files/manager'],
+        ...registeredDocumentAliases.filter(row => row.parentRoute === '/software/installer').map(row => [row.route, row.route] as const),
+      ] as const) {
+        const html = await observe(`registered-unqualified-owner:${path}`, await fetch(`${origin}${path}`, { headers: { cookie }, redirect: 'manual' }), 200)
+        expect(html).toContain('data-tool-availability="unverified"')
+        expect(html).toContain('disabled data-wiring="soon"')
+        expect(html).not.toContain('data-status-page="404"')
+        const supplied = hydration.at(-1)
+        expect(supplied).toMatchObject({ surface: 'xpanel', activeRoute: canonicalRoute })
+        expect(supplied?.workspaceSummary).toEqual({
+          account: { id: owner.id, ownerId: owner.ownerId, username: owner.username, primaryDomain: owner.primaryDomain, status: owner.status, planId: owner.planId },
+          plan: { id: plan.id, name: plan.name },
+        })
+        expect(supplied?.catalog).toBeUndefined()
+        expect(supplied).not.toHaveProperty('error')
+        for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(supplied).not.toHaveProperty(key)
+        for (const value of [owner.home, owner.ipv4, owner.contactEmail, other.primaryDomain, PUBLIC_VECTOR, PUBLIC_DB_AUTH,
+          otherDatabase.id, otherDatabase.name, otherDatabaseUser.id, otherDatabaseUser.name,
+          ...databases.map(database => database.name), ...databaseUsers.map(user => user.name),
+        ]) {
+          expect(JSON.stringify(supplied?.workspaceSummary)).not.toContain(value)
+          expect(html).not.toContain(value)
+        }
+        for (const value of [owner.username, owner.primaryDomain, plan.name]) expect(html).toContain(value)
+        for (const value of [owner.id, other.id, principal.id, plan.id, featureList.id]) expect(html).not.toContain(value)
+      }
       await observe('scoped-summary-http:other-account', await fetch(`${origin}/panel?accountId=${other.id}`, { headers: { cookie }, redirect: 'manual' }), 404)
       await observe('scoped-summary-http:anonymous', await fetch(`${origin}/panel`, { redirect: 'manual' }), 303, '/login')
+      expect(snapshotReads).toBe(0)
     } finally { await server.close() }
   })
 })

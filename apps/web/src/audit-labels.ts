@@ -144,6 +144,7 @@ export const AUDIT_LABELS: Readonly<Record<string, AuditCopy>> = {
   'transfer.completed': copy('Finished a transfer', 'أكمل نقلاً'),
   'upgrade.failed': copy('Upgrade failed', 'فشلت الترقية'),
   'upgrade.recovered': copy('Recovered an upgrade', 'استعاد ترقية'),
+  'upgrade.recovery_observed': copy('Observed an upgrade recovery state', 'رصد حالة استرداد الترقية'),
   'upgrade.refused': copy('Refused an upgrade', 'رفض ترقية'),
   'upgrade.rollback_failed': copy('Upgrade rollback failed', 'فشل التراجع عن الترقية'),
   'upgrade.rolled_back': copy('Rolled back an upgrade', 'تراجع عن ترقية'),

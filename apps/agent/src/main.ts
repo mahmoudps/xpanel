@@ -1,14 +1,15 @@
 import { existsSync, readFileSync } from 'node:fs'
+import { timingSafeEqual } from 'node:crypto'
 import { chown, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fail } from '@xpanel/core'
 import type { OsProfile } from '@xpanel/core'
-import { createDb, migrate } from '@xpanel/db'
+import { createDb, initializeOperationalMetadata, migrate } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
-import { NativeAccountFileRunner, verifyHelperBinary } from './account-file-runner.ts'
-import { IoAnalyticsEngine, WebsiteAnalyticsEngine } from './analytics.ts'
+import { createProductionAccountFileRunner, DEFAULT_FILE_WORKER_INCIDENT_DIR } from './production-file-runner.ts'
+import { CanonicalIoResourcePipeline, IoAnalyticsEngine, WebsiteAnalyticsEngine } from './analytics.ts'
 import { createProductionHostTargetMatcher, LinuxHostExecutor } from './executor.ts'
 import { ensureAcmeWebRoot } from './host-access.ts'
 import { syncRuntimePublicOrigin } from './agent-origin.ts'
@@ -17,6 +18,8 @@ import { enableMailWebsocketProxy } from './services/mail-websocket.ts'
 import { readOpenDkimPublished, writeOpenDkimPublished } from './services/opendkim-live.ts'
 import { HostReconciler } from './reconciler.ts'
 import { createAgentApp, listenAgentSocket, loadAgentCredentialFile } from './server.ts'
+import type { AgentApp } from './server.ts'
+import { awaitLifecycleWriterDrain, createLifecycleBackgroundResources, isLifecycleManaged, readLifecyclePublicStatus, startLifecycleWriterParticipant, withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
 import { createMariaDbSqlRunner, DEFAULT_MARIADB_ADMIN_CNF, MariaDbServiceAdapter } from './services/mariadb.ts'
 
 export interface AgentDaemonOptions {
@@ -28,10 +31,25 @@ export interface AgentDaemonOptions {
   quotaFilesystem?: string | null
   ioDevices?: string[]
   fileHelperBinaryPath?: string
+  fileWorkerIncidentDir?: string
   mariadbAdminCnfPath?: string
 }
 
 const detectHostOsProfile = async (): Promise<OsProfile> => detectOs((p) => readFileSync(p, 'utf8'))
+
+/** A frozen maintenance endpoint does not open a database or manufacture authenticated state. */
+const quarantinedAgentApp = (agentToken: string): AgentApp => ({
+  async fetch(request) {
+    const actual = Buffer.from(request.headers.get('x-xpanel-agent-token') ?? '', 'utf8')
+    const expected = Buffer.from(agentToken, 'utf8')
+    const authenticated = actual.length === expected.length && timingSafeEqual(actual, expected)
+    return new Response(JSON.stringify({ error: authenticated ? 'Lifecycle maintenance requires an inspected restart before this agent can serve requests.' : 'Invalid or missing agent service authentication.' }), {
+      status: authenticated ? 503 : 401,
+      headers: { 'content-type': 'application/problem+json', 'cache-control': 'no-store', ...(authenticated ? { 'retry-after': '5' } : {}) },
+    })
+  },
+  subscribe() { return () => {} },
+})
 
 /**
  * Starts the privileged `xpanel-agent` root daemon listening on `/run/xpanel/agent.sock`.
@@ -58,111 +76,237 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
       : [])
   const os = await detectHostOsProfile()
 
-  if (dbPath !== ':memory:') {
-    await mkdir(dirname(dbPath), { recursive: true })
-  }
-  await mkdir(stateDir, { recursive: true })
-  const runtimeDirectory = dirname(socketPath)
-  const createdRuntimeDirectory = await mkdir(runtimeDirectory, { recursive: true, mode: 0o750 })
-  if (createdRuntimeDirectory) await chown(runtimeDirectory, 0, socketGid)
-
-  const dbHandle = createDb(dbPath)
-  await migrate(dbHandle.runner)
-
-  const store = new StateStore(stateDir)
-  const mariadbAdminCnfPath =
-    opts.mariadbAdminCnfPath ?? process.env.XPANEL_MARIADB_ADMIN_CNF ?? DEFAULT_MARIADB_ADMIN_CNF
-  const sqlRunner = createMariaDbSqlRunner(new MariaDbServiceAdapter({ adminDefaultsFile: mariadbAdminCnfPath }))
-  const executor = new LinuxHostExecutor({
-    trustedHostTargetMatcher: createProductionHostTargetMatcher(),
-    sqlRunner,
-  })
-  const ioAnalytics = new IoAnalyticsEngine()
-  const websiteAnalytics = new WebsiteAnalyticsEngine()
-
-  const fileHelperBinaryPath =
-    opts.fileHelperBinaryPath ?? process.env.XPANEL_FILE_HELPER_BINARY ?? '/opt/xpanel/bin/xpanel-account-files'
-  let accountFileRunner: NativeAccountFileRunner | undefined
-  if (existsSync(fileHelperBinaryPath)) {
-    const helperSha256 = await verifyHelperBinary(fileHelperBinaryPath)
-    accountFileRunner = new NativeAccountFileRunner({
-      binaryPath: fileHelperBinaryPath,
-      expectedSha256: helperSha256,
-    })
-  }
-
-  const reconciler = new HostReconciler({
-    store,
-    db: dbHandle.db,
-    executor,
-    os,
-    quotaFilesystem,
-    ioDevices,
-  })
-  await syncRuntimePublicOrigin(executor).catch((error: unknown) => {
-    process.stderr.write(`xpanel-agent public origin: ${error instanceof Error ? error.message : String(error)}\n`)
-  })
-  await enableMailWebsocketProxy(executor).catch((error: unknown) => {
-    process.stderr.write(`xpanel-agent mail websocket: ${error instanceof Error ? error.message : String(error)}\n`)
-  })
-  await reconciler.recoverInterruptedReconciliation().catch(() => undefined)
-
-  await ensureAcmeWebRoot(executor, os.paths.nginxUser).catch((error: unknown) => {
-    process.stderr.write(`xpanel-agent ACME webroot: ${error instanceof Error ? error.message : String(error)}\n`)
-  })
-  if (existsSync('/usr/sbin/postfix') && existsSync('/usr/sbin/dovecot')) {
-    await (async () => {
-      const snapshot = await store.readSnapshot().catch(() => null)
-      const hostname = snapshot?.server?.settings.hostname
-      const domains = [
-        ...(snapshot?.domains.map(domain => domain.name) ?? []),
-        ...(snapshot?.serviceUsers.flatMap(user => {
-          if (!user.services.email) return []
-          const at = user.login.lastIndexOf('@')
-          return at > 0 ? [user.login.slice(at + 1)] : []
-        }) ?? []),
-      ]
-      const owned = await reconciler.ownedChecksums()
-      const signing = await ensureInstalledMail(executor, os, hostname, owned, domains)
-      const published = (await readOpenDkimPublished(executor).catch(() => null))?.trim() ?? ''
-      if (signing.stamp && published !== signing.stamp) {
-        await reconciler.reconcile({ force: true, actor: 'agent', mailAuth: signing.signing })
-        await writeOpenDkimPublished(executor, signing.stamp)
-      }
-    })().catch((error: unknown) => {
-      process.stderr.write(`xpanel-agent local mail: ${error instanceof Error ? error.message : String(error)}\n`)
-    })
-  }
-
-  const app = createAgentApp({
-    reconciler,
-    store,
-    db: dbHandle.db,
-    executor,
-    ...(accountFileRunner ? { accountFileRunner } : {}),
-    ioAnalytics,
-    websiteAnalytics,
-    os: { id: os.id, versionId: os.versionId, family: os.family },
-    nginxUser: os.paths.nginxUser,
-    agentToken,
-  })
-
-  let listener: Awaited<ReturnType<typeof listenAgentSocket>>
+  let managed = false
+  let quarantined = false
   try {
-    listener = await listenAgentSocket(app, socketPath, { gid: socketGid })
+    managed = await isLifecycleManaged()
+    quarantined = (await readLifecyclePublicStatus()).active
+    managed ||= quarantined
+  } catch {
+    // Unsafe lifecycle metadata is a fence, never permission for ordinary initialization.
+    managed = true
+    quarantined = true
+  }
+  let ioResourcePipeline: CanonicalIoResourcePipeline | undefined
+  let resourcesFenced = false
+  let closeDaemon: (() => Promise<void>) | undefined
+  const participant = managed ? await startLifecycleWriterParticipant('agent', {
+    // A fenced pipeline stays paused until an inspected process restart. This callback
+    // does not establish native host quiescence or authorize barrier retirement.
+    onFence: async () => { resourcesFenced = true; await ioResourcePipeline?.pause() },
+  }) : undefined
+  let participantClosing: Promise<void> | undefined
+  const closeParticipant = (): Promise<void> => participantClosing ??= participant?.close() ?? Promise.resolve()
+  if (quarantined) {
+    try {
+      // The normal listener can build a missing native verifier. Quarantine must only
+      // load the existing protected artifact and must never enter that build fallback.
+      if (!existsSync('/opt/xpanel/bin/xpanel-peer-identity.node')) fail('PRECONDITION_FAILED', 'quarantine requires the installed native peer identity artifact')
+      const app = quarantinedAgentApp(agentToken)
+      const listener = await createLifecycleBackgroundResources(() => listenAgentSocket(app, socketPath, { gid: socketGid }))
+      let closing: Promise<void> | undefined
+      const close = (): Promise<void> => closing ??= (async () => {
+        const errors: unknown[] = []
+        try { await listener.close() } catch (error) { errors.push(error) }
+        try { await closeParticipant() } catch (error) { errors.push(error) }
+        if (errors.length) throw new AggregateError(errors, 'quarantined agent IPC shutdown requires inspection')
+      })()
+      return { app, socketPath, close, recoveryRequired: new Promise<void>(() => {}), quarantined: true as const }
+    } catch (error) {
+      try { await closeParticipant() } catch (cleanup) { throw new AggregateError([error, cleanup], 'quarantined agent startup cleanup requires inspection') }
+      throw error
+    }
+  }
+  let settleStartup!: () => void
+  const startupSettled = new Promise<void>((resolve) => { settleStartup = resolve })
+  try {
+    const daemon = await withLifecycleWriterAdmission(async () => {
+      if (dbPath !== ':memory:') {
+        await mkdir(dirname(dbPath), { recursive: true })
+      }
+      await mkdir(stateDir, { recursive: true })
+      const runtimeDirectory = dirname(socketPath)
+      const createdRuntimeDirectory = await mkdir(runtimeDirectory, { recursive: true, mode: 0o750 })
+      if (createdRuntimeDirectory) await chown(runtimeDirectory, 0, socketGid)
+
+      const dbHandle = createDb(dbPath, dbPath === ':memory:' ? {} : { durability: 'strict' })
+      let accountFileRunner: Awaited<ReturnType<typeof createProductionAccountFileRunner>> | undefined
+      let listener: Awaited<ReturnType<typeof listenAgentSocket>> | undefined
+      let resourcesClosing: Promise<void> | undefined
+      let closing: Promise<void> | undefined
+      const closeResources = (): Promise<void> => resourcesClosing ??= (async () => {
+        const errors: unknown[] = []
+        try { await listener?.close() } catch (error) { errors.push(error) }
+        try { await ioResourcePipeline?.stop() } catch (error) { errors.push(error) }
+        try { await accountFileRunner?.close() } catch (error) { errors.push(error) }
+        if (errors.length) throw new AggregateError(errors, 'agent resource shutdown requires inspection')
+      })()
+      const closeNormal = (): Promise<void> => closing ??= (async () => {
+        // Startup owns a shared writer scope. Waiting for global drainage inside that
+        // scope would wait for ourselves; final retirement starts after its release.
+        await startupSettled
+        const errors: unknown[] = []
+        try { await closeResources() } catch (error) { errors.push(error) }
+        try { await awaitLifecycleWriterDrain() } catch (error) { errors.push(error) }
+        try { await dbHandle.close() } catch (error) { errors.push(error) }
+        // Closing owned IPC is process cleanup, never a host-drain assertion or
+        // permission to remove an incident, root barrier, or retirement fence.
+        try { await closeParticipant() } catch (error) { errors.push(error) }
+        if (errors.length) throw new AggregateError(errors, 'agent shutdown requires operational recovery')
+      })()
+      closeDaemon = closeNormal
+      try {
+        await migrate(dbHandle.runner)
+        await initializeOperationalMetadata(dbHandle.db)
+
+        const store = new StateStore(stateDir)
+        const mariadbAdminCnfPath =
+          opts.mariadbAdminCnfPath ?? process.env.XPANEL_MARIADB_ADMIN_CNF ?? DEFAULT_MARIADB_ADMIN_CNF
+        const sqlRunner = createMariaDbSqlRunner(new MariaDbServiceAdapter({ adminDefaultsFile: mariadbAdminCnfPath }))
+        const executor = new LinuxHostExecutor({
+          trustedHostTargetMatcher: createProductionHostTargetMatcher(),
+          sqlRunner,
+        })
+        const ioAnalytics = new IoAnalyticsEngine()
+        const websiteAnalytics = new WebsiteAnalyticsEngine()
+
+        const fileHelperBinaryPath =
+          opts.fileHelperBinaryPath ?? process.env.XPANEL_FILE_HELPER_BINARY ?? '/opt/xpanel/bin/xpanel-account-files'
+        let recoveryDetected = false
+        let signalRecovery!: () => void
+        const recoveryRequired = new Promise<void>((resolve) => { signalRecovery = resolve })
+        const onRecoveryRequired = (): void => {
+          if (recoveryDetected) return
+          recoveryDetected = true
+          signalRecovery()
+          // Do not await the operation that reported this state through pool.close().
+          if (closeDaemon) void closeDaemon().catch(() => undefined)
+        }
+        accountFileRunner = await createProductionAccountFileRunner(fileHelperBinaryPath, {
+          incidentDir: opts.fileWorkerIncidentDir ?? DEFAULT_FILE_WORKER_INCIDENT_DIR,
+          onRecoveryRequired,
+        })
+        if (recoveryDetected) fail('PRECONDITION_FAILED', 'privileged file worker recovery is required before agent startup')
+
+        const reconciler = new HostReconciler({
+          store,
+          db: dbHandle.db,
+          executor,
+          os,
+          quotaFilesystem,
+          ioDevices,
+        })
+        await syncRuntimePublicOrigin(executor).catch((error: unknown) => {
+          process.stderr.write(`xpanel-agent public origin: ${error instanceof Error ? error.message : String(error)}\n`)
+        })
+        await enableMailWebsocketProxy(executor).catch((error: unknown) => {
+          process.stderr.write(`xpanel-agent mail websocket: ${error instanceof Error ? error.message : String(error)}\n`)
+        })
+        await reconciler.recoverInterruptedReconciliation().catch(() => undefined)
+
+        await ensureAcmeWebRoot(executor, os.paths.nginxUser).catch((error: unknown) => {
+          process.stderr.write(`xpanel-agent ACME webroot: ${error instanceof Error ? error.message : String(error)}\n`)
+        })
+        if (existsSync('/usr/sbin/postfix') && existsSync('/usr/sbin/dovecot')) {
+          await (async () => {
+            const snapshot = await store.readSnapshot().catch(() => null)
+            const hostname = snapshot?.server?.settings.hostname
+            const domains = [
+              ...(snapshot?.domains.map(domain => domain.name) ?? []),
+              ...(snapshot?.serviceUsers.flatMap(user => {
+                if (!user.services.email) return []
+                const at = user.login.lastIndexOf('@')
+                return at > 0 ? [user.login.slice(at + 1)] : []
+              }) ?? []),
+            ]
+            const owned = await reconciler.ownedChecksums()
+            const signing = await ensureInstalledMail(executor, os, hostname, owned, domains)
+            const published = (await readOpenDkimPublished(executor).catch(() => null))?.trim() ?? ''
+            if (signing.stamp && published !== signing.stamp) {
+              await reconciler.reconcile({ force: true, actor: 'agent', mailAuth: signing.signing })
+              await writeOpenDkimPublished(executor, signing.stamp)
+            }
+          })().catch((error: unknown) => {
+            process.stderr.write(`xpanel-agent local mail: ${error instanceof Error ? error.message : String(error)}\n`)
+          })
+        }
+
+        ioResourcePipeline = new CanonicalIoResourcePipeline({ store, engine: ioAnalytics, onEvent: event => reconciler.emit(event) })
+        if (resourcesFenced) await ioResourcePipeline.pause()
+        await createLifecycleBackgroundResources(() => ioResourcePipeline!.start())
+
+        const app = createAgentApp({
+          reconciler,
+          store,
+          db: dbHandle.db,
+          executor,
+          ...(accountFileRunner ? { accountFileRunner } : {}),
+          ioAnalytics,
+          ioResourcePipeline,
+          websiteAnalytics,
+          os: { id: os.id, versionId: os.versionId, family: os.family },
+          nginxUser: os.paths.nginxUser,
+          agentToken,
+        })
+
+        listener = await createLifecycleBackgroundResources(() => listenAgentSocket(app, socketPath, { gid: socketGid }))
+
+        if (recoveryDetected) {
+          fail('PRECONDITION_FAILED', 'privileged file worker recovery is required before agent startup')
+        }
+        return { app, socketPath, close: closeNormal, recoveryRequired, quarantined: false as const }
+      } catch (error) {
+        try { await closeResources() } catch (cleanup) { throw new AggregateError([error, cleanup], 'agent startup cleanup requires inspection') }
+        throw error
+      }
+    })
+    settleStartup()
+    return daemon
   } catch (error) {
-    await dbHandle.close()
+    settleStartup()
+    try {
+      if (closeDaemon) await closeDaemon()
+      else { await awaitLifecycleWriterDrain(); await closeParticipant() }
+    } catch (cleanup) { throw new AggregateError([error, cleanup], 'agent startup retirement requires inspection') }
     throw error
   }
+}
 
-  return {
-    app,
-    socketPath,
-    close: async () => {
-      await listener.close()
-      await dbHandle.close()
-    },
+export const AGENT_SHUTDOWN_TIMEOUT_MS = 35_000
+
+/** Standalone process lifetime; the daemon library never exits its caller. */
+export const attachAgentProcessLifecycle = (daemon: { close: () => Promise<void>; recoveryRequired: Promise<void> }): void => {
+  let stopping: Promise<void> | undefined
+  let deadline: ReturnType<typeof setTimeout> | undefined
+  let exitCode = 0
+  let exited = false
+  let recoveryReported = false
+  const reportRecovery = (): void => {
+    if (recoveryReported) return
+    recoveryReported = true
+    process.stderr.write('xpanel-agent shutdown requires operational recovery\n')
   }
+  const finish = (code: number): void => {
+    if (exited) return
+    exited = true
+    clearTimeout(deadline)
+    process.exit(code)
+  }
+  const shutdown = (requestedCode: number): void => {
+    exitCode = Math.max(exitCode, requestedCode)
+    if (stopping) return
+    deadline = setTimeout(() => { reportRecovery(); finish(1) }, AGENT_SHUTDOWN_TIMEOUT_MS)
+    stopping = Promise.resolve().then(() => daemon.close()).then(
+      () => finish(exitCode),
+      () => { reportRecovery(); finish(1) },
+    )
+  }
+  process.once('SIGINT', () => shutdown(0))
+  process.once('SIGTERM', () => shutdown(0))
+  void daemon.recoveryRequired.then(
+    () => { reportRecovery(); shutdown(1) },
+    () => { reportRecovery(); shutdown(1) },
+  )
 }
 
 const isMainModule = (): boolean => {
@@ -176,12 +320,8 @@ const isMainModule = (): boolean => {
 if (isMainModule()) {
   startAgentDaemon()
     .then((daemon) => {
-      process.stdout.write(`xpanel-agent listening on ${daemon.socketPath}\n`)
-      const shutdown = () => {
-        daemon.close().finally(() => process.exit(0))
-      }
-      process.once('SIGINT', shutdown)
-      process.once('SIGTERM', shutdown)
+      process.stdout.write(`xpanel-agent ${daemon.quarantined ? 'quarantined' : 'listening'} on ${daemon.socketPath}\n`)
+      attachAgentProcessLifecycle(daemon)
     })
     .catch((err) => {
       process.stderr.write(`xpanel-agent fatal error: ${err instanceof Error ? err.message : String(err)}\n`)

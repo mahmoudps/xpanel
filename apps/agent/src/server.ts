@@ -1,3 +1,4 @@
+import { lifecycleAdmissionResponse, withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, open } from 'node:fs/promises'
@@ -6,14 +7,14 @@ import { createServer } from 'node:http'
 import type { Server } from 'node:http'
 import { Socket } from 'node:net'
 import { dirname, isAbsolute, resolve } from 'node:path'
-import { fail, isUuid, isXpanelError } from '@xpanel/core'
+import { fail, isUuid, isXpanelError, validateDomainName } from '@xpanel/core'
 import { profileFor } from '@xpanel/os'
 import { edge } from '@xpanel/render'
 import type { Account, ErrorCode, Id, LiveEvent, Principal } from '@xpanel/core'
 import { appendAudit, getPrincipal, latestActive } from '@xpanel/db'
 import type { Db } from '@xpanel/db'
 import type { StateStore } from '@xpanel/state'
-import { IoAnalyticsEngine, runJailedShellCommand, WebsiteAnalyticsEngine } from './analytics.ts'
+import { type CanonicalIoResourcePipeline, type IoAnalyticsEngine, runJailedShellCommand, unavailableIoAnalytics, WebsiteAnalyticsEngine } from './analytics.ts'
 import { LinuxHostExecutor } from './executor.ts'
 import type { AgentExecutor } from './executor.ts'
 import { JailedFileManager } from './file-manager.ts'
@@ -21,10 +22,12 @@ import { AcmeCertificateServiceAdapter } from './services/acme.ts'
 import { createHttp01AcmeClient } from './services/acme-client.ts'
 import { probeAuditLog, probeHostCapabilities, readHostMeasurements } from './host-probes.ts'
 import { readAccountUsage } from './account-usage.ts'
+import { observeHostLimits, unavailableHostLimits } from './limit-gaps.ts'
 import { readPublicOriginSync } from './agent-origin.ts'
 import { readHostConfigChecks, readHostIdentity, readServedCertificatePem, PANEL_LISTENER_PORT } from './host-identity.ts'
 import { probeDkimOutcome } from './services/dkim-probe.ts'
-import { signMailboxSubmission } from './services/dkim-sign.ts'
+import { createSignRateLimit, signMailboxSubmission, submissionFromDomains } from './services/dkim-sign.ts'
+import { readOpenDkimPublicMaterial } from './services/opendkim-live.ts'
 import { parseDf, parseDfInodes, parseLoadavg, parseMeminfo } from './host-info.ts'
 import { readHostServices, restartHostService } from './host-services.ts'
 import { createAccountBackup, listAccountBackups, restoreAccountBackup, DEFAULT_BACKUP_DIR } from './account-backup.ts'
@@ -190,6 +193,8 @@ export interface AgentServerDeps {
   executor?: AgentExecutor
   accountFileRunner?: AccountFileRunner
   ioAnalytics?: IoAnalyticsEngine
+  /** The one daemon-owned sampler; API reads never create collectors or choose kernel paths. */
+  ioResourcePipeline?: CanonicalIoResourcePipeline
   websiteAnalytics?: WebsiteAnalyticsEngine
   os: { id: string; versionId: string; family: string }
   /** System account nginx runs as. The ACME traversal probe uses it. */
@@ -231,7 +236,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
     deps.expectedPeerUid !== undefined
       ? normalizeAllowedPeerUids(deps.expectedPeerUid, deps.allowRootPeer === true)
       : null
-  const ioEngine = deps.ioAnalytics ?? new IoAnalyticsEngine()
+  const allowDkimSign = createSignRateLimit()
   const webEngine = deps.websiteAnalytics ?? new WebsiteAnalyticsEngine()
 
   const resolveAccountHome = (accountHome: string, username: string): string => {
@@ -447,7 +452,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
     })
   }
 
-  const fetch = async (req: Request): Promise<Response> => {
+  const fetchInner = async (req: Request): Promise<Response> => {
     const url = new URL(req.url, 'http://agent.local')
     const { pathname } = url
     const method = req.method.toUpperCase()
@@ -489,22 +494,84 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         return jsonResponse(outcome.selector ? outcome : { status: outcome.status })
       }
 
+      if (method === 'GET' && pathname === '/host/dkim-public') {
+        const domain = validateDomainName(url.searchParams.get('domain') ?? '')
+        const assigned = (await deps.store.listDomains()).find(row => row.name === domain)
+        const account = assigned ? await deps.store.getAccount(assigned.accountId) : null
+        if (!account) return fail('NOT_FOUND', 'domain not found')
+        await assertAccountCaller(caller, account, 'host.dkim-public')
+        if (!deps.executor) return fail('PRECONDITION_FAILED', 'verified DKIM signing material is unavailable')
+        const material = await readOpenDkimPublicMaterial(deps.executor, domain)
+        if (!material) return fail('PRECONDITION_FAILED', 'verified DKIM signing material is unavailable')
+        return jsonResponse(material)
+      }
+
       if (method === 'POST' && pathname === '/host/dkim-sign') {
         const body = await readObjectBody(req)
         const mailbox = typeof body.mailbox === 'string' ? body.mailbox.trim().toLowerCase() : ''
         const rawMime = typeof body.rawMime === 'string' ? body.rawMime : ''
-        if (!/^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(mailbox) || mailbox.length > 254) {
+        const purpose = body.purpose
+        const validMailbox = mailbox.length <= 254 && /^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(mailbox)
+        const auditSign = async (outcome: 'ok' | 'denied' | 'failed', detail: Record<string, unknown>): Promise<void> => {
+          await appendAudit(deps.db, {
+            actor: caller.actor,
+            action: 'host.dkim-sign',
+            target: `mailbox:${validMailbox ? mailbox : 'unavailable'}`,
+            detail,
+            outcome,
+          })
+        }
+        if (purpose !== 'webmail-send') {
+          await auditSign('denied', { reason: 'purpose' })
+          return fail('FORBIDDEN', 'signing is only available to the webmail send path')
+        }
+        if (!validMailbox) {
+          await auditSign('denied', { reason: 'mailbox' })
           return fail('VALIDATION', 'mailbox address is invalid')
         }
-        if (rawMime.length === 0 || rawMime.length > 12_000_000) return fail('VALIDATION', 'submitted message is empty or too large')
+        const mimeBytes = Buffer.byteLength(rawMime, 'utf8')
+        if (mimeBytes === 0 || mimeBytes > 12_000_000) {
+          await auditSign('denied', { reason: 'size', bytes: mimeBytes })
+          return fail('VALIDATION', 'submitted message is empty or too large')
+        }
         const user = await deps.store.getServiceUserByLogin(mailbox)
-        if (!user?.services.email) return fail('NOT_FOUND', 'mailbox not found')
+        if (!user?.services.email) {
+          await auditSign('denied', { reason: 'mailbox-not-found' })
+          return fail('NOT_FOUND', 'mailbox not found')
+        }
         const account = await deps.store.getAccount(user.accountId)
-        if (!account) return fail('NOT_FOUND', 'account not found')
-        await assertAccountCaller(caller, account, 'host.dkim-sign')
-        if (!deps.executor) return jsonResponse({ signed: false }, 404)
-        const signed = await signMailboxSubmission(deps.executor, mailbox, rawMime)
-        if (!signed) return jsonResponse({ signed: false })
+        if (!account) {
+          await auditSign('denied', { reason: 'account-not-found' })
+          return fail('NOT_FOUND', 'account not found')
+        }
+        try {
+          await assertAccountCaller(caller, account, 'host.dkim-sign')
+        } catch (error) {
+          await auditSign('denied', { reason: 'cross-account', accountId: account.id })
+          throw error
+        }
+        const fromDomains = submissionFromDomains(rawMime)
+        const domains = new Set((await deps.store.listDomains({ accountId: account.id })).map(domain => domain.name.toLowerCase()))
+        const mailboxDomain = mailbox.slice(mailbox.lastIndexOf('@') + 1)
+        if (!domains.has(mailboxDomain) || !fromDomains || fromDomains.some(domain => !domains.has(domain)) || new Set(fromDomains).size !== 1) {
+          await auditSign('denied', { reason: 'from-domain', fromDomain: fromDomains?.[0] ?? null })
+          return fail('FORBIDDEN', 'the From domain is not one of this account')
+        }
+        const fromDomain = fromDomains[0]!
+        if (!allowDkimSign(account.id)) {
+          await auditSign('denied', { reason: 'rate' })
+          return fail('FORBIDDEN', 'signing rate limit exceeded')
+        }
+        if (!deps.executor) {
+          await auditSign('failed', { reason: 'unavailable' })
+          return jsonResponse({ signed: false }, 404)
+        }
+        const signed = await signMailboxSubmission(deps.executor, mailbox, rawMime, fromDomain)
+        if (!signed) {
+          await auditSign('failed', { reason: 'unsigned', fromDomain })
+          return jsonResponse({ signed: false })
+        }
+        await auditSign('ok', { fromDomain, purpose: 'webmail-send' })
         return jsonResponse({ rawMime: signed })
       }
 
@@ -514,11 +581,14 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         if (!account) return fail('NOT_FOUND', 'account not found')
         await assertAccountCaller(caller, account, 'host.account-usage')
         if (!deps.executor) return jsonResponse({ available: false }, 404)
-        const usage = await readAccountUsage(deps.executor, { username: account.username, uid: account.uid, home: account.home })
+        let resources
+        try { resources = (await deps.store.getPlan(account.planId))?.resources }
+        catch { /* An unread assigned plan leaves enforcement unknown, preserving usage measurements. */ }
+        const usage = await readAccountUsage(deps.executor, { username: account.username, uid: account.uid, home: account.home, ...(resources ? { resources } : {}) })
         return jsonResponse(usage)
       }
 
-      const purgeMatch = /^\/accounts\/([a-z][a-z0-9]{2,15})\/purge$/.exec(pathname)
+      const purgeMatch = /^\/accounts\/([a-z][a-z0-9]{0,15})\/purge$/.exec(pathname)
       if ((method === 'GET' || method === 'POST') && purgeMatch) {
         await assertRootCaller(caller, 'account.purge')
         if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)
@@ -582,6 +652,11 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
             readServedCertificate: (servername?: string) => readServedCertificatePem('127.0.0.1', PANEL_LISTENER_PORT, 2000, servername),
             publicOrigin: () => readPublicOriginSync(),
           })
+          identity.observedLimits = unavailableHostLimits()
+          try {
+            const [accounts, plans] = await Promise.all([deps.store.listAccounts(), deps.store.listPlans()])
+            identity.observedLimits = await observeHostLimits(host, accounts, plans, '/home')
+          } catch { /* Missing account or plan evidence must not fall back to controller presence. */ }
           let configChecks: Awaited<ReturnType<typeof readHostConfigChecks>> = {}
           try {
             configChecks = await readHostConfigChecks(host)
@@ -644,7 +719,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         return jsonResponse({ service })
       }
 
-      const accountBackup = /^\/accounts\/([a-z][a-z0-9]{2,15})\/backups$/.exec(pathname)
+      const accountBackup = /^\/accounts\/([a-z][a-z0-9]{0,15})\/backups$/.exec(pathname)
       if (accountBackup && (method === 'GET' || method === 'POST')) {
         await assertRootCaller(caller, 'account.backup')
         if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)
@@ -699,15 +774,10 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
 
       if (method === 'GET' && pathname === '/analytics/io') {
         await assertRootCaller(caller, 'analytics.io')
-        if (deps.executor) {
-          const [accounts, plans] = await Promise.all([deps.store.listAccounts(), deps.store.listPlans()])
-          const plansById = new Map(plans.map((p) => [p.id, p]))
-          const snap = await ioEngine.sample(accounts, plansById, deps.executor, {
-            onEvent: (ev) => deps.reconciler.emit(ev),
-          })
-          return jsonResponse(snap)
-        }
-        return jsonResponse(ioEngine.latestSnapshot())
+        if ([...url.searchParams.keys()].length > 0) return fail('VALIDATION', 'resource reads do not accept caller-selected accounts, UIDs or paths')
+        const snapshot = await deps.store.readSnapshot()
+        const result = deps.ioResourcePipeline ? await deps.ioResourcePipeline.read(snapshot) : unavailableIoAnalytics('not-sampled')
+        return jsonResponse(result.available ? result.snapshot : result, result.available ? 200 : 503)
       }
 
       if (method === 'POST' && pathname === '/analytics/websites/ingest') {
@@ -739,7 +809,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         return jsonResponse(snap)
       }
 
-      const shellMatch = /^\/accounts\/([a-z][a-z0-9]{2,15})\/shell$/.exec(pathname)
+      const shellMatch = /^\/accounts\/([a-z][a-z0-9]{0,15})\/shell$/.exec(pathname)
       if (method === 'POST' && shellMatch) {
         const username = shellMatch[1]!
         const account =
@@ -781,7 +851,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         }
       }
 
-      const filesMatch = /^\/accounts\/([a-z][a-z0-9]{2,15})\/files$/.exec(pathname)
+      const filesMatch = /^\/accounts\/([a-z][a-z0-9]{0,15})\/files$/.exec(pathname)
       if (method === 'POST' && filesMatch) {
         const username = filesMatch[1]!
         const account =
@@ -878,7 +948,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         }
       }
 
-      const certificateMatch = /^\/accounts\/([a-z][a-z0-9]{2,15})\/certificates$/.exec(pathname)
+      const certificateMatch = /^\/accounts\/([a-z][a-z0-9]{0,15})\/certificates$/.exec(pathname)
       if (method === 'POST' && certificateMatch) {
         const username = certificateMatch[1]!
         const account = (await deps.store.getAccountByUsername(username)) ?? fail('NOT_FOUND', `account "${username}" not found`)
@@ -952,6 +1022,14 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       }
       return problemResponse(err, pathname)
     }
+  }
+
+  const fetch = async (req: Request): Promise<Response> => {
+    // Agent health authenticates/audits, so it has no anonymous maintenance bypass.
+    const denied = await lifecycleAdmissionResponse(req, { surface: 'agent' })
+    if (denied) return denied
+    try { return await withLifecycleWriterAdmission(() => fetchInner(req)) }
+    catch { return new Response(JSON.stringify({ error: 'Lifecycle writer admission is unavailable.' }), { status: 503, headers: { 'content-type': 'application/problem+json', 'retry-after': '5', 'cache-control': 'no-store' } }) }
   }
 
   return {

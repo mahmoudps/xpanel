@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { renderWebApp } from './app.ts'
-import { designPages, designReferenceRoutesEnabled, readDesignAdapter, readPanelPhpPage, renderDesignMain, renderDesignNav, renderHomeToolGrid } from './design-board.ts'
+import { designPages, designReferenceRoutesEnabled, readDesignAdapter, readPanelPhpPage, renderDesignMain, renderDesignNav, renderHomeToolGrid, renderDisabledScreen } from './design-board.ts'
 import { resolveWebDocumentRoute } from './document-routes.ts'
 import { renderPanelSurface } from './surfaces/xpanel.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
@@ -17,6 +17,30 @@ const withDesignPages = <T>(fn: () => T): T => {
 }
 
 describe('design board routes', () => {
+  it('denies navigation without context and separates admitted documents from qualified tools', () => {
+    expect(renderDesignNav('xwhm', 'en', '/whm', new Set())).not.toContain('href=')
+    const principal = { kind: 'reseller' as const, id: 'fixture-reseller', username: 'reseller' }
+    const context = { principal, reseller: { acl: ['list-accounts' as const] } }
+    const nav = renderDesignNav('xwhm', 'en', '/whm/accounts', new Set(), context)
+    expect(nav).toContain('href="/whm/accounts"')
+    expect(nav).toContain('data-nav-route="/whm/accounts" data-nav-wiring="soon"')
+    expect(nav).toContain('Coming soon')
+    for (const route of ['/whm/server/setup', '/whm/server/upgrade', '/whm/accounts/new', '/whm/security/firewall', '/whm/audit']) expect(nav).not.toContain(`href="${route}"`)
+    const qualified = renderDesignNav('xwhm', 'en', '/whm/accounts', new Set(['/whm/accounts']), context)
+    expect(qualified).toContain('data-nav-route="/whm/accounts" data-nav-wiring="live"')
+    expect(qualified).not.toContain('data-nav-route="/whm/server/upgrade"')
+  })
+
+  it.each(['en', 'ar'] as const)('renders an honest disabled %s document without invented records or an active action', locale => {
+    const html = renderDisabledScreen('<Unissued & unknown>', locale)
+    expect(html).toContain('&lt;Unissued &amp; unknown&gt;')
+    expect(html).toContain('data-wiring="soon"')
+    expect(html).toMatch(/<button[^>]*disabled[^>]*data-wiring="soon"/)
+    expect(html).not.toMatch(/<input|<form|data-design-record|alice|srv1/)
+    expect((html.match(/<h1\b/g) ?? []).length).toBe(1)
+    expect(html).toContain(locale === 'ar' ? 'قيد التفعيل' : 'Coming soon')
+  })
+
   afterEach(() => {
     delete process.env.XPANEL_DESIGN_PAGES
   })
@@ -92,7 +116,7 @@ describe('design board routes', () => {
 
   it('keeps the design specimens out of the product sidebar until the development flag is set', () => {
     expect(designReferenceRoutesEnabled()).toBe(false)
-    const nav = renderDesignNav('xpanel', 'en', '/home', new Set(['/home']))
+    const nav = renderDesignNav('xpanel', 'en', '/home', new Set(['/home']), { principal: { kind: 'user', id: 'fixture-owner', username: 'owner', accountId: 'fixture-account' }, disabledFeatures: new Set() })
     expect(nav).not.toContain('/design/system')
     expect(nav).not.toContain('/design/components')
     expect(nav).not.toContain('/design/navigation')
@@ -101,14 +125,18 @@ describe('design board routes', () => {
     expect(resolveWebDocumentRoute('/design/system')).toBeNull()
     const opened = withDesignPages(() => renderWebApp({ surface: 'xpanel', activeRoute: '/design/system', locale: 'en' }))
     expect(opened).toContain('data-design-page="/design/system"')
-    expect(opened).toContain('data-nav-route="/design/system"')
+    // Rendering a development specimen does not register it as an authorized product destination.
+    expect(opened).not.toContain('data-nav-route="/design/system"')
     expect(withDesignPages(() => resolveWebDocumentRoute('/design/components'))).toEqual({ surface: 'xpanel', activeRoute: '/design/components' })
   })
 
   it('serves the unwired routes from the product shell', () => {
     for (const route of ['/software/php', '/advanced/cron', '/files/backup', '/whm/security/ssh', '/whm/plans/features']) {
       const surface = route.startsWith('/whm') ? 'xwhm' as const : 'xpanel' as const
-      const html = renderWebApp({ surface, activeRoute: route, locale: 'en' })
+      const visibility = surface === 'xwhm'
+        ? { principal: { kind: 'root' as const, id: 'fixture-root', username: 'root' } }
+        : { principal: { kind: 'user' as const, id: 'fixture-owner', username: 'owner', accountId: 'fixture-account' }, disabledFeatures: new Set<string>() }
+      const html = renderWebApp({ surface, activeRoute: route, locale: 'en', visibility })
       expect(html).toContain(`data-design-page="${route}"`)
       expect(html).toContain('data-nav-wiring="soon"')
       expect(html).not.toMatch(/<form\b/)
