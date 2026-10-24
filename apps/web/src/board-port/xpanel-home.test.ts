@@ -126,9 +126,13 @@ describe('xPanel home board port', () => {
     assert.doesNotMatch(specimen, /aria-disabled="true"|Coming soon/)
   })
   it('keeps board sample data out of product code', () => {
-    for (const name of ['./xpanel-home.ts', './xmail-inbox.ts', './xmail-compose.ts']) {
+    for (const name of ['./xpanel-home.ts', './xmail-inbox.ts', './xmail-compose.ts', './xwhm-account-create.ts']) {
       const product = readFileSync(new URL(name, import.meta.url), 'utf8')
       for (const sample of ['alice-shop.com', '198.51.100.24', '1,431 today', 'Generation 142']) assert.ok(!product.includes(sample), `${name}: ${sample}`)
+    }
+    const create = readFileSync(new URL('./xwhm-account-create.ts', import.meta.url), 'utf8')
+    for (const sample of ['salma-studio.com', 'salma.haddad@example.org', 'q7Vt-Lm2x-Rk9p-Hd4w', '10.0.0.12', '10.0.0.21', 'xpanel-20017.slice', 'Generation 143', 'Generation 142', 'srv1.xpanel.test', 'v1.4.2', 'reseller1']) {
+      assert.ok(!create.includes(sample), sample)
     }
     const scripts = new URL('../../../../scripts/', import.meta.url)
     for (const entry of readdirSync(scripts).filter(entry => entry.startsWith('board-fidelity-'))) {
