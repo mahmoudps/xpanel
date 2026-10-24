@@ -811,11 +811,34 @@ async function paletteFilter(page, state, expect, observations) {
   observations.push({ check: 'palette-localized-filter-and-navigation', destination: '/files/manager', original_index: fileIndex, full_result_count: routes.length, localized_label: label, localized_expected_routes: expectedLocalizedRoutes, localized_observed_routes: localizedMatches, exact_route_query: '/files/manager', exact_route_result_count: 1, second_localized_match_keyboard_selection: state.locale === 'en' ? '/software/php' : null, zero_results: true, clear_recovery: true, arrow_wrap: true, actual_enter_navigation: true, back_context: true })
 }
 
+function paletteGeometryLog(outcome) {
+  if (!['palette-scroll-ar-1440', 'palette-alias-ar-1440'].includes(outcome.id)) return undefined
+  const pick = (value, keys) => value && Object.fromEntries(keys.filter(key => typeof value[key] === 'number' || typeof value[key] === 'string').map(key => [key, typeof value[key] === 'string' ? value[key].slice(0, 80) : value[key]]))
+  const documentKeys = ['scroll_y', 'document_height', 'body_height', 'client_width', 'viewport_width', 'gutter', 'root_overflow', 'body_overflow', 'active_tag', 'active_id']
+  const before = outcome.observations.find(value => value.check === 'palette-scroll-before-close-diagnostics')
+  const closed = outcome.observations.find(value => value.check === 'palette-internal-scroll-and-focus-return')
+  const alias = outcome.observations.find(value => value.check === 'authorized-alias-search-and-keyboard-navigation')
+  return {
+    before: pick(before?.scroll_before, documentKeys),
+    open: pick(before?.open, ['scroll_top', 'document_y', 'selected_top', 'selected_bottom', 'list_top', 'list_bottom', 'document_width', 'viewport_width']),
+    after_escape: pick(closed?.after_diagnostics, documentKeys),
+    controls: alias?.controls.slice(0, 3).map(value => ({ ...pick(value, ['role', 'width', 'height']), rect: pick(value.rect, ['x', 'y', 'top', 'right', 'bottom', 'left']), computed: pick(value.computed, ['height', 'min_height', 'box_sizing', 'transform']) })),
+    dialog_transform: alias?.dialog_transform?.slice(0, 80),
+    animations: alias?.animations.slice(0, 2).map(value => pick(value, ['play_state', 'current_time', 'progress', 'duration'])),
+  }
+}
+
+function paletteDocumentDiagnostics() {
+  const root = document.documentElement, body = document.body, active = document.activeElement
+  return { scroll_y: scrollY, document_height: root.scrollHeight, body_height: body.scrollHeight, client_width: root.clientWidth, viewport_width: innerWidth, gutter: innerWidth - root.clientWidth, root_overflow: getComputedStyle(root).overflow, body_overflow: getComputedStyle(body).overflow, active_tag: active?.tagName, active_id: active?.id }
+}
+
 async function paletteScroll(page, state, expect, observations, capture) {
   await page.locator('#main-content:visible').first().evaluate(element => element.focus({ preventScroll: true }))
   await page.evaluate(() => scrollTo(0, Math.min(180, Math.max(0, document.documentElement.scrollHeight - innerHeight))))
   await frames(page)
-  const before = await page.evaluate(() => scrollY)
+  const beforeDiagnostics = await page.evaluate(paletteDocumentDiagnostics)
+  const before = beforeDiagnostics.scroll_y
   await page.keyboard.press('Control+k')
   await expect(page.locator('[data-cmdk-search]')).toBeFocused()
   const options = page.locator(paletteOptions), count = await options.count()
@@ -830,9 +853,10 @@ async function paletteScroll(page, state, expect, observations, capture) {
     const list = element.getBoundingClientRect(), selected = element.querySelector('[aria-selected="true"]').getBoundingClientRect()
     return { scroll_top: element.scrollTop, document_y: scrollY, selected_top: selected.top, selected_bottom: selected.bottom, list_top: list.top, list_bottom: list.bottom, document_width: document.documentElement.scrollWidth, viewport_width: innerWidth }
   })
+  observations.push({ check: 'palette-scroll-before-close-diagnostics', scroll_before: beforeDiagnostics, open: final })
   assert.ok(final.scroll_top > 100, 'Arrow navigation must scroll the result list')
   assert.ok(final.selected_top >= final.list_top - 1 && final.selected_bottom <= final.list_bottom + 1, 'The selected result must remain inside the list viewport')
-  assert.ok(Math.abs(final.document_y - before) <= 1, 'Scrolling the result list must preserve the background document position')
+  assert.ok(Math.abs(final.document_y - before) <= 1, `Scrolling the result list must preserve the background document position; ${JSON.stringify({ before: beforeDiagnostics, open: final, delta: final.document_y - before })}`)
   assert.ok(final.document_width <= final.viewport_width + 1, 'The palette must fit the actual viewport')
   const routeAlignment = await page.locator(`${paletteOptions}[aria-selected="true"]`).evaluate(option => {
     const title = option.querySelector('strong'), route = option.querySelector('code bdi')
@@ -844,8 +868,10 @@ async function paletteScroll(page, state, expect, observations, capture) {
   await page.keyboard.press('Escape')
   await expect(page.locator('[data-xp-cmdk]')).toBeHidden()
   await expect(page.locator('#main-content:visible').first()).toBeFocused()
-  assert.ok(Math.abs(await page.evaluate(() => scrollY) - before) <= 1)
-  observations.push({ check: 'palette-internal-scroll-and-focus-return', result_count: count, scroll_before: before, initial, final, screenshot, escape_return: 'main-content', route_alignment: routeAlignment })
+  const afterDiagnostics = await page.evaluate(paletteDocumentDiagnostics)
+  observations.push({ check: 'palette-internal-scroll-and-focus-return', result_count: count, scroll_before: before, initial, final, screenshot, escape_return: 'main-content', route_alignment: routeAlignment, before_diagnostics: beforeDiagnostics, after_diagnostics: afterDiagnostics })
+  assert.ok(Math.abs(afterDiagnostics.scroll_y - before) <= 1, `Closing the palette must preserve the background document position; ${JSON.stringify({ before: beforeDiagnostics, open: final, after: afterDiagnostics, delta: afterDiagnostics.scroll_y - before })}`)
+
   assert.equal(routeAlignment.route, '/whm/preferences', 'The measured metadata belongs to the actual selected navigation destination')
   assert.equal(routeAlignment.route_direction, 'ltr', 'Technical route content stays isolated LTR')
   assert.ok(routeAlignment.title_ink.width > 0 && routeAlignment.route_ink.width > 0, 'Measure actual nonempty title and route ink')
@@ -888,7 +914,15 @@ async function paletteAlias(page, state, expect, observations) {
       heading_query_group_gap: q.top - Math.max(h.bottom, c.bottom),
       query_results_group_gap: l.top - q.bottom,
       heading_control_edge_delta: rtl ? Math.abs(heading.right - q.right) : Math.abs(heading.left - q.left),
-      controls: [q, c, result].map(rect => ({ width: rect.width, height: rect.height })),
+      controls: [q, c, result].map((rect, index) => {
+        const element = [input, close, option][index], style = getComputedStyle(element)
+        return { role: ['input', 'close', 'option'][index], width: rect.width, height: rect.height, rect: { x: rect.x, y: rect.y, top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left }, computed: { height: style.height, min_height: style.minHeight, box_sizing: style.boxSizing, transform: style.transform } }
+      }),
+      dialog_transform: border.transform,
+      animations: document.querySelector('[data-xp-cmdk]').getAnimations({ subtree: true }).map(animation => {
+        const timing = animation.effect?.getComputedTiming()
+        return { play_state: animation.playState, current_time: animation.currentTime, progress: timing?.progress, duration: timing?.duration }
+      }),
       query_visible_label: [...document.querySelectorAll('label[for="xp-cmdk-input"]')].some(label => !label.classList.contains('xp-sr-only')),
       technical_route_direction: option.querySelector('code bdi')?.getAttribute('dir'),
       result_list_role: list.getAttribute('role'),
@@ -909,7 +943,7 @@ async function paletteAlias(page, state, expect, observations) {
   assert.ok(Math.abs(geometry.heading_query_group_gap - 24) <= 1, 'The header and query are sibling groups with 24px spacing')
   assert.ok(Math.abs(geometry.query_results_group_gap - 24) <= 1, 'The query and result list are sibling groups with 24px spacing')
   assert.ok(geometry.heading_control_edge_delta <= 1, 'The visible heading and query control share the logical content edge')
-  for (const control of geometry.controls) assert.ok(control.width >= 44 && control.height >= 44, 'Actual palette controls retain 44px targets')
+  for (const control of geometry.controls) assert.ok(control.width >= 44 && control.height >= 44, `Actual palette controls retain 44px targets; ${JSON.stringify({ control, all_controls: geometry.controls, dialog_transform: geometry.dialog_transform, animations: geometry.animations })}`)
   assert.equal(geometry.technical_route_direction, 'ltr')
   assert.equal(geometry.result_list_role, 'listbox')
 }
@@ -1228,7 +1262,7 @@ export async function runNavigationAcceptance({ output, filter } = {}) {
         await page.screenshot({ path: join(destination, outcome.screenshot), fullPage: true }).catch(error => { outcome.screenshot_error = String(error.message).slice(0, 200) })
         await context.close()
         outcomes.push(outcome)
-        process.stdout.write(`${JSON.stringify({ id: state.id, status: outcome.status, failure: outcome.failure?.message })}\n`)
+        process.stdout.write(`${JSON.stringify({ id: state.id, status: outcome.status, failure: outcome.failure?.message, geometry: paletteGeometryLog(outcome) })}\n`)
       }
     }
   } catch (error) {
