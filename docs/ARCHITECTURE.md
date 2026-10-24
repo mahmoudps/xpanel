@@ -121,6 +121,8 @@ Transfers require durable leases, checkpoints, idempotent retries and a recovera
 
 The catalog assessor uses `researched`, `implemented`, `integrated`, `verified` and `out-of-scope` states. Production tool navigation admits only qualifying verified capabilities. Source/artifact identity, environment, acceptance criteria and outcomes must match; a test name or fixture page cannot promote delivery.
 
+An original signed application catalog and the account installer are in scope. Domain purchase, vendor licence storefronts, and third-party commercial installers stay out of scope. A store screen that lists nothing and disables install is not evidence that an application was installed.
+
 The read-only workspace fallback can display the signed-in identity and a bounded whitelist of authorized account/plan fields without qualifying hosting tools. It does not render unfiltered provider payloads or imply service health. Seven administrative destinations have separate root-only navigation metadata; their screens and actions remain unimplemented. Navigation definitions and synthetic fixture pages are not production feature delivery.
 
 Release packaging selects runtime inputs explicitly, rejects credentials and unsafe archive entries, checks runtime module closure, and records manifests and dependency provenance. Reference material and development dependencies do not belong in the production artifact. Archive verification, native build provenance, installation and live service acceptance are separate steps.

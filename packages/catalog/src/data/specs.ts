@@ -2007,11 +2007,14 @@ export const specs: ToolSpec[] = [
   {
     "id": "site-software",
     "behaviors": [
-      "Toggle for email notices about available updates",
-      "Per-addon tabs: install (quick, or advanced with URL, admin user, password, email), manage installed instances, upgrade an instance, uninstall an instance",
-      "Extra info: version details, license terms, security notes"
+      "Account store home lists only applications from a signed catalog the provider has enabled",
+      "Application detail shows description, screenshots, version, requirements, requested permissions, and changelog from that catalog",
+      "Install asks for a domain and path, optional database creation, an admin user, and consent to the requested permissions",
+      "Progress reports steps, a determinate percent or an indeterminate wait, a log, cancel, success, and failure with retry",
+      "Installed applications show version, update availability, auto-update, backup-before-update, open and admin links, and uninstall after a danger confirmation",
+      "Updates can run in bulk with per-item progress and roll back to the previous version"
     ],
-    "acceptance": "Not implemented: the route /software/site-software returns NOT_FOUND and no feature key is offered in plans.",
+    "acceptance": "The account store screens render an empty catalog and disable install, update, rollback, and uninstall until a signed catalog and installer are connected. They do not report a successful install. Softaculous and Installatron stay out of scope.",
     "source": "https://docs.cpanel.net/cpanel/software/site-software/",
     "upstreamFeatureKey": "addoncgi",
     "upstreamAcl": "",
@@ -4002,9 +4005,11 @@ export const specs: ToolSpec[] = [
   {
     "id": "tweak-site-software",
     "behaviors": [
-      "Controls the legacy script catalog"
+      "Catalog sources and the signing keys trusted for those sources",
+      "Enable or disable each catalog application",
+      "Per-plan feature keys that decide which applications an account may install"
     ],
-    "acceptance": "Not built.",
+    "acceptance": "The root catalog screen lists no source, signing key, or application until those records are read. Enable, disable, and feature-key writes stay disabled and do not report success.",
     "source": "https://docs.cpanel.net/whm/server-configuration/tweak-settings/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
