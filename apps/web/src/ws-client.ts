@@ -1260,6 +1260,12 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       if (contactEmail) body.contactEmail = contactEmail;
       var ipv6 = value('ipv6');
       if (ipv6) body.ipv6 = ipv6;
+      var shellButton = form.querySelector('[data-shell-choice][aria-pressed="true"]');
+      var shellChoice = shellButton && shellButton.getAttribute('data-shell-choice');
+      if (shellChoice === 'none' || shellChoice === 'jailed') body.shell = shellChoice;
+      var ownerButton = form.querySelector('[data-owner-choice][aria-pressed="true"]');
+      var ownerChoice = ownerButton && ownerButton.getAttribute('data-owner-choice');
+      if (ownerChoice) body.ownerId = ownerChoice;
       var submittedValues = controls.map(function (state) {
         return state.element.name === 'password' ? '' : state.element.value;
       });

@@ -109,14 +109,13 @@ async function createAccountGate(page, host, state, result, destination, expect)
   const password = form.locator('[name="password"]')
   assert.equal(await password.getAttribute('type'), 'password')
   const submit = form.locator('button[type="submit"]')
-  const fields = await form.evaluate(form => [...form.querySelectorAll('.xp-accounts__field')].map(field => {
-    const label = field.querySelector('label'), value = field.querySelector('input,select')
-    const a = label.getBoundingClientRect(), b = value.getBoundingClientRect()
-    return { gap: b.top - a.bottom, left: Math.abs(a.left - b.left), width: b.width, height: b.height }
+  const named = await form.evaluate(form => ['username', 'primaryDomain', 'contactEmail', 'password', 'planId', 'ipAssignment', 'ipv6'].every(name => form.querySelector('[name="' + name + '"]')))
+  assert.equal(named, true)
+  const fields = await form.evaluate(form => [...form.querySelectorAll('input,select,button')].filter(control => control.getAttribute('name') !== 'planId').map(control => {
+    const rect = control.getBoundingClientRect()
+    return { name: control.getAttribute('name') || control.getAttribute('data-plan-choice') || control.getAttribute('data-shell-choice') || control.getAttribute('data-owner-choice') || control.type, width: rect.width, height: rect.height }
   }))
-  assert.equal(fields.length, 6)
-  assert.ok(await form.evaluate(form => form.getBoundingClientRect().width <= 640.5), 'The single-column form stays within a readable desktop measure')
-  for (const field of fields) assert.ok(Math.abs(field.gap - 8) < 1 && field.left < 1 && field.width >= 44 && field.height >= 44)
+  for (const field of fields) assert.ok(field.height >= 44 && field.width >= 44, `${field.name} is ${field.width}x${field.height}`)
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
   result.fields = fields
   await page.screenshot({ path: join(destination, 'screenshots/' + state.id + '-form.png'), fullPage: true })
@@ -191,7 +190,12 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
   const { chromium, expect } = await import('@playwright/test')
   let browser, version
   try {
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath(), timeout: 20000 })
+    let executable = '/opt/google/chrome/chrome'
+    try {
+      const bundled = chromium.executablePath()
+      if (existsSync(bundled)) executable = bundled
+    } catch { /* the system Chrome is the fallback when Playwright has no browser */ }
+    browser = await chromium.launch({ headless: true, executablePath: executable, timeout: 20000 })
     version = browser.version()
     for (const state of selected) {
       const result = { ...state, status: 'running', page_errors: [], requests: [] }

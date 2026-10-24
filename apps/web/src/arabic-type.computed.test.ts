@@ -7,8 +7,10 @@ import { renderFidelityDocument as renderHome, renderLiveDocument as renderHomeL
 import { renderInbox, xmailInboxFromProps } from './board-port/xmail-inbox.ts'
 import { renderFidelityDocument as renderInboxFidelity, renderLiveDocument as renderInboxLive } from './board-port/xmail-inbox.fixture.ts'
 import { renderFidelityDocument as renderComposeFidelity, renderLiveDocument as renderComposeLive } from './board-port/xmail-compose.fixture.ts'
+import { renderCreateDocument, whmAccountCreateFromProps } from './board-port/xwhm-account-create.ts'
 import { renderMailSurface } from './surfaces/xmail.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
+import { defaultPlan } from '@xpanel/core'
 import { DESIGN_TOKENS_CSS } from './tokens.ts'
 import playwright from '../../../node_modules/@playwright/test/index.js'
 
@@ -267,6 +269,22 @@ const productDocument = (body: string, locale: 'ar' | 'en' = 'ar'): string => {
   return `<!doctype html><html lang="${ar ? 'ar' : 'en'}" dir="${ar ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>${DESIGN_TOKENS_CSS}</style></head><body>${body}</body></html>`
 }
 
+const sentenceMono = (): string[] => {
+  const root = globalThis as unknown as Dom
+  const bad: string[] = []
+  const walk = (el: DomEl): void => {
+    for (const node of Array.from(el.childNodes)) {
+      if (node.nodeType === 3 && /[\u0600-\u06FF]/.test(node.nodeValue ?? '') && !/[A-Za-z@/\\]/.test(node.nodeValue ?? '')) {
+        const font = root.getComputedStyle(el).fontFamily
+        const first = font.split(',')[0] ?? ''
+        if (first.includes('Mono') || first.includes('monospace')) bad.push((node.nodeValue ?? '').trim().slice(0, 40))
+      } else if (node.nodeType === 1) walk(node as DomEl)
+    }
+  }
+  walk(root.document.body)
+  return bad
+}
+
 const pageScroll = (): { scroll: number; inner: number } => {
   const root = globalThis as unknown as Dom
   return { scroll: root.document.documentElement.scrollWidth, inner: root.innerWidth }
@@ -350,6 +368,29 @@ const auditLog = (locale: 'ar' | 'en' = 'ar'): string => productDocument(renderW
     { id: '2', at: '2026-10-22T13:31:00Z', actor: 'root', action: 'mailbox.created', target: 'service-user:mbxabc', detail: {}, outcome: 'ok' },
     { id: '3', at: '2026-10-22T13:02:00Z', actor: 'alice', action: 'file.write', target: longTarget, detail: {}, outcome: 'ok' },
   ],
+}), locale)
+
+const createShaped = (locale: 'ar' | 'en'): string => renderCreateDocument(whmAccountCreateFromProps({
+  locale,
+  principal: { kind: 'root', id: 'root', username: 'root' },
+  plans: [defaultPlan({ id: 'shaped-plan', name: 'department.with.a.very.long.name', featureListId: 'shaped-features' })],
+  accounts: [],
+  resellers: [],
+  draft: {
+    username: 'department',
+    domain: 'department.with.a.very.long.name.example.test',
+    email: 'department.with.a.very.long.name@example.test',
+  },
+}))
+
+const createSurface = (locale: 'ar' | 'en'): string => productDocument(renderWhmSurface({
+  locale,
+  principal: { kind: 'root', id: 'root', username: 'root' },
+  activeRoute: '/whm/accounts/new',
+  plans: [defaultPlan({ id: 'shaped-plan', name: 'department.with.a.very.long.name', featureListId: 'shaped-features' })],
+  accounts: [],
+  resellers: [],
+  hostname: 'department.with.a.very.long.name.example.test',
 }), locale)
 
 const mailFilters = (locale: 'ar' | 'en' = 'ar'): string => productDocument(renderMailSurface({
@@ -487,6 +528,10 @@ describe('Arabic computed type', () => {
       ['audit-en', auditLog('en')],
       ['filters-ar', mailFilters('ar')],
       ['filters-en', mailFilters('en')],
+      ['create-shaped-ar', createShaped('ar')],
+      ['create-shaped-en', createShaped('en')],
+      ['create-surface-ar', createSurface('ar')],
+      ['create-surface-en', createSurface('en')],
     ]
     try {
       for (const [screen, html] of screens) {
@@ -503,10 +548,14 @@ describe('Arabic computed type', () => {
         if (engine) {
           assert.ok(engine.left >= -1 && engine.right <= engine.inner + 1, `${screen} engine ${engine.left}..${engine.right} in ${engine.inner}`)
         }
+        if (screen.endsWith('-ar') && screen.startsWith('create-')) {
+          const mono = await page.evaluate(sentenceMono)
+          assert.deepEqual(mono, [], `${screen} arabic sentence in mono: ${mono.join(' | ')}`)
+        }
         await page.close()
       }
     } finally {
       await browser.close()
     }
-  }, 60_000)
+  }, 120_000)
 })

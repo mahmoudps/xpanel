@@ -29,6 +29,7 @@ import {
 import { auditActionHtml, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
 import { isArabicSentence } from '../arabic-type.ts'
 import { renderWhmDashboard, whmDashboardFromProps, type DashboardHostSample } from '../board-port/xwhm-dashboard.ts'
+import { renderWhmAccountCreate, whmAccountCreateFromProps } from '../board-port/xwhm-account-create.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
@@ -178,6 +179,18 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
     certificates: props.certificates, rollbackGenerationId: props.rollbackGenerationId,
     ...(props.generationActivatedAt ? { generationActivatedAt: props.generationActivatedAt } : {}),
     ...(props.nearLimits ? { nearLimits: props.nearLimits } : {}),
+  })), locale)
+
+  if (section === 'create-account') return ensureAccessibleSurfaceHtml(renderWhmAccountCreate(whmAccountCreateFromProps({
+    locale,
+    principal,
+    hostname: props.hostname,
+    version: props.version,
+    generationId: props.generationId,
+    plans: props.plans,
+    accounts: props.accounts,
+    resellers: props.resellers,
+    activeReseller: props.activeReseller ?? null,
   })), locale)
 
   const rawHtml = renderSurfaceShell({
@@ -340,8 +353,8 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
         </div>
         <p class="xp-help" data-host-info-status role="status"></p>
       </section>` : ''}
-      ${section === 'accounts' || section === 'create-account' ? `
-      <section class="xp-card xp-accounts${section === 'create-account' ? ' xp-accounts--create' : ''}" id="whm-accounts" data-section="accounts-isolation" data-accounts-workspace aria-labelledby="whm-accounts-heading">
+      ${section === 'accounts' ? `
+      <section class="xp-card xp-accounts" id="whm-accounts" data-section="accounts-isolation" data-accounts-workspace aria-labelledby="whm-accounts-heading">
         <div class="xp-card__header xp-accounts__header">
           <h1 id="whm-accounts-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
           ${section === 'accounts' ? `<span class="xp-help xp-tabular">${isAr ? 'الحسابات: ' + accounts.length : accounts.length + (accounts.length === 1 ? ' account' : ' accounts')}</span>` : ''}
@@ -492,47 +505,6 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           </div>
           </form>
         </dialog>` : ''}
-        ${section === 'create-account' ? `<form class="xp-form-group" id="whm-create-account-drawer" action="/api/accounts" method="post" data-create-account-form="true">
-          <div class="xp-accounts__field">
-          <label class="xp-label" for="new-acc-username">${isAr ? 'اسم المستخدم' : 'Username'}</label>
-          <input id="new-acc-username" name="username" type="text" class="xp-input xp-mono" dir="ltr" required pattern="[a-z][a-z0-9]{2,15}" placeholder="salma" />
-          </div>
-          <div class="xp-accounts__field">
-          <label class="xp-label" for="new-acc-domain">${isAr ? 'النطاق الأساسي' : 'Primary domain'}</label>
-          <input id="new-acc-domain" name="primaryDomain" type="text" class="xp-input xp-mono" dir="ltr" required placeholder="salma.studio" />
-          </div>
-          <div class="xp-accounts__field">
-          <label class="xp-label" for="new-acc-contact">${isAr ? 'بريد التواصل' : 'Contact email'}</label>
-          <input id="new-acc-contact" name="contactEmail" type="email" class="xp-input" dir="ltr" autocomplete="email" inputmode="email" spellcheck="false" />
-          </div>
-          <div class="xp-accounts__field">
-          <label class="xp-label" for="new-acc-plan">${isAr ? 'خطة الاستضافة' : 'Hosting plan'}</label>
-          <select id="new-acc-plan" name="planId" class="xp-select" required>${plans.map(plan => `<option value="${escapeHtml(plan.id)}">${escapeHtml(formatDisplayName(plan.name))}</option>`).join('')}</select>
-          </div>
-          <div class="xp-accounts__field">
-            <label class="xp-label" for="new-acc-password">${isAr ? 'كلمة المرور' : 'Password'}</label>
-            <input id="new-acc-password" name="password" type="password" class="xp-input" autocomplete="new-password" minlength="8" required aria-describedby="new-acc-password-help" />
-            <span class="xp-help" id="new-acc-password-help">${isAr ? '8 أحرف على الأقل.' : 'At least 8 characters.'}</span>
-          </div>
-          <div class="xp-accounts__field">
-          <label class="xp-label" for="new-acc-ipv4">${isAr ? 'تعيين IPv4' : 'IPv4 assignment'}</label>
-          <select id="new-acc-ipv4" name="ipAssignment" class="xp-select" required aria-describedby="new-acc-ipv4-address new-acc-ipv4-status">
-            <option value="shared">${isAr ? 'المشترك الافتراضي' : 'Default shared'}</option>
-            <option value="dedicated:auto" disabled>${isAr ? 'مخصص تلقائي' : 'Dedicated · Automatic'}</option>
-          </select>
-          <div class="xp-help">
-            <output class="xp-field-value xp-mono" data-account-ip-preview hidden><bdi id="new-acc-ipv4-address" dir="ltr" style="display:inline" data-account-ip-address></bdi></output>
-            <span id="new-acc-ipv4-status" data-account-ip-status role="status" aria-live="polite">${isAr ? 'جارٍ تحميل العناوين…' : 'Loading IP availability…'}</span>
-          </div>
-          <button type="button" class="xp-btn xp-btn--ghost" style="justify-self:start" data-account-ip-refresh>${isAr ? 'تحديث العناوين' : 'Refresh IP availability'}</button>
-          </div>
-          <div class="xp-accounts__field">
-          <label class="xp-label" for="new-acc-ipv6">${isAr ? 'عنوان IPv6 (اختياري)' : 'IPv6 address (optional)'}</label>
-          <input id="new-acc-ipv6" name="ipv6" type="text" class="xp-input xp-mono" dir="ltr" value="" />
-          </div>
-          <p class="xp-help" data-account-create-status role="status" aria-live="polite" tabindex="-1" hidden></p>
-          <button type="submit" class="xp-btn xp-btn--primary" ${plans.length && (isRoot || heldAcls.has('create-account')) ? '' : 'disabled'}>${escapeHtml(t(locale, 'accounts.create'))}</button>
-        </form>` : ''}
       </section>
 
 ` : ''}
