@@ -1,9 +1,10 @@
 /// <reference path="../../test/gate/pngjs.d.ts" />
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { createServer } from 'node:http'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { get as httpGet } from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'vitest'
@@ -221,6 +222,20 @@ interface GateRow {
   negative: string
   negativePass: boolean
   sha256: { board: string; app: string; diff: string }
+  capture: {
+    board: CaptureSide
+    app: CaptureSide
+    repeatBoardPngSha: string | null
+    repeatPixelsMatch: boolean
+  }
+}
+
+interface CaptureSide {
+  pid: number
+  url: string
+  responseSha256: string
+  domSha256: string
+  pngChunks: string[]
 }
 
 const screens: readonly GateScreen[] = [
@@ -244,40 +259,57 @@ interface Page {
   close: () => Promise<void>
 }
 
-const serveDir = (dir: string, indexFile: string) => new Promise<{ port: number; close: () => void }>((resolve) => {
-  const server = createServer(async (req, res) => {
-    const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-    const file = path.join(dir, decodeURIComponent(url.pathname === '/' ? `/${indexFile}` : url.pathname))
-    try {
-      const body = await readFile(file)
-      res.writeHead(200, { 'content-type': file.endsWith('.js') ? 'text/javascript' : 'text/html; charset=utf-8' })
-      res.end(body)
-    } catch {
-      res.writeHead(404)
-      res.end('missing')
+const gateServer = path.join(import.meta.dirname, '../../test/gate/static-server.mjs')
+
+const serveChild = (args: string[]) => new Promise<{ port: number; pid: number; close: () => void }>((resolve, reject) => {
+  const child = spawn(process.execPath, [gateServer, ...args], { stdio: ['ignore', 'pipe', 'pipe'] })
+  let text = ''
+  let settled = false
+  const fail = (message: string) => {
+    if (settled) return
+    settled = true
+    clearTimeout(timer)
+    child.kill()
+    reject(new Error(message))
+  }
+  const timer = setTimeout(() => fail(`gate server did not listen: ${text}`), 5000)
+  child.stdout.on('data', (chunk: Buffer) => {
+    text += chunk.toString()
+    const match = /PORT (\d+)/.exec(text)
+    const port = match?.[1]
+    if (port) {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve({ port: Number(port), pid: child.pid ?? 0, close: () => { child.kill() } })
     }
   })
-  server.listen(0, '127.0.0.1', () => {
-    const address = server.address()
-    resolve({ port: typeof address === 'object' && address ? address.port : 0, close: () => server.close() })
-  })
+  child.stderr.on('data', (chunk: Buffer) => { text += chunk.toString() })
+  child.on('exit', (code) => { if (!/PORT \d+/.test(text)) fail(`gate server exited ${code}: ${text}`) })
 })
 
-const servePages = (pages: Map<string, string>) => new Promise<{ port: number; close: () => void }>((resolve) => {
-  const server = createServer((req, res) => {
-    const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-    const html = pages.get(`${url.pathname}${url.search}`)
-    if (!html) { res.writeHead(404); res.end('missing'); return }
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-    res.end(html)
-  })
-  server.listen(0, '127.0.0.1', () => {
-    const address = server.address()
-    resolve({ port: typeof address === 'object' && address ? address.port : 0, close: () => server.close() })
-  })
+const fetchBody = (url: string) => new Promise<Buffer>((resolve, reject) => {
+  httpGet(url, (res) => {
+    const chunks: Buffer[] = []
+    res.on('data', (chunk: Buffer) => chunks.push(chunk))
+    res.on('end', () => resolve(Buffer.concat(chunks)))
+  }).on('error', reject)
 })
 
-const sha256 = (buf: Buffer) => createHash('sha256').update(buf).digest('hex')
+const pngChunks = (png: Buffer): string[] => {
+  const types: string[] = []
+  let offset = 8
+  while (offset + 8 <= png.length) {
+    const length = png.readUInt32BE(offset)
+    const type = png.toString('ascii', offset + 4, offset + 8)
+    types.push(type)
+    offset += 12 + length
+    if (type === 'IEND') break
+  }
+  return types
+}
+
+const sha256 = (buf: Buffer | string) => createHash('sha256').update(buf).digest('hex')
 
 describe('product-route board gate', () => {
   it.skipIf(chromeExecutable === undefined || !existsSync(designRoot))('proves the product route, refuses a byte-identical pair, and fails a 1px pad', async () => {
@@ -291,7 +323,9 @@ describe('product-route board gate', () => {
       pages.set(screen.route, html)
       pages.set(`${screen.route}&gate=pad`, padPort(html, screen.port))
     }
-    const appServer = await servePages(pages)
+    const pageFile = path.join(outDir, 'pages.json')
+    await writeFile(pageFile, JSON.stringify(Object.fromEntries(pages)))
+    const appServer = await serveChild(['map', pageFile])
     const browser = await (chromium as unknown as { launch: (options: { executablePath: string; args: string[] }) => Promise<Browser> }).launch({
       executablePath: chromeExecutable as string,
       args: ['--font-render-hinting=none', '--disable-lcd-text'],
@@ -299,7 +333,7 @@ describe('product-route board gate', () => {
     const report: GateRow[] = []
     try {
       for (const screen of screens) {
-        const boardServer = await serveDir(path.join(designRoot, screen.board[0]), screen.board[1])
+        const boardServer = await serveChild(['dir', path.join(designRoot, screen.board[0]), screen.board[1]])
         const shoot = async (url: string, product: boolean) => {
           const page = await browser.newPage({ viewport: screen.viewport, deviceScaleFactor: 1 })
           await page.goto(url, { waitUntil: 'networkidle' })
@@ -311,6 +345,7 @@ describe('product-route board gate', () => {
             dcRoot: document.getElementById('dc-root') ? 1 : 0,
             xdc: document.querySelector('x-dc') ? 1 : 0,
             scName: document.querySelectorAll('[data-sc-name]').length,
+            dom: document.documentElement.outerHTML,
           }))
           await page.evaluate(async () => {
             document.documentElement.style.overflow = 'hidden'
@@ -322,9 +357,14 @@ describe('product-route board gate', () => {
           await page.close()
           return { png, facts }
         }
-        const board = await shoot(`http://127.0.0.1:${boardServer.port}/${screen.board[1]}`, false)
-        const app = await shoot(`http://127.0.0.1:${appServer.port}${screen.route}`, true)
+        const boardUrl = `http://127.0.0.1:${boardServer.port}/${encodeURI(screen.board[1])}`
+        const appUrl = `http://127.0.0.1:${appServer.port}${screen.route}`
+        const board = await shoot(boardUrl, false)
+        const app = await shoot(appUrl, true)
         const padded = await shoot(`http://127.0.0.1:${appServer.port}${screen.route}&gate=pad`, true)
+        const repeat = sameCapture(board.png, app.png) ? await shoot(boardUrl, false) : null
+        const boardResponse = await fetchBody(boardUrl)
+        const appResponse = await fetchBody(appUrl)
         boardServer.close()
         assert.equal(app.facts.surface, screen.surface)
         assert.equal(app.facts.port, screen.port)
@@ -354,10 +394,27 @@ describe('product-route board gate', () => {
           negative: `${(negative.ratio * 100).toFixed(2)}%`,
           negativePass: negative.pass,
           sha256: { board: sha256(board.png), app: sha256(app.png), diff: sha256(score.diff) },
+          capture: {
+            board: { pid: boardServer.pid, url: boardUrl, responseSha256: sha256(boardResponse), domSha256: sha256(board.facts.dom), pngChunks: pngChunks(board.png) },
+            app: { pid: appServer.pid, url: appUrl, responseSha256: sha256(appResponse), domSha256: sha256(app.facts.dom), pngChunks: pngChunks(app.png) },
+            repeatBoardPngSha: repeat ? sha256(repeat.png) : null,
+            repeatPixelsMatch: false,
+          },
         }
         report.push(row)
+        assert.notEqual(row.capture.board.pid, row.capture.app.pid, `${screen.id} board and product were the same process`)
+        assert.notEqual(new URL(boardUrl).port, new URL(appUrl).port, `${screen.id} captures shared a port`)
+        assert.notEqual(row.capture.board.responseSha256, row.capture.app.responseSha256, `${screen.id} HTTP bodies matched`)
+        assert.notEqual(row.capture.board.domSha256, row.capture.app.domSha256, `${screen.id} rendered DOM matched`)
         assert.equal(row.negativePass, false, `${screen.id} 1px pad must fail the gate, got ${row.negative}`)
         assert.equal(row.accepted, row.pass && !byteIdentical, `${screen.id} acceptance did not follow the gate`)
+        if (byteIdentical && repeat) {
+          const repeatScore = scoreGate(board.png, repeat.png)
+          assert.equal(repeatScore.mismatched, 0, `${screen.id} second board navigation changed pixels`)
+          assert.equal(row.capture.board.pngChunks.includes('tIME'), false, `${screen.id} PNG has a timestamp chunk`)
+          assert.equal(row.capture.app.pngChunks.includes('tIME'), false)
+          row.capture.repeatPixelsMatch = true
+        }
       }
       for (const id of ['home-ltr', 'home-phone']) {
         const row = report.find(item => item.id === id)
