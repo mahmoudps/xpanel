@@ -3,6 +3,8 @@ import type {
   Account,
   AuditEntry,
   Certificate,
+  Domain,
+  FeatureList,
   FirewallRule,
   IoAnalyticsSnapshot,
   MailIpConfig,
@@ -29,6 +31,7 @@ import {
 import { auditActionHtml, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
 import { isArabicSentence } from '../arabic-type.ts'
 import { renderWhmDashboard, whmDashboardFromProps, type DashboardHostSample } from '../board-port/xwhm-dashboard.ts'
+import { renderWhmPlans, whmPlansFromSurface } from '../board-port/xwhm-plans.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
@@ -99,7 +102,11 @@ export interface WhmSurfaceProps {
   generationActivatedAt?: string
   nearLimits?: Array<{ name: string; note: string }>
   certificates?: readonly Pick<Certificate, 'names' | 'notAfter'>[]
+  featureLists?: readonly FeatureList[]
+  domains?: readonly Domain[]
   actionState?: AsyncActionBannerProps
+  /** Harness only. Board-sample model for the pixel gate. Production leaves this unset. */
+  plansPort?: Record<string, unknown>
 }
 
 const ALL_RESELLER_ACLS: readonly ResellerAcl[] = [
@@ -178,6 +185,21 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
     certificates: props.certificates, rollbackGenerationId: props.rollbackGenerationId,
     ...(props.generationActivatedAt ? { generationActivatedAt: props.generationActivatedAt } : {}),
     ...(props.nearLimits ? { nearLimits: props.nearLimits } : {}),
+  })), locale)
+
+  if (section === 'plans') return ensureAccessibleSurfaceHtml(renderWhmPlans(props.plansPort ?? whmPlansFromSurface({
+    locale,
+    username: principal.username,
+    plans: props.plans ?? [],
+    ...(props.hostname ? { hostname: props.hostname } : {}),
+    ...(props.version ? { version: props.version } : {}),
+    ...(generationId !== undefined ? { generationId } : {}),
+    ...(props.accounts ? { accounts: props.accounts } : {}),
+    ...(props.resellers ? { resellers: props.resellers } : {}),
+    ...(props.featureLists ? { featureLists: props.featureLists } : {}),
+    ...(props.domains ? { domains: props.domains } : {}),
+    ...(props.catalog ? { catalog: props.catalog } : {}),
+    ...(props.ipPool ? { ipPool: props.ipPool } : {}),
   })), locale)
 
   const rawHtml = renderSurfaceShell({

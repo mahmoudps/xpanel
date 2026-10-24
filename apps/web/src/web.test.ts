@@ -167,12 +167,12 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     for (const svc of ['nginx', 'apache', 'php-fpm', 'mariadb', 'dovecot', 'postfix', 'pdns', 'nftables']) {
       assert.match(html, new RegExp(`data-service-row="${svc}"`))
     }
-    // Plans & cgroup v2 limits + explicit Unlimited
-    assert.match(html, /for="plan-cpu-quota">CPU \(%\)<\/label>/)
-    assert.match(html, /for="plan-memory-max">Memory \(MB\)<\/label>/)
-    assert.match(html, /for="plan-tasks-max">Processes<\/label>/)
-    assert.match(html, /name="unlimitedAddonDomains" value="unlimited"/)
-    assert.match(html, /Unlimited addon domains/)
+    // Plans board: slice fields and an explicit Unlimited control
+    assert.match(html, /data-board-port="xwhm-plans"/)
+    assert.match(html, /id="f-cpu"/)
+    assert.match(html, /id="f-mem"/)
+    assert.match(html, /id="f-proc"/)
+    assert.match(html, /aria-label="Unlimited: Addon domains"/)
     // Accounts & type-to-confirm terminate guard
     assert.match(html, /data-type-to-confirm="true"/)
     // Resellers & 14-privilege ACL matrix
