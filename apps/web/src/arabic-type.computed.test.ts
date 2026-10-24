@@ -8,7 +8,10 @@ import { renderInbox, xmailInboxFromProps } from './board-port/xmail-inbox.ts'
 import { renderFidelityDocument as renderInboxFidelity, renderLiveDocument as renderInboxLive } from './board-port/xmail-inbox.fixture.ts'
 import { renderFidelityDocument as renderComposeFidelity, renderLiveDocument as renderComposeLive } from './board-port/xmail-compose.fixture.ts'
 import { renderMailSurface } from './surfaces/xmail.ts'
+import { renderPanelSurface } from './surfaces/xpanel.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
+import { renderEmailDocument } from './board-port/xpanel-email.ts'
+import { defaultPlan, type Account } from '@xpanel/core'
 import { DESIGN_TOKENS_CSS } from './tokens.ts'
 import playwright from '../../../node_modules/@playwright/test/index.js'
 
@@ -267,6 +270,62 @@ const productDocument = (body: string, locale: 'ar' | 'en' = 'ar'): string => {
   return `<!doctype html><html lang="${ar ? 'ar' : 'en'}" dir="${ar ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>${DESIGN_TOKENS_CSS}</style></head><body>${body}</body></html>`
 }
 
+const sentenceMono = (): string[] => {
+  const root = globalThis as unknown as Dom
+  const bad: string[] = []
+  const walk = (el: DomEl): void => {
+    for (const node of Array.from(el.childNodes)) {
+      if (node.nodeType === 3 && /[\u0600-\u06FF]/.test(node.nodeValue ?? '') && !/[A-Za-z@/\\]/.test(node.nodeValue ?? '')) {
+        const font = root.getComputedStyle(el).fontFamily
+        const first = font.split(',')[0] ?? ''
+        if (first.includes('Mono') || first.includes('monospace')) bad.push((node.nodeValue ?? '').trim().slice(0, 80))
+      } else if (node.nodeType === 1) walk(node as DomEl)
+    }
+  }
+  walk(root.document.body)
+  return bad
+}
+
+const emailProductDocument = (body: string, locale: 'ar' | 'en'): string => {
+  const ar = locale === 'ar'
+  return `<!doctype html><html lang="${ar ? 'ar' : 'en'}" dir="${ar ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>${DESIGN_TOKENS_CSS}</style></head><body>${body}</body></html>`
+}
+
+const emailLong = 'department.with.a.very.long.name'
+const emailAccount = (home: string): Account => ({
+  id: 'email-shaped', username: 'department', uid: 21001, gid: 21001, home, primaryDomain: `${emailLong}.example.test`,
+  planId: 'email-plan', ownerId: null, status: 'active', suspendReason: null, contactEmail: `ops@${emailLong}.example.test`,
+  ipv4: '192.0.2.40', shell: 'none', createdAt: '2026-10-22T00:00:00Z',
+})
+const emailShaped = (locale: 'ar' | 'en'): string => renderEmailDocument({
+  locale,
+  account: { username: 'department', uid: 21001, home: `/home/${emailLong}`, primaryDomain: `${emailLong}.example.test` },
+  plan: { name: emailLong, resources: { diskMb: 5120, maxProcesses: 100 }, caps: { mailboxes: 25, ftpAccounts: 10, forwarders: 'unlimited' }, defaultMailboxQuotaMb: 1024 },
+  domains: [{ id: 'email-domain', name: `${emailLong}.example.test` }],
+  serviceUsers: [{
+    id: 'email-user', login: `${emailLong}@example.test`,
+    services: { email: true, ftp: true, webdisk: true }, mailboxQuotaMb: 2048,
+    ftpDir: `public_html/${emailLong}/${'notes-'.repeat(6)}files`,
+  }],
+})
+const emailSurface = (locale: 'ar' | 'en'): string => emailProductDocument(renderPanelSurface({
+  locale,
+  activeRoute: '/email/accounts',
+  account: emailAccount(`/home/${emailLong}`),
+  plan: defaultPlan({ id: 'email-plan', name: emailLong, featureListId: 'email-features' }),
+  domains: [{
+    id: 'email-domain', accountId: 'email-shaped', name: `${emailLong}.example.test`, kind: 'primary', parentId: null,
+    docRoot: `/home/${emailLong}/public_html`, siteType: 'php', upstream: null, redirect: null,
+    php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 1, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 1, processIdleTimeoutSec: 1 }, ini: {} },
+    wildcard: false, certificateId: null, suspended: false, expiresAt: null, pathQuotaMb: 'unlimited',
+  }],
+  serviceUsers: [{
+    id: 'email-user', accountId: 'email-shaped', login: `${emailLong}@example.test`,
+    services: { email: true, ftp: true, webdisk: true }, mailboxQuotaMb: 2048,
+    ftpDir: `public_html/${emailLong}/${'notes-'.repeat(6)}files`,
+  }],
+}), locale)
+
 const pageScroll = (): { scroll: number; inner: number } => {
   const root = globalThis as unknown as Dom
   return { scroll: root.document.documentElement.scrollWidth, inner: root.innerWidth }
@@ -487,6 +546,10 @@ describe('Arabic computed type', () => {
       ['audit-en', auditLog('en')],
       ['filters-ar', mailFilters('ar')],
       ['filters-en', mailFilters('en')],
+      ['email-shaped-ar', emailShaped('ar')],
+      ['email-shaped-en', emailShaped('en')],
+      ['email-surface-ar', emailSurface('ar')],
+      ['email-surface-en', emailSurface('en')],
     ]
     try {
       for (const [screen, html] of screens) {
@@ -494,6 +557,10 @@ describe('Arabic computed type', () => {
         await page.setViewportSize({ width: 390, height: 844 })
         const box = await page.evaluate(pageScroll)
         assert.ok(box.scroll <= box.inner, `${screen} scrolls sideways ${box.scroll} > ${box.inner}`)
+        if (screen.startsWith('email-') && screen.endsWith('-ar')) {
+          const mono = await page.evaluate(sentenceMono)
+          assert.deepEqual(mono, [], `${screen} arabic sentence in mono: ${mono.join(' | ')}`)
+        }
         if (screen.startsWith('inbox')) {
           const edges = await page.evaluate(mailEdges)
           assert.equal(edges.time, '', `${screen} time leaves the viewport ${edges.time}`)
@@ -508,5 +575,5 @@ describe('Arabic computed type', () => {
     } finally {
       await browser.close()
     }
-  }, 60_000)
+  }, 120_000)
 })

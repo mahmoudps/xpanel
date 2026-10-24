@@ -24,6 +24,7 @@ import {
   renderStatusBadge,
 } from '../tokens.ts'
 import { renderAccountResources, resourceRowsFromPlan } from '../board-canvas.ts'
+import { renderXpanelEmail } from '../board-port/xpanel-email.ts'
 import { renderXpanelHome, xpanelHomeFromProps } from '../board-port/xpanel-home.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
@@ -157,6 +158,19 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
       })) } : {}),
       signOutLabel: isAr ? 'تسجيل الخروج' : 'Sign out',
     })), locale)
+  }
+
+  if (activeRoute === '/email/accounts') {
+    const emailPlan = plan && plan.id === account.planId ? plan : undefined
+    return ensureAccessibleSurfaceHtml(renderXpanelEmail({
+      locale,
+      account,
+      ...(emailPlan ? { plan: emailPlan } : {}),
+      domains,
+      serviceUsers: props.serviceUsers ?? [],
+      ...(props.usage ? { usage: { diskBytes: props.usage.diskBytes, processCount: props.usage.processCount } } : {}),
+      signOutLabel: isAr ? 'تسجيل الخروج' : 'Sign out',
+    }), locale)
   }
 
   const rawHtml = renderSurfaceShell({
