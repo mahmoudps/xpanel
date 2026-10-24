@@ -12,6 +12,23 @@ describe('xWHM dashboard board port', () => {
     }
     assert.equal(html.includes('Activity & Jobs'), false)
     assert.equal(html.includes('Sign out'), false)
+    assert.match(html, /href="\/whm\/server\/upgrade"/)
+    assert.equal(html.includes('/whm/upgrade"'), false)
+  })
+
+  it('keeps root links out of a reseller sidebar', () => {
+    const html = renderWhmDashboard(whmDashboardFromProps({
+      locale: 'en',
+      principal: { username: 'reseller1', kind: 'reseller', acl: ['list-accounts'] },
+    }))
+    assert.match(html, /href="\/whm"/)
+    assert.match(html, /href="\/whm\/accounts"/)
+    for (const route of ['/whm/resellers', '/whm/security/firewall', '/whm/server/upgrade', '/whm/server/setup', '/whm/accounts/new', '/whm/services', '/whm/audit']) {
+      assert.equal(html.includes(`href="${route}"`), false, route)
+    }
+    const root = renderWhmDashboard(whmDashboardFromProps({ locale: 'en', principal: { username: 'root', kind: 'root' } }))
+    assert.match(root, /href="\/whm\/server\/upgrade"/)
+    assert.equal(root.includes('href="/whm/upgrade"'), false)
   })
 
   it('keeps the same cards when the host has not reported measurements', () => {

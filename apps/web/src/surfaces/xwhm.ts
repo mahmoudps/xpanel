@@ -1,4 +1,4 @@
-import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
+import { routeOpenTo, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import type {
   Account,
   AuditEntry,
@@ -171,7 +171,13 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
     : ''
 
   if (section === 'overview') return ensureAccessibleSurfaceHtml(renderWhmDashboard(whmDashboardFromProps({
-    locale, principal, hostname: props.hostname, panelHostname: props.panelHostname, version: props.version, availableVersion: props.availableVersion,
+    locale,
+    principal: {
+      username: principal.username,
+      kind: principal.kind === 'reseller' ? 'reseller' : 'root',
+      acl: principal.kind === 'reseller' ? [...heldAcls] : [],
+    },
+    hostname: props.hostname, panelHostname: props.panelHostname, version: props.version, availableVersion: props.availableVersion,
     generationId: props.generationId, accounts: props.accounts, resellers: props.resellers, ipPool: props.ipPool,
     plans: props.plans, services, auditEntries, hostSample: props.hostSample, driftCount: props.driftCount,
     ...(props.driftCheckedAt ? { driftCheckedAt: props.driftCheckedAt } : {}),
@@ -191,7 +197,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
       </div>
     </div>
 
-    ${renderDesignNav('xwhm', locale, activeRoute, qualifiedRoutes)}`,
+    ${renderDesignNav('xwhm', locale, activeRoute, qualifiedRoutes, route => routeOpenTo(route, props.visibility ?? { principal, ...(principal.kind === 'reseller' && heldAcls.size > 0 ? { reseller: { acl: [...heldAcls] } } : {}), disabledFeatures: new Set() }))}`,
     topbar: `      <div class="xp-topbar__start">
         ${renderPageSearchButton(locale)}
       </div>

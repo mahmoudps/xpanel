@@ -10,7 +10,6 @@ import { canSeeAccount, fail, hasAcl, type AuditEntry, type OsProfile } from '@x
 import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { mapAgentHostInfo, mapAgentServices } from '../../web/src/board-port/xwhm-dashboard.ts'
 import { publicContactEmail } from '../../web/src/display-name.ts'
-import { ACCOUNT_SECURITY_ROUTES } from '../../web/src/surfaces/account-security.ts'
 import { createDb, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, type AuditQuery, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
@@ -52,11 +51,6 @@ const detectHostOsProfile = async (): Promise<OsProfile> => {
  * Loads `serveWebUi` from `@xpanel/web` dynamically so visiting `/`, `/login`, `/whm`, `/panel`, `/mail`
  * renders the full bilingual HTML5 UI hydrated with live state from `StateStore` and `Db` when available.
  */
-const WORKSPACE_HOME: Record<EntryPoint, string> = { xpanel: '/home', xwhm: '/whm', xmail: '/mail/inbox' }
-
-const isWorkspaceHome = (route: { surface: string; activeRoute: string }): boolean =>
-  WORKSPACE_HOME[route.surface as EntryPoint] === route.activeRoute
-
 const suggestedPanel = (pathname: string, current?: EntryPoint): EntryPoint | undefined => {
   const path = pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
   const guess: EntryPoint | undefined = path === '/whm' || path.startsWith('/whm/') ? 'xwhm'
@@ -267,15 +261,6 @@ export const createDefaultWebRenderer = async (deps: {
     const qualifiedRoute = visibleNavigation(scopedVisibility, catalog).some(item => item.surface === surface
       && item.sections.some(section => section.pages.some(page => page.route === documentRoute.activeRoute)))
     if (!qualifiedRoute) {
-      if (!isWorkspaceHome(documentRoute) && !ACCOUNT_SECURITY_ROUTES.has(documentRoute.activeRoute)) {
-        return documentStatus(404, {
-          surface,
-          visibility: scopedVisibility,
-          ...(qualifiedCatalog ? { catalog: qualifiedCatalog } : {}),
-          ...(ownAccountId ? { accountId: ownAccountId } : {}),
-          workspaceHref: ENTRY_POINTS[surface].home,
-        })
-      }
       const email = await supportEmail()
       const summaryAccount = principal.kind === 'user' && surface === 'xpanel' ? scoped?.account : null
       const summaryPlan = summaryAccount ? scoped?.plan : null

@@ -55,7 +55,7 @@ html[lang="ar"] .xp-board-port,
 html[dir=rtl] .xp-board-port,
 .xp-board-port[dir=rtl] { font-family: ${BOARD_SANS_RTL}; }
 html[lang="ar"] body,
-html[dir=rtl] body { font-family: ${BOARD_SANS_RTL}; }
+html[dir=rtl] body { font-family: ${BOARD_SANS_RTL}; line-height: 1.75; }
 ${ar('*')},
 html[lang="ar"],
 html[dir=rtl],

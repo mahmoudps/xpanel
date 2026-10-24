@@ -279,8 +279,29 @@ export const designHeading = (route: string, locale: Locale): string | undefined
 
 const copy = (value: Copy, locale: Locale): string => locale === 'ar' ? value[1] : value[0]
 
-export const renderDesignNav = (surface: DesignPage['surface'], locale: Locale, activeRoute: string, qualifiedRoutes: ReadonlySet<string>): string => {
-  const pages = productDesignPages().filter(item => item.surface === surface)
+export const renderDisabledScreen = (title: string, locale: Locale): string => {
+  const label = copy(soon, locale)
+  const body = copy(noneBody, locale)
+  return `<section class="xp-design-page" data-wiring="soon" data-catalog-screen="true">
+    <header class="xp-board-head">
+      <div>
+        <h1 class="xp-page-title">${escapeHtml(title)}</h1>
+        <p class="xp-prose xp-design-page__lede">${escapeHtml(body)}</p>
+      </div>
+      <div class="xp-board-actions"><button type="button" class="xp-btn xp-btn--primary" disabled data-wiring="soon">${escapeHtml(label)}</button><p class="xp-help" data-wiring-hint="soon">${escapeHtml(label)}</p></div>
+    </header>
+    <div class="xp-design-empty" role="status"><h2>${escapeHtml(label)}</h2><p class="xp-prose">${escapeHtml(body)}</p></div>
+  </section>`
+}
+
+export const renderDesignNav = (
+  surface: DesignPage['surface'],
+  locale: Locale,
+  activeRoute: string,
+  qualifiedRoutes: ReadonlySet<string>,
+  openRoute?: (route: string) => boolean,
+): string => {
+  const pages = productDesignPages().filter(item => item.surface === surface && (openRoute === undefined || openRoute(item.route)))
   const groups: { name: string; id: string; items: DesignPage[] }[] = []
   for (const item of pages) {
     const name = copy(item.group, locale)

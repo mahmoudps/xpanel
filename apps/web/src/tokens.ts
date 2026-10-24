@@ -774,7 +774,7 @@ html[lang="ar"] {
   font-family: var(--xp-font-sans-rtl);
   --xp-leading-caption: 22px;
   --xp-leading-label: 24px;
-  --xp-leading-body: 26px;
+  --xp-leading-body: 28px;
   --xp-leading-card: 30px;
   --xp-leading-page: 36px;
 }
