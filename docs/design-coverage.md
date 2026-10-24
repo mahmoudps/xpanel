@@ -10,7 +10,35 @@ The claude-export has 44 `.dc.html` files. The only variant files are Home (Engl
 
 Motion gate is **not measured** on every row. Data binding is `real` where the product route reads a live source, or `empty-state coming soon` where the screen stays empty until its tool is connected. A dash means this ledger has not classified that route.
 
-Update this file in every PR that changes a row. Names, routes, and status only.
+Update a row in every PR that changes that screen. The tables stay names, routes, and status. The section below is the shared way to add a screen to the gate. Do not rename the harness exports or the four fixture fields.
+
+## How to add a screen to the gate
+
+The harness is gate PR #32 (pending) until it merges. Import it from the test tree. `scripts/package-release.mjs` ships `apps/*/src` and rejects `pixelmatch` and `pngjs`, which are root devDependencies.
+
+Stable exports, from `apps/web/test/gate/board-gate.ts`:
+
+| Export | Contract |
+| --- | --- |
+| `PAGE_LIMIT` | `0.005`. The whole page must be at or under 0.5%. |
+| `TILE_LIMIT` | `0.01`. Every tile must be at or under 1%. |
+| `TILE` | `200`. Tiles are 200×200, and the right and bottom edges are shorter. |
+| `scoreGate(boardPng, appPng)` | pixelmatch threshold `0.1`, `includeAA: false`. `pass` is page and every tile inside the limits. |
+| `sameCapture(boardPng, appPng)` | `Buffer.equals`. True when the two PNG files are the same bytes. |
+| `gateAccepts({ score, board, app, negativePass })` | `score.pass` and the PNGs are not the same bytes and `negativePass === false`. A byte-identical pair is not a pass. |
+| `padPort(html, port)` | Inserts `padding-top:1px` on the first `data-board-port="PORT"` root. The published capture does not use this. The padded capture must fail `scoreGate`. |
+
+Stable fixture fields, on `BoardGateFixture` in `apps/web/src/board-port/gate-fixture.ts`: `homePort`, `dashboardPort`, `inboxPort`, `composePort`. Add a new screen with a new optional field. Do not rename these four, and do not put the field on the product surface props.
+
+1. Put the board's sample strings in `apps/web/src/board-port/<screen>.fixture.ts`. No product module imports that file.
+2. Add the optional field to `BoardGateFixture`. In the surface, render `boardGateFixture()?.yourField ?? yourFromProps(...)`. `apps/api/src/main.ts` never calls `installBoardGateFixture`. The installer returns without storing anything unless `process.env.VITEST === 'true'`.
+3. In the test, call `installBoardGateFixture({ yourField })`, then `renderWebApp` for that product route, then `installBoardGateFixture(undefined)` in a `finally`.
+4. Serve the board export (the `.dc.html` and its folder, so the board renderer can build `#dc-root`) from one HTTP server. Serve the `renderWebApp` HTML from a second server. The two captures use different ports and different paths.
+5. Screenshot both at the board viewport, device scale 1, with `--font-render-hinting=none` and `--disable-lcd-text`, after `document.fonts.ready`.
+6. On the product capture, require `data-surface`, the screen's `data-board-port`, and zero `data-dc-tpl`, `#dc-root`, `x-dc`, and `data-sc-name`. On the board capture, require `#dc-root`.
+7. Record the URL, the response HTML SHA-256, and the PNG SHA-256 for each side. `gateAccepts` refuses a byte-identical PNG pair. A 1px `padPort` reshoot must fail the same gate.
+8. Arabic stays a visual check. It is not this pixel gate.
+9. Only a `*.test.ts` file may import `apps/web/test/gate/board-gate.ts`. A runtime source file under `src` must not.
 
 ## Boards
 
