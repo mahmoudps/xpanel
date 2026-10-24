@@ -84,6 +84,7 @@ References are implementation targets, not certification. Protocol support requi
 - A missing prerequisite, skipped test, absent harness or failed cleanup leaves the relevant gate open. Do not rewrite earlier failures as successful runs.
 - Bind evidence to source and artifact hashes, command, runtime, environment, timestamp, observed effects and cleanup. Verify the exact release rather than a nearby source revision.
 - Keep catalog stages evidence-based: `researched`, `implemented`, `integrated`, `verified`, `out-of-scope`. Production navigation admits only qualifying verified capabilities.
+- The original signed application catalog and the account installer are in scope. Domain purchase, vendor licence storefronts, and third-party commercial installers stay out of scope. Do not render a successful install, update, or uninstall until that installer and a signed catalog are connected.
 - Check actual data, effective identities, service responses and failure outcomes. A dashboard status, successful render, HTTP 200 or command string is not a sufficient oracle.
 
 See [TESTING.md](TESTING.md) for executable commands.

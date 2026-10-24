@@ -45,6 +45,21 @@ describe('catalog data', () => {
     expect(specs.map(s => s.id).sort()).toEqual(tools.map(t => t.id).sort())
   })
 
+  it('keeps an original signed app catalog in scope', () => {
+    const byId = new Map(tools.map(tool => [tool.id, tool]))
+    expect(byId.get('site-software')?.status).toBe('researched')
+    expect(byId.get('tweak-site-software')?.status).toBe('researched')
+    expect(byId.get('site-software-catalog')?.status).toBe('researched')
+    expect(byId.get('site-software-instances')?.status).toBe('researched')
+    expect(byId.get('domain-purchase')?.status).toBe('out-of-scope')
+    expect(byId.get('vendor-marketplace')?.status).toBe('out-of-scope')
+    expect(byId.get('market-provider-manager')?.status).toBe('out-of-scope')
+    expect(byId.get('domain-purchase')?.delivery.reason).not.toMatch(/excluded by project rules/i)
+    expect(byId.get('vendor-marketplace')?.delivery.reason).not.toMatch(/excluded by project rules/i)
+    expect(byId.get('softaculous')?.status).toBe('out-of-scope')
+    expect(byId.get('installatron')?.status).toBe('out-of-scope')
+  })
+
   it('marks excluded products out of scope', () => {
     const excluded = tools.filter(t => /wp toolkit|imunify|sitejet|softaculous/i.test(t.name))
     expect(excluded.length).toBeGreaterThan(0)
@@ -61,8 +76,8 @@ describe('catalog data', () => {
 
   it('reviews every definition without promoting declarations to verified delivery', () => {
     expect(tools).toHaveLength(594)
-    expect(tools.filter(tool => tool.status === 'researched')).toHaveLength(531)
-    expect(tools.filter(tool => tool.status === 'out-of-scope')).toHaveLength(63)
+    expect(tools.filter(tool => tool.status === 'researched')).toHaveLength(533)
+    expect(tools.filter(tool => tool.status === 'out-of-scope')).toHaveLength(61)
     expect(tools.filter(tool => tool.status === 'verified')).toEqual([])
     for (const tool of tools) {
       expect(tool.status).toBe(tool.delivery.status)

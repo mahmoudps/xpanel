@@ -26,6 +26,7 @@ const surfacePageTitles: Record<SurfaceKind, Readonly<Record<string, LocalizedTi
     audit: ['Audit log', 'سجل التدقيق'], generations: ['Configuration history', 'سجل الإعدادات'],
     upgrade: ['Upgrade', 'الترقية'], transfer: ['Transfer tool', 'أداة النقل'],
     security: ['Sign-in security', 'أمان تسجيل الدخول'],
+    store: ['App store', 'متجر التطبيقات'],
   },
   xmail: {
     inbox: ['Inbox', 'البريد الوارد'], compose: ['Compose message', 'إنشاء رسالة'],
@@ -41,6 +42,9 @@ const routePageTitles: Readonly<Record<string, LocalizedTitle>> = {
   '/whm/plans/features': ['Feature lists', 'قوائم الميزات'],
   '/whm/backups': ['Server backups', 'نسخ الخادم'],
   '/whm/resellers/privileges': ['Reseller privileges', 'صلاحيات الموزعين'],
+  '/whm/software/store': ['Catalog', 'الكتالوج'],
+  '/whm/software/store/extensions': ['Extensions', 'الإضافات'],
+  '/whm/software/store/activity': ['Activity', 'النشاط'],
   '/mail/folders': ['Folders', 'المجلدات'],
 }
 
@@ -98,6 +102,8 @@ const surfaceSections: Record<SurfaceShellProps['surface'], Readonly<Record<stri
     '/whm/server/setup': 'design', '/whm/domains': 'design', '/whm/ssl': 'design',
     '/whm/backups': 'backups',
     '/whm/services/web': 'design', '/whm/software/php': 'design', '/whm/security': 'design',
+    '/whm/software/store': 'store', '/whm/software/store/extensions': 'store',
+    '/whm/software/store/activity': 'store',
     '/whm/security/ssh': 'design',
   },
   xmail: {

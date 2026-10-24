@@ -30,6 +30,7 @@ import { auditActionHtml, auditActorLabel, auditOutcomeLabel, auditTargetLabel }
 import { isArabicSentence } from '../arabic-type.ts'
 import { renderWhmDashboard, whmDashboardFromProps, type DashboardHostSample } from '../board-port/xwhm-dashboard.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
+import { renderRootStore } from '../store/whm-store.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
 
@@ -987,6 +988,7 @@ ${section === 'upgrade' ? `<section class="xp-card" data-section="root-lifecycle
 ${section === 'transfer' ? `<section class="xp-card" data-section="root-lifecycle"><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1><p class="xp-prose">${isAr ? 'اختر مصدر النقل وراجع الحسابات قبل الاستيراد.' : 'Choose the transfer source and review its accounts before importing.'}</p><button type="button" class="xp-btn xp-btn--primary" data-action="start-transfer" ${isRoot ? '' : 'disabled'}>${isAr ? 'بدء النقل' : 'Start transfer'}</button></section>` : ''}
 ${section === 'security' ? `<section class="xp-card" data-section="account-security"><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1></section>` : ''}
 ${section === 'design' ? renderDesignMain(activeRoute, locale) : ''}
+${section === 'store' ? renderRootStore({ locale, route: activeRoute, plans }) : ''}
 ${section === undefined || (section === 'io' && !ioSnapshot) || (section === 'mail-ips' && !mailIpConfig) ? renderSurfaceUnavailable(locale, '/whm') : ''}`,
   })
   return ensureAccessibleSurfaceHtml(rawHtml.trim(), locale)
