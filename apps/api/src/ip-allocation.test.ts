@@ -42,6 +42,7 @@ const fixture = async () => {
   const root = await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
   await setTotpSecret(database.db, root.id, new Uint8Array(32))
   const resellerPrincipal = await createResellerPrincipal(database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH })
+  await setTotpSecret(database.db, resellerPrincipal.id, new Uint8Array(32))
   const session = async (principalId: string, audience: EntryPoint = 'xwhm', mfaVerified = true) => {
     const token = 'test-ip-session-' + randomUUID()
     await createSession(database.db, { principalId, tokenHash: sessionTokenHash(token, audience), expiresAt: new Date(Date.now() + 600000).toISOString(), mfaVerified })

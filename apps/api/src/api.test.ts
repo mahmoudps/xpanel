@@ -193,8 +193,14 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
   const loginRoot = async () => {
     const login = await loginAs('root', 'RootPassword!2026')
     assert.equal(login.res.status, 200)
-    assert.equal(login.body.mfaEnrollmentRequired, false)
+    assert.equal(login.body.mfaEnrollmentRequired, true)
     assert.equal(login.body.totpEnabled, false)
+    const setupRes = await login.client.request('/api/auth/2fa/setup', { method: 'POST', body: { password: 'RootPassword!2026' } })
+    assert.equal(setupRes.status, 200)
+    const setupData = (await setupRes.json()) as { secret: string }
+    const enableRes = await login.client.request('/api/auth/2fa/enable', { method: 'POST', body: { code: computeTotpCode(setupData.secret) } })
+    assert.equal(enableRes.status, 200)
+    assert.equal((await login.client.request('/api/accounts')).status, 200)
     return login
   }
 
@@ -204,8 +210,10 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     assert.equal(loginRes.status, 200)
     assert.equal((loginBody.principal as { username: string }).username, 'root')
     assert.equal(loginBody.totpEnabled, false)
-    assert.equal(loginBody.mfaEnrollmentRequired, false)
-    assert.equal((await rootClient.request('/api/accounts')).status, 200)
+    assert.equal(loginBody.mfaEnrollmentRequired, true)
+    const held = await rootClient.request('/api/accounts')
+    assert.equal(held.status, 403)
+    assert.match(JSON.stringify(await held.json()), /root must complete two-factor enrollment before administration/)
     assert.ok(typeof loginBody.csrfToken === 'string' && loginBody.csrfToken.length > 10)
 
     // Mutating request without CSRF token is rejected with 403 FORBIDDEN
@@ -274,24 +282,25 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     })
     assert.equal(resetRes.code, 0)
 
-    const disable2faRes = await runCli(['disable-2fa', 'root'], {
+    const disable2faRes = await runCli(['disable-2fa', 'root', '--confirm'], {
       db: dbHandle.db,
       store: stateHandle.store,
       stdout: (msg) => logs.push(msg),
     })
     assert.equal(disable2faRes.code, 0)
+    assert.match(disable2faRes.stderr, /high-severity recovery action/)
 
     // Resetting a username does not remove the independent IP throttle.
     const stillIpLocked = await loginAs('root', 'NewRootPassword!2026', undefined, '192.0.2.6')
     assert.equal(stillIpLocked.res.status, 429)
 
-    // A different trusted peer authenticates with the password alone and can open the workspace.
+    // A different trusted peer can sign in with the password, and administration stays closed until enrollment.
     const afterCli = await loginAs('root', 'NewRootPassword!2026')
     assert.equal(afterCli.res.status, 200)
     assert.equal(afterCli.body.totpEnabled, false)
-    assert.equal(afterCli.body.mfaEnrollmentRequired, false)
+    assert.equal(afterCli.body.mfaEnrollmentRequired, true)
     const workspace = await afterCli.client.request('/api/accounts')
-    assert.equal(workspace.status, 200)
+    assert.equal(workspace.status, 403)
   })
 
   it('2. Feature list + Plan creation + Account creation (alice and bob) with host reconciliation and search index', async () => {

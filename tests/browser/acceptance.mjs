@@ -112,7 +112,7 @@ export async function runBrowserAcceptance({ chromium, expect }) {
       }, { mobile: locale === 'ar' })
     }
 
-    await scenario('BR-ROOT-BOOTSTRAP', 'Root changes the bootstrap password, opens the workspace without MFA, enrolls from the security page, then returns to password-only after disable-2fa', async ({ page, panel, context, record }) => {
+    await scenario('BR-ROOT-BOOTSTRAP', 'Root changes the bootstrap password, enrolls before xWHM, then returns to the enrollment hold after disable-2fa', async ({ page, panel, context, record }) => {
       const bootstrap = await panel.rootState()
       record('persisted_bootstrap_state', bootstrap)
       expect(bootstrap).toEqual({ exists: true, force_password_change: true, mfa_enabled: false })
@@ -128,12 +128,11 @@ export async function runBrowserAcceptance({ chromium, expect }) {
       expect((await submit(page, '[data-auth-password-form]', '/api/auth/change-password', record)).status()).toBe(200)
       await expect(page.locator(loginForm)).toBeVisible()
       expect((await login(page, 'root', panel.replacementPassword, record)).status()).toBe(200)
-      await page.waitForURL(url => url.pathname === '/whm')
-      record('password_only_workspace', { path: new URL(page.url()).pathname })
-      await expect(page.locator('[data-mfa-optional-link]')).toBeVisible()
-      await expect(page.locator('[data-auth-setup-form]')).toHaveCount(0)
-      await page.goto(`${panel.baseUrl}/whm/security/sign-in`)
-      await expect(page.locator('[data-mfa-recommendation]')).toBeVisible()
+      await expect(page.locator('[data-auth-enrollment]')).toBeVisible()
+      const held = await page.evaluate(async () => (await fetch('/api/accounts')).status)
+      record('unenrolled_root_held', { status: held, path: new URL(page.url()).pathname })
+      expect(held).toBe(403)
+      expect(new URL(page.url()).pathname).not.toBe('/whm')
       await accessibility(page, record)
       await expect(page.locator('[data-action="setup-2fa"]')).toBeVisible()
       await page.locator('#enrollment-password').fill(panel.replacementPassword)
@@ -158,7 +157,8 @@ export async function runBrowserAcceptance({ chromium, expect }) {
       expect(recoveryCodes.length, 'Recovery codes are displayed once before acknowledgement').toBe(8)
       await page.locator('[data-action="acknowledge-recovery"]').click()
       record('recovery_codes_acknowledged')
-      await page.waitForURL(url => url.pathname === '/whm/security/sign-in')
+      await page.waitForURL(url => url.pathname === '/whm')
+      await page.goto(`${panel.baseUrl}/whm/security/sign-in`)
       await expect(page.locator('[data-mfa-enabled="true"]')).toBeVisible()
       await page.goto(`${panel.baseUrl}/whm`)
       const enrolled = await panel.rootState()
@@ -205,9 +205,11 @@ export async function runBrowserAcceptance({ chromium, expect }) {
       record('persisted_disabled_state', disabled)
       expect(disabled).toEqual({ exists: true, force_password_change: false, mfa_enabled: false })
       expect((await login(page, 'root', panel.replacementPassword, record)).status()).toBe(200)
-      await page.waitForURL(url => url.pathname === '/whm')
-      await expect(page.locator('[data-mfa-optional-link]')).toBeVisible()
-      record('disable_2fa_restored_password_login')
+      await expect(page.locator('[data-auth-enrollment]')).toBeVisible()
+      const afterDisable = await page.evaluate(async () => (await fetch('/api/accounts')).status)
+      record('disable_2fa_restored_enrollment_hold', { status: afterDisable })
+      expect(afterDisable).toBe(403)
+      expect(new URL(page.url()).pathname).not.toBe('/whm')
     })
 
     await scenario('BR-OWNER-SCOPE', 'An account owner signs in through the UI and cannot open the administrative HTML surface', async ({ page, panel, record }) => {

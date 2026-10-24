@@ -51,6 +51,7 @@ export const AUDIT_LABELS: Readonly<Record<string, AuditCopy>> = {
   'auth.mfa_seal_key_rotated': copy('Rotated the two-factor seal key', 'دوّر مفتاح ختم التحقق'),
   'auth.origin_rejected': copy('Rejected the request origin', 'رفض أصل الطلب'),
   'auth.password_changed': copy('Changed a password', 'غيّر كلمة المرور'),
+  'auth.password_only_opt_out': copy('Signed in with the development password opt-out', 'سجّل الدخول بإعفاء التطوير من التحقق'),
   'auth.password_reset': copy('Reset a password', 'أعاد ضبط كلمة المرور'),
   'auth.root_initialized': copy('Initialized the root account', 'هيّأ حساب الجذر'),
   'backup.account.completed': copy('Finished an account backup', 'أكمل نسخ حساب'),

@@ -45,6 +45,7 @@ const fixture = async () => {
   const root = await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
   await setTotpSecret(database.db, root.id, new Uint8Array(32))
   const resellerPrincipal = await createResellerPrincipal(database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH })
+  await setTotpSecret(database.db, resellerPrincipal.id, new Uint8Array(32))
   const owner = await createUserPrincipal(database.db, { username: account.username, accountId: account.id, passwordHash: HASH })
   const alias = await createUserPrincipal(database.db, { username: 'alias7', accountId: account.id, passwordHash: HASH })
   const neighbor = await createUserPrincipal(database.db, { username: other.username, accountId: other.id, passwordHash: HASH })

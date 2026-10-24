@@ -2,15 +2,22 @@ import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'vitest'
 import type { AgentApp } from '@xpanel/agent'
 import { tools } from '@xpanel/catalog'
-import { createRootPrincipal, createTestDb } from '@xpanel/db'
+import { createRootPrincipal, createTestDb, setTotpSecret } from '@xpanel/db'
 import type { TestDbHandle } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
 import type { TestStateStoreHandle } from '@xpanel/state'
-import { hashPasswordArgon2id, parseCookies } from './auth.ts'
+import { hashPasswordArgon2id, parseCookies, sealTotpSecret, sha256Hex } from './auth.ts'
 import { resetQualifiedCatalogCache } from './host-catalog.ts'
 import { createApiApp } from './server.ts'
 import type { ApiApp } from './server.ts'
 import { TEST_SERVER_SECRET } from './testing.ts'
+
+const TOTP_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP'
+const RECOVERIES = [
+  'catalog-recovery-code-one-128-bits-at-least',
+  'catalog-recovery-code-two-128-bits-at-least',
+]
+let recoveryIndex = 0
 
 const healthAgent = (body: unknown): AgentApp => ({
   fetch: async (request) => {
@@ -28,11 +35,13 @@ describe('GET /api/catalog', () => {
     resetQualifiedCatalogCache()
     db = await createTestDb()
     state = await createTestStateStore()
-    await createRootPrincipal(db.db, {
+    recoveryIndex = 0
+    const root = await createRootPrincipal(db.db, {
       username: 'root',
       passwordHash: await hashPasswordArgon2id('RootPassword!2026'),
       forcePasswordChange: false,
     })
+    await setTotpSecret(db.db, root.id, sealTotpSecret(TOTP_SECRET, TEST_SERVER_SECRET), RECOVERIES.map(code => sha256Hex(code)))
   })
 
   afterEach(async () => {
@@ -52,15 +61,16 @@ describe('GET /api/catalog', () => {
     const login = await app.fetch(new Request('http://localhost/api/auth/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username: 'root', password: 'RootPassword!2026' }),
+      body: JSON.stringify({ username: 'root', password: 'RootPassword!2026', recoveryCode: RECOVERIES[recoveryIndex++] }),
     }), { remoteAddress: '192.0.2.40' })
     assert.equal(login.status, 200)
     const setCookie = login.headers.get('set-cookie')
     const cookie = parseCookies(setCookie
       ? setCookie.split(',').map(part => part.split(';')[0]?.trim()).filter(Boolean).join('; ')
       : null)
+    const cookieHeader = Object.entries(cookie).map(([name, value]) => `${name}=${encodeURIComponent(value)}`).join('; ')
     const response = await app.fetch(new Request('http://localhost/api/catalog', {
-      headers: { cookie: Object.entries(cookie).map(([name, value]) => `${name}=${encodeURIComponent(value)}`).join('; ') },
+      headers: { cookie: cookieHeader },
     }), { remoteAddress: '192.0.2.40' })
     assert.equal(response.status, 200)
     return response.json() as Promise<{ tools: { id: string; status: string }[]; navigation: { sections: { pages: { route: string }[] }[] }[] }>

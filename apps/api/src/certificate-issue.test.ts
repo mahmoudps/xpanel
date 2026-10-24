@@ -15,7 +15,7 @@ import type { TestDbHandle } from '@xpanel/db'
 import { profileFor } from '@xpanel/os'
 import { createTestStateStore } from '@xpanel/state'
 import type { TestStateStoreHandle } from '@xpanel/state'
-import { CSRF_HEADER_NAME, hashPasswordArgon2id, HOST_SESSION_COOKIE_NAME, parseCookies, SESSION_COOKIE_NAME } from './auth.ts'
+import { computeTotpCode, CSRF_HEADER_NAME, hashPasswordArgon2id, HOST_SESSION_COOKIE_NAME, parseCookies, SESSION_COOKIE_NAME } from './auth.ts'
 import { policyForRequest } from './authorization.ts'
 import { entryPointAllowsApiRoute } from './entry-points.ts'
 import { createApiApp } from './server.ts'
@@ -123,15 +123,32 @@ describe('account certificate issuance', () => {
       body: JSON.stringify({ username, password: 'CertificatePassword!2026' }),
     }), { remoteAddress: '192.0.2.5' })
     expect(login.status).toBe(200)
-    const body = await login.json() as { csrfToken?: string }
+    const body = await login.json() as { csrfToken?: string; mfaEnrollmentRequired?: boolean }
     const cookies = parseCookies(login.headers.get('set-cookie')?.split(',').map(part => part.split(';')[0]?.trim()).filter(Boolean).join('; ') ?? null)
     const name = cookies[HOST_SESSION_COOKIE_NAME] ? HOST_SESSION_COOKIE_NAME : SESSION_COOKIE_NAME
+    const cookie = `${name}=${cookies[name]}`
+    const csrf = body.csrfToken ?? ''
+    if (body.mfaEnrollmentRequired) {
+      const setup = await app.fetch(new Request('http://localhost/api/auth/2fa/setup', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie, [CSRF_HEADER_NAME]: csrf },
+        body: JSON.stringify({ password: 'CertificatePassword!2026' }),
+      }), { remoteAddress: '192.0.2.5' })
+      expect(setup.status).toBe(200)
+      const enrollment = await setup.json() as { secret: string }
+      const enable = await app.fetch(new Request('http://localhost/api/auth/2fa/enable', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie, [CSRF_HEADER_NAME]: csrf },
+        body: JSON.stringify({ code: computeTotpCode(enrollment.secret) }),
+      }), { remoteAddress: '192.0.2.5' })
+      expect(enable.status).toBe(200)
+    }
     return async (path: string, payload: unknown) => app.fetch(new Request(`http://localhost${path}`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        cookie: `${name}=${cookies[name]}`,
-        [CSRF_HEADER_NAME]: body.csrfToken ?? '',
+        cookie,
+        [CSRF_HEADER_NAME]: csrf,
       },
       body: JSON.stringify(payload),
     }), { remoteAddress: '192.0.2.5' })

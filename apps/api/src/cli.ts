@@ -89,7 +89,7 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
           '  reindex                              Rebuild SQLite search/cache index from state',
           '  init-root --password-stdin           Provision root once from standard input; requires a password change',
           '  reset-password <username> --password-stdin  Read one password from standard input',
-          '  disable-2fa <username>               Disable TOTP 2FA for a principal',
+          '  disable-2fa <username> --confirm    Disable TOTP 2FA for a principal',
           '  repair-state-ownership               Root-only: give the xpanel user the state tree',
         ].join('\n'),
       )
@@ -203,7 +203,7 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
             principalId: root.id,
           })
         })
-        writeOut('Root initialized. Change the password at first sign-in before administering the server. Two-factor authentication stays optional until it is enrolled.')
+        writeOut('Root initialized. Change the password and enroll MFA at first sign-in before administering the server.')
         return {
           code: 0,
           stdout: outLines.join('\n'),
@@ -255,24 +255,26 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
 
       case 'disable-2fa': {
         const username = rest[0]?.trim().toLowerCase()
-        if (!username || rest.length !== 1) {
-          return fail('VALIDATION', 'usage: xpanel disable-2fa <username>')
+        if (!username || rest.length !== 2 || rest[1] !== '--confirm') {
+          return fail('VALIDATION', 'usage: xpanel disable-2fa <username> --confirm')
         }
         const principal = await findPrincipalByUsername(deps.db, username)
         if (!principal) {
           return fail('NOT_FOUND', `principal "${username}" not found`)
         }
+        const warning = `WARNING: disable-2fa removed two-factor authentication for "${principal.username}". This is a high-severity recovery action. The operator must enroll again before administering the server.`
         await setTotpSecret(deps.db, principal.id, null, [], {
           clearLockout: true,
           audit: {
             actor: 'cli:root',
             action: 'auth.2fa_disabled',
             target: `principal:${principal.username}`,
-            detail: { via: 'cli' },
+            detail: { via: 'cli', severity: 'high', warning },
             outcome: 'ok',
             principalId: principal.id,
           },
         })
+        writeErr(warning)
         writeOut(`Two-factor authentication disabled for "${principal.username}".`)
         return {
           code: 0,

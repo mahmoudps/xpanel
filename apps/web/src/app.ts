@@ -63,6 +63,8 @@ export interface WebAppRenderState {
   error?: Omit<StatusPageModel, 'locale' | 'theme' | 'density' | 'surface' | 'path' | 'visibility'> & { surface?: StatusPageModel['surface'] }
   supportEmail?: string
   panels?: readonly PanelLink[]
+  /** Exact public xMail origin. Account pages link to `${mailOrigin}/mail/inbox`. */
+  mailOrigin?: string
 }
 
 const renderCommandPaletteModal = (
@@ -205,7 +207,7 @@ const renderUnavailableWorkspace = (
   return renderSurfaceShell({
     surface: panelSurface,
     locale,
-    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${panelLabel(panelSurface)}</strong></div>${renderDesignNav(panelSurface, locale, path, qualifiedRoutes)}${panelSurface === 'xmail' ? renderSecurityNavLink('xmail', locale, path) : ''}`,
+    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${panelLabel(panelSurface)}</strong></div>${renderDesignNav(panelSurface, locale, path, qualifiedRoutes, state?.mailOrigin)}${panelSurface === 'xmail' ? renderSecurityNavLink('xmail', locale, path) : ''}`,
     topbar: renderUserMenu({
       locale,
       theme,
@@ -361,6 +363,7 @@ export function renderWebApp(state: WebAppRenderState): string {
         activeRoute,
         ...(state.catalog ? { catalog: state.catalog } : {}),
         visibility: state.visibility,
+        ...(state.mailOrigin ? { mailOrigin: state.mailOrigin } : {}),
       })
       break
     case 'xmail':

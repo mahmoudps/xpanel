@@ -124,13 +124,14 @@ export function renderStatusBody(model: StatusPageModel): string {
   const role = model.role ?? ''
   const nav = visibleNavigation(model.visibility, model.catalog).find(item => item.surface === model.surface)
   const qualified = new Set((nav?.sections ?? []).flatMap(section => section.pages.map(page => page.route)))
+  const mailOrigin = model.panels?.find(panel => panel.surface === 'xmail')?.origin
   const subtitle = model.hostname
     ? `<div><bdi dir="ltr" class="xp-mono">${escapeHtml(model.hostname)}</bdi></div>`
     : ''
   return renderSurfaceShell({
     surface: model.surface,
     locale: model.locale,
-    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><div><strong>${panelLabel(model.surface)}</strong>${subtitle}</div></div>${renderDesignNav(model.surface, model.locale, model.path, qualified)}`,
+    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><div><strong>${panelLabel(model.surface)}</strong>${subtitle}</div></div>${renderDesignNav(model.surface, model.locale, model.path, qualified, mailOrigin)}`,
     topbar: renderUserMenu({
       locale: model.locale,
       theme: model.theme,

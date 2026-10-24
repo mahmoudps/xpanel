@@ -280,7 +280,12 @@ describe('CLI: explicit one-time root provisioning', () => {
       await db.query(
         "CREATE TRIGGER reject_2fa_audit BEFORE INSERT ON audit_log WHEN NEW.action = 'auth.2fa_disabled' BEGIN SELECT RAISE(ABORT, 'fixture 2fa audit denied'); END",
       )
-      const auditFailResult = await runCli(['disable-2fa', 'root'], { db, store })
+      const missingConfirm = await runCli(['disable-2fa', 'root'], { db, store })
+      assert.equal(missingConfirm.code, 1)
+      assert.match(missingConfirm.stderr, /--confirm/)
+      assert.equal((await findPrincipalByUsername(db, 'root'))?.totpEnabled, true)
+
+      const auditFailResult = await runCli(['disable-2fa', 'root', '--confirm'], { db, store })
       assert.equal(auditFailResult.code, 1)
       const afterAbort = await findPrincipalByUsername(db, 'root')
       assert.equal(afterAbort?.totpEnabled, true)

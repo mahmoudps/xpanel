@@ -105,12 +105,12 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
       assert.equal(session.response.status, 401); assert.equal(session.response.headers.get('set-cookie'), null)
     }
     const root = await f.login('xwhm', 'root')
-    assert.equal(root.data.mfaEnrollmentRequired, false)
-    assert.equal((await f.request('xwhm', '/api/accounts', { cookie: root.cookie })).status, 200)
-    assert.equal(await f.websocketStatus('xwhm', root.cookie), 101)
+    assert.equal(root.data.mfaEnrollmentRequired, true)
+    assert.equal((await f.request('xwhm', '/api/accounts', { cookie: root.cookie, csrf: root.data.csrfToken })).status, 403)
+    assert.equal(await f.websocketStatus('xwhm', root.cookie), 401)
     const reseller = await f.login('xwhm', 'reseller')
     assert.equal(reseller.response.status, 200)
-    assert.equal(reseller.data.mfaEnrollmentRequired, false)
+    assert.equal(reseller.data.mfaEnrollmentRequired, true)
     assert.notEqual(reseller.response.headers.get('set-cookie'), null)
   })
 

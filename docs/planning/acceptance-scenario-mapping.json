@@ -332,8 +332,8 @@
         "H",
         "B"
       ],
-      "title": "Root first-login password change; MFA only when enrolled",
-      "independentOracle": "With forcePasswordChange=true, ordinary endpoints stay forbidden until the password is changed. Unenrolled root, reseller, and user sessions are not blocked for missing MFA. When TOTP is enabled, password-only login does not open a session; disable-2fa restores password-only access.",
+      "title": "Root first-login password change and required operator MFA",
+      "independentOracle": "With forcePasswordChange=true, ordinary endpoints stay forbidden until the password is changed. Unenrolled root and reseller sessions can reach enrollment and logout only. Hosting-account users such as demohost are not held for missing MFA. When TOTP is enabled, password-only login does not open a session. disable-2fa requires --confirm, audits severity high, and returns the operator to the enrollment hold. XPANEL_ALLOW_PASSWORD_ONLY_ROOT=1 is a development-only opt-out and must be unset before production.",
       "harnesses": [
         "apps/api/src/s01-s05-security-auth.test.ts",
         "apps/api/src/h03-onboarding.test.ts"
