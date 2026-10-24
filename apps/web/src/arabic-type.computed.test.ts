@@ -6,6 +6,8 @@ import { renderFidelityDocument as renderDashboard, renderWhmDashboard, whmDashb
 import { renderFidelityDocument as renderHome, renderLiveDocument as renderHomeLive } from './board-port/xpanel-home.fixture.ts'
 import { renderFidelityDocument as renderInboxFidelity, renderLiveDocument as renderInboxLive } from './board-port/xmail-inbox.fixture.ts'
 import { renderFidelityDocument as renderComposeFidelity, renderLiveDocument as renderComposeLive } from './board-port/xmail-compose.fixture.ts'
+import { defaultPlan, type Account } from '@xpanel/core'
+import { renderAccountsDocument, whmAccountsFromProps } from './board-port/xwhm-accounts.ts'
 import { renderMailSurface } from './surfaces/xmail.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
 import { DESIGN_TOKENS_CSS } from './tokens.ts'
@@ -300,6 +302,64 @@ const mailFilters = (locale: 'ar' | 'en' = 'ar'): string => productDocument(rend
   sieveRules: [{ id: '1', name: 'أرشيف الفواتير', condition: `header :contains "Subject" "${'invoice-'.repeat(8)}"`, action: 'fileinto INBOX.Archive', enabled: true }],
 }), locale)
 
+const shapedAccount = (): Account => ({
+  id: 'shaped-account',
+  username: 'department.with.a.very.long.name',
+  uid: 24001,
+  gid: 24001,
+  home: '/home/department.with.a.very.long.name',
+  primaryDomain: 'department.with.a.very.long.name.alice-shop.example.test',
+  planId: 'shaped-plan',
+  ownerId: null,
+  status: 'active',
+  suspendReason: null,
+  contactEmail: 'owner@department.with.a.very.long.name.alice-shop.example.test',
+  ipv4: '192.0.2.10',
+  extraIps: ['192.0.2.11'],
+  shell: 'jailed',
+  createdAt: '2026-10-22T14:05:00Z',
+})
+
+const shapedPlan = () => defaultPlan({ id: 'shaped-plan', name: 'Synthetic plan', featureListId: 'features' })
+
+const shapedAccounts = (locale: 'ar' | 'en'): string => renderAccountsDocument(whmAccountsFromProps({
+  locale,
+  principal: { kind: 'root', username: 'operator' },
+  isRoot: true,
+  hostname: locale === 'ar' ? 'الخادم' : 'panel.example.test',
+  generationId: 7,
+  version: '1.0.0',
+  accounts: [shapedAccount()],
+  plans: [shapedPlan()],
+}))
+
+const shapedSurface = (locale: 'ar' | 'en'): string => productDocument(renderWhmSurface({
+  locale,
+  principal: { kind: 'root', id: 'shaped-root', username: 'operator' },
+  activeRoute: '/whm/accounts',
+  hostname: locale === 'ar' ? 'الخادم' : 'panel.example.test',
+  generationId: 7,
+  version: '1.0.0',
+  accounts: [shapedAccount()],
+  plans: [shapedPlan()],
+}), locale)
+
+const sentenceMono = (): string[] => {
+  const root = globalThis as unknown as Dom
+  const bad: string[] = []
+  const walk = (el: DomEl): void => {
+    for (const node of Array.from(el.childNodes)) {
+      if (node.nodeType === 3 && /[\u0600-\u06FF]/.test(node.nodeValue ?? '') && !/[A-Za-z@/\\]/.test(node.nodeValue ?? '')) {
+        const font = root.getComputedStyle(el).fontFamily
+        const first = font.split(',')[0] ?? ''
+        if (first.includes('Mono') || first.includes('monospace')) bad.push((node.nodeValue ?? '').trim().slice(0, 40))
+      } else if (node.nodeType === 1) walk(node as DomEl)
+    }
+  }
+  walk(root.document.body)
+  return bad
+}
+
 const open = async (browser: Browser, html: string): Promise<Page> => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
   await page.setContent(html, { waitUntil: 'domcontentloaded' })
@@ -420,6 +480,10 @@ describe('Arabic computed type', () => {
       ['audit-en', auditLog('en')],
       ['filters-ar', mailFilters('ar')],
       ['filters-en', mailFilters('en')],
+      ['accounts-shaped-ar', shapedAccounts('ar')],
+      ['accounts-shaped-en', shapedAccounts('en')],
+      ['accounts-surface-ar', shapedSurface('ar')],
+      ['accounts-surface-en', shapedSurface('en')],
     ]
     try {
       for (const [screen, html] of screens) {
@@ -431,10 +495,14 @@ describe('Arabic computed type', () => {
         if (engine) {
           assert.ok(engine.left >= -1 && engine.right <= engine.inner + 1, `${screen} engine ${engine.left}..${engine.right} in ${engine.inner}`)
         }
+        if (screen.endsWith('-ar') && screen.startsWith('accounts-')) {
+          const mono = await page.evaluate(sentenceMono)
+          assert.deepEqual(mono, [], `${screen} Arabic sentence in mono: ${mono.join(' | ')}`)
+        }
         await page.close()
       }
     } finally {
       await browser.close()
     }
-  }, 60_000)
+  }, 120_000)
 })

@@ -1385,7 +1385,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         var row = origin && origin.closest('[data-account-row]');
         var label = row && row.querySelector('[data-account-status] .xp-badge__label');
         if (label) label.textContent = copy('Verification required', 'يلزم التحقق');
-        var badge = row && row.querySelector('[data-account-status] .xp-badge');
+        var badge = row && (row.querySelector('[data-account-status].xp-badge') || row.querySelector('[data-account-status] .xp-badge'));
         if (badge) {
           badge.className = 'xp-badge xp-badge--warn';
           badge.setAttribute('data-status', 'warn');

@@ -126,9 +126,9 @@ describe('xPanel home board port', () => {
     assert.doesNotMatch(specimen, /aria-disabled="true"|Coming soon/)
   })
   it('keeps board sample data out of product code', () => {
-    for (const name of ['./xpanel-home.ts', './xmail-inbox.ts', './xmail-compose.ts']) {
+    for (const name of ['./xpanel-home.ts', './xmail-inbox.ts', './xmail-compose.ts', './xwhm-accounts.ts']) {
       const product = readFileSync(new URL(name, import.meta.url), 'utf8')
-      for (const sample of ['alice-shop.com', '198.51.100.24', '1,431 today', 'Generation 142']) assert.ok(!product.includes(sample), `${name}: ${sample}`)
+      for (const sample of ['alice-shop.com', '198.51.100.24', '1,431 today', 'Generation 142', 'omar-clinic.net', 'lina and tarek']) assert.ok(!product.includes(sample), `${name}: ${sample}`)
     }
     const scripts = new URL('../../../../scripts/', import.meta.url)
     for (const entry of readdirSync(scripts).filter(entry => entry.startsWith('board-fidelity-'))) {

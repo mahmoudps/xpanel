@@ -27,6 +27,7 @@ import {
   renderThresholdMeter,
 } from '../tokens.ts'
 import { auditActionHtml, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
+import { renderWhmAccounts, whmAccountsFromProps } from '../board-port/xwhm-accounts.ts'
 import { renderWhmDashboard, whmDashboardFromProps, type DashboardHostSample } from '../board-port/xwhm-dashboard.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
@@ -167,6 +168,11 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
   const actionBannerHtml = props.actionState
     ? renderAsyncActionState({ ...props.actionState, locale })
     : ''
+
+  if (section === 'accounts') return ensureAccessibleSurfaceHtml(renderWhmAccounts(whmAccountsFromProps({
+    locale, principal, isRoot, acls: [...heldAcls], hostname: props.hostname, version: props.version,
+    generationId, accounts: props.accounts, plans, resellers,
+  })), locale)
 
   if (section === 'overview') return ensureAccessibleSurfaceHtml(renderWhmDashboard(whmDashboardFromProps({
     locale, principal, hostname: props.hostname, panelHostname: props.panelHostname, version: props.version, availableVersion: props.availableVersion,
@@ -337,158 +343,11 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
         </div>
         <p class="xp-help" data-host-info-status role="status"></p>
       </section>` : ''}
-      ${section === 'accounts' || section === 'create-account' ? `
+      ${section === 'create-account' ? `
       <section class="xp-card xp-accounts${section === 'create-account' ? ' xp-accounts--create' : ''}" id="whm-accounts" data-section="accounts-isolation" data-accounts-workspace aria-labelledby="whm-accounts-heading">
         <div class="xp-card__header xp-accounts__header">
           <h1 id="whm-accounts-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-          ${section === 'accounts' ? `<span class="xp-help xp-tabular">${isAr ? 'الحسابات: ' + accounts.length : accounts.length + (accounts.length === 1 ? ' account' : ' accounts')}</span>` : ''}
           </div>
-        ${section === 'accounts' ? `
-        <div class="xp-table-wrap xp-accounts__table-wrap">
-          <table class="xp-table xp-accounts__table">
-          <thead>
-          <tr>
-          <th scope="col">${isAr ? 'الحساب' : 'Account'}</th>
-          <th scope="col">${isAr ? 'النطاق الأساسي' : 'Primary domain'}</th>
-          <th scope="col">${isAr ? 'الخطة' : 'Plan'}</th>
-          <th scope="col">${isAr ? 'الحالة' : 'Status'}</th>
-          <th scope="col">${isAr ? 'الإجراءات' : 'Actions'}</th>
-        </tr>
-          </thead>
-          <tbody>${accounts.map(acc => {
-          const canSuspend = isRoot || heldAcls.has('suspend-account')
-          const canTerminate = isRoot || heldAcls.has('terminate-account')
-          const statusLabel = acc.status === 'active' ? t(locale, 'common.status.active') : acc.status === 'suspended' ? t(locale, 'common.status.suspended') : isAr ? 'قيد الإنهاء' : 'Terminating'
-          const attributes = `data-account-id="${escapeHtml(acc.id)}" data-username="${escapeHtml(acc.username)}" data-domain="${escapeHtml(acc.primaryDomain)}"`
-          return `<tr data-account-row="${escapeHtml(acc.username)}">
-          <td>
-          <div class="xp-accounts__identity">
-          <strong>
-          <bdi dir="ltr">${escapeHtml(acc.username)}</bdi>
-          </strong>
-          <details class="xp-accounts__details" data-account-details>
-          <summary>${isAr ? 'التفاصيل' : 'Details'}</summary>
-          <dl class="xp-accounts__technical">
-            <div>
-          <dt>UID</dt>
-          <dd>
-          <bdi dir="ltr">${acc.uid}</bdi>
-          </dd>
-          </div>
-          <div>
-          <dt>${isAr ? 'وحدة الموارد' : 'Resource unit'}</dt>
-          <dd>
-          <bdi dir="ltr">xpanel-${acc.uid}.slice</bdi>
-          </dd>
-          </div>
-          <div>
-          <dt>IPv4</dt>
-          <dd>
-          <bdi dir="ltr">${escapeHtml(acc.ipv4)}</bdi>
-          </dd>
-          </div>${acc.ipv6 ? `<div>
-          <dt>IPv6</dt>
-          <dd>
-          <bdi dir="ltr">${escapeHtml(acc.ipv6)}</bdi>
-          </dd>
-          </div>` : ''}${acc.extraIps?.length ? `<div>
-          <dt>${isAr ? 'عناوين إضافية' : 'Additional IPs'}</dt>
-          <dd>
-          <bdi dir="ltr">${escapeHtml(acc.extraIps.join(', '))}</bdi>
-          </dd>
-          </div>` : ''}          <div>
-          <dt>${isAr ? 'الطرفية' : 'Shell'}</dt>
-          <dd>
-          <bdi dir="ltr">${escapeHtml(acc.shell)}</bdi>
-          </dd>
-          </div>
-          <div>
-          <dt>${isAr ? 'البريد' : 'Contact'}</dt>
-          <dd><bdi dir="ltr">${escapeHtml(acc.contactEmail)}</bdi></dd>
-          </div>
-          <div>
-          <dt>${isAr ? 'حصة القرص' : 'Disk quota'}</dt>
-          <dd><bdi dir="ltr">${escapeHtml((() => { const disk = plans.find(plan => plan.id === acc.planId)?.resources.diskMb; return disk === undefined ? (isAr ? 'غير متاحة' : 'Unavailable') : disk === 'unlimited' ? (isAr ? 'غير محدود' : 'Unlimited') : disk + ' MB' })())}</bdi></dd>
-          </div>
-          </dl>
-          ${(isRoot || heldAcls.has('edit-account')) ? `<form class="xp-form-group" data-account-contact-form="true" data-account-id="${escapeHtml(acc.id)}">
-            <label class="xp-label" for="contact-${escapeHtml(acc.id)}">${isAr ? 'بريد التواصل' : 'Contact email'}</label>
-            <input id="contact-${escapeHtml(acc.id)}" name="contactEmail" type="email" class="xp-input" dir="ltr" required value="${escapeHtml(acc.contactEmail)}" />
-            <p class="xp-help" data-account-contact-status role="status" hidden></p>
-            <button type="submit" class="xp-btn">${isAr ? 'حفظ البريد' : 'Save email'}</button>
-          </form>` : ''}
-          ${(isRoot || heldAcls.has('change-password')) ? `<form class="xp-form-group" data-account-password-form="true" data-account-id="${escapeHtml(acc.id)}">
-            <label class="xp-label" for="password-${escapeHtml(acc.id)}">${isAr ? 'كلمة مرور جديدة' : 'New password'}</label>
-            <input id="password-${escapeHtml(acc.id)}" name="password" type="password" class="xp-input" minlength="8" required autocomplete="new-password" />
-            <p class="xp-help" data-account-password-status role="status" hidden></p>
-            <button type="submit" class="xp-btn">${isAr ? 'تغيير كلمة المرور' : 'Change password'}</button>
-          </form>` : ''}
-          </details>
-          </div>
-          </td>
-          <td>
-          <span class="xp-accounts__mobile-label" aria-hidden="true">${isAr ? 'النطاق الأساسي' : 'Primary domain'}</span>
-          <bdi dir="ltr" class="xp-accounts__domain">${escapeHtml(acc.primaryDomain)}</bdi>
-          </td>
-          <td>
-          <span class="xp-accounts__mobile-label" aria-hidden="true">${isAr ? 'الخطة' : 'Plan'}</span>
-          <span>${escapeHtml(plans.find(plan => plan.id === acc.planId)?.name ?? (isAr ? 'غير متاحة' : 'Unavailable'))}</span>
-          </td>
-          <td>
-          <span class="xp-accounts__mobile-label" aria-hidden="true">${isAr ? 'الحالة' : 'Status'}</span>
-          <span data-account-status>${renderStatusBadge(acc.status === 'active' ? 'ok' : acc.status === 'suspended' ? 'suspended' : 'critical', statusLabel)}</span>
-          </td>
-          <td>
-          <div class="xp-accounts__actions">${canSuspend && acc.status !== 'terminating' ? `<button type="button" class="xp-btn xp-btn--ghost" data-action="${acc.status === 'suspended' ? 'unsuspend-account' : 'suspend-account'}" ${attributes}>${acc.status === 'suspended' ? (isAr ? 'إلغاء التعليق' : 'Unsuspend') : (isAr ? 'تعليق' : 'Suspend')}</button>` : ''}${canTerminate && acc.status !== 'terminating' ? `<button type="button" class="xp-btn xp-btn--ghost xp-accounts__delete" data-action="terminate-account" ${attributes}>${isAr ? 'حذف' : 'Delete'}</button>` : ''}${!canSuspend && !canTerminate ? `<span class="xp-help">${isAr ? 'للعرض فقط' : 'Read only'}</span>` : ''}</div>
-          </td>
-          </tr>`
-        }).join('') || `<tr>
-          <td colspan="5">
-          <p class="xp-accounts__empty">${isAr ? 'لا توجد حسابات.' : 'No accounts.'}</p>
-          </td>
-          </tr>`}</tbody>
-          </table>
-          </div>
-        <dialog class="xp-account-dialog" data-account-dialog aria-labelledby="xp-account-dialog-title" aria-describedby="xp-account-dialog-description">
-          <form method="dialog" data-account-action-form novalidate>
-            <div class="xp-account-dialog__header">
-          <h2 id="xp-account-dialog-title" data-account-dialog-title>${isAr ? 'إجراء الحساب' : 'Account action'}</h2>
-          <p id="xp-account-dialog-description" data-account-dialog-description>
-          </p>
-          </div>
-            <dl class="xp-account-dialog__identity">
-          <div class="xp-accounts__field">
-          <dt>${isAr ? 'الحساب' : 'Account'}</dt>
-          <dd>
-          <bdi dir="ltr" data-account-dialog-username>
-          </bdi>
-          </dd>
-          </div>
-          <div class="xp-accounts__field">
-          <dt>${isAr ? 'النطاق الأساسي' : 'Primary domain'}</dt>
-          <dd>
-          <bdi dir="ltr" data-account-dialog-domain>
-          </bdi>
-          </dd>
-          </div>
-          </dl>
-            <div class="xp-accounts__field" data-account-confirm-field hidden>
-          <label class="xp-label" for="terminate-confirm-user">${isAr ? 'اكتب اسم المستخدم للتأكيد' : 'Type the username to confirm'}</label>
-          <input id="terminate-confirm-user" name="confirmUsername" type="text" class="xp-input xp-mono" dir="ltr" autocomplete="off" spellcheck="false" data-type-to-confirm="true" aria-describedby="xp-account-confirm-help" />
-          <span class="xp-help" id="xp-account-confirm-help">${isAr ? 'يجب أن يطابق اسم الحساب أعلاه تمامًا.' : 'Must exactly match the account above.'}</span>
-          </div>
-            <div class="xp-accounts__field" data-account-reason-field hidden>
-          <label class="xp-label" for="account-suspend-reason">${isAr ? 'سبب التعليق' : 'Suspension reason'}</label>
-          <textarea id="account-suspend-reason" name="reason" class="xp-textarea" rows="2" maxlength="500"></textarea>
-          </div>
-            <p class="xp-account-dialog__status" data-account-action-status role="status" aria-live="polite" tabindex="-1" hidden>
-          </p>
-            <div class="xp-account-dialog__footer">
-          <button type="button" class="xp-btn" data-account-action-cancel>${isAr ? 'إلغاء' : 'Cancel'}</button>
-          <button type="submit" class="xp-btn xp-btn--primary" data-account-action-submit disabled>${isAr ? 'تأكيد' : 'Confirm'}</button>
-          </div>
-          </form>
-        </dialog>` : ''}
         ${section === 'create-account' ? `<form class="xp-form-group" id="whm-create-account-drawer" action="/api/accounts" method="post" data-create-account-form="true">
           <div class="xp-accounts__field">
           <label class="xp-label" for="new-acc-username">${isAr ? 'اسم المستخدم' : 'Username'}</label>

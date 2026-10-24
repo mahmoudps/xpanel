@@ -191,7 +191,9 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
   const { chromium, expect } = await import('@playwright/test')
   let browser, version
   try {
-    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath(), timeout: 20000 })
+    const bundled = (() => { try { return chromium.executablePath() } catch { return '' } })()
+    const executablePath = [process.env.CHROME_PATH, bundled, '/opt/google/chrome/chrome'].find(candidate => candidate && existsSync(candidate))
+    browser = await chromium.launch({ headless: true, executablePath, timeout: 20000 })
     version = browser.version()
     for (const state of selected) {
       const result = { ...state, status: 'running', page_errors: [], requests: [] }
@@ -207,7 +209,8 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
         if (state.screen === 'create') {
           await createAccountGate(page, host, state, result, destination, expect)
         } else {
-        assert.equal(await page.locator('.xp-accounts__table thead th').count(), 5)
+        assert.equal(await page.locator('[data-board-port="xwhm-accounts"] thead th').count(), 9)
+        await page.locator('[data-account-row="beta"] [data-account-menu]').click()
         assert.equal(await page.locator('[data-account-row]').count(), 2)
         await expect(page.locator('[data-account-dialog]')).not.toBeVisible()
         result.fonts = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
@@ -260,6 +263,7 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
         await submit.click(); await unsuspend
         await expect(dialog.locator('[data-account-action-status]')).toContainText(state.locale === 'ar' ? 'تعذر' : 'could not be verified')
         await cancel.click()
+        await page.locator('[data-account-row="alpha"] [data-account-menu]').click()
         await page.locator('[data-account-row="alpha"] [data-action="suspend-account"]').click()
         await dialog.locator('[name="reason"]').fill('Synthetic reason')
         const suspension = page.waitForResponse(response => response.url().endsWith('/suspend'))
@@ -268,8 +272,8 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
         await expect(submit).toBeDisabled()
         await expect(page.locator('[data-account-row="alpha"] [data-account-status]')).toContainText(state.locale === 'ar' ? 'يلزم التحقق' : 'Verification required')
         await cancel.click()
-        await expect(page.locator('[data-account-row="alpha"] summary')).toBeFocused()
-        await expect(page.locator('[data-account-row="alpha"] [data-account-status] .xp-badge')).toHaveAttribute('data-status', 'warn')
+        await expect(page.locator('[data-account-row="alpha"] [data-account-menu]')).toBeFocused()
+        await expect(page.locator('[data-account-row="alpha"] [data-account-status].xp-badge')).toHaveAttribute('data-status', 'warn')
         result.requests = host.requests.slice(initial)
         assert.deepEqual(result.requests.map(request => request.method + ' ' + request.path), ['DELETE /api/accounts/internal-beta', 'POST /api/accounts/internal-beta/unsuspend', 'POST /api/accounts/internal-alpha/suspend'])
         }
