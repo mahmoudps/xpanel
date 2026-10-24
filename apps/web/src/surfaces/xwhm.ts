@@ -27,6 +27,7 @@ import {
   renderThresholdMeter,
 } from '../tokens.ts'
 import { auditActionHtml, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
+import { boardGateFixture } from '../board-port/gate-fixture.ts'
 import { renderWhmAccounts, whmAccountsFromProps } from '../board-port/xwhm-accounts.ts'
 import { renderWhmDashboard, whmDashboardFromProps, type DashboardHostSample } from '../board-port/xwhm-dashboard.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
@@ -169,10 +170,13 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
     ? renderAsyncActionState({ ...props.actionState, locale })
     : ''
 
-  if (section === 'accounts') return ensureAccessibleSurfaceHtml(renderWhmAccounts(whmAccountsFromProps({
-    locale, principal, isRoot, acls: [...heldAcls], hostname: props.hostname, version: props.version,
-    generationId, accounts: props.accounts, plans, resellers,
-  })), locale)
+  if (section === 'accounts') {
+    const accountsModel = boardGateFixture()?.accountsPort ?? whmAccountsFromProps({
+      locale, principal, isRoot, acls: [...heldAcls], hostname: props.hostname, version: props.version,
+      generationId, accounts: props.accounts, plans, resellers,
+    })
+    return ensureAccessibleSurfaceHtml(renderWhmAccounts(accountsModel), locale)
+  }
 
   if (section === 'overview') return ensureAccessibleSurfaceHtml(renderWhmDashboard(whmDashboardFromProps({
     locale, principal, hostname: props.hostname, panelHostname: props.panelHostname, version: props.version, availableVersion: props.availableVersion,

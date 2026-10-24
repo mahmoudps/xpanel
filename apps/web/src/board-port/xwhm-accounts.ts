@@ -526,7 +526,8 @@ export const renderWhmAccounts = (model: AccountsBoardModel): string => {
     : "'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif"
   return `<div class="xp-board-port" data-board-port="xwhm-accounts" data-section="accounts-isolation" data-accounts-workspace id="whm-accounts"${model.art ? '' : ' data-product="true"'}${ar ? ' dir="rtl"' : ''} style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #F5F6F8; font-family: ${boardFace}; color: #101828">
   <style>
-    .xp-board-port{line-height:normal;font-size:16px;font-kerning:auto;font-feature-settings:normal;font-synthesis:weight style small-caps;-webkit-font-smoothing:antialiased}
+    .xp-board-port{line-height:normal;font-size:16px;font-kerning:auto;font-feature-settings:normal;font-synthesis:weight style small-caps;-webkit-font-smoothing:auto}
+    .xp-board-port .xp-badge{border:0;line-height:normal;padding:4px 10px}
     .xp-board-port a{color:#1D5BD6}.xp-board-port a:hover{color:#1546A8}
     .xp-board-port :focus-visible{outline:2px solid #1D5BD6;outline-offset:2px}
     .xp-board-port nav[aria-label="xWHM navigation"] :focus-visible{outline-color:#6EA0FF}

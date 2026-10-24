@@ -6,10 +6,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import playwright from '../node_modules/@playwright/test/index.js'
 import { qualifyHostTools, tools } from '../packages/catalog/src/index.ts'
-import { defaultPlan } from '../packages/core/src/rules/plans.ts'
 import { renderWebApp } from '../apps/web/src/app.ts'
-import { PNG } from 'pngjs'
-import pixelmatch from 'pixelmatch'
+import { whmAccountsFixture } from '../apps/web/src/board-port/xwhm-accounts.fixture.ts'
+import { installBoardGateFixture } from '../apps/web/src/board-port/gate-fixture.ts'
+import { gateAccepts, scoreGate } from '../apps/web/test/gate/board-gate.ts'
 
 const { chromium } = playwright
 const root = path.dirname(fileURLToPath(import.meta.url))
@@ -22,39 +22,37 @@ const route = '/whm/accounts'
 const fixtureUrl = `${route}?fixture=board`
 const boardName = path.basename(boardFile)
 
-const plan = defaultPlan({ id: 'fixture-plan', name: 'Business', featureListId: 'fixture-features' })
-const account = (id, username, uid, domain, createdAt, status) => ({
-  id, username, uid, gid: uid, home: `/home/${username}`, primaryDomain: domain,
-  planId: plan.id, ownerId: null, status, suspendReason: status === 'suspended' ? 'billing' : null,
-  contactEmail: `ops@${domain}`, ipv4: '192.0.2.21', shell: 'none', createdAt,
-})
 const catalog = qualifyHostTools(tools, {
   executor: 'linux',
   probes: { 'control-plane': 'passed', 'linux-account': 'passed' },
 })
 const principal = { kind: 'root', id: 'fixture-root', username: 'root' }
 const productHtml = (pad) => {
-  let html = renderWebApp({
-    surface: 'xwhm',
-    locale: 'en',
-    theme: 'light',
-    activeRoute: route,
-    realtimeEnabled: false,
-    visibility: { principal },
-    catalog,
-    whm: {
-      principal,
-      hostname: 'srv1.xpanel.test',
-      version: '1.4.2',
-      generationId: 142,
-      plans: [plan],
-      resellers: [],
-      accounts: [
-        account('11111111-1111-4111-8111-111111111111', 'lina', 20012, 'lina-bakery.com', '2026-10-22T12:00:00Z', 'active'),
-        account('22222222-2222-4222-8222-222222222222', 'nour', 20015, 'nour.dev', '2026-10-21T12:00:00Z', 'suspended'),
-      ],
-    },
-  })
+  process.env.VITEST = 'true'
+  installBoardGateFixture({ accountsPort: whmAccountsFixture() })
+  let html
+  try {
+    html = renderWebApp({
+      surface: 'xwhm',
+      locale: 'en',
+      theme: 'light',
+      activeRoute: route,
+      realtimeEnabled: false,
+      visibility: { principal },
+      catalog,
+      whm: {
+        principal,
+        hostname: 'panel.example.test',
+        version: '0.0.0',
+        generationId: 1,
+        plans: [],
+        resellers: [],
+        accounts: [],
+      },
+    })
+  } finally {
+    installBoardGateFixture(undefined)
+  }
   if (pad) {
     const next = html.replace(
       /(<div class="xp-board-port" data-board-port="xwhm-accounts"[^>]*style=")/,
@@ -100,12 +98,13 @@ const serveDir = (dir) => new Promise((resolve) => {
 const assertProduct = async (page) => {
   const facts = await page.evaluate(() => ({
     surface: document.documentElement.getAttribute('data-surface'),
-    port: document.querySelector('[data-board-port="xwhm-accounts"][data-product="true"]') ? 'xwhm-accounts' : '',
+    port: document.querySelector('[data-board-port="xwhm-accounts"]')?.getAttribute('data-board-port') ?? '',
+    xdc: document.querySelector('x-dc') ? 1 : 0,
     dcTpl: document.querySelectorAll('[data-dc-tpl]').length,
     dcRoot: document.getElementById('dc-root') ? 1 : 0,
     scName: document.querySelectorAll('[data-sc-name]').length,
   }))
-  if (facts.surface !== 'xwhm' || facts.port !== 'xwhm-accounts' || facts.dcTpl !== 0 || facts.dcRoot !== 0 || facts.scName !== 0) {
+  if (facts.surface !== 'xwhm' || facts.port !== 'xwhm-accounts' || facts.dcTpl !== 0 || facts.dcRoot !== 0 || facts.scName !== 0 || facts.xdc !== 0) {
     throw new Error(`product DOM assertion failed: ${JSON.stringify(facts)}`)
   }
   return facts
@@ -127,16 +126,6 @@ const shoot = async (browser, url, product) => {
   return { png, facts }
 }
 
-const diffRatio = (left, right) => {
-  const a = PNG.sync.read(left)
-  const b = PNG.sync.read(right)
-  const width = Math.min(a.width, b.width)
-  const height = Math.min(a.height, b.height)
-  const diff = new PNG({ width, height })
-  const mismatched = pixelmatch(a.data, b.data, diff.data, width, height, { threshold: 0.1, includeAA: false })
-  return { mismatched, total: width * height, ratio: mismatched / (width * height), diff: PNG.sync.write(diff) }
-}
-
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
 
 const main = async () => {
@@ -153,8 +142,8 @@ const main = async () => {
   const boardShot = await shoot(browser, boardUrl, false)
   const appShot = await shoot(browser, appUrl, true)
   const padShot = await shoot(browser, padUrl, true)
-  const result = diffRatio(boardShot.png, appShot.png)
-  const negative = diffRatio(appShot.png, padShot.png)
+  const result = scoreGate(boardShot.png, appShot.png)
+  const negative = scoreGate(appShot.png, padShot.png)
   await writeFile(path.join(outDir, 'xwhm-accounts-ltr-board.png'), boardShot.png)
   await writeFile(path.join(outDir, 'xwhm-accounts-ltr-app.png'), appShot.png)
   await writeFile(path.join(outDir, 'xwhm-accounts-ltr-diff.png'), result.diff)
@@ -172,7 +161,9 @@ const main = async () => {
     diff: `${(result.ratio * 100).toFixed(2)}%`,
     mismatched: result.mismatched,
     total: result.total,
-    within3pct: result.ratio <= 0.03,
+    pass: result.pass,
+    worstTile: { ...result.worstTile, diff: `${(result.worstTile.ratio * 100).toFixed(2)}%` },
+    accepted: gateAccepts({ score: result, board: boardShot.png, app: appShot.png, negativePass: negative.pass }),
     appUrl: fixtureUrl,
     appDocument: 'renderWebApp({ surface: "xwhm", activeRoute: "/whm/accounts", theme: "light" })',
     boardUrl: `${boardName} served from XP_BOARD_FILE`,
@@ -188,7 +179,7 @@ const main = async () => {
   }
   await writeFile(path.join(outDir, 'report.json'), JSON.stringify(row, null, 2))
   console.log(JSON.stringify(row, null, 2))
-  if (result.ratio > 0.03) process.exitCode = 1
+  if (!gateAccepts({ score: result, board: boardShot.png, app: appShot.png, negativePass: negative.pass })) process.exitCode = 1
 }
 
 main().catch((error) => {
