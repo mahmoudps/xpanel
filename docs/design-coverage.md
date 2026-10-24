@@ -2,13 +2,13 @@
 
 **2 of 44 boards done. 0 are Merged+gated.**
 
-Done means the row is Merged+gated or Blocked with a reason. Gate PR #32 (pending) until it merges: [#32](https://github.com/mahmoudps/xpanel/pull/32). The strict gate is ≤0.5% of the page and ≤1% of every 200×200 tile, on the product route, with a DOM proof, a byte-identical pair refused, and a 1px pad that must fail. Board sample content stays in the test fixture. A merged screen stays **Not started** until that gate accepts it in a merged commit. This run accepts Home phone only, and that row stays Not started because #32 has not merged. Home LTR is 0.00% and refused because the two captures are the same bytes. Home phone is 0.00% and the PNG bytes differed, so the current rule accepted that capture. Dashboard, Inbox, and Compose miss the tile limit and are not byte-identical. The open Accounts, Create account, and Email PRs were measured with live-shaped data (1.94%, 6.76%, and 3.20%). Those figures are not this gate, so their static-gate cell stays a dash.
+Done means the row is Merged+gated or Blocked with a reason. Gate PR #32 (pending) until it merges: [#32](https://github.com/mahmoudps/xpanel/pull/32). The strict gate is ≤0.5% of the page and ≤1% of every 200×200 tile, on the product route, with a DOM proof, a byte-identical pair refused, and a 1px pad that must fail. Board sample content stays in the test fixture. A merged screen stays **Not started** until that gate accepts it in a merged commit. Home LTR is 0.00% and refused because the two PNG files are the same bytes ([#59](https://github.com/mahmoudps/xpanel/pull/59)). A second navigation of the board URL reproduced that SHA-256. The HTTP bodies and rendered DOM hashes differ, and the PNG has no `tIME` chunk, so the match is the encoder writing identical pixels, and the refusal stands. Home phone is 0.00% and the PNG bytes differed, so the current rule accepted that capture; the row stays Not started. Dashboard is 0.00% page and 0.00% worst tile, Inbox is 0.02% and 0.86% at x=600,y=0, and Compose is 0.00% and 0.08% at x=400,y=1000, all on [#59](https://github.com/mahmoudps/xpanel/pull/59). Those three are locally accepted and stay Not started until that commit merges. The open Accounts, Create account, and Email PRs were measured with live-shaped data (1.94%, 6.76%, and 3.20%). Those figures are not this gate, so their static-gate cell stays a dash.
 
 The claude-export has 44 `.dc.html` files. The only variant files are Home (English), Home (Arabic), and Home (phone). There is no separate empty, error, or modal file. HTTP 403, 404, 421, 500, and 503 are product error responses without a board.
 
 `/` and `/panel` open `/home`. `/mail` opens `/mail/inbox`. `/panel/<route>` opens that xPanel route. `/design/system`, `/design/components`, and `/design/navigation` exist only when `XPANEL_DESIGN_PAGES=1`.
 
-Motion gate is **not measured** on every row. Data binding is `real` where the product route reads a live source, or `empty-state coming soon` where the screen stays empty until its tool is connected. A dash means this ledger has not classified that route.
+Motion gate is **not measured** on every row. Inventory for Home, Home phone, Dashboard, Inbox, and Compose: each board file has only `a{color:#1D5BD6}a:hover{color:#1546A8}`. Those documents declare no transition, no `@keyframes`, and no animation duration. `support.js` `sc-shine` (1.4s ease infinite) is the design-tool placeholder. Shell motion stays mobile-nav 200ms and command palette 160ms. No frame gate. Data binding is `real` where the product route reads a live source, or `empty-state coming soon` where the screen stays empty until its tool is connected. A dash means this ledger has not classified that route.
 
 Update a row in every PR that changes that screen. The tables stay names, routes, and status. The section below is the shared way to add a screen to the gate. Do not rename the harness exports or the four fixture fields.
 
@@ -44,8 +44,8 @@ Stable fixture fields, on `BoardGateFixture` in `apps/web/src/board-port/gate-fi
 
 | Board file | Surface | Product route | Status | Static gate % | Motion gate | Data binding | PR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| General · Home/PanelHome.dc.html | xPanel | /home | Not started | 0.00% pixels, refused: byte-identical ([#32](https://github.com/mahmoudps/xpanel/pull/32)) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/14) |
-| General · Home — phone/PanelHomeMobile.dc.html | xPanel | /home (390×844) | Not started | 0.00% pixels; PNG bytes differed, rule accepted, not merged (gate PR #32 (pending)) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/14) |
+| General · Home/PanelHome.dc.html | xPanel | /home | Not started | 0.00% pixels, refused: byte-identical ([#59](https://github.com/mahmoudps/xpanel/pull/59)) | inventory: hover only | real | [PR](https://github.com/mahmoudps/xpanel/pull/14) |
+| General · Home — phone/PanelHomeMobile.dc.html | xPanel | /home (390×844) | Not started | 0.00% pixels; PNG bytes differed, rule accepted, not merged ([#59](https://github.com/mahmoudps/xpanel/pull/59)) | inventory: hover only | real | [PR](https://github.com/mahmoudps/xpanel/pull/14) |
 | General · Home — Arabic (RTL)/PanelHomeAr.dc.html | xPanel | /home?lang=ar | Blocked: Arabic typography (#20) is a visual check, not a pixel gate | — | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/20) |
 | General · Resources & quotas/PanelResources.dc.html | xPanel | /resources | Not started | — | not measured | real | — |
 | Email · Email accounts/PanelEmail.dc.html | xPanel | /email/accounts | PR open | — | not measured | real; pending fields empty-state coming soon | [PR](https://github.com/mahmoudps/xpanel/pull/30) |
@@ -64,7 +64,7 @@ Stable fixture fields, on `BoardGateFixture` in `apps/web/src/board-port/gate-fi
 | Design system/Main.dc.html | xPanel | /design/system | Not started | — | not measured | — | — |
 | Navigation map — all 187 pages/NavMap.dc.html | xPanel | /design/navigation | Not started | — | not measured | — | — |
 | Premium components/Components.dc.html | xPanel | /design/components | Not started | — | not measured | — | — |
-| Home · Dashboard/WhmDashboard.dc.html | xWHM | /whm | Not started | 0.57% page, worst tile 6.74% (fail, [#32](https://github.com/mahmoudps/xpanel/pull/32)) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/15) |
+| Home · Dashboard/WhmDashboard.dc.html | xWHM | /whm | Not started | 0.00% page, worst tile 0.00% (local pass, not merged, [#59](https://github.com/mahmoudps/xpanel/pull/59)) | inventory: hover only | real | [PR](https://github.com/mahmoudps/xpanel/pull/15) |
 | Home · Audit log/WhmAudit.dc.html | xWHM | /whm/audit | Not started | — | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/22) |
 | Accounts · Accounts/WhmAccounts.dc.html | xWHM | /whm/accounts | PR open | — | not measured | real; pending fields empty-state coming soon | [PR](https://github.com/mahmoudps/xpanel/pull/27) |
 | Accounts · Create account/WhmAccountCreate.dc.html | xWHM | /whm/accounts/new | PR open | — | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/28) |
@@ -84,8 +84,8 @@ Stable fixture fields, on `BoardGateFixture` in `apps/web/src/board-port/gate-fi
 | xWHM Software · PHP/WhmPhp.dc.html | xWHM | /whm/software/php | Not started | — | not measured | empty-state coming soon | — |
 | Server · Setup & settings/WhmSetup.dc.html | xWHM | /whm/server/setup | Not started | — | not measured | empty-state coming soon | — |
 | Server · Upgrade/WhmUpgrade.dc.html | xWHM | /whm/server/upgrade | Not started | — | not measured | real | — |
-| Mail · Inbox/MailInbox.dc.html | xMail | /mail/inbox | Not started | 0.88% page, worst tile 10.90% (fail, [#32](https://github.com/mahmoudps/xpanel/pull/32)) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/16) |
-| Mail · Compose/MailCompose.dc.html | xMail | /mail/compose | Not started | 1.38% page, worst tile 9.88% (fail, [#32](https://github.com/mahmoudps/xpanel/pull/32)) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/17) |
+| Mail · Inbox/MailInbox.dc.html | xMail | /mail/inbox | Not started | 0.02% page, worst tile 0.86% at x=600,y=0 (local pass, not merged, [#59](https://github.com/mahmoudps/xpanel/pull/59)) | inventory: hover only | real | [PR](https://github.com/mahmoudps/xpanel/pull/16) |
+| Mail · Compose/MailCompose.dc.html | xMail | /mail/compose | Not started | 0.00% page, worst tile 0.08% at x=400,y=1000 (local pass, not merged, [#59](https://github.com/mahmoudps/xpanel/pull/59)) | inventory: hover only | real | [PR](https://github.com/mahmoudps/xpanel/pull/17) |
 | Sign in/Login.dc.html | auth | /login | Not started | — | not measured | real | — |
 | Build map/BuildMap.dc.html | — | — | Blocked: no product route | — | not measured | — | — |
 
