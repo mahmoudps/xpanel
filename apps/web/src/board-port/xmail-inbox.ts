@@ -9,7 +9,9 @@ const FONT_AR = "'IBM Plex Sans Arabic', 'IBM Plex Sans', system-ui, sans-serif"
 const PORT_CSS = `.xp-board-port{line-height:normal;font-size:16px;font-kerning:auto;font-feature-settings:normal;font-synthesis:weight style small-caps;-webkit-font-smoothing:antialiased}
 .xp-board-port a{color:#1D5BD6}.xp-board-port a:hover{color:#1546A8}
 .xp-board-port :focus-visible{outline:2px solid #1D5BD6;outline-offset:2px}
-.xp-board-port p{max-inline-size:none}`
+.xp-board-port p{line-height:inherit;margin:0;max-inline-size:none}
+.xp-board-port p+p{margin-block-start:0}
+.xp-board-port :is(code,kbd,pre,time){font-weight:inherit;font-variant-numeric:inherit}`
 
 const glyph = (inner: string, size = 18): string =>
   `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`

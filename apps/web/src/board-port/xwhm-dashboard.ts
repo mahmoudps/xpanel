@@ -395,7 +395,7 @@ const pill = (chip: DashboardChip, mono = false): string => {
   const dot = chip.dot ?? chip.fg
   const border = chip.borderedDot ? `border: 1.5px solid ${chip.fg};` : ''
   const font = mono ? " font-family: 'IBM Plex Mono', monospace;" : ''
-  return `<span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: ${chip.bg}; color: ${chip.fg}; font-size: 12px; font-weight: 600;${font}"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: ${dot}; ${border}"></span>${escapeHtml(chip.label)}</span>`
+  return `<span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: ${chip.bg}; color: ${chip.fg}; font-size: 12px; font-weight: 600; white-space: nowrap;${font}"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: ${dot}; ${border}"></span>${escapeHtml(chip.label)}</span>`
 }
 
 const linkStyle = 'display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; color: #C9D3E1; text-decoration: none; font-size: 14px'
@@ -520,6 +520,9 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
     .xp-board-port a{color:#1D5BD6}.xp-board-port a:hover{color:#1546A8}
     .xp-board-port :focus-visible{outline:2px solid #1D5BD6;outline-offset:2px}
     .xp-board-port nav[aria-label="xWHM navigation"] :focus-visible{outline-color:#6EA0FF}
+    .xp-board-port p{line-height:inherit;margin:0;max-inline-size:none}
+    .xp-board-port p+p{margin-block-start:0}
+    .xp-board-port :is(code,kbd,pre,time){font-weight:inherit;font-variant-numeric:inherit}
     ${ARABIC_TYPE_CSS}
   </style>
   ${navHtml(model)}
