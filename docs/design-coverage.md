@@ -47,7 +47,7 @@ Stable fixture fields, on `BoardGateFixture` in `apps/web/src/board-port/gate-fi
 | General · Home/PanelHome.dc.html | xPanel | /home | Not started | 0.00% pixels, refused: byte-identical ([#32](https://github.com/mahmoudps/xpanel/pull/32)) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/14) |
 | General · Home — phone/PanelHomeMobile.dc.html | xPanel | /home (390×844) | Not started | 0.00% pixels; PNG bytes differed, rule accepted, not merged (gate PR #32 (pending)) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/14) |
 | General · Home — Arabic (RTL)/PanelHomeAr.dc.html | xPanel | /home?lang=ar | Blocked: Arabic typography (#20) is a visual check, not a pixel gate | — | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/20) |
-| General · Resources & quotas/PanelResources.dc.html | xPanel | /resources | Not started | 0.00% page, worst tile 0.00% at 1440×2520 and 1280×2520, refused: byte-identical. 1px pad fails (2.06% at 1440, 2.14% at 1280) | none on this board | real | this PR |
+| General · Resources & quotas/PanelResources.dc.html | xPanel | /resources | Not started | 0.00% page, worst tile 0.00% at 1440×2520 and 1280×2520, refused: byte-identical. 1px pad fails (2.06% at 1440, 2.14% at 1280) | none on this board | real | [PR](https://github.com/mahmoudps/xpanel/pull/51) |
 | Email · Email accounts/PanelEmail.dc.html | xPanel | /email/accounts | PR open | — | not measured | real; pending fields empty-state coming soon | [PR](https://github.com/mahmoudps/xpanel/pull/30) |
 | Files · File manager/PanelFiles.dc.html | xPanel | /files/manager | Not started | — | not measured | real | — |
 | Files · Directory privacy/PanelSite.dc.html | xPanel | /files/directory-privacy | Not started | — | not measured | empty-state coming soon | — |
@@ -273,7 +273,7 @@ Finish the open work before these rows: the strict-gate follow-up (Home, Home ph
 
 Not started boards after that, in navigation order:
 
-1. `General · Resources & quotas/PanelResources.dc.html` → `/resources` (port open: pixels 0.00%, gate refuses the byte-identical pair)
+1. `General · Resources & quotas/PanelResources.dc.html` → `/resources` ([#51](https://github.com/mahmoudps/xpanel/pull/51): pixels 0.00%, gate refuses the byte-identical pair)
 2. `Files · File manager/PanelFiles.dc.html` → `/files/manager`
 3. `Files · Directory privacy/PanelSite.dc.html` → `/files/directory-privacy`
 4. `Files · Backup/PanelBackup.dc.html` → `/files/backup`
