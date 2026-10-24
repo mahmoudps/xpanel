@@ -1801,13 +1801,28 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       form.addEventListener('submit', function (event) {
         event.preventDefault();
         var status = form.querySelector('[data-mailbox-status]');
+        function chosen(name) {
+          var el = form.querySelector('[data-service-choice="' + name + '"]');
+          return el ? el.getAttribute('aria-checked') === 'true' : null;
+        }
+        var emailOn = chosen('email');
+        var ftpOn = chosen('ftp');
+        var webOn = chosen('webdisk');
+        var services = emailOn === null && ftpOn === null && webOn === null
+          ? { email: true, ftp: false, webdisk: false }
+          : { email: emailOn === true, ftp: ftpOn === true, webdisk: webOn === true };
+        var unlimited = form.querySelector('[data-quota-unlimited]');
+        var quotaInput = form.querySelector('[name="mailboxQuotaMb"]');
+        var mailboxQuotaMb = unlimited && unlimited.checked ? 'unlimited' : Number(quotaInput.value);
         var body = {
           localPart: form.querySelector('[name="localPart"]').value.trim().toLowerCase(),
           domainId: form.querySelector('[name="domainId"]').value,
           password: form.querySelector('[name="password"]').value,
-          mailboxQuotaMb: Number(form.querySelector('[name="mailboxQuotaMb"]').value),
-          services: { email: true, ftp: false, webdisk: false },
+          mailboxQuotaMb: mailboxQuotaMb,
+          services: services,
         };
+        var dir = form.querySelector('[name="ftpDir"]');
+        if (dir && (ftpOn === true || webOn === true) && dir.value.trim()) body.ftpDir = dir.value.trim();
         window.xpanelSessionRequest('POST', '/api/service-users', body).then(reload).catch(function (error) { note(status, failText(error)); });
       });
     });
