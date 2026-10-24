@@ -28,8 +28,10 @@ The board exports themselves stay out of the repo. Read them from the design sto
 
 ## 3. Pixel gate (mandatory, per screen)
 - Test-only harness: render the app page with a fixture mirroring the board's sample content, at the board's exact viewport and DPR, with fonts loaded and animations paused.
-- pixelmatch at threshold 0.1: **3% or less differing pixels** for LTR, and also for the RTL mirror.
-- Publish board, app and diff images, plus a per-screen table of diff % in the PR. A screen above 3% is NOT done. A screen at or under 3% is also not done until the content-truth table in section 7 is attached.
+- pixelmatch at threshold 0.1, `includeAA: false`. The screen passes only when the whole page is **≤0.5%** and every **200×200** tile is **≤1%**. The capture is the product route (`renderWebApp`), with the board's sample content injected from a test fixture. A byte-identical board/app pair is refused, even at 0.00%. A 1px pad of the port root must fail this same gate, and that negative control runs in the test suite.
+- Shared harness, stable for every lane: import `scoreGate`, `gateAccepts`, `sameCapture`, `padPort`, `PAGE_LIMIT`, `TILE_LIMIT`, and `TILE` from `apps/web/test/gate/board-gate.ts`. That file is outside `src`, so the release packager does not ship `pixelmatch` or `pngjs`. Inject the sample in the test server with `installBoardGateFixture({ homePort, dashboardPort, inboxPort, composePort })` from `apps/web/src/board-port/gate-fixture.ts`, then clear it with `installBoardGateFixture(undefined)`. Those four names are fixture fields, not product surface props. `apps/api/src/main.ts` never calls the installer, and the slot stays empty unless Vitest is running.
+- Arabic is a visual check, not this pixel gate.
+- Publish board, app and diff images, plus a per-screen table of diff % in the PR. A screen that misses either limit is NOT done. A screen inside both limits is also not done until the content-truth table in section 7 is attached.
 - Also screenshot the REAL product route with real (possibly empty) data, and confirm that the structure is identical to the board (same regions present).
 
 ## 4. RTL correctness (Arabic)
@@ -45,7 +47,7 @@ The board exports themselves stay out of the repo. Read them from the design sto
 
 ## 6. Done means
 - Every region in the inventory is present.
-- LTR and RTL both pass the 3% gate.
+- LTR passes the strict gate (≤0.5% page, ≤1% per 200×200 tile, distinct captures, failing 1px control). Arabic stays a visual check.
 - The RTL bidi check passes.
 - Motion is verified.
 - The real route shows the same structure.

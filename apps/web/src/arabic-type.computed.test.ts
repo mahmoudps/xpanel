@@ -3,10 +3,10 @@ import { existsSync } from 'node:fs'
 import { describe, it } from 'vitest'
 import { ARABIC_TYPE_CSS } from './arabic-type.ts'
 import { renderFidelityDocument as renderDashboard, renderWhmDashboard, whmDashboardFromProps } from './board-port/xwhm-dashboard.ts'
-import { renderFidelityDocument as renderHome, renderLiveDocument as renderHomeLive } from './board-port/xpanel-home.fixture.ts'
+import { renderFidelityDocument as renderHome, renderLiveDocument as liveShapedHomeDocument } from './board-port/xpanel-home.fixture.ts'
 import { renderInbox, xmailInboxFromProps } from './board-port/xmail-inbox.ts'
-import { renderFidelityDocument as renderInboxFidelity, renderLiveDocument as renderInboxLive } from './board-port/xmail-inbox.fixture.ts'
-import { renderFidelityDocument as renderComposeFidelity, renderLiveDocument as renderComposeLive } from './board-port/xmail-compose.fixture.ts'
+import { renderFidelityDocument as renderInboxFidelity, renderLiveDocument as liveShapedInboxDocument } from './board-port/xmail-inbox.fixture.ts'
+import { renderFidelityDocument as renderComposeFidelity, renderLiveDocument as liveShapedComposeDocument } from './board-port/xmail-compose.fixture.ts'
 import { renderMailSurface } from './surfaces/xmail.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
 import { DESIGN_TOKENS_CSS } from './tokens.ts'
@@ -468,20 +468,20 @@ describe('Arabic computed type', () => {
       ['home-ar', renderHome('ar')],
       ['home-en', renderHome('ltr')],
       ['home-phone', renderHome('phone')],
-      ['home-live-ar', renderHomeLive('ar')],
-      ['home-live-en', renderHomeLive('ltr')],
-      ['home-live-phone', renderHomeLive('phone')],
+      ['home-live-ar', liveShapedHomeDocument('ar')],
+      ['home-live-en', liveShapedHomeDocument('ltr')],
+      ['home-live-phone', liveShapedHomeDocument('phone')],
       ['dashboard-ar', renderDashboard('rtl')],
       ['dashboard-en', renderDashboard('ltr')],
       ['whm-live-ar', liveDashboard('ar')],
       ['whm-live-en', liveDashboard('en')],
-      ['inbox-ar', renderInboxLive('ar')],
-      ['inbox-en', renderInboxLive('en')],
+      ['inbox-ar', liveShapedInboxDocument('ar')],
+      ['inbox-en', liveShapedInboxDocument('en')],
       ['inbox-fixture', renderInboxFidelity()],
       ['inbox-shaped-ar', shapedInbox('ar')],
       ['inbox-shaped-en', shapedInbox('en')],
-      ['compose-ar', renderComposeLive('ar')],
-      ['compose-en', renderComposeLive('en')],
+      ['compose-ar', liveShapedComposeDocument('ar')],
+      ['compose-en', liveShapedComposeDocument('en')],
       ['compose-fixture', renderComposeFidelity()],
       ['audit-ar', auditLog('ar')],
       ['audit-en', auditLog('en')],

@@ -24,6 +24,7 @@ import {
   renderStatusBadge,
 } from '../tokens.ts'
 import { renderAccountResources, resourceRowsFromPlan } from '../board-canvas.ts'
+import { boardGateFixture } from '../board-port/gate-fixture.ts'
 import { renderXpanelHome, xpanelHomeFromProps } from '../board-port/xpanel-home.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
@@ -134,7 +135,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
 
   if (section === 'overview') {
     const homePlan = plan && plan.id === account.planId ? plan : undefined
-    return ensureAccessibleSurfaceHtml(renderXpanelHome(xpanelHomeFromProps({
+    const homeModel = boardGateFixture()?.homePort ?? xpanelHomeFromProps({
       locale,
       account,
       ...(homePlan ? { plan: homePlan } : {}),
@@ -157,7 +158,8 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
         detailHtml: escapeHtml(auditTargetLabel(entry.target, locale)),
       })) } : {}),
       signOutLabel: isAr ? 'تسجيل الخروج' : 'Sign out',
-    })), locale)
+    })
+    return ensureAccessibleSurfaceHtml(renderXpanelHome(homeModel), locale)
   }
 
   const rawHtml = renderSurfaceShell({

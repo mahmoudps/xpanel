@@ -10,6 +10,7 @@ import {
   renderMobileNavToggle, renderSurfaceUnavailable, renderUnavailableSurfaceShell,
   resolveSurfaceSection,
 } from '../shell.ts'
+import { boardGateFixture } from '../board-port/gate-fixture.ts'
 import { renderXmailCompose, xmailComposeFromProps } from '../board-port/xmail-compose.ts'
 import { renderXmailInbox, xmailInboxFromProps } from '../board-port/xmail-inbox.ts'
 
@@ -116,8 +117,9 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
   const observedFolderHtml = observedFolders.length ? `<section class="xp-mail-nav-section" aria-labelledby="mail-observed-folders"><h2 id="mail-observed-folders" class="xp-label">${text('Folders', 'المجلدات')}</h2><ul class="xp-mail-observed-folders">${observedFolders.map(folder => `<li data-mail-folder="${escapeHtml(folder)}">${icons.folder}<span>${escapeHtml(folder)}</span></li>`).join('')}</ul></section>` : ''
   const actionBanner = props.actionState ? renderAsyncActionState({ ...props.actionState, locale }) : ''
 
+  const gate = boardGateFixture()
   if (section === 'inbox') {
-    return ensureAccessibleSurfaceHtml(renderXmailInbox(xmailInboxFromProps({
+    return ensureAccessibleSurfaceHtml(renderXmailInbox(gate?.inboxPort ?? xmailInboxFromProps({
       locale,
       mailbox,
       ...(props.quotaUsedMb !== undefined ? { quotaUsedMb: props.quotaUsedMb } : {}),
@@ -136,7 +138,7 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
   }
 
   if (section === 'compose') {
-    return ensureAccessibleSurfaceHtml(renderXmailCompose(xmailComposeFromProps({
+    return ensureAccessibleSurfaceHtml(renderXmailCompose(gate?.composePort ?? xmailComposeFromProps({
       locale,
       mailbox,
       ...(props.quotaUsedMb !== undefined ? { quotaUsedMb: props.quotaUsedMb } : {}),

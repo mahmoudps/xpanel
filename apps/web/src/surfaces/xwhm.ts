@@ -28,6 +28,7 @@ import {
 } from '../tokens.ts'
 import { auditActionHtml, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
 import { isArabicSentence } from '../arabic-type.ts'
+import { boardGateFixture } from '../board-port/gate-fixture.ts'
 import { renderWhmDashboard, whmDashboardFromProps, type DashboardHostSample } from '../board-port/xwhm-dashboard.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
@@ -170,7 +171,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
     ? renderAsyncActionState({ ...props.actionState, locale })
     : ''
 
-  if (section === 'overview') return ensureAccessibleSurfaceHtml(renderWhmDashboard(whmDashboardFromProps({
+  if (section === 'overview') return ensureAccessibleSurfaceHtml(renderWhmDashboard(boardGateFixture()?.dashboardPort ?? whmDashboardFromProps({
     locale, principal, hostname: props.hostname, panelHostname: props.panelHostname, version: props.version, availableVersion: props.availableVersion,
     generationId: props.generationId, accounts: props.accounts, resellers: props.resellers, ipPool: props.ipPool,
     plans: props.plans, services, auditEntries, hostSample: props.hostSample, driftCount: props.driftCount,
