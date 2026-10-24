@@ -45,9 +45,11 @@ describe('xWHM dashboard board port', () => {
     assert.doesNotMatch(product, /Activity & Jobs|data-generation-chip=/)
   })
 
-  it('keeps the approved English dashboard free of bidi isolates', () => {
-    const html = renderWhmDashboard(whmDashboardFixture())
-    assert.equal(html.includes('<bdi'), false)
+  it('keeps English document direction while isolating the hostname', () => {
+    const model = whmDashboardFixture()
+    const html = renderWhmDashboard(model)
+    const hostname = `<bdi dir="ltr">${model.ledeHost}</bdi>`
+    assert.equal(html.split(hostname).length - 1, 1)
     assert.equal(html.includes('dir="rtl"'), false)
     assert.match(html, /2026-10-22 14:05 UTC<\/time>\./)
     assert.match(html, /inset 3px 0 0 #6EA0FF/)

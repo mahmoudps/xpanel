@@ -171,7 +171,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
     : ''
 
   if (section === 'overview') return ensureAccessibleSurfaceHtml(renderWhmDashboard(whmDashboardFromProps({
-    locale, principal, hostname: props.hostname, panelHostname: props.panelHostname, version: props.version, availableVersion: props.availableVersion,
+    locale, theme, realtimeEnabled: props.realtimeEnabled === true, principal, hostname: props.hostname, panelHostname: props.panelHostname, version: props.version, availableVersion: props.availableVersion,
     generationId: props.generationId, accounts: props.accounts, resellers: props.resellers, ipPool: props.ipPool,
     plans: props.plans, services, auditEntries, hostSample: props.hostSample, driftCount: props.driftCount,
     ...(props.driftCheckedAt ? { driftCheckedAt: props.driftCheckedAt } : {}),

@@ -136,6 +136,8 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
     const homePlan = plan && plan.id === account.planId ? plan : undefined
     return ensureAccessibleSurfaceHtml(renderXpanelHome(xpanelHomeFromProps({
       locale,
+      theme,
+      realtimeEnabled: props.realtimeEnabled === true,
       account,
       ...(homePlan ? { plan: homePlan } : {}),
       domains,

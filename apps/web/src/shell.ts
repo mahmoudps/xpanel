@@ -57,7 +57,7 @@ export const normalizeSurfaceRoute = (surface: SurfaceKind, activeRoute: string)
 
 export const renderPageSearchButton = (locale: Locale): string => {
   const label = locale === 'ar' ? 'ابحث عن صفحة' : 'Find a page'
-  return `<button type="button" class="xp-btn xp-page-search" data-action="open-cmdk" aria-keyshortcuts="Control+K Meta+K" aria-label="${label}" title="${label} (Ctrl K)">
+  return `<button type="button" class="xp-btn xp-page-search" data-action="open-cmdk" aria-keyshortcuts="Control+K Meta+K" aria-label="${label} Ctrl K" title="${label} (Ctrl K)">
     <svg class="xp-page-search__icon" aria-hidden="true" focusable="false" viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8.5" cy="8.5" r="5.5" /><path d="m12.5 12.5 4 4" /></svg>
     <span class="xp-page-search__label">${label}</span><kbd class="xp-mono">Ctrl K</kbd>
   </button>`

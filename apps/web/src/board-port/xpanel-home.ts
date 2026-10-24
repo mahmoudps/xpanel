@@ -3,6 +3,7 @@ import { ARABIC_TYPE_CSS } from '../arabic-type.ts'
 import { isolateLtrRuns, metaPieces } from '../bidi-runs.ts'
 import { formatDisplayName } from '../display-name.ts'
 import { escapeHtml, formatAsciiBytes, formatUtcClock } from '../tokens.ts'
+import { renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
 type IconName = keyof typeof ICONS
 
@@ -245,6 +246,8 @@ export interface HomeNavView {
 
 export interface HomeDesktopModel {
   ar: boolean
+  theme?: 'dark' | 'light'
+  realtimeEnabled?: boolean
   username: string
   domain: string
   planLabel: string
@@ -279,6 +282,8 @@ export interface HomeDesktopModel {
 
 export interface HomePhoneModel {
   ar: boolean
+  theme?: 'dark' | 'light'
+  realtimeEnabled?: boolean
   username: string
   domain: string
   planLabel: string
@@ -357,7 +362,7 @@ const navHtml = (groups: HomeNavView[], ar: boolean, phone: boolean): string => 
   const labelStyle = ar
     ? 'padding: 0 12px; font-size: 12px; font-weight: 600; color: #5D6B7E'
     : 'padding: 0 12px; font-size: 11px; font-weight: 600; color: #5D6B7E; letter-spacing: 0.02em'
-  const items = group.items.map(item => `<li><a href="${escapeHtml(item.href)}" aria-current="${item.current ? 'page' : 'false'}" style="${linkStyle(item.current, ar, phone)}">${iconSvg(item.icon, 18, ' style="flex: none"')}<span>${escapeHtml(item.label)}</span></a></li>`).join('')
+  const items = group.items.map(item => `<li><a href="${escapeHtml(item.href)}" data-nav-route="${escapeHtml(item.href)}" aria-current="${item.current ? 'page' : 'false'}" style="${linkStyle(item.current, ar, phone)}">${iconSvg(item.icon, 18, ' style="flex: none"')}<span>${escapeHtml(item.label)}</span></a></li>`).join('')
   return `<div style="display: flex; flex-direction: column; gap: ${phone ? 2 : 4}px">
         <span id="${group.id}" style="${labelStyle}">${escapeHtml(group.label)}</span>
         <ul aria-labelledby="${group.id}" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px">${items}</ul>
@@ -641,6 +646,8 @@ const phoneFromFacts = (facts: LiveFacts, actionHtml: string, titleTag: 'h1' | '
 
 export interface XpanelHomeProps {
   locale?: Locale
+  theme?: 'dark' | 'light'
+  realtimeEnabled?: boolean
   account: { username: string; uid: number; home: string; primaryDomain: string; ipv4: string }
   plan?: {
     name: string
@@ -740,9 +747,16 @@ export const xpanelHomeFromProps = (props: XpanelHomeProps): { desktop: HomeDesk
   const facts = factsFromProps(props)
   const actionHtml = props.actionHtml ?? ''
   return {
-    desktop: desktopFromFacts(facts, actionHtml, props.qualifiedRoutes, props.signOutLabel),
-    phone: phoneFromFacts(facts, actionHtml, 'div', props.qualifiedRoutes, props.signOutLabel),
+    desktop: { ...desktopFromFacts(facts, actionHtml, props.qualifiedRoutes, props.signOutLabel), theme: props.theme ?? 'dark', realtimeEnabled: props.realtimeEnabled === true },
+    phone: { ...phoneFromFacts(facts, actionHtml, 'div', props.qualifiedRoutes, props.signOutLabel), theme: props.theme ?? 'dark', realtimeEnabled: props.realtimeEnabled === true },
   }
+}
+
+const homeControls = (model: { ar: boolean; theme?: 'dark' | 'light'; realtimeEnabled?: boolean }): string => {
+  const locale = model.ar ? 'ar' : 'en'
+  const nextTheme = model.theme === 'dark' ? 'light' : 'dark'
+  const themeLabel = nextTheme === 'light' ? (model.ar ? 'الوضع الفاتح' : 'Light') : (model.ar ? 'الوضع الداكن' : 'Dark')
+  return `${renderPageSearchButton(locale)}${renderLiveUpdatesIndicator(locale, model.realtimeEnabled === true)}<a href="?theme=${nextTheme}" class="xp-btn xp-btn--ghost" data-theme-toggle="${nextTheme}">${themeLabel}</a>`
 }
 
 const sideMeter = (label: string, value: string, pct: number, ar: boolean): string => {
@@ -792,11 +806,11 @@ export const renderDesktop = (model: HomeDesktopModel): string => {
     : ''
   const filterExtra = ar ? ' dir="auto" style="width: 100%; min-height: 44px; padding-inline-start: 40px; padding-inline-end: 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; font-family: inherit; font-size: 14px; color: #101828; text-align: start"' : ' style="width: 100%; min-height: 44px; padding-inline-start: 40px; padding-inline-end: 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; font-family: inherit; font-size: 14px; color: #101828"'
   const lang = ar
-    ? `<a href="?lang=en" lang="en" hreflang="en" dir="ltr" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 8px; font-family: 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 600; text-decoration: none">English</a>`
-    : `<a href="?lang=ar" lang="ar" hreflang="ar" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 8px; font-family: 'IBM Plex Sans Arabic', 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 600; text-decoration: none">العربية</a>`
+    ? `<a href="?lang=en" data-lang-switch="en" lang="en" hreflang="en" dir="ltr" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 8px; font-family: 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 600; text-decoration: none">English</a>`
+    : `<a href="?lang=ar" data-lang-switch="ar" lang="ar" hreflang="ar" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 8px; font-family: 'IBM Plex Sans Arabic', 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 600; text-decoration: none">العربية</a>`
   return `<div class="xp-board-port" data-home-desktop="true" data-locale="${ar ? 'ar' : 'en'}"${ar ? ' dir="rtl"' : ''} style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #F5F6F8; color: #101828">
   <style>${PORT_CSS}</style>
-  <nav aria-label="${ar ? 'تنقل xPanel' : 'xPanel navigation'}" style="flex: 1 1 248px; max-width: 100%; background: #FFFFFF; border-inline-end: 1px solid #E2E6EC; padding: 20px 14px; display: flex; flex-direction: column; gap: 16px">
+  <nav data-xp-sidebar aria-label="${ar ? 'تنقل xPanel' : 'xPanel navigation'}" style="flex: 1 1 248px; max-width: 100%; background: #FFFFFF; border-inline-end: 1px solid #E2E6EC; padding: 20px 14px; display: flex; flex-direction: column; gap: 16px">
     <a href="/home" style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 4px; text-decoration: none; color: #1D5BD6">
       <span aria-hidden="true" style="width: 36px; height: 36px; border-radius: 8px; background: #101828; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 18px; font-weight: 600">x</span>
       ${brand}
@@ -813,15 +827,16 @@ export const renderDesktop = (model: HomeDesktopModel): string => {
     </div>
     ${navHtml(model.nav, ar, false)}
   </nav>
-  <main id="main-content" style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+  <main id="main-content" tabindex="-1" data-home-main="desktop" style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
     <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px clamp(16px, 3vw, 32px); background: #FFFFFF; border-bottom: 1px solid #E2E6EC">
       <div role="search" style="position: relative; flex: 1 1 260px; max-width: 420px">
         ${searchIcon}
-        <input type="search" aria-label="${ar ? 'ابحث عن أداة أو نطاق أو صندوق بريد' : 'Find a tool, domain or mailbox'}" placeholder="${ar ? 'ابحث عن أداة' : 'Find a tool'}" style="width: 100%; min-height: 44px; padding-inline-start: 40px; padding-inline-end: 44px; border-radius: 8px; border: 1px solid #D0D5DD; background: #F8F9FB; font-family: inherit; font-size: 14px; color: #101828">
+        <input id="home-header-search" type="search" aria-describedby="tool-filter-count" aria-label="${ar ? 'ابحث عن أداة أو نطاق أو صندوق بريد' : 'Find a tool, domain or mailbox'}" placeholder="${ar ? 'ابحث عن أداة' : 'Find a tool'}" style="width: 100%; min-height: 44px; padding-inline-start: 40px; padding-inline-end: 44px; border-radius: 8px; border: 1px solid #D0D5DD; background: #F8F9FB; font-family: inherit; font-size: 14px; color: #101828">
         <kbd aria-hidden="true" style="position: absolute; inset-inline-end: 10px; top: 11px; min-width: 22px; height: 22px; padding: 0 6px; display: flex; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #475467; font-family: ${MONO}; font-size: 12px">/</kbd>
       </div>
       <span style="flex: 1 1 auto"></span>
       <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: #EEF0F3; color: #344054; font-size: 12px; font-weight: 600; font-family: ${MONO}">${domainPill}</span>
+      ${homeControls(model)}
       ${lang}
       ${model.signOutLabel ? `<button type="button" data-action="logout" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer">${escapeHtml(model.signOutLabel)}</button>` : ''}
       <button type="button" aria-label="${ar ? `قائمة المستخدم، ${escapeHtml(model.username)}` : `User menu, ${escapeHtml(model.username)}`}" style="width: 44px; height: 44px; border-radius: 50%; border: 1px solid #C7D7F8; background: #E8EFFD; color: #1D5BD6; font-family: ${MONO}; font-size: 15px; font-weight: 600">${escapeHtml(model.username.slice(0, 1).toLowerCase())}</button>
@@ -882,7 +897,7 @@ const drawerHtml = (model: HomePhoneModel): string => {
   const card = ar
     ? `<bdi dir="ltr" style="font-family: ${MONO}; font-size: 14px; font-weight: 600">${escapeHtml(model.username)}</bdi><bdi dir="ltr" style="font-family: ${MONO}; font-size: 12px; color: #5D6B7E">${escapeHtml(model.domain)}</bdi>`
     : `<span style="font-family: ${MONO}; font-size: 14px; font-weight: 600">${escapeHtml(model.username)}</span><span style="font-family: ${MONO}; font-size: 12px; color: #5D6B7E">${escapeHtml(model.domain)}</span>`
-  return `<template id="xpanel-home-drawer"><div style="position: absolute; inset: 0; z-index: 10"><button type="button" data-home-action="close-menu" aria-label="${ar ? 'إغلاق التنقل' : 'Close navigation'}" tabindex="-1" style="position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: none; background: #10182866"></button><div id="m-drawer" role="dialog" aria-modal="true" aria-label="${ar ? 'تنقل xPanel' : 'xPanel navigation'}" style="position: absolute; top: 0; bottom: 0; inset-inline-start: 0; width: 304px; background: #FFFFFF; border-inline-end: 1px solid #E2E6EC; display: flex; flex-direction: column"><div style="flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #E2E6EC"><span aria-hidden="true" style="width: 28px; height: 28px; border-radius: 7px; background: #101828; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 15px; font-weight: 600">x</span><span style="flex: 1 1 auto; font-family: ${MONO}; font-size: 17px; font-weight: 500; color: #1D5BD6">xPanel</span><button type="button" data-home-action="close-menu" aria-label="${ar ? 'إغلاق التنقل' : 'Close navigation'}" style="flex: none; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div><nav aria-label="${ar ? 'تنقل xPanel' : 'xPanel navigation'}" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px 14px 20px; display: flex; flex-direction: column; gap: 14px"><div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-radius: 12px; border: 1px solid #E2E6EC; background: #F8F9FB"><div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">${card}</div><span style="display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; background: #EEF0F3; color: #344054; font-size: 12px; font-weight: 600">${ar ? `<bdi dir="ltr">${escapeHtml(model.planLabel)}</bdi>` : escapeHtml(model.planLabel)}</span></div>${navHtml(model.nav, ar, true)}</nav></div></div></template>`
+  return `<template id="xpanel-home-drawer"><div style="position: absolute; inset: 0; z-index: 10"><button type="button" data-home-action="close-menu" aria-label="${ar ? 'إغلاق التنقل' : 'Close navigation'}" tabindex="-1" style="position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: none; background: #10182866"></button><div id="m-drawer" tabindex="-1" role="dialog" aria-modal="true" aria-label="${ar ? 'تنقل xPanel' : 'xPanel navigation'}" style="position: absolute; top: 0; bottom: 0; inset-inline-start: 0; width: 304px; background: #FFFFFF; border-inline-end: 1px solid #E2E6EC; display: flex; flex-direction: column"><div style="flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #E2E6EC"><span aria-hidden="true" style="width: 28px; height: 28px; border-radius: 7px; background: #101828; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 15px; font-weight: 600">x</span><span style="flex: 1 1 auto; font-family: ${MONO}; font-size: 17px; font-weight: 500; color: #1D5BD6">xPanel</span><button type="button" data-home-action="close-menu" aria-label="${ar ? 'إغلاق التنقل' : 'Close navigation'}" style="flex: none; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div><nav data-xp-sidebar aria-label="${ar ? 'تنقل xPanel' : 'xPanel navigation'}" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px 14px 20px; display: flex; flex-direction: column; gap: 14px"><div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-radius: 12px; border: 1px solid #E2E6EC; background: #F8F9FB"><div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">${card}</div><span style="display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; background: #EEF0F3; color: #344054; font-size: 12px; font-weight: 600">${ar ? `<bdi dir="ltr">${escapeHtml(model.planLabel)}</bdi>` : escapeHtml(model.planLabel)}</span></div>${navHtml(model.nav, ar, true)}</nav></div></div></template>`
 }
 
 export const renderPhone = (model: HomePhoneModel): string => {
@@ -915,21 +930,21 @@ export const renderPhone = (model: HomePhoneModel): string => {
     ? `<bdi dir="ltr" style="font-family: ${MONO}; font-size: 17px; font-weight: 500; color: #1D5BD6">xPanel</bdi>`
     : `<span style="font-family: ${MONO}; font-size: 17px; font-weight: 500; color: #1D5BD6">xPanel</span>`
   const lang = ar
-    ? `<a href="?lang=en" lang="en" hreflang="en" dir="ltr" style="align-self: center; min-height: 44px; display: inline-flex; align-items: center; padding: 0 12px; font-family: 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 600; text-decoration: none">English</a>`
-    : `<a href="?lang=ar" lang="ar" hreflang="ar" style="align-self: center; min-height: 44px; display: inline-flex; align-items: center; padding: 0 12px; font-family: 'IBM Plex Sans Arabic', 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 600; text-decoration: none">العربية</a>`
+    ? `<a href="?lang=en" data-lang-switch="en" lang="en" hreflang="en" dir="ltr" style="align-self: center; min-height: 44px; display: inline-flex; align-items: center; padding: 0 12px; font-family: 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 600; text-decoration: none">English</a>`
+    : `<a href="?lang=ar" data-lang-switch="ar" lang="ar" hreflang="ar" style="align-self: center; min-height: 44px; display: inline-flex; align-items: center; padding: 0 12px; font-family: 'IBM Plex Sans Arabic', 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 600; text-decoration: none">العربية</a>`
   const filterStyle = ar
     ? 'width: 100%; min-height: 44px; padding-inline-start: 40px; padding-inline-end: 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; font-family: inherit; font-size: 16px; color: #101828; text-align: start'
     : 'width: 100%; min-height: 44px; padding-inline-start: 40px; padding-inline-end: 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; font-family: inherit; font-size: 16px; color: #101828'
   return `<div class="xp-board-port" data-home-phone="true" data-locale="${ar ? 'ar' : 'en'}"${ar ? ' dir="rtl"' : ''} style="width: 390px; height: 844px; position: relative; overflow: hidden; display: flex; flex-direction: column; background: #F5F6F8; color: #101828">
   <style>${PORT_CSS}</style>
-  <header style="flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #FFFFFF; border-bottom: 1px solid #E2E6EC">
+  <header style="flex: none; min-height: 64px; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #FFFFFF; border-bottom: 1px solid #E2E6EC">
     <button type="button" id="xpanel-home-menu" data-home-action="open-menu" aria-label="${ar ? 'فتح التنقل' : 'Open navigation'}" aria-expanded="false" aria-controls="m-drawer" style="flex: none; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"></path></svg></button>
     <a href="/home" style="display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 4px; text-decoration: none">${`<span aria-hidden="true" style="width: 28px; height: 28px; border-radius: 7px; background: #101828; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 15px; font-weight: 600">x</span>`}${brand}</a>
     <span style="flex: 1 1 auto"></span>
     ${model.signOutLabel ? `<button type="button" data-action="logout" style="flex: none; min-height: 44px; padding: 0 10px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer">${escapeHtml(model.signOutLabel)}</button>` : ''}
     <button type="button" aria-label="${ar ? `قائمة المستخدم، ${escapeHtml(model.username)}` : `User menu, ${escapeHtml(model.username)}`}" style="flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #C7D7F8; background: #E8EFFD; color: #1D5BD6; font-family: ${MONO}; font-size: 15px; font-weight: 600">${escapeHtml(model.username.slice(0, 1).toLowerCase())}</button>
   </header>
-  <main style="flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px 16px 32px; display: flex; flex-direction: column; gap: 16px">
+  <main tabindex="-1" data-home-main="phone" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px 16px 32px; display: flex; flex-direction: column; gap: 16px">
     ${model.actionHtml}
     <div style="display: flex; flex-direction: column; gap: 4px">${title}<p style="margin: 0; font-size: 13px; color: #475467; line-height: ${ar ? '1.7' : '1.6'}">${model.ledeHtml}</p></div>
     <div style="position: relative">
@@ -949,7 +964,7 @@ export const renderPhone = (model: HomePhoneModel): string => {
       <span id="m-filter-count" role="status" data-rest="${escapeHtml(model.countText)}" style="font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums">${escapeHtml(model.countText)}</span>
     </div>
     <div data-tool-section="true" style="display: flex; flex-direction: column; gap: 8px; margin-top: -8px">${groups}</div>
-    ${lang}
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">${homeControls(model)}${lang}</div>
   </main>
   <div id="xpanel-home-drawer-host" hidden></div>
   ${drawerHtml(model)}
@@ -958,13 +973,15 @@ export const renderPhone = (model: HomePhoneModel): string => {
 
 export const HOME_SCRIPT = `<script>
 (function () {
-  var wireFilter = function (inputId, countId, rootSel, phone) {
+  var wireFilter = function (inputId, countId, rootSel, phone, peerId) {
     var input = document.getElementById(inputId)
+    var peer = peerId ? document.getElementById(peerId) : null
     var count = document.getElementById(countId)
     var root = document.querySelector(rootSel)
     if (!input || !root) return
     var ar = root.getAttribute('data-locale') === 'ar'
-    input.addEventListener('input', function () {
+    var update = function () {
+      if (peer) peer.value = input.value
       var raw = input.value.trim()
       var q = raw.toLowerCase()
       var groups = root.querySelectorAll('[data-tool-group]')
@@ -1055,13 +1072,136 @@ export const HOME_SCRIPT = `<script>
           ? (ar ? 'امسح الحقل أو جرّب كلمة أقصر مثل «بريد».' : 'Clear the field or try a shorter word, such as “mail”.')
           : (ar ? 'امسح الحقل أو جرّب كلمة أقصر مثل «بريد». الأدوات التي تخفيها قائمة ميزات خطتك لا تظهر هنا.' : 'Clear the field or try a shorter word, such as “mail”. Tools that your plan’s feature list hides do not appear here.')
       }
+    }
+    input.addEventListener('input', update)
+    if (peer) peer.addEventListener('input', function () { input.value = peer.value; update() })
+  }
+  wireFilter('tool-filter', 'tool-filter-count', '[data-home-desktop]', false, 'home-header-search')
+  wireFilter('m-filter', 'm-filter-count', '[data-home-phone]', true)
+  var homeOverlay = null
+  var lastHomeFocus = null
+  var homeFocusSelector = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), details > summary:first-of-type, [tabindex], [contenteditable="true"]'
+  var visibleHomeElement = function (element) {
+    if (!element || !element.isConnected || element.closest('[hidden], [inert]') || !element.getClientRects().length) return false
+    if (typeof element.checkVisibility === 'function' && !element.checkVisibility()) return false
+    var visibility = window.getComputedStyle(element).visibility
+    return visibility !== 'hidden' && visibility !== 'collapse'
+  }
+  var homeFocusTargets = function (drawer) {
+    return Array.prototype.filter.call(drawer.querySelectorAll(homeFocusSelector), function (element) {
+      return element.tabIndex >= 0 && !element.matches(':disabled') && visibleHomeElement(element)
     })
   }
-  wireFilter('tool-filter', 'tool-filter-count', '[data-home-desktop]', false)
-  wireFilter('m-filter', 'm-filter-count', '[data-home-phone]', true)
+  var otherHomeModal = function () {
+    return Array.prototype.find.call(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]'), function (element) {
+      if (homeOverlay && element === homeOverlay.drawer) return false
+      return !element.closest('[hidden]') && element.getClientRects().length &&
+        window.getComputedStyle(element).visibility !== 'hidden' &&
+        (element.matches('dialog[open]') || !element.closest('[inert]'))
+    })
+  }
+  var focusHomeDrawer = function () {
+    if (!homeOverlay || otherHomeModal()) return
+    var targets = homeFocusTargets(homeOverlay.drawer)
+    var link = targets.find(function (element) { return element.tagName === 'A' })
+    ;(link || targets[0] || homeOverlay.drawer).focus({ preventScroll: true })
+  }
+  var closeHomeMenu = function (restoreFocus) {
+    var state = homeOverlay
+    if (!state) return
+    var ownedFocus = state.host.contains(document.activeElement) || document.activeElement === document.body
+    homeOverlay = null
+    state.host.hidden = true
+    state.host.style.display = 'none'
+    state.trigger.setAttribute('aria-expanded', 'false')
+    state.inert.forEach(function (previous) {
+      if (previous.value === null) previous.element.removeAttribute('inert')
+      else previous.element.setAttribute('inert', previous.value)
+    })
+    state.scroll.forEach(function (previous) {
+      previous.values.forEach(function (property) { previous.element.style.removeProperty(property.name) })
+      previous.values.forEach(function (property) {
+        if (property.value) previous.element.style.setProperty(property.name, property.value, property.priority)
+      })
+    })
+    if (restoreFocus && ownedFocus && !otherHomeModal() && visibleHomeElement(state.trigger)) state.trigger.focus({ preventScroll: true })
+  }
+  var openHomeMenu = function (trigger) {
+    if (homeOverlay || window.innerWidth > 800 || !visibleHomeElement(trigger) || otherHomeModal()) return
+    var host = document.getElementById('xpanel-home-drawer-host')
+    var template = document.getElementById('xpanel-home-drawer')
+    if (!host || !template || !template.content) return
+    if (!host.firstElementChild) host.appendChild(template.content.cloneNode(true))
+    var drawer = host.querySelector('#m-drawer')
+    if (!drawer) return
+    var state = { host: host, drawer: drawer, trigger: trigger, inert: [], scroll: [] }
+    host.hidden = false
+    host.style.display = 'contents'
+    trigger.setAttribute('aria-expanded', 'true')
+    // Save and restore sibling state at each ancestor, as with the shared shell overlays.
+    var current = host
+    while (current.parentElement) {
+      Array.prototype.forEach.call(current.parentElement.children, function (sibling) {
+        if (sibling === current) return
+        state.inert.push({ element: sibling, value: sibling.getAttribute('inert') })
+        sibling.setAttribute('inert', '')
+      })
+      current = current.parentElement
+      if (current === document.body) break
+    }
+    ;[document.body, document.documentElement, trigger.closest('[data-home-phone]')].forEach(function (element) {
+      if (!element) return
+      var values = ['overflow', 'overflow-x', 'overflow-y'].map(function (name) {
+        return { name: name, value: element.style.getPropertyValue(name), priority: element.style.getPropertyPriority(name) }
+      })
+      state.scroll.push({ element: element, values: values })
+      element.style.setProperty('overflow', 'hidden', 'important')
+    })
+    homeOverlay = state
+    focusHomeDrawer()
+  }
+  var syncHomeMain = function () {
+    var desktop = document.querySelector('[data-home-main="desktop"]')
+    var phone = document.querySelector('[data-home-main="phone"]')
+    var active = window.innerWidth <= 800 ? phone : desktop
+    ;[desktop, phone].forEach(function (element) { if (element && element.id === 'main-content') element.removeAttribute('id') })
+    if (active) active.id = 'main-content'
+  }
+  syncHomeMain()
+  document.addEventListener('keydown', function (event) {
+    if (!homeOverlay || event.isComposing || otherHomeModal()) return
+    // Release the home sheet before the shared client opens its command palette.
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { closeHomeMenu(true); return }
+    event.stopPropagation()
+    if (event.key === 'Escape') { event.preventDefault(); closeHomeMenu(true); return }
+    if (event.key !== 'Tab') return
+    var targets = homeFocusTargets(homeOverlay.drawer)
+    var first = targets[0], last = targets[targets.length - 1], focused = document.activeElement
+    if (!first) { event.preventDefault(); homeOverlay.drawer.focus({ preventScroll: true }) }
+    else if (event.shiftKey && (focused === first || focused === homeOverlay.drawer || !homeOverlay.drawer.contains(focused))) { event.preventDefault(); last.focus({ preventScroll: true }) }
+    else if (!event.shiftKey && (focused === last || !homeOverlay.drawer.contains(focused))) { event.preventDefault(); first.focus({ preventScroll: true }) }
+  }, true)
+  document.addEventListener('focusin', function (event) {
+    if (event.target.closest && event.target.closest('[data-board-port="xpanel-home"]')) lastHomeFocus = event.target
+    if (homeOverlay && !homeOverlay.drawer.contains(event.target) && !otherHomeModal()) focusHomeDrawer()
+  })
+  window.addEventListener('resize', function () {
+    var focused = document.activeElement
+    if (focused === document.body && lastHomeFocus && !visibleHomeElement(lastHomeFocus)) focused = lastHomeFocus
+    var wasHome = focused && focused.closest && focused.closest('[data-board-port="xpanel-home"]')
+    syncHomeMain()
+    if (window.innerWidth > 800) closeHomeMenu(false)
+    if (wasHome && !visibleHomeElement(focused) && !otherHomeModal()) {
+      var main = document.getElementById('main-content')
+      if (visibleHomeElement(main)) main.focus({ preventScroll: true })
+    }
+  })
+  window.addEventListener('pagehide', function () { closeHomeMenu(false) })
   document.addEventListener('click', function (event) {
     var target = event.target
     if (!target || !target.closest) return
+    var navigation = target.closest('a[href]')
+    if (homeOverlay && navigation && homeOverlay.drawer.contains(navigation)) closeHomeMenu(false)
     var button = target.closest('[data-home-action]')
     if (!button) return
     var action = button.getAttribute('data-home-action')
@@ -1078,25 +1218,13 @@ export const HOME_SCRIPT = `<script>
       var chevron = button.querySelector('svg')
       if (chevron) chevron.style.transform = show ? 'rotate(180deg)' : 'none'
     }
-    if (action === 'open-menu' || action === 'close-menu') {
-      var host = document.getElementById('xpanel-home-drawer-host')
-      var menu = document.getElementById('xpanel-home-menu')
-      if (action === 'open-menu' && host && !host.firstElementChild) {
-        var tpl = document.getElementById('xpanel-home-drawer')
-        if (tpl && tpl.content) host.appendChild(tpl.content.cloneNode(true))
-      }
-      if (host) {
-        var showMenu = action === 'open-menu'
-        host.hidden = !showMenu
-        host.style.display = showMenu ? 'contents' : 'none'
-      }
-      if (menu) menu.setAttribute('aria-expanded', action === 'open-menu' ? 'true' : 'false')
-    }
+    if (action === 'open-menu') openHomeMenu(button)
+    if (action === 'close-menu') closeHomeMenu(true)
   })
 })()
 </script>`
 
-const RESPONSIVE_CSS = `.xp-home-phone-only{display:none}@media (max-width:800px){.xp-home-desk-only{display:none}.xp-home-phone-only{display:block}}`
+const RESPONSIVE_CSS = `.xp-home-phone-only{display:none}.xp-home-phone-only > [data-home-phone]{width:100% !important;min-inline-size:0;max-inline-size:100%}@media (max-width:800px){.xp-home-desk-only{display:none}.xp-home-phone-only{display:block}}`
 
 export const renderXpanelHome = (model: { desktop: HomeDesktopModel; phone: HomePhoneModel }): string =>
   `<div data-board-port="xpanel-home"><style>${RESPONSIVE_CSS}</style><div class="xp-home-desk-only">${renderDesktop(model.desktop)}</div><div class="xp-home-phone-only">${renderPhone(model.phone)}</div>${HOME_SCRIPT}</div>`

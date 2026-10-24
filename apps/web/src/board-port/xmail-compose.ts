@@ -1,6 +1,6 @@
 import type { Locale } from '../i18n.ts'
 import { escapeHtml, renderAsyncActionState, type AsyncActionBannerProps } from '../tokens.ts'
-import { renderLiveUpdatesIndicator } from '../shell.ts'
+import { renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 import { formatMailboxQuota } from './mail-truth.ts'
 
 export const MONO = "'IBM Plex Mono', monospace"
@@ -9,7 +9,15 @@ const FONT_AR = "'IBM Plex Sans Arabic', 'IBM Plex Sans', system-ui, sans-serif"
 const PORT_CSS = `.xp-board-port{line-height:normal;font-size:16px;font-kerning:auto;font-feature-settings:normal;font-synthesis:weight style small-caps;-webkit-font-smoothing:antialiased}
 .xp-board-port a{color:#1D5BD6}.xp-board-port a:hover{color:#1546A8}
 .xp-board-port :focus-visible{outline:2px solid #1D5BD6;outline-offset:2px}
-.xp-board-port p{max-inline-size:none}`
+.xp-board-port p{max-inline-size:none}
+@media(min-width:960px){.xp-board-port[data-mail-layout="reference"] [data-xp-sidebar]{flex:0 0 200px!important;inline-size:200px}}
+.xp-board-port [data-mail-recip-box] > ul:empty{display:none}
+.xp-board-port[data-board-port="xmail-compose"] [data-mail-recip-box]:has(> input:read-only){background-color:#F2F4F7!important}
+.xp-board-port[data-board-port="xmail-compose"] #compose-from{appearance:none;line-height:24px;padding-inline-end:28px!important;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:right 16px center,right 12px center;background-size:4px 4px;background-repeat:no-repeat}
+html[dir="rtl"] .xp-board-port[data-board-port="xmail-compose"] #compose-from{padding-inline-start:28px!important;padding-inline-end:12px!important;background-position:left 12px center,left 16px center}
+@media(forced-colors:active){.xp-board-port[data-board-port="xmail-compose"] #compose-from{appearance:auto;background-image:none;padding-inline:12px!important}}
+@media(max-width:959px){.xp-board-port[data-board-port="xmail-compose"] :is(input:not([type="hidden"]),select,[contenteditable="true"]){font-size:16px!important}}
+`
 
 const glyph = (inner: string, size = 18): string =>
   `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`
@@ -63,6 +71,7 @@ export interface ComposeModel {
   /** Board copy overrides; live screens use the neutral sentences. */
   feedback?: { sendOk: string; saved: string; savedNote: string }
   locale: Locale
+  theme?: 'light' | 'dark'
   product: boolean
   mailbox: string
   quotaText: string
@@ -111,12 +120,12 @@ const countSpan = (count: { text: string; kind: CountKind }): string => {
 
 const folderLink = (item: FolderLink): string => {
   const style = item.current
-    ? 'display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 600; color: #1D5BD6; background: #E8EFFD; text-decoration: none'
-    : 'display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; color: #344054; text-decoration: none'
+    ? 'display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 600; color: #1D5BD6; background: #E8EFFD; text-decoration: none'
+    : 'display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; font-size: 14px; color: #344054; text-decoration: none'
   const current = item.current ? ' aria-current="page"' : ''
   const observed = item.observed ? ` data-mail-folder="${escapeHtml(item.observed)}"` : ''
   const aria = item.aria ? ` aria-label="${escapeHtml(item.aria)}"` : ''
-  return `<li${observed}><a href="${escapeHtml(item.href)}"${current}${aria} style="${style}">${ICONS[item.icon]}<span style="flex: 1 1 auto">${escapeHtml(item.label)}</span>${item.count ? countSpan(item.count) : ''}</a></li>`
+  return `<li${observed}><a href="${escapeHtml(item.href)}" data-nav-route="${escapeHtml(item.href)}"${current}${aria} style="${style}">${ICONS[item.icon]}<span style="flex: 1 1 auto">${escapeHtml(item.label)}</span>${item.count ? countSpan(item.count) : ''}</a></li>`
 }
 
 const TOOLBAR: Array<{ key: string; label: string; title: string; icon: string; action?: boolean; sep?: boolean }> = [
@@ -147,13 +156,13 @@ const chipHtml = (chip: Chip, ar: boolean): string => {
   const shown = chip.name ? `<${chip.addr}>` : chip.addr
   const fieldLabel = ar ? ({ to: 'إلى', cc: 'نسخة', bcc: 'نسخة مخفية' }[chip.field] ?? chip.field) : ({ to: 'To', cc: 'Cc', bcc: 'Bcc' }[chip.field] ?? chip.field)
   const invalid = chip.invalid ? `<span style="font-size: 12px; font-weight: 600; color: #B42318; white-space: nowrap">${ar ? '· راجع العنوان' : '· check address'}</span>` : ''
-  return `<li data-mail-chip="${escapeHtml(chip.field)}" data-addr="${escapeHtml(chip.addr)}" data-invalid="${chip.invalid ? 'true' : 'false'}" style="display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 2px 0 10px; border-radius: 999px; background: ${bg}; border: 1px solid ${border}; font-size: 13px; color: #101828; max-width: 100%"><span style="font-weight: 500; white-space: nowrap">${escapeHtml(chip.name)}</span><span style="font-family: ${MONO}; font-size: 12px; color: ${addrColor}; overflow-wrap: anywhere">${tech(shown, ar)}</span>${invalid}<button type="button" data-mail-action="remove-chip" aria-label="${escapeHtml(`${ar ? 'إزالة' : 'Remove'} ${chip.addr} ${ar ? 'من' : 'from'} ${fieldLabel}`)}" style="flex: none; width: 28px; height: 28px; border-radius: 50%; border: none; background: transparent; color: #475467; display: flex; align-items: center; justify-content: center">${ICONS.close}</button></li>`
+  return `<li data-mail-chip="${escapeHtml(chip.field)}" data-addr="${escapeHtml(chip.addr)}" data-invalid="${chip.invalid ? 'true' : 'false'}" style="display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 2px 0 10px; border-radius: 999px; background: ${bg}; border: 1px solid ${border}; font-size: 13px; color: #101828; max-width: 100%"><span style="font-weight: 500; white-space: nowrap">${escapeHtml(chip.name)}</span><span style="font-family: ${MONO}; font-size: 12px; color: ${addrColor}; overflow-wrap: anywhere">${tech(shown, ar)}</span>${invalid}<button type="button" data-mail-action="remove-chip" aria-label="${escapeHtml(`${ar ? 'إزالة' : 'Remove'} ${chip.addr} ${ar ? 'من' : 'from'} ${fieldLabel}`)}" style="flex: none; width: 44px; height: 44px; border-radius: 50%; border: none; background: transparent; color: #475467; display: flex; align-items: center; justify-content: center">${ICONS.close}</button></li>`
 }
 
 const recipientRow = (field: string, label: string, inputId: string, chips: Chip[], ar: boolean): string => {
   const mine = chips.filter(chip => chip.field === field)
   const placeholder = mine.length ? (ar ? 'أضف عنواناً آخر' : 'Add another') : (ar ? 'أضف مستلماً' : 'Add a recipient')
-  return `<div data-mail-recip="${field}" style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 12px; padding: 8px 0; border-bottom: 1px solid #EEF0F3"><label for="${inputId}" style="flex: 0 0 64px; min-height: 44px; display: flex; align-items: center; font-size: 13px; font-weight: 600; color: #344054">${escapeHtml(label)}</label><div data-mail-recip-box="${field}" style="flex: 1 1 260px; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 44px; padding: 4px 6px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF"><ul aria-label="${escapeHtml(`${label} ${ar ? 'المستلمون' : 'recipients'}`)}" style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px">${mine.map(chip => chipHtml(chip, ar)).join('')}</ul><input id="${inputId}" data-mail-recip-input="${field}" type="text" inputmode="email" autocomplete="email" aria-describedby="recips-help" placeholder="${escapeHtml(placeholder)}" style="flex: 1 1 160px; min-width: 120px; min-height: 34px; padding: 0 6px; border: none; background: transparent; font-family: ${MONO}; font-size: 13px; color: #101828"></div></div>`
+  return `<div data-mail-recip="${field}" style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 8px 0; border-bottom: 1px solid #EEF0F3"><label for="${inputId}" style="display: block; padding-inline: 13px; font-size: 13px; font-weight: 600; color: #344054">${escapeHtml(label)}</label><div data-mail-recip-box="${field}" style="flex: 1 1 260px; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 44px; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--xp-control-edge, #808b9c); background: #FFFFFF"><ul aria-label="${escapeHtml(`${label} ${ar ? 'المستلمون' : 'recipients'}`)}" style="list-style: none; margin: 0; padding: 0; display: flex; flex: 1 1 100%; flex-wrap: wrap; gap: 6px">${mine.map(chip => chipHtml(chip, ar)).join('')}</ul><input id="${inputId}" data-mail-recip-input="${field}" type="text" dir="ltr" inputmode="email" autocomplete="email" aria-describedby="recips-help" placeholder="${escapeHtml(placeholder)}" style="flex: 1 1 160px; min-width: 120px; min-height: 44px; padding: 0 6px; text-align: ${ar ? 'right' : 'left'}; border: none; background: transparent; font-family: ${MONO}; font-size: 13px; color: #101828"></div></div>`
 }
 
 const attachmentHtml = (file: AttachmentFile): string => `<li data-mail-file="true" style="display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 10px; border-radius: 10px; border: 1px solid #E2E6EC; background: #FFFFFF"><span aria-hidden="true" style="flex: none; width: 34px; height: 34px; border-radius: 8px; background: #EEF0F3; color: #344054; display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 10px; font-weight: 600">${escapeHtml(file.ext)}</span><span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px"><span style="display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline"><span style="font-size: 13px; font-weight: 500; overflow-wrap: anywhere">${escapeHtml(file.name)}</span><span data-mail-file-state="true" style="font-size: 12px; color: ${file.stateColor}; font-variant-numeric: tabular-nums">${escapeHtml(file.state)}</span></span>${file.uploading ? `<span aria-hidden="true" style="display: block; height: 4px; border-radius: 2px; background: #E9ECF1; overflow: hidden; max-width: 320px"><span style="display: block; height: 4px; width: ${escapeHtml(file.pct)}; background: #1D5BD6; border-radius: 2px"></span></span>` : ''}</span><button type="button" data-mail-action="remove-file" aria-label="${escapeHtml(file.removeLabel)}" style="flex: none; width: 44px; height: 44px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: #475467; display: flex; align-items: center; justify-content: center">${ICONS.closeLg}</button></li>`
@@ -211,7 +220,7 @@ const COMPOSE_SCRIPT = `<script id="xmail-compose-client">
       remove.type = 'button'
       remove.setAttribute('data-mail-action', 'remove-chip')
       remove.setAttribute('aria-label', text('data-remove') + ' ' + addr)
-      remove.style.cssText = 'flex:none;width:28px;height:28px;border-radius:50%;border:none;background:transparent;color:#475467'
+      remove.style.cssText = 'flex:none;width:44px;height:44px;border-radius:50%;border:none;background:transparent;color:#475467'
       remove.textContent = '\\u00d7'
       li.appendChild(remove)
       if (list) list.appendChild(li)
@@ -367,7 +376,7 @@ export const renderCompose = (model: ComposeModel): string => {
   const ar = model.locale === 'ar'
   const font = ar ? FONT_AR : FONT_EN
   const t = (en: string, arabic: string): string => ar ? arabic : en
-  const mailbox = tech(model.mailbox, ar)
+  const mailbox = `<bdi dir="ltr">${escapeHtml(model.mailbox)}</bdi>`
   const quota = tech(model.quotaText, ar)
   const vacBg = model.vacationOn ? '#E7F5EE' : '#EEF0F3'
   const vacFg = model.vacationOn ? '#0E7A4E' : '#344054'
@@ -395,12 +404,16 @@ export const renderCompose = (model: ComposeModel): string => {
   ].map(([name, value]) => ` ${name}="${escapeHtml(value ?? '')}"`).join('')
   return `<div class="xp-board-port" data-board-port="xmail-compose" data-surface="xmail" data-mail-layout="reference" data-mailbox="${escapeHtml(model.mailbox)}" data-locale="${model.locale}" data-product="${model.product ? 'true' : 'false'}"${copy}${ar ? ' dir="rtl"' : ''} style="min-height: 100vh; display: flex; flex-direction: column; background: #F5F6F8; font-family: ${font}; color: #101828">
 <style>${PORT_CSS}</style>
+<a class="xp-skip-link" href="#main-content">${ar ? 'انتقل إلى المحتوى' : 'Skip to content'}</a>
 <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 12px 24px; background: #FFFFFF; border-bottom: 1px solid #E2E6EC">
   <a href="${escapeHtml(model.inboxHref)}" style="display: flex; align-items: center; gap: 10px; min-height: 44px; text-decoration: none"><span aria-hidden="true" style="width: 36px; height: 36px; border-radius: 8px; background: #0E7A4E; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 18px; font-weight: 600">x</span><span style="font-family: ${MONO}; font-size: 17px; font-weight: 500; color: #0E7A4E">${ar ? '<bdi dir="ltr">xMail</bdi>' : 'xMail'}</span></a>
   <div role="search" aria-label="${t('Search mail', 'البحث في البريد')}" style="flex: 1 1 280px; max-width: 520px; position: relative; display: flex; align-items: center; margin: 0"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5D6B7E" stroke-width="2" stroke-linecap="round" style="position: absolute; inset-inline-start: 12px"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><input type="search" aria-label="${t('Search mail', 'البحث في البريد')}" placeholder="${t('Search sender, subject or text', 'ابحث عن المرسل أو الموضوع أو النص')}" style="width: 100%; min-height: 44px; padding-inline: 38px 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; font-family: inherit; font-size: 14px; color: #101828"></div>
   <span style="flex: 1 1 0; min-width: 0"></span>
   <div style="display: flex; align-items: center; gap: 8px; min-width: 0"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#475467" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 7l9 6 9-6"></path></svg><span style="font-family: ${MONO}; font-size: 13px; color: #101828">${mailbox}</span></div>
-  <div style="display: flex; flex-direction: column; gap: 4px; min-width: 150px"><div style="display: flex; justify-content: space-between; gap: 10px; font-size: 12px"><span style="font-weight: 600; color: #344054">${t('Mailbox', 'صندوق البريد')}</span><span style="color: #475467; font-variant-numeric: tabular-nums">${quota}</span></div><div data-quota-ratio="${model.quotaMeasured ? 'measured' : 'unknown'}" aria-hidden="true" style="height: 6px; border-radius: 3px; background: #E9ECF1; overflow: hidden"><div style="height: 6px; width: ${model.quotaPct}%; background: #1D5BD6; border-radius: 3px"></div></div></div>
+  <div data-mail-quota style="display: flex; flex-direction: column; gap: 4px; min-width: 150px"><div style="display: flex; flex-direction: column; gap: 4px; font-size: 12px"><span data-mail-quota-label style="font-weight: 600; color: #344054">${t('Mailbox', 'صندوق البريد')}</span><span data-mail-quota-value style="color: #475467; font-variant-numeric: tabular-nums">${quota}</span></div><div data-quota-ratio="${model.quotaMeasured ? 'measured' : 'unknown'}" aria-hidden="true" style="height: 6px; border-radius: 3px; background: #E9ECF1; overflow: hidden"><div style="height: 6px; width: ${model.quotaPct}%; background: #1D5BD6; border-radius: 3px"></div></div></div>
+  ${renderPageSearchButton(model.locale)}
+  <a href="?lang=${ar ? 'en' : 'ar'}" data-lang-switch="${ar ? 'en' : 'ar'}" lang="${ar ? 'en' : 'ar'}" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; color: #1D5BD6; text-decoration: none">${ar ? 'English' : 'العربية'}</a>
+  <a href="?theme=${model.theme === 'dark' ? 'light' : 'dark'}" data-theme-toggle="${model.theme === 'dark' ? 'light' : 'dark'}" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; color: #1D5BD6; text-decoration: none">${model.theme === 'dark' ? (ar ? 'الوضع الفاتح' : 'Light theme') : (ar ? 'الوضع الداكن' : 'Dark theme')}</a>
   ${model.wsHtml}
   <button type="button"${model.logoutAttr} style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 14px; font-weight: 600">${t('Sign out', 'تسجيل الخروج')}</button>
 </header>
@@ -409,25 +422,25 @@ export const renderCompose = (model: ComposeModel): string => {
     <a href="${escapeHtml(model.composeHref)}" aria-current="page"${model.routeAttr} style="min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 16px; border-radius: 8px; border: 1px solid #1D5BD6; background: #1546A8; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none">${ICONS.compose}${t('Compose', 'إنشاء رسالة')}</a>
     <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px">${model.folders.map(folderLink).join('')}</ul>
     <div style="display: flex; flex-direction: column; gap: 2px"><span id="my-folders" style="font-size: 11px; font-weight: 600; color: #5D6B7E; padding: 0 12px 4px">${t('Your folders', 'مجلداتك')}</span><ul aria-labelledby="my-folders" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px">${model.custom.map(folderLink).join('')}</ul></div>
-    <div style="display: flex; flex-direction: column; gap: 2px; padding-top: 14px; border-top: 1px solid #EEF0F3"><span id="mbx-settings" style="font-size: 11px; font-weight: 600; color: #5D6B7E; padding: 0 12px 4px">${t('Mailbox settings', 'إعدادات الصندوق')}</span><ul aria-labelledby="mbx-settings" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px"><li><a href="${escapeHtml(model.vacationHref)}" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; color: #344054; text-decoration: none"><span>${t('Vacation responder', 'الرد التلقائي')}</span><span style="font-size: 12px; color: #475467">${escapeHtml(model.vacationShort)}</span></a></li><li><a href="${escapeHtml(model.filtersHref)}" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; color: #344054; text-decoration: none"><span>${t('Filters', 'الفلاتر')}</span><span style="font-size: 12px; color: #475467">${escapeHtml(model.filtersShort)}</span></a></li></ul></div>
+    <div style="display: flex; flex-direction: column; gap: 2px; padding-top: 14px; border-top: 1px solid #EEF0F3"><span id="mbx-settings" style="font-size: 11px; font-weight: 600; color: #5D6B7E; padding: 0 12px 4px">${t('Mailbox settings', 'إعدادات الصندوق')}</span><ul aria-labelledby="mbx-settings" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px"><li><a href="${escapeHtml(model.vacationHref)}" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; font-size: 14px; color: #344054; text-decoration: none"><span>${t('Vacation responder', 'الرد التلقائي')}</span><span style="font-size: 12px; color: #475467">${escapeHtml(model.vacationShort)}</span></a></li><li><a href="${escapeHtml(model.filtersHref)}" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; font-size: 14px; color: #344054; text-decoration: none"><span>${t('Filters', 'الفلاتر')}</span><span style="font-size: 12px; color: #475467">${escapeHtml(model.filtersShort)}</span></a></li></ul></div>
   </nav>
-  <main id="main-content" data-section="compose-drawer" style="flex: 4.236 1 740px; min-width: 0; padding: 24px 24px 52px; display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start">
+  <main id="main-content" tabindex="-1" data-section="compose-drawer" style="flex: 4.236 1 740px; min-width: 0; padding: 24px 24px 52px; display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start">
     ${model.actionHtml}
     <div role="group" aria-labelledby="compose-title" data-compose-form="true" data-mail-send-availability="available" style="flex: 1.618 1 0; min-width: min(100%, 460px); display: flex; flex-direction: column; border-radius: 12px; border: 1px solid #E2E6EC; background: #FFFFFF">
       <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 24px; border-bottom: 1px solid #EEF0F3">
-        <div style="display: flex; flex-direction: column; gap: 2px"><nav aria-label="${t('Breadcrumb', 'مسار التنقل')}"><a href="${escapeHtml(model.inboxHref)}" style="font-size: 12px; color: #475467">${t('Inbox', 'الوارد')}</a></nav><h1 id="compose-title" style="margin: 0; font-size: 20px; font-weight: 600">${t('New message', 'رسالة جديدة')}</h1></div>
+        <div style="display: flex; flex-direction: column; gap: 2px"><nav aria-label="${t('Breadcrumb', 'مسار التنقل')}"><a href="${escapeHtml(model.inboxHref)}" style="display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; font-size: 12px; color: #475467">${t('Inbox', 'الوارد')}</a></nav><h1 id="compose-title" style="margin: 0; font-size: 20px; font-weight: 600">${t('New message', 'رسالة جديدة')}</h1></div>
         <span id="mail-send-status" role="status" style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #475467">${ICONS.check}${escapeHtml(model.savedText)}</span>
       </div>
       <div style="display: flex; flex-direction: column; padding: 8px 24px 0">
-        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 0; border-bottom: 1px solid #EEF0F3"><label for="compose-from" style="flex: 0 0 64px; font-size: 13px; font-weight: 600; color: #344054">${t('From', 'من')}</label><select id="compose-from" style="flex: 1 1 260px; min-width: 0; min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; font-family: inherit; font-size: 14px; color: #101828">${model.fromOptions.map(option => `<option value="${escapeHtml(option.value)}" data-addr="${escapeHtml(option.value)}"${option.value === model.fromValue ? ' selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}</select></div>
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 8px 0; border-bottom: 1px solid #EEF0F3"><label for="compose-from" style="display: block; padding-inline: 13px; font-size: 13px; font-weight: 600; color: #344054">${t('From', 'من')}</label><select id="compose-from" dir="ltr" style="text-align: ${ar ? 'right' : 'left'}; flex: 1 1 260px; min-width: 0; min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--xp-control-edge, #808b9c); background-color: #FFFFFF; font-family: inherit; font-size: 14px; color: #101828">${model.fromOptions.map(option => `<option value="${escapeHtml(option.value)}" data-addr="${escapeHtml(option.value)}"${option.value === model.fromValue ? ' selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}</select></div>
         ${recipientRow('to', t('To', 'إلى'), 'compose-to', model.chips, ar)}
         ${recipientRow('cc', t('Cc', 'نسخة'), 'compose-cc', model.chips, ar)}
         ${recipientRow('bcc', t('Bcc', 'نسخة مخفية'), 'compose-bcc', model.chips, ar)}
-        <span id="recips-help" style="padding: 6px 0 0 76px; font-size: 12px; font-weight: 500; color: #5D6B7E">${t('Press Enter or type a comma after each address. Bcc recipients are hidden from everyone else.', 'اضغط Enter أو اكتب فاصلة بعد كل عنوان. تبقى نسخة مخفية مخفية عن بقية المستلمين.')}</span>
-        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 0; border-bottom: 1px solid #EEF0F3"><label for="compose-subject" style="flex: 0 0 64px; font-size: 13px; font-weight: 600; color: #344054">${t('Subject', 'الموضوع')}</label><input id="compose-subject" type="text" value="${escapeHtml(model.subject)}" style="flex: 1 1 260px; min-width: 0; min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; font-family: inherit; font-size: 14px; color: #101828"></div>
+        <span id="recips-help" style="padding: 6px 13px 0; font-size: 12px; font-weight: 500; color: #5D6B7E">${t('Press Enter or type a comma after each address. Bcc recipients are hidden from everyone else.', 'اضغط Enter أو اكتب فاصلة بعد كل عنوان. تبقى نسخة مخفية مخفية عن بقية المستلمين.')}</span>
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 8px 0; border-bottom: 1px solid #EEF0F3"><label for="compose-subject" style="display: block; padding-inline: 13px; font-size: 13px; font-weight: 600; color: #344054">${t('Subject', 'الموضوع')}</label><input id="compose-subject" type="text" dir="auto" value="${escapeHtml(model.subject)}" style="text-align: ${ar ? 'right' : 'left'}; flex: 1 1 260px; min-width: 0; min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--xp-control-edge, #808b9c); background: #FFFFFF; font-family: inherit; font-size: 14px; color: #101828"></div>
       </div>
       <div role="toolbar" aria-label="${t('Formatting', 'التنسيق')}" aria-controls="compose-body" style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 16px 24px 0; padding: 4px; border-radius: 10px; border: 1px solid #E2E6EC; background: #F8F9FB">${toolbarHtml(ar, model.numbersOn)}</div>
-      <div style="padding: 12px 24px 0"><label for="compose-body" style="display: none">${t('Message body', 'نص الرسالة')}</label><div id="compose-body" role="textbox" aria-multiline="true" aria-label="${t('Message body', 'نص الرسالة')}" contenteditable="true" spellcheck="true" style="min-height: 300px; padding: 16px 18px; border-radius: 10px; border: 1px solid #D0D5DD; background: #FFFFFF; font-size: 14px; line-height: 1.6; color: #101828; display: flex; flex-direction: column; gap: 12px">${model.bodyHtml}</div></div>
+      <div style="padding: 12px 24px 0"><label id="compose-body-label" for="compose-body" style="display: block; margin-bottom: 8px; padding-inline: 13px; font-size: 13px; font-weight: 600; color: #344054">${t('Message body', 'نص الرسالة')}</label><div id="compose-body" role="textbox" dir="auto" aria-labelledby="compose-body-label" aria-multiline="true" aria-label="${t('Message body', 'نص الرسالة')}" contenteditable="true" spellcheck="true" style="min-height: 300px; padding: 16px 12px; text-align: ${ar ? 'right' : 'left'}; border-radius: 10px; border: 1px solid var(--xp-control-edge, #808b9c); background: #FFFFFF; font-size: 14px; line-height: 1.6; color: #101828; display: flex; flex-direction: column; gap: 12px">${model.bodyHtml}</div></div>
       <section aria-labelledby="att-title" style="display: flex; flex-direction: column; gap: 10px; padding: 20px 24px 0">
         <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px"><h2 id="att-title" style="margin: 0; font-size: 14px; font-weight: 600">${t('Attachments', 'المرفقات')} <span style="font-weight: 400; color: #475467; font-variant-numeric: tabular-nums">· ${escapeHtml(model.attachSummary)}</span></h2><span style="display: inline-flex; align-items: center; gap: 8px"><button type="button"${model.product ? ' disabled' : ''} style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 14px; font-weight: 600">${ICONS.attach}${t('Attach files', 'إرفاق ملفات')}</button>${unwired}</span></div>
         <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">${model.attachments.map(attachmentHtml).join('')}</ul>
@@ -444,11 +457,11 @@ export const renderCompose = (model: ComposeModel): string => {
     <aside aria-label="${t('Mailbox settings', 'إعدادات الصندوق')}" style="flex: 1 1 0; min-width: min(100%, 300px); display: flex; flex-direction: column; gap: 26px">
       <section aria-labelledby="identity-title" style="display: flex; flex-direction: column; gap: 12px; padding: 20px; border-radius: 12px; border: 1px solid #E2E6EC; background: #FFFFFF">
         <h2 id="identity-title" style="margin: 0; font-size: 16px; font-weight: 600">${t('Sending as', 'عنوان المرسل')}</h2>
-        <dl style="margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 14px; font-size: 13px; line-height: 1.4">
-          <dt style="color: #475467">${t('Address', 'العنوان')}</dt><dd data-mail-from-addr="true" style="margin: 0; font-family: ${MONO}; overflow-wrap: anywhere">${tech(model.fromAddr, ar)}</dd>
-          <dt style="color: #475467">DKIM</dt><dd style="margin: 0">${model.identityDkim}</dd>
-          <dt style="color: #475467">SPF, DMARC</dt><dd style="margin: 0">${model.identitySpf}</dd>
-          <dt style="color: #475467">${t('Size limit', 'حد الحجم')}</dt><dd style="margin: 0">${model.identitySize}</dd>
+        <dl style="margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; font-size: 13px; line-height: 1.4">
+          <div data-mail-identity-field style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0"><dt style="color: #475467">${t('Address', 'العنوان')}</dt><dd data-mail-from-addr="true" style="margin: 0; min-width: 0; font-family: ${MONO}; overflow-wrap: anywhere">${ar ? `<bdi dir="ltr" style="overflow-wrap: anywhere">${escapeHtml(model.fromAddr)}</bdi>` : escapeHtml(model.fromAddr)}</dd></div>
+          <div data-mail-identity-field style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0"><dt style="color: #475467">DKIM</dt><dd style="margin: 0">${model.identityDkim}</dd></div>
+          <div data-mail-identity-field style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0"><dt style="color: #475467">SPF, DMARC</dt><dd style="margin: 0">${model.identitySpf}</dd></div>
+          <div data-mail-identity-field style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0"><dt style="color: #475467">${t('Size limit', 'حد الحجم')}</dt><dd style="margin: 0">${model.identitySize}</dd></div>
         </dl>
       </section>
       <section id="vacation" aria-labelledby="vac-title" style="display: flex; flex-direction: column; gap: 12px; padding: 20px; border-radius: 12px; border: 1px solid #E2E6EC; background: #FFFFFF">
@@ -495,6 +508,7 @@ export interface XmailComposeRule {
 
 export interface XmailComposeProps {
   locale?: Locale
+  theme?: 'light' | 'dark'
   mailbox: string
   quotaUsedMb?: number
   quotaUsedBytes?: number
@@ -581,6 +595,7 @@ export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel =>
   const dash = '—'
   return {
     locale,
+    theme: props.theme ?? 'light',
     product: true,
     mailbox: props.mailbox,
     quotaText: quota.text,
