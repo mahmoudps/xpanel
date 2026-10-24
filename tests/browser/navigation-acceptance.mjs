@@ -823,6 +823,8 @@ function paletteGeometryLog(outcome) {
     open: pick(before?.open, ['scroll_top', 'document_y', 'selected_top', 'selected_bottom', 'list_top', 'list_bottom', 'document_width', 'viewport_width']),
     after_escape: pick(closed?.after_diagnostics, documentKeys),
     controls: alias?.controls.slice(0, 3).map(value => ({ ...pick(value, ['role', 'width', 'height']), rect: pick(value.rect, ['x', 'y', 'top', 'right', 'bottom', 'left']), computed: pick(value.computed, ['height', 'min_height', 'box_sizing', 'transform']) })),
+    opening_controls: alias?.opening_motion.controls.slice(0, 3).map(value => pick(value, ['width', 'height'])),
+    opening_animations: alias?.opening_motion.animations.slice(0, 2).map(value => pick(value, ['play_state', 'duration', 'iterations'])),
     dialog_transform: alias?.dialog_transform?.slice(0, 80),
     animations: alias?.animations.slice(0, 2).map(value => pick(value, ['play_state', 'current_time', 'progress', 'duration'])),
   }
@@ -894,6 +896,14 @@ async function paletteAlias(page, state, expect, observations) {
   await expect(selected.locator('strong')).not.toContainText('Addon Domains')
   await expect(page.locator('[data-cmdk-item^="/whm"]')).toHaveCount(0)
   await expect(page.locator('[data-cmdk-item^="/design/"]')).toHaveCount(0)
+  const openingMotion = await page.locator('.xp-cmdk-dialog').evaluate(dialog => ({
+    controls: [...dialog.querySelectorAll('[data-cmdk-search],button,[aria-selected="true"]')].slice(0, 3).map(element => ({ width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height })),
+    animations: dialog.getAnimations().map(animation => ({ play_state: animation.playState, duration: animation.effect?.getComputedTiming().duration, iterations: animation.effect?.getTiming().iterations })),
+  }))
+  assert.ok(openingMotion.animations.every(animation => Number.isFinite(animation.duration) && Number.isFinite(animation.iterations)), 'Palette opening geometry requires finite presentation animations')
+  observations.push({ check: 'palette-opening-motion-before-steady-geometry', ...openingMotion })
+  await expect.poll(() => page.locator('.xp-cmdk-dialog').evaluate(dialog => dialog.getAnimations().every(animation => animation.playState === 'finished' || animation.playState === 'idle')), { timeout: 8000 }).toBe(true)
+  await frames(page)
   const geometry = await page.evaluate(() => {
     const dialog = document.querySelector('.xp-cmdk-dialog')
     const header = dialog.firstElementChild
@@ -937,7 +947,7 @@ async function paletteAlias(page, state, expect, observations) {
   await expect(page.locator('[data-domains-table]')).toBeVisible()
   await currentPage(page, '/domains', expect)
   assertContext(page.url(), state, { path: '/domains' })
-  observations.push({ check: 'authorized-alias-search-and-keyboard-navigation', alias: 'Addon Domains', destination: '/domains', visible_label_unchanged: true, actual_enter_navigation: true, ...geometry })
+  observations.push({ check: 'authorized-alias-search-and-keyboard-navigation', alias: 'Addon Domains', destination: '/domains', visible_label_unchanged: true, actual_enter_navigation: true, opening_motion: openingMotion, ...geometry })
   const expectedPadding = state.width < 960 ? 16 : 24
   for (const [edge, value] of Object.entries(geometry.panel_padding)) assert.ok(Math.abs(value - expectedPadding) <= 1, `Actual palette content ${edge} padding must be ${expectedPadding}px; got ${value}`)
   assert.ok(Math.abs(geometry.heading_query_group_gap - 24) <= 1, 'The header and query are sibling groups with 24px spacing')

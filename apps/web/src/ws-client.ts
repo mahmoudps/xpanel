@@ -800,17 +800,27 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     }
     document.body.style.overflow = overlay.bodyOverflow;
     document.documentElement.style.overflow = overlay.documentOverflow;
-    if (restoreFocus) restoreVisibleFocus(overlay.returnFocus);
+    if (restoreFocus) {
+      restoreVisibleFocus(overlay.returnFocus);
+      // Preserve the document after the lock and focus restoration have settled.
+      // Do not override navigation or a deliberate history/hash change.
+      if (!overlay.skipDocumentRestore && window.location.href === overlay.documentHref &&
+          (window.scrollX !== overlay.documentX || window.scrollY !== overlay.documentY)) {
+        window.scrollTo({ left: overlay.documentX, top: overlay.documentY, behavior: 'instant' });
+      }
+    }
   }
 
-  function closeActiveOverlay(restoreFocus, immediate) {
+  function closeActiveOverlay(restoreFocus, immediate, skipDocumentRestore) {
     if (!activeOverlay) return;
     var overlay = activeOverlay;
     if (overlay.closing) {
+      overlay.skipDocumentRestore = overlay.skipDocumentRestore || Boolean(skipDocumentRestore);
       overlay.restoreFocusAfterClose = overlay.restoreFocusAfterClose || restoreFocus;
       if (immediate) finishOverlayClose(overlay, overlay.restoreFocusAfterClose);
       return;
     }
+    overlay.skipDocumentRestore = Boolean(skipDocumentRestore);
     if (overlay.motion && !immediate) {
       overlay.closing = true;
       overlay.restoreFocusAfterClose = restoreFocus;
@@ -824,6 +834,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       if (activeOverlay.closing && activeOverlay.motion) {
         activeOverlay.closing = false;
         activeOverlay.restoreFocusAfterClose = false;
+        activeOverlay.skipDocumentRestore = false;
         activeOverlay.motion.open();
         focusOverlay(activeOverlay);
       }
@@ -832,6 +843,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     lastKeyPrefix = null;
     clearTimeout(lastKeyPrefixTimer);
     var returnFocus = trigger || document.activeElement;
+    var documentOrigin = activeOverlay && activeOverlay.documentHref === window.location.href ? activeOverlay : null;
     if (activeOverlay) {
       if (activeOverlay.element.contains(returnFocus)) returnFocus = activeOverlay.returnFocus;
       closeActiveOverlay(false, true);
@@ -847,7 +859,11 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       tabIndex: element.getAttribute('tabindex'),
       inertElements: [],
       bodyOverflow: document.body.style.overflow,
-      documentOverflow: document.documentElement.style.overflow
+      documentOverflow: document.documentElement.style.overflow,
+      documentHref: documentOrigin ? documentOrigin.documentHref : window.location.href,
+      documentX: documentOrigin ? documentOrigin.documentX : window.scrollX,
+      documentY: documentOrigin ? documentOrigin.documentY : window.scrollY,
+      skipDocumentRestore: false
     };
     if (kind === 'mobile-nav') {
       setMobileNavigationState(true);
@@ -980,7 +996,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     });
     results.addEventListener('click', function (event) {
       var link = event.target.closest ? event.target.closest('a[data-cmdk-item]') : null;
-      if (link && results.contains(link) && activeOverlay && activeOverlay.element === modal) closeActiveOverlay(true);
+      if (link && results.contains(link) && activeOverlay && activeOverlay.element === modal) closeActiveOverlay(true, false, true);
     });
     filterCommandPalette();
   }
@@ -1518,7 +1534,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
           ((activeOverlay.kind === 'cmdk' && navigation.hasAttribute('data-cmdk-item')) ||
            (activeOverlay.kind === 'mobile-nav' && navigation.hasAttribute('data-nav-route')))) {
         // Navigation is never held behind a presentation animation.
-        closeActiveOverlay(true, true); return;
+        closeActiveOverlay(true, true, true); return;
       }
       var target = e.target && e.target.closest ? e.target.closest('[data-action], [data-filter-chip]') : null;
       if (!target) return;

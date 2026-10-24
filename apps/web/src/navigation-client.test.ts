@@ -41,6 +41,8 @@ type Listener = [string, EventListenerOrEventListenerObject, boolean | AddEventL
 let documentListeners: Listener[]
 let windowListeners: Listener[]
 let originalWidth: PropertyDescriptor | undefined
+let originalScrollX: PropertyDescriptor | undefined
+let originalScrollY: PropertyDescriptor | undefined
 let socket: ReturnType<typeof vi.fn>
 
 function element<T extends HTMLElement = HTMLElement>(selector: string): T {
@@ -105,6 +107,8 @@ beforeEach(() => {
   document.body.style.overflow = 'clip'
   document.documentElement.style.overflow = 'scroll'
   originalWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth')
+  originalScrollX = Object.getOwnPropertyDescriptor(window, 'scrollX')
+  originalScrollY = Object.getOwnPropertyDescriptor(window, 'scrollY')
   viewport(390)
   socket = vi.fn(function WebSocketMock() {})
   vi.stubGlobal('WebSocket', socket)
@@ -147,10 +151,104 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   if (originalWidth) Object.defineProperty(window, 'innerWidth', originalWidth)
+  if (originalScrollX) Object.defineProperty(window, 'scrollX', originalScrollX)
+  if (originalScrollY) Object.defineProperty(window, 'scrollY', originalScrollY)
   document.body.innerHTML = ''
   document.body.style.overflow = ''
   document.documentElement.style.overflow = ''
   delete document.documentElement.dataset.realtimeEnabled
+})
+
+describe('overlay document position restoration', () => {
+  function documentPosition() {
+    const position = { x: 12, y: 180 }
+    Object.defineProperty(window, 'scrollX', { configurable: true, get: () => position.x })
+    Object.defineProperty(window, 'scrollY', { configurable: true, get: () => position.y })
+    const restore = vi.spyOn(window, 'scrollTo').mockImplementation((options: ScrollToOptions | number, y?: number) => {
+      expect(document.body.style.overflow).toBe('clip')
+      expect(document.documentElement.style.overflow).toBe('scroll')
+      if (typeof options === 'number') { position.x = options; position.y = y ?? 0 }
+      else { position.x = options.left ?? position.x; position.y = options.top ?? position.y }
+    })
+    return { position, restore }
+  }
+
+  it.each([false, true])('restores the captured position after focus causes the observed 5px displacement; missing trigger=%s', missing => {
+    viewport(1440)
+    const { position, restore } = documentPosition()
+    const trigger = element('#search-toggle'), fallback = element('#home-link')
+    bootClient()
+    trigger.focus()
+    trigger.click()
+    if (missing) trigger.remove()
+    const returned = missing ? fallback : trigger
+    returned.addEventListener('focus', () => { position.x += 3; position.y += 5 }, { once: true })
+    press('Escape')
+    expect(document.activeElement).toBe(returned)
+    expect(position).toEqual({ x: 12, y: 180 })
+    expect(restore).toHaveBeenCalledOnce()
+    expect(restore).toHaveBeenCalledWith({ left: 12, top: 180, behavior: 'instant' })
+  })
+
+  it.each(['switch', 'reopen'])('keeps the original document offset across overlay %s', transition => {
+    const { position } = documentPosition()
+    bootClient()
+    element('#search-toggle').click()
+    position.y = 185
+    element(transition === 'switch' ? '#activity-toggle' : '#search-toggle').click()
+    press('Escape')
+    expect(position).toEqual({ x: 12, y: 180 })
+  })
+
+  it('preserves a negative RTL horizontal offset', () => {
+    const { position, restore } = documentPosition()
+    position.x = -12
+    bootClient()
+    element('#search-toggle').click()
+    position.x = -9
+    press('Escape')
+    expect(restore).toHaveBeenCalledWith({ left: -12, top: 180, behavior: 'instant' })
+  })
+
+  it('does not overwrite a deliberate history change during an overlay', () => {
+    const { position, restore } = documentPosition()
+    const href = location.href
+    bootClient()
+    element('#search-toggle').click()
+    history.replaceState(null, '', '#intentional-navigation')
+    position.y = 240
+    try { press('Escape'); expect(position.y).toBe(240); expect(restore).not.toHaveBeenCalled() }
+    finally { history.replaceState(null, '', href) }
+  })
+
+  it.each(['ordinary', 'prevented', 'modified', 'new-tab'])('preserves navigation intent and focus policy for %s links', kind => {
+    const { position, restore } = documentPosition()
+    viewport(1440)
+    searchablePalette()
+    bootClient()
+    const trigger = element('#search-toggle'), link = element<HTMLAnchorElement>('#command-files')
+    trigger.focus(); trigger.click()
+    position.y = 185
+    if (kind === 'new-tab') link.target = '_blank'
+    if (kind === 'prevented') link.addEventListener('click', event => event.preventDefault())
+    // Prevent jsdom's unimplemented destination load after product event dispatch.
+    const stopLoad = (event: Event) => event.preventDefault()
+    window.addEventListener('click', stopLoad, { once: true })
+    link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: kind === 'modified' }))
+    expect(element('#xp-cmdk-modal').hidden).toBe(true)
+    expect(position.y).toBe(185)
+    expect(restore).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('does not issue a document scroll when focus restoration leaves the position unchanged', () => {
+    const { position, restore } = documentPosition()
+    bootClient()
+    element('#search-toggle').click()
+    press('Escape')
+    expect(position).toEqual({ x: 12, y: 180 })
+    expect(restore).not.toHaveBeenCalled()
+  })
 })
 
 describe('responsive navigation client', () => {
