@@ -22,7 +22,8 @@ const line = (locale: Locale, key: string): string => escapeHtml(t(locale, key))
 
 const cliHint = (locale: Locale): string => {
   const [before, after] = t(locale, 'security.2fa.cliHint').split('{command}')
-  return `${escapeHtml(before ?? '')}<bdi dir="ltr" class="xp-mono">xpanel disable-2fa root</bdi>${escapeHtml(after ?? '')}`
+  const command = ['xpanel', 'disable-2fa', 'root', '--confirm'].map(token => `<span style="white-space: nowrap">${escapeHtml(token)}</span>`).join(' ')
+  return `${escapeHtml(before ?? '')}<bdi dir="ltr" class="xp-mono" style="overflow-wrap: anywhere">${command}</bdi>${escapeHtml(after ?? '')}`
 }
 
 /** Optional authenticator enrollment. It never replaces the password session or closes the workspace. */

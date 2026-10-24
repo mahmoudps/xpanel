@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, it } from 'vitest'
@@ -8,7 +8,7 @@ import type { HostAction, RenderedFile } from '@xpanel/core'
 import { createTestDb, listGenerations } from '@xpanel/db'
 import { profileFor } from '@xpanel/os'
 import { createTestStateStore } from '@xpanel/state'
-import { LinuxHostExecutor } from './executor.ts'
+import { createProductionHostTargetMatcher, LinuxHostExecutor } from './executor.ts'
 import type { HostTargetOperation } from './executor.ts'
 import { compileDesiredGeneration, HostReconciler } from './reconciler.ts'
 
@@ -112,6 +112,53 @@ describe('generated host file target authorization', () => {
     await assert.rejects(() => executor.removePath(marker), preconditionFailure)
     assert.equal(await executor.readFile(marker), 'protected-original')
   })
+
+  it('admits the managed account paths without granting arbitrary tenant content', () => {
+    const permits = createProductionHostTargetMatcher()
+    for (const operation of ['read', 'write', 'remove'] as const) {
+      assert.equal(permits('/home/fixture/public_html/.user.ini', operation), true)
+      assert.equal(permits('/home/fixture/cgi-bin/php.cgi', operation), true)
+      assert.equal(permits('/home/fixture/public_html/private.txt', operation), false)
+    }
+  })
+
+  for (const [directory, filename] of [['public_html', '.user.ini'], ['cgi-bin', 'php.cgi']] as const) {
+    it.each(['read', 'write', 'remove'] as const)(`refuses %s through a substituted ${directory} ancestor of ${filename}`, async (operation) => {
+      const accountRoot = join(fixture, 'account')
+      const parent = join(accountRoot, directory)
+      const retiredParent = join(accountRoot, `${directory}-original`)
+      const outside = join(fixture, 'outside-account')
+      const target = join(parent, filename)
+      const outsideTarget = join(outside, filename)
+      await mkdir(parent, { recursive: true })
+      await mkdir(outside)
+      await writeFile(target, 'original-account-content')
+      await writeFile(outsideTarget, 'protected-outside-content')
+      const executor = new LinuxHostExecutor({ trustedHostTargets: [{ path: target, operations: ['read', 'write', 'remove'] }] })
+      assert.equal(await executor.readFile(target), 'original-account-content')
+
+      // A tenant substitutes the parent after the exact target was granted.
+      await rename(parent, retiredParent)
+      await symlink(outside, parent, process.platform === 'win32' ? 'junction' : 'dir')
+      let failure: unknown
+      let observed: unknown
+      try {
+        if (operation === 'read') observed = await executor.readFile(target)
+        else if (operation === 'write') await executor.writeFile({ path: target, content: 'replacement-account-content', mode: 0o600 })
+        else await executor.removePath(target)
+      } catch (error) {
+        failure = error
+      }
+      const outsideContent = await readFile(outsideTarget, 'utf8').catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return null
+        throw error
+      })
+      assert.equal(outsideContent, 'protected-outside-content')
+      assert.equal(await readFile(join(retiredParent, filename), 'utf8'), 'original-account-content')
+      assert.equal(observed, undefined, 'a substituted parent must not expose the outside file')
+      assert.notEqual(failure, undefined, 'the granted path must fail closed after parent substitution')
+    })
+  }
 
   it('copies target grants so later caller mutation cannot mint permissions', async () => {
     const operations: HostTargetOperation[] = ['read']

@@ -14,20 +14,22 @@ import playwright from '../../../node_modules/@playwright/test/index.js'
 
 interface Browser {
   newPage: (options: { viewport: { width: number; height: number }; deviceScaleFactor: number }) => Promise<Page>
+  version: () => string
   close: () => Promise<void>
 }
 interface Page {
-  setContent: (html: string, options: { waitUntil: 'domcontentloaded' }) => Promise<void>
+  setContent: (html: string, options: { waitUntil: 'load' }) => Promise<void>
   setViewportSize: (size: { width: number; height: number }) => Promise<void>
   evaluate: <T>(fn: () => T) => Promise<T>
   close: () => Promise<void>
 }
 const chromium = (playwright as unknown as { chromium: { executablePath: () => string; launch: (options: { executablePath: string; args: string[] }) => Promise<Browser> } }).chromium
 
-/** CHROME_PATH first, then a system Chrome, then the Playwright build. The test skips only when none is installed. */
-const chromeExecutable = (): string | undefined => {
-  const bundled = (() => { try { return chromium.executablePath() } catch { return '' } })()
-  return [process.env.CHROME_PATH, '/opt/google/chrome/chrome', bundled].find((candidate): candidate is string => Boolean(candidate) && existsSync(candidate as string))
+/** Explicit trusted override or the matching Playwright build; missing prerequisites are a failed gate. */
+const chromeExecutable = (): string => {
+  const candidate = process.env.CHROME_PATH || chromium.executablePath()
+  assert.ok(existsSync(candidate), 'Required Chromium is unavailable; install the pinned Playwright browser or set a valid trusted CHROME_PATH')
+  return candidate
 }
 const executable = chromeExecutable()
 
@@ -68,7 +70,7 @@ interface Sample {
   face: string
 }
 
-interface DomBox { left: number; right: number; width: number; height: number }
+interface DomBox { left: number; right: number; top: number; bottom: number; width: number; height: number }
 interface DomNode { nodeType: number; nodeValue: string | null; textContent: string | null }
 interface DomEl {
   textContent: string | null
@@ -273,6 +275,57 @@ const pageScroll = (): { scroll: number; inner: number } => {
   return { scroll: root.document.documentElement.scrollWidth, inner: root.innerWidth }
 }
 
+const overflowDiagnostics = () => {
+  interface Element extends DomEl { tagName: string; offsetWidth: number }
+  interface Face { family: string; status: string; weight: string; style: string }
+  const root = globalThis as unknown as {
+    innerWidth: number; innerHeight: number; devicePixelRatio: number
+    navigator: { userAgent: string; platform: string }
+    visualViewport: { width: number; height: number; scale: number } | null
+    document: {
+      documentElement: Element; body: Element
+      querySelectorAll: (selector: string) => ArrayLike<Element>
+      fonts: { status: string; check: (font: string) => boolean; [Symbol.iterator]: () => Iterator<Face> }
+    }
+    getComputedStyle: (element: DomEl) => Record<string, string>
+  }
+  const bounds = (element: DomEl) => {
+    const r = element.getBoundingClientRect()
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }
+  }
+  const identify = (element: Element) => ({
+    tag: element.tagName, id: element.getAttribute('id'), class: element.getAttribute('class'),
+    role: element.getAttribute('role'), dir: element.getAttribute('dir'),
+    homeDesktop: element.getAttribute('data-home-desktop'), homePhone: element.getAttribute('data-home-phone'),
+    styleAttribute: element.getAttribute('style'),
+  })
+  const inspect = (element: Element) => {
+    const style = root.getComputedStyle(element)
+    const keys = ['display', 'visibility', 'position', 'direction', 'boxSizing', 'width', 'minWidth', 'maxWidth', 'inlineSize', 'minInlineSize', 'maxInlineSize', 'flex', 'flexBasis', 'flexShrink', 'flexWrap', 'gridTemplateColumns', 'gap', 'whiteSpace', 'overflowWrap', 'wordBreak', 'overflowX', 'overflowY', 'paddingInlineStart', 'paddingInlineEnd', 'marginInlineStart', 'marginInlineEnd', 'fontFamily', 'fontSize', 'fontWeight', 'lineHeight']
+    return {
+      ...identify(element), rect: bounds(element), clientWidth: element.clientWidth, scrollWidth: element.scrollWidth, offsetWidth: element.offsetWidth,
+      computed: Object.fromEntries(keys.map(key => [key, style[key]])),
+    }
+  }
+  const candidates = Array.from(root.document.querySelectorAll('body *')).filter(element => {
+    const r = bounds(element), style = root.getComputedStyle(element)
+    return r.width > 0 && r.height > 0 && style.display !== 'none' && style.visibility === 'visible'
+      && (r.left < -0.5 || r.right > root.innerWidth + 0.5 || element.scrollWidth > element.clientWidth + 1)
+  }).map(element => {
+    const ancestors = []
+    let parent = element.parentElement as Element | null
+    for (let depth = 0; parent && depth < 6; depth++, parent = parent.parentElement as Element | null) ancestors.push(inspect(parent))
+    const r = bounds(element)
+    return { ...inspect(element), text: element.textContent?.replace(/\s+/g, ' ').slice(0, 200), outside: Math.max(0, -r.left, r.right - root.innerWidth), ancestors }
+  }).sort((a, b) => b.outside - a.outside)
+  return {
+    viewport: { innerWidth: root.innerWidth, innerHeight: root.innerHeight, clientWidth: root.document.documentElement.clientWidth, scrollWidth: root.document.documentElement.scrollWidth, gutter: root.innerWidth - root.document.documentElement.clientWidth, devicePixelRatio: root.devicePixelRatio, visual: root.visualViewport ? { width: root.visualViewport.width, height: root.visualViewport.height, scale: root.visualViewport.scale } : null },
+    engine: { userAgent: root.navigator.userAgent, platform: root.navigator.platform }, html: inspect(root.document.documentElement), body: inspect(root.document.body),
+    fonts: { status: root.document.fonts.status, checks: Object.fromEntries(['16px "IBM Plex Sans Arabic"', '16px "IBM Plex Sans"', '13px "IBM Plex Mono"'].map(font => [font, root.document.fonts.check(font)])), faces: Array.from(root.document.fonts).map(face => ({ family: face.family, status: face.status, weight: face.weight, style: face.style })) },
+    candidateCount: candidates.length, candidates: candidates.slice(0, 40),
+  }
+}
+
 const mailEdges = (): { time: string; addr: string } => {
   const root = globalThis as unknown as Dom
   const outside = (selector: string): string => {
@@ -362,12 +415,39 @@ const mailFilters = (locale: 'ar' | 'en' = 'ar'): string => productDocument(rend
 
 const open = async (browser: Browser, html: string): Promise<Page> => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
-  await page.setContent(html, { waitUntil: 'domcontentloaded' })
+  await page.setContent(html, { waitUntil: 'load' })
+  const fontReadiness = await page.evaluate(async () => {
+    interface Face { family: string; status: string }
+    const root = globalThis as unknown as { document: { fonts: {
+      ready: Promise<unknown>
+      load: (font: string, text: string) => Promise<Face[]>
+      [Symbol.iterator]: () => Iterator<Face>
+    } } }
+    await root.document.fonts.ready
+    const familyName = (face: Face) => face.family.replace(/^["']|["']$/g, '')
+    const declared = Array.from(root.document.fonts)
+    const results = []
+    for (const family of ['IBM Plex Sans Arabic', 'IBM Plex Sans', 'IBM Plex Mono', 'XP Arabic In Mono']) {
+      if (!declared.some(face => familyName(face) === family)) continue
+      const sample = family.includes('Arabic') ? 'العربية' : 'xPanel 123'
+      const loaded = await root.document.fonts.load(`400 16px "${family}"`, sample)
+      results.push({
+        family,
+        loaded: loaded.filter(face => familyName(face) === family && face.status === 'loaded').length,
+        failed: Array.from(root.document.fonts).filter(face => familyName(face) === family && face.status === 'error').length,
+      })
+    }
+    return results
+  })
+  for (const font of fontReadiness) {
+    assert.ok(font.loaded > 0, `Declared required font ${font.family} did not load`)
+    assert.equal(font.failed, 0, `Declared required font ${font.family} has a failed face`)
+  }
   return page
 }
 
 describe('Arabic computed type', () => {
-  it.skipIf(executable === undefined)('keeps body and nav at least 14.5px and labels at least 12.5px', async () => {
+  it('keeps body and nav at least 14.5px and labels at least 12.5px', async () => {
     const browser = await chromium.launch({
       executablePath: executable as string,
       args: ['--font-render-hinting=none', '--disable-lcd-text'],
@@ -460,7 +540,7 @@ describe('Arabic computed type', () => {
     }
   }, 60_000)
 
-  it.skipIf(executable === undefined)('does not scroll sideways at 390', async () => {
+  it('does not scroll sideways at 390', async () => {
     const browser = await chromium.launch({
       executablePath: executable as string,
       args: ['--font-render-hinting=none', '--disable-lcd-text'],
@@ -494,6 +574,7 @@ describe('Arabic computed type', () => {
         const page = await open(browser, html)
         await page.setViewportSize({ width: 390, height: 844 })
         const box = await page.evaluate(pageScroll)
+        if (box.scroll > box.inner) console.error('XPANEL_OVERFLOW_DIAGNOSTICS=' + JSON.stringify({ screen, executable, browserVersion: browser.version(), ...(await page.evaluate(overflowDiagnostics)) }))
         assert.ok(box.scroll <= box.inner, `${screen} scrolls sideways ${box.scroll} > ${box.inner}`)
         if (screen.startsWith('inbox')) {
           const edges = await page.evaluate(mailEdges)

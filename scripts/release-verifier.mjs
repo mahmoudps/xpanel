@@ -3,7 +3,7 @@ import { constants } from 'node:fs'
 import { open, lstat, mkdir, opendir, readlink } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { pipeline } from 'node:stream/promises'
-import { Transform } from 'node:stream'
+import { Readable, Transform } from 'node:stream'
 import { createGunzip } from 'node:zlib'
 import process from 'node:process'
 
@@ -212,9 +212,25 @@ const admitted = async run => {
   active++
   try { return await run() } finally { active-- }
 }
+// The stream owns only this bounded adapter, never the retained FileHandle.
+// Destroying FileHandle.createReadStream can close its handle even with
+// autoClose:false; explicit reads keep cancellation inside the outer lifetime.
+const archiveReader = (handle, size, bounds) => {
+  if (!Number.isSafeInteger(size) || size < 1 || size > bounds.compressedBytes) refuse('LIMIT', 'Compressed archive size is out of bounds')
+  return Readable.from((async function* () {
+    let position = 0
+    while (position < size) {
+      const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, size - position))
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position)
+      if (!Number.isSafeInteger(bytesRead) || bytesRead < 1 || bytesRead > buffer.length) refuse('FILE_CHANGED', 'Archive ended or returned an invalid read length')
+      position += bytesRead
+      yield bytesRead === buffer.length ? buffer : buffer.subarray(0, bytesRead)
+    }
+  })(), { objectMode: false, highWaterMark: 64 * 1024 })
+}
 const readArchiveHash = async (handle, size, bounds) => {
   const digest = createHash('sha256'); let bytes = 0
-  for await (const chunk of handle.createReadStream({ autoClose: false, start: 0, end: size - 1, highWaterMark: 64 * 1024 })) {
+  for await (const chunk of archiveReader(handle, size, bounds)) {
     bytes += chunk.length; if (bytes > bounds.compressedBytes) refuse('LIMIT', 'Compressed archive exceeds budget'); digest.update(chunk)
   }
   if (bytes !== size) refuse('FILE_CHANGED', 'Archive length changed while reading')
@@ -337,7 +353,7 @@ const verifyOpenArchive = async (archivePath, trust, callback, protectedPath) =>
       if (before.size <= 0n || before.size > BigInt(trust.bounds.compressedBytes)) refuse('LIMIT', 'Compressed archive size is out of bounds')
       const size = Number(before.size), archiveSha256 = await readArchiveHash(handle, size, trust.bounds)
       if (archiveSha256 !== trust.expectedArchiveSha256) refuse('ARCHIVE_CHECKSUM_MISMATCH', 'External archive digest does not match')
-      const raw = handle.createReadStream({ autoClose: false, start: 0, end: size - 1, highWaterMark: 64 * 1024 }), secondHash = createHash('sha256'); let compressed = 0
+      const raw = archiveReader(handle, size, trust.bounds), secondHash = createHash('sha256'); let compressed = 0
       const meter = new Transform({ transform(chunk, _encoding, done) { compressed += chunk.length; if (compressed > trust.bounds.compressedBytes) done(new ReleaseVerificationError('LIMIT', 'Compressed archive budget exceeded')); else { secondHash.update(chunk); done(null, chunk) } } })
       const gunzip = createGunzip({ chunkSize: 64 * 1024 }), pumping = pipeline(raw, meter, gunzip)
       void pumping.catch(() => undefined)
@@ -473,7 +489,7 @@ const stageOpenAuthenticatedArchive = async (stagingRoot, options) => {
     directory = await open(pinned, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
     const privateStat = await directory.stat({ bigint: true }); rootStat(privateStat, true)
     if (Number(privateStat.mode & 0o7777n) !== 0o700 || !stable(privateStat, await lstat(lifetime.stagedAt, { bigint: true }))) refuse('UNSAFE_TREE', 'Private staging directory identity differs')
-    const raw = lifetime.handle.createReadStream({ autoClose: false, start: 0, end: report.archiveBytes - 1, highWaterMark: 64 * 1024 })
+    const raw = archiveReader(lifetime.handle, report.archiveBytes, trust.bounds)
     const compressedHash = createHash('sha256'); let compressed = 0
     const meter = new Transform({ transform(chunk, _encoding, done) {
       compressed += chunk.length

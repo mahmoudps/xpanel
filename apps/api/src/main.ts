@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { execFile, spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -23,7 +23,7 @@ import { createAgentClient } from './agent-client.ts'
 import { classifyCliInvocation, xpanelServiceUid } from './cli-privilege.ts'
 import { ENTRY_POINTS, entryPointAllowsRole, type EntryPoint } from './entry-points.ts'
 import { assertStateWritable } from './state-access.ts'
-import { LiveEventHub } from './ws.ts'
+import { LiveEventHub, WS_AUTHORIZATION_UNAVAILABLE } from './ws.ts'
 import type { ApiApp } from './server.ts'
 import {
   awaitLifecycleWriterDrain,
@@ -71,7 +71,7 @@ const createQuarantinedApiApp = (): ApiApp => ({
       headers: { 'content-type': health ? 'application/json' : 'application/problem+json', 'cache-control': 'no-store', ...(health ? {} : { 'retry-after': '5' }) },
     })
   },
-  authenticateUpgrade: async () => null,
+  authenticateUpgrade: async () => WS_AUTHORIZATION_UNAVAILABLE,
   watchMailbox: () => {},
 })
 
@@ -675,8 +675,13 @@ export const createDefaultWebRenderer = async (deps: {
         } catch { /* No published signing material. The probe line stays the label. */ }
         if (postfixMain !== null && messageSizeLimitBytes(postfixMain) === null) {
           try {
-            const probed = spawnSync('/usr/sbin/postconf', ['-h', 'message_size_limit'], { encoding: 'utf8', timeout: 2000 })
-            const bytes = probed.status === 0 ? messageSizeLimitFromPostconf(probed.stdout ?? '') : null
+            const output = await new Promise<string>((resolve, reject) => {
+              execFile('/usr/sbin/postconf', ['-h', 'message_size_limit'], { encoding: 'utf8', timeout: 2000, maxBuffer: 1024, windowsHide: true }, (error, stdout) => {
+                if (error) reject(error)
+                else resolve(stdout)
+              })
+            })
+            const bytes = messageSizeLimitFromPostconf(output)
             if (bytes !== null) postfixMain = `${postfixMain}\nmessage_size_limit = ${bytes}\n`
           } catch { /* The file text stays the only source when postconf cannot run. */ }
         }

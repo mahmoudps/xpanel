@@ -226,6 +226,35 @@ describe('php and server settings', () => {
     expect(assertPhpSettings(php(), caps)).toEqual(php())
   })
 
+  it.each([
+    ['unknown field', { ...php(), extra: 'x' }],
+    ['version', php({ version: '8' })],
+    ['version path', php({ version: '../8.3' })],
+    ['handler', php({ handler: 'mod_php' as never })],
+    ['mode', php({ fpm: { ...php().fpm, mode: 'adaptive' as never } })],
+    ['maxChildren 0', php({ fpm: { ...php().fpm, maxChildren: 0 } })],
+    ['maxChildren float', php({ fpm: { ...php().fpm, maxChildren: 1.5 } })],
+    ['ondemand without idle timeout', php({ fpm: { ...php().fpm, processIdleTimeoutSec: 0 } })],
+    ['dynamic spare order', php({ fpm: { ...php().fpm, mode: 'dynamic', minSpareServers: 4, maxSpareServers: 2, startServers: 3 } })],
+    ['dynamic start outside spares', php({ fpm: { ...php().fpm, mode: 'dynamic', minSpareServers: 1, maxSpareServers: 2, startServers: 5 } })],
+    ['ini key', php({ ini: { 'Memory-Limit': '1' } })],
+    ['ini newline', php({ ini: { memory_limit: '1\nauto_prepend_file=/etc/passwd' } })],
+    ['ini quote', php({ ini: { memory_limit: '1"' } })],
+    ['ini not object', php({ ini: [] as never })],
+    ['ini server-owned extension', php({ ini: { extension: 'evil.so' } })],
+    ['ini server-owned open_basedir', php({ ini: { open_basedir: '/' } })],
+    ['ini server-owned disable_functions', php({ ini: { disable_functions: '' } })],
+    ['ini unknown directive', php({ ini: { 'opcache.enable': '1' } })],
+    ['memory above the plan', php({ ini: { memory_limit: '2G' } })],
+  ])('rejects PHP settings with %s', (_what, value) => {
+    expect(rejects(() => assertPhpSettings(value, caps))).toBe(true)
+  })
+
+  it('accepts a consistent dynamic pool through the composed PHP boundary', () => {
+    const dynamic = php({ fpm: { ...php().fpm, mode: 'dynamic', maxChildren: 8, minSpareServers: 2, maxSpareServers: 4, startServers: 3 } })
+    expect(assertPhpSettings(dynamic, caps)).toEqual(dynamic)
+  })
+
   it('refuses more workers than the plan allows with LIMIT_EXCEEDED, and allows them when unlimited', () => {
     const big = php({ fpm: { ...php().fpm, maxChildren: 9 } })
     expect(codeOf(() => assertPhpSettings(big, caps))).toBe('LIMIT_EXCEEDED')

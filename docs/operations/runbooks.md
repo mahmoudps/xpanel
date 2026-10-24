@@ -24,7 +24,11 @@ No credential values belong in commands, process arguments, examples, logs, or r
 | Account file helper | `/opt/xpanel/bin/xpanel-account-files` | Native confined helper; absence must fail closed |
 | Account backup work/download roots | `/var/lib/xpanel/backups/work`, `/var/lib/xpanel/backups/downloads` | Defaults in `packages/lifecycle/src/backup/plan.ts`; a plan does not prove a connected production executor |
 
-The actual administrative CLI is Node running `apps/api/src/main.ts`, implemented by `apps/api/src/cli.ts`. Its commands are `status`, `reconcile [--force]`, `reconcile --resolve-failed <generation-id>`, `rollback <generation-id>`, `reindex`, `init-root --password-stdin`, `reset-password <username> --password-stdin`, and `disable-2fa <username>`. Administrative verbs require the operating-system root user on Linux. Reconcile, resolve-failed, and rollback require an authenticated separate agent. There is no implemented general `xpanel-ctl` command suite for backup, vault, certificate, queue, or release operations.
+The control-plane administrative CLI is Node running `apps/api/src/main.ts`, implemented by `apps/api/src/cli.ts`. Its commands include `status`, `reconcile [--force]`, `reconcile --resolve-failed <generation-id>`, `rollback <generation-id>`, `reindex`, `init-root --password-stdin`, `reset-password <username> --password-stdin`, and `disable-2fa <username> [--confirm]`. Administrative verbs require the operating-system root user on Linux. Reconcile, resolve-failed, and rollback require an authenticated separate agent. Recovering an enrolled factor requires the explicit `--confirm` flag. Consult the current CLI usage before executing a recovery command.
+
+The separate `bin/xpanel-ctl` wrapper runs `scripts/xpanel-ctl.mjs`. It implements `version`, `status`, `doctor`, `install`, `adopt`, `update`, `upgrade`, `rollback-release`, `recover`, `uninstall`, `verify-install-source`, and `verify-install-ready`. Changes default to `--plan`; native effects require `--apply --yes` and the actual privileged prerequisites. Only `update` accepts `--check`. There is no purge or OS-upgrade command, nor a general backup, vault, certificate or queue command family.
+
+Authenticated artifact inputs are supplied together as `--artifact FILE --sha256 HEX --signing-key FILE --key-id ID`; the signing key stays in a protected file. Source/readiness diagnostics additionally require `--artifact-dir DIR`. Optional dependency receipts are diagnostic input, not authority to apply. Source verification alone returns `SOURCE_PROOF_IS_NOT_RUNTIME_READINESS` with `installReady: false`. A plan, imported receipt or available CLI does not establish installed/native readiness. See the [database transaction contract](../DB-TRANSACTIONS.md) and [management TLS lifecycle](../../deploy/nginx/README.md#management-tls-lifecycle).
 
 ## Three-profile ingress and existing-installation migration
 
@@ -34,7 +38,7 @@ The API executable starts three immutable profiles in one unprivileged process. 
 |---|---|---|---|
 | xPanel | `2083` | `127.0.0.1:12083` | Account user |
 | xWHM | `2087` | `127.0.0.1:12087` | Root or reseller |
-| xMail | `2096` | `127.0.0.1:12096` | Account user; mailbox credentials remain pending |
+| xMail | `2096` | `127.0.0.1:12096` | Mailbox service user with a bound sealed session |
 
 Configure all of the following in the protected API environment. Values below are generic examples, not an installed deployment:
 
@@ -60,7 +64,7 @@ Before activation on an existing installation:
 4. Do not attempt sequential new-API rule creation to repair a legacy `2087`-only state: each firewall mutation now validates admission for all three management ports, so the first partial addition can be rejected. Apply the approved complete additive state/rules transition atomically under maintenance control before enabling the new entrypoints; record actual validation and application separately.
 5. Configure each reviewed TLS ingress, exact public Host including port, replacement forwarded protocol/client identity and the protected ingress credential. Keep its nginx include root-owned and mode `0600`; do not log the directive or pass credential values in shell arguments. Never trust a client-supplied ingress header. Validate `nginx -t` before reload.
 6. Reserve public management ports `2083/2087/2096` and private loopback listeners `12083/12087/12096` from tenant TCP forwards, proxies and web backends. The native firewall path guards all active management ports and drops public access to private listeners; source rendering does not establish the live firewall state. Do not remove the old listener until the new release, origins, trusted TLS, health, login and rollback have passed independent checks.
-7. Verify every public HTTPS surface from an external observer and test wrong Host/origin/role, cross-profile raw-session replay, CSRF, sign-out, MFA, password change and HTTP/WebSocket confinement. Browser cookies can cross same-host ports; audience-bound stored session hashes and CSRF enforce the separation. Bearer tokens do not authenticate these interactive profiles. xMail's current account login is not mailbox authentication or SMTP/IMAP proof.
+7. Verify every public HTTPS surface from an external observer and test wrong Host/origin/role, cross-profile raw-session replay, CSRF, sign-out, MFA, password change and HTTP/WebSocket confinement. Browser cookies can cross same-host ports; audience-bound stored session hashes and CSRF enforce the separation. Bearer tokens do not authenticate these interactive profiles. xMail's address login and sealed-session binding require the current mailbox identity, service user and mail capabilities; they do not by themselves prove live SMTP/IMAP delivery.
 
 No migration, port opening or public TLS qualification is inferred from a dry run, a fixture or deployment documentation. Keep the existing installation unchanged until the complete reviewed change and recovery procedure are ready.
 
@@ -94,7 +98,7 @@ Targets: A26-A28, A59.
 
 Inspect current API execution fields before treating an account operation as completed. Supported configuration paths may change desired state and acknowledge only global reconciliation, with `targetVerified: false` and `verificationRequired: true`. Independently inspect the target/service outcome before retrying, especially after an unknown transport result or revision conflict. A row or global generation is not a target-bound lifecycle receipt.
 
-Account DELETE rechecks authorization and exact username confirmation, then returns HTTP 412 because verified target-bound purge is unavailable. Do not bypass it with direct filesystem or principal deletion. Contact-email-only PATCH also returns 412 before effects until its metadata/index writer is qualified. Native lifecycle and restart/rollback recovery remain open; the existing coordinator is not a qualified drop-in workaround.
+Account DELETE rechecks authorization and exact username confirmation. Without the agent's `target-bound-userdel` contract it returns HTTP 412 before changes. With that contract, it marks the account terminating and requests a purge bound to the stored username, UID and home. A failed purge returns HTTP 503 with `verificationRequired` and retained terminating state; successful purge precedes identity revocation and account/index removal. Do not bypass a refusal with direct filesystem or principal deletion. Contact-email-only PATCH writes the account and contact index; index failure attempts compensating rollback and reports whether state may have changed. These source and fixture contracts do not qualify native purge, lifecycle or restart/rollback safety on a deployed host.
 
 Creation requires a password and a real explicit or configured primary IPv4. Preserve all linked-principal revocations and independent manual disables through suspension/unsuspension. If state may have changed but host outcome is unknown, retain verification-required status and use a separately reviewed recovery procedure.
 
@@ -112,16 +116,16 @@ Targets: A06, A09-A11, A29-A30.
 ### Execution Steps
 
 1. Provision root once through `node /opt/xpanel/apps/api/src/main.ts init-root --password-stdin`, feeding a single password line from a protected input source. Do not use inline-password compatibility modes. The command sets the forced-password-change flag; it does not enroll MFA or complete setup.
-2. Start the verified services only after configuration/native prerequisites are reviewed. Use the actual server-selected `/login` form on the matching HTTPS profile: root/reseller on xWHM `2087`, account users on xPanel `2083` or xMail `2096`. Complete the forced password change. Two-factor enrollment is optional for root, resellers, and users; sign-in uses the password until an authenticator is enabled. When TOTP is enabled, sign-in requires a current code or a single-use recovery code. Do not inject cookies or bypass an enabled second factor to make onboarding appear successful. Root can enroll later from xWHM `/whm/security/sign-in`.
+2. Start the verified services only after configuration/native prerequisites are reviewed. Use the actual server-selected `/login` form on the matching HTTPS profile: root/reseller on xWHM `2087`, account users on xPanel `2083`, and mailbox address login on xMail `2096`. Complete the forced password change. The trusted startup policy disables two-factor authentication in explicit development; it preserves stored factors and recovery material. Production, unset and unknown environments use optional enrollment for root, resellers and users. Under that policy, an enabled authenticator requires a current code or a single-use recovery code. Do not inject cookies or request markers to bypass the policy. Root can opt in later from xWHM `/whm/security/sign-in` when enrollment is available.
 3. Protect the TOTP seed and returned single-use recovery codes offline. Count and behavior must follow the current authentication implementation; do not assume a fixed count from an older runbook.
 4. Complete the available setup workflow and verify actual persisted configuration. If a required UI/adapter is unavailable, report blocked. The forced password change remains a gate. Missing two-factor enrollment does not. Do not fabricate bootstrap URLs or completion records.
 
 ### Verification Oracle
 
-- Missing/old credentials do not authenticate. Forced password change holds for HTML, REST, and WS. Enabled TOTP holds on those same surfaces. An account with two-factor authentication disabled, including root after `disable-2fa` or before any enrollment, signs in with its password and opens its workspace.
+- Missing/old credentials do not authenticate. Forced password change holds for HTML, REST, and WS. Production/default optional policy enforces an enrolled factor on those same surfaces. Development bypasses factor challenges without deleting factors or consuming recovery codes; a development-issued session does not gain factor proof when production policy resumes. An unenrolled account signs in with its password.
 - Password change/reset revokes sessions/tokens as required by the credential policy; recovery codes and consumed TOTP windows cannot be replayed.
 - Cookies, CSRF, expiry/logout/revocation, localized inline login failure, and unauthorized HTML redirects are observed in a real browser.
-- Emergency `reset-password` or `disable-2fa` is a sensitive audited local recovery operation. Require explicit authorization and review revocation and audit effects. After `disable-2fa`, password sign-in opens the workspace again. Re-enable TOTP from the security page when the operator chooses.
+- Emergency `reset-password` or `disable-2fa` is a sensitive audited local recovery operation. Require explicit authorization and review revocation and audit effects. For an enrolled factor, run `disable-2fa <username> --confirm`; refusal without confirmation preserves the factor and credentials. After confirmed recovery, password sign-in opens the workspace again. Re-enable TOTP from the security page when the operator chooses.
 
 ## Runbook 03: Secret rotation
 
@@ -210,7 +214,7 @@ Targets: A26, A53, A59.
 
 1. Verify release archive authentication before extraction and verify the extracted exact tree, including unexpected files. The packager uses HMAC-SHA256 with a separately protected real key; it is not an Ed25519 public-signature release system. Do not use a development/default key as release authentication.
 2. Preserve the previous verified release and a consistent control DB/state/config/key snapshot. Review migration compatibility and source/artifact normalization separately from raw input identity.
-3. Execute only a reviewed qualified upgrade integration. Its state machine covers precheck, snapshot, stage, migrate, switch, health-check, and rollback. Do not invent a `current` symlink layout or general upgrade CLI not supplied by the installed system.
+3. Inspect the installed `xpanel-ctl` plan and execute effects only when its authenticated artifact, native authority, writer-drain, recovery and health prerequisites are satisfied. Portable lifecycle state machines and source diagnostics are not substitutes for those native gates. Do not invent an alternate `current` symlink layout or use a diagnostic receipt to authorize activation.
 4. Verify the actual API/agent version/hashes and independent host/tenant probes after activation. If required production ports or safety guards are absent, the automated upgrade remains blocked; a documented operator maintenance procedure needs its own reviewed recovery proof.
 
 ### Verification Oracle
@@ -234,7 +238,7 @@ Targets: A19-A21, A53.
 
 1. Inspect the candidate/current generation and live file/service difference. Preserve all required data/configuration before mutation.
 2. Configuration rollback uses the actual `node /opt/xpanel/apps/api/src/main.ts rollback <generation-id>` command with a positive existing generation ID, OS-root authorization, and authenticated separate agent. It must fail closed when the agent is unavailable.
-3. Release rollback follows the reviewed upgrade ports/procedure and its saved release/state/schema compatibility plan; there is no general `upgrade rollback` CLI in this source. Never reactivate a known security-vulnerable release for public access.
+3. Release rollback uses the separately guarded `xpanel-ctl rollback-release --release X.Y.Z` plan/apply contract and its saved release/state/schema compatibility evidence. It is distinct from configuration-generation rollback. Never reactivate a known security-vulnerable release for public access.
 4. Run independent syntax/service/tenant probes and reconcile observed state with the recorded active generation. Preserve failed attempts and recovery diagnostics.
 5. When `xpanel reconcile` returns HTTP 412 because a generation's rollback failed and the journal phase is `needs_attention`, do not delete the journal by hand. The command below checks that live owned files match the journal backup or the failed candidate, writes an audit row `reconcile.attention_resolved`, marks that generation failed, and drops the active journal. It does not apply a new generation. Run it as root, then reconcile:
 
@@ -243,7 +247,7 @@ Targets: A19-A21, A53.
    node /opt/xpanel/apps/api/src/main.ts reconcile
    ```
 
-   Replace `25` with the generation id from the 412 detail. A mismatch between the disk and the journal refuses the clear and leaves the journal in place. After a deploy that includes this command, generation 25 on the lab is cleared with the first command, and the second command writes the mail maps.
+   Replace `25` with the generation id from the 412 detail. A mismatch between the disk and the journal refuses the clear and leaves the journal in place. A subsequent reconcile requires its own current validation and execution evidence.
 
 ### Verification Oracle
 

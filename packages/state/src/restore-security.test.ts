@@ -7,7 +7,7 @@ import type { TestStateStoreHandle } from './store.ts'
 import type { StateSnapshot } from './types.ts'
 import { checksumStateTree } from './validate-state.ts'
 
-const fault = vi.hoisted(() => ({ mode: '', match: '', remaining: 0, baseRevision: 0, artifactsAtCommit: [] as string[] }))
+const fault = vi.hoisted(() => ({ mode: '', match: '', remaining: 0, baseRevision: 0, artifactsAtCommit: [] as string[], authorityPublishedRoot: '', directoryFailures: 0 }))
 vi.mock('node:fs/promises', async (importOriginal) => {
   const fs = await importOriginal<typeof import('node:fs/promises')>()
   const ioError = () => Object.assign(new Error('injected restore I/O failure'), { code: 'EIO' })
@@ -21,6 +21,11 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     open: async (...args: Parameters<typeof fs.open>) => {
       const path = pathText(args[0])
       if (fault.mode === 'stage-write' && path.includes('/.restore-stage-') && path.includes(fault.match) && fault.remaining-- > 0) throw ioError()
+      // Files and authority rename are real; only the post-publication directory
+      // sync failure is modeled. This is not native power-loss qualification.
+      if (fault.mode === 'authority-dirsync' && path === fault.authorityPublishedRoot && args[1] === 'r') {
+        return { sync: async () => { fault.directoryFailures++; throw ioError() }, close: async () => undefined }
+      }
       return fs.open(...args)
     },
     readFile: async (...args: Parameters<typeof fs.readFile>) => {
@@ -40,6 +45,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       if ((fault.mode === 'activate' || fault.mode === 'rollback') && from.includes('/.restore-stage-') && from.endsWith(`/${fault.match}`)) throw ioError()
       if (fault.mode === 'rollback' && from.includes('/.restore-backup-') && from.endsWith(`/${fault.match}`)) throw ioError()
       await fs.rename(...args)
+      if (authorityCommit && fault.mode === 'authority-dirsync') fault.authorityPublishedRoot = to.slice(0, to.lastIndexOf('/'))
       if (authorityCommit && fault.mode === 'authority-after') throw ioError()
       const corruptTarget = fault.match === 'feature-lists' ? to.includes('/feature-lists/') : to.endsWith('/uid-allocator.json')
       if (fault.mode === 'stage-corrupt' && to.includes('/.restore-stage-') && corruptTarget && fault.remaining-- > 0) {
@@ -76,6 +82,8 @@ describe('generation restore preserves live desired state on refusal', () => {
     fault.remaining = 0
     fault.baseRevision = 0
     fault.artifactsAtCommit = []
+    fault.authorityPublishedRoot = ''
+    fault.directoryFailures = 0
     state = await createTestStateStore()
     await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: 'Diagnostic inventory' })
     const feature = await state.store.createFeatureList({ name: 'Snapshot features', ownerId: null, disabled: [] })
@@ -226,6 +234,25 @@ describe('generation restore preserves live desired state on refusal', () => {
     expect(fault.artifactsAtCommit.some(name => name.startsWith('.restore-backup-'))).toBe(true)
     expect(fault.artifactsAtCommit.some(name => name.startsWith('.restore-stage-'))).toBe(true)
     expect((await readdir(state.rootDir)).filter(name => name.startsWith('.restore-'))).toEqual([])
+  })
+
+  it('rejects an authority directory-sync EIO despite visible committed bytes and retains recovery evidence', async () => {
+    fault.mode = 'authority-dirsync'
+    fault.baseRevision = await state.store.getRevision()
+    const error = await state.store.restoreGenerationSnapshot(1).then(() => null, (reason: unknown) => reason)
+    expect(fault.directoryFailures).toBeGreaterThan(0)
+    expect(error).toMatchObject({ name: 'StateDirectoryDurabilityError', code: 'STATE_DIRECTORY_DURABILITY', phase: 'sync', cause: { code: 'EIO' } })
+    const authority = JSON.parse(await readFile(join(state.rootDir, 'authority.json'), 'utf8'))
+    expect(authority.revision).toBe(fault.baseRevision + 1)
+    expect(typeof authority.committedLeaseId).toBe('string')
+    const journal = JSON.parse(await readFile(join(state.rootDir, '.lock', 'intent.json'), 'utf8'))
+    expect(journal.leaseId).toBe(authority.committedLeaseId)
+    expect(journal.op).toBe('restoreGenerationSnapshot')
+    // Publication happened: do not claim unchanged data or roll it back on an
+    // uncertain commit. Keep the exact recovery artifacts for guarded retry.
+    expect(JSON.parse(await readFile(join(state.rootDir, 'feature-lists', `${snapshot.featureLists[0]!.id}.json`), 'utf8')).name).toBe('Snapshot features')
+    expect((await readdir(state.rootDir)).some(name => name.startsWith('.restore-backup-'))).toBe(true)
+    expect((await readdir(state.rootDir)).some(name => name.startsWith('.restore-stage-'))).toBe(true)
   })
 
   it('normalizes validated data before publication and removes restore artifacts after success', async () => {

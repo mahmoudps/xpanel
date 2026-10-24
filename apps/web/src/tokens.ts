@@ -3263,9 +3263,9 @@ html[dir="rtl"] .xp-accounts__technical bdi, html[dir="rtl"] .xp-account-dialog_
 .xp-account-security { min-inline-size: 0; }
 .xp-main > .xp-account-security { margin-block-end: var(--xp-space-card); }
 .xp-account-security .xp-help { margin: 0; }
-/* Development security uses page-section and card-content spacing roles. */
-.xp-workspace-summary[data-security-page]:has(> .xp-account-security[data-auth-state="development-disabled"]) { gap: var(--xp-space-section); }
-.xp-workspace-summary[data-security-page] > .xp-account-security[data-auth-state="development-disabled"] { gap: var(--xp-space-card); }
+/* Disabled and enrolled security cards use page-section and card-content spacing roles. */
+.xp-workspace-summary[data-security-page]:has(> .xp-account-security:is([data-auth-state="development-disabled"], [data-mfa-enabled="true"])) { gap: var(--xp-space-section); }
+.xp-workspace-summary[data-security-page] > .xp-account-security:is([data-auth-state="development-disabled"], [data-mfa-enabled="true"]) { gap: var(--xp-space-card); }
 .xp-totp-qr { display: inline-block; inline-size: max-content; max-inline-size: 100%; padding: 8px; background: #ffffff; border: 1px solid var(--xp-border); border-radius: var(--xp-radius-sm, 6px); line-height: 0; }
 .xp-totp-qr > svg { display: block; inline-size: 168px; block-size: 168px; max-inline-size: 100%; }
 

@@ -192,6 +192,7 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
     const fs = await vi.importActual<typeof import('node:fs')>('node:fs')
     const pathModule = await vi.importActual<typeof import('node:path')>('node:path')
     let backing = archiveFile(original), nextFd = 10_000, openedFile: any, closed = false, fileCloses = 0, directoryMode = 0o755, treeEpoch = 0, changeTreeDuringRead = false, closeFailure = false, stagingWriteFailure = false
+    let ownerRetiring = false, archiveClosedOutsideOwner = false, observedWriterFailure = false, readsAfterWriterFailure = 0
     const dirs = new Map<number, string>()
     const tree = new Map<string, any>()
     for (const entry of parseTarGzBuffer(original)) {
@@ -231,7 +232,8 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
       open: async (path: string, flags = 0, mode = 0o644) => {
         if (canonical(path) === '/protected/release.tar.gz') {
           const actual = await real.open(backing, 'r'); closed = false
-          openedFile = { fd: actual.fd, stat: async () => fileStat(await actual.stat({ bigint: true })), createReadStream: (opts: any) => actual.createReadStream(opts), close: async () => { fileCloses++; await actual.close(); closed = true; if (closeFailure) throw new Error('diagnostic uncertain close') } }
+          actual.on('close', () => { if (!ownerRetiring) archiveClosedOutsideOwner = true })
+          openedFile = { fd: actual.fd, stat: async () => fileStat(await actual.stat({ bigint: true })), read: async (buffer: Buffer, offset: number, length: number, position: number) => { if (observedWriterFailure) readsAfterWriterFailure++; return actual.read(buffer, offset, length, position) }, createReadStream: (opts: any) => actual.createReadStream(opts), close: async () => { fileCloses++; ownerRetiring = true; await actual.close(); closed = true; if (closeFailure) throw new Error('diagnostic uncertain close') } }
           return openedFile
         }
         if ((flags & fs.constants.O_CREAT) !== 0) {
@@ -239,7 +241,7 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
           tree.set(canonical(path), { content: Buffer.alloc(0), mode, uid: 0n, nlink: 1n })
         }
         const node = tree.get(canonical(path))
-        if (node && !node.directory) return { fd: nextFd++, stat: async () => treeStat(canonical(path)), write: async (bytes: Buffer, offset: number, length: number) => { if (stagingWriteFailure) throw new Error('diagnostic ENOSPC'); const chunk = bytes.subarray(offset, offset + length); node.content = Buffer.concat([node.content, chunk]); return { bytesWritten: chunk.length } }, sync: async () => undefined, createReadStream: () => { if (changeTreeDuringRead) { treeEpoch++; changeTreeDuringRead = false } return Readable.from([node.content]) }, close: async () => undefined }
+        if (node && !node.directory) return { fd: nextFd++, stat: async () => treeStat(canonical(path)), write: async (bytes: Buffer, offset: number, length: number) => { if (stagingWriteFailure) { observedWriterFailure = true; throw new Error('diagnostic ENOSPC') } const chunk = bytes.subarray(offset, offset + length); node.content = Buffer.concat([node.content, chunk]); return { bytesWritten: chunk.length } }, sync: async () => undefined, createReadStream: () => { if (changeTreeDuringRead) { treeEpoch++; changeTreeDuringRead = false } return Readable.from([node.content]) }, close: async () => undefined }
         const normalized = canonical(path), fd = nextFd++; dirs.set(fd, normalized)
         return { fd, stat: async () => directory(normalized), sync: async () => undefined, statfs: async () => ({ type: 0x9fa0n }), close: async () => { dirs.delete(fd) } }
       },
@@ -250,6 +252,8 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
       mutate: () => { const bytes = Buffer.from(original); bytes[bytes.length - 1] ^= 1; writeFileSync(backing, bytes) }, insecure: () => { directoryMode = 0o777 },
       failClose: () => { closeFailure = true },
       failStageWrite: () => { stagingWriteFailure = true },
+      archiveClosedOutsideOwner: () => archiveClosedOutsideOwner,
+      readsAfterWriterFailure: () => readsAfterWriterFailure,
       content: (path: string) => tree.get(path)?.content,
       paths: () => [...tree.keys()],
       treeFault: (kind: string) => {
@@ -343,6 +347,9 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
       return { validation: 'claimed-ready' }
     })).rejects.toMatchObject({ code: 'ARCHIVE_USE_UNCERTAIN', stagingRetained: true })
     expect(f.paths().some((path: string) => path.startsWith('/protected/staging/authenticated-'))).toBe(true)
+    expect(f.readsAfterWriterFailure()).toBeGreaterThan(0)
+    expect(f.archiveClosedOutsideOwner()).toBe(false)
+    expect(f.fileCloses()).toBe(1)
     expect(f.isClosed()).toBe(true)
   })
   it('binds extraction to the held signer and forbids another staging attempt', async () => {

@@ -10,9 +10,9 @@ The live sidebars stay empty while every in-scope catalog tool is `researched`. 
 
 Stuffing synthetic `CapabilityEvidence` into the static catalog would mark tools verified on every install, including ones this host cannot run. That is not the gate.
 
-## Runtime qualification
+## Runtime availability checks
 
-`qualifyHostTools` copies the catalog and marks a tool verified only when all of the following are true:
+`qualifyHostTools` copies the catalog and assigns its runtime `verified` availability label only when all of the following are true:
 
 - `XPANEL_HOST_QUALIFICATION` is not `off`
 - the agent health report says `executor: "linux"` (a fake executor never qualifies)
@@ -35,13 +35,13 @@ The API adds `control-plane: passed` after it can read agent `/health`. The agen
 | `systemd` | `/usr/bin/systemctl` exists |
 | `host-info` | The agent read and parsed `/proc/loadavg` and `/proc/meminfo`. A path that exists but cannot be read fails the probe. The screen also reads `df -B1 -P /` |
 
-`test:linux` remains the host qualification harness for executor behaviour. It does not flip the static catalog. A lab host qualifies tools by running the real agent and API; no separate evidence file is required.
+These probes govern runtime navigation admission. Binary presence, agent reachability and the catalog's `verified` label are not independent hosting acceptance or proof of a completed tenant operation. `test:linux` supplies bounded executor evidence when its real prerequisites are met; it does not flip the static catalog or replace current target-host service, recovery and external-observer evidence.
 
-## Tools that qualify
+## Source paths admitted by the probes
 
 A page is hidden until every tool on it qualifies. Feature keys must not be in the plan’s disabled list (`domains` and `addondomains`, `popaccts (Email Accounts)`, `mysql`, `filemanager`, `AutoSSL`).
 
-| Tool | Probes | What works |
+| Tool | Probes | Implemented source path; native acceptance remains separate |
 | --- | --- | --- |
 | `list-accounts`, `modify-account`, `password-modification` | control-plane | List, contact email, password |
 | `manage-account-suspension`, `terminate-accounts` | control-plane, linux-account | Suspend, unsuspend, and terminate. Terminate also needs the Linux purge route |

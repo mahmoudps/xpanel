@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fail } from '@xpanel/core'
-import { claimStateOwnership } from '@xpanel/state'
+import { claimStateOwnership, fsyncDir } from '@xpanel/state'
 import type { ConfigTest, HostAction, OsProfile, RenderedFile } from '@xpanel/core'
 import type { AgentExecutor } from './executor.ts'
 
@@ -395,6 +395,7 @@ const fsyncWriteJson = async (filePath: string, data: unknown): Promise<void> =>
   await claimStateOwnership(tmp)
   await rename(tmp, filePath)
   await claimStateOwnership(filePath)
+  await fsyncDir(dirname(filePath))
 }
 
 const readJsonSafe = async <T>(filePath: string): Promise<T | null> => {
@@ -463,6 +464,7 @@ export class ReconcilerJournal {
     await fsyncWriteJson(this.historyJournalPath(record.generationId), record)
     if (record.phase === 'committed' || record.phase === 'rolled_back' || record.phase === 'failed') {
       await rm(this.activeJournalPath, { force: true })
+      await fsyncDir(dirname(this.activeJournalPath))
     } else {
       await fsyncWriteJson(this.activeJournalPath, record)
     }

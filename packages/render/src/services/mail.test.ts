@@ -317,6 +317,8 @@ describe('Dovecot configuration', () => {
     const mailbox = renderDovecotMailboxConf(rhel)
     expect(mailbox.content.match(/^passdb \{/gm)).toHaveLength(1)
     expect(mailbox.content.match(/^userdb \{/gm)).toHaveLength(1)
+    expect(mailbox.content).toContain('passdb {\n  driver = passwd-file\n  args = username_format=%Lu /opt/test/dovecot/xpanel/domains/%Ld.passwd\n')
+    expect(mailbox.content).toContain('userdb {\n  driver = passwd-file\n  args = username_format=%Lu /opt/test/dovecot/xpanel/domains/%Ld.passwd\n')
   })
 
   it('wires LMTP/auth sockets, quota warnings and per-mailbox sieve', () => {

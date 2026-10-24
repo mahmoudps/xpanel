@@ -1263,7 +1263,16 @@ export class HostReconciler {
 
     // Stage 1: Render, capture previous file backups, and stage candidate files in isolated directory
     this.emitStage(pendingGen.id, 'render', 'running', scope, `Rendering ${compiled.files.length} files`)
-    await this.deps.store.saveGenerationSnapshot(pendingGen.id)
+    try {
+      // Persist exactly the state that produced these files. The store rejects
+      // a revision advanced during preflight before any live host activation.
+      await this.deps.store.saveGenerationSnapshot(pendingGen.id, snapshot)
+    } catch (err) {
+      const errorMsg = (err instanceof Error ? err.message : String(err)).slice(0, 2000)
+      await markFailed(this.deps.db, pendingGen.id, errorMsg)
+      this.emitStage(pendingGen.id, 'render', 'failed', scope, errorMsg)
+      throw err
+    }
 
     const previousFilesBackup = await this.capturePreviousFilesBackup(
       compiled.files,

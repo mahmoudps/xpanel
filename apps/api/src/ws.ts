@@ -54,7 +54,10 @@ interface QueuedEvent {
   bytes: number
 }
 
-type AuthenticateUpgrade = (req: IncomingMessage) => Promise<EventSubscriber | null>
+// Internal availability result; client fields never create this authority.
+export const WS_AUTHORIZATION_UNAVAILABLE = Symbol('websocket-authorization-unavailable')
+export type UpgradeAuthorization = EventSubscriber | null | typeof WS_AUTHORIZATION_UNAVAILABLE
+type AuthenticateUpgrade = (req: IncomingMessage) => Promise<UpgradeAuthorization>
 type ConnectedHook = (req: IncomingMessage, subscriber: EventSubscriber, signal: AbortSignal) => void | Promise<void>
 
 const accountSet = (subscriber: EventSubscriber): ReadonlySet<Id> =>
@@ -71,7 +74,7 @@ const positiveInterval = (value: number | undefined, fallback: number): number =
 const authorizeBeforeDeadline = async (
   req: IncomingMessage,
   authenticate: AuthenticateUpgrade,
-): Promise<EventSubscriber | null> => {
+): Promise<UpgradeAuthorization> => {
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<null>((resolve) => {
     timer = setTimeout(() => resolve(null), AUTHENTICATION_TIMEOUT_MS)
@@ -270,6 +273,10 @@ export class LiveEventHub {
       }
       const subscriber = await authorizeBeforeDeadline(req, authenticate)
       if (socket.destroyed) return
+      if (subscriber === WS_AUTHORIZATION_UNAVAILABLE) {
+        socket.end('HTTP/1.1 503 Service Unavailable\r\nRetry-After: 5\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n', () => socket.destroy())
+        return
+      }
       if (!subscriber) {
         socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n', () => socket.destroy())
         return
@@ -328,7 +335,7 @@ export class LiveEventHub {
 
     const refresh = async (): Promise<EventSubscriber | null> => {
       const current = await authorizeBeforeDeadline(req, authenticate)
-      if (closed || !current) return null
+      if (closed || !current || current === WS_AUTHORIZATION_UNAVAILABLE) return null
       if (
         current.kind !== initial.kind ||
         (initial.id !== undefined && current.id !== initial.id) ||

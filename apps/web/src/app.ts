@@ -84,17 +84,25 @@ const renderCommandPaletteModal = (
       section: getSurfaceNavigationLabel(navSurfaceId, 'section', sec, locale),
       name: getSurfaceNavigationLabel(navSurfaceId, 'page', page, locale),
       route: page.route,
+      keywords: page.keywords,
     })),
   )
 
   return `
+<style>
+  .xp-cmdk-dialog { --xp-cmdk-panel-padding: var(--xp-space-card); }
+  @media (max-width: 959px) {
+    .xp-cmdk-dialog { --xp-cmdk-panel-padding: var(--xp-space-field); }
+    .xp-cmdk-dialog .xp-cmdk-result__route { flex-basis: 100%; margin-inline-start: 0; direction: inherit; text-align: start; }
+  }
+</style>
 <div id="xp-cmdk-modal" class="xp-modal-backdrop" data-xp-cmdk="true" hidden role="dialog" aria-modal="true" aria-labelledby="xp-cmdk-title">
-  <div class="xp-cmdk-dialog">
-    <div class="xp-card__header" style="padding: var(--xp-space-field) var(--xp-space-card); border-block-end: 1px solid var(--xp-border); margin-block-end: 0;">
+  <div class="xp-cmdk-dialog" style="padding: var(--xp-cmdk-panel-padding); display: flex; flex-direction: column; gap: var(--xp-space-card);">
+    <div class="xp-card__header" style="padding: 0; margin-block-end: 0;">
       <strong id="xp-cmdk-title">${isAr ? 'الانتقال إلى صفحة' : 'Go to a page'}</strong>
-      <button type="button" class="xp-btn" data-action="close-cmdk">${escapeHtml(t(locale, 'common.close'))}</button>
+      <button type="button" class="xp-btn" data-action="close-cmdk" style="min-block-size: calc(var(--xp-space-field) * 3); min-inline-size: calc(var(--xp-space-field) * 3);">${escapeHtml(t(locale, 'common.close'))}</button>
     </div>
-    <div style="padding: var(--xp-space-field) var(--xp-space-card);">
+    <div style="display: flex; flex-direction: column; gap: var(--xp-space-card); min-inline-size: 0;">
       <label class="xp-sr-only" for="xp-cmdk-input">${isAr ? 'ابحث عن صفحة' : 'Find a page'}</label>
       <input
         id="xp-cmdk-input"
@@ -111,12 +119,12 @@ const renderCommandPaletteModal = (
         maxlength="160"
         placeholder="${isAr ? 'ابحث عن صفحة' : 'Find a page'}"
       />
-      <ul id="xp-cmdk-results" class="xp-cmdk-results" data-cmdk-results role="listbox" aria-label="${isAr ? 'الصفحات' : 'Pages'}" style="list-style: none; margin: 12px 0 0; padding: 0; max-block-size: min(280px, 45dvh); overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 6px;">
+      <ul id="xp-cmdk-results" class="xp-cmdk-results" data-cmdk-results role="listbox" aria-label="${isAr ? 'الصفحات' : 'Pages'}" style="list-style: none; margin: 0; padding: 0; max-block-size: min(280px, 45dvh); overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 6px;">
         ${quickPages
           .map(
             (item, index) => `
           <li data-cmdk-row role="presentation">
-            <a id="xp-cmdk-option-${index}" href="${escapeHtml(item.route)}" class="xp-nav-item xp-cmdk-result" data-cmdk-item="${escapeHtml(item.route)}" data-cmdk-search-text="${escapeHtml(`${item.name} ${item.section} ${item.route}`)}" role="option" aria-selected="false" tabindex="-1">
+            <a id="xp-cmdk-option-${index}" href="${escapeHtml(item.route)}" class="xp-nav-item xp-cmdk-result" data-cmdk-item="${escapeHtml(item.route)}" data-cmdk-search-text="${escapeHtml([item.name, item.section, item.route, ...item.keywords].join(' '))}" role="option" aria-selected="false" tabindex="-1">
               <strong>${escapeHtml(item.name)}</strong>
               <span class="xp-cmdk-result__section">— ${escapeHtml(item.section)}</span>
               <code class="xp-mono xp-cmdk-result__route"><bdi dir="ltr">${escapeHtml(item.route)}</bdi></code>
@@ -126,7 +134,7 @@ const renderCommandPaletteModal = (
           )
           .join('')}
       </ul>
-      <p data-cmdk-empty role="status"${quickPages.length ? ' hidden' : ''}>${isAr ? 'لا توجد صفحات مطابقة.' : 'No matching pages.'}</p>
+      <p data-cmdk-empty role="status" style="margin: 0;"${quickPages.length ? ' hidden' : ''}>${isAr ? 'لا توجد صفحات مطابقة.' : 'No matching pages.'}</p>
       <p class="xp-sr-only" data-cmdk-status aria-live="polite" aria-atomic="true" data-count-label="${isAr ? 'النتائج' : 'Results'}"></p>
     </div>
   </div>

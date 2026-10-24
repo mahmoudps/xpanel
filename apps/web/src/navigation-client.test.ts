@@ -665,6 +665,24 @@ describe('local command palette behavior', () => {
     expect(element('#command-arabic').getAttribute('aria-setsize')).toBe('1')
   })
 
+  it('finds a keyword alias without changing its visible label or contextual keyboard destination', () => {
+    const link = element('#command-files')
+    link.setAttribute('data-cmdk-search-text', `${link.getAttribute('data-cmdk-search-text')} Legacy file browser`)
+    const activate = vi.spyOn(link, 'click').mockImplementation(() => {})
+    const href = link.getAttribute('href')
+    bootClient()
+    element('#search-toggle').click()
+    searchCommands('legacy browser')
+    expect(selectedCommand()).toBe(link)
+    expect(link.textContent).toBe('File manager')
+    expect(element('#command-mail').closest('li')!.hidden).toBe(true)
+    expect(element('[data-cmdk-search]')).toBe(document.activeElement)
+    expect(press('Enter').defaultPrevented).toBe(true)
+    expect(activate).toHaveBeenCalledTimes(1)
+    expect(link.getAttribute('href')).toBe(href)
+    expect(socket).not.toHaveBeenCalled()
+  })
+
   it('wraps arrow selection, keeps focus in the input, and executes the exact contextual link on Enter', () => {
     bootClient()
     element('#search-toggle').focus()
@@ -836,6 +854,39 @@ describe('authorized command palette rendering', () => {
   }))
   const owner: VisibilityContext = { principal: { kind: 'user', id: 'fixture-user', username: 'fixture', accountId: 'fixture-account' }, disabledFeatures: new Set() }
   const root: VisibilityContext = { principal: { kind: 'root', id: 'fixture-root', username: 'fixture-admin' } }
+
+  it.each(['en', 'ar'] as const)('includes existing search aliases only for admitted pages in %s', locale => {
+    const html = renderWebApp({ surface: 'xpanel', visibility: owner, catalog: qualifiedCatalog, locale })
+    const parsed = new DOMParser().parseFromString(html, 'text/html')
+    const domains = parsed.querySelector('[data-cmdk-item="/domains"]')!
+    expect(domains.getAttribute('data-cmdk-search-text')).toContain('Addon Domains')
+    expect(domains.textContent).not.toContain('Addon Domains')
+    expect(parsed.querySelectorAll('[data-cmdk-item^="/whm"]')).toHaveLength(0)
+    expect(parsed.querySelectorAll('[data-cmdk-item^="/design/"]')).toHaveLength(0)
+  })
+
+  it('escapes keyword metadata and never leaks aliases from a page outside the principal scope', () => {
+    const pages = (visibility: VisibilityContext) => visibleNavigation(visibility, qualifiedCatalog)
+      .flatMap(surface => surface.sections.flatMap(section => section.pages))
+    const admitted = pages(owner).find(page => page.route === '/domains')!
+    const forbidden = pages(root).find(page => page.route === '/whm/accounts/new')!
+    const admittedKeywords = admitted.keywords, forbiddenKeywords = forbidden.keywords
+    const hostile = '\" data-alias-injected=\"true\"><img src=x onerror=alert(1)>'
+    try {
+      admitted.keywords = [...admittedKeywords, hostile]
+      forbidden.keywords = [...forbiddenKeywords, 'admin-only-alias-marker']
+      const html = renderWebApp({ surface: 'xpanel', visibility: owner, catalog: qualifiedCatalog })
+      const parsed = new DOMParser().parseFromString(html, 'text/html')
+      expect(parsed.querySelector('[data-cmdk-item="/domains"]')?.getAttribute('data-cmdk-search-text')).toContain(hostile)
+      expect(parsed.querySelector('[data-alias-injected]')).toBeNull()
+      expect(parsed.querySelector('img[src="x"]')).toBeNull()
+      expect([...parsed.querySelectorAll('[data-cmdk-search-text]')].some(option => option.getAttribute('data-cmdk-search-text')!.includes('admin-only-alias-marker'))).toBe(false)
+      expect(parsed.querySelector('[data-cmdk-item="/whm/accounts/new"]')).toBeNull()
+    } finally {
+      admitted.keywords = admittedKeywords
+      forbidden.keywords = forbiddenKeywords
+    }
+  })
 
   it.each(['xpanel', 'xwhm', 'xmail'] as const)('includes every authorized %s page once, beyond the former section and global caps', surface => {
     const visibility = surface === 'xwhm' ? root : owner

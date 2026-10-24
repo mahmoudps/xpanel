@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { mkdir, open, readFile, rename, rm, rmdir, stat, unlink } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, rename, rm, rmdir, stat, unlink } from 'node:fs/promises'
 import { dirname, join, posix, win32 } from 'node:path'
 import { fail } from '@xpanel/core'
 import type { ConfigTest, HostAction, RenderedFile } from '@xpanel/core'
 import { assertSafeArgv } from '@xpanel/os'
+import { removePinnedHostTree, withOwnedHostFileHandle, withPinnedHostTargetParent } from './host-target-parent.ts'
 
 export interface ConfigTestResult {
   ok: boolean
@@ -528,17 +529,16 @@ export class LinuxHostExecutor implements AgentExecutor {
    */
   private async ensureSystemdDropInDir(dir: string): Promise<void> {
     this.requireHostTarget(dir, 'ensure-directory')
-    try {
-      await mkdir(dir, { mode: 0o755 })
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    }
-    const directory = await open(dir, constants.O_RDONLY | constants.O_DIRECTORY | (constants.O_NOFOLLOW ?? 0))
-    try {
-      await directory.chmod(0o755)
-    } finally {
-      await directory.close()
-    }
+    await withPinnedHostTargetParent(dir, async target => {
+      try {
+        await mkdir(target, { mode: 0o755 })
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      }
+      await withOwnedHostFileHandle(await open(target, constants.O_RDONLY | constants.O_DIRECTORY | (constants.O_NOFOLLOW ?? 0)), async directory => {
+        await directory.chmod(0o755)
+      })
+    })
   }
 
   /**
@@ -549,21 +549,21 @@ export class LinuxHostExecutor implements AgentExecutor {
   private async publishAtomicFile(
     file: RenderedFile,
     ownership: { uid: number; gid: number } | undefined,
+    target: string,
   ): Promise<void> {
     const dir = dirname(file.path)
-    const tmp = join(dir, `.${randomUUID()}.tmp`)
+    const tmp = join(dirname(target), `.${randomUUID()}.tmp`)
     let published = false
     try {
-      const fh = await open(tmp, 'wx', file.mode)
-      try {
+      await withOwnedHostFileHandle(await open(tmp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600), async fh => {
+        const metadata = await fh.stat()
+        if (!metadata.isFile() || metadata.nlink !== 1) fail('PRECONDITION_FAILED', 'managed temporary content must be a regular file without hard links')
         await fh.writeFile(file.content, 'utf8')
         if (ownership) await fh.chown(ownership.uid, ownership.gid)
         await fh.chmod(file.mode)
         await fh.sync()
-      } finally {
-        await fh.close()
-      }
-      await rename(tmp, file.path)
+      })
+      await rename(tmp, target)
       published = true
     } catch (err) {
       if (isEnoent(err) && SYSTEMD_DROPIN_DIR_RE.test(dir)) {
@@ -593,24 +593,25 @@ export class LinuxHostExecutor implements AgentExecutor {
     const dropIn = SYSTEMD_DROPIN_DIR_RE.test(dir)
     if (dropIn) await this.ensureSystemdDropInDir(dir)
     try {
-      await this.publishAtomicFile(file, ownership)
+      await withPinnedHostTargetParent(file.path, target => this.publishAtomicFile(file, ownership, target))
     } catch (err) {
       if (!dropIn || !isEnoent(err)) throw err
       await this.ensureSystemdDropInDir(dir)
-      await this.publishAtomicFile(file, ownership)
+      await withPinnedHostTargetParent(file.path, target => this.publishAtomicFile(file, ownership, target))
     }
   }
 
   async readFile(path: string): Promise<string | null> {
     this.requireHostTarget(path, 'read')
     try {
-      const fh = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
-      try {
-        if (!(await fh.stat()).isFile()) fail('PRECONDITION_FAILED', 'managed host content must be a regular file')
-        return await fh.readFile('utf8')
-      } finally {
-        await fh.close()
+      const read = async (target: string): Promise<string> => {
+        return withOwnedHostFileHandle(await open(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)), async fh => {
+          const metadata = await fh.stat()
+          if (!metadata.isFile() || (!HOST_MEASUREMENT_READS.has(path) && metadata.nlink !== 1)) fail('PRECONDITION_FAILED', 'managed host content must be a regular file without hard links')
+          return await fh.readFile('utf8')
+        })
       }
+      return HOST_MEASUREMENT_READS.has(path) ? await read(path) : await withPinnedHostTargetParent(path, read)
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
       throw err
@@ -619,17 +620,34 @@ export class LinuxHostExecutor implements AgentExecutor {
 
   async removePath(path: string): Promise<void> {
     this.requireHostTarget(path, 'remove')
-    if (MAILDIR_BOX_RE.test(path)) {
-      await rm(path, { recursive: true, force: true })
-      return
-    }
     try {
-      await unlink(path)
+      await withPinnedHostTargetParent(path, async target => {
+        if (MAILDIR_BOX_RE.test(path)) {
+          await removePinnedHostTree(target)
+          return
+        }
+        try {
+          await unlink(target)
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code
+          if (code === 'ENOENT') return
+          if (code !== 'EISDIR' && code !== 'EPERM') throw error
+          await rmdir(target)
+        }
+      })
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      if (code === 'ENOENT') return
-      if (code !== 'EISDIR' && code !== 'EPERM') throw error
-      await rmdir(path)
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+
+  /** Absence is positive ENOENT evidence, never a failed subprocess predicate. */
+  async probeRemovalTarget(path: string): Promise<'present' | 'absent' | 'unknown'> {
+    this.requireHostTarget(path, 'remove')
+    try {
+      await lstat(path)
+      return 'present'
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'unknown'
     }
   }
 
@@ -682,18 +700,17 @@ export class LinuxHostExecutor implements AgentExecutor {
         this.requireHostTarget(action.path, 'ensure-directory')
         assertMode(action.mode)
         const ownership = await this.resolveOwnership(action.owner, action.group)
-        try {
-          await mkdir(action.path, { mode: action.mode })
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-        }
-        const directory = await open(action.path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
-        try {
-          if (ownership) await directory.chown(ownership.uid, ownership.gid)
-          await directory.chmod(action.mode)
-        } finally {
-          await directory.close()
-        }
+        await withPinnedHostTargetParent(action.path, async target => {
+          try {
+            await mkdir(target, { mode: action.mode })
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+          }
+          await withOwnedHostFileHandle(await open(target, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW), async directory => {
+            if (ownership) await directory.chown(ownership.uid, ownership.gid)
+            await directory.chmod(action.mode)
+          })
+        })
         return
       }
       case 'remove-path':

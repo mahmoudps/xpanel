@@ -110,8 +110,8 @@ import {
 import type { AuthenticatedCaller } from './auth.ts'
 import { createExtendedApiRouter } from './extended-routes.ts'
 import { assertAccountAuthorized, assertAccountFeatures, assertApiScope, assertRequestAuthorized, isMailboxPrincipal, requireDomainAccount, ownedAccounts } from './authorization.ts'
-import { LiveEventHub } from './ws.ts'
-import type { EventSubscriber } from './ws.ts'
+import { LiveEventHub, WS_AUTHORIZATION_UNAVAILABLE } from './ws.ts'
+import type { EventSubscriber, UpgradeAuthorization } from './ws.ts'
 import { renderWebApp } from '../../web/src/app.ts'
 import { requestPrefersHtml } from '../../web/src/status-page.ts'
 import { ENTRY_POINTS, entryPointAllowsApiRoute, entryPointAllowsRole, sessionTokenHash } from './entry-points.ts'
@@ -261,7 +261,7 @@ export interface ApiServerDeps {
 export interface ApiApp {
   fetch(req: Request, context?: TransportContext): Promise<Response>
   hub: LiveEventHub
-  authenticateUpgrade(req: IncomingMessage, context?: TransportContext): Promise<EventSubscriber | null>
+  authenticateUpgrade(req: IncomingMessage, context?: TransportContext): Promise<UpgradeAuthorization>
   watchMailbox(req: IncomingMessage, signal: AbortSignal): void
 }
 
@@ -627,8 +627,29 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         return fail('FORBIDDEN', 'invalid or missing CSRF token (x-csrf-token)')
       }
     }
-    await assertRequestAuthorized(deps.store, caller, req)
-    return caller
+    const pathname = new URL(req.url).pathname
+    const recoveryRoute = (method === 'GET' && pathname === '/api/auth/me')
+      || (method === 'POST' && ['/api/auth/logout', '/api/auth/change-password'].includes(pathname))
+    const nativeMailboxSession = caller.sessionId !== null && caller.apiTokenId === null
+      && caller.principal.kind === 'user'
+      && (/^mbx[0-9a-f]{28}$/i.test(caller.principal.username) || caller.principal.username.includes('@'))
+    // Native address sign-in is a mailbox identity, even though its persisted
+    // principal belongs to a hosting account. Bind only from the sealed session;
+    // request mailbox selectors must never grant account-owner authority.
+    const authorizedCaller = nativeMailboxSession && !recoveryRoute
+      ? await (async () => {
+        const { record } = await openAuthorizedMailboxSession(deps.db, deps.store, serverSecret, caller)
+        return Object.freeze({
+          ...caller,
+          principal: Object.freeze({ ...caller.principal, accountId: record.accountId }),
+          principalKind: 'mailbox' as const,
+          mailbox: record.mailbox,
+          serviceUserId: record.serviceUserId,
+        })
+      })()
+      : caller
+    await assertRequestAuthorized(deps.store, authorizedCaller, req)
+    return authorizedCaller
   }
 
   const assertRoot = async (caller: AuthenticatedCaller, action: string): Promise<void> => {
@@ -3167,12 +3188,15 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   }
 
   // Bounded HTTP/WS authorization settles SH; idle sockets hold no writer lease.
-  const authenticateUpgrade = async (req: IncomingMessage, context?: TransportContext): Promise<EventSubscriber | null> => {
+  const authenticateUpgrade = async (req: IncomingMessage, context?: TransportContext): Promise<UpgradeAuthorization> => {
     try {
       const probe = new Request(`http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`)
-      if (await lifecycleAdmissionResponse(probe)) return null
-      return await withLifecycleWriterAdmission(() => authenticateUpgradeInner(req, context))
-    } catch { return null }
+      if (await lifecycleAdmissionResponse(probe)) return WS_AUTHORIZATION_UNAVAILABLE
+      return await withLifecycleWriterAdmission(async () => {
+        try { return await authenticateUpgradeInner(req, context) }
+        catch { return null }
+      })
+    } catch { return WS_AUTHORIZATION_UNAVAILABLE }
   }
   const fetch = async (req: Request, context?: TransportContext): Promise<Response> => {
     const denied = await lifecycleAdmissionResponse(req)

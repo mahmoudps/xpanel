@@ -612,8 +612,8 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         const removed = await deps.executor.runCommand(['/usr/sbin/userdel', '-r', '--', username])
         const alreadyGone = /does not exist|no such user|unknown user/i.test(removed.stderr)
         if (!removed.ok && !alreadyGone) return jsonResponse({ purged: false, reason: 'userdel_failed' }, 409)
-        const remains = await deps.executor.runCommand(['/usr/bin/test', '-e', '--', account.home])
-        if (remains.ok) return jsonResponse({ purged: false, reason: 'home_still_present' }, 409)
+        const presence = await deps.executor.probeRemovalTarget(account.home)
+        if (presence !== 'absent') return jsonResponse({ purged: false, reason: presence === 'present' ? 'home_still_present' : 'home_presence_unknown' }, 409)
         return jsonResponse({ purged: true })
       }
 

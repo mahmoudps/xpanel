@@ -32,6 +32,7 @@ for (const locale of ['en', 'ar']) {
   states.push({ id: `shortcut-palette-${locale}`, kind: 'shortcut', path: '/home', width: 1440, locale })
   for (const width of [360, 768, 1440]) states.push({ id: `unqualified-summary-${locale}-${width}`, kind: 'summary', path: '/home', width, locale })
   for (const kind of ['palette-filter', 'palette-owner', 'palette-unqualified']) states.push({ id: `${kind}-${locale}`, kind, path: '/home', width: 1440, locale })
+  for (const width of [360, 1440]) states.push({ id: `palette-alias-${locale}-${width}`, kind: 'palette-alias', path: '/home', width, locale })
   for (const width of [320, 1440]) states.push({ id: `palette-scroll-${locale}-${width}`, kind: 'palette-scroll', path: '/whm/accounts/new', width, locale })
   states.push({ id: `palette-native-input-${locale}`, kind: 'palette-native-input', path: '/mail/compose', width: 390, locale })
   for (const [surface, path] of [['panel', '/home'], ['whm', '/whm/accounts/new'], ['mail', '/mail/compose']]) states.push({ id: `shortcut-context-${surface}-${locale}`, kind: 'shortcut-context', surface, path, width: 1440, locale })
@@ -532,12 +533,84 @@ async function paletteScroll(page, state, expect, observations, capture) {
   assert.ok(final.selected_top >= final.list_top - 1 && final.selected_bottom <= final.list_bottom + 1, 'The selected result must remain inside the list viewport')
   assert.ok(Math.abs(final.document_y - before) <= 1, 'Scrolling the result list must preserve the background document position')
   assert.ok(final.document_width <= final.viewport_width + 1, 'The palette must fit the actual viewport')
+  const routeAlignment = await page.locator(`${paletteOptions}[aria-selected="true"]`).evaluate(option => {
+    const title = option.querySelector('strong'), route = option.querySelector('code bdi')
+    const ink = element => { const range = document.createRange(); range.selectNodeContents(element); const rect = range.getBoundingClientRect(); return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height } }
+    const titleInk = ink(title), routeInk = ink(route), rtl = document.documentElement.dir === 'rtl'
+    return { title: title.textContent.trim(), route: route.textContent.trim(), title_ink: titleInk, route_ink: routeInk, logical_edge_delta: rtl ? Math.abs(titleInk.right - routeInk.right) : Math.abs(titleInk.left - routeInk.left), route_below_title: routeInk.top >= titleInk.bottom, same_line: routeInk.top < titleInk.bottom && titleInk.top < routeInk.bottom, route_direction: route.getAttribute('dir'), wrapper_direction: getComputedStyle(route.parentElement).direction }
+  })
   const screenshot = await capture('open-palette')
   await page.keyboard.press('Escape')
   await expect(page.locator('[data-xp-cmdk]')).toBeHidden()
   await expect(page.locator('#main-content:visible').first()).toBeFocused()
   assert.ok(Math.abs(await page.evaluate(() => scrollY) - before) <= 1)
-  observations.push({ check: 'palette-internal-scroll-and-focus-return', result_count: count, scroll_before: before, initial, final, screenshot, escape_return: 'main-content' })
+  observations.push({ check: 'palette-internal-scroll-and-focus-return', result_count: count, scroll_before: before, initial, final, screenshot, escape_return: 'main-content', route_alignment: routeAlignment })
+  assert.equal(routeAlignment.route, '/whm/preferences', 'The measured metadata belongs to the actual selected navigation destination')
+  assert.equal(routeAlignment.route_direction, 'ltr', 'Technical route content stays isolated LTR')
+  assert.ok(routeAlignment.title_ink.width > 0 && routeAlignment.route_ink.width > 0, 'Measure actual nonempty title and route ink')
+  if (state.width < 960) {
+    assert.equal(routeAlignment.route_below_title, true, 'Compact phone route metadata belongs below its navigation title')
+    assert.ok(routeAlignment.logical_edge_delta <= 1, `Phone navigation title and technical route share the logical ink edge; got ${routeAlignment.logical_edge_delta}`)
+  } else {
+    assert.equal(routeAlignment.same_line, true, 'Desktop palette entries preserve the side-by-side utility row')
+  }
+}
+
+async function paletteAlias(page, state, expect, observations) {
+  await openPalette(page, expect)
+  const input = page.locator('[data-cmdk-search]')
+  await input.fill('Addon Domains')
+  await expect(page.locator(paletteOptions)).toHaveCount(1)
+  const selected = await selectedPaletteOption(page, expect, 0)
+  await expect(selected).toHaveAttribute('data-cmdk-item', '/domains')
+  await expect(selected.locator('strong')).toHaveText(state.locale === 'ar' ? 'النطاقات' : 'Domains')
+  await expect(selected.locator('strong')).not.toContainText('Addon Domains')
+  await expect(page.locator('[data-cmdk-item^="/whm"]')).toHaveCount(0)
+  await expect(page.locator('[data-cmdk-item^="/design/"]')).toHaveCount(0)
+  const geometry = await page.evaluate(() => {
+    const dialog = document.querySelector('.xp-cmdk-dialog')
+    const header = dialog.firstElementChild
+    const title = document.querySelector('#xp-cmdk-title')
+    const close = header.querySelector('button')
+    const input = document.querySelector('[data-cmdk-search]')
+    const list = document.querySelector('[data-cmdk-results]')
+    const option = list.querySelector('[aria-selected="true"]')
+    const bounds = element => element.getBoundingClientRect()
+    const card = bounds(dialog), h = bounds(title), c = bounds(close), q = bounds(input), result = bounds(option), l = bounds(list)
+    const border = getComputedStyle(dialog)
+    const inner = { top: card.top + parseFloat(border.borderTopWidth), right: card.right - parseFloat(border.borderRightWidth), bottom: card.bottom - parseFloat(border.borderBottomWidth), left: card.left + parseFloat(border.borderLeftWidth) }
+    const ink = document.createRange(); ink.selectNodeContents(title)
+    const heading = ink.getBoundingClientRect()
+    const rtl = document.documentElement.dir === 'rtl'
+    return {
+      panel_padding: { top: Math.min(h.top, c.top) - inner.top, right: inner.right - q.right, bottom: inner.bottom - result.bottom, left: q.left - inner.left },
+      heading_query_group_gap: q.top - Math.max(h.bottom, c.bottom),
+      query_results_group_gap: l.top - q.bottom,
+      heading_control_edge_delta: rtl ? Math.abs(heading.right - q.right) : Math.abs(heading.left - q.left),
+      controls: [q, c, result].map(rect => ({ width: rect.width, height: rect.height })),
+      query_visible_label: [...document.querySelectorAll('label[for="xp-cmdk-input"]')].some(label => !label.classList.contains('xp-sr-only')),
+      technical_route_direction: option.querySelector('code bdi')?.getAttribute('dir'),
+      result_list_role: list.getAttribute('role'),
+      utility_rows_are_not_cards: true,
+      not_applicable: ['No visible label/value pair is invented for the accessible combobox.', 'Compact option rows are utility controls, not content cards or sibling form fields.', 'This command menu has no separate major content section.'],
+    }
+  })
+  const href = await selected.getAttribute('href')
+  assertContext(new URL(href, page.url()).href, state, { path: '/domains' })
+  await page.keyboard.press('Enter')
+  await page.waitForURL(url => url.pathname === '/domains')
+  await expect(page.locator('[data-domains-table]')).toBeVisible()
+  await currentPage(page, '/domains', expect)
+  assertContext(page.url(), state, { path: '/domains' })
+  observations.push({ check: 'authorized-alias-search-and-keyboard-navigation', alias: 'Addon Domains', destination: '/domains', visible_label_unchanged: true, actual_enter_navigation: true, ...geometry })
+  const expectedPadding = state.width < 960 ? 16 : 24
+  for (const [edge, value] of Object.entries(geometry.panel_padding)) assert.ok(Math.abs(value - expectedPadding) <= 1, `Actual palette content ${edge} padding must be ${expectedPadding}px; got ${value}`)
+  assert.ok(Math.abs(geometry.heading_query_group_gap - 24) <= 1, 'The header and query are sibling groups with 24px spacing')
+  assert.ok(Math.abs(geometry.query_results_group_gap - 24) <= 1, 'The query and result list are sibling groups with 24px spacing')
+  assert.ok(geometry.heading_control_edge_delta <= 1, 'The visible heading and query control share the logical content edge')
+  for (const control of geometry.controls) assert.ok(control.width >= 44 && control.height >= 44, 'Actual palette controls retain 44px targets')
+  assert.equal(geometry.technical_route_direction, 'ltr')
+  assert.equal(geometry.result_list_role, 'listbox')
 }
 
 async function paletteNativeInput(page, state, expect, observations) {
@@ -771,6 +844,7 @@ export async function runNavigationAcceptance({ output, filter } = {}) {
         else if (state.kind === 'audit-spacing') await auditSpacing(page, state, expect, outcome.observations)
         else if (state.kind === 'summary') await summary(page, state, expect, outcome.observations)
         else if (state.kind === 'palette-filter') await paletteFilter(page, state, expect, outcome.observations)
+        else if (state.kind === 'palette-alias') await paletteAlias(page, state, expect, outcome.observations)
         else if (state.kind === 'palette-scroll') await paletteScroll(page, state, expect, outcome.observations, async suffix => {
           const screenshot = `screenshots/${state.id}-${suffix}.png`
           await page.screenshot({ path: join(destination, screenshot), fullPage: true })

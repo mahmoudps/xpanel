@@ -118,6 +118,44 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     return { plan, account, fl }
   }
 
+  it('refuses a stale compiled snapshot before live activation and records the pending generation as failed', async () => {
+    await seedEnvironment()
+    const reconciler = new HostReconciler({ store: stateHandle.store, db: dbHandle.db, executor, os })
+    const initial = await reconciler.reconcile({ actor: 'root', mailAuth: null })
+    assert.equal(initial.status, 'applied')
+    const active = await latestActive(dbHandle.db)
+    assert.ok(active)
+
+    const settings = (await stateHandle.store.getServerSettings())!
+    await stateHandle.store.saveServerSettings({ ...settings, sshPort: 2222 })
+    const liveFiles = JSON.stringify([...executor.files])
+    const liveActionCount = executor.executedActions.length
+    const configTestCount = executor.executedTests.length
+    const originalPreflight = executor.preflight.bind(executor)
+    let changedAfterCompilation = false
+    executor.preflight = async (plan) => {
+      await originalPreflight(plan)
+      if (!changedAfterCompilation) {
+        changedAfterCompilation = true
+        await stateHandle.store.saveServerSettings({ ...settings, sshPort: 2223 })
+      }
+    }
+
+    await assert.rejects(
+      reconciler.reconcile({ actor: 'root', force: true, mailAuth: null }),
+      (error: unknown) => isXpanelError(error) && error.code === 'CONFLICT',
+    )
+
+    assert.equal(changedAfterCompilation, true)
+    assert.equal((await latestActive(dbHandle.db))?.id, active.id)
+    assert.equal((await getGeneration(dbHandle.db, active.id + 1))?.status, 'failed')
+    assert.equal(await stateHandle.store.readGenerationSnapshot(active.id + 1), null)
+    assert.equal(await reconciler.journal.readActiveJournal(), null)
+    assert.equal(JSON.stringify([...executor.files]), liveFiles)
+    assert.equal(executor.executedActions.length, liveActionCount)
+    assert.equal(executor.executedTests.length, configTestCount)
+  })
+
   it('bumps a stamped zone after body drift, then remains stable without changing TTLs', async () => {
     const { account } = await seedEnvironment()
     await stateHandle.store.saveDnsZone({ id: randomUUID(), accountId: account.id, name: 'alice.example.com', serial: 2026102400, records: [{ id: randomUUID(), zone: 'alice.example.com', name: 'www', type: 'A', ttl: 300, content: '192.0.2.10', priority: null }] })

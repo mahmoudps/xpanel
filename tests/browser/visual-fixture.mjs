@@ -50,6 +50,7 @@ const stateFor = (route, qualifiedCatalog) => ({
   whm: {
     principal: root, hostname: 'synthetic-host.example.test', version: '0.1.0-fixture', availableVersion: '0.1.0-fixture',
     adminSessionIp: '192.0.2.100', plans: [plan], accounts: [account],
+    featureLists: [{ id: plan.featureListId, name: 'Synthetic visual features' }],
     ioSnapshot: { at, current: ioPoint, history: [0, 1, 2].map(index => ({ ...ioPoint, at: `2026-10-22T11:5${index}:00Z`, readBytesPerSec: (12 + index * 3) * 1024 ** 2 })),
       accounts: [{ accountId: account.id, username: account.username, uid: account.uid, readBytesPerSec: 3 * 1024 ** 2, writeBytesPerSec: 1024 ** 2, readIops: 48, writeIops: 20, memoryCurrentBytes: 256 * 1024 ** 2, memoryLimitMb: 1024, pidsCurrent: 24, pidsLimit: 100, cpuPercent: 18, statusLevel: 'ok' }] },
     services: ['nginx', 'apache', 'php-fpm', 'mariadb', 'dovecot', 'postfix', 'pdns', 'nftables'].map(name => ({ name, unit: `${name}.service`, version: 'synthetic', active: true, enabled: true, rssMb: 24, role: 'Synthetic visual sample' })),

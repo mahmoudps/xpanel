@@ -22,6 +22,8 @@ jobs:
       matrix:
         layer: [unit, http]
     name: Portable ${{ matrix.layer }} tests (no browser or Linux service proof)
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.tools/playwright-browsers
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -32,6 +34,9 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Install pinned Chromium for required computed-geometry tests
+        if: matrix.layer == 'unit'
+        run: pnpm exec playwright install --with-deps chromium
       - name: Compile account-file helper (no native hosting qualification)
         if: matrix.layer == 'unit'
         run: node helpers/account-files/build.mjs --output "$RUNNER_TEMP/xpanel-account-files"

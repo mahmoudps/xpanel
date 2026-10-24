@@ -73,7 +73,7 @@ import type {
   ServiceUser,
   ShellAccess,
 } from '@xpanel/core'
-import { AsyncMutex, atomicRemove, atomicWriteJson, listJsonFiles, listSubdirs, readJsonIfExists } from './atomic.ts'
+import { AsyncMutex, atomicRemove, atomicWriteJson, isStateDirectoryDurabilityError, listJsonFiles, listSubdirs, readJsonIfExists } from './atomic.ts'
 import type {
   AccountFilter,
   CronJobState,
@@ -326,6 +326,10 @@ export class StateStore {
         if (internalOpts.restoreAuthorityOnAbort) await lease.restorePreAcquireAuthorityIfUncommitted()
         return result
       } catch (error) {
+        // A successful read of renamed bytes cannot acknowledge directory durability.
+        // Publication may already have happened; do not claim an unchanged tree or
+        // attempt rollback from this uncertainty.
+        if (isStateDirectoryDurabilityError(error)) throw error
         const authority = await lease.assertFencingToken().catch(() => null)
         if (hasResult && shouldCommit && authority?.committedLeaseId === lease.leaseId) return await complete(authority)
         if (internalOpts.onAbort) {

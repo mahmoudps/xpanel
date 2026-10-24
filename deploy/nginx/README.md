@@ -9,10 +9,13 @@ ports are xPanel `2083`, xWHM `2087` and xMail `2096`.
 | --- | --- | --- | --- |
 | xPanel | `https://panel.example.test:2083` | `127.0.0.1:12083` | Account user |
 | xWHM | `https://whm.panel.example.test:2087` | `127.0.0.1:12087` | Root or reseller |
-| xMail | `https://mail.panel.example.test:2096` | `127.0.0.1:12096` | Account user |
+| xMail | `https://mail.panel.example.test:2096` | `127.0.0.1:12096` | Mailbox service user |
 
-xMail authenticates the account's existing control-plane identity. This does not
-implement or qualify mailbox credentials, SMTP/IMAP delivery, or a live mailbox.
+xMail accepts the mailbox address and credential through the native mail login
+path. Its sealed mailbox session is bound to the current service user, account,
+enabled mail capabilities and mailbox identity. An account-only control-plane
+session is not a mailbox session. This source contract does not qualify live
+SMTP/IMAP delivery or an installed mail service.
 
 ## Required configuration
 
@@ -89,3 +92,44 @@ Render-only installer tests, loopback HTTP tests and synthetic browser UI tests
 are limited evidence. Public TLS, the live firewall and installed service
 lifecycle require their own target-host evidence. These entrypoints do not
 change the project's prelaunch readiness decision.
+
+## Management TLS lifecycle
+
+`scripts/management-tls.mjs` provides a separate, guarded management-ingress
+lifecycle. First inspect a plan using the pinned Node runtime:
+
+```sh
+node /opt/xpanel/scripts/management-tls.mjs plan \
+  --management-hostname=panel.example.test \
+  --management-address=192.0.2.10 \
+  --acme-email=admin@example.test --accept-acme-terms
+```
+
+These are documentation values. Review the actual names, address, ACME contact,
+network reachability and certificate authority terms before running effects.
+Repeat `--management-address` for additional reviewed addresses. `plan` reports
+configuration and origins without provisioning them. `configure` accepts the
+same arguments; `prepare`, `renew` and `verify` load the protected configuration
+and accept no additional options. All four effect/verification phases require
+Linux root, trusted files and the installed pinned Node version.
+
+Configuration is `/etc/xpanel/management-tls.json`; lifecycle state is
+`/var/lib/xpanel-management-tls`, and the dedicated ACME scope is
+`/etc/xpanel/management-acme`. The managed ingress and protected secret include
+are `/etc/nginx/conf.d/xpanel-management.conf` and
+`/etc/nginx/xpanel-management/ingress-secret.conf`. These managed paths differ
+from the manually reviewed generic example above; do not activate both layouts
+without checking ownership, listeners and configuration conflicts.
+
+`prepare` can contact the CA, write owned configuration, start or reload nginx,
+and enable the renewal timer. It still reports application bootstrap pending:
+it does not provision an application identity or establish tenant readiness.
+`verify` observes the configured ingress; authenticated application behavior,
+real firewall policy and native hosting services require separate acceptance.
+
+Treat `active-command.json` and `active-transition.json` in the lifecycle state
+directory as durable uncertainty barriers. They can indicate a child or
+configuration transition whose effects have not been resolved. Preserve the
+files and inspect the corresponding process, owned configuration and recovery
+evidence. Removing a barrier, killing a timer, or retrying a command does not
+prove quiescence. The CLI refuses another transition while these barriers exist.

@@ -274,7 +274,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     })
     assert.equal(resetRes.code, 0)
 
-    const disable2faRes = await runCli(['disable-2fa', 'root'], {
+    const disable2faRes = await runCli(['disable-2fa', 'root', '--confirm'], {
       db: dbHandle.db,
       store: stateHandle.store,
       stdout: (msg) => logs.push(msg),

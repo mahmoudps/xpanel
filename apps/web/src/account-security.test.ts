@@ -39,7 +39,9 @@ describe('optional two-factor enrollment', () => {
       surface: 'xwhm', locale, activeRoute: '/whm/security/sign-in', visibility: { principal: root }, security: { totpEnabled: true },
     })
     expect(enrolled).toContain('data-mfa-enabled="true"')
-    expect(enrolled).toContain('xpanel disable-2fa root')
+    const isolatedTechnicalText = [...enrolled.matchAll(/<bdi dir="ltr" class="xp-mono"(?: [^>]*)?>(.*?)<\/bdi>/g)]
+      .map(match => match[1]!.replace(/<[^>]+>/g, ''))
+    expect(isolatedTechnicalText.filter(text => text === 'xpanel disable-2fa root --confirm')).toHaveLength(1)
     expect(enrolled).not.toMatch(/<form[^>]*data-auth-setup-form/)
     expect(enrolled).not.toContain('data-mfa-recommendation')
   })

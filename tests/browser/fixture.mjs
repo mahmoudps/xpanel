@@ -59,7 +59,7 @@ export async function createBrowserFixture() {
       return { exists: principal !== null, force_password_change: principal?.forcePasswordChange, mfa_enabled: principal?.totpEnabled }
     }
     const disableRoot2fa = async () => {
-      const result = await runCli(['disable-2fa', 'root'], { db: db.db, store })
+      const result = await runCli(['disable-2fa', 'root', '--confirm'], { db: db.db, store })
       if (result.code !== 0) throw new Error('disable-2fa failed')
     }
     return { baseUrl: `http://127.0.0.1:${server.port}`, rootPassword, replacementPassword, ownerPassword, store: server.store, rootState, disableRoot2fa, close }

@@ -89,7 +89,7 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
           '  reindex                              Rebuild SQLite search/cache index from state',
           '  init-root --password-stdin           Provision root once from standard input; requires a password change',
           '  reset-password <username> --password-stdin  Read one password from standard input',
-          '  disable-2fa <username>               Disable TOTP 2FA for a principal',
+          '  disable-2fa <username> [--confirm]   Recover an enrolled factor with explicit confirmation',
           '  repair-state-ownership               Root-only: give the xpanel user the state tree',
         ].join('\n'),
       )
@@ -255,12 +255,16 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
 
       case 'disable-2fa': {
         const username = rest[0]?.trim().toLowerCase()
-        if (!username || rest.length !== 1) {
-          return fail('VALIDATION', 'usage: xpanel disable-2fa <username>')
+        const confirmed = rest.length === 2 && rest[1] === '--confirm'
+        if (!username || (rest.length !== 1 && !confirmed)) {
+          return fail('VALIDATION', 'usage: xpanel disable-2fa <username> [--confirm]')
         }
         const principal = await findPrincipalByUsername(deps.db, username)
         if (!principal) {
           return fail('NOT_FOUND', `principal "${username}" not found`)
+        }
+        if (principal.totpEnabled && !confirmed) {
+          return fail('VALIDATION', 'usage: xpanel disable-2fa <username> --confirm; enrolled-factor recovery revokes active sessions and API tokens')
         }
         await setTotpSecret(deps.db, principal.id, null, [], {
           clearLockout: true,
@@ -268,12 +272,13 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
             actor: 'cli:root',
             action: 'auth.2fa_disabled',
             target: `principal:${principal.username}`,
-            detail: { via: 'cli' },
+            detail: { via: 'cli', severity: 'high', confirmed, reason: 'operator_factor_recovery' },
             outcome: 'ok',
             principalId: principal.id,
           },
         })
         writeOut(`Two-factor authentication disabled for "${principal.username}".`)
+        writeErr('Operator factor recovery completed; active sessions and API tokens were revoked. Two-factor enrollment remains optional.')
         return {
           code: 0,
           stdout: outLines.join('\n'),

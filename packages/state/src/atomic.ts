@@ -8,17 +8,68 @@ import { fail } from '@xpanel/core'
 
 let tmpSeq = 0
 
-/** Fsyncs a directory where the OS permits opening directories for sync (Linux/BSD). */
-const fsyncDir = async (dir: string): Promise<void> => {
+export type StateDirectoryDurabilityPhase = 'open' | 'sync' | 'close'
+
+/** Publication may already be visible. This error never proves unchanged data or rollback. */
+export class StateDirectoryDurabilityError extends Error {
+  readonly code = 'STATE_DIRECTORY_DURABILITY'
+  readonly directory: string
+  readonly phase: StateDirectoryDurabilityPhase
+  closeCause?: unknown
+  constructor(directory: string, phase: StateDirectoryDurabilityPhase, cause: unknown) {
+    super('state directory durability could not be confirmed', { cause })
+    this.name = 'StateDirectoryDurabilityError'
+    this.directory = directory
+    this.phase = phase
+  }
+}
+
+export const isStateDirectoryDurabilityError = (error: unknown): error is StateDirectoryDurabilityError =>
+  error instanceof StateDirectoryDurabilityError
+
+/**
+ * Linux/BSD failures are fatal. Windows retains a bounded best-effort exception:
+ * directory open EISDIR/EPERM; directory sync EINVAL/ENOTSUP. Actual Node 26 on
+ * Windows also returns EPERM/fsync for an opened directory: that exception
+ * additionally requires fstat on this same descriptor to prove it is a directory.
+ * A failed descriptor check keeps the original error fatal. These bounded OS
+ * compatibility codes do not establish Windows power-loss durability or prove
+ * that every such failure is an unsupported filesystem operation. Permission,
+ * capacity, I/O, unknown and all close failures otherwise remain fatal.
+ */
+const windowsUnsupportedDirectoryOperation = (phase: 'open' | 'sync', error: unknown): boolean => {
+  if (process.platform !== 'win32') return false
+  const code = (error as NodeJS.ErrnoException | null)?.code
+  return phase === 'open' ? code === 'EISDIR' || code === 'EPERM' : code === 'EINVAL' || code === 'ENOTSUP'
+}
+
+/** Sync a published directory entry; preserve the first failure if close also fails. */
+export const fsyncDir = async (dir: string): Promise<void> => {
   let fh
   try {
     fh = await open(dir, 'r')
-    await fh.sync()
-  } catch {
-    // Windows and some virtual filesystems do not allow opening or syncing a directory fd.
-  } finally {
-    await fh?.close()
+  } catch (cause) {
+    if (windowsUnsupportedDirectoryOperation('open', cause)) return
+    throw new StateDirectoryDurabilityError(dir, 'open', cause)
   }
+  let failure: StateDirectoryDurabilityError | undefined
+  try {
+    await fh.sync()
+  } catch (cause) {
+    let unsupported = windowsUnsupportedDirectoryOperation('sync', cause)
+    const io = cause as NodeJS.ErrnoException | null
+    if (!unsupported && process.platform === 'win32' && io?.code === 'EPERM' && io.syscall === 'fsync') {
+      try { unsupported = (await fh.stat()).isDirectory() === true }
+      catch { /* Failure to prove the descriptor is a directory preserves the original error. */ }
+    }
+    if (!unsupported) failure = new StateDirectoryDurabilityError(dir, 'sync', cause)
+  }
+  try { await fh.close() }
+  catch (cause) {
+    if (failure) failure.closeCause = cause
+    else failure = new StateDirectoryDurabilityError(dir, 'close', cause)
+  }
+  if (failure) throw failure
 }
 
 const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))

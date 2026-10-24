@@ -11,7 +11,7 @@ if (existsSync(output)) throw new Error('Preserve prior evidence; choose a fresh
 mkdirSync(join(output, 'screenshots'), { recursive: true })
 process.env.PLAYWRIGHT_BROWSERS_PATH ??= join(process.cwd(), '.tools/playwright-browsers')
 const { chromium } = await import('@playwright/test')
-const inputs = ['apps/web/src/charts.ts', 'apps/web/src/surfaces/xwhm.ts', 'apps/web/src/tokens.ts', 'apps/web/src/ws-client.ts', 'tests/browser/visual-fixture.mjs', 'tests/browser/technical-values-acceptance.mjs']
+const inputs = ['apps/web/src/charts.ts', 'apps/web/src/surfaces/xwhm.ts', 'apps/web/src/plan-editor.ts', 'packages/core/src/rules/plans.ts', 'apps/web/src/tokens.ts', 'apps/web/src/ws-client.ts', 'tests/browser/visual-fixture.mjs', 'tests/browser/technical-values-acceptance.mjs']
 const fingerprint = () => inputs.map(path => ({ path, sha256: createHash('sha256').update(readFileSync(path)).digest('hex') }))
 const before = fingerprint()
 const pages = [['traffic', '/metrics/traffic'], ['io', '/whm/monitoring/io'], ['plans', '/whm/plans'], ['outbound', '/whm/email/outbound']]
@@ -26,7 +26,7 @@ const fixture = await createVisualFixture(), browser = await chromium.launch({ h
 
 // Resolve the browser's actual native input text, including its user-agent shadow
 // tree. A mirror element or CSS direction alone cannot prove native glyph order.
-async function nativeInputObservation(page) {
+async function nativeInputObservation(page, id, expected) {
   const session = await page.context().newCDPSession(page)
   try {
     await session.send('DOM.enable'); await session.send('CSS.enable')
@@ -35,22 +35,24 @@ async function nativeInputObservation(page) {
       if (predicate(node)) return node
       for (const child of [...node.children ?? [], ...node.shadowRoots ?? []]) { const found = find(child, predicate); if (found) return found }
     }
-    const input = find(root, node => { const i = node.attributes?.indexOf('id'); return i >= 0 && node.attributes[i + 1] === 'plan-io-max' })
-    assert.ok(input, 'Plan IO native input must exist')
-    const text = find(input, node => node.nodeType === 3 && node.nodeValue === '100 / 50')
+    const input = find(root, node => { const i = node.attributes?.indexOf('id'); return node.nodeName === 'INPUT' && i >= 0 && node.attributes[i + 1] === id })
+    assert.ok(input, 'Current plan IO native input must exist: ' + id)
+    const text = find(input, node => node.nodeType === 3 && node.nodeValue === expected)
     assert.ok(text, 'Chromium must expose the actual nonempty native input glyph node')
     const { object } = await session.send('DOM.resolveNode', { backendNodeId: text.backendNodeId })
     const { result, exceptionDetails } = await session.send('Runtime.callFunctionOn', {
       objectId: object.objectId, returnByValue: true,
       functionDeclaration: function () {
-        const raw = this.textContent, firstAt = raw.indexOf('100'), secondAt = raw.lastIndexOf('50')
+        const raw = this.textContent
         const box = (from, to) => { const range = document.createRange(); range.setStart(this, from); range.setEnd(this, to); const r = range.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom } }
-        return { raw, first: box(firstAt, firstAt + 3), second: box(secondAt, secondAt + 2), whole: box(0, raw.length), direction: getComputedStyle(this.parentElement).direction }
+        return { raw, characters: [...raw].map((character, index) => ({ character, ...box(index, index + 1) })), whole: box(0, raw.length), direction: getComputedStyle(this.parentElement).direction }
       }.toString(),
     })
     assert.ok(!exceptionDetails, 'Native input glyph geometry must be measurable')
-    const { fonts } = await session.send('CSS.getPlatformFontsForNode', { nodeId: text.parentId })
-    return { ...result.value, applied_fonts: fonts }
+    const textHost = find(input, node => node.children?.some(child => child.nodeId === text.nodeId))
+    assert.ok(textHost?.nodeId, 'The actual native glyph container must be observable')
+    const { fonts } = await session.send('CSS.getPlatformFontsForNode', { nodeId: textHost.nodeId })
+    return { id, expected, ...result.value, applied_fonts: fonts }
   } finally { await session.detach() }
 }
 
@@ -105,10 +107,16 @@ try {
           return { raw, characters }
         }) : []
         const fields = ['mail-outbound-mode', 'mail-default-ipv4', 'mail-default-ipv6', 'mail-default-helo'].map(id => { const c = document.getElementById(id), l = document.querySelector('label[for="' + id + '"]'); return c && l ? { id, gap: rect(c).top - rect(l).bottom, logical_edge_delta: edgeDelta(rect(c), rect(l)), control: rect(c) } : null }).filter(Boolean)
-        const label = document.querySelector('#whm-plans label:has(input[name="unlimitedAddonDomains"])'), input = document.getElementById('plan-io-max'), inputLabel = document.querySelector('label[for="plan-io-max"]')
+        const label = document.querySelector('#whm-plans label[for="plan-addonDomains-unlimited"]')
+        const planInputs = ['plan-ioReadBps', 'plan-ioWriteBps'].map(id => {
+          const input = document.getElementById(id), inputLabel = document.querySelector('label[for="' + id + '"]')
+          return input && inputLabel ? { id, name: input.name, type: input.type, value: input.value, disabled: input.disabled, associated: input.labels.length === 1 && input.labels[0] === inputLabel, dir: input.dir, computed_direction: getComputedStyle(input).direction, ...rect(input), label_glyph: glyph(inputLabel), logical_edge_delta: edgeDelta(rect(input), rect(inputLabel)) } : null
+        }).filter(Boolean)
+        const planEditor = document.querySelector('[data-native-plan-editor]'), feature = planEditor?.querySelector('[name="featureListId"]')
+        const planEditorState = planEditor ? { editable: planEditor.dataset.planEditable, savedId: planEditor.getAttribute('data-plan-id'), saveDisabled: planEditor.querySelector('[data-native-plan-save]').disabled, featureId: feature.value, featureOptions: [...feature.options].map(option => ({ value: option.value, text: option.text })) } : null
         const io = document.querySelector('.xp-io-monitor'), ioHeader = io?.querySelector(':scope > .xp-card__header'), ioStatus = io?.querySelector(':scope > [data-resource-observation-state]'), nestedHeader = io?.querySelector(':scope > .xp-card > .xp-card__header')
         const ioContract = kind === 'io' ? { incomplete: ioStatus?.dataset.resourceObservationState, legacyLive: document.querySelectorAll('.xp-io-monitor [data-live-kpi]').length, supplied: document.querySelectorAll('[data-resource-observation]').length, hostRatio: /RAM\s+\d+\s*\/|Load\s+\d/.test(io.textContent), headerStatusGap: rect(ioStatus).top - rect(ioHeader).bottom, nestedHeaderMargin: parseFloat(getComputedStyle(nestedHeader).marginBlockEnd) } : null
-        return { viewport: innerWidth, document_scroll_width: document.documentElement.scrollWidth, body_overflow_x: getComputedStyle(document.body).overflowX, root_overflow_x: getComputedStyle(document.documentElement).overflowX, pairs, kpis, wrappers, fields, technical_tokens, ioContract, unlimited_label: label ? rect(label) : null, input: input ? { value: input.value, dir: input.dir, computed_direction: getComputedStyle(input).direction, ...rect(input), label_glyph: glyph(inputLabel), logical_edge_delta: edgeDelta(rect(input), rect(inputLabel)) } : null }
+        return { viewport: innerWidth, document_scroll_width: document.documentElement.scrollWidth, body_overflow_x: getComputedStyle(document.body).overflowX, root_overflow_x: getComputedStyle(document.documentElement).overflowX, pairs, kpis, wrappers, fields, technical_tokens, ioContract, unlimited_label: label ? rect(label) : null, plan_inputs: planInputs, plan_editor: planEditorState }
       }, sample.kind)
       const g = outcome.geometry
       check('document-fits-viewport', g.document_scroll_width <= sample.width + 1, g.document_scroll_width)
@@ -165,14 +173,19 @@ try {
         check('outbound-label-control-edges-and-targets', g.fields.every(field => field.logical_edge_delta <= 1 && field.control.height >= 43.5), g.fields)
       }
       if (sample.kind === 'plans') {
-        outcome.native_input = await nativeInputObservation(page)
-        check('native-plan-input-glyph-order', outcome.native_input.first.left < outcome.native_input.second.left, outcome.native_input)
-        check('plan-input-direction-and-label-edge', g.input.dir === 'ltr' && g.input.computed_direction === 'ltr' && g.input.logical_edge_delta <= 1 && g.input.height >= 43.5, g.input)
+        const expected = [{ id: 'plan-ioReadBps', name: 'ioReadBps', value: '50' }, { id: 'plan-ioWriteBps', name: 'ioWriteBps', value: '25' }]
+        check('current-plan-IO-controls-preserve-separate-MiB-values', g.plan_inputs.length === 2 && expected.every((field, index) => g.plan_inputs[index].id === field.id && g.plan_inputs[index].name === field.name && g.plan_inputs[index].type === 'number' && g.plan_inputs[index].value === field.value && !g.plan_inputs[index].disabled && g.plan_inputs[index].associated), g.plan_inputs)
+        check('plan-editor-uses-actual-feature-list-read', g.plan_editor?.editable === 'true' && g.plan_editor.savedId === null && g.plan_editor.saveDisabled && g.plan_editor.featureId === 'visual-features' && g.plan_editor.featureOptions.length === 1 && g.plan_editor.featureOptions[0].text === 'Synthetic visual features', g.plan_editor)
+        outcome.native_inputs = []
+        for (const field of expected) outcome.native_inputs.push(await nativeInputObservation(page, field.id, field.value))
+        check('native-plan-input-glyph-order', outcome.native_inputs.length === 2 && outcome.native_inputs.every(input => input.raw === input.expected && input.characters.length >= 2 && input.direction === 'ltr' && input.characters.every((character, index, all) => character.right > character.left && (index === 0 || (Math.abs(character.top - all[0].top) <= 1 && character.left > all[index - 1].left)))), outcome.native_inputs)
+        check('plan-input-direction-and-label-edge', g.plan_inputs.length === 2 && g.plan_inputs.every(input => input.dir === 'ltr' && input.computed_direction === 'ltr' && input.logical_edge_delta <= 1 && input.height >= 43.5), g.plan_inputs)
         check('compound-plan-row-glyph-order', g.pairs.length >= 2 && g.pairs.every(pair => pair.first.left < pair.second.left), g.pairs)
         check('unlimited-clickable-label-44px', g.unlimited_label.height >= 43.5, g.unlimited_label)
-        const label = page.locator('#whm-plans label:has(input[name="unlimitedAddonDomains"])'), checkbox = label.locator('input')
+        const label = page.locator('#whm-plans label[for="plan-addonDomains-unlimited"]'), checkbox = label.locator('input[name="unlimited.addonDomains"]')
         const initial = await checkbox.isChecked(); await label.click({ position: { x: 8, y: 8 } }); const toggled = await checkbox.isChecked(); await checkbox.setChecked(initial)
         check('label-padding-is-actual-click-target', initial !== toggled, { initial, toggled, restored: await checkbox.isChecked() })
+        check('restoring-unlimited-retains-clean-disabled-save', await page.locator('[data-native-plan-save]').isDisabled(), await page.locator('[data-native-plan-save]').isDisabled())
       }
       outcome.heading_font = await assertAppliedFont(page, '#main-content h1', sample.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
       check('no-page-console-errors-or-writes', outcome.page_errors.length === 0 && outcome.console_errors.length === 0 && outcome.mutations.length === 0, { page_errors: outcome.page_errors, console_errors: outcome.console_errors, mutations: outcome.mutations })

@@ -12,6 +12,7 @@ import {
   findActiveApiTokenByHash,
   findActiveSessionByTokenHash,
   findPrincipalByUsername,
+  listAudit,
   setTotpSecret,
 } from '@xpanel/db'
 import type { Db } from '@xpanel/db'
@@ -280,13 +281,77 @@ describe('CLI: explicit one-time root provisioning', () => {
       await db.query(
         "CREATE TRIGGER reject_2fa_audit BEFORE INSERT ON audit_log WHEN NEW.action = 'auth.2fa_disabled' BEGIN SELECT RAISE(ABORT, 'fixture 2fa audit denied'); END",
       )
-      const auditFailResult = await runCli(['disable-2fa', 'root'], { db, store })
+      const auditFailResult = await runCli(['disable-2fa', 'root', '--confirm'], { db, store })
       assert.equal(auditFailResult.code, 1)
+      assert.match(auditFailResult.stderr, /fixture 2fa audit denied/)
       const afterAbort = await findPrincipalByUsername(db, 'root')
       assert.equal(afterAbort?.totpEnabled, true)
       assert.deepEqual(afterAbort?.totpSecretEnc, sealed)
       assert.ok(await findActiveSessionByTokenHash(db, sessionHash))
       assert.ok(await findActiveApiTokenByHash(db, apiTokenHash))
+    })
+  })
+
+  it('requires explicit confirmation for an enrolled factor without changing credentials, sessions or audit', async () => {
+    await withCli(async (db, store) => {
+      const root = await createRootPrincipal(db, { username: 'root', passwordHash: PUBLIC_HASH, forcePasswordChange: false })
+      await setTotpSecret(db, root.id, new Uint8Array(48).fill(7), [sha256Hex('synthetic-recovery-code')])
+      const expiresAt = new Date(Date.now() + 3_600_000).toISOString()
+      await createSession(db, { principalId: root.id, tokenHash: sha256Hex('synthetic-confirm-session'), expiresAt, mfaVerified: true })
+      await createApiToken(db, { principalId: root.id, name: 'Synthetic recovery', tokenHash: sha256Hex('synthetic-confirm-api-token'), scopes: ['*'], expiresAt })
+      const snapshot = async () => Promise.all(['principals', 'sessions', 'api_tokens', 'totp_enrollments', 'login_failure_counters', 'lockouts', 'audit_log'].map(table => db.query(`SELECT * FROM ${table} ORDER BY 1`)))
+      const before = await snapshot()
+      for (const args of [['disable-2fa', 'root'], ['disable-2fa', 'root', '--unexpected'], ['disable-2fa', 'root', '--confirm', '--confirm']]) {
+        const result = await runCli(args, { db, store })
+        assert.equal(result.code, 1)
+        assert.match(result.stderr, /--confirm/)
+        assert.deepEqual(await snapshot(), before)
+      }
+    })
+  })
+
+  it('confirms enrolled-factor recovery with neutral high-severity audit and revokes prior credentials', async () => {
+    await withCli(async (db, store) => {
+      const root = await createRootPrincipal(db, { username: 'root', passwordHash: PUBLIC_HASH, forcePasswordChange: false })
+      const recoveryHash = sha256Hex('synthetic-confirmed-recovery-code')
+      await setTotpSecret(db, root.id, new Uint8Array(48).fill(8), [recoveryHash])
+      const sessionHash = sha256Hex('synthetic-confirmed-session'), tokenHash = sha256Hex('synthetic-confirmed-token')
+      const expiresAt = new Date(Date.now() + 3_600_000).toISOString()
+      await createSession(db, { principalId: root.id, tokenHash: sessionHash, expiresAt, mfaVerified: true })
+      await createApiToken(db, { principalId: root.id, name: 'Synthetic confirmed recovery', tokenHash, scopes: ['*'], expiresAt })
+      const result = await runCli(['disable-2fa', 'root', '--confirm'], { db, store })
+      assert.equal(result.code, 0)
+      const after = await findPrincipalByUsername(db, 'root')
+      assert.equal(after?.totpEnabled, false)
+      assert.equal(after?.totpSecretEnc, null)
+      assert.deepEqual(after?.totpRecoveryHashes, [])
+      assert.equal(after?.forcePasswordChange, false)
+      assert.equal(await findActiveSessionByTokenHash(db, sessionHash), null)
+      assert.equal(await findActiveApiTokenByHash(db, tokenHash), null)
+      const rows = (await listAudit(db)).filter(entry => entry.action === 'auth.2fa_disabled')
+      assert.equal(rows.length, 1)
+      assert.deepEqual(rows[0]!.detail, { via: 'cli', severity: 'high', confirmed: true, reason: 'operator_factor_recovery' })
+      assert.match(result.stderr, /revoked/i)
+      assert.doesNotMatch(result.stderr, /must.*enroll|enrollment.*required|mandatory/i)
+      assert.equal(JSON.stringify({ result, rows }).includes(recoveryHash), false)
+      assert.equal(JSON.stringify({ result, rows }).includes(PUBLIC_HASH), false)
+    })
+  })
+
+  it('keeps unenrolled recovery optional and rejects a missing confirmed principal without audit changes', async () => {
+    await withCli(async (db, store) => {
+      await createRootPrincipal(db, { username: 'root', passwordHash: PUBLIC_HASH, forcePasswordChange: false })
+      const before = await listAudit(db)
+      const missing = await runCli(['disable-2fa', 'missing', '--confirm'], { db, store })
+      assert.equal(missing.code, 1)
+      assert.match(missing.stderr, /NOT_FOUND/)
+      assert.deepEqual(await listAudit(db), before)
+      const unenrolled = await runCli(['disable-2fa', 'root'], { db, store })
+      assert.equal(unenrolled.code, 0)
+      const principal = await findPrincipalByUsername(db, 'root')
+      assert.equal(principal?.totpEnabled, false)
+      assert.equal(principal?.forcePasswordChange, false)
+      assert.doesNotMatch(unenrolled.stderr, /must.*enroll|enrollment.*required|mandatory/i)
     })
   })
 })

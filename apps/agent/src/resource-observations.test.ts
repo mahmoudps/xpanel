@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { posix } from 'node:path'
+import { spawnSync } from 'node:child_process'
 
 const ports = vi.hoisted(() => ({
   nowUs: 10_000_000, open: vi.fn(), statfs: vi.fn(), readlink: vi.fn(),
@@ -26,6 +27,20 @@ const configuration = () => ({ revision: REVISION, accounts: [{ accountId: ACCOU
 const procStat = (user = 100, idle = 800, guest = 0) => `cpu ${user} 0 100 ${idle} 0 0 0 0 ${guest} 0\ncpu0 1 0 1 1 0 0 0 0 0 0\ncpu1 1 0 1 1 0 0 0 0 0 0\nintr 1 2 3\n`
 const ioStat = (rbytes = 100, wbytes = 200, rios = 4, wios = 2) => `8:0 rbytes=${rbytes} wbytes=${wbytes} rios=${rios} wios=${wios} dbytes=0 dios=0\n`
 const sourcePath = '/sys/fs/cgroup/xpanel.slice/xpanel-20001.slice'
+
+describe('resource observation native ESM module import', () => {
+  it('loads with the actual Node process exports without starting a sampler or accessing the host', () => {
+    const target = new URL('./resource-observations.ts', import.meta.url).href
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      const mod = await import(${JSON.stringify(target)});
+      if (typeof mod.LinuxResourceObservationSampler !== 'function') throw new Error('Missing sampler export');
+      console.log('RESOURCE_IMPORT_OK');
+    `], { encoding: 'utf8', timeout: 10_000, maxBuffer: 64 * 1024, windowsHide: true })
+    expect(result.error).toBeUndefined()
+    expect(result.status, result.stderr).toBe(0)
+    expect(result.stdout.trim()).toBe('RESOURCE_IMPORT_OK')
+  })
+})
 
 /** Scoped diagnostic kernel/file-handle model. It never enters production imports or host qualification. */
 class KernelFixture {

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { open, readlink, statfs } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
-import { geteuid, hrtime, pid, platform } from 'node:process'
+import * as nodeProcess from 'node:process'
 import {
   RESOURCE_LIVE_STALE_AFTER_MS, RESOURCE_OBSERVATION_FIELDS, RESOURCE_OBSERVATION_LIMITS,
   RESOURCE_SAMPLE_INTERVAL_MS, parseResourceObservationSnapshot, projectResourceObservationForLive,
@@ -13,6 +13,9 @@ import type {
   HostResourceObservation, LiveResourceObservation, ResourceObservationSnapshot, ResourceRateBaseline,
   ResourceReadSpan, ResourceSourceIdentity, ResourceUnavailableReason,
 } from '../../../packages/core/src/rules/resource-observations.ts'
+
+// Unix-only properties may be absent before the sampler's platform admission check.
+const { geteuid, hrtime, pid, platform } = nodeProcess
 
 /** Reader workload ceilings, not hosting quotas or measured capacities. */
 export const RESOURCE_READER_LIMITS = Object.freeze({

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { chmod, chown, lstat, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { assertInt, assertLine, fail } from '@xpanel/core'
-import { atomicRemove, atomicWriteJson, readJsonIfExists } from './atomic.ts'
+import { atomicRemove, atomicWriteJson, fsyncDir, isStateDirectoryDurabilityError, readJsonIfExists } from './atomic.ts'
 import { acquireWriterMutex, WRITER_MUTEX_FILE, type WriterMutexGuard } from './writer-mutex.ts'
 import type { AllocatedReferenceRecord, ReferenceKind, StateAuthorityMetadata, WriterLockHolder } from './types.ts'
 import { formatShortReference, normalizeReferenceKind, validateStateAuthority, validateUidAllocator } from './validate-state.ts'
@@ -242,9 +242,7 @@ export class WriterLock {
       await handle.sync()
       await handle.close(); handle = undefined
       await rename(temp, path)
-      let directory
-      try { directory = await open(dirname(path), 'r'); await directory.sync() } catch { /* Directory fsync is unavailable on some platforms. */ }
-      finally { await directory?.close() }
+      await fsyncDir(dirname(path))
     } catch (error) { await handle?.close().catch(() => undefined); await rm(temp, { force: true }).catch(() => undefined); throw error }
   }
   private async recoverGeneric(journal: WriteIntentRecord): Promise<void> {
@@ -333,7 +331,7 @@ export class WriterLock {
       prepared = undefined
       publishedLease = leaseId
       await atomicWriteJson(this.authorityFilePath, { ...current, fencingToken, updatedAt: acquiredAt }, 0o640)
-      let committed = false, closing = false, released = false
+      let committed = false, commitDurabilityUncertain = false, closing = false, released = false
       let tail: Promise<unknown> = Promise.resolve()
       let releasePromise: Promise<void> | undefined
       const assertCurrent = async (expected = fencingToken): Promise<StateAuthorityMetadata> => {
@@ -361,7 +359,7 @@ export class WriterLock {
         assertFencingToken: expected => run(() => assertCurrent(expected)),
         recordIntent: value => run(async () => {
           await assertCurrent()
-          if (committed) return fail('CONFLICT', 'cannot journal after authority commit')
+          if (committed || commitDurabilityUncertain) return fail('CONFLICT', 'cannot journal after authority commit or uncertain durability')
           if (await readJsonIfExists(this.intentFilePath) !== null) return fail('CONFLICT', 'an uncommitted state journal already exists')
           const record: WriteIntentRecord = { ...value, leaseId, fencingToken, baseRevision: current.revision, recordedAt: new Date().toISOString() }
           // Validate the full prospective journal before publication, without canonical file effects.
@@ -370,7 +368,7 @@ export class WriterLock {
         }),
         recordRestoreIntent: input => run(async () => {
           await assertCurrent()
-          if (committed || await readJsonIfExists(this.intentFilePath) !== null) return fail('CONFLICT', 'cannot replace active recovery evidence')
+          if (committed || commitDurabilityUncertain || await readJsonIfExists(this.intentFilePath) !== null) return fail('CONFLICT', 'cannot replace active recovery evidence')
           if (!Array.isArray(input.entries) || input.entries.length !== RESTORE_ENTRIES.length || input.entries.some((name, index) => name !== RESTORE_ENTRIES[index])) return fail('VALIDATION', 'restore entries must be the complete canonical allowlist')
           await this.validateRestorePlan({ stageName: input.stageName, backupName: input.backupName, entries: input.entries.map(name => ({ name, originalHash: null, stagedHash: null })) })
           const entries = []
@@ -383,6 +381,7 @@ export class WriterLock {
         rollbackRestoreIntent: () => run(() => rollbackCurrent(true)),
         clearIntent: () => run(async () => {
           await assertCurrent()
+          if (commitDurabilityUncertain) return fail('CONFLICT', 'uncertain authority durability requires guarded recovery')
           if (!committed && (await this.readAuthority()).committedLeaseId !== leaseId) return fail('CONFLICT', 'uncommitted recovery evidence cannot be cleared')
           const journal = await this.validatedIntent(holder)
           if (journal?.restore) await this.recoverRestore(journal.restore, true, journal)
@@ -390,10 +389,14 @@ export class WriterLock {
         }),
         commitAuthority: (patch = {}) => run(async () => {
           const latest = await assertCurrent()
-          if (committed) return fail('CONFLICT', 'state writer lease already committed')
+          if (committed || commitDurabilityUncertain) return fail('CONFLICT', 'state writer lease already committed or durability is uncertain')
           const revision = patch.revision !== undefined ? assertInt(patch.revision, latest.revision, Number.MAX_SAFE_INTEGER, 'revision') : patch.incrementRevision === false ? latest.revision : assertInt(latest.revision + 1, latest.revision, Number.MAX_SAFE_INTEGER, 'revision')
           const updated = validateStateAuthority({ ...latest, committedLeaseId: leaseId, revision, fencingToken, updatedAt: new Date().toISOString(), references: { ...latest.references, ...patch.references }, ...(latest.allocatedReferences || patch.allocatedReferences ? { allocatedReferences: { ...latest.allocatedReferences, ...patch.allocatedReferences } } : {}) })
-          await atomicWriteJson(this.authorityFilePath, updated, 0o640, () => assertCurrent())
+          try { await atomicWriteJson(this.authorityFilePath, updated, 0o640, () => assertCurrent()) }
+          catch (error) {
+            if (isStateDirectoryDurabilityError(error)) commitDurabilityUncertain = true
+            throw error
+          }
           committed = true
           const journal = await this.validatedIntent(holder)
           if (journal && !journal.restore) await rm(this.intentFilePath)
@@ -408,8 +411,13 @@ export class WriterLock {
             try {
               const finalAuthority = await assertCurrent()
               const info = await lstat(this.intentFilePath).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
-              if (info && (committed || finalAuthority.committedLeaseId === leaseId)) await this.recoverOrphan(guard)
-              else if (!info) await rm(this.lockDirPath, { recursive: true })
+              // Readable post-rename authority is not a durable commit receipt.
+              // Preserve this lease's evidence on uncertainty while still releasing
+              // the kernel guard. Later guarded recovery remains a separate path.
+              if (!commitDurabilityUncertain) {
+                if (info && (committed || finalAuthority.committedLeaseId === leaseId)) await this.recoverOrphan(guard)
+                else if (!info) await rm(this.lockDirPath, { recursive: true })
+              }
               // Any journal, including malformed bytes/failed rollback evidence, remains for guarded recovery.
             } finally { released = true; await guard.release() }
           })

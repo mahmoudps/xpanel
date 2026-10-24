@@ -124,7 +124,7 @@ Keep the 44px minimum interaction target independently of the text line height. 
 
 Keep dialogs bound to the persisted internal account target while displaying its username/domain for confirmation. Exact confirmation, Escape/focus return, disabled pending inputs, cleared passwords and single-flight submission are required. Unknown outcomes require review before retry, not a success toast or automatic second request. Global acknowledgement with `targetVerified: false` must remain verification-required.
 
-Deletion and contact-email-only PATCH remain explicitly unavailable with HTTP 412 until safe target-bound purge and qualified metadata/index contracts exist. Failures must not remove principal identity or imply native lifecycle success. Tables require scoped headers and named keyboard-reachable scroll regions even when wrappers have multiple CSS classes.
+Account writes require current-target authorization. Contact-email-only PATCH synchronizes the account and contact index with compensating rollback on index failure. Deletion refuses with HTTP 412 before changes when target-bound purge is unavailable; after an advertised purge contract is accepted, failure can return HTTP 503 with verification required and retained terminating state. These source contracts do not qualify native purge or production availability. Failures must preserve recovery evidence and must not imply completed native lifecycle effects. Tables require scoped headers and named keyboard-reachable scroll regions even when wrappers have multiple CSS classes.
 
 ## Release acceptance
 

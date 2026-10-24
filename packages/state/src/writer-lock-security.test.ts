@@ -6,10 +6,18 @@ import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WriterLock, type WriterLease } from './writer-lock.ts'
 
-const ioFault = vi.hoisted(() => ({ failRenameTo: '', failIntentClear: false, partialCleanup: '' }))
+const ioFault = vi.hoisted(() => ({ failRenameTo: '', failIntentClear: false, partialCleanup: '', failDirectoryAfterRenameTo: '', lastRenamedTo: '', directoryFailures: 0 }))
 vi.mock('node:fs/promises', async importOriginal => {
   const original = await importOriginal<typeof import('node:fs/promises')>()
-  return { ...original, rm: async (...args: Parameters<typeof original.rm>) => {
+  return { ...original, open: async (...args: Parameters<typeof original.open>) => {
+    const normalized = (path: unknown) => String(path).replace(/\\/g, '/')
+    const target = normalized(ioFault.failDirectoryAfterRenameTo)
+    if (target && normalized(ioFault.lastRenamedTo) === target && args[1] === 'r'
+      && normalized(args[0]) === target.slice(0, target.lastIndexOf('/'))) {
+      return { sync: async () => { ioFault.directoryFailures++; throw Object.assign(new Error('injected rollback directory sync failure'), { code: 'EIO' }) }, close: async () => undefined }
+    }
+    return original.open(...args)
+  }, rm: async (...args: Parameters<typeof original.rm>) => {
     if (String(args[0]) === ioFault.partialCleanup) {
       await original.rm(join(String(args[0]), 'server.json'), { force: true }); throw Error('synthetic partial artifact cleanup failure')
     }
@@ -17,7 +25,8 @@ vi.mock('node:fs/promises', async importOriginal => {
     return original.rm(...args)
   }, rename: async (...args: Parameters<typeof original.rename>) => {
     if (String(args[1]) === ioFault.failRenameTo) throw Error('synthetic rollback write failure')
-    return original.rename(...args)
+    await original.rename(...args)
+    ioFault.lastRenamedTo = String(args[1])
   } }
 })
 
@@ -26,6 +35,7 @@ let base: string
 let root: string
 beforeEach(async () => {
   ioFault.failRenameTo = ''; ioFault.failIntentClear = false; ioFault.partialCleanup = ''
+  ioFault.failDirectoryAfterRenameTo = ''; ioFault.lastRenamedTo = ''; ioFault.directoryFailures = 0
   const parent = resolve('.tools/r01-lock-tests')
   await mkdir(parent, { recursive: true })
   base = await mkdtemp(join(parent, 'case-'))
@@ -33,7 +43,7 @@ beforeEach(async () => {
   await mkdir(root)
   cleanup.push(async () => { if (!resolve(base).startsWith(parent + '\\') && !resolve(base).startsWith(parent + '/')) throw Error('unsafe fixture cleanup'); await rm(base, { recursive: true, force: true }) })
 })
-afterEach(async () => { ioFault.failRenameTo = ''; ioFault.failIntentClear = false; ioFault.partialCleanup = ''; vi.restoreAllMocks(); for (const close of cleanup.splice(0).reverse()) await close() })
+afterEach(async () => { ioFault.failRenameTo = ''; ioFault.failIntentClear = false; ioFault.partialCleanup = ''; ioFault.failDirectoryAfterRenameTo = ''; ioFault.lastRenamedTo = ''; vi.restoreAllMocks(); for (const close of cleanup.splice(0).reverse()) await close() })
 const lock = () => new WriterLock(root, { acquireTimeoutMs: 80, retryIntervalMs: 5, deadOwnerGraceMs: 0 })
 const acquire = async (writer = lock()) => { const lease = await writer.acquire(); cleanup.push(() => lease.release()); return lease }
 const json = async (path: string, value: unknown) => writeFile(path, JSON.stringify(value))
@@ -248,6 +258,25 @@ describe('writer journal commit identity', () => {
     expect(await readFile(path)).toEqual(bytes)
     await expect(readFile(writer.intentFilePath)).rejects.toMatchObject({ code: 'ENOENT' })
     expect((await lease.assertFencingToken()).fencingToken).toBe(lease.fencingToken)
+  })
+  it('retains the exact journal when restored preimage bytes are visible but directory sync fails', async () => {
+    const writer = lock()
+    const bytes = Buffer.from('{\n\t"value": "original bytes"\n}\n')
+    const path = join(root, 'metadata.json')
+    await writeFile(path, bytes)
+    const lease = await acquire(writer)
+    await lease.recordIntent({ op: 'durable-rollback', createdRelPaths: [], backups: [{ relPath: 'metadata.json', existed: true, contentBase64: bytes.toString('base64') }] })
+    const journal = await readFile(writer.intentFilePath, 'utf8')
+    await json(path, { partial: true })
+    ioFault.failDirectoryAfterRenameTo = path
+    await expect(lease.rollbackIntent()).rejects.toMatchObject({ code: 'STATE_DIRECTORY_DURABILITY', phase: 'sync', cause: { code: 'EIO' } })
+    expect(ioFault.directoryFailures).toBe(1)
+    expect(await readFile(path)).toEqual(bytes)
+    expect(await readFile(writer.intentFilePath, 'utf8')).toBe(journal)
+    ioFault.failDirectoryAfterRenameTo = ''
+    await lease.rollbackIntent()
+    expect(await readFile(path)).toEqual(bytes)
+    await expect(readFile(writer.intentFilePath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
   it('rejects a prospective escaping journal before its publication', async () => {
     const writer = lock()
