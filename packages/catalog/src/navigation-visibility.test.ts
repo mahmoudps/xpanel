@@ -53,7 +53,7 @@ describe('verified navigation policy', () => {
   })
 
   it('does not publish unverified catalog navigation in any surface', () => {
-    expect(routesOf(visibleNavigation({ principal: owner, disabledFeatures: new Set() }))).toEqual(['/home', '/resources'])
+    expect(routesOf(visibleNavigation({ principal: owner, disabledFeatures: new Set() }))).toEqual(['/home'])
     expect(visibleNavigation({ principal: { ...owner, accountId: '' }, disabledFeatures: new Set() })).toEqual([])
     expect(visibleNavigation({ principal: root })).toEqual([])
     expect(visibleNavigation({ principal: reseller, reseller: { acl: ['manage-dns'] } })).toEqual([])
@@ -135,7 +135,7 @@ describe('verified navigation policy', () => {
     expect(routesOf(visibleNavigation(ownerContext, privateCatalog)).some(route => route.startsWith('/whm'))).toBe(false)
     expect(JSON.stringify(productionTools)).toBe(before)
     expect(productionTools.filter(entry => entry.status === 'verified')).toEqual([])
-    expect(routesOf(visibleNavigation(ownerContext))).toEqual(['/home', '/resources'])
+    expect(routesOf(visibleNavigation(ownerContext))).toEqual(['/home'])
     expect(visibleNavigation({ principal: root })).toEqual([])
   })
 

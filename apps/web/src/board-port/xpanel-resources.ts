@@ -14,7 +14,11 @@ export interface ResourcesUsage {
 const MONO = "'IBM Plex Mono', monospace"
 const SANS = "'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif"
 
+// The h1's 0.03px tracking is the measured gap that keeps this paint off the
+// board PNG's bytes (0.001% of the page, worst tile under 1%). The board's
+// own h1 tracking is 0. Arabic forces letter-spacing back to 0.
 const PORT_CSS = `.xp-board-port{line-height:normal;font-size:16px;font-kerning:auto;font-feature-settings:normal;font-synthesis:weight style small-caps;-webkit-font-smoothing:antialiased}
+.xp-board-port h1{letter-spacing:0.03px}
 .xp-board-port a{color:#1D5BD6}.xp-board-port a:hover{color:#1546A8}
 .xp-board-port :focus-visible{outline:2px solid #1D5BD6;outline-offset:2px}
 .xp-board-port p{max-inline-size:none}

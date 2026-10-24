@@ -9,6 +9,7 @@ import path from 'node:path'
 import { describe, it } from 'vitest'
 import { defaultPlan } from '@xpanel/core'
 import playwright from '../../../../node_modules/@playwright/test/index.js'
+import { tools, type CatalogTool } from '@xpanel/catalog'
 import { renderWebApp } from '../app.ts'
 import { renderPanelSurface } from '../surfaces/xpanel.ts'
 import { PAGE_LIMIT, TILE_LIMIT, gateAccepts, padPort, sameCapture, scoreGate } from '../../test/gate/board-gate.ts'
@@ -32,6 +33,12 @@ const visibility = {
   principal: { kind: 'user' as const, id: 'resources-user', username: 'alice', accountId: account.id },
   disabledFeatures: new Set<string>(),
 }
+const RESOURCES_TOOL_IDS = ['resource-usage', 'account-usage-stats', 'disk-usage']
+const resourcesCatalog: CatalogTool[] = tools.map(tool => (
+  RESOURCES_TOOL_IDS.includes(tool.id)
+    ? { ...tool, status: 'verified', delivery: { ...tool.delivery, status: 'verified', reason: 'Pixel-gate fixture. Not a host qualification.' } }
+    : tool
+))
 
 const portOf = (html: string): string => {
   const start = html.indexOf('<div data-board-port="xpanel-resources"')
@@ -41,7 +48,7 @@ const portOf = (html: string): string => {
 
 const productHtml = (locale: 'en' | 'ar' = 'en') => renderWebApp({
   surface: 'xpanel', locale, theme: 'light', activeRoute: '/resources', realtimeEnabled: false,
-  visibility, panel: { account, plan },
+  visibility, catalog: resourcesCatalog, panel: { account, plan },
 })
 
 describe('xPanel resources board port', () => {
@@ -119,7 +126,7 @@ describe('xPanel resources board port', () => {
 })
 
 interface Page {
-  goto: (url: string, options: { waitUntil: 'networkidle' }) => Promise<unknown>
+  goto: (url: string, options: { waitUntil: 'networkidle' }) => Promise<{ text: () => Promise<string> } | null>
   waitForSelector: (selector: string, options: { timeout: number }) => Promise<unknown>
   evaluate: <T>(fn: () => T | Promise<T>) => Promise<T>
   waitForTimeout: (ms: number) => Promise<void>
@@ -194,9 +201,11 @@ describe('resources product-route pixel gate', () => {
       for (const viewport of viewports) {
         const shoot = async (url: string, product: boolean) => {
           const page = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height }, deviceScaleFactor: 1 })
-          await page.goto(url, { waitUntil: 'networkidle' })
+          const response = await page.goto(url, { waitUntil: 'networkidle' })
+          const served = await response?.text() ?? ''
           if (!product) await page.waitForSelector('#dc-root', { timeout: 8000 })
           const facts = await page.evaluate(() => ({
+            href: location.href,
             surface: document.documentElement.getAttribute('data-surface'),
             port: document.querySelector('[data-board-port]')?.getAttribute('data-board-port') ?? '',
             dcTpl: document.querySelectorAll('[data-dc-tpl]').length,
@@ -213,11 +222,23 @@ describe('resources product-route pixel gate', () => {
           await page.waitForTimeout(400)
           const png = await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width: viewport.width, height: viewport.height } })
           await page.close()
-          return { png, facts }
+          return { png, facts, served }
         }
-        const board = await shoot(`http://127.0.0.1:${boardServer.port}/PanelResources.dc.html`, false)
-        const app = await shoot(`http://127.0.0.1:${appServer.port}/resources?fixture=board`, true)
+        const boardUrl = `http://127.0.0.1:${boardServer.port}/PanelResources.dc.html`
+        const appUrl = `http://127.0.0.1:${appServer.port}/resources?fixture=board`
+        const board = await shoot(boardUrl, false)
+        const app = await shoot(appUrl, true)
         const padded = await shoot(`http://127.0.0.1:${appServer.port}/resources?fixture=board&gate=pad`, true)
+        assert.notEqual(board.facts.href, app.facts.href)
+        assert.equal(board.facts.href.endsWith('/PanelResources.dc.html'), true)
+        assert.equal(app.facts.href.includes('/resources?fixture=board'), true)
+        assert.equal(app.served.includes('data-surface="xpanel"'), true)
+        assert.equal(app.served.includes('data-board-port="xpanel-resources"'), true)
+        assert.equal(app.served.includes('id="dc-root"'), false)
+        assert.equal(app.served.includes('<x-dc'), false)
+        assert.equal(app.served.includes('data-dc-tpl'), false)
+        assert.equal(board.served.includes('<x-dc'), true)
+        assert.notEqual(createHash('sha256').update(board.served).digest('hex'), createHash('sha256').update(app.served).digest('hex'))
         assert.equal(app.facts.surface, 'xpanel')
         assert.equal(app.facts.port, 'xpanel-resources')
         assert.equal(app.facts.dcTpl, 0)
@@ -225,6 +246,7 @@ describe('resources product-route pixel gate', () => {
         assert.equal(app.facts.xdc, 0)
         assert.equal(app.facts.scName, 0)
         assert.equal(board.facts.dcRoot, 1)
+        assert.ok(board.facts.dcTpl > 0)
         const score = scoreGate(board.png, app.png)
         const negative = scoreGate(app.png, padded.png)
         const byteIdentical = sameCapture(board.png, app.png)
@@ -236,25 +258,26 @@ describe('resources product-route pixel gate', () => {
         const row = {
           id: viewport.id,
           route: '/resources',
-          page: `${(score.ratio * 100).toFixed(2)}%`,
-          worstTile: `${(score.worstTile.ratio * 100).toFixed(2)}% @ ${score.worstTile.x},${score.worstTile.y}`,
+          page: `${(score.ratio * 100).toFixed(4)}%`,
+          worstTile: `${(score.worstTile.ratio * 100).toFixed(4)}% @ ${score.worstTile.x},${score.worstTile.y}`,
           pass: score.pass,
           byteIdentical,
           accepted,
           negative: `${(negative.ratio * 100).toFixed(2)}%`,
           negativePass: negative.pass,
           limits: { page: PAGE_LIMIT, tile: TILE_LIMIT },
+          source: {
+            board: { url: board.facts.href, htmlSha256: createHash('sha256').update(board.served).digest('hex') },
+            app: { url: app.facts.href, htmlSha256: createHash('sha256').update(app.served).digest('hex') },
+          },
           sha256: { board: createHash('sha256').update(board.png).digest('hex'), app: createHash('sha256').update(app.png).digest('hex') },
         }
         report.push(row)
         assert.equal(row.negativePass, false, `${viewport.id} 1px pad must fail, got ${row.negative}`)
         assert.equal(row.pass, true, `${viewport.id} page ${row.page} tile ${row.worstTile}`)
-        assert.equal(row.accepted, row.pass && !row.byteIdentical && row.negativePass === false)
-        if (row.byteIdentical) {
-          assert.equal(row.accepted, false, `${viewport.id} byte-identical paint is refused`)
-        } else {
-          assert.equal(row.accepted, true, `${viewport.id} page ${row.page} tile ${row.worstTile}`)
-        }
+        assert.equal(row.byteIdentical, false, `${viewport.id} PNG bytes must differ`)
+        assert.notEqual(row.sha256.board, row.sha256.app)
+        assert.equal(row.accepted, true, `${viewport.id} page ${row.page} tile ${row.worstTile}`)
       }
     } finally {
       await writeFile(path.join(outDir, 'report.json'), JSON.stringify(report, null, 2))

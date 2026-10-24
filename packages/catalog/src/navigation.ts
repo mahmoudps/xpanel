@@ -24,17 +24,6 @@ export const visibleNavigation = (
   const pageReady = (page: NavPage): boolean => {
     if (!allowsPageRole(page, ctx)) return false
     if (page.route === '/home' && accountResolved) return true
-    // Stored plan limits are enough to open this page. Its three tools stay
-    // unverified until a host probe reports live series; a disabled feature still hides it.
-    // A catalog that does not list those tools is not this page, so the shortcut stays off.
-    if (page.route === '/resources' && accountResolved && ctx.disabledFeatures) {
-      const listed = page.tools.flatMap(id => {
-        const tool = catalog.find(entry => entry.id === id)
-        return tool ? [tool] : []
-      })
-      const featureOff = listed.some(tool => typeof tool.featureKey === 'string' && tool.featureKey.length > 0 && ctx.disabledFeatures!.has(tool.featureKey))
-      if (listed.length === page.tools.length && page.tools.length > 0 && !featureOff) return true
-    }
     if (page.tools.length === 0) return false
     if (page.tools.every(id => allowed.has(id))) return true
     // The server dashboard reads the same host sample as Server Information.
