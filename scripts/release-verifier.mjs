@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { constants } from 'node:fs'
-import { open, lstat, mkdir, opendir, readlink } from 'node:fs/promises'
+import { open, lstat, stat, statfs, mkdir, opendir, readlink } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { Readable, Transform } from 'node:stream'
@@ -355,11 +355,12 @@ const verifyOpenArchive = async (archivePath, trust, callback, protectedPath) =>
       if (archiveSha256 !== trust.expectedArchiveSha256) refuse('ARCHIVE_CHECKSUM_MISMATCH', 'External archive digest does not match')
       const raw = archiveReader(handle, size, trust.bounds), secondHash = createHash('sha256'); let compressed = 0
       const meter = new Transform({ transform(chunk, _encoding, done) { compressed += chunk.length; if (compressed > trust.bounds.compressedBytes) done(new ReleaseVerificationError('LIMIT', 'Compressed archive budget exceeded')); else { secondHash.update(chunk); done(null, chunk) } } })
-      const gunzip = createGunzip({ chunkSize: 64 * 1024 }), pumping = pipeline(raw, meter, gunzip)
+      const cancellation = new AbortController()
+    const gunzip = createGunzip({ chunkSize: 64 * 1024 }), pumping = pipeline(raw, meter, gunzip, { signal: cancellation.signal })
       void pumping.catch(() => undefined)
       let consumed = false
       try { result = await parseTar(gunzip, trust); await pumping; consumed = true }
-      finally { if (!consumed) { raw.destroy(); meter.destroy(); gunzip.destroy(); await pumping.catch(() => undefined) } }
+      finally { if (!consumed) { cancellation.abort(); raw.destroy(); meter.destroy(); gunzip.destroy(); await pumping.catch(() => undefined) } }
       if (compressed !== size || secondHash.digest('hex') !== archiveSha256 || !stable(before, await handle.stat({ bigint: true }))) refuse('FILE_CHANGED', 'Archive changed during verification')
       result = freeze({ ok: true, ...result, archiveSha256, archiveBytes: size, totalUnpackedBytes: result.manifest.totalUnpackedBytes, sourceClosure: { authenticatedBuilderDeclaration: true, runtimeImportsReparsed: false }, scope: 'source-artifact', runtimeDependenciesVerified: false, installReady: false, lifecycleControlsPresent: REQUIRED_LIFECYCLE_CONTROL_FILES.every(path => result.manifest.files.some(file => file.path === path)) })
       if (callback) {
@@ -409,6 +410,22 @@ const rootStat = (stat, directory) => {
 const linuxRoot = () => {
   if (process.platform !== 'linux' || typeof process.geteuid !== 'function' || process.geteuid() !== 0 || !constants.O_NOFOLLOW || !constants.O_DIRECTORY || !constants.O_NONBLOCK) refuse('LINUX_ROOT_REQUIRED', 'Protected verification requires actual Linux root and no-follow primitives')
 }
+// Public statfs follows a retained descriptor link; identity checks bind every
+// observation to the held proc directory and revalidate the canonical proc stack.
+const verifyProcAnchor = async evidence => {
+  const identities = async () => {
+    if (await readlink('/proc/self') !== String(process.pid)) refuse('UNSAFE_TREE', 'Own proc identity changed')
+    for (const item of evidence) if (!stableProc(item.stat, await item.handle.stat({ bigint: true })) || !stableProc(item.stat, await lstat(item.path, { bigint: true }))) refuse('FILE_CHANGED', 'Proc ancestry identity changed during verification')
+  }
+  await identities()
+  for (const item of evidence) {
+    const pinned = `/proc/${process.pid}/fd/${item.handle.fd}`
+    if (!stableProc(item.stat, await stat(pinned, { bigint: true }))) refuse('FILE_CHANGED', 'Proc descriptor path differs from held directory')
+    if ((await statfs(pinned, { bigint: true })).type !== 0x9fa0n) refuse('UNSAFE_TREE', 'Own proc FD anchor is not established')
+    if (!stableProc(item.stat, await stat(pinned, { bigint: true })) || !stableProc(item.stat, await item.handle.stat({ bigint: true }))) refuse('FILE_CHANGED', 'Proc descriptor identity changed during filesystem observation')
+    await identities()
+  }
+}
 const protectedArchiveAncestry = async (archivePath, bounds) => {
   if (typeof archivePath !== 'string' || !isAbsolute(archivePath) || resolve(archivePath) !== archivePath || archivePath.includes('\0') || archivePath.split('/').length > bounds.depth) refuse('OPTIONS', 'Archive path must be canonical and absolute')
   const held = [], observed = []
@@ -422,8 +439,9 @@ const protectedArchiveAncestry = async (archivePath, bounds) => {
     observed.push({ path, handle, stat, compare }); return handle
   }
   try {
-    const proc = await own('/proc'), pid = await own(`/proc/${process.pid}`), fd = await own(`/proc/${process.pid}/fd`)
-    if (await readlink('/proc/self') !== String(process.pid) || (await proc.statfs({ bigint: true })).type !== 0x9fa0n || (await pid.statfs({ bigint: true })).type !== 0x9fa0n || (await fd.statfs({ bigint: true })).type !== 0x9fa0n) refuse('UNSAFE_TREE', 'Own proc FD anchor is not established')
+    await own('/proc'); await own(`/proc/${process.pid}`); await own(`/proc/${process.pid}/fd`)
+    const procEvidence = observed.slice()
+    await verifyProcAnchor(procEvidence)
     let parent = await own('/'), canonical = ''
     for (const part of archivePath.slice(1).split('/').slice(0, -1)) {
       if (!part || part === '.' || part === '..') refuse('OPTIONS', 'Noncanonical protected ancestor')
@@ -433,7 +451,7 @@ const protectedArchiveAncestry = async (archivePath, bounds) => {
       observed.push({ path: canonical, handle: child, stat: canonicalStat, compare: stable }); parent = child
     }
     const verify = async () => {
-      if (await readlink('/proc/self') !== String(process.pid)) refuse('UNSAFE_TREE', 'Own proc identity changed')
+      await verifyProcAnchor(procEvidence)
       for (const item of observed) if (!item.compare(item.stat, await item.handle.stat({ bigint: true })) || !item.compare(item.stat, await lstat(item.path, { bigint: true }))) refuse('FILE_CHANGED', 'Protected ancestry changed')
     }
     await verify(); return { verify, close }
@@ -496,11 +514,12 @@ const stageOpenAuthenticatedArchive = async (stagingRoot, options) => {
       if (compressed > report.archiveBytes || compressed > trust.bounds.compressedBytes) done(new ReleaseVerificationError('LIMIT', 'Staging compressed byte ceiling exceeded'))
       else { compressedHash.update(chunk); done(null, chunk) }
     } })
-    const gunzip = createGunzip({ chunkSize: 64 * 1024 }), pumping = pipeline(raw, meter, gunzip)
+    const cancellation = new AbortController()
+    const gunzip = createGunzip({ chunkSize: 64 * 1024 }), pumping = pipeline(raw, meter, gunzip, { signal: cancellation.signal })
     void pumping.catch(() => undefined)
     let consumed = false, parsed
     try { parsed = await parseTar(gunzip, trust, `/proc/${process.pid}/fd/${directory.fd}`); await pumping; consumed = true }
-    finally { if (!consumed) { raw.destroy(); meter.destroy(); gunzip.destroy(); await pumping.catch(() => undefined) } }
+    finally { if (!consumed) { cancellation.abort(); raw.destroy(); meter.destroy(); gunzip.destroy(); await pumping.catch(() => undefined) } }
     if (compressed !== report.archiveBytes || compressedHash.digest('hex') !== report.archiveSha256 || parsed.manifestSha256 !== report.manifestSha256 || !stable(lifetime.before, await lifetime.handle.stat({ bigint: true }))) refuse('FILE_CHANGED', 'Staged source differs from the retained authenticated archive')
     await directory.sync(); await parent.sync()
     if (!stable(await directory.stat({ bigint: true }), await lstat(lifetime.stagedAt, { bigint: true }))) refuse('FILE_CHANGED', 'Staging path no longer names its owned directory')
@@ -540,12 +559,11 @@ export const verifyAuthenticatedReleaseTree = async (root, options) => {
       handles.push(handle); const stat = await handle.stat({ bigint: true }); rootStat(stat, true); return { handle, stat }
     }
     try {
-      const proc = await own('/proc'), procStat = await proc.handle.statfs({ bigint: true })
-      if (procStat.type !== 0x9fa0n || await readlink('/proc/self') !== String(process.pid)) refuse('UNSAFE_TREE', 'Own proc FD anchor is not established')
+      const proc = await own('/proc')
       const pid = await own(`/proc/${process.pid}`), fd = await own(`/proc/${process.pid}/fd`)
       const anchor = `/proc/${process.pid}/fd`, pinned = (parent, name) => `${anchor}/${parent.handle.fd}/${name}`
-      if ((await pid.handle.statfs({ bigint: true })).type !== 0x9fa0n || (await fd.handle.statfs({ bigint: true })).type !== 0x9fa0n) refuse('UNSAFE_TREE', 'Invalid own FD directory')
       const procEvidence = [{ path: '/proc', ...proc }, { path: `/proc/${process.pid}`, ...pid }, { path: `/proc/${process.pid}/fd`, ...fd }]
+      await verifyProcAnchor(procEvidence)
       let directory = await own('/'); ancestry.push({ path: '/', ...directory })
       for (const name of root.slice(1).split('/')) { directory = await own(pinned(directory, name)); ancestry.push({ path: ancestry.at(-1).path === '/' ? `/${name}` : `${ancestry.at(-1).path}/${name}`, ...directory }) }
       const visit = async (parent, relative) => {
@@ -587,8 +605,7 @@ export const verifyAuthenticatedReleaseTree = async (root, options) => {
         } finally { await closeOwned(cursor) }
       }
       await visit(directory, '')
-      if (await readlink('/proc/self') !== String(process.pid)) refuse('UNSAFE_TREE', 'Own proc identity changed')
-      for (const item of procEvidence) if (!stableProc(item.stat, await item.handle.stat({ bigint: true })) || !stableProc(item.stat, await lstat(item.path, { bigint: true }))) refuse('FILE_CHANGED', 'Proc ancestry identity changed during verification')
+      await verifyProcAnchor(procEvidence)
       for (const item of ancestry) if (!stable(item.stat, await item.handle.stat({ bigint: true })) || !stable(item.stat, await lstat(item.path, { bigint: true }))) refuse('FILE_CHANGED', 'Release ancestry changed during verification')
       if (expected.size || !manifest) refuse('MISSING_FILE', 'Authenticated tree closure is incomplete')
       return freeze({ ok: true, root, manifest, manifestSha256: archive.manifestSha256, archiveSha256: archive.archiveSha256, verifiedFiles: archive.entries.filter(entry => entry.type === 'file').length, ownership: 'observed-linux-root', verifiedAt: new Date().toISOString() })

@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { request as requestFontHttps } from 'node:https'
+import { Transform as FontTransform, Writable as FontWritable } from 'node:stream'
+import { pipeline as fontPipeline } from 'node:stream/promises'
+import { createGunzip, createInflate, createBrotliDecompress, createZstdDecompress } from 'node:zlib'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -87,6 +91,280 @@ async function currentPage(page, path, expect) {
     await page.keyboard.press('Escape')
     await expect(page.locator('#xpanel-home-menu')).toBeFocused()
     await expect(page.locator('#xpanel-home-menu')).toHaveAttribute('aria-expanded', 'false')
+  }
+}
+
+const NAV_FONT_LIMITS = Object.freeze({ deadlineMs: 60_000, cssUrls: 1, fontUrls: 64, variantsPerUrl: 2, responses: 130, cssBytes: 256 * 1024, fontBytes: 1024 * 1024, aggregateBytes: 16 * 1024 * 1024, concurrency: 4, htmlBytes: 2 * 1024 * 1024 })
+const NAV_FONT_ORIGINS = new Set(['https://fonts.googleapis.com', 'https://fonts.gstatic.com'])
+const NAV_FONT_SENSITIVE = new Set(['cookie', 'cookie2', 'authorization', 'proxy-authorization'])
+const NAV_FONT_HOP = new Set(['host', 'connection', 'proxy-connection', 'keep-alive', 'transfer-encoding', 'te', 'trailer', 'upgrade', 'content-length'])
+const fontHash = value => createHash('sha256').update(value).digest('hex')
+const fontFailure = code => Object.assign(new Error(code), { fontCode: code })
+const fontLocation = value => { const url = new URL(value); return { origin: url.origin, pathname: url.pathname, url_sha256: fontHash(url.href) } }
+function fontAssetUrl(value, kind) {
+  const url = new URL(value)
+  if (url.protocol !== 'https:' || url.username || url.password || url.port || url.hash || url.href.length > 4096) throw fontFailure('unsafe-font-url')
+  if (kind === 'css' ? url.origin !== 'https://fonts.googleapis.com' || url.pathname !== '/css2' : url.origin !== 'https://fonts.gstatic.com' || !/^\/s\/[a-z0-9]+\/v[0-9]+\/[A-Za-z0-9_-]+\.woff2$/.test(url.pathname)) throw fontFailure('unapproved-font-url')
+  return url.href
+}
+const fontDecodeAttribute = value => value.replaceAll('&amp;', '&')
+function fontInputsFromHtml(html) {
+  const css = new Set(), fonts = new Set()
+  for (const match of html.matchAll(/<link\b([^>]+)>/gi)) {
+    const attr = name => match[1].match(new RegExp('(?:^|\\s)' + name + '="([^"]*)"', 'i'))?.[1] ?? ''
+    if (attr('rel').split(/\s+/).includes('stylesheet')) css.add(fontAssetUrl(fontDecodeAttribute(attr('href')), 'css'))
+  }
+  for (const match of html.matchAll(/@font-face\s*\{([^{}]+)\}/gi)) {
+    for (const source of match[1].matchAll(/url\(\s*['"]?(https:\/\/[^)'"\s]+)['"]?\s*\)/g)) fonts.add(fontAssetUrl(source[1], 'font'))
+  }
+  return { css, fonts }
+}
+function fontsFromCss(bytes) {
+  let css
+  try { css = new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch { throw fontFailure('invalid-font-css-encoding') }
+  if (/@import\b/i.test(css)) throw fontFailure('font-css-import-unsupported')
+  const fonts = new Set(), faces = [...css.matchAll(/@font-face\s*\{([^{}]+)\}/gi)]
+  if (!faces.length || faces.length > 128) throw fontFailure('font-css-face-count')
+  const families = new Set()
+  for (const face of faces) {
+    const family = face[1].match(/font-family:\s*['"]([^'"]+)['"]/i)?.[1]
+    if (family) families.add(family)
+    const src = face[1].match(/\bsrc\s*:\s*([^;]+);/i)?.[1] ?? ''
+    if (/local\s*\(/i.test(src) || !/format\(\s*['"]woff2['"]\s*\)/i.test(src)) throw fontFailure('font-css-source-format')
+    const urls = [...src.matchAll(/url\(\s*['"]?([^)'"\s]+)['"]?\s*\)/g)]
+    if (!urls.length) throw fontFailure('font-css-source-missing')
+    for (const url of urls) fonts.add(fontAssetUrl(url[1], 'font'))
+  }
+  for (const family of ['IBM Plex Sans', 'IBM Plex Sans Arabic', 'IBM Plex Mono']) if (!families.has(family)) throw fontFailure('font-css-family-missing')
+  const allUrls = [...css.matchAll(/url\(\s*['"]?([^)'"\s]+)['"]?\s*\)/g)].map(match => fontAssetUrl(match[1], 'font'))
+  if (allUrls.some(url => !fonts.has(url))) throw fontFailure('font-css-extra-resource')
+  return fonts
+}
+function fontHeaders(raw) {
+  const headers = {}
+  for (const [name, value] of Object.entries(raw)) {
+    const key = name.toLowerCase()
+    if (NAV_FONT_SENSITIVE.has(key) && value) throw fontFailure('credentialed-font-request')
+    if (!NAV_FONT_SENSITIVE.has(key) && !NAV_FONT_HOP.has(key) && /^[a-z0-9-]+$/.test(key)) headers[key] = String(value)
+  }
+  if (!headers['user-agent']) throw fontFailure('font-user-agent-missing')
+  return headers
+}
+const sameFontVariant = (entry, headers) => entry.userAgent === headers['user-agent'] && entry.vary.every(name => (entry.requestHeaders[name] ?? null) === (headers[name] ?? null))
+const fontVariantKey = (vary, headers) => fontHash(JSON.stringify([headers['user-agent'], ...vary.map(name => [name, headers[name] ?? null])]))
+async function fetchFontResponse(url, kind, headers, state) {
+  state.signal.throwIfAborted()
+  if (++state.responses > NAV_FONT_LIMITS.responses) throw fontFailure('font-response-count-limit')
+  const limit = kind === 'css' ? NAV_FONT_LIMITS.cssBytes : NAV_FONT_LIMITS.fontBytes
+  return await new Promise((resolveResponse, rejectResponse) => {
+    const request = requestFontHttps(url, { method: 'GET', headers, signal: state.signal, rejectUnauthorized: true, maxHeaderSize: 16384 }, response => {
+      ;(async () => {
+        try {
+          if (response.statusCode !== 200) throw fontFailure('font-response-not-200')
+          if (response.headers['set-cookie'] || response.headers['set-cookie2'] || response.headers['www-authenticate'] || response.headers['proxy-authenticate']) throw fontFailure('credentialed-font-response')
+          const mime = String(response.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase()
+          if (mime !== (kind === 'css' ? 'text/css' : 'font/woff2')) throw fontFailure('font-response-mime')
+          const vary = [...new Set(String(response.headers.vary ?? '').split(',').map(name => name.trim().toLowerCase()).filter(Boolean))].sort()
+          if (vary.length > 32 || vary.some(name => !/^[a-z0-9-]+$/.test(name) || NAV_FONT_SENSITIVE.has(name) || NAV_FONT_HOP.has(name))) throw fontFailure('font-response-vary-unsupported')
+          const length = response.headers['content-length']
+          if (length !== undefined && (!/^\d+$/.test(String(length)) || Number(length) > limit)) throw fontFailure('font-wire-byte-limit')
+          const encoding = String(response.headers['content-encoding'] ?? 'identity').trim().toLowerCase()
+          const decoder = encoding === 'identity' ? null : encoding === 'gzip' ? createGunzip() : encoding === 'deflate' ? createInflate() : encoding === 'br' ? createBrotliDecompress() : encoding === 'zstd' ? createZstdDecompress() : null
+          if (encoding !== 'identity' && !decoder) throw fontFailure('font-content-encoding-unsupported')
+          let wireBytes = 0, decodedBytes = 0
+          const chunks = []
+          const wire = new FontTransform({ transform(chunk, _encoding, callback) {
+            wireBytes += chunk.length; state.wireBytes += chunk.length
+            callback(wireBytes > limit || state.wireBytes > NAV_FONT_LIMITS.aggregateBytes ? fontFailure('font-wire-byte-limit') : null, chunk)
+          } })
+          const sink = new FontWritable({ write(chunk, _encoding, callback) {
+            decodedBytes += chunk.length; state.decodedBytes += chunk.length
+            if (decodedBytes > limit || state.decodedBytes > NAV_FONT_LIMITS.aggregateBytes) { callback(fontFailure('font-decoded-byte-limit')); return }
+            chunks.push(Buffer.from(chunk)); callback()
+          } })
+          await fontPipeline([response, wire, ...(decoder ? [decoder] : []), sink], { signal: state.signal })
+          const body = Buffer.concat(chunks, decodedBytes)
+          if (!body.length) throw fontFailure('font-response-empty')
+          if (kind === 'font' && (body.length < 48 || body.toString('ascii', 0, 4) !== 'wOF2' || body.readUInt32BE(8) !== body.length)) throw fontFailure('font-woff2-invalid')
+          const responseHeaders = {}
+          const connectionTokens = String(response.headers.connection ?? '').split(',').map(value => value.trim().toLowerCase())
+          for (const [name, value] of Object.entries(response.headers)) {
+            if (value !== undefined && !NAV_FONT_HOP.has(name) && name !== 'content-encoding' && !connectionTokens.includes(name)) responseHeaders[name] = Array.isArray(value) ? value.join(', ') : String(value)
+          }
+          if (kind === 'font' && responseHeaders['access-control-allow-origin'] !== '*' && !(typeof headers.origin === 'string' && responseHeaders['access-control-allow-origin'] === headers.origin)) throw fontFailure('font-cors-invalid')
+          resolveResponse({ url, kind, body, bodyHash: fontHash(body), mime, status: 200, vary, userAgent: headers['user-agent'], requestHeaders: Object.freeze({ ...headers }), headers: Object.freeze(responseHeaders), variantKey: fontVariantKey(vary, headers), wireBytes, replayCount: 0 })
+        } finally { response.destroy() }
+      })().catch(rejectResponse)
+    })
+    request.on('error', rejectResponse)
+    request.end()
+  })
+}
+async function fontMapLimited(jobs, state, work) {
+  let index = 0
+  const workers = Array.from({ length: Math.min(NAV_FONT_LIMITS.concurrency, jobs.length) }, async () => { while (index < jobs.length) { state.signal.throwIfAborted(); await work(jobs[index++]) } })
+  try { await Promise.all(workers) } catch (error) { state.controller.abort(error); await Promise.allSettled(workers); throw error }
+}
+async function prepareNavigationFontTransport(browser, fixture, unqualifiedFixture) {
+  const started = Date.now(), controller = new AbortController()
+  const state = { controller, signal: controller.signal, wireBytes: 0, decodedBytes: 0, responses: 0 }
+  const timer = setTimeout(() => controller.abort(fontFailure('font-preparation-deadline')), NAV_FONT_LIMITS.deadlineMs)
+  const assets = new Map(), cssUrls = new Set(), fontUrls = new Set(), inlineFontUrls = new Set(), provenance = new Map(), profiles = { css: [], font: [] }
+  const addProvenance = (url, value) => { const rows = provenance.get(url) ?? new Map(); rows.set(JSON.stringify(value), value); provenance.set(url, rows) }
+  let phase = 'inventory', effectiveUserAgent = '', cdpUserAgent = '', probes = 0
+  const remaining = () => { state.signal.throwIfAborted(); return Math.max(1, NAV_FONT_LIMITS.deadlineMs - (Date.now() - started)) }
+  const addProfile = (kind, headers) => { const key = fontHash(JSON.stringify(Object.entries(headers).sort())); if (!profiles[kind].some(profile => profile.key === key)) { if (profiles[kind].length >= 16) throw fontFailure('font-header-profile-count'); profiles[kind].push({ key, headers }) } }
+  const report = status => ({ status, phase, duration_ms: Date.now() - started, limits: NAV_FONT_LIMITS, transport: 'prepared-https-entity-byte-replay', cold_cdn_performance_qualified: false, browser_user_agent_sha256: effectiveUserAgent ? fontHash(effectiveUserAgent) : null, cdp_user_agent_sha256: cdpUserAgent ? fontHash(cdpUserAgent) : null, metadata_only_probes: probes, unique_css_urls: cssUrls.size, unique_font_urls: fontUrls.size, direct_inline_font_url_hashes: [...inlineFontUrls].map(fontHash).sort(), response_count: state.responses, wire_bytes: state.wireBytes, decoded_bytes: state.decodedBytes, assets: [...assets.values()].flatMap(entries => entries.map(entry => ({ ...fontLocation(entry.url), kind: entry.kind, status: entry.status, mime: entry.mime, bytes: entry.body.length, wire_bytes: entry.wireBytes, body_sha256: entry.bodyHash, discovered_from: [...(provenance.get(entry.url)?.values() ?? [])], vary_vector_sha256: entry.variantKey, replay_count: entry.replayCount }))) })
+  const ensure = async (url, kind, headers) => {
+    const entries = assets.get(url) ?? []
+    if (entries.some(entry => sameFontVariant(entry, headers))) return
+    if (entries.length >= NAV_FONT_LIMITS.variantsPerUrl) throw fontFailure('font-variant-count-limit')
+    const entry = await fetchFontResponse(url, kind, headers, state)
+    entries.push(entry); assets.set(url, entries)
+    if (kind === 'css') for (const font of fontsFromCss(entry.body)) {
+      fontUrls.add(font)
+      addProvenance(font, { kind: 'stylesheet-font-face', stylesheet_url_sha256: fontHash(url), stylesheet_body_sha256: entry.bodyHash })
+    }
+    if (fontUrls.size > NAV_FONT_LIMITS.fontUrls) throw fontFailure('font-url-count-limit')
+  }
+  const probe = async (baseUrl, locale, withCss) => {
+    phase = withCss ? 'font-header-probe' : 'css-header-probe'; probes++
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' })
+    const abort = () => { void context.close().catch(() => {}) }
+    state.signal.addEventListener('abort', abort, { once: true })
+    let probeError = null
+    try {
+      await context.route('**/*', async route => {
+        try {
+          const request = route.request(), url = new URL(request.url())
+          if (!['GET', 'HEAD'].includes(request.method())) { await route.abort(); return }
+          if (!NAV_FONT_ORIGINS.has(url.origin)) { if (url.origin !== new URL(baseUrl).origin) { await route.abort(); return } await route.continue(); return }
+          if (request.method() !== 'GET') throw fontFailure('font-probe-method')
+          const headers = fontHeaders(await request.allHeaders())
+          if (!effectiveUserAgent) effectiveUserAgent = headers['user-agent']
+          if (headers['user-agent'] !== effectiveUserAgent) throw fontFailure('font-user-agent-varies')
+          if (cssUrls.has(url.href) && request.resourceType() === 'stylesheet') {
+            addProfile('css', headers)
+            if (withCss) {
+              const entry = (assets.get(url.href) ?? []).find(value => sameFontVariant(value, headers))
+              if (!entry) throw fontFailure('font-css-probe-variant-missing')
+              await route.fulfill({ status: entry.status, headers: entry.headers, body: entry.body }); return
+            }
+          } else if (fontUrls.has(url.href) && request.resourceType() === 'font') addProfile('font', headers)
+          else throw fontFailure('font-probe-unapproved-resource')
+          await route.abort()
+        } catch (error) { probeError ??= error; await route.abort().catch(() => {}) }
+      })
+      const page = await context.newPage(), url = new URL('/home', baseUrl)
+      for (const [key, value] of Object.entries({ lang: locale, theme: 'light', density: 'compact', accountId: 'visual-account' })) url.searchParams.set(key, value)
+      await page.goto(url.href, { waitUntil: 'domcontentloaded', timeout: remaining() })
+      await page.evaluate(async () => { await document.fonts.ready })
+      if (probeError) throw probeError
+      state.signal.throwIfAborted()
+    } finally { state.signal.removeEventListener('abort', abort); await context.close() }
+  }
+  try {
+    const cdp = await browser.newBrowserCDPSession()
+    try { cdpUserAgent = (await cdp.send('Browser.getVersion')).userAgent } finally { await cdp.detach() }
+    for (const path of ['/home', '/whm/accounts/new', '/mail/compose', '/login']) for (const locale of ['en', 'ar']) {
+      const url = new URL(path, fixture.baseUrl); url.searchParams.set('lang', locale)
+      const response = await fetch(url, { signal: state.signal })
+      if (response.status !== 200) throw fontFailure('font-inventory-document-status')
+      const chunks = []; let bytes = 0
+      for await (const chunk of response.body) { bytes += chunk.length; if (bytes > NAV_FONT_LIMITS.htmlBytes) throw fontFailure('font-inventory-document-size'); chunks.push(chunk) }
+      const html = Buffer.concat(chunks), input = fontInputsFromHtml(html.toString('utf8')), documentHash = fontHash(html)
+      for (const value of input.css) { cssUrls.add(value); addProvenance(value, { kind: 'rendered-stylesheet-link', path, locale, document_sha256: documentHash }) }
+      for (const value of input.fonts) { fontUrls.add(value); inlineFontUrls.add(value); addProvenance(value, { kind: 'rendered-inline-font-face', path, locale, document_sha256: documentHash }) }
+    }
+    if (cssUrls.size !== NAV_FONT_LIMITS.cssUrls || fontUrls.size !== 4) throw fontFailure('font-inventory-source-changed')
+    for (const target of [fixture, unqualifiedFixture]) await probe(target.baseUrl, 'en', false)
+    if (!profiles.css.length) throw fontFailure('font-css-header-profile-missing')
+    phase = 'css-fetch'
+    for (const url of cssUrls) for (const profile of profiles.css) await ensure(url, 'css', profile.headers)
+    for (const target of [fixture, unqualifiedFixture]) for (const locale of ['en', 'ar']) await probe(target.baseUrl, locale, true)
+    if (!profiles.font.length) throw fontFailure('font-header-profile-missing')
+    phase = 'font-fetch'
+    await fontMapLimited([...fontUrls], state, async url => { for (const profile of profiles.font) await ensure(url, 'font', profile.headers) })
+    phase = 'ready'
+    const preparationDuration = Date.now() - started
+    return {
+      report() { return { ...report('ready'), duration_ms: preparationDuration } },
+      async replay(route, errors) {
+        const request = route.request(), url = new URL(request.url())
+        if (!NAV_FONT_ORIGINS.has(url.origin)) return false
+        const reject = async code => { if (errors.length < 16) errors.push({ code, ...fontLocation(url.href) }); else if (errors.length === 16) errors.push({ code: 'font-violations-truncated' }); await route.abort(); return true }
+        if (request.method() !== 'GET') return await reject('font-replay-method')
+        const kind = request.resourceType() === 'stylesheet' ? 'css' : request.resourceType() === 'font' ? 'font' : null
+        if (!kind) return await reject('font-replay-resource-type')
+        let headers
+        try { headers = fontHeaders(await request.allHeaders()) } catch { return await reject('font-replay-credentialed-headers') }
+        const entry = (assets.get(url.href) ?? []).find(value => value.kind === kind && sameFontVariant(value, headers))
+        if (!entry) return await reject('font-replay-variant-missing')
+        if (fontHash(entry.body) !== entry.bodyHash) return await reject('font-replay-body-integrity')
+        entry.replayCount++
+        await route.fulfill({ status: entry.status, headers: entry.headers, body: entry.body })
+        return true
+      },
+    }
+  } catch (error) {
+    controller.abort(error)
+    const failure = fontFailure(error.fontCode ?? (state.signal.reason?.fontCode === 'font-preparation-deadline' ? 'font-preparation-deadline' : 'font-preparation-transport-failed'))
+    failure.preparation = report('blocked'); throw failure
+  } finally { clearTimeout(timer) }
+}
+// Observe requests without changing routing, cache, retry or timeout behavior.
+// Serialize this bounded, sanitized evidence only when a case fails.
+function failureNetworkDiagnostics(page) {
+  const caps = { pending: 64, events: 128, origin_chars: 256, pathname_chars: 512 }
+  const pending = new Map(), events = []
+  const observed = { started: 0, finished: 0, failed: 0 }
+  const dropped = { pending_starts: 0, event_records: 0, url_parts: 0 }
+  const startedAt = performance.now()
+  const describe = request => {
+    let url = { scheme: null, origin: null, pathname: null, omitted: true, truncated: false }
+    try {
+      const parsed = new URL(request.url())
+      url.scheme = ['http:', 'https:'].includes(parsed.protocol) ? parsed.protocol : 'other'
+      if (url.scheme !== 'other') {
+        const truncated = parsed.origin.length > caps.origin_chars || parsed.pathname.length > caps.pathname_chars
+        url = { scheme: parsed.protocol, origin: parsed.origin.slice(0, caps.origin_chars), pathname: parsed.pathname.slice(0, caps.pathname_chars), omitted: false, truncated }
+        if (truncated) dropped.url_parts++
+      }
+    } catch { /* Never retain an invalid raw URL or a non-HTTP payload. */ }
+    return { url, resource_type: request.resourceType(), is_navigation: request.isNavigationRequest() }
+  }
+  const record = entry => {
+    if (events.length === caps.events) { events.shift(); dropped.event_records++ }
+    events.push(entry)
+  }
+  page.on('request', request => {
+    const at = performance.now(), metadata = describe(request)
+    observed.started++
+    if (pending.size < caps.pending) pending.set(request, { ...metadata, at })
+    else dropped.pending_starts++
+    record({ phase: 'started', at_ms: Math.round(at - startedAt), age_ms: 0, ...metadata })
+  })
+  const settled = (request, phase) => {
+    const at = performance.now(), item = pending.get(request)
+    const metadata = item ? { url: item.url, resource_type: item.resource_type, is_navigation: item.is_navigation } : describe(request)
+    pending.delete(request)
+    observed[phase]++
+    const code = phase === 'failed' ? request.failure()?.errorText : null
+    record({ phase, at_ms: Math.round(at - startedAt), age_ms: item ? Math.max(0, Math.round(at - item.at)) : null, ...metadata, ...(phase === 'failed' ? { error_code: typeof code === 'string' && /^net::ERR_[A-Z0-9_]+$/.test(code) ? code : null } : {}) })
+  }
+  page.on('requestfinished', request => settled(request, 'finished'))
+  page.on('requestfailed', request => settled(request, 'failed'))
+  return {
+    snapshot() {
+      const now = performance.now()
+      return {
+        scope: 'Failure-only request metadata; no query, fragment, credentials, headers, cookies or body',
+        elapsed_ms: Math.round(now - startedAt), caps: { ...caps }, observed: { ...observed }, dropped: { ...dropped },
+        truncated: Object.values(dropped).some(count => count > 0),
+        pending: [...pending.values()].map(item => ({ url: item.url, resource_type: item.resource_type, is_navigation: item.is_navigation, started_ms: Math.round(item.at - startedAt), age_ms: Math.max(0, Math.round(now - item.at)) })),
+        events: events.map(entry => ({ ...entry })),
+      }
+    },
   }
 }
 
@@ -468,13 +746,35 @@ async function paletteFilter(page, state, expect, observations) {
   const input = page.locator('[data-cmdk-search]'), options = page.locator(paletteOptions)
   const routes = await options.evaluateAll(elements => elements.map(element => element.dataset.cmdkItem))
   const fileIndex = routes.indexOf('/files/manager'), label = state.locale === 'ar' ? 'مدير الملفات' : 'File manager'
+  const expectedLocalizedRoutes = state.locale === 'ar' ? ['/files/manager'] : ['/files/manager', '/software/php']
+  const assertLocalizedResults = async () => {
+    await expect(options).toHaveCount(expectedLocalizedRoutes.length)
+    const matchedRoutes = await options.evaluateAll(elements => elements.map(element => element.dataset.cmdkItem))
+    assert.deepEqual(matchedRoutes, expectedLocalizedRoutes, 'Localized token search must show the exact authorized matches, including existing aliases')
+    for (let index = 0; index < expectedLocalizedRoutes.length; index++) {
+      const matchedHref = await options.nth(index).getAttribute('href')
+      assertContext(new URL(matchedHref, page.url()).href, state, { path: expectedLocalizedRoutes[index] })
+    }
+    await expect(page.locator('[data-cmdk-status]')).toHaveText(`${state.locale === 'ar' ? 'النتائج' : 'Results'}: ${expectedLocalizedRoutes.length}`)
+    return matchedRoutes
+  }
   assert.ok(fileIndex >= 8, 'Search must find a real destination beyond the former first-eight truncation')
   await expect(page.locator('[data-cmdk-item="/files/manager"] strong')).toHaveText(label)
   const href = await page.locator('[data-cmdk-item="/files/manager"]').getAttribute('href')
   assertContext(new URL(href, page.url()).href, state, { path: '/files/manager' })
   await input.fill(label)
-  await expect(options).toHaveCount(1)
+  const localizedMatches = await assertLocalizedResults()
   await expect(page.locator('[data-cmdk-empty]')).toBeHidden()
+  await expect(await selectedPaletteOption(page, expect, 0)).toHaveAttribute('data-cmdk-item', '/files/manager')
+  if (state.locale === 'en') {
+    await page.keyboard.press('ArrowDown')
+    await expect(await selectedPaletteOption(page, expect, 1)).toHaveAttribute('data-cmdk-item', '/software/php')
+    await page.keyboard.press('ArrowUp')
+    await expect(await selectedPaletteOption(page, expect, 0)).toHaveAttribute('data-cmdk-item', '/files/manager')
+  }
+  await input.fill('/files/manager')
+  await expect(options).toHaveCount(1)
+  assert.deepEqual(await options.evaluateAll(elements => elements.map(element => element.dataset.cmdkItem)), ['/files/manager'], 'An exact route query still narrows to one real destination')
   await selectedPaletteOption(page, expect, 0)
   await expect(page.locator('[data-cmdk-status]')).toHaveText(state.locale === 'ar' ? 'النتائج: 1' : 'Results: 1')
   await input.fill('unmatched-navigation-result-xyz')
@@ -497,7 +797,8 @@ async function paletteFilter(page, state, expect, observations) {
   await page.keyboard.press('ArrowDown')
   await selectedPaletteOption(page, expect, 1)
   await input.fill(label)
-  await selectedPaletteOption(page, expect, 0)
+  await assertLocalizedResults()
+  await expect(await selectedPaletteOption(page, expect, 0)).toHaveAttribute('data-cmdk-item', '/files/manager')
   await page.keyboard.press('Enter')
   await page.waitForURL(url => url.pathname === '/files/manager')
   await expect(page.locator('[data-file-manager-table]')).toBeVisible()
@@ -507,7 +808,7 @@ async function paletteFilter(page, state, expect, observations) {
   await assertHomeNavigationClosed(page, expect)
   await currentPage(page, state.path, expect)
   assertContext(page.url(), state)
-  observations.push({ check: 'palette-localized-filter-and-navigation', destination: '/files/manager', original_index: fileIndex, full_result_count: routes.length, localized_label: label, zero_results: true, clear_recovery: true, arrow_wrap: true, actual_enter_navigation: true, back_context: true })
+  observations.push({ check: 'palette-localized-filter-and-navigation', destination: '/files/manager', original_index: fileIndex, full_result_count: routes.length, localized_label: label, localized_expected_routes: expectedLocalizedRoutes, localized_observed_routes: localizedMatches, exact_route_query: '/files/manager', exact_route_result_count: 1, second_localized_match_keyboard_selection: state.locale === 'en' ? '/software/php' : null, zero_results: true, clear_recovery: true, arrow_wrap: true, actual_enter_navigation: true, back_context: true })
 }
 
 async function paletteScroll(page, state, expect, observations, capture) {
@@ -814,15 +1115,20 @@ export async function runNavigationAcceptance({ output, filter } = {}) {
   const fixture = await createVisualFixture()
   const unqualifiedFixture = await createVisualFixture({ qualifiedCatalog: false, resolvedAccount: false })
   const browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath(), timeout: 20000 })
-  const outcomes = [], started = Date.now()
+  const outcomes = []
+  let started = Date.now(), fontTransport = null, preparationFailure = null
   try {
+    fontTransport = await prepareNavigationFontTransport(browser, fixture, unqualifiedFixture)
+    started = Date.now()
     for (const state of selected) {
-      const outcome = { ...state, status: 'running', observations: [], page_errors: [], console_errors: [], mutations: [], websockets: [] }
+      const outcome = { ...state, status: 'running', observations: [], page_errors: [], console_errors: [], mutations: [], websockets: [], font_transport_errors: [] }
       const context = await browser.newContext({ viewport: { width: state.width, height: state.height ?? (state.width < 960 ? 800 : 900) }, colorScheme: 'light', reducedMotion: state.kind === 'motion' ? 'reduce' : 'no-preference' })
       const page = await context.newPage()
+      const networkDiagnostics = failureNetworkDiagnostics(page)
       page.setDefaultTimeout(8000)
       await context.route('**/*', async route => {
         if (!['GET', 'HEAD'].includes(route.request().method())) { outcome.mutations.push({ method: route.request().method() }); await route.abort(); return }
+        if (await fontTransport.replay(route, outcome.font_transport_errors)) return
         await route.continue()
       })
       page.on('pageerror', error => outcome.page_errors.push(String(error.message).slice(0, 200)))
@@ -911,10 +1217,12 @@ export async function runNavigationAcceptance({ output, filter } = {}) {
         assert.deepEqual(outcome.page_errors, [])
         assert.deepEqual(outcome.mutations, [])
         assert.deepEqual(outcome.websockets, [])
+        assert.deepEqual(outcome.font_transport_errors, [])
         outcome.status = 'passed'
       } catch (error) {
         outcome.status = 'failed'
         outcome.failure = { name: error.name, message: String(error.message).slice(0, 1000), stack: String(error.stack).split('\n').slice(0, 10) }
+        outcome.network_failure = networkDiagnostics.snapshot()
       } finally {
         outcome.screenshot = `screenshots/${state.id}.png`
         await page.screenshot({ path: join(destination, outcome.screenshot), fullPage: true }).catch(error => { outcome.screenshot_error = String(error.message).slice(0, 200) })
@@ -923,6 +1231,9 @@ export async function runNavigationAcceptance({ output, filter } = {}) {
         process.stdout.write(`${JSON.stringify({ id: state.id, status: outcome.status, failure: outcome.failure?.message })}\n`)
       }
     }
+  } catch (error) {
+    if (fontTransport) throw error
+    preparationFailure = { code: error.fontCode ?? 'font-preparation-failed', preparation: error.preparation ?? null }
   } finally { await browser.close(); await fixture.close(); await unqualifiedFixture.close() }
   const after = fingerprint(destination, 'after'), initial = new Map(before.files.map(file => [file.path, file.sha256])), final = new Map(after.files.map(file => [file.path, file.sha256]))
   const drift = [...new Set([...initial.keys(), ...final.keys()])].filter(path => initial.get(path) !== final.get(path)).sort()
@@ -930,7 +1241,7 @@ export async function runNavigationAcceptance({ output, filter } = {}) {
   const times = actions.map(action => action.event_to_second_frame_ms).filter(Number.isFinite).sort((a, b) => a - b)
   const observations = outcomes.flatMap(outcome => outcome.observations)
   const measurements = { local_input_events: times.length, event_to_second_frame_ms: { minimum: times[0] ?? null, median: times.length ? times[Math.floor(times.length / 2)] : null, p95: times.length ? times[Math.ceil(times.length * 0.95) - 1] : null, maximum: times.at(-1) ?? null }, observed_layout_shift_entries: actions.reduce((sum, action) => sum + action.shifts.length, 0), layout_shift_value_sum_including_recent_input: actions.reduce((sum, action) => sum + action.shifts.reduce((total, shift) => total + shift.value, 0), 0), fonts_ready: outcomes.filter(outcome => outcome.fonts?.ready).length, actual_locale_font_loaded: outcomes.filter(outcome => outcome.fonts?.faces.some(face => face.family === outcome.fonts.family && face.status === 'loaded')).length, explicit_control_fields: observations.filter(value => value.check === 'explicit-field-alignment').reduce((sum, value) => sum + value.measured, 0), workspace_summary_fields: observations.filter(value => value.check === 'unqualified-workspace-summary').reduce((sum, value) => sum + value.measured_fields, 0) }
-  const report = { schema_version: 1, captured_at: new Date().toISOString(), status: outcomes.every(outcome => outcome.status === 'passed') && drift.length === 0 ? 'passed' : 'failed', runtime: process.version, environment: { platform: process.platform, browser: browser.version(), headless: true, loopback: true, cpu_throttling: 'none', network_throttling: 'none', external_fonts: true, viewport_emulation_only: true, physical_touch_device: false }, scope: { filter: filter ?? null, full_suite_case_count: states.length, executed_case_count: selected.length, initial_widths: [...new Set(selected.map(state => state.width))].sort((a, b) => a - b), initial_heights: [...new Set(selected.map(state => state.height ?? (state.width < 960 ? 800 : 900)))].sort((a, b) => a - b), boundary_widths: [...new Set(selected.flatMap(state => state.kind.startsWith('home-') ? [800, 801] : ['sheet-close', 'toolbar-summary', 'palette-return'].includes(state.kind) ? [959, 960] : []))].sort((a, b) => a - b), locales: [...new Set(selected.map(state => state.locale))], qualified_catalog_test_states: selected.filter(state => !['summary', 'palette-unqualified'].includes(state.kind)).length, original_unqualified_catalog_states: selected.filter(state => ['summary', 'palette-unqualified'].includes(state.kind)).length }, tests: { total: outcomes.length, passed: outcomes.filter(outcome => outcome.status === 'passed').length, failed: outcomes.filter(outcome => outcome.status === 'failed').length }, measurements, duration_ms: Date.now() - started, source: { before_sha256: before.sha256, after_sha256: after.sha256, files: before.files.length, drift }, limits: ['Synthetic catalog and principals are test-only; no authentication, authorization enforcement, host command, hosting service or production qualification.', 'Theme persistence means selected URL context survives document navigation and reload; this suite does not require a browser storage preference absent from the product contract.', 'Input-event-to-second-frame measurements use browser performance.now and requestAnimationFrame. Action-to-second-frame durations also include automation dispatch. Neither is INP. Layout-shift entries include recent-input flags and are not a page CLS qualification.', 'Sampled shell routes, explicit field contracts, two locales and selected breakpoints do not certify every screen or accessibility requirement.', 'The account Home filter is exercised directly: slash focuses the visible existing search/filter input and preserves native typing. Command-palette access remains separately exercised through its shared keyboard shortcut. The unresolved-account cases exercise only the standalone synthetic summary DTO renderer; real authenticated missing-account HTTP requests remain denied.'], outcomes }
+  const report = { schema_version: 1, captured_at: new Date().toISOString(), status: preparationFailure ? 'blocked' : outcomes.length === selected.length && outcomes.every(outcome => outcome.status === 'passed') && drift.length === 0 ? 'passed' : 'failed', font_transport: fontTransport?.report() ?? preparationFailure?.preparation ?? null, prerequisite_failure: preparationFailure, runtime: process.version, environment: { platform: process.platform, browser: browser.version(), headless: true, loopback: true, cpu_throttling: 'none', network_throttling: 'none', external_fonts: true, viewport_emulation_only: true, physical_touch_device: false }, scope: { filter: filter ?? null, full_suite_case_count: states.length, requested_case_count: selected.length, executed_case_count: outcomes.length, initial_widths: [...new Set(selected.map(state => state.width))].sort((a, b) => a - b), initial_heights: [...new Set(selected.map(state => state.height ?? (state.width < 960 ? 800 : 900)))].sort((a, b) => a - b), boundary_widths: [...new Set(selected.flatMap(state => state.kind.startsWith('home-') ? [800, 801] : ['sheet-close', 'toolbar-summary', 'palette-return'].includes(state.kind) ? [959, 960] : []))].sort((a, b) => a - b), locales: [...new Set(selected.map(state => state.locale))], qualified_catalog_test_states: selected.filter(state => !['summary', 'palette-unqualified'].includes(state.kind)).length, original_unqualified_catalog_states: selected.filter(state => ['summary', 'palette-unqualified'].includes(state.kind)).length }, tests: { total: outcomes.length, passed: outcomes.filter(outcome => outcome.status === 'passed').length, failed: outcomes.filter(outcome => outcome.status === 'failed').length }, measurements, duration_ms: preparationFailure ? 0 : Date.now() - started, source: { before_sha256: before.sha256, after_sha256: after.sha256, files: before.files.length, drift }, limits: ['Synthetic catalog and principals are test-only; no authentication, authorization enforcement, host command, hosting service or production qualification.', 'Theme persistence means selected URL context survives document navigation and reload; this suite does not require a browser storage preference absent from the product contract.', 'Input-event-to-second-frame measurements use browser performance.now and requestAnimationFrame. Action-to-second-frame durations also include automation dispatch. Neither is INP. Layout-shift entries include recent-input flags and are not a page CLS qualification.', 'Sampled shell routes, explicit field contracts, two locales and selected breakpoints do not certify every screen or accessibility requirement.', 'Font bytes are freshly prepared over bounded HTTPS and replayed unchanged; case timings qualify ready-font interaction and geometry, not cold CDN latency, availability or offline production.', 'The account Home filter is exercised directly: slash focuses the visible existing search/filter input and preserves native typing. Command-palette access remains separately exercised through its shared keyboard shortcut. The unresolved-account cases exercise only the standalone synthetic summary DTO renderer; real authenticated missing-account HTTP requests remain denied.'], outcomes }
   writeFileSync(join(destination, 'results.json'), `${JSON.stringify(report, null, 2)}\n`)
   writeFileSync(join(destination, 'README.md'), `# Synthetic navigation acceptance\n\n${report.tests.passed}/${report.tests.total} cases passed; source drift: ${drift.length}.\n\nSee [results](results.json). Font faces, field counts, focus observations, action-to-second-frame timings and layout-shift entries are recorded per case.\n\n${report.limits.map(value => `- ${value}`).join('\n')}\n`)
   process.stdout.write(`${JSON.stringify({ status: report.status, tests: report.tests, drift: drift.length })}\n`)

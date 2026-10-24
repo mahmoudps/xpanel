@@ -1,4 +1,4 @@
-import { createHash, createHmac } from 'node:crypto'
+import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, dirname, basename } from 'node:path'
@@ -183,6 +183,50 @@ describe('strict authenticated runtime release verifier, diagnostic archives onl
   })
 })
 
+describe('buffered diagnostic rejection retires its archive descriptor', () => {
+  const pendingHandles = new Set<any>()
+  afterEach(async () => {
+    // A failed regression still retires its own real temporary-file handle.
+    for (const handle of pendingHandles) await handle.close()
+    pendingHandles.clear()
+    vi.doUnmock('node:fs/promises'); vi.resetModules()
+  })
+  it.each([
+    { label: 'unsafe first-member metadata', bounds: undefined, code: 'UNSAFE_MODE' },
+    { label: 'expanded byte ceiling', bounds: { tarBytes: 1024 }, code: 'LIMIT' },
+  ])('settles $label after the compressed source has buffered beyond one chunk', async ({ bounds, code }) => {
+    // This window leaves a second compressed chunk buffered in the meter while
+    // zlib is backpressured. Payloads are diagnostic bytes, never extracted.
+    const bytes = createTarGzBuffer([
+      { name: 'VERSION', content: Buffer.from('buffered-verifier-fixture\n'), mode: bounds ? 0o644 : 0o666 },
+      { name: 'README.md', content: randomBytes(68 * 1024) },
+    ])
+    expect(bytes.length).toBeGreaterThan(64 * 1024)
+    expect(bytes.length).toBeLessThan(80 * 1024)
+    const archive = archiveFile(bytes)
+    const real = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    let opened: any, openCalls = 0, closeEvents = 0
+    vi.resetModules()
+    vi.doMock('node:fs/promises', () => ({
+      ...real,
+      open: async (...args: Parameters<typeof real.open>) => {
+        const handle = await real.open(...args)
+        if (args[0] === archive) {
+          opened = handle; openCalls++; pendingHandles.add(handle)
+          handle.once('close', () => { closeEvents++; pendingHandles.delete(handle) })
+        }
+        return handle
+      },
+    }))
+    const mod = await import('./release-verifier.mjs')
+    await expect(mod.verifyAuthenticatedReleaseArchive(archive, { ...options(bytes), ...(bounds ? { bounds } : {}) })).rejects.toMatchObject({ code })
+    expect(openCalls).toBe(1)
+    expect(closeEvents).toBe(1)
+    expect(opened.fd).toBe(-1)
+    expect(pendingHandles.size).toBe(0)
+  })
+})
+
 // Scoped Linux-identity diagnostics. Archive bytes/streams are real temporary files; root/proc
 // ownership and directory identities are mocked ONLY here. This is not native Linux proof.
 describe('retained archive FD lifetime diagnostics with explicit filesystem identity fixtures', () => {
@@ -193,6 +237,8 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
     const pathModule = await vi.importActual<typeof import('node:path')>('node:path')
     let backing = archiveFile(original), nextFd = 10_000, openedFile: any, closed = false, fileCloses = 0, directoryMode = 0o755, treeEpoch = 0, changeTreeDuringRead = false, closeFailure = false, stagingWriteFailure = false
     let ownerRetiring = false, archiveClosedOutsideOwner = false, observedWriterFailure = false, readsAfterWriterFailure = 0
+    let procFault = '', procEpoch = 0
+    const procFilesystemCalls: string[] = []
     const dirs = new Map<number, string>()
     const tree = new Map<string, any>()
     for (const entry of parseTarGzBuffer(original)) {
@@ -204,7 +250,7 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
       const match = new RegExp(`^/proc/${process.pid}/fd/([0-9]+)(?:/(.*))?$`).exec(path)
       return match ? match[2] ? `${dirs.get(Number(match[1])) === '/' ? '' : dirs.get(Number(match[1]))}/${match[2]}` : dirs.get(Number(match[1]))! : path
     }
-    const directory = (path: string) => ({ uid: 0n, gid: 0n, mode: BigInt(0o40000 | (tree.get(path)?.mode ?? directoryMode)), dev: 1n, ino: BigInt(`0x${sha(Buffer.from(path)).slice(0, 12)}`) + (path === '/protected/tree' ? BigInt(treeEpoch) : 0n), nlink: 2n, size: 0n, mtimeNs: 1n, ctimeNs: 1n, isDirectory: () => true, isFile: () => false })
+    const directory = (path: string) => ({ uid: 0n, gid: 0n, mode: BigInt(0o40000 | (tree.get(path)?.mode ?? directoryMode)), dev: 1n, ino: BigInt(`0x${sha(Buffer.from(path)).slice(0, 12)}`) + (path === '/protected/tree' ? BigInt(treeEpoch) : path === '/proc' ? BigInt(procEpoch) : 0n), nlink: 2n, size: 0n, mtimeNs: 1n, ctimeNs: 1n, isDirectory: () => true, isFile: () => false })
     const treeStat = (path: string) => {
       const node = tree.get(path)
       if (!node) throw Object.assign(new Error('diagnostic ENOENT'), { code: 'ENOENT' })
@@ -217,7 +263,16 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
     vi.doMock('node:path', () => ({ dirname: pathModule.posix.dirname, join: pathModule.posix.join, isAbsolute: pathModule.posix.isAbsolute, resolve: pathModule.posix.resolve }))
     vi.doMock('node:fs', () => ({ constants: { ...fs.constants, O_NOFOLLOW: 0x20000, O_DIRECTORY: 0x10000, O_NONBLOCK: 0x800 } }))
     vi.doMock('node:fs/promises', () => ({
-      ...real, lstat: stat, readlink: async (path: string) => path === '/proc/self' ? String(process.pid) : '',
+      ...real, lstat: stat,
+      stat: async (path: string) => { const value = await stat(path); return procFault === 'identity' && /^\/proc\/[0-9]+\/fd\/[0-9]+$/.test(path) ? { ...value, ino: value.ino + 1n } : value },
+      statfs: async (path: string) => {
+        const match = new RegExp(`^/proc/${process.pid}/fd/([0-9]+)$`).exec(path)
+        if (!match || !dirs.has(Number(match[1]))) throw new Error('statfs must observe a retained known descriptor path')
+        procFilesystemCalls.push(path)
+        if (procFault === 'ancestry') { procEpoch++; procFault = '' }
+        return { type: procFault === 'filesystem' ? 0n : 0x9fa0n }
+      },
+      readlink: async (path: string) => path === '/proc/self' ? String(process.pid) : '',
       mkdir: async (path: string, opts: { recursive?: boolean; mode?: number }) => {
         const target = canonical(path), parts = target.split('/')
         for (let i = 2; i < parts.length; i++) if (!tree.has(parts.slice(0, i).join('/'))) tree.set(parts.slice(0, i).join('/'), { directory: true, mode: 0o755 })
@@ -243,11 +298,12 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
         const node = tree.get(canonical(path))
         if (node && !node.directory) return { fd: nextFd++, stat: async () => treeStat(canonical(path)), write: async (bytes: Buffer, offset: number, length: number) => { if (stagingWriteFailure) { observedWriterFailure = true; throw new Error('diagnostic ENOSPC') } const chunk = bytes.subarray(offset, offset + length); node.content = Buffer.concat([node.content, chunk]); return { bytesWritten: chunk.length } }, sync: async () => undefined, createReadStream: () => { if (changeTreeDuringRead) { treeEpoch++; changeTreeDuringRead = false } return Readable.from([node.content]) }, close: async () => undefined }
         const normalized = canonical(path), fd = nextFd++; dirs.set(fd, normalized)
-        return { fd, stat: async () => directory(normalized), sync: async () => undefined, statfs: async () => ({ type: 0x9fa0n }), close: async () => { dirs.delete(fd) } }
+        return { fd, stat: async () => directory(normalized), sync: async () => undefined, close: async () => { dirs.delete(fd) } }
       },
     }))
     const mod = await import('./release-verifier.mjs')
     return { mod, path: '/protected/release.tar.gz', isClosed: () => closed, fileCloses: () => fileCloses,
+      procFault: (kind: string) => { procFault = kind }, procFilesystemCalls: () => procFilesystemCalls,
       closeFile: async () => { await openedFile.close() }, replace: () => { backing = archiveFile(original) },
       mutate: () => { const bytes = Buffer.from(original); bytes[bytes.length - 1] ^= 1; writeFileSync(backing, bytes) }, insecure: () => { directoryMode = 0o777 },
       failClose: () => { closeFailure = true },
@@ -276,7 +332,7 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
       expect(report.archiveSha256).toBe(sha(original)); expect(Number.isInteger(fd)).toBe(true)
       expect(f.isClosed()).toBe(false); during = true; return 'staged-only'
     })
-    expect(during).toBe(true); expect(result.value).toBe('staged-only'); expect(f.isClosed()).toBe(true); expect(f.fileCloses()).toBe(1)
+    expect(f.procFilesystemCalls().length).toBeGreaterThanOrEqual(3); expect(during).toBe(true); expect(result.value).toBe('staged-only'); expect(f.isClosed()).toBe(true); expect(f.fileCloses()).toBe(1)
   })
   it.each(['replace', 'mutate', 'closeFile', 'throw'] as const)('refuses publication after callback %s and revokes its report', async action => {
     const f = await fixture(); let report: any
@@ -297,6 +353,22 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
     const f = await fixture(); f.insecure(); let invoked = false
     await expect(f.mod.withAuthenticatedReleaseArchive(f.path, options(original), () => { invoked = true })).rejects.toMatchObject({ code: 'UNSAFE_MODE' })
     expect(invoked).toBe(false); expect(f.fileCloses()).toBe(0)
+  })
+  it.each([['filesystem', 'UNSAFE_TREE'], ['identity', 'FILE_CHANGED'], ['ancestry', 'FILE_CHANGED']])('rejects proc %s before archive admission', async (kind, code) => {
+    const f = await fixture(); f.procFault(kind); let invoked = false
+    await expect(f.mod.withAuthenticatedReleaseArchive(f.path, options(original), () => { invoked = true })).rejects.toMatchObject({ code })
+    expect(invoked).toBe(false); expect(f.fileCloses()).toBe(0)
+  })
+  it.each([['filesystem', 'UNSAFE_TREE'], ['identity', 'FILE_CHANGED'], ['ancestry', 'FILE_CHANGED']])('rejects installed-tree proc %s using real module API observations', async (kind, code) => {
+    const f = await fixture(); let treeFailure: any, treeSucceeded = false
+    await expect(f.mod.withAuthenticatedReleaseArchive(f.path, options(original), async ({ report }: any) => {
+      f.procFault(kind)
+      try { await f.mod.verifyAuthenticatedReleaseTree('/protected/tree', { authenticatedArchive: report, signingKey: key, keyId }); treeSucceeded = true }
+      catch (error) { treeFailure = error }
+      throw new Error('diagnostic proc rejection')
+    })).rejects.toMatchObject({ code: 'ARCHIVE_USE_UNCERTAIN' })
+    expect(treeSucceeded).toBe(false); expect(treeFailure).toMatchObject({ code })
+    expect(f.isClosed()).toBe(true)
   })
   it('retains uncertain retirement and refuses new verification without retrying the close', async () => {
     const f = await fixture(); f.failClose()
