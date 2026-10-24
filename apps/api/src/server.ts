@@ -115,7 +115,7 @@ import { ENTRY_POINTS, entryPointAllowsApiRoute, entryPointAllowsRole, sessionTo
 import type { EntryPoint } from './entry-points.ts'
 import { loadQualifiedCatalog } from './host-catalog.ts'
 import { renderTotpQrSvg } from './totp-qr.ts'
-import { createLocalMailboxTransport, establishMailboxSession, mailFolderName, openMailboxSession, parseMailboxSend, revokeMailboxIdentity } from './mail/inbox.ts'
+import { createLocalMailboxTransport, establishMailboxSession, mailFolderName, mailboxAddressIndex, openMailboxSession, parseMailboxSend, revokeMailboxIdentity, rewriteMailboxIds } from './mail/inbox.ts'
 import type { MailboxTransport } from './mail/inbox.ts'
 import { deleteMailboxSession } from '@xpanel/db'
 
@@ -445,7 +445,19 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     },
     scope: LiveEventScope = { accountId: null, resellerId: null },
   ): Promise<AuditEntry> => {
-    const entry = await appendAudit(deps.db, input)
+    let actor = input.actor
+    let target = input.target
+    if (/mbx[0-9a-f]{8,}/i.test(`${actor}\n${target}`)) {
+      try {
+        const snap = await deps.store.readSnapshot()
+        const addresses = mailboxAddressIndex(
+          snap.serviceUsers.filter(user => user.services.email && user.login.includes('@')).map(user => user.login),
+        )
+        actor = rewriteMailboxIds(actor, addresses)
+        target = rewriteMailboxIds(target, addresses)
+      } catch { /* The row keeps the id when the address cannot be read. */ }
+    }
+    const entry = await appendAudit(deps.db, { ...input, actor, target })
     const event: LiveEvent = {
       id: randomUUID(),
       at: entry.at,
@@ -2604,6 +2616,18 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           return jsonResponse({ serviceUser, reconcile: reconcile?.body ?? null })
         }
         if (method === 'DELETE') {
+          if (existing.services.email && existing.login.includes('@')) {
+            await emitAudit(
+              {
+                actor: caller.principal.username,
+                action: 'mailbox.deleted',
+                target: `mailbox:${existing.login}`,
+                outcome: 'ok',
+                principalId: caller.principal.id,
+              },
+              { accountId: account.id, resellerId: account.ownerId },
+            )
+          }
           await revokeMailboxIdentity(deps.db, existing.login, suId)
           await deps.store.deleteServiceUser(suId)
           const reconcile = await triggerReconcile(caller, {

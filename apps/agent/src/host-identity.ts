@@ -62,8 +62,10 @@ export const certificateFromPem = (pem: string, now = Date.now()): ObservedCerti
 export interface HostIdentityReader {
   readFile(path: string): Promise<string | null>
   runCommand(argv: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }>
-  /** PEM presented by the panel TLS listener. Absent in unit tests that do not dial it. */
-  readServedCertificate?(): Promise<string | null>
+  /** PEM presented by the panel TLS listener. Pass a DNS name to send it as SNI. */
+  readServedCertificate?(servername?: string): Promise<string | null>
+  /** API public origin, for example the WHM PUBLIC_ORIGIN. The host is the SNI name. */
+  publicOrigin?(): string | null
 }
 
 /** The panel TLS listener. nginx's catch-all certificate is a different file. */
@@ -100,8 +102,48 @@ export const sslCertificateForListen = (config: string, port: number): string | 
   return null
 }
 
-/** Peer certificate from a TLS handshake. A closed port returns null. */
-export const readServedCertificatePem = (host: string, port: number, timeoutMs = 2000): Promise<string | null> =>
+/** DNS names on the server block that listens on `port`. `_` and IP addresses are skipped. */
+export const serverNamesForListen = (config: string, port: number): string[] => {
+  const blocks: string[] = []
+  const opener = /\bserver\s*\{/g
+  let found: RegExpExecArray | null
+  while ((found = opener.exec(config)) !== null) {
+    let depth = 1
+    let index = found.index + found[0].length
+    const start = index
+    while (index < config.length && depth > 0) {
+      const char = config[index]
+      if (char === '{') depth += 1
+      else if (char === '}') depth -= 1
+      index += 1
+    }
+    blocks.push(config.slice(start, index - 1))
+    opener.lastIndex = index
+  }
+  const listen = new RegExp(`\\blisten\\s+[^;]*\\b${port}\\b[^;]*;`, 'i')
+  for (const block of blocks) {
+    if (!listen.test(block)) continue
+    const named = /(?:^|[^\w-])server_name\s+([^;]+);/.exec(block)
+    if (!named?.[1]) continue
+    return named[1].split(/\s+/).map(name => name.trim().toLowerCase()).filter(name => name.length > 0 && name !== '_' && isIP(name) === 0)
+  }
+  return []
+}
+
+const originHost = (value: string | null | undefined): string | null => {
+  if (!value) return null
+  try {
+    const url = value.includes('://') ? new URL(value) : new URL(`https://${value}`)
+    const host = url.hostname.toLowerCase()
+    if (!host || isIP(host) !== 0) return null
+    return host
+  } catch {
+    return null
+  }
+}
+
+/** Peer certificate from a TLS handshake. `servername` is the SNI the panel hostname needs. */
+export const readServedCertificatePem = (host: string, port: number, timeoutMs = 2000, servername?: string): Promise<string | null> =>
   new Promise((resolve) => {
     let settled = false
     const done = (value: string | null): void => {
@@ -109,7 +151,13 @@ export const readServedCertificatePem = (host: string, port: number, timeoutMs =
       settled = true
       resolve(value)
     }
-    const socket = tls.connect({ host, port, rejectUnauthorized: false, timeout: timeoutMs }, () => {
+    const socket = tls.connect({
+      host,
+      port,
+      rejectUnauthorized: false,
+      timeout: timeoutMs,
+      ...(servername ? { servername } : {}),
+    }, () => {
       try {
         const peer = socket.getPeerCertificate()
         const raw = peer.raw
@@ -237,14 +285,69 @@ export const readHostIdentity = async (reader: HostIdentityReader): Promise<Host
   const versionFile = await readText(reader, '/opt/xpanel/VERSION')
   const version = (versionFile ? parseVersionFile(versionFile) : null) ?? await readAgentPackageVersion()
   if (version) identity.version = version
-  const pem = await readPanelCertificatePem(reader)
-  const certificate = pem ? certificateFromPem(pem) : null
-  if (certificate) {
-    identity.certificates = [{ names: certificate.names, notAfter: certificate.notAfter }]
-    const dns = certificate.names.find(name => isIP(name) === 0)
-    if (dns) identity.panelDomain = dns
-  }
+  const certificates = await readPanelCertificates(reader)
+  if (certificates.rows.length > 0) identity.certificates = certificates.rows
+  if (certificates.panelDomain) identity.panelDomain = certificates.panelDomain
   return identity
+}
+
+const certificateKey = (row: { names: string[]; notAfter: string }): string => `${row.notAfter}\n${row.names.join(',')}`
+
+/**
+ * The no-SNI handshake is the certificate nginx serves for the IP. The named
+ * handshake is the certificate for the public origin or the listener's server_name.
+ */
+const readPanelCertificates = async (
+  reader: HostIdentityReader,
+): Promise<{ rows: Array<{ names: string[]; notAfter: string }>; panelDomain?: string }> => {
+  let dumped = ''
+  for (const bin of ['/usr/sbin/nginx', '/usr/bin/nginx']) {
+    const text = await commandText(reader, [bin, '-T'])
+    if (text.includes('server')) {
+      dumped = text
+      break
+    }
+  }
+  const origin = originHost(reader.publicOrigin?.() ?? null)
+  const serverName = origin ?? serverNamesForListen(dumped, PANEL_LISTENER_PORT)[0] ?? null
+  const pems: string[] = []
+  const take = async (servername?: string): Promise<string | null> => {
+    if (!reader.readServedCertificate) return null
+    try {
+      const pem = await reader.readServedCertificate(servername)
+      return pem && pem.includes('BEGIN CERTIFICATE') ? pem : null
+    } catch {
+      return null
+    }
+  }
+  const plain = await take()
+  const named = serverName ? await take(serverName) : null
+  if (plain) pems.push(plain)
+  if (named && named !== plain) pems.push(named)
+  if (pems.length === 0) {
+    const path = dumped ? sslCertificateForListen(dumped, PANEL_LISTENER_PORT) : null
+    const file = path ? await readText(reader, path) : null
+    if (file && file.includes('BEGIN CERTIFICATE')) pems.push(file)
+  }
+  const rows: Array<{ names: string[]; notAfter: string }> = []
+  const seen = new Set<string>()
+  let panelDomain: string | undefined
+  const namedCert = named ? certificateFromPem(named) : null
+  const namedDns = namedCert?.names.find(name => isIP(name) === 0)
+  if (namedDns) panelDomain = namedDns
+  for (const pem of pems) {
+    const parsed = certificateFromPem(pem)
+    if (!parsed) continue
+    const key = certificateKey(parsed)
+    if (seen.has(key)) continue
+    seen.add(key)
+    rows.push({ names: parsed.names, notAfter: parsed.notAfter })
+    if (!panelDomain) {
+      const dns = parsed.names.find(name => isIP(name) === 0)
+      if (dns) panelDomain = dns
+    }
+  }
+  return panelDomain ? { rows, panelDomain } : { rows }
 }
 
 export interface HostConfigCheck {

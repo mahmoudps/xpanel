@@ -119,6 +119,7 @@ export const AUDIT_LABELS: Readonly<Record<string, AuditCopy>> = {
   'mail.mailing_list.created': copy('Created a mailing list', 'أنشأ قائمة بريدية'),
   'mail.mailing_list.deleted': copy('Deleted a mailing list', 'حذف قائمة بريدية'),
   'mail.spam_settings.updated': copy('Updated spam settings', 'حدّث إعدادات البريد المزعج'),
+  'mailbox.deleted': copy('Deleted a mailbox', 'حذف صندوق بريد'),
   'plan.created': copy('Created a plan', 'أنشأ خطة'),
   'plan.deleted': copy('Deleted a plan', 'حذف خطة'),
   'plan.updated': copy('Updated a plan', 'حدّث خطة'),
@@ -212,6 +213,7 @@ export const auditOutcomeLabel = (action: string, outcome: string, locale: Local
   if (outcome === 'denied') return locale === 'ar' ? 'مرفوض' : 'Denied'
   if (outcome !== 'ok') return locale === 'ar' ? 'فشل' : 'Failed'
   if (action === 'auth.login') return locale === 'ar' ? 'دخول' : 'Signed in'
+  if (action === 'auth.logout') return locale === 'ar' ? 'تم' : 'Done'
   return locale === 'ar' ? 'مطبّق' : 'Applied'
 }
 

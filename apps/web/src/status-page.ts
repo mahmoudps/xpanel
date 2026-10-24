@@ -1,5 +1,6 @@
 import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
-import { panelLabel, renderPlannedNavigation, renderSupportNotice, renderUserMenu, safePanelLinks, type DensityChoice, type PanelId, type PanelLink, type ThemeChoice } from './chrome.ts'
+import { panelLabel, renderSupportNotice, renderUserMenu, safePanelLinks, type DensityChoice, type PanelId, type PanelLink, type ThemeChoice } from './chrome.ts'
+import { renderDesignNav } from './design-board.ts'
 import type { Locale } from './i18n.ts'
 import { renderSurfaceShell } from './shell.ts'
 import { escapeHtml } from './tokens.ts'
@@ -24,6 +25,8 @@ export interface StatusPageModel {
   /** Another panel that matches this request better than the current listener. */
   suggested?: PanelId
   supportEmail?: string
+  /** Host or primary domain shown under the brand, the same subtitle as the live shell. */
+  hostname?: string
   visibility?: VisibilityContext
   /** Qualified catalog for this host. The sidebar keeps these sections as links. */
   catalog?: readonly CatalogTool[]
@@ -119,10 +122,15 @@ export function renderStatusBody(model: StatusPageModel): string {
     </div>`
   }
   const role = model.role ?? ''
+  const nav = visibleNavigation(model.visibility, model.catalog).find(item => item.surface === model.surface)
+  const qualified = new Set((nav?.sections ?? []).flatMap(section => section.pages.map(page => page.route)))
+  const subtitle = model.hostname
+    ? `<div><bdi dir="ltr" class="xp-mono">${escapeHtml(model.hostname)}</bdi></div>`
+    : ''
   return renderSurfaceShell({
     surface: model.surface,
     locale: model.locale,
-    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${panelLabel(model.surface)}</strong></div>${renderPlannedNavigation(model.surface, model.locale, model.path, visibleNavigation(model.visibility, model.catalog))}`,
+    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><div><strong>${panelLabel(model.surface)}</strong>${subtitle}</div></div>${renderDesignNav(model.surface, model.locale, model.path, qualified)}`,
     topbar: renderUserMenu({
       locale: model.locale,
       theme: model.theme,

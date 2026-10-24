@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { MimeCodecAndSanitizer } from './mime.ts'
 import { attachmentsFromBodyStructure } from './imap.ts'
 import { tlsConnectOptions, smtpHumanCopy } from './smtp.ts'
-import { composeDraftFromMessage, formatMessageSizeLimit, messageSizeLimitBytes, messageSizeLimitFromPostconf, smtpdMiltersConnected } from './document.ts'
+import { composeDraftFromMessage, dkimIdentityLine, formatMessageSizeLimit, messageSizeLimitBytes, messageSizeLimitFromPostconf, smtpdMiltersConfigured } from './document.ts'
 import { imapHumanCopy } from './inbox.ts'
 
 describe('live mail truth', () => {
@@ -45,8 +45,12 @@ describe('live mail truth', () => {
     expect(messageSizeLimitBytes('message_size_limit = 10240000\n')).toBe(10_240_000)
     expect(messageSizeLimitFromPostconf('10240000\n')).toBe(10_240_000)
     expect(messageSizeLimitFromPostconf('')).toBeNull()
-    expect(smtpdMiltersConnected('smtpd_milters =\n')).toBe(false)
-    expect(smtpdMiltersConnected('smtpd_milters = local:/run/opendkim/opendkim.sock\n')).toBe(true)
+    expect(smtpdMiltersConfigured('smtpd_milters =\n')).toBe(false)
+    expect(smtpdMiltersConfigured('smtpd_milters = local:opendkim/opendkim.sock\n')).toBe(true)
+    expect(dkimIdentityLine('refused', 'xp202610', 'en')).toBe('OpenDKIM refused the connection')
+    expect(dkimIdentityLine('signing', 'xp202610', 'en')).toBe('OpenDKIM is signing with xp202610')
+    expect(dkimIdentityLine('unknown', undefined, 'ar')).toBe('حالة OpenDKIM غير معروفة')
+    expect(dkimIdentityLine('refused', 'xp202610', 'en').includes('connected')).toBe(false)
   })
 
   it('quotes the original message for reply, reply-all, and forward', () => {

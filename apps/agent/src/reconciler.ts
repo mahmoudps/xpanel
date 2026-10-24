@@ -30,6 +30,7 @@ import { edge, services, system } from '@xpanel/render'
 import type { StateSnapshot, StateStore } from '@xpanel/state'
 import type { AgentExecutor } from './executor.ts'
 import { applyPostfixLocalDelivery, retirePostfixLocalDelivery } from './services/local-mail.ts'
+import { ensureOpenDkimSigning, mailAuthZoneAdditions, type OpenDkimSigning } from './services/opendkim-live.ts'
 import { removedMaildirPaths } from './services/mail.ts'
 import {
   buildGenerationManifest,
@@ -66,6 +67,8 @@ export interface CompileOptions {
   ioDevices?: string[]
   zoneDir?: string
   now?: Date
+  /** DKIM material already written by the live mail writer. Absent leaves the zone unchanged. */
+  mailAuth?: OpenDkimSigning | null
 }
 
 const DEFAULT_ZONE_DIR = '/var/lib/powerdns/zones'
@@ -486,6 +489,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
         content: r.content,
         priority: r.priority,
       })),
+      ...(opts.mailAuth ? mailAuthZoneAdditions(zone.name, zone.records, opts.mailAuth) : []),
     ])
     files.push({
       path: `${zoneDir}/${zone.name}.zone`,
@@ -1108,7 +1112,7 @@ export class HostReconciler {
    * removes only owned obsolete files, rolls back on reload/health failure, or activates
    * atomically and updates the SQLite index.
    */
-  async reconcile(opts: { force?: boolean; scope?: LiveEventScope; actor?: string } = {}): Promise<ReconcileResult> {
+  async reconcile(opts: { force?: boolean; scope?: LiveEventScope; actor?: string; mailAuth?: OpenDkimSigning | null } = {}): Promise<ReconcileResult> {
     const startMs = Date.now()
     const scope: LiveEventScope = opts.scope ?? { accountId: null, resellerId: null }
     const actor = opts.actor ?? 'agent'
@@ -1126,43 +1130,69 @@ export class HostReconciler {
 
     const snapshot = await this.deps.store.readSnapshot()
     const currentGen = await latestActive(this.deps.db)
-
-    const compiled = compileDesiredGeneration(snapshot, {
-      os: this.deps.os,
-      quotaFilesystem: this.deps.quotaFilesystem ?? null,
-      ...(this.deps.ioDevices && { ioDevices: this.deps.ioDevices }),
-      ...(this.deps.zoneDir && { zoneDir: this.deps.zoneDir }),
-    })
-
+    const mailDomains = [
+      ...snapshot.domains.map(domain => domain.name),
+      ...snapshot.serviceUsers.flatMap(user => {
+        if (!user.services.email) return []
+        const at = user.login.lastIndexOf('@')
+        return at > 0 ? [user.login.slice(at + 1)] : []
+      }),
+    ]
     const previousManifest = currentGen ? await this.journal.readManifest(currentGen.id) : null
-    const filesChecksum = computeFilesChecksum(compiled.files)
-    const previewCandidate = buildGenerationManifest({
-      generationId: (currentGen?.id ?? 0) + 1,
-      stateChecksum: snapshot.checksum,
-      filesChecksum,
-      actor,
-      files: compiled.files,
-      postActions: compiled.postActions,
-      os: this.deps.os,
-    })
-    const previewDiff = diffManifests(previousManifest, previewCandidate)
     const appliedSnapshot = currentGen ? await this.deps.store.readGenerationSnapshot(currentGen.id) : null
-    if (appliedSnapshot) {
-      for (const path of removedMaildirPaths(appliedSnapshot, snapshot)) {
-        compiled.postActions.push({ kind: 'remove-path', path })
+    const compileMail = (mailAuth: OpenDkimSigning | null) => {
+      const next = compileDesiredGeneration(snapshot, {
+        os: this.deps.os,
+        quotaFilesystem: this.deps.quotaFilesystem ?? null,
+        ...(this.deps.ioDevices && { ioDevices: this.deps.ioDevices }),
+        ...(this.deps.zoneDir && { zoneDir: this.deps.zoneDir }),
+        ...(mailAuth ? { mailAuth } : {}),
+      })
+      if (appliedSnapshot) {
+        for (const path of removedMaildirPaths(appliedSnapshot, snapshot)) {
+          next.postActions.push({ kind: 'remove-path', path })
+        }
+      }
+      return next
+    }
+    const preflightOf = (next: ReturnType<typeof compileMail>, checksum: string) => {
+      const previewCandidate = buildGenerationManifest({
+        generationId: (currentGen?.id ?? 0) + 1,
+        stateChecksum: snapshot.checksum,
+        filesChecksum: checksum,
+        actor,
+        files: next.files,
+        postActions: next.postActions,
+        os: this.deps.os,
+      })
+      const previewDiff = diffManifests(previousManifest, previewCandidate)
+      return {
+        files: next.files,
+        preActions: next.preActions,
+        postActions: [
+          ...next.postActions,
+          ...previewDiff.removed.map((removed) => ({ kind: 'remove-path' as const, path: removed.path })),
+        ],
       }
     }
 
     // Preflight MUST run before any executor read/write/action or DB/snapshot creation.
-    const preflightPlan = {
-      files: compiled.files,
-      preActions: compiled.preActions,
-      postActions: [
-        ...compiled.postActions,
-        ...previewDiff.removed.map((r) => ({ kind: 'remove-path' as const, path: r.path })),
-      ],
+    let mailAuth = opts.mailAuth ?? null
+    let compiled = compileMail(mailAuth)
+    let filesChecksum = computeFilesChecksum(compiled.files)
+    await this.deps.executor.preflight(preflightOf(compiled, filesChecksum))
+    if (!('mailAuth' in opts)) {
+      try {
+        mailAuth = (await ensureOpenDkimSigning(this.deps.executor, mailDomains)).signing
+      } catch { /* A missing OpenDKIM user leaves the zone as it was. */ }
+      const refreshed = compileMail(mailAuth)
+      const nextChecksum = computeFilesChecksum(refreshed.files)
+      if (nextChecksum !== filesChecksum) {
+        compiled = refreshed
+        filesChecksum = nextChecksum
+        await this.deps.executor.preflight(preflightOf(compiled, filesChecksum))
+      }
     }
-    await this.deps.executor.preflight(preflightPlan)
 
     let repairedDriftCount = 0
     if (

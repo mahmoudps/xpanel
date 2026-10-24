@@ -326,9 +326,9 @@ export const postfixMainSettings = (os: OsProfile, o: PostfixMainOptions = {}): 
     // stated explicitly so relaying never depends on the distribution's compatibility_level
     smtpd_relay_restrictions: 'permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination',
     smtpd_recipient_restrictions: `check_recipient_access ${t}:${p.recipientAccess}`,
-    // OpenDKIM's Debian/Ubuntu socket. accept keeps mail flowing when the socket is down.
-    smtpd_milters: 'local:/run/opendkim/opendkim.sock',
-    non_smtpd_milters: 'local:/run/opendkim/opendkim.sock',
+    // Relative to the Postfix chroot (/var/spool/postfix). accept keeps mail flowing when the socket is down.
+    smtpd_milters: 'local:opendkim/opendkim.sock',
+    non_smtpd_milters: 'local:opendkim/opendkim.sock',
     milter_protocol: '6',
     milter_default_action: 'accept',
   }

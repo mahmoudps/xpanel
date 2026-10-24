@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { fail } from '@xpanel/core'
-import { createRootPrincipal, createTestDb } from '@xpanel/db'
+import { createRootPrincipal, createTestDb, listAudit } from '@xpanel/db'
 import { createTestStateStore, ExtendedFeaturesStore } from '@xpanel/state'
 import { hashPasswordArgon2id } from './auth.ts'
 import { createApiApp } from './server.ts'
@@ -263,7 +263,8 @@ describe('xMail mailbox inbox', () => {
     expect(after.vacationEnabled).toBe(true)
     expect(after.sieveRules).toEqual([expect.objectContaining({ name: 'Orders', condition: 'Subject contains invoice', action: 'File into Orders', enabled: false })])
     expect(after.identityDkim).toBe('Selector default is stored for alpha.example.test')
-    expect(after.identitySpf).toBe('SPF record stored · DMARC record stored')
+    expect(after.identitySpf).toContain('v=spf1 +a +mx +ip4:192.0.2.10 ~all')
+    expect(after.identitySpf).toContain('v=DMARC1; p=quarantine')
     expect(after.identitySize).toBe('25 MiB per message')
   })
 
@@ -321,8 +322,17 @@ describe('xMail mailbox inbox', () => {
       db: database.db, store: state.store, serverSecret: SECRET, sessionId: rows[0]?.session_id ?? '', transport, postfixMain,
     })
     expect(loaded.identitySize).toBe('10 MB')
-    expect(loaded.identityDkim).toBe('not signed')
+    expect(loaded.identityDkim).toBe('OpenDKIM status unknown')
+    expect(loaded.identityDkim).not.toContain('connected')
     expect(loaded.identitySpf).toBe('SPF record missing · DMARC record missing')
+    const refused = await loadMailDocument({
+      db: database.db, store: state.store, serverSecret: SECRET, sessionId: rows[0]?.session_id ?? '', transport,
+      postfixMain: 'smtpd_milters = local:opendkim/opendkim.sock\n',
+      dkimProbe: 'refused',
+      dkimByDomain: { 'alpha.example.test': { selector: 'xp202610', dnsTxt: 'v=DKIM1; k=rsa; p=abc' } },
+    })
+    expect(refused.identityDkim).toBe('OpenDKIM refused the connection · v=DKIM1; k=rsa; p=abc')
+    expect(refused.identitySpf).toBe('v=spf1 a mx ~all · v=DMARC1; p=none')
   })
 
   it('removes the mailbox login and its sessions when the mailbox is deleted', async () => {
@@ -336,7 +346,7 @@ describe('xMail mailbox inbox', () => {
       async remove() { return undefined },
       async send() { return { messageId: '<sent@alpha.example.test>' } },
     }
-    const { database, state, login } = await harness(transport)
+    const { database, state, login, call, sessionOf } = await harness(transport)
     const inbox = await login('inbox@alpha.example.test', 'alpha-secret')
     const other = await login('other@beta.example.test', 'beta-secret')
     expect(inbox.status).toBe(200)
@@ -347,6 +357,8 @@ describe('xMail mailbox inbox', () => {
     const before = await names()
     expect(before).toEqual(expect.arrayContaining([inboxName, otherName]))
     expect(await database.db.query('SELECT session_id FROM mailbox_sessions')).toHaveLength(2)
+    const signedOut = await call('POST', '/api/auth/logout', {}, sessionOf(inbox))
+    expect(signedOut.status).toBe(200)
 
     await createRootPrincipal(database.db, {
       username: 'root',
@@ -382,6 +394,14 @@ describe('xMail mailbox inbox', () => {
     expect(sessions.map(row => row.mailbox)).toEqual(['other@beta.example.test'])
     expect(await state.store.getServiceUserByLogin('inbox@alpha.example.test')).toBeNull()
     expect(await state.store.getServiceUserByLogin('other@beta.example.test')).not.toBeNull()
+    const audit = await listAudit(database.db, { limit: 20 })
+    const deleted = audit.find(row => row.action === 'mailbox.deleted')
+    expect(deleted?.outcome).toBe('ok')
+    expect(deleted?.actor).toBe('root')
+    expect(deleted?.target).toBe('mailbox:inbox@alpha.example.test')
+    const logout = audit.find(row => row.action === 'auth.logout' && row.target.includes('inbox@alpha.example.test'))
+    expect(logout?.actor).toBe('inbox@alpha.example.test')
+    expect(logout?.actor.startsWith('mbx')).toBe(false)
   })
 
   it('shows a mailbox address in place of the stored principal id', () => {

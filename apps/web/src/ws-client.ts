@@ -448,6 +448,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
 
   var reconnectAttempt = 0;
   var wsOpened = false;
+  var liveUpdatesGaveUp = false;
+  var connectTimer = null;
   var ws = null;
   var lastKeyPrefix = null;
   var lastKeyPrefixTimer = null;
@@ -475,6 +477,28 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     var tone = connected ? 'ok' : 'suspended';
     badge.className = 'xp-badge xp-badge--' + tone;
     badge.setAttribute('data-status', tone);
+    var text = badge.querySelector('.xp-badge__label');
+    if (text) text.textContent = label;
+  }
+
+  function markLiveUpdatesOff() {
+    if (liveUpdatesGaveUp) return;
+    liveUpdatesGaveUp = true;
+    if (connectTimer) clearTimeout(connectTimer);
+    if (ws) {
+      try { ws.close(); } catch (_err) { /* The socket is already gone. */ }
+    }
+    var indicator = document.querySelector('[data-ws-indicator]');
+    if (!indicator) return;
+    indicator.setAttribute('data-ws-indicator', 'unavailable');
+    var ar = document.documentElement.lang === 'ar';
+    var label = ar ? 'التحديثات المباشرة متوقفة' : 'Live updates off';
+    indicator.setAttribute('aria-label', label);
+    indicator.setAttribute('title', label);
+    var badge = indicator.querySelector('.xp-badge');
+    if (!badge) return;
+    badge.className = 'xp-badge xp-badge--suspended';
+    badge.setAttribute('data-status', 'suspended');
     var text = badge.querySelector('.xp-badge__label');
     if (text) text.textContent = label;
   }
@@ -561,19 +585,29 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
   }
 
   function connectWebSocket() {
-    if (typeof window === 'undefined' || !('WebSocket' in window)) return;
+    if (liveUpdatesGaveUp) return;
+    if (typeof window === 'undefined' || !('WebSocket' in window)) {
+      markLiveUpdatesOff();
+      return;
+    }
     var proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     var url = proto + '//' + window.location.host + '/api/ws';
     try {
       ws = new WebSocket(url);
     } catch (_err) {
-      scheduleReconnect();
+      markLiveUpdatesOff();
       return;
     }
+    if (connectTimer) clearTimeout(connectTimer);
+    connectTimer = setTimeout(function () {
+      if (wsOpened || liveUpdatesGaveUp) return;
+      markLiveUpdatesOff();
+    }, 4000);
 
     ws.onopen = function () {
       wsOpened = true;
       reconnectAttempt = 0;
+      if (connectTimer) clearTimeout(connectTimer);
       setWsBadgeState('connected');
     };
 
@@ -591,12 +625,18 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     };
 
     ws.onclose = function () {
-      setWsBadgeState(wsOpened ? 'reconnecting' : 'offline');
+      if (connectTimer) clearTimeout(connectTimer);
+      if (liveUpdatesGaveUp) return;
+      if (!wsOpened) {
+        markLiveUpdatesOff();
+        return;
+      }
+      setWsBadgeState('reconnecting');
       scheduleReconnect();
     };
 
     ws.onerror = function () {
-      if (!wsOpened) setWsBadgeState('offline');
+      if (!wsOpened) markLiveUpdatesOff();
     };
   }
 

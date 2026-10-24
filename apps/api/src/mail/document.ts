@@ -137,11 +137,25 @@ export const messageSizeLimitBytes = (mainCf: string): number | null => {
   return Number.isSafeInteger(bytes) && bytes > 0 ? bytes : null
 }
 
-/** True when smtpd_milters names a socket. An empty assignment is not a connection. */
-export const smtpdMiltersConnected = (mainCf: string): boolean => {
+/** True when smtpd_milters names a socket. A configured socket is not a connection. */
+export const smtpdMiltersConfigured = (mainCf: string): boolean => {
   const match = /^[ \t]*smtpd_milters[ \t]*=[ \t]*(.*)$/m.exec(mainCf)
   const value = match?.[1]?.trim() ?? ''
   return value.length > 0
+}
+
+/** @deprecated A milter line is configuration. The compose page uses `dkimIdentityLine`. */
+export const smtpdMiltersConnected = smtpdMiltersConfigured
+
+export type DkimProbeStatus = 'signing' | 'refused' | 'unknown'
+
+/** The compose label. It names the probe result, never the presence of a milter line. */
+export const dkimIdentityLine = (status: DkimProbeStatus, selector: string | undefined, locale: 'en' | 'ar' = 'en'): string => {
+  const ar = locale === 'ar'
+  if (status === 'signing' && selector) return ar ? `OpenDKIM يوقّع بالمحدد ${selector}` : `OpenDKIM is signing with ${selector}`
+  if (status === 'signing') return ar ? 'OpenDKIM يوقّع' : 'OpenDKIM is signing'
+  if (status === 'refused') return ar ? 'OpenDKIM رفض الاتصال' : 'OpenDKIM refused the connection'
+  return ar ? 'حالة OpenDKIM غير معروفة' : 'OpenDKIM status unknown'
 }
 
 /** 10,240,000 B is 9.77 MiB and is shown as 10 MB. Values under 9.5 MB keep one decimal. */
@@ -170,6 +184,16 @@ const ruleAction = (filter: EmailFilter): string => {
   return filter.actionTarget ? `${filter.action} ${filter.actionTarget}` : filter.action
 }
 
+const zoneTxt = (
+  records: readonly { name: string; type: string; content: string }[],
+  zone: string,
+  owner: string,
+): string[] => records.filter(record => record.type === 'TXT').filter(record => {
+  const raw = record.name.trim().toLowerCase().replace(/\.$/, '')
+  const name = raw === '@' || raw === '' || raw === zone ? '@' : raw.endsWith(`.${zone}`) ? raw.slice(0, -(zone.length + 1)) : raw
+  return name === owner
+}).map(record => record.content)
+
 const previewOf = (text: string): string =>
   text.split(/\r?\n/).map(line => line.trim()).find(line => line.length > 0)?.slice(0, 180) ?? ''
 
@@ -188,6 +212,12 @@ export const loadMailDocument = async (input: {
   folder?: string
   /** Postfix main.cf text. Absent when the file could not be read. */
   postfixMain?: string | null
+  /** Result of a socket connect as the postfix user. Omitted means the probe did not run. */
+  dkimProbe?: DkimProbeStatus
+  /** Public DKIM material from the live writer. The private key is not here. */
+  dkimByDomain?: Readonly<Record<string, { selector: string; dnsTxt: string }>>
+  zones?: readonly { name: string; records: readonly { name: string; type: string; content: string }[] }[]
+  locale?: 'en' | 'ar'
   reply?: { mode: 'reply' | 'reply-all' | 'forward'; uid: number }
 }): Promise<MailDocument> => {
   if (!input.sessionId) return { mailbox: '' }
@@ -215,17 +245,31 @@ export const loadMailDocument = async (input: {
   } catch { /* unknown, not zero */ }
 
   try {
-    const domain = record.mailbox.split('@')[1] ?? ''
+    const domain = (record.mailbox.split('@')[1] ?? '').toLowerCase()
+    const locale = input.locale === 'ar' ? 'ar' : 'en'
     const auth = domain ? await extended.readEmailAuth(domain) : null
+    const material = domain ? input.dkimByDomain?.[domain] : undefined
+    const zone = input.zones?.find(item => item.name.toLowerCase() === domain)
+    const records = zone?.records ?? []
+    const probe = input.dkimProbe
+    const haveProbe = probe === 'signing' || probe === 'refused' || probe === 'unknown'
     const postfixMain = typeof input.postfixMain === 'string' ? input.postfixMain : null
-    const milter = postfixMain !== null && smtpdMiltersConnected(postfixMain)
-    if (auth?.dkimTxtValue && milter) document.identityDkim = `Selector ${auth.selector} is stored for ${auth.domain}`
-    else if (auth?.dkimTxtValue && postfixMain === null) document.identityDkim = `Selector ${auth.selector} is stored for ${auth.domain}`
-    else if (postfixMain !== null) document.identityDkim = milter ? 'OpenDKIM milter is connected' : 'not signed'
-    if (auth || postfixMain !== null) {
-      const spf = auth?.spfTxtValue ? 'SPF record stored' : 'SPF record missing'
-      const dmarc = auth?.dmarcTxtValue ? 'DMARC record stored' : 'DMARC record missing'
-      document.identitySpf = `${spf} · ${dmarc}`
+    if (haveProbe || material || auth || postfixMain !== null) {
+      if (haveProbe || material) {
+        const line = dkimIdentityLine(haveProbe ? probe : 'unknown', material?.selector, locale)
+        document.identityDkim = material?.dnsTxt ? `${line} · ${material.dnsTxt}` : line
+      } else if (auth?.dkimTxtValue) {
+        document.identityDkim = `Selector ${auth.selector} is stored for ${auth.domain}`
+      } else {
+        document.identityDkim = dkimIdentityLine('unknown', undefined, locale)
+      }
+      const zoneSpf = zoneTxt(records, domain, '@').find(content => content.toLowerCase().startsWith('v=spf1'))
+      const zoneDmarc = zoneTxt(records, domain, '_dmarc').find(content => content.toLowerCase().startsWith('v=dmarc1'))
+      const spf = zoneSpf ?? auth?.spfTxtValue ?? (material ? 'v=spf1 a mx ~all' : null)
+      const dmarc = zoneDmarc ?? auth?.dmarcTxtValue ?? (material ? 'v=DMARC1; p=none' : null)
+      const spfLabel = spf ?? (locale === 'ar' ? 'سجل SPF غير موجود' : 'SPF record missing')
+      const dmarcLabel = dmarc ?? (locale === 'ar' ? 'سجل DMARC غير موجود' : 'DMARC record missing')
+      document.identitySpf = `${spfLabel} · ${dmarcLabel}`
     }
   } catch { /* unknown */ }
 

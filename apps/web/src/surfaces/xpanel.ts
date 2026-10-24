@@ -60,6 +60,13 @@ export interface PanelSurfaceProps {
   dnsRecords?: DnsRecord[]
   lastSignInAt?: string
   recentAudit?: Array<{ action: string; target: string; actor?: string; detail?: Record<string, unknown> }>
+  usage?: {
+    phpVersion: string | null
+    diskBytes: number | null
+    memoryBytes: number | null
+    processCount: number | null
+    bandwidth: 'unmeasured'
+  }
   terminalSessionId?: string
   actionState?: AsyncActionBannerProps
 }
@@ -139,6 +146,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
       ...(generationId !== undefined ? { generationId } : {}),
       actionHtml: actionBannerHtml,
       ...(accountRoutes ? { qualifiedRoutes: accountRoutes } : {}),
+      ...(props.usage ? { usage: props.usage } : {}),
       ...(props.lastSignInAt ? { lastSignInAt: props.lastSignInAt } : {}),
       ...(props.recentAudit ? { recentChanges: props.recentAudit.map(entry => ({
         pill: isAr ? 'تدقيق' : 'Audit',

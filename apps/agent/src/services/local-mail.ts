@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import type { OsProfile, RenderedFile } from '@xpanel/core'
 import { services } from '@xpanel/render'
 import type { AgentExecutor } from '../executor.ts'
+import { ensureOpenDkimSigning, type OpenDkimSetup } from './opendkim-live.ts'
 
 /** Path to the active generation's content hash. A restart must not replace those bytes. */
 export type OwnedChecksums = ReadonlyMap<string, string>
@@ -105,7 +106,9 @@ export const ensureInstalledMail = async (
   os: OsProfile,
   hostname?: string | null,
   owned?: OwnedChecksums,
-): Promise<void> => {
+  domains: readonly string[] = [],
+): Promise<OpenDkimSetup> => {
+  const signing = await ensureOpenDkimSigning(executor, domains)
   const maps = services.renderPostfixMaps(os, [])
   for (const action of maps.actions) {
     if (action.kind === 'ensure-dir') await executor.runAction(action)
@@ -124,4 +127,5 @@ export const ensureInstalledMail = async (
   await applyPostfixLocalDelivery(executor, os, owned)
   await executor.runAction({ kind: 'systemd', verb: 'reload', unit: os.services.dovecot })
   await executor.runAction({ kind: 'systemd', verb: 'reload', unit: os.services.postfix })
+  return signing
 }

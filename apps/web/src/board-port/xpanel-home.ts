@@ -459,7 +459,10 @@ const liveHint = (item: ToolDef, facts: LiveFacts, phone: boolean): Hint => {
   switch (item.id) {
     case 'files.manager': return mono(facts.home)
     case 'files.ftp': return { text: people(facts.ftpUsers, ar, 'مستخدم واحد', 'مستخدمان', 'مستخدمين', 'user', 'users'), mono: false, dir: ar ? 'rtl' : 'ltr' }
-    case 'files.disk': return facts.diskLimit ? num(`— / ${facts.diskLimit}`) : dash
+    case 'files.disk': {
+      const diskLine = resourceLine(facts, 'disk')
+      return diskLine === '—' ? dash : num(diskLine)
+    }
     case 'files.trash': return { text: people(facts.trashFiles, ar, 'عنصر واحد', 'عنصران', 'عناصر', 'item', 'items'), mono: false, dir: ar ? 'rtl' : 'ltr' }
     case 'db.list': return num(ratio(facts.databases, facts.databaseCap))
     case 'db.users': return { text: people(facts.databaseUsers, ar, 'مستخدم واحد', 'مستخدمان', 'مستخدمين', 'user', 'users'), mono: false, dir: ar ? 'rtl' : 'ltr' }
@@ -470,7 +473,7 @@ const liveHint = (item: ToolDef, facts: LiveFacts, phone: boolean): Hint => {
     case 'email.webmail': return ar ? word('افتح') : plain(phone ? '' : 'Open')
     case 'software.php': return facts.phpShort ? mono(phone ? facts.phpShort : (facts.phpHint ?? facts.phpShort)) : dash
     case 'software.ini': return mono('.user.ini')
-    case 'advanced.processes': return facts.processLimit ? num(`— / ${facts.processLimit}`) : dash
+    case 'advanced.processes': return resourceLine(facts, 'processes') === '—' ? dash : num(resourceLine(facts, 'processes'))
     case 'prefs.language': return ar ? word('العربية') : plain('English')
     default: return dash
   }
@@ -504,22 +507,49 @@ interface LiveFacts {
   memoryLimit: string | null
   processLimit: string | null
   ioLimit: string | null
+  sampled: boolean
+  diskBytes: number | null
+  memoryBytes: number | null
+  processCount: number | null
+  diskCapBytes: number | null
+  memoryCapBytes: number | null
+  processCap: number | null
   generationId?: number
   signInHtml?: string
   changes?: HomeChange[]
 }
 
-const blankMeter = (label: string, value: string): HomeMeter => ({ label, value, pct: 0, note: '—' })
+const blankMeter = (label: string, value: string, pct = 0): HomeMeter => ({ label, value, pct, note: '—' })
+
+const resourceLine = (facts: LiveFacts, kind: 'disk' | 'memory' | 'processes' | 'bandwidth'): string => {
+  const limit = kind === 'disk' ? facts.diskLimit : kind === 'memory' ? facts.memoryLimit : kind === 'processes' ? facts.processLimit : facts.bandwidthLimit
+  if (kind === 'bandwidth') {
+    if (!facts.sampled) return limit ? `— / ${limit}` : '—'
+    const label = facts.ar ? 'لم تُقاس بعد' : 'not measured yet'
+    return limit ? `${label} / ${limit}` : label
+  }
+  const used = kind === 'disk' ? facts.diskBytes : kind === 'memory' ? facts.memoryBytes : facts.processCount
+  if (!facts.sampled || used === null) return limit ? `— / ${limit}` : '—'
+  const shown = kind === 'processes' ? String(used) : formatAsciiBytes(used)
+  return limit ? `${shown} / ${limit}` : shown
+}
+
+const resourcePct = (facts: LiveFacts, kind: 'disk' | 'memory' | 'processes'): number => {
+  if (!facts.sampled) return 0
+  const used = kind === 'disk' ? facts.diskBytes : kind === 'memory' ? facts.memoryBytes : facts.processCount
+  const cap = kind === 'disk' ? facts.diskCapBytes : kind === 'memory' ? facts.memoryCapBytes : facts.processCap
+  if (used === null || cap === null || cap <= 0) return 0
+  return Math.max(0, Math.min(100, Math.round((used / cap) * 100)))
+}
 
 const liveDesktopMeters = (facts: LiveFacts): HomeMeter[] => {
   const ar = facts.ar
-  const quota = (limit: string | null) => limit ? `— / ${limit}` : '—'
   return [
-    blankMeter(ar ? 'القرص' : 'Disk', quota(facts.diskLimit)),
-    blankMeter(ar ? 'حركة البيانات الشهرية' : 'Monthly bandwidth', quota(facts.bandwidthLimit)),
+    blankMeter(ar ? 'القرص' : 'Disk', resourceLine(facts, 'disk'), resourcePct(facts, 'disk')),
+    blankMeter(ar ? 'حركة البيانات الشهرية' : 'Monthly bandwidth', resourceLine(facts, 'bandwidth')),
     blankMeter(ar ? 'سقف الكتابة على القرص' : 'IO write cap', facts.ioLimit ? `— / ${facts.ioLimit}` : '—'),
-    blankMeter(ar ? 'الذاكرة' : 'Memory', quota(facts.memoryLimit)),
-    blankMeter(ar ? 'العمليات' : 'Processes', facts.processLimit ? `— / ${facts.processLimit}` : '—'),
+    blankMeter(ar ? 'الذاكرة' : 'Memory', resourceLine(facts, 'memory'), resourcePct(facts, 'memory')),
+    blankMeter(ar ? 'العمليات' : 'Processes', resourceLine(facts, 'processes'), resourcePct(facts, 'processes')),
     blankMeter(ar ? 'النطاقات الإضافية' : 'Addon domains', ratio(facts.addonDomains, facts.addonCap)),
     blankMeter(ar ? 'صناديق البريد' : 'Mailboxes', ratio(facts.mailboxes, facts.mailboxCap)),
     blankMeter(ar ? 'قواعد البيانات' : 'Databases', ratio(facts.databases, facts.databaseCap)),
@@ -527,16 +557,16 @@ const liveDesktopMeters = (facts: LiveFacts): HomeMeter[] => {
 }
 
 const livePhoneMeters = (facts: LiveFacts): HomeMeter[] => {
-  const quota = (limit: string | null) => limit ? `— / ${limit}` : '—'
   const labels = facts.ar
     ? ['حركة البيانات الشهرية', 'القرص', 'العمليات', 'الذاكرة', 'صناديق البريد', 'قواعد البيانات', 'النطاقات الإضافية']
     : ['Monthly bandwidth', 'Disk', 'Processes', 'Memory', 'Mailboxes', 'Databases', 'Addon domains']
   const values = [
-    quota(facts.bandwidthLimit), quota(facts.diskLimit),
-    facts.processLimit ? `— / ${facts.processLimit}` : '—', quota(facts.memoryLimit),
+    resourceLine(facts, 'bandwidth'), resourceLine(facts, 'disk'),
+    resourceLine(facts, 'processes'), resourceLine(facts, 'memory'),
     ratio(facts.mailboxes, facts.mailboxCap), ratio(facts.databases, facts.databaseCap), ratio(facts.addonDomains, facts.addonCap),
   ]
-  return labels.map((label, index) => blankMeter(label, values[index] ?? '—'))
+  const pcts = [0, resourcePct(facts, 'disk'), resourcePct(facts, 'processes'), resourcePct(facts, 'memory'), 0, 0, 0]
+  return labels.map((label, index) => blankMeter(label, values[index] ?? '—', pcts[index] ?? 0))
 }
 
 const liveLede = (facts: LiveFacts): string => {
@@ -567,8 +597,8 @@ const desktopFromFacts = (facts: LiveFacts, actionHtml: string, qualified?: Read
   const generation = liveGeneration(facts)
   return {
     ar, username: facts.username, domain: facts.domain, planLabel: facts.planLabel,
-    diskLabel: ar ? 'القرص' : 'Disk', diskValue: facts.diskLimit ? `— / ${facts.diskLimit}` : '—', diskPct: 0,
-    procLabel: ar ? 'العمليات' : 'Processes', procValue: facts.processLimit ? `— / ${facts.processLimit}` : '—', procPct: 0,
+    diskLabel: ar ? 'القرص' : 'Disk', diskValue: resourceLine(facts, 'disk'), diskPct: resourcePct(facts, 'disk'),
+    procLabel: ar ? 'العمليات' : 'Processes', procValue: resourceLine(facts, 'processes'), procPct: resourcePct(facts, 'processes'),
     nav: navViews(ar, 'nav-group-'),
     title: ar ? 'الرئيسية' : 'Home', ledeHtml: liveLede(facts),
     pill: generation.pill, generationHtml: generation.html,
@@ -580,7 +610,7 @@ const desktopFromFacts = (facts: LiveFacts, actionHtml: string, qualified?: Read
     meters: liveDesktopMeters(facts),
     changesTitle: ar ? 'آخر التغييرات' : 'Recent changes', changes: facts.changes ?? [],
     emptyChanges: ar ? 'لا تغييرات مسجّلة لهذا الحساب بعد.' : 'No changes are recorded for this account yet.',
-    metricsUnavailable: true, actionHtml,
+    metricsUnavailable: !facts.sampled, actionHtml,
     ...(signOutLabel ? { signOutLabel } : {}),
   }
 }
@@ -592,7 +622,7 @@ const phoneFromFacts = (facts: LiveFacts, actionHtml: string, titleTag: 'h1' | '
     ar, username: facts.username, domain: facts.domain, planLabel: facts.planLabel,
     title: ar ? 'الرئيسية' : 'Home', titleTag, ledeHtml: livePhoneLede(facts),
     countText: totalCount(groups, ar, true), groups, meters: livePhoneMeters(facts),
-    nav: navViews(ar, 'm-nav-group-'), metricsUnavailable: true, actionHtml,
+    nav: navViews(ar, 'm-nav-group-'), metricsUnavailable: !facts.sampled, actionHtml,
     ...(signOutLabel ? { signOutLabel } : {}),
   }
 }
@@ -628,6 +658,14 @@ export interface XpanelHomeProps {
   signOutLabel?: string
   lastSignInAt?: string
   recentChanges?: HomeChange[]
+  /** A host sample. Absent means the meters stay unknown. */
+  usage?: {
+    phpVersion: string | null
+    diskBytes: number | null
+    memoryBytes: number | null
+    processCount: number | null
+    bandwidth: 'unmeasured'
+  }
 }
 
 const factsFromProps = (props: XpanelHomeProps): LiveFacts => {
@@ -635,11 +673,14 @@ const factsFromProps = (props: XpanelHomeProps): LiveFacts => {
   const domains = props.domains ?? []
   const primary = domains.find(domain => domain.kind === 'primary') ?? domains.find(domain => domain.name === props.account.primaryDomain)
   const handler = primary?.php?.handler
-  const version = primary?.php?.version
-  const phpName = handler === 'fpm' ? 'PHP-FPM' : handler === 'cgi' ? 'CGI' : handler === 'suphp' ? 'suPHP' : handler === 'lsphp' ? 'lsphp' : null
+  const unitVersion = props.usage?.phpVersion && /^\d+\.\d+$/.test(props.usage.phpVersion) ? props.usage.phpVersion : null
+  const version = unitVersion ?? primary?.php?.version ?? null
+  const phpName = unitVersion ? 'PHP-FPM' : handler === 'fpm' ? 'PHP-FPM' : handler === 'cgi' ? 'CGI' : handler === 'suphp' ? 'suPHP' : handler === 'lsphp' ? 'lsphp' : null
   const resources = props.plan?.resources
   const caps = props.plan?.caps
   const io = finite(resources?.ioWriteBps)
+  const diskMb = finite(resources?.diskMb)
+  const memoryMb = finite(resources?.memoryMb)
   return {
     ar,
     username: props.account.username,
@@ -649,8 +690,8 @@ const factsFromProps = (props: XpanelHomeProps): LiveFacts => {
     ipv4: props.account.ipv4,
     planLabel: props.plan?.name ? formatDisplayName(props.plan.name) : '—',
     php: version && phpName ? `${version} · ${phpName}` : '—',
-    phpShort: version ?? null,
-    phpHint: version ? (handler === 'fpm' ? `${version} · FPM` : version) : null,
+    phpShort: version,
+    phpHint: version ? (unitVersion || handler === 'fpm' ? `${version} · FPM` : version) : null,
     slice: `xpanel-${props.account.uid}.slice`,
     addonDomains: domains.filter(domain => domain.kind === 'addon').length,
     addonCap: finite(caps?.addonDomains),
@@ -663,11 +704,18 @@ const factsFromProps = (props: XpanelHomeProps): LiveFacts => {
     trashFiles: (props.files ?? []).filter(file => file.trashed).length,
     zones: new Set((props.dnsRecords ?? []).map(record => record.zone)).size,
     sites: domains.length,
-    diskLimit: finite(resources?.diskMb) === null ? null : storage(finite(resources?.diskMb) ?? 0),
+    diskLimit: diskMb === null ? null : storage(diskMb),
     bandwidthLimit: finite(resources?.bandwidthMbMonth) === null ? null : storage(finite(resources?.bandwidthMbMonth) ?? 0),
-    memoryLimit: finite(resources?.memoryMb) === null ? null : `${finite(resources?.memoryMb)} MB`,
+    memoryLimit: memoryMb === null ? null : `${memoryMb} MB`,
     processLimit: finite(resources?.maxProcesses) === null ? null : String(finite(resources?.maxProcesses)),
     ioLimit: io === null ? null : `${formatAsciiBytes(io)}/s`,
+    sampled: props.usage !== undefined,
+    diskBytes: props.usage?.diskBytes ?? null,
+    memoryBytes: props.usage?.memoryBytes ?? null,
+    processCount: props.usage?.processCount ?? null,
+    diskCapBytes: diskMb === null ? null : diskMb * 1024 * 1024,
+    memoryCapBytes: memoryMb === null ? null : memoryMb * 1024 * 1024,
+    processCap: finite(resources?.maxProcesses),
     ...(props.lastSignInAt ? { signInHtml: props.locale === 'ar' ? `<bdi dir="ltr">${escapeHtml(formatUtcClock(props.lastSignInAt))}</bdi>` : escapeHtml(formatUtcClock(props.lastSignInAt)) } : {}),
     ...(props.recentChanges ? { changes: props.recentChanges } : {}),
     ...(props.generationId ? { generationId: props.generationId } : {}),

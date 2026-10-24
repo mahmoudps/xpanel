@@ -92,6 +92,7 @@ export interface WhmSurfaceProps {
   }
   hostSample?: DashboardHostSample | null
   driftCount?: number | null
+  driftCheckedAt?: string | null
   /** Previous superseded generation. Empty when the host has nothing to roll back to. */
   rollbackGenerationId?: number
   generationActivatedAt?: string
@@ -172,6 +173,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
     locale, principal, hostname: props.hostname, panelHostname: props.panelHostname, version: props.version, availableVersion: props.availableVersion,
     generationId: props.generationId, accounts: props.accounts, resellers: props.resellers, ipPool: props.ipPool,
     plans: props.plans, services, auditEntries, hostSample: props.hostSample, driftCount: props.driftCount,
+    ...(props.driftCheckedAt ? { driftCheckedAt: props.driftCheckedAt } : {}),
     certificates: props.certificates, rollbackGenerationId: props.rollbackGenerationId,
     ...(props.generationActivatedAt ? { generationActivatedAt: props.generationActivatedAt } : {}),
     ...(props.nearLimits ? { nearLimits: props.nearLimits } : {}),

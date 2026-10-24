@@ -168,10 +168,30 @@ describe('live truth surfaces', () => {
     }).desktop
     assert.match(home.meters.find(meter => meter.label === 'IO write cap')?.value ?? '', /50\.0 MB\/s/)
     assert.equal(home.meters.find(meter => meter.label === 'Mailboxes')?.value, '1 / 20')
+    const sampled = xpanelHomeFromProps({
+      account: { username: 'demohost', uid: 20000, home: '/home/demohost', primaryDomain: 'demo.example.test', ipv4: '192.0.2.10' },
+      plan: { name: 'Demo', resources: { diskMb: 5120, bandwidthMbMonth: 1024, memoryMb: 512, maxProcesses: 20, ioWriteBps: 50_000_000 }, caps: { addonDomains: 5, mailboxes: 20, databases: 5 } },
+      usage: { phpVersion: '8.3', diskBytes: 1_500_000_000, memoryBytes: 120_000_000, processCount: 4, bandwidth: 'unmeasured' },
+    }).desktop
+    assert.match(sampled.info.map(row => row.valueHtml).join(' '), /8\.3 · PHP-FPM/)
+    assert.match(sampled.meters.find(meter => meter.label === 'Disk')?.value ?? '', /1\.50 GB \/ 5 GB/)
+    assert.match(sampled.meters.find(meter => meter.label === 'Memory')?.value ?? '', /120 MB \/ 512 MB/)
+    assert.equal(sampled.meters.find(meter => meter.label === 'Processes')?.value, '4 / 20')
+    assert.match(sampled.meters.find(meter => meter.label === 'Monthly bandwidth')?.value ?? '', /not measured yet/)
+    assert.equal(sampled.metricsUnavailable, false)
+    const quiet = whmDashboardFromProps({ driftCount: 0, driftCheckedAt: '2026-10-24T14:04:00.000Z', generationId: 3 })
+    assert.equal(quiet.reconcilerTiles.find(tile => tile.label === 'Drift')?.note, 'Checked 14:04 UTC')
+    const moved = whmDashboardFromProps({ locale: 'ar', driftCount: 2, driftCheckedAt: '2026-10-24T14:04:00.000Z' })
+    assert.match(moved.reconcilerTiles.find(tile => tile.label === 'الانحراف')?.note ?? '', /انحراف/)
+    assert.match(moved.reconcilerTiles.find(tile => tile.label === 'الانحراف')?.note ?? '', /14:04 UTC/)
+    assert.equal(whmDashboardFromProps({}).reconcilerTiles.find(tile => tile.label === 'Drift')?.note, '—')
     assert.match(home.info.map(row => row.valueHtml).join(' '), /18:04 UTC/)
     assert.equal(home.changes.length, 1)
     assert.match(home.changes[0]?.titleHtml ?? '', /Signed in/)
     assert.equal(auditOutcomeLabel('auth.login', 'ok', 'en'), 'Signed in')
+    assert.equal(auditOutcomeLabel('auth.logout', 'ok', 'en'), 'Done')
+    assert.equal(auditOutcomeLabel('auth.logout', 'ok', 'ar'), 'تم')
+    assert.equal(auditOutcomeLabel('dns.zone.saved', 'ok', 'en'), 'Applied')
     assert.equal(auditTargetLabel('generation:142', 'en'), 'Generation 142')
     assert.equal(auditTargetLabel('mbx:abc', 'en'), '')
     assert.equal(auditTargetLabel('/health', 'en'), '/health')
@@ -198,7 +218,7 @@ describe('live truth surfaces', () => {
       assert.ok((parsed?.daysLeft ?? 99) < 30)
     }
     const stale = certificate
-      ? certificate.replaceAll('panel.example.test', 'panel.xpanel-lab.test')
+      ? certificate.replaceAll('panel.example.test', 'other.example.test')
       : null
     const nginx = `
 server {
@@ -230,7 +250,7 @@ server {
     assert.equal(identity.version, '0.1.0-xmail.20261024.1')
     if (certificate) {
       assert.equal(identity.panelDomain, 'panel.example.test')
-      assert.equal(identity.panelDomain?.includes('xpanel-lab.test'), false)
+      assert.equal(identity.panelDomain?.includes('other.example.test'), false)
     }
     const served = await readHostIdentity({
       readFile: async () => stale,
@@ -238,5 +258,19 @@ server {
       readServedCertificate: async () => certificate,
     })
     if (certificate) assert.equal(served.panelDomain, 'panel.example.test')
+    const named = await readHostIdentity({
+      readFile: async () => null,
+      runCommand: async (argv) => argv[0]?.endsWith('/nginx') && argv[1] === '-T'
+        ? { ok: true, stdout: 'server { listen 127.0.0.1:8443 ssl; server_name panel.example.test; ssl_certificate /etc/xpanel/ssl/panel/fullchain.pem; }\n', stderr: '' }
+        : { ok: false, stdout: '', stderr: '' },
+      readServedCertificate: async (servername) => servername ? certificate : stale,
+      publicOrigin: () => 'https://panel.example.test',
+    })
+    if (certificate && stale) {
+      assert.equal(named.panelDomain, 'panel.example.test')
+      assert.equal(named.certificates?.length, 2)
+      assert.equal(named.certificates?.some(row => row.names.includes('other.example.test')), true)
+      assert.equal(named.certificates?.some(row => row.names.includes('panel.example.test')), true)
+    }
   })
 })
