@@ -1873,6 +1873,45 @@ export class StateStore {
     return (await this.readAllDatabasesUnlocked()).find((x) => x.db.id === did)?.db ?? null
   }
 
+  /** Reads one account's database metadata under a lease without scanning other accounts. */
+  async readAccountDatabases(id: Id, hint?: { username: string }): Promise<{
+    databases: Database[]
+    databaseUsers: DatabaseUser[]
+  }> {
+    this.assertNotReentrant()
+    return this.mutex.run(() => this.runOperation(async () => {
+      const lease = await this.writerLock.acquire()
+      try {
+        await lease.assertFencingToken()
+        const linked = await this.getAccount(id, hint)
+        if (!linked) {
+          await lease.assertFencingToken()
+          return { databases: [], databaseUsers: [] }
+        }
+        const account = validateAccountFile(await readJsonIfExists(join(this.accountDir(linked.username), 'account.json')))
+        if (account.id !== linked.id || account.username !== linked.username) {
+          fail('VALIDATION', 'database workspace account identity mismatch')
+        }
+        const databases: Database[] = []
+        for (const file of await listJsonFiles(join(this.accountDir(account.username), 'databases'))) {
+          databases.push(validateDatabaseFile(await readJsonIfExists(file), account))
+        }
+        const databasesById = new Map(databases.map(database => [database.id, database]))
+        const databaseUsers: DatabaseUser[] = []
+        for (const file of await listJsonFiles(join(this.accountDir(account.username), 'db-users'))) {
+          databaseUsers.push(toPublicDatabaseUser(validateDatabaseUserFile(await readJsonIfExists(file), { account, databasesById })))
+        }
+        await lease.assertFencingToken()
+        return {
+          databases: databases.filter(database => database.trashedAt === null).sort((a, b) => a.name.localeCompare(b.name)),
+          databaseUsers: databaseUsers.sort((a, b) => a.name.localeCompare(b.name)),
+        }
+      } finally {
+        await lease.release()
+      }
+    }))
+  }
+
   async listDatabases(accountId: Id, opts: { includeTrashed?: boolean } = {}): Promise<Database[]> {
     if (!isUuid(accountId)) return []
     const aid = accountId.toLowerCase()

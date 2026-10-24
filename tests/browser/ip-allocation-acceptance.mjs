@@ -11,6 +11,15 @@ import { collectSnapshotFiles, computeSourceDigest } from '../../scripts/vm/sour
 import { assertAppliedFont } from './applied-font-contract.mjs'
 
 const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
+const creationFieldContract = [
+  { id: 'new-acc-username', name: 'username', tag: 'INPUT', type: 'text', required: true },
+  { id: 'new-acc-domain', name: 'primaryDomain', tag: 'INPUT', type: 'text', required: true },
+  { id: 'new-acc-contact', name: 'contactEmail', tag: 'INPUT', type: 'email', required: false },
+  { id: 'new-acc-plan', name: 'planId', tag: 'SELECT', type: 'select-one', required: true },
+  { id: 'new-acc-password', name: 'password', tag: 'INPUT', type: 'password', required: true },
+  { id: 'new-acc-ipv4', name: 'ipAssignment', tag: 'SELECT', type: 'select-one', required: true },
+  { id: 'new-acc-ipv6', name: 'ipv6', tag: 'INPUT', type: 'text', required: false },
+]
 const output = resolve(process.argv.find(value => value.startsWith('--output='))?.slice(9) ?? 'test-results/ip-allocation-' + new Date().toISOString().replaceAll(':', '-'))
 assert.equal(process.versions.node, readFileSync(join(root, '.node-version'), 'utf8').trim())
 assert.equal(existsSync(output), false, 'Use a new evidence directory; preserve previous attempts.')
@@ -131,7 +140,18 @@ try {
       assert.equal(await selector.evaluate(element => element.tagName), 'SELECT')
       assert.equal(await selector.getAttribute('aria-describedby'), 'new-acc-ipv4-address new-acc-ipv4-status')
       await expect(page.getByRole('combobox', { name: state.locale === 'ar' ? 'تعيين IPv4' : 'IPv4 assignment', exact: true })).toHaveCount(1)
-      assert.equal(await page.locator('[data-create-account-form] input,[data-create-account-form] select').count(), 6)
+      const creationFields = await page.locator('[data-create-account-form] input,[data-create-account-form] select').evaluateAll(controls => controls.map(control => ({
+        id: control.id, name: control.name, tag: control.tagName, type: control.type, required: control.required,
+        labelFor: control.labels[0]?.htmlFor, associatedLabels: control.labels.length,
+        labelAssociated: control.labels[0]?.control === control && control.labels[0].textContent.trim().length > 0,
+      })))
+      assert.deepEqual(creationFields.map(({ id, name, tag, type, required }) => ({ id, name, tag, type, required })), creationFieldContract)
+      for (const field of creationFields) {
+        assert.equal(field.labelFor, field.id)
+        assert.equal(field.associatedLabels, 1)
+        assert.equal(field.labelAssociated, true)
+      }
+      result.creationFields = creationFields
       await expect(selector).toHaveValue('shared')
       if (state.kind === 'native') {
         await ready(page); await page.evaluate(() => document.fonts.ready)

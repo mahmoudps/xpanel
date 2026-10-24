@@ -103,7 +103,7 @@ See [TESTING.md](TESTING.md) for executable commands.
 
 ### Typography and spacing roles
 
-Use IBM Plex Sans for English interface text and brands, and IBM Plex Sans Arabic for Arabic interface text. Noto Sans Arabic remains an allowed fallback face, not the Arabic UI face. Keep ordinary navigation, labels, buttons, headings and values in the interface family. Reserve IBM Plex Mono for code, commands, file paths and technical identifiers; tabular numbers do not by themselves require a monospace family.
+Use IBM Plex Sans for English interface text and IBM Plex Sans Arabic for Arabic interface text. Noto Sans Arabic remains an allowed fallback face, not the Arabic UI face. Keep ordinary navigation, labels, buttons, headings and values in the interface family. The sign-in xPanel, xWHM and xMail wordmarks and the reference mail header wordmark use IBM Plex Mono. This explicit wordmark exception does not extend to ordinary interface text or headings. Otherwise reserve IBM Plex Mono for code, commands, file paths and technical identifiers; tabular numbers do not by themselves require a monospace family.
 
 | Role | Font size | Latin line height | Arabic line height |
 |---|---|---|---|
@@ -114,7 +114,7 @@ Use IBM Plex Sans for English interface text and brands, and IBM Plex Sans Arabi
 | Page heading | 26px | 34px | 36px |
 | Mobile input | 16px | 24px | 24px |
 
-Arabic uses additional vertical room for its glyphs; Latin and Arabic line heights are not identical. Brands use proportional Plex Sans with their role line height; technical-only Mono does not change the ordinary interface hierarchy.
+Arabic uses additional vertical room for its glyphs; Latin and Arabic line heights are not identical. The dedicated wordmarks retain their product typography; their Mono exception does not change the proportional font or line-height requirements for ordinary interface text and headings.
 
 The primary layout rhythm uses 8px between a label and its value, 16px between fields, 24px between groups or within desktop cards, and 32px between larger sections. Phone cards use 16px padding. Utility icon spacing is separate from form/group rhythm. Generic controls retain at least 44px height; login inputs use 48px.
 

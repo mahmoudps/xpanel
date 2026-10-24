@@ -29,6 +29,7 @@ vi.mock('../../web/src/index.ts', async (importOriginal) => {
 
 const PUBLIC_VECTOR = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const SERVER_SECRET = 'web-boundary-fixture-secret-for-tests-only'
+const PUBLIC_DB_AUTH = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq'
 const observations: Record<string, unknown>[] = []
 const future = () => new Date(Date.now() + 60_000).toISOString()
 const protectedPaths = ['/', '/whm', '/panel', '/mail', '/home', '/resources', '/files/manager', '/panel/files/manager', '/whm/accounts', '/mail/inbox']
@@ -253,7 +254,7 @@ describe('production web renderer boundary regressions', () => {
     expect(snapshotReads).toBe(0)
   })
 
-  it('serves a real authenticated read-only account overview over HTTP without cross-account or private fields', async () => {
+  it.each([false, true])('serves a scoped account overview over HTTP with populated owner database state: %s', async (populated) => {
     const featureList = await state.store.createFeatureList({ name: 'Summary fixture features', ownerId: null, disabled: [] })
     const plan = await state.store.createPlan({
       name: 'Summary plan7', ownerId: null, featureListId: featureList.id,
@@ -267,6 +268,16 @@ describe('production web renderer boundary regressions', () => {
     await state.store.saveServerIp({ address: '192.0.2.199', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
     const owner = await state.store.createAccount({ ...accountInput, username: 'owner7', primaryDomain: 'owner7.example.test' })
     const other = await state.store.createAccount({ ...accountInput, username: 'other7', primaryDomain: 'private-other-account.example.test' })
+    const trashedDatabase = await state.store.createDatabase({ accountId: owner.id, name: 'owner7_trashed' })
+    await state.store.trashDatabase(trashedDatabase.id)
+    const databases = populated ? [await state.store.createDatabase({ accountId: owner.id, name: 'owner7_live' })] : []
+    const databaseUsers = populated ? await Promise.all(['app', 'reader'].map(name => state.store.createDatabaseUser({
+      accountId: owner.id, name: `owner7_${name}`, authPlugin: 'ed25519', authString: PUBLIC_DB_AUTH,
+    }))) : []
+    const otherDatabase = await state.store.createDatabase({ accountId: other.id, name: 'other7_private' })
+    const otherDatabaseUser = await state.store.createDatabaseUser({
+      accountId: other.id, name: 'other7_private', authPlugin: 'ed25519', authString: PUBLIC_DB_AUTH,
+    })
     const principal = await createUserPrincipal(db.db, { username: owner.username, accountId: owner.id, passwordHash: PUBLIC_VECTOR })
     const cookie = await session(principal.id)
     const app = createApiApp({ store: state.store, db: db.db, serverSecret: SERVER_SECRET, webRenderer: await renderer() })
@@ -275,13 +286,23 @@ describe('production web renderer boundary regressions', () => {
       const origin = `http://127.0.0.1:${server.port}`
       for (const locale of ['en', 'ar']) {
         const response = await fetch(`${origin}/panel?lang=${locale}`, { headers: { cookie }, redirect: 'manual' })
-        const html = await observe(`scoped-summary-http:${locale}`, response, 200)
+        const html = await observe(`scoped-summary-http:${populated ? 'database-populated' : 'database-empty'}:${locale}`, response, 200)
         for (const value of [owner.username, owner.primaryDomain, plan.name, owner.home, owner.ipv4]) expect(html).toContain(value)
         expect(html).toContain('data-board-port="xpanel-home"')
         expect(html).toContain(locale === 'ar' ? 'الرئيسية' : 'Home')
         expect(html).toContain('data-action="logout"')
         expect(html).not.toContain('data-tool-availability="unverified"')
         expect(html).not.toMatch(/<form\b|[\u0660-\u0669\u06f0-\u06f9]/)
+        const panel = hydration.at(-1)?.panel as { databases: Array<{ id: string; name: string }>; databaseUsers: Array<{ id: string; name: string; grants: unknown[] }> }
+        expect(panel.databases.map(database => database.name)).toEqual(databases.map(database => database.name))
+        expect(panel.databaseUsers).toEqual(databaseUsers.map(user => ({ id: user.id, name: user.name, grants: user.grants })))
+        const databaseLabel = locale === 'ar' ? 'قواعد البيانات' : 'Databases'
+        const databaseMeter = new RegExp(`color: #475467">${databaseLabel}</span>([\\s\\S]*?)</div>`).exec(html)?.[1]
+        expect(databaseMeter?.replace(/<[^>]*>/g, '').trim()).toBe(`${databases.length} / 1`)
+        for (const value of [otherDatabase.id, otherDatabase.name, otherDatabaseUser.id, otherDatabaseUser.name, trashedDatabase.id, trashedDatabase.name, PUBLIC_DB_AUTH]) {
+          expect(JSON.stringify(panel)).not.toContain(value)
+          expect(html).not.toContain(value)
+        }
         for (const value of [owner.id, other.id, principal.id, plan.id, featureList.id, owner.contactEmail, other.primaryDomain, PUBLIC_VECTOR]) expect(html).not.toContain(value)
       }
       await observe('scoped-summary-http:other-account', await fetch(`${origin}/panel?accountId=${other.id}`, { headers: { cookie }, redirect: 'manual' }), 404)

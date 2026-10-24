@@ -119,6 +119,7 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
   if (section === 'inbox') {
     return ensureAccessibleSurfaceHtml(renderXmailInbox(xmailInboxFromProps({
       locale,
+      theme,
       mailbox,
       ...(props.quotaUsedMb !== undefined ? { quotaUsedMb: props.quotaUsedMb } : {}),
       ...(props.quotaUsedBytes !== undefined ? { quotaUsedBytes: props.quotaUsedBytes } : {}),
@@ -138,6 +139,7 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
   if (section === 'compose') {
     return ensureAccessibleSurfaceHtml(renderXmailCompose(xmailComposeFromProps({
       locale,
+      theme,
       mailbox,
       ...(props.quotaUsedMb !== undefined ? { quotaUsedMb: props.quotaUsedMb } : {}),
       ...(props.quotaUsedBytes !== undefined ? { quotaUsedBytes: props.quotaUsedBytes } : {}),

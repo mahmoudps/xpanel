@@ -3,6 +3,7 @@ import { ARABIC_TYPE_CSS, isArabicSentence } from '../arabic-type.ts'
 import { isolateLtrRuns } from '../bidi-runs.ts'
 import { auditActionHtml, auditActionLabel, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
 import type { Locale } from '../i18n.ts'
+import { renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 import { escapeHtml, formatAsciiDate, formatAsciiNumber, formatBytes, formatUtcClock, formatUtcDay } from '../tokens.ts'
 
 interface DashboardServiceInput {
@@ -41,6 +42,8 @@ export interface DashboardHostSample {
 
 interface DashboardProps {
   locale?: Locale
+  theme?: 'light' | 'dark'
+  realtimeEnabled?: boolean
   principal?: { username: string }
   hostname?: string
   /** Panel vhost, shown beside the system hostname when the two differ. */
@@ -117,6 +120,8 @@ export interface DashboardNotice {
 
 export interface WhmDashboardModel {
   locale: Locale
+  theme: 'light' | 'dark'
+  realtimeEnabled: boolean
   hostname: string
   username: string
   versionLabel: string
@@ -205,7 +210,7 @@ const NAV: Array<{ id: string; label: [string, string]; items: Array<{ href: str
   { id: 'nav-g-ops', label: ['Operations', 'التشغيل'], items: [
     { href: '/whm/backups', label: ['Backups', 'النسخ'], icon: '<rect x="3" y="4" width="18" height="5" rx="1"></rect><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"></path>' },
     { href: '/whm/transfers', label: ['Transfer tool', 'أداة النقل'], icon: '<path d="M4 8h14l-4-4M20 16H6l4 4"></path>' },
-    { href: '/whm/upgrade', label: ['Upgrade', 'الترقية'], icon: '<circle cx="12" cy="12" r="9"></circle><path d="M12 16V8M8.5 11.5L12 8l3.5 3.5"></path>' },
+    { href: '/whm/server/upgrade', label: ['Upgrade', 'الترقية'], icon: '<circle cx="12" cy="12" r="9"></circle><path d="M12 16V8M8.5 11.5L12 8l3.5 3.5"></path>' },
     { href: '/whm/audit', label: ['Audit log', 'سجل التدقيق'], icon: '<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"></path><path d="M14 3v5h5M8.5 13h7M8.5 17h7"></path>' },
   ] },
 ]
@@ -398,21 +403,21 @@ const pill = (chip: DashboardChip, mono = false): string => {
   return `<span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: ${chip.bg}; color: ${chip.fg}; font-size: 12px; font-weight: 600;${font}"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: ${dot}; ${border}"></span>${escapeHtml(chip.label)}</span>`
 }
 
-const linkStyle = 'display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; color: #C9D3E1; text-decoration: none; font-size: 14px'
-const activeStyle = 'display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; background: #1D2B40; color: #FFFFFF; font-weight: 600; box-shadow: inset 3px 0 0 #6EA0FF; text-decoration: none; font-size: 14px'
+const linkStyle = 'display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; color: #C9D3E1; text-decoration: none; font-size: 14px'
+const activeStyle = 'display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; background: #1D2B40; color: #FFFFFF; font-weight: 600; box-shadow: inset 3px 0 0 #6EA0FF; text-decoration: none; font-size: 14px'
 
 const navHtml = (model: WhmDashboardModel): string => {
   const ar = model.locale === 'ar'
   const index = ar ? 1 : 0
   const active = ar
-    ? 'display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; background: #1D2B40; color: #FFFFFF; font-weight: 600; box-shadow: inset -3px 0 0 #6EA0FF; text-decoration: none; font-size: 14px'
+    ? 'display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; background: #1D2B40; color: #FFFFFF; font-weight: 600; box-shadow: inset -3px 0 0 #6EA0FF; text-decoration: none; font-size: 14px'
     : activeStyle
   const groups = NAV.map(group => {
     const items = group.items.map(item => {
       const current = item.href === model.activeHref
       const label = show(item.label[index] ?? '', ar)
       const labelBody = label.includes('<') ? `<span>${label}</span>` : label
-      return `<li><a href="${item.href}"${current ? ' aria-current="page"' : ''} style="${current ? active : linkStyle}">${svg(item.icon)}${labelBody}</a></li>`
+      return `<li><a href="${item.href}" data-nav-route="${item.href}"${current ? ' aria-current="page"' : ''} style="${current ? active : linkStyle}">${svg(item.icon)}${labelBody}</a></li>`
     }).join('')
     return `<div style="display: flex; flex-direction: column; gap: 4px">
       <span id="${group.id}" style="padding: 0 12px; font-size: 11px; font-weight: 600; color: #8A99AF; line-height: 1.6">${show(group.label[index] ?? '', ar)}</span>
@@ -420,7 +425,7 @@ const navHtml = (model: WhmDashboardModel): string => {
     </div>`
   }).join('')
   const brand = ar ? '<bdi dir="ltr">xWHM</bdi>' : 'xWHM'
-  return `<nav aria-label="xWHM navigation" style="flex: 1 1 248px; max-width: 100%; background: #0E1726; color: #C9D3E1; padding: 20px 14px; display: flex; flex-direction: column; gap: 18px">
+  return `<nav data-xp-sidebar aria-label="xWHM navigation" style="flex: 1 1 248px; max-width: 100%; background: #0E1726; color: #C9D3E1; padding: 20px 14px; display: flex; flex-direction: column; gap: 18px">
     <div style="display: flex; align-items: center; gap: 10px; padding: 0 6px">
       <span aria-hidden="true" style="flex: none; width: 36px; height: 36px; border-radius: 8px; background: #1D5BD6; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 500">x</span>
       <div style="display: flex; flex-direction: column; min-width: 0">
@@ -440,18 +445,21 @@ const headerHtml = (model: WhmDashboardModel): string => {
   const generation = show(model.generationLabel, ar)
   const generationBody = generation.includes('<bdi') ? `<span>${generation}</span>` : generation
   const lang = model.locale === 'ar'
-    ? `<a href="?lang=en" lang="en" hreflang="en" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; border-radius: 8px; font-family: 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 500; color: #1D5BD6; text-decoration: none">English</a>`
-    : `<a href="?lang=ar" lang="ar" hreflang="ar" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; border-radius: 8px; font-family: 'IBM Plex Sans Arabic', 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 500; color: #1D5BD6; text-decoration: none">العربية</a>`
+    ? `<a href="?lang=en" data-lang-switch="en" lang="en" hreflang="en" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; border-radius: 8px; font-family: 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 500; color: #1D5BD6; text-decoration: none">English</a>`
+    : `<a href="?lang=ar" data-lang-switch="ar" lang="ar" hreflang="ar" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; border-radius: 8px; font-family: 'IBM Plex Sans Arabic', 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 500; color: #1D5BD6; text-decoration: none">العربية</a>`
   return `<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 32px; background: #FFFFFF; border-bottom: 1px solid #E2E6EC">
       <div role="search" style="position: relative; flex: 1 1 260px; max-width: 420px; display: flex; align-items: center">
         <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5D6B7E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position: absolute; inset-inline-start: 12px; pointer-events: none"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
-        <input type="search" aria-label="${escapeHtml(model.searchLabel)}" placeholder="${escapeHtml(model.searchPlaceholder)}" style="width: 100%; min-height: 40px; padding-inline-start: 36px; padding-inline-end: 40px; border-radius: 8px; border: 1px solid #D0D5DD; background: #F8F9FB; font-family: inherit; font-size: 14px; color: #101828">
+        <input type="search" aria-label="${escapeHtml(model.searchLabel)}" placeholder="${escapeHtml(model.searchPlaceholder)}" style="width: 100%; min-height: 44px; padding-inline-start: 36px; padding-inline-end: 40px; border-radius: 8px; border: 1px solid #D0D5DD; background: #F8F9FB; font-family: inherit; font-size: 14px; color: #101828">
         <kbd aria-hidden="true" style="position: absolute; inset-inline-end: 8px; min-width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid #D0D5DD; background: #FFFFFF; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #475467">/</kbd>
       </div>
       <span style="flex: 1 1 0"></span>
       <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: ${genBg}; color: ${genFg}; font-size: 12px; font-weight: 600"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: ${genFg}"></span>${generationBody}</span>
       <span style="display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: #EEF0F3; color: #344054; font-size: 12px; font-weight: 600; font-family: 'IBM Plex Mono', monospace">${show(model.versionLabel, ar)}</span>
+      ${renderPageSearchButton(model.locale)}
+      ${renderLiveUpdatesIndicator(model.locale, model.realtimeEnabled)}
       ${lang}
+      <a href="?theme=${model.theme === 'dark' ? 'light' : 'dark'}" data-theme-toggle="${model.theme === 'dark' ? 'light' : 'dark'}" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; color: #1D5BD6; text-decoration: none">${model.theme === 'dark' ? (model.locale === 'ar' ? 'الوضع الفاتح' : 'Light theme') : (model.locale === 'ar' ? 'الوضع الداكن' : 'Dark theme')}</a>
       ${model.signOutLabel ? `<button type="button" data-action="logout" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer">${escapeHtml(model.signOutLabel)}</button>` : ''}
       <button type="button" aria-label="${escapeHtml(model.locale === 'ar' ? `قائمة المستخدم ${model.username}` : `User menu for ${model.username}`)}" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding-block: 0; padding-inline: 6px 12px; border-radius: 999px; border: 1px solid #E2E6EC; background: #FFFFFF; color: #101828; font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; cursor: pointer"><span aria-hidden="true" style="width: 32px; height: 32px; border-radius: 50%; background: #0E1726; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 13px">${initial}</span>${show(model.username, ar)}</button>
     </header>`
@@ -513,7 +521,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
     : `<li style="display: flex; gap: 6px"><a href="/whm" style="color: #475467">${escapeHtml(model.crumbRoot)}</a><span aria-hidden="true">/</span></li><li aria-current="page">${escapeHtml(model.crumbPage)}</li>`
   const lede = ar
     ? `<p style="margin: 0; font-size: 14px; color: #475467; line-height: 1.6; max-width: 68ch"><span style="font-family: 'IBM Plex Mono', monospace">${ltr(model.ledeHost)}</span> ${rich(model.ledeRest)}<time datetime="${escapeHtml(model.ledeDatetime)}"><bdi dir="ltr" style="white-space: nowrap">${escapeHtml(model.ledeTime)}</bdi></time></p>`
-    : `<p style="margin: 0; font-size: 14px; color: #475467; line-height: 1.6; max-width: 68ch"><span style="font-family: 'IBM Plex Mono', monospace">${escapeHtml(model.ledeHost)}</span> ${escapeHtml(model.ledeRest)}<time datetime="${escapeHtml(model.ledeDatetime)}">${escapeHtml(model.ledeTime)}</time>.</p>`
+    : `<p style="margin: 0; font-size: 14px; color: #475467; line-height: 1.6; max-width: 68ch"><span style="font-family: 'IBM Plex Mono', monospace"><bdi dir="ltr">${escapeHtml(model.ledeHost)}</bdi></span> ${escapeHtml(model.ledeRest)}<time datetime="${escapeHtml(model.ledeDatetime)}">${escapeHtml(model.ledeTime)}</time>.</p>`
   return `<div class="xp-board-port" data-board-port="xwhm-dashboard" data-section="overview-attention"${ar ? ' dir="rtl"' : ''} style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #F5F6F8; color: #101828">
   <style>
     .xp-board-port{line-height:normal;font-size:16px;font-kerning:auto;font-feature-settings:normal;font-synthesis:weight style small-caps;-webkit-font-smoothing:antialiased}
@@ -523,7 +531,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
     ${ARABIC_TYPE_CSS}
   </style>
   ${navHtml(model)}
-  <main id="main-content" style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+  <main id="main-content" tabindex="-1" style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
     ${headerHtml(model)}
     <div style="width: 100%; max-width: 1180px; margin: 0 auto; padding: 24px 32px 52px; display: flex; flex-direction: column; gap: 24px">
       <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px">
@@ -627,6 +635,8 @@ const running = (label = 'Running'): DashboardChip => ({ label, bg: '#E7F5EE', f
 
 export const whmDashboardFixture = (): WhmDashboardModel => ({
   locale: 'en',
+  theme: 'light',
+  realtimeEnabled: false,
   hostname: 'srv1.xpanel.test',
   username: 'root',
   versionLabel: 'v1.4.2',
@@ -730,6 +740,8 @@ const domain = (name: string): string => `<bdi dir="ltr"><span style="font-famil
 
 export const whmDashboardFixtureAr = (): WhmDashboardModel => ({
   locale: 'ar',
+  theme: 'light',
+  realtimeEnabled: false,
   hostname: 'srv1.xpanel.test',
   username: 'root',
   versionLabel: 'v1.4.2',
@@ -1018,6 +1030,8 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
   const meter = (label: string): DashboardMeter => ({ label, value: '—', now: '0', pct: '0%', color: '#1D5BD6', note: '—', noteColor: '#5D6B7E' })
   return {
     locale,
+    theme: props.theme ?? 'light',
+    realtimeEnabled: props.realtimeEnabled === true,
     hostname,
     username: props.principal?.username ?? '—',
     versionLabel: version,

@@ -462,8 +462,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
   function setWsBadgeState(state) {
     var el = document.querySelector('[data-ws-state]');
     if (el) el.setAttribute('data-ws-state', state);
-    var indicator = document.querySelector('[data-ws-indicator]');
-    if (!indicator || indicator.getAttribute('data-ws-indicator') === 'unavailable') return;
+    var indicators = document.querySelectorAll('[data-ws-indicator]');
     var ar = document.documentElement.lang === 'ar';
     var connected = state === 'connected';
     var label = connected
@@ -471,14 +470,18 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       : state === 'offline' ? (ar ? 'غير متصل' : 'Offline')
       : state === 'reconnecting' ? (ar ? 'إعادة الاتصال' : 'Reconnecting')
       : (ar ? 'جار الاتصال' : 'Connecting');
-    indicator.setAttribute('data-ws-indicator', connected ? 'connected' : 'disconnected');
-    var badge = indicator.querySelector('.xp-badge');
-    if (!badge) return;
-    var tone = connected ? 'ok' : 'suspended';
-    badge.className = 'xp-badge xp-badge--' + tone;
-    badge.setAttribute('data-status', tone);
-    var text = badge.querySelector('.xp-badge__label');
-    if (text) text.textContent = label;
+    for (var i = 0; i < indicators.length; i++) {
+      var indicator = indicators[i];
+      if (indicator.getAttribute('data-ws-indicator') === 'unavailable') continue;
+      indicator.setAttribute('data-ws-indicator', connected ? 'connected' : 'disconnected');
+      var badge = indicator.querySelector('.xp-badge');
+      if (!badge) continue;
+      var tone = connected ? 'ok' : 'suspended';
+      badge.className = 'xp-badge xp-badge--' + tone;
+      badge.setAttribute('data-status', tone);
+      var text = badge.querySelector('.xp-badge__label');
+      if (text) text.textContent = label;
+    }
   }
 
   function markLiveUpdatesOff() {
@@ -488,19 +491,22 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     if (ws) {
       try { ws.close(); } catch (_err) { /* The socket is already gone. */ }
     }
-    var indicator = document.querySelector('[data-ws-indicator]');
-    if (!indicator) return;
-    indicator.setAttribute('data-ws-indicator', 'unavailable');
+    var indicators = document.querySelectorAll('[data-ws-indicator]');
     var ar = document.documentElement.lang === 'ar';
     var label = ar ? 'التحديثات المباشرة متوقفة' : 'Live updates off';
-    indicator.setAttribute('aria-label', label);
-    indicator.setAttribute('title', label);
-    var badge = indicator.querySelector('.xp-badge');
-    if (!badge) return;
-    badge.className = 'xp-badge xp-badge--suspended';
-    badge.setAttribute('data-status', 'suspended');
-    var text = badge.querySelector('.xp-badge__label');
-    if (text) text.textContent = label;
+    for (var i = 0; i < indicators.length; i++) {
+      var indicator = indicators[i];
+      if (indicator.getAttribute('data-ws-indicator') === 'unavailable') continue;
+      indicator.setAttribute('data-ws-indicator', 'unavailable');
+      indicator.setAttribute('aria-label', label);
+      indicator.setAttribute('title', label);
+      var badge = indicator.querySelector('.xp-badge');
+      if (!badge) continue;
+      badge.className = 'xp-badge xp-badge--suspended';
+      badge.setAttribute('data-status', 'suspended');
+      var text = badge.querySelector('.xp-badge__label');
+      if (text) text.textContent = label;
+    }
   }
 
   function updateReconcileDom(event) {
