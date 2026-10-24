@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { fail } from '@xpanel/core'
 import { createRootPrincipal, createTestDb, listAudit } from '@xpanel/db'
 import { createTestStateStore, ExtendedFeaturesStore } from '@xpanel/state'
-import { hashPasswordArgon2id } from './auth.ts'
+import { computeTotpCode, hashPasswordArgon2id } from './auth.ts'
 import { createApiApp } from './server.ts'
 import { loadMailDocument } from './mail/document.ts'
 import type { InboxMessage, MailboxSendInput, MailboxTransport } from './mail/inbox.ts'
@@ -376,8 +376,23 @@ describe('xMail mailbox inbox', () => {
       body: JSON.stringify({ username: 'root', password: 'RootPassword!2026' }),
     }), { remoteAddress: '192.0.2.5' })
     expect(rootLogin.status).toBe(200)
-    const rootBody = await rootLogin.json() as { csrfToken?: string }
+    const rootBody = await rootLogin.json() as { csrfToken?: string; mfaEnrollmentRequired?: boolean }
     const cookie = (rootLogin.headers.get('set-cookie') ?? '').split(';')[0] ?? ''
+    if (rootBody.mfaEnrollmentRequired) {
+      const setup = await whm.fetch(new Request(`${origin}/api/auth/2fa/setup`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie, 'x-csrf-token': rootBody.csrfToken ?? '' },
+        body: JSON.stringify({ password: 'RootPassword!2026' }),
+      }), { remoteAddress: '192.0.2.5' })
+      expect(setup.status).toBe(200)
+      const enrollment = await setup.json() as { secret: string }
+      const enable = await whm.fetch(new Request(`${origin}/api/auth/2fa/enable`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie, 'x-csrf-token': rootBody.csrfToken ?? '' },
+        body: JSON.stringify({ code: computeTotpCode(enrollment.secret) }),
+      }), { remoteAddress: '192.0.2.5' })
+      expect(enable.status).toBe(200)
+    }
     const serviceUser = await state.store.getServiceUserByLogin('inbox@alpha.example.test')
     expect(serviceUser?.id).toBeTruthy()
     const removed = await whm.fetch(new Request(`${origin}/api/service-users/${serviceUser!.id}`, {

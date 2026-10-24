@@ -39,6 +39,7 @@ const fixture = async () => {
   await setTotpSecret(database.db, root.id, new Uint8Array(32))
   const reseller = await state.store.createReseller({ username: 'reseller7', passwordHash: HASH, acl: ['list-accounts'], maxAccounts: 10, totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] })
   const resellerPrincipal = await createResellerPrincipal(database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH })
+  await setTotpSecret(database.db, resellerPrincipal.id, new Uint8Array(32))
   const sessions = new Map<EntryPoint, { cookie: string; id: string }>()
   const servers = new Map<EntryPoint, Awaited<ReturnType<typeof listenApiServer>>>()
   const session = async (profile: EntryPoint, principalId: string) => {

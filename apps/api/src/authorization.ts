@@ -4,6 +4,7 @@ import type { Account, ResellerAcl } from '@xpanel/core'
 import type { StateStore } from '@xpanel/state'
 import type { AuthenticatedCaller } from './auth.ts'
 import { isMongoDatabaseRoute } from './entry-points.ts'
+import { operatorRequiresMfaEnrollment } from './mfa-policy.ts'
 
 export interface RoutePolicy {
   resource: string
@@ -218,6 +219,15 @@ export const assertRequestAuthorized = async (store: StateStore, caller: Authent
   const passwordRecoveryRoute = (method === 'GET' && pathname === '/api/auth/me') ||
     (method === 'POST' && ['/api/auth/logout', '/api/auth/change-password'].includes(pathname))
   if (caller.principalRecord.forcePasswordChange && !passwordRecoveryRoute) return fail('FORBIDDEN', 'password change is required before continuing', { passwordChangeRequired: true })
+  const enrollmentRoute = (method === 'GET' && pathname === '/api/auth/me') ||
+    (method === 'POST' && (
+      ['/api/auth/logout', '/api/auth/2fa/setup', '/api/auth/2fa/enable'].includes(pathname) ||
+      (pathname === '/api/auth/change-password' && caller.principalRecord.forcePasswordChange)
+    ))
+  if (operatorRequiresMfaEnrollment(caller.principal.kind, caller.principalRecord.totpEnabled) && !enrollmentRoute) {
+    const role = caller.principal.kind === 'reseller' ? 'reseller' : 'root'
+    return fail('FORBIDDEN', `${role} must complete two-factor enrollment before administration`, { mfaEnrollmentRequired: true })
+  }
   if (policy.rootOnly && (caller.principal.kind !== 'root' || isMailboxPrincipal(caller))) return fail('FORBIDDEN', 'root role is required for this operation')
   if (isMailboxPrincipal(caller)) {
     if (!/^\/api\/auth\/(?:me|logout)$/.test(pathname)) {

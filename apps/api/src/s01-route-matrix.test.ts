@@ -102,11 +102,12 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       delegatedIps: ['192.0.2.10'],
     })
     resellerFullId = resellerFull.id
-    await createResellerPrincipal(db.db, {
+    const resellerFullPrincipal = await createResellerPrincipal(db.db, {
       id: resellerFull.id,
       username: resellerFull.username,
       passwordHash,
     })
+    await setTotpSecret(db.db, resellerFullPrincipal.id, sealTotpSecret('JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', SERVER_SECRET), [])
 
     const resellerNoAcl = await state.store.createReseller({
       username: 'resellernoacl',
@@ -120,11 +121,12 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       delegatedIps: [],
     })
     resellerNoAclId = resellerNoAcl.id
-    await createResellerPrincipal(db.db, {
+    const resellerNoAclPrincipal = await createResellerPrincipal(db.db, {
       id: resellerNoAcl.id,
       username: resellerNoAcl.username,
       passwordHash,
     })
+    await setTotpSecret(db.db, resellerNoAclPrincipal.id, sealTotpSecret('JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', SERVER_SECRET), [])
 
     featureListId = (
       await state.store.createFeatureList({

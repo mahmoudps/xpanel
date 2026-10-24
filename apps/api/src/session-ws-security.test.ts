@@ -867,9 +867,10 @@ describe('WebSocket authentication against real API and SQLite authority', () =>
       nameservers: ['ns1.example.test'],
       delegatedIps: [],
     })
-    await createResellerPrincipal(database.db, {
+    const resellerPrincipal = await createResellerPrincipal(database.db, {
       id: resellerA.id, username: resellerA.username, passwordHash: fixturePasswordHash,
     })
+    await setTotpSecret(database.db, resellerPrincipal.id, sealTotpSecret('JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', SERVER_SECRET), [])
     await state.store.saveServerIp({ address: '203.0.113.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
     const accountA = await state.store.createAccount({
       username: 'alice',

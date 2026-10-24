@@ -1,4 +1,5 @@
 import type { Locale } from '../i18n.ts'
+import { mailInboxHref } from '../mail-origin.ts'
 import { ARABIC_TYPE_CSS } from '../arabic-type.ts'
 import { isolateLtrRuns, metaPieces } from '../bidi-runs.ts'
 import { formatDisplayName } from '../display-name.ts'
@@ -103,7 +104,7 @@ const GROUPS: Array<{ en: string; ar: string; tools: ToolDef[] }> = [
     tool('email.accounts', 'mail', '/email/accounts', 'Email accounts', 'حسابات البريد', 'email accounts mailbox imap smtp quota صندوق'),
     tool('email.forward', 'forward', '/email/accounts', 'Forwarders', 'إعادة التوجيه', 'forwarders forward alias', true),
     tool('email.filters', 'filter', '/email/accounts', 'Filters', 'الفلاتر', 'filters spam rules sieve تصفية'),
-    tool('email.webmail', 'inbox', '/mail/inbox', 'xMail webmail', 'بريد xMail', 'webmail xmail inbox read compose'),
+    tool('email.webmail', 'inbox', mailInboxHref(), 'xMail webmail', 'بريد xMail', 'webmail xmail inbox read compose'),
   ] },
   { en: 'Metrics', ar: 'المقاييس', tools: [
     tool('metrics.visitors', 'users', '/metrics/traffic', 'Visitors', 'الزوار', 'visitors stats traffic analytics زيارات'),
@@ -153,7 +154,7 @@ const NAV: NavGroup[] = [
   { en: 'Databases', ar: 'قواعد البيانات', items: [{ en: 'MariaDB', ar: 'MariaDB', href: '/databases/mariadb', icon: 'database' }] },
   { en: 'Email', ar: 'البريد', items: [
     { en: 'Email & users', ar: 'البريد والمستخدمون', href: '/email/accounts', icon: 'mail' },
-    { en: 'xMail', ar: 'xMail', href: '/mail/inbox', icon: 'inbox' },
+    { en: 'xMail', ar: 'xMail', href: mailInboxHref(), icon: 'inbox' },
   ] },
   { en: 'Software', ar: 'البرمجيات', items: [
     { en: 'PHP', ar: 'PHP', href: '/software/php', icon: 'code' },
@@ -296,28 +297,39 @@ export interface HomePhoneModel {
 
 const ALWAYS_LIVE_HREFS = new Set(['/security/account'])
 
+const hrefPath = (href: string): string => {
+  if (href.startsWith('https://')) {
+    try {
+      const url = new URL(href)
+      return `${url.pathname}${url.search}`
+    } catch { /* Compare the raw href when it is not a URL. */ }
+  }
+  return href
+}
+
 /** A missing set keeps the board specimen fully linked. A set enables only qualified routes. */
 const toolEnabled = (href: string, qualified: ReadonlySet<string> | undefined): boolean => {
   if (qualified === undefined) return true
-  if (href.startsWith('?')) return true
-  return ALWAYS_LIVE_HREFS.has(href) || qualified.has(href)
+  const path = hrefPath(href)
+  if (path.startsWith('?')) return true
+  return ALWAYS_LIVE_HREFS.has(path) || qualified.has(path)
 }
 
-export const navViews = (ar: boolean, idPrefix: string): HomeNavView[] => NAV.map((group, index) => ({
+export const navViews = (ar: boolean, idPrefix: string, mailOrigin?: string): HomeNavView[] => NAV.map((group, index) => ({
   id: `${idPrefix}${index}`,
   label: ar ? group.ar : group.en,
   items: group.items.map(item => ({
-    href: item.href,
+    href: item.href === '/mail/inbox' ? mailInboxHref(mailOrigin) : item.href,
     label: ar ? item.ar : item.en,
     icon: item.icon,
     current: item.href === '/home',
   })),
 }))
 
-export const groupViews = (ar: boolean, phone: boolean, hints: (tool: ToolDef) => Hint, qualified?: ReadonlySet<string>): HomeGroupView[] => GROUPS.map(group => {
+export const groupViews = (ar: boolean, phone: boolean, hints: (tool: ToolDef) => Hint, qualified?: ReadonlySet<string>, mailOrigin?: string): HomeGroupView[] => GROUPS.map(group => {
   const tools = group.tools.map(item => {
     const hint = hints(item)
-    const href = item.id === 'prefs.language' ? (ar ? '?lang=en' : '?lang=ar') : item.href
+    const href = item.id === 'prefs.language' ? (ar ? '?lang=en' : '?lang=ar') : item.id === 'email.webmail' ? mailInboxHref(mailOrigin) : item.href
     const enabled = toolEnabled(href, qualified)
     const soon = ar ? 'قيد التفعيل' : 'Coming soon'
     return {
@@ -603,15 +615,15 @@ const liveGeneration = (facts: LiveFacts): { pill: { label: string; bg: string; 
   return { pill: neutral, html: `<span style="font-variant-numeric: tabular-nums">Generation ${facts.generationId}</span>` }
 }
 
-const desktopFromFacts = (facts: LiveFacts, actionHtml: string, qualified?: ReadonlySet<string>, signOutLabel?: string): HomeDesktopModel => {
+const desktopFromFacts = (facts: LiveFacts, actionHtml: string, qualified?: ReadonlySet<string>, signOutLabel?: string, mailOrigin?: string): HomeDesktopModel => {
   const ar = facts.ar
-  const groups = groupViews(ar, false, item => liveHint(item, facts, false), qualified)
+  const groups = groupViews(ar, false, item => liveHint(item, facts, false), qualified, mailOrigin)
   const generation = liveGeneration(facts)
   return {
     ar, username: facts.username, domain: facts.domain, planLabel: facts.planLabel,
     diskLabel: ar ? 'القرص' : 'Disk', diskValue: resourceLine(facts, 'disk'), diskPct: resourcePct(facts, 'disk'),
     procLabel: ar ? 'العمليات' : 'Processes', procValue: resourceLine(facts, 'processes'), procPct: resourcePct(facts, 'processes'),
-    nav: navViews(ar, 'nav-group-'),
+    nav: navViews(ar, 'nav-group-', mailOrigin),
     title: ar ? 'الرئيسية' : 'Home', ledeHtml: liveLede(facts),
     pill: generation.pill, generationHtml: generation.html,
     bannerHtml: null, bannerHref: '/metrics/traffic', bannerLabel: ar ? 'اعرض الاستهلاك لكل نطاق' : 'See bandwidth by domain',
@@ -627,14 +639,14 @@ const desktopFromFacts = (facts: LiveFacts, actionHtml: string, qualified?: Read
   }
 }
 
-const phoneFromFacts = (facts: LiveFacts, actionHtml: string, titleTag: 'h1' | 'div', qualified?: ReadonlySet<string>, signOutLabel?: string): HomePhoneModel => {
+const phoneFromFacts = (facts: LiveFacts, actionHtml: string, titleTag: 'h1' | 'div', qualified?: ReadonlySet<string>, signOutLabel?: string, mailOrigin?: string): HomePhoneModel => {
   const ar = facts.ar
-  const groups = groupViews(ar, true, item => liveHint(item, facts, true), qualified).map((group, index) => ({ ...group, open: index === 0 }))
+  const groups = groupViews(ar, true, item => liveHint(item, facts, true), qualified, mailOrigin).map((group, index) => ({ ...group, open: index === 0 }))
   return {
     ar, username: facts.username, domain: facts.domain, planLabel: facts.planLabel,
     title: ar ? 'الرئيسية' : 'Home', titleTag, ledeHtml: livePhoneLede(facts),
     countText: totalCount(groups, ar, true), groups, meters: livePhoneMeters(facts),
-    nav: navViews(ar, 'm-nav-group-'), metricsUnavailable: !facts.sampled, actionHtml,
+    nav: navViews(ar, 'm-nav-group-', mailOrigin), metricsUnavailable: !facts.sampled, actionHtml,
     ...(signOutLabel ? { signOutLabel } : {}),
   }
 }
@@ -668,6 +680,8 @@ export interface XpanelHomeProps {
   /** Routes this account may open. Omit it for the board specimen, which links every tool. */
   qualifiedRoutes?: ReadonlySet<string>
   signOutLabel?: string
+  /** Public xMail origin. Inbox links use `${mailOrigin}/mail/inbox` when it is set. */
+  mailOrigin?: string
   lastSignInAt?: string
   recentChanges?: HomeChange[]
   /** A host sample. Absent means the meters stay unknown. */
@@ -740,8 +754,8 @@ export const xpanelHomeFromProps = (props: XpanelHomeProps): { desktop: HomeDesk
   const facts = factsFromProps(props)
   const actionHtml = props.actionHtml ?? ''
   return {
-    desktop: desktopFromFacts(facts, actionHtml, props.qualifiedRoutes, props.signOutLabel),
-    phone: phoneFromFacts(facts, actionHtml, 'div', props.qualifiedRoutes, props.signOutLabel),
+    desktop: desktopFromFacts(facts, actionHtml, props.qualifiedRoutes, props.signOutLabel, props.mailOrigin),
+    phone: phoneFromFacts(facts, actionHtml, 'div', props.qualifiedRoutes, props.signOutLabel, props.mailOrigin),
   }
 }
 

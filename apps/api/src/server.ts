@@ -114,6 +114,7 @@ import { requestPrefersHtml } from '../../web/src/status-page.ts'
 import { ENTRY_POINTS, entryPointAllowsApiRoute, entryPointAllowsRole, sessionTokenHash } from './entry-points.ts'
 import type { EntryPoint } from './entry-points.ts'
 import { loadQualifiedCatalog } from './host-catalog.ts'
+import { operatorRequiresMfaEnrollment, passwordOnlyOperatorsAllowed, PASSWORD_ONLY_ROOT_ENV, PASSWORD_ONLY_ROOT_WARNING } from './mfa-policy.ts'
 import { renderTotpQrSvg } from './totp-qr.ts'
 import { createLocalMailboxTransport, establishMailboxSession, mailFolderName, mailboxAddressIndex, openMailboxSession, parseMailboxSend, revokeMailboxIdentity, rewriteMailboxIds } from './mail/inbox.ts'
 import type { MailboxTransport } from './mail/inbox.ts'
@@ -979,7 +980,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             session: { id: established.session.id, expiresAt: established.session.expiresAt, mfaVerified: established.session.mfaVerified },
             csrfToken: mailboxCsrf,
             passwordChangeRequired: false,
-            mfaEnrollmentRequired: false,
+            mfaEnrollmentRequired: operatorRequiresMfaEnrollment(established.principal.kind, false),
           }, 200, { 'set-cookie': mailboxCookie })
         }
 
@@ -1097,6 +1098,24 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             resellerId: principal.kind === 'reseller' ? principal.id : null,
           },
         )
+        if (passwordOnlyOperatorsAllowed() && (principal.kind === 'root' || principal.kind === 'reseller') && !principalRecord.totpEnabled) {
+          process.stderr.write(`WARNING: ${PASSWORD_ONLY_ROOT_WARNING} principal=${principal.username}\n`)
+          await emitAudit(
+            {
+              actor: principal.username,
+              action: 'auth.password_only_opt_out',
+              target: `principal:${principal.username}`,
+              detail: { severity: 'high', flag: PASSWORD_ONLY_ROOT_ENV, warning: PASSWORD_ONLY_ROOT_WARNING },
+              outcome: 'ok',
+              principalId: principal.id,
+              ip,
+            },
+            {
+              accountId: null,
+              resellerId: principal.kind === 'reseller' ? principal.id : null,
+            },
+          )
+        }
 
         return jsonResponse(
           {
@@ -1110,7 +1129,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             csrfToken,
             totpEnabled: principalRecord.totpEnabled,
             passwordChangeRequired: principalRecord.forcePasswordChange,
-            mfaEnrollmentRequired: false,
+            mfaEnrollmentRequired: operatorRequiresMfaEnrollment(principal.kind, principalRecord.totpEnabled),
           },
           200,
           { 'set-cookie': cookie },
@@ -1143,7 +1162,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           principal: caller.principal,
           totpEnabled: caller.principalRecord.totpEnabled,
           passwordChangeRequired: caller.principalRecord.forcePasswordChange,
-          mfaEnrollmentRequired: false,
+          mfaEnrollmentRequired: operatorRequiresMfaEnrollment(caller.principal.kind, caller.principalRecord.totpEnabled),
           csrfToken: caller.sessionToken ? deriveCsrfToken(caller.sessionToken, serverSecret, entryPoint) : null,
         })
       }

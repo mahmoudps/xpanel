@@ -7,10 +7,14 @@ const root = { kind: 'root' as const, id: 'root-id', username: 'root' }
 const reseller = { kind: 'reseller' as const, id: 'reseller-id', username: 'resell' }
 const owner = { kind: 'user' as const, id: 'user-id', username: 'owner', accountId: 'account-id' }
 
-describe('optional two-factor enrollment', () => {
-  it('keeps sign-in from treating enrollment as a gate', () => {
-    expect(renderLoginSurface({ audience: 'xwhm' })).not.toMatch(/must complete enrollment|data-auth-setup-form|data-mfa-recommendation/)
-    expect(LOGIN_CLIENT_SCRIPT).not.toMatch(/step\('enrollment-required'\)/)
+describe('operator two-factor enrollment', () => {
+  it('keeps an unenrolled operator on the sign-in enrollment step', () => {
+    const login = renderLoginSurface({ audience: 'xwhm' })
+    expect(login).toMatch(/data-auth-state="credentials"/)
+    expect(login).toMatch(/data-auth-enrollment hidden/)
+    expect(login).toMatch(/must complete enrollment/)
+    expect(login).toMatch(/data-auth-setup-form/)
+    expect(LOGIN_CLIENT_SCRIPT).toMatch(/step\('enrollment-required'\)/)
     expect(LOGIN_CLIENT_SCRIPT).toMatch(/mfaEnrollmentRequired/)
     expect(LOGIN_CLIENT_SCRIPT).toMatch(/redirectToWorkspace\(\)/)
   })
@@ -39,7 +43,7 @@ describe('optional two-factor enrollment', () => {
       surface: 'xwhm', locale, activeRoute: '/whm/security/sign-in', visibility: { principal: root }, security: { totpEnabled: true },
     })
     expect(enrolled).toContain('data-mfa-enabled="true"')
-    expect(enrolled).toContain('xpanel disable-2fa root')
+    expect(enrolled).toContain('xpanel disable-2fa root --confirm')
     expect(enrolled).not.toMatch(/<form[^>]*data-auth-setup-form/)
     expect(enrolled).not.toContain('data-mfa-recommendation')
   })

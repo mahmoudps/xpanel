@@ -24,7 +24,7 @@ No credential values belong in commands, process arguments, examples, logs, or r
 | Account file helper | `/opt/xpanel/bin/xpanel-account-files` | Native confined helper; absence must fail closed |
 | Account backup work/download roots | `/var/lib/xpanel/backups/work`, `/var/lib/xpanel/backups/downloads` | Defaults in `packages/lifecycle/src/backup/plan.ts`; a plan does not prove a connected production executor |
 
-The actual administrative CLI is Node running `apps/api/src/main.ts`, implemented by `apps/api/src/cli.ts`. Its commands are `status`, `reconcile [--force]`, `reconcile --resolve-failed <generation-id>`, `rollback <generation-id>`, `reindex`, `init-root --password-stdin`, `reset-password <username> --password-stdin`, and `disable-2fa <username>`. Administrative verbs require the operating-system root user on Linux. Reconcile, resolve-failed, and rollback require an authenticated separate agent. There is no implemented general `xpanel-ctl` command suite for backup, vault, certificate, queue, or release operations.
+The actual administrative CLI is Node running `apps/api/src/main.ts`, implemented by `apps/api/src/cli.ts`. Its commands are `status`, `reconcile [--force]`, `reconcile --resolve-failed <generation-id>`, `rollback <generation-id>`, `reindex`, `init-root --password-stdin`, `reset-password <username> --password-stdin`, and `disable-2fa <username> --confirm`. Administrative verbs require the operating-system root user on Linux. Reconcile, resolve-failed, and rollback require an authenticated separate agent. There is no implemented general `xpanel-ctl` command suite for backup, vault, certificate, queue, or release operations.
 
 ## Three-profile ingress and existing-installation migration
 
@@ -49,6 +49,8 @@ XPANEL_MAIL_PUBLIC_ORIGIN=https://mail.panel.example.test:2096
 XPANEL_SERVER_SECRET_FILE=/etc/xpanel/server.secret
 XPANEL_INGRESS_SECRET_FILE=/etc/xpanel/ingress.secret
 ```
+
+`XPANEL_ALLOW_PASSWORD_ONLY_ROOT` is not part of this production list. See Runbook 02. It must be unset before production.
 
 Origins must be canonical exact HTTPS origins on the profile's required public port, without credentials, path, query, fragment or trailing slash. The production backend ports are fixed and must be distinct from SSH, tenant web backends and other services. The installer preserves an existing `api.env`; it does not populate missing origins or silently convert a legacy shared listener. Startup fails closed on incomplete configuration. TLS certificates must cover every selected hostname; a wildcard covers only one label level.
 
@@ -112,16 +114,20 @@ Targets: A06, A09-A11, A29-A30.
 ### Execution Steps
 
 1. Provision root once through `node /opt/xpanel/apps/api/src/main.ts init-root --password-stdin`, feeding a single password line from a protected input source. Do not use inline-password compatibility modes. The command sets the forced-password-change flag; it does not enroll MFA or complete setup.
-2. Start the verified services only after configuration/native prerequisites are reviewed. Use the actual server-selected `/login` form on the matching HTTPS profile: root/reseller on xWHM `2087`, account users on xPanel `2083` or xMail `2096`. Complete the forced password change. Two-factor enrollment is optional for root, resellers, and users; sign-in uses the password until an authenticator is enabled. When TOTP is enabled, sign-in requires a current code or a single-use recovery code. Do not inject cookies or bypass an enabled second factor to make onboarding appear successful. Root can enroll later from xWHM `/whm/security/sign-in`.
+2. Start the verified services only after configuration/native prerequisites are reviewed. Use the actual server-selected `/login` form on the matching HTTPS profile: root/reseller on xWHM `2087`, account users on xPanel `2083` or xMail `2096`. Complete the forced password change, then complete two-factor enrollment before opening xWHM. Root and resellers cannot administer until an authenticator is enrolled. Hosting-account users, including the `demohost` account, are not held for missing enrollment; they sign in with a password and may add an authenticator later from the account security page. When TOTP is enabled, sign-in requires a current code or a single-use recovery code. Do not inject cookies or bypass an enabled second factor to make onboarding appear successful.
 3. Protect the TOTP seed and returned single-use recovery codes offline. Count and behavior must follow the current authentication implementation; do not assume a fixed count from an older runbook.
-4. Complete the available setup workflow and verify actual persisted configuration. If a required UI/adapter is unavailable, report blocked. The forced password change remains a gate. Missing two-factor enrollment does not. Do not fabricate bootstrap URLs or completion records.
+4. Complete the available setup workflow and verify actual persisted configuration. If a required UI/adapter is unavailable, report blocked. The forced password change remains a gate. Missing two-factor enrollment also remains a gate for root and resellers. Do not fabricate bootstrap URLs or completion records.
+
+### Development-only password opt-out
+
+`XPANEL_ALLOW_PASSWORD_ONLY_ROOT=1` lets root and resellers open their workspaces without enrolling. It is off by default. It is a lab flag only and must be removed before production. When it is set, the process writes a startup warning, and every password-only root or reseller login writes the same warning to stderr and a high-severity audit event `auth.password_only_opt_out`. Hosting-account users are unchanged by this flag: they were never required to enroll. Do not set the flag in `/etc/xpanel/api.env` on a production host.
 
 ### Verification Oracle
 
-- Missing/old credentials do not authenticate. Forced password change holds for HTML, REST, and WS. Enabled TOTP holds on those same surfaces. An account with two-factor authentication disabled, including root after `disable-2fa` or before any enrollment, signs in with its password and opens its workspace.
+- Missing/old credentials do not authenticate. Forced password change holds for HTML, REST, and WS. Enabled TOTP holds on those same surfaces. An unenrolled root or reseller session can reach enrollment and logout only; administration returns 403 `root must complete two-factor enrollment before administration` (or the reseller form of that sentence) and administrative HTML returns 403. A hosting-account user such as `demohost` still opens xPanel with a password when no authenticator is enrolled.
 - Password change/reset revokes sessions/tokens as required by the credential policy; recovery codes and consumed TOTP windows cannot be replayed.
 - Cookies, CSRF, expiry/logout/revocation, localized inline login failure, and unauthorized HTML redirects are observed in a real browser.
-- Emergency `reset-password` or `disable-2fa` is a sensitive audited local recovery operation. Require explicit authorization and review revocation and audit effects. After `disable-2fa`, password sign-in opens the workspace again. Re-enable TOTP from the security page when the operator chooses.
+- Emergency `reset-password` or `disable-2fa <username> --confirm` is a sensitive audited local recovery operation. `disable-2fa` refuses to run without `--confirm`, prints a warning, and writes an audit event with severity `high`. After it runs, root and resellers are back on the enrollment hold unless `XPANEL_ALLOW_PASSWORD_ONLY_ROOT=1` is set. Re-enroll before administering the server.
 
 ## Runbook 03: Secret rotation
 

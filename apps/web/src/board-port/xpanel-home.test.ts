@@ -112,6 +112,16 @@ describe('xPanel home board port', () => {
     assert.match(tools, />Coming soon</)
     assert.match(tools, /data-tool-wiring="soon"/)
     assert.doesNotMatch(tools, /<a href="\/files\/backup"/)
+    const absolute = renderXpanelHome(xpanelHomeFromProps({
+      locale: 'en',
+      account: { username: 'owner', uid: 1000, home: '/home/owner', primaryDomain: 'example.test', ipv4: '192.0.2.10' },
+      qualifiedRoutes: qualified,
+      mailOrigin: 'https://mail.example.test:2096',
+    }))
+    const absoluteTools = rows(absolute)
+    assert.match(absoluteTools, /<a href="https:\/\/mail\.example\.test:2096\/mail\/inbox"/)
+    assert.match(absolute, /href="https:\/\/mail\.example\.test:2096\/mail\/inbox"/)
+    assert.doesNotMatch(absoluteTools, /aria-disabled="true"[^>]*href="https:\/\/mail\.example\.test:2096\/mail\/inbox"|href="https:\/\/mail\.example\.test:2096\/mail\/inbox"[^>]*aria-disabled="true"/)
     const arabic = renderXpanelHome(xpanelHomeFromProps({
       locale: 'ar',
       account: { username: 'owner', uid: 1000, home: '/home/owner', primaryDomain: 'example.test', ipv4: '192.0.2.10' },

@@ -70,6 +70,8 @@ export interface PanelSurfaceProps {
   }
   terminalSessionId?: string
   actionState?: AsyncActionBannerProps
+  /** Public xMail origin from XPANEL_MAIL_PUBLIC_ORIGIN. */
+  mailOrigin?: string
 }
 
 const ALLOWLISTED_SHELL_BINARIES = [
@@ -157,6 +159,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
         detailHtml: escapeHtml(auditTargetLabel(entry.target, locale)),
       })) } : {}),
       signOutLabel: isAr ? 'تسجيل الخروج' : 'Sign out',
+      ...(props.mailOrigin ? { mailOrigin: props.mailOrigin } : {}),
     })), locale)
   }
 
@@ -179,7 +182,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
       </div>
     </div>
 
-    ${renderDesignNav('xpanel', locale, activeRoute, qualifiedRoutes)}`,
+    ${renderDesignNav('xpanel', locale, activeRoute, qualifiedRoutes, props.mailOrigin)}`,
     topbar: `      <div class="xp-topbar__start">
         ${renderPageSearchButton(locale)}
 

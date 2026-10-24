@@ -58,7 +58,8 @@ describe('contact metadata DELETE target contracts on real local HTTP', () => {
     const root = await createRootPrincipal(db.db, { username: 'root', passwordHash: PASSWORD_HASH, forcePasswordChange: false })
     await setTotpSecret(db.db, root.id, sealTotpSecret('JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', SECRET), [])
     const reseller = await state.store.createReseller({ username: 'contactreseller', passwordHash: PASSWORD_HASH, acl: ['list-accounts', 'edit-account'], maxAccounts: 5, totalDiskMb: 10000, totalBandwidthMb: 100000, oversell: false, nameservers: [], delegatedIps: [] })
-    await createResellerPrincipal(db.db, { id: reseller.id, username: reseller.username, passwordHash: PASSWORD_HASH })
+    const resellerPrincipal = await createResellerPrincipal(db.db, { id: reseller.id, username: reseller.username, passwordHash: PASSWORD_HASH })
+    await setTotpSecret(db.db, resellerPrincipal.id, sealTotpSecret('JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', SECRET), [])
     const feature = await state.store.createFeatureList({ name: 'Contacts', ownerId: null, disabled: [] })
     const plan = await state.store.createPlan({ name: 'Contacts', ownerId: null, featureListId: feature.id,
       resources: { diskMb: 1024, bandwidthMbMonth: 10240, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 },

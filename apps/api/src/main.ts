@@ -24,6 +24,7 @@ import { createAgentClient } from './agent-client.ts'
 import { classifyCliInvocation, xpanelServiceUid } from './cli-privilege.ts'
 import { ENTRY_POINTS, entryPointAllowsRole, type EntryPoint } from './entry-points.ts'
 import { assertStateWritable } from './state-access.ts'
+import { operatorRequiresMfaEnrollment, warnIfPasswordOnlyOperators } from './mfa-policy.ts'
 
 export interface PanelServerOptions {
   port?: number
@@ -77,6 +78,15 @@ export const createDefaultWebRenderer = async (deps: {
   agent?: { fetch: AgentApp['fetch']; token: string } | null
 }): Promise<(req: Request) => Promise<Response> | Response> => {
   const { serveWebUi, resolveWebDocumentRoute } = await import('../../web/src/index.ts')
+  const exactHttpsOrigin = (value: string | undefined): string | undefined => {
+    if (!value) return undefined
+    try {
+      const url = new URL(value)
+      if (url.protocol === 'https:' && url.origin === value) return url.origin
+    } catch { /* An invalid origin is not linked. */ }
+    return undefined
+  }
+  const mailOrigin = exactHttpsOrigin(deps.panels?.xmail) ?? exactHttpsOrigin(process.env.XPANEL_MAIL_PUBLIC_ORIGIN)
   const panelLinks = (['xpanel', 'xwhm', 'xmail'] as const).flatMap(surface => {
     const origin = deps.panels?.[surface]
     if (!origin) return []
@@ -150,6 +160,7 @@ export const createDefaultWebRenderer = async (deps: {
         ...(model.accountId ? { accountId: model.accountId } : {}),
         ...(email ? { supportEmail: email } : {}),
         ...(panelLinks.length ? { panels: panelLinks } : {}),
+        ...(mailOrigin ? { mailOrigin } : {}),
         error: {
           status,
           surface: model.surface,
@@ -206,6 +217,9 @@ export const createDefaultWebRenderer = async (deps: {
       return new Response(null, { status: 303, headers: { ...headers, location: '/login' } })
     }
     const principal = caller.principal
+    if (operatorRequiresMfaEnrollment(principal.kind, caller.principalRecord.totpEnabled)) {
+      return new Response('Multi-factor enrollment is required.', { status: 403, headers })
+    }
     const security = { totpEnabled: caller.principalRecord.totpEnabled }
     const roleHome: EntryPoint | undefined = principal.kind === 'user' ? 'xpanel' : 'xwhm'
     const wrongRole = (deps.entryPoint && !entryPointAllowsRole(deps.entryPoint, principal.kind))
@@ -288,6 +302,7 @@ export const createDefaultWebRenderer = async (deps: {
         ...(ownAccountId ? { accountId: ownAccountId } : {}),
         ...(email ? { supportEmail: email } : {}),
         ...(panelLinks.length ? { panels: panelLinks } : {}),
+        ...(mailOrigin ? { mailOrigin } : {}),
         workspaceSummary: {
           ...(summaryAccount ? { account: { id: summaryAccount.id, ownerId: summaryAccount.ownerId, username: summaryAccount.username,
             primaryDomain: summaryAccount.primaryDomain, status: summaryAccount.status, planId: summaryAccount.planId } } : {}),
@@ -348,6 +363,7 @@ export const createDefaultWebRenderer = async (deps: {
         ...(ownAccountId ? { accountId: ownAccountId } : {}),
         ...(email ? { supportEmail: email } : {}),
         ...(panelLinks.length ? { panels: panelLinks } : {}),
+        ...(mailOrigin ? { mailOrigin } : {}),
         panel: {
           account: homeAccount,
           plan: homePlan,
@@ -508,6 +524,7 @@ export const createDefaultWebRenderer = async (deps: {
       surface,
       activeRoute: documentRoute.activeRoute,
       security,
+      ...(mailOrigin ? { mailOrigin } : {}),
       ...(url.searchParams.has('accountId') && account ? { accountId: account.id } : {}),
       visibility,
       ...(qualifiedCatalog ? { catalog: qualifiedCatalog } : {}),
@@ -642,6 +659,7 @@ export const createDefaultWebRenderer = async (deps: {
  * Starts the `xpanel-api` HTTP + WebSocket server with integrated Web UI renderer (`@xpanel/web`).
  */
 export const startPanelServer = async (opts: PanelServerOptions = {}) => {
+  warnIfPasswordOnlyOperators()
   const port = opts.port ?? (Number(process.env.XPANEL_PORT ?? '2087') || 2087)
   const host = opts.host ?? process.env.XPANEL_HOST ?? '127.0.0.1'
   const defaultBaseDir = process.platform === 'linux' ? '/var/lib/xpanel' : '.xpanel-data'
@@ -746,6 +764,7 @@ export const resolvePanelEntrypoints = (
  * Public TLS is terminated by the configured ingress, never by these HTTP listeners.
  */
 export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) => {
+  warnIfPasswordOnlyOperators()
   const { host, entryPoints } = resolvePanelEntrypoints(opts)
   if (!opts.agentApp && ENTRY_POINT_ORDER.some(name => entryPoints[name].port !== ENTRY_POINT_ENV[name].defaultPort)) {
     fail('PRECONDITION_FAILED', 'production entrypoint listeners must use reserved ports 12083, 12087 and 12096')
