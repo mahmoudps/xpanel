@@ -722,7 +722,7 @@ export const renderDesktop = (model: HomeDesktopModel): string => {
         const pad = model.changes.length === 1 ? '0' : index === 0 ? '0 0 12px' : last ? '12px 0 0' : '12px 0'
         const border = index === 0 ? '' : '; border-top: 1px solid #EEF0F3'
         const action = change.actionHref ? `<a href="${escapeHtml(change.actionHref)}" style="align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 13px; font-weight: 600">${escapeHtml(change.actionLabel ?? '')}</a>` : ''
-        return `<li style="display: flex; flex-direction: column; gap: 4px; padding: ${pad}${border}"><div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">${pill(change.pill, change.pillBg, change.pillFg)}<span style="font-size: 14px; font-weight: 600">${change.titleHtml}</span></div><span style="font-size: 12px; color: #5D6B7E; line-height: ${line}">${change.detailHtml}</span>${action}</li>`
+        return `<li style="display: flex; flex-direction: column; gap: 4px; padding: ${pad}${border}"><div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">${pill(change.pill, change.pillBg, change.pillFg)}<span style="font-size: 14px; font-weight: 600">${change.titleHtml}</span></div>${change.detailHtml ? `<span style="font-size: 12px; color: #5D6B7E; line-height: ${line}">${change.detailHtml}</span>` : ''}${action}</li>`
       }).join('')}</ol>`
     : `<p role="status" style="margin: 0; font-size: 13px; color: #5D6B7E; line-height: ${line}">${escapeHtml(model.emptyChanges)}</p>`
   const banner = model.bannerHtml

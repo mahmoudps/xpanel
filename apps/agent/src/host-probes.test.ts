@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { createProductionHostTargetMatcher, LinuxHostExecutor, MAILDIR_BOX_RE } from './executor.ts'
 import { parseLoadavg, parseMeminfo } from './host-info.ts'
-import { classifyHostBinaries, readHostMeasurements } from './host-probes.ts'
+import { classifyHostBinaries, probeAuditLog, readHostMeasurements } from './host-probes.ts'
 
 describe('host capability probes', () => {
-  it('passes a probe only when its binary is present', () => {
+  it('passes a probe only when its binary is present', async () => {
     const present = new Set(['/usr/sbin/useradd', '/usr/sbin/apache2', '/usr/bin/mariadb'])
     const probes = classifyHostBinaries(path => present.has(path), false)
     expect(probes['linux-account']).toBe('passed')
@@ -17,6 +17,10 @@ describe('host capability probes', () => {
     expect(probes.systemd).toBe('failed')
     expect(probes.backups).toBe('failed')
     expect(probes['host-info']).toBe('failed')
+    expect(probes.audit_log).toBe('failed')
+    expect(classifyHostBinaries(() => false, false, false, { auditLog: true }).audit_log).toBe('passed')
+    await expect(probeAuditLog(async () => [])).resolves.toBe(true)
+    await expect(probeAuditLog(async () => { throw new Error('unread') })).resolves.toBe(false)
   })
 
   it('requires both postfix and dovecot, and the confined file runner', () => {

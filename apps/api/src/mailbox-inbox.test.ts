@@ -6,7 +6,7 @@ import { hashPasswordArgon2id } from './auth.ts'
 import { createApiApp } from './server.ts'
 import { loadMailDocument } from './mail/document.ts'
 import type { InboxMessage, MailboxSendInput, MailboxTransport } from './mail/inbox.ts'
-import { createLocalMailboxTransport, imapHumanCopy, mailboxPrincipalUsername, mailReceivedAtUtc } from './mail/inbox.ts'
+import { auditActorQuery, auditTargetQuery, createLocalMailboxTransport, imapHumanCopy, mailboxAddressIndex, mailboxPrincipalUsername, mailReceivedAtUtc, rewriteMailboxIds } from './mail/inbox.ts'
 
 const SECRET = 'mailbox-inbox-synthetic-server-secret-32b'
 const ORIGIN = 'https://mail.example.test'
@@ -382,6 +382,19 @@ describe('xMail mailbox inbox', () => {
     expect(sessions.map(row => row.mailbox)).toEqual(['other@beta.example.test'])
     expect(await state.store.getServiceUserByLogin('inbox@alpha.example.test')).toBeNull()
     expect(await state.store.getServiceUserByLogin('other@beta.example.test')).not.toBeNull()
+  })
+
+  it('shows a mailbox address in place of the stored principal id', () => {
+    const address = 'inbox@alpha.example.test'
+    const username = mailboxPrincipalUsername(address)
+    const index = mailboxAddressIndex([address, 'not-an-address'])
+    expect(rewriteMailboxIds(username, index)).toBe(address)
+    expect(rewriteMailboxIds(`service-user:${username}`, index)).toBe(`service-user:${address}`)
+    expect(rewriteMailboxIds('root', index)).toBe('root')
+    expect(auditActorQuery(address)).toBe(username)
+    expect(auditActorQuery('root')).toBe('root')
+    expect(auditTargetQuery(`mailbox:${address}`)).toBe(`mailbox:${username}`)
+    expect(auditTargetQuery('/health')).toBe('/health')
   })
 
   it('turns a refused local IMAP connection into a mail-server error', async () => {

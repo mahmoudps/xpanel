@@ -705,6 +705,14 @@ export class HostReconciler {
   /**
    * Inspects the active generation's owned-file manifest against the live host files.
    */
+  /** Checksums of the active generation's owned files. Empty when no generation is active. */
+  async ownedChecksums(): Promise<Map<string, string>> {
+    const current = await latestActive(this.deps.db)
+    if (!current) return new Map()
+    const manifest = await this.journal.readManifest(current.id)
+    return new Map((manifest?.files ?? []).map(file => [file.path, file.sha256]))
+  }
+
   async checkDrift(): Promise<DriftReport> {
     const currentGen = await latestActive(this.deps.db)
     if (!currentGen) {

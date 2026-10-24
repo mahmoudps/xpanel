@@ -1,6 +1,24 @@
+import { createHash } from 'node:crypto'
 import type { OsProfile, RenderedFile } from '@xpanel/core'
 import { services } from '@xpanel/render'
 import type { AgentExecutor } from '../executor.ts'
+
+/** Path to the active generation's content hash. A restart must not replace those bytes. */
+export type OwnedChecksums = ReadonlyMap<string, string>
+
+const contentSha = (content: string): string => createHash('sha256').update(content, 'utf8').digest('hex')
+
+/**
+ * A generation-owned path is written only when the new bytes are the generation's
+ * bytes. Anything else would show up as drift on the next check.
+ */
+const mayWrite = (path: string, next: string, existing: string | null, owned?: OwnedChecksums): boolean => {
+  if (existing === next) return false
+  if (!owned) return true
+  const expected = owned.get(path)
+  if (expected === undefined) return true
+  return contentSha(next) === expected
+}
 
 const managedPaths = (os: OsProfile): { main: string; master: string } => ({
   main: `${os.paths.postfixDir}/main.cf`,
@@ -35,15 +53,31 @@ const writeFileIfChanged = async (executor: AgentExecutor, file: RenderedFile): 
  * files stay outside the generation manifest: the journal deletes paths that
  * disappear from the next generation.
  */
-export const applyPostfixLocalDelivery = async (executor: AgentExecutor, os: OsProfile): Promise<void> => {
-  await writeFileIfChanged(executor, services.renderDovecotAuthConf(os))
-  await writeFileIfChanged(executor, services.renderDovecotSpecialUseConf(os))
-  await writeFileIfChanged(executor, services.renderDovecotQuotaConf(os))
+const writeRendered = async (executor: AgentExecutor, file: RenderedFile, owned?: OwnedChecksums): Promise<void> => {
+  const existing = await executor.readFile(file.path)
+  if (!mayWrite(file.path, file.content, existing, owned)) return
+  await writeFileIfChanged(executor, file)
+}
+
+export const applyPostfixLocalDelivery = async (
+  executor: AgentExecutor,
+  os: OsProfile,
+  owned?: OwnedChecksums,
+): Promise<void> => {
+  await writeRendered(executor, services.renderDovecotAuthConf(os), owned)
+  await writeRendered(executor, services.renderDovecotSpecialUseConf(os), owned)
+  await writeRendered(executor, services.renderDovecotQuotaConf(os), owned)
   const paths = managedPaths(os)
-  const main = services.replaceManagedBlock((await executor.readFile(paths.main)) ?? '', services.localDeliveryMainBlock(os))
-  const master = services.replaceManagedBlock((await executor.readFile(paths.master)) ?? '', services.localSubmissionMasterBlock(os))
-  await writeTextIfChanged(executor, paths.main, main)
-  await writeTextIfChanged(executor, paths.master, master)
+  const mainExisting = (await executor.readFile(paths.main)) ?? ''
+  const masterExisting = (await executor.readFile(paths.master)) ?? ''
+  const main = services.replaceManagedBlock(mainExisting, services.localDeliveryMainBlock(os))
+  const master = services.replaceManagedBlock(masterExisting, services.localSubmissionMasterBlock(os))
+  if (mayWrite(paths.main, main, mainExisting.length > 0 ? mainExisting : null, owned)) {
+    await writeTextIfChanged(executor, paths.main, main)
+  }
+  if (mayWrite(paths.master, master, masterExisting.length > 0 ? masterExisting : null, owned)) {
+    await writeTextIfChanged(executor, paths.master, master)
+  }
 }
 
 /** Removes the managed region after the last mailbox leaves the generation. */
@@ -70,18 +104,24 @@ export const ensureInstalledMail = async (
   executor: AgentExecutor,
   os: OsProfile,
   hostname?: string | null,
+  owned?: OwnedChecksums,
 ): Promise<void> => {
   const maps = services.renderPostfixMaps(os, [])
   for (const action of maps.actions) {
     if (action.kind === 'ensure-dir') await executor.runAction(action)
   }
   for (const file of maps.files) {
-    if ((await executor.readFile(file.path)) === null) await executor.writeFile(file)
+    const existing = await executor.readFile(file.path)
+    if (existing !== null) continue
+    if (!mayWrite(file.path, file.content, null, owned)) continue
+    await executor.writeFile(file)
   }
   const mailboxPath = services.renderDovecotMailboxConf(os).path
-  const postmaster = services.resolveMailboxPostmaster(hostname, await executor.readFile(mailboxPath))
-  await writeFileIfChanged(executor, services.renderDovecotMailboxConf(os, { postmaster }))
-  await applyPostfixLocalDelivery(executor, os)
+  const existingMailbox = await executor.readFile(mailboxPath)
+  const postmaster = services.resolveMailboxPostmaster(hostname, existingMailbox)
+  const mailbox = services.renderDovecotMailboxConf(os, { postmaster })
+  if (mayWrite(mailbox.path, mailbox.content, existingMailbox, owned)) await writeFileIfChanged(executor, mailbox)
+  await applyPostfixLocalDelivery(executor, os, owned)
   await executor.runAction({ kind: 'systemd', verb: 'reload', unit: os.services.dovecot })
   await executor.runAction({ kind: 'systemd', verb: 'reload', unit: os.services.postfix })
 }

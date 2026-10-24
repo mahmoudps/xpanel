@@ -155,7 +155,9 @@ export const parseApacheVersion = (text: string): string | null => {
   return match ? match[1]! : null
 }
 
-const VERSION_TOKEN = /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.]+)?$/
+const SEMVER_IDENTIFIER = '[0-9A-Za-z-]+'
+/** Full semver, including prerelease identifiers that contain hyphens. */
+const VERSION_TOKEN = new RegExp(`^\\d+\\.\\d+\\.\\d+(?:-${SEMVER_IDENTIFIER}(?:\\.${SEMVER_IDENTIFIER})*)?(?:\\+${SEMVER_IDENTIFIER}(?:\\.${SEMVER_IDENTIFIER})*)?$`)
 
 /** One version line from `/opt/xpanel/VERSION`. */
 export const parseVersionFile = (text: string): string | null => {

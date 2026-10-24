@@ -193,6 +193,32 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     assert.match(whmAt('/whm/audit'), /Synthetic target/)
     assert.match(whmAt('/whm/audit'), /2026-10-22 14:05:00 UTC/)
     assert.doesNotMatch(whmAt('/whm/audit'), /service_user\.deleted/)
+    const filtered = whmAt('/whm/audit', {
+      auditEntries: [
+        { id: '90', at: fixtureAt, actor: 'info@alice-shop.com', action: 'agent.peer_denied', target: '/health', detail: { peerUid: 0 }, outcome: 'denied' },
+        { id: '80', at: fixtureAt, actor: 'synthetic-root', action: 'service_user.deleted', target: 'Synthetic target', detail: {}, outcome: 'ok' },
+      ],
+      auditList: { actor: 'info@alice-shop.com', action: '', target: '', before: '', hasMore: true, oldestId: '80' },
+    })
+    assert.match(filtered, /data-audit-filters="true"/)
+    assert.match(filtered, /info@alice-shop\.com/)
+    assert.match(filtered, /Agent refused a request from an unauthorized local user \(uid 0\)/)
+    assert.match(filtered, />\/health</)
+    assert.equal(filtered.includes('An internal record'), false)
+    assert.equal(filtered.includes('mbx'), false)
+    assert.match(filtered, /data-audit-older="true"/)
+    assert.match(filtered, /before=80/)
+    const older = whmAt('/whm/audit', {
+      locale: 'ar',
+      auditEntries: [
+        { id: '90', at: fixtureAt, actor: 'info@alice-shop.com', action: 'agent.peer_denied', target: '/health', detail: { peerUid: 0 }, outcome: 'denied' },
+      ],
+      auditList: { actor: 'info@alice-shop.com', action: '', target: '', before: '90', hasMore: false, oldestId: '90' },
+    })
+    assert.match(older, /رفض الوكيل طلباً من مستخدم محلي غير مصرح/)
+    assert.match(older, /<bdi dir="ltr">\(uid 0\)<\/bdi>/)
+    assert.match(older, /الأحدث/)
+    assert.equal(older.includes('سجل داخلي'), false)
     assert.match(html, /data-action="start-transfer"/)
     assert.doesNotMatch(html, /cpmove-ziad\.tar\.gz/)
     assertAllBadgesHaveSvgAndLabel(html)

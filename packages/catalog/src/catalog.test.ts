@@ -60,8 +60,8 @@ describe('catalog data', () => {
   })
 
   it('reviews every definition without promoting declarations to verified delivery', () => {
-    expect(tools).toHaveLength(593)
-    expect(tools.filter(tool => tool.status === 'researched')).toHaveLength(530)
+    expect(tools).toHaveLength(594)
+    expect(tools.filter(tool => tool.status === 'researched')).toHaveLength(531)
     expect(tools.filter(tool => tool.status === 'out-of-scope')).toHaveLength(63)
     expect(tools.filter(tool => tool.status === 'verified')).toEqual([])
     for (const tool of tools) {

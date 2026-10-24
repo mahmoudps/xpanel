@@ -72,5 +72,9 @@ describe('audit action copy', () => {
     assert.equal(auditActionLabel('not.a.real.code', 'ar'), 'حدث مسجّل')
     assert.equal(auditActionHtml('dns.zone.saved', 'ar').includes('dns.zone.saved'), false)
     assert.match(auditActionHtml('dns.zone.saved', 'ar'), /<bdi dir="ltr">DNS<\/bdi>/)
+    const peer = { actor: 'uid:0', detail: { peerUid: 0 } }
+    assert.equal(auditActionLabel('agent.peer_denied', 'en', peer), 'Agent refused a request from an unauthorized local user (uid 0)')
+    assert.equal(auditActionLabel('agent.peer_denied', 'ar', peer), 'رفض الوكيل طلباً من مستخدم محلي غير مصرح (uid 0)')
+    assert.match(auditActionHtml('agent.peer_denied', 'ar', peer), /<bdi dir="ltr">\(uid 0\)<\/bdi>/)
   })
 })

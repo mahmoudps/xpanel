@@ -2,12 +2,14 @@ import { existsSync } from 'node:fs'
 import { acmeTraverseProbeArgv } from '@xpanel/os'
 import { parseLoadavg, parseMeminfo } from './host-info.ts'
 
-export type AgentHostProbe = 'linux-account' | 'apache' | 'mariadb' | 'mail' | 'files' | 'acme' | 'pdns' | 'backups' | 'systemd' | 'host-info'
+export type AgentHostProbe = 'linux-account' | 'apache' | 'mariadb' | 'mail' | 'files' | 'acme' | 'pdns' | 'backups' | 'systemd' | 'host-info' | 'audit_log'
 export type AgentHostProbeResult = 'passed' | 'failed'
 
 export interface HostMeasurementEvidence {
   /** True only after `/proc/loadavg` and `/proc/meminfo` were read and parsed. */
   hostInfo?: boolean
+  /** True only after a read of the append-only audit log succeeded. */
+  auditLog?: boolean
   /**
    * When false, nginx cannot serve the HTTP-01 webroot. Omitted leaves the
    * previous client-only result so callers that have not probed traversal still pass.
@@ -39,6 +41,7 @@ export const classifyHostBinaries = (
   backups: present('/var/lib/xpanel') ? 'passed' : 'failed',
   systemd: present('/usr/bin/systemctl') ? 'passed' : 'failed',
   'host-info': measurements.hostInfo === true ? 'passed' : 'failed',
+  audit_log: measurements.auditLog === true ? 'passed' : 'failed',
 })
 
 /**
@@ -74,6 +77,16 @@ export const readHostMeasurements = async (
     acmeReachable = false
   }
   return { hostInfo, acmeReachable }
+}
+
+/** The audit log is readable when a query against it returns, including an empty log. */
+export const probeAuditLog = async (read: () => Promise<unknown>): Promise<boolean> => {
+  try {
+    await read()
+    return true
+  } catch {
+    return false
+  }
 }
 
 export const probeHostCapabilities = (

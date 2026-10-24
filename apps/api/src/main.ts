@@ -6,20 +6,18 @@ import type { Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { agentCallerHeaders, loadAgentCredentialFile } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
-import { canSeeAccount, fail, hasAcl } from '@xpanel/core'
-import { visibleNavigation } from '@xpanel/catalog'
-import type { VisibilityContext } from '@xpanel/catalog'
+import { canSeeAccount, fail, hasAcl, type AuditEntry, type OsProfile } from '@xpanel/core'
+import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { mapAgentHostInfo, mapAgentServices } from '../../web/src/board-port/xwhm-dashboard.ts'
 import { publicContactEmail } from '../../web/src/display-name.ts'
 import { ACCOUNT_SECURITY_ROUTES } from '../../web/src/surfaces/account-security.ts'
-import type { OsProfile } from '@xpanel/core'
-import { createDb, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, type Db } from '@xpanel/db'
+import { createDb, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, type AuditQuery, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { runCli } from './cli.ts'
 import { loadQualifiedCatalog } from './host-catalog.ts'
 import { loadMailDocument, messageSizeLimitBytes, messageSizeLimitFromPostconf, type MailDocument } from './mail/document.ts'
-import { createLocalMailboxTransport, mailFolderName } from './mail/inbox.ts'
+import { auditActorQuery, auditTargetQuery, createLocalMailboxTransport, mailFolderName, mailboxAddressIndex, rewriteMailboxIds } from './mail/inbox.ts'
 import { createApiApp, ensureRootPrincipal, listenApiServer } from './server.ts'
 import { authenticateRequest } from './auth.ts'
 import { createAgentClient } from './agent-client.ts'
@@ -103,6 +101,10 @@ export const createDefaultWebRenderer = async (deps: {
       }
       return resolvedContact || undefined
     }
+    const qualifiedDocumentCatalog = async (): Promise<readonly CatalogTool[] | undefined> => {
+      const loaded = await loadQualifiedCatalog(deps.agent ?? null)
+      return loaded.some(tool => tool.status === 'verified') ? loaded : undefined
+    }
     const documentStatus = async (
       status: 403 | 404,
       model: {
@@ -111,13 +113,16 @@ export const createDefaultWebRenderer = async (deps: {
         accountId?: string
         workspaceHref?: string
         suggested?: EntryPoint
+        catalog?: readonly CatalogTool[]
       },
     ) => {
       const email = await supportEmail()
+      const catalog = model.catalog ?? (model.visibility ? await qualifiedDocumentCatalog() : undefined)
       return serveWebUi(req, async () => ({
         surface: model.surface,
         activeRoute: url.pathname,
         ...(model.visibility ? { visibility: model.visibility } : {}),
+        ...(catalog ? { catalog } : {}),
         ...(model.accountId ? { accountId: model.accountId } : {}),
         ...(email ? { supportEmail: email } : {}),
         ...(panelLinks.length ? { panels: panelLinks } : {}),
@@ -241,6 +246,7 @@ export const createDefaultWebRenderer = async (deps: {
         return documentStatus(404, {
           surface,
           visibility: scopedVisibility,
+          ...(qualifiedCatalog ? { catalog: qualifiedCatalog } : {}),
           ...(ownAccountId ? { accountId: ownAccountId } : {}),
           workspaceHref: ENTRY_POINTS[surface].home,
         })
@@ -273,6 +279,7 @@ export const createDefaultWebRenderer = async (deps: {
         listSessionsForPrincipal(deps.db, principal.id).catch(() => []),
         listAudit(deps.db, { mentions: homeAccount.username, limit: 8 }).catch(() => []),
       ])
+      const homeAddresses = mailboxAddressIndex(ownedUsers.flatMap(user => user.services.email && user.login.includes('@') ? [user.login] : []))
       const lastSignInAt = [...sessions]
         .filter(session => session.id !== caller.sessionId)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.createdAt
@@ -294,7 +301,12 @@ export const createDefaultWebRenderer = async (deps: {
           serviceUsers: ownedUsers.map(user => ({ ...user, passwordHash: '' })),
           files: [],
           ...(lastSignInAt ? { lastSignInAt } : {}),
-          recentAudit: homeAudit.map(entry => ({ action: entry.action, target: entry.target })),
+          recentAudit: homeAudit.map(entry => ({
+            action: entry.action,
+            actor: rewriteMailboxIds(entry.actor, homeAddresses),
+            target: rewriteMailboxIds(entry.target, homeAddresses),
+            detail: entry.detail,
+          })),
         },
       }))
     }
@@ -340,6 +352,32 @@ export const createDefaultWebRenderer = async (deps: {
     const accountServiceUsers = snap.serviceUsers.filter((u) => u.accountId === account?.id).map((u) => ({ ...u, passwordHash: '' }))
     const active = await latestActive(deps.db)
     const dashboardRoute = surface === 'xwhm' && documentRoute.activeRoute === '/whm' && principal.kind === 'root'
+    const auditRoute = surface === 'xwhm' && documentRoute.activeRoute === '/whm/audit' && principal.kind === 'root'
+    const AUDIT_PAGE_SIZE = 50
+    const typedActor = auditRoute ? (url.searchParams.get('actor') ?? '').trim().slice(0, 128) : ''
+    const typedAction = auditRoute ? (url.searchParams.get('action') ?? '').trim().slice(0, 128) : ''
+    const typedTarget = auditRoute ? (url.searchParams.get('target') ?? '').trim().slice(0, 480) : ''
+    const typedBefore = auditRoute ? (url.searchParams.get('before') ?? '').trim() : ''
+    const actionFilter = /^[a-z][a-z0-9_.:-]{0,127}$/.test(typedAction) ? typedAction : ''
+    const beforeId = /^[1-9][0-9]{0,14}$/.test(typedBefore) ? typedBefore : ''
+    const actorFilters = typedActor ? [...new Set([typedActor, auditActorQuery(typedActor)])] : []
+    const targetFilters = typedTarget ? [...new Set([typedTarget, auditTargetQuery(typedTarget)])] : []
+    const collectAudit = async (query: AuditQuery): Promise<AuditEntry[]> => {
+      const actors = actorFilters.length > 0 ? actorFilters : [undefined]
+      const targets = targetFilters.length > 0 ? targetFilters : [undefined]
+      const found = new Map<string, AuditEntry>()
+      for (const actor of actors) {
+        for (const target of targets) {
+          const rows = await listAudit(deps.db, {
+            ...query,
+            ...(actor ? { actor } : {}),
+            ...(target ? { target } : {}),
+          })
+          for (const row of rows) found.set(row.id, row)
+        }
+      }
+      return [...found.values()].sort((a, b) => Number(b.id) - Number(a.id))
+    }
     const readAgentJson = async (path: string): Promise<unknown> => {
       if (!dashboardRoute || !deps.agent) return null
       try {
@@ -352,15 +390,31 @@ export const createDefaultWebRenderer = async (deps: {
         return null
       }
     }
-    const [hostInfo, hostServices, hostDrift, auditPage, rollbackGeneration] = dashboardRoute
-      ? await Promise.all([
-          readAgentJson('/host/info'),
-          readAgentJson('/host/services'),
-          readAgentJson('/host/drift'),
-          listAudit(deps.db, { limit: 8 }).catch(() => []),
-          previousGeneration(deps.db).catch(() => null),
-        ])
-      : [null, null, null, [], null]
+    const [hostInfo, hostServices, hostDrift, overviewAudit, rollbackGeneration, auditListed] = await Promise.all([
+      dashboardRoute ? readAgentJson('/host/info') : null,
+      dashboardRoute ? readAgentJson('/host/services') : null,
+      dashboardRoute ? readAgentJson('/host/drift') : null,
+      dashboardRoute ? listAudit(deps.db, { limit: 8 }).catch(() => []) : [],
+      dashboardRoute ? previousGeneration(deps.db).catch(() => null) : null,
+      auditRoute
+        ? collectAudit({
+            limit: AUDIT_PAGE_SIZE + 1,
+            ...(beforeId ? { beforeId } : {}),
+            ...(actionFilter ? { action: actionFilter } : {}),
+          }).catch(() => [])
+        : [],
+    ])
+    const mailboxAddresses = mailboxAddressIndex(
+      snap.serviceUsers.filter(user => user.services.email && user.login.includes('@')).map(user => user.login),
+    )
+    const showAudit = (entry: AuditEntry): AuditEntry => ({
+      ...entry,
+      actor: rewriteMailboxIds(entry.actor, mailboxAddresses),
+      target: rewriteMailboxIds(entry.target, mailboxAddresses),
+    })
+    const auditPage = overviewAudit.map(showAudit)
+    const auditHasMore = auditListed.length > AUDIT_PAGE_SIZE
+    const auditRows = auditListed.slice(0, AUDIT_PAGE_SIZE).map(showAudit)
     const asRecord = (value: unknown): Record<string, unknown> | null =>
       value !== null && typeof value === 'object' ? value as Record<string, unknown> : null
     const hostSample = mapAgentHostInfo(hostInfo)
@@ -408,6 +462,17 @@ export const createDefaultWebRenderer = async (deps: {
         ...(principal.kind === 'root' && snap.server ? {
           hostname: hostSample?.hostname ?? snap.server.settings.hostname,
           ...(hostSample?.panelDomain ? { panelHostname: hostSample.panelDomain } : {}),
+        } : {}),
+        ...(auditRoute ? {
+          auditEntries: auditRows,
+          auditList: {
+            actor: typedActor,
+            action: typedAction,
+            target: typedTarget,
+            before: beforeId,
+            hasMore: auditHasMore,
+            oldestId: auditRows.at(-1)?.id ?? '',
+          },
         } : {}),
         ...(dashboardRoute ? {
           auditEntries: auditPage,

@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import type { OsProfile } from '@xpanel/core'
+import { services } from '@xpanel/render'
 import { FakeHostExecutor } from '../executor.ts'
 import { applyPostfixLocalDelivery, ensureInstalledMail } from './local-mail.ts'
 
@@ -88,5 +90,28 @@ describe('live mail writer', () => {
 
     await ensureInstalledMail(executor, os, 'other.example.test')
     expect(executor.files.get(mailbox)?.content).toContain('postmaster_address = postmaster@other.example.test')
+  })
+
+  it('leaves a generation-owned mailbox file unchanged when a restart would differ', async () => {
+    const executor = new FakeHostExecutor()
+    seed(executor, '/etc/postfix/main.cf', 'compatibility_level = 3.6\n')
+    seed(executor, '/etc/postfix/master.cf', '# master\n')
+    const mailbox = services.renderDovecotMailboxConf(os, { postmaster: 'postmaster@mail.example.test' })
+    seed(executor, mailbox.path, mailbox.content)
+    const sha = createHash('sha256').update(mailbox.content, 'utf8').digest('hex')
+    await ensureInstalledMail(executor, os, 'other.example.test', new Map([[mailbox.path, sha]]))
+    expect(executor.files.get(mailbox.path)?.content).toBe(mailbox.content)
+    expect(backups(executor, mailbox.path)).toHaveLength(0)
+  })
+
+  it('repairs a generation-owned mailbox file when the render matches the generation', async () => {
+    const executor = new FakeHostExecutor()
+    seed(executor, '/etc/postfix/main.cf', 'compatibility_level = 3.6\n')
+    seed(executor, '/etc/postfix/master.cf', '# master\n')
+    const mailbox = services.renderDovecotMailboxConf(os, { postmaster: 'postmaster@mail.example.test' })
+    seed(executor, mailbox.path, 'protocol lmtp {\n  postmaster_address = postmaster@wrong.example.test\n}\n')
+    const sha = createHash('sha256').update(mailbox.content, 'utf8').digest('hex')
+    await ensureInstalledMail(executor, os, 'mail.example.test', new Map([[mailbox.path, sha]]))
+    expect(executor.files.get(mailbox.path)?.content).toBe(mailbox.content)
   })
 })

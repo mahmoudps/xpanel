@@ -82,6 +82,42 @@ export const normalizeMailbox = (value: string): string => {
 export const mailboxPrincipalUsername = (mailbox: string): string =>
   `mbx${createHash('sha256').update(`xpanel-mailbox:${mailbox}`).digest('hex').slice(0, 28)}`
 
+const MAILBOX_ID = /mbx[0-9a-f]{8,}/gi
+const EMBEDDED_MAILBOX = /[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi
+
+/** Hash to address for mailboxes that still exist as service users. */
+export const mailboxAddressIndex = (logins: readonly string[]): ReadonlyMap<string, string> => {
+  const map = new Map<string, string>()
+  for (const login of logins) {
+    const address = login.trim().toLowerCase()
+    if (!MAILBOX_RE.test(address) || address.length > 254) continue
+    map.set(mailboxPrincipalUsername(address), address)
+  }
+  return map
+}
+
+/** Replaces a mailbox principal id with the address when the mailbox is known. */
+export const rewriteMailboxIds = (value: string, addresses: ReadonlyMap<string, string>): string =>
+  value.replace(MAILBOX_ID, (token) => addresses.get(token.toLowerCase()) ?? token)
+
+/** The stored actor is the mailbox hash. An address filter looks up that hash. */
+export const auditActorQuery = (typed: string): string => {
+  const value = typed.trim()
+  if (!value.includes('@')) return value
+  const address = value.toLowerCase()
+  if (!MAILBOX_RE.test(address) || address.length > 254) return value
+  return mailboxPrincipalUsername(address)
+}
+
+/** A displayed address stands in for the hash stored on older rows. */
+export const auditTargetQuery = (typed: string): string =>
+  typed.replace(EMBEDDED_MAILBOX, (address) => {
+    const normalized = address.toLowerCase()
+    return MAILBOX_RE.test(normalized) && normalized.length <= 254
+      ? mailboxPrincipalUsername(normalized)
+      : address
+  })
+
 const sealMailboxPassword = (password: string, serverSecret: string): Uint8Array => {
   const key = createHash('sha256').update(`mailbox-seal:${serverSecret}`).digest()
   const iv = randomBytes(12)

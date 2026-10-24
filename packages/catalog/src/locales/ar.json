@@ -318,6 +318,7 @@
  "catalog.tool.application-locales.name": "تهيئة لغات التطبيقات",
  "catalog.tool.application-manager.name": "مدير التطبيقات",
  "catalog.tool.assign-ipv6.name": "تعيين عناوين IPv6",
+ "catalog.tool.audit-log.name": "سجل التدقيق",
  "catalog.tool.auto-ssl.name": "الشهادات التلقائية",
  "catalog.tool.autoresponders.name": "الردود التلقائية",
  "catalog.tool.background-process-killer.name": "إنهاء العمليات الخلفية المحظورة",

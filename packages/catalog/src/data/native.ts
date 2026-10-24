@@ -496,6 +496,17 @@ const NATIVE: NativeTool[] = [
     ],
     acceptance: 'Saving a template that references an unknown variable is refused with the variable named, and the preview renders known variables with sample values.',
   },
+  {
+    tool: whm('audit-log', 'whm-server-status', 'Audit log', 'log-entry',
+      'The server audit log: who did what, to which target, with filters and older pages.'),
+    behaviors: [
+      'Reads the append-only audit log for the root operator',
+      'Filters by actor, action and target',
+      'Pages older entries without dropping the newest page',
+      'The page opens when the audit log can be read',
+    ],
+    acceptance: 'A readable audit log lists the stored rows, a filter keeps only the matching action, and the older-page link returns the next page of rows.',
+  },
 ]
 
 export const nativeTools: ToolDefinition[] = NATIVE.map(n => ({ ...n.tool, status: 'researched' }))

@@ -19,7 +19,7 @@ import type { AgentExecutor } from './executor.ts'
 import { JailedFileManager } from './file-manager.ts'
 import { AcmeCertificateServiceAdapter } from './services/acme.ts'
 import { createHttp01AcmeClient } from './services/acme-client.ts'
-import { probeHostCapabilities, readHostMeasurements } from './host-probes.ts'
+import { probeAuditLog, probeHostCapabilities, readHostMeasurements } from './host-probes.ts'
 import { readHostConfigChecks, readHostIdentity, readServedCertificatePem, PANEL_LISTENER_PORT } from './host-identity.ts'
 import { parseDf, parseDfInodes, parseLoadavg, parseMeminfo } from './host-info.ts'
 import { readHostServices, restartHostService } from './host-services.ts'
@@ -456,12 +456,13 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         const linuxExecutor = deps.executor instanceof LinuxHostExecutor ? deps.executor : null
         const executor = linuxExecutor ? 'linux' : deps.executor ? 'fake' : 'unknown'
         const measurements = linuxExecutor ? await readHostMeasurements(linuxExecutor, deps.nginxUser ?? 'nginx') : undefined
+        const auditLog = await probeAuditLog(() => deps.db.query('SELECT id FROM audit_log LIMIT 1'))
         return jsonResponse({
           ok: true,
           os: deps.os,
           currentGeneration: currentGen,
           executor,
-          ...(measurements ? { probes: probeHostCapabilities(Boolean(deps.accountFileRunner), true, measurements) } : {}),
+          ...(measurements ? { probes: probeHostCapabilities(Boolean(deps.accountFileRunner), true, { ...measurements, auditLog }) } : {}),
           ...(verifiedPeer
             ? {
                 peer: {
