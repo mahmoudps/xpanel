@@ -24,6 +24,7 @@ import {
   renderStatusBadge,
 } from '../tokens.ts'
 import { renderAccountResources, resourceRowsFromPlan } from '../board-canvas.ts'
+import { renderComposedXpanel } from '../board-port/composed/all.ts'
 import { renderXpanelHome, xpanelHomeFromProps } from '../board-port/xpanel-home.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
@@ -131,6 +132,22 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
   const actionBannerHtml = props.actionState
     ? renderAsyncActionState({ ...props.actionState, locale })
     : ''
+  const composedHtml = renderComposedXpanel({
+    route: activeRoute,
+    locale,
+    account,
+    ...(plan ? { plan } : {}),
+    domains,
+    files: props.files ?? [],
+    databases,
+    databaseUsers,
+    serviceUsers: props.serviceUsers ?? [],
+    ...(customConfig ? { customConfig } : {}),
+    ...(websiteAnalytics ? { websiteAnalytics } : {}),
+    ...(terminalSessionId ? { terminalSessionId } : {}),
+    shellEnabled,
+    ...(props.usage ? { usage: props.usage } : {}),
+  })
 
   if (section === 'overview') {
     const homePlan = plan && plan.id === account.planId ? plan : undefined
@@ -210,7 +227,8 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
           <button type="button" class="xp-btn xp-btn--ghost" data-action="logout">${escapeHtml(isAr ? 'تسجيل الخروج' : 'Sign out')}</button>
         </div>
       </div>`,
-    content: `      ${actionBannerHtml}
+    content: composedHtml !== undefined ? `      ${actionBannerHtml}
+${composedHtml}` : `      ${actionBannerHtml}
 ${section === 'resources' ? renderAccountResources(locale, account.uid, resourceRowsFromPlan(plan?.resources ?? null)) : ''}
       ${section === 'domains' ? `      <!-- 2. Domains & Multi-IP Binding Table -->
       <section class="xp-card" id="xpanel-domains" data-section="domains-multi-ip" aria-labelledby="xpanel-domains-heading">
