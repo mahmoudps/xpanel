@@ -1,5 +1,5 @@
 import type { Account, AuditEntry, Certificate, Plan, ServerIpEntry } from '@xpanel/core'
-import { ARABIC_TYPE_CSS } from '../arabic-type.ts'
+import { ARABIC_TYPE_CSS, isArabicSentence } from '../arabic-type.ts'
 import { isolateLtrRuns } from '../bidi-runs.ts'
 import { auditActionHtml, auditActionLabel, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
 import type { Locale } from '../i18n.ts'
@@ -370,6 +370,13 @@ const show = (value: string, ar: boolean): string => {
   return ltr(value)
 }
 
+/** Identifiers stay mono. A whole Arabic sentence uses the sans stack, not a per-glyph fallback. */
+const monoSpan = (plain: string, inner: string, style: string): string => {
+  if (!isArabicSentence(plain)) return `<span style="${style}">${inner}</span>`
+  const sans = style.replace("'IBM Plex Mono', monospace", "'IBM Plex Sans Arabic', 'IBM Plex Sans', system-ui, sans-serif")
+  return `<span class="xp-ar-sentence" style="${sans}">${inner}</span>`
+}
+
 const pill = (chip: DashboardChip, mono = false): string => {
   const dot = chip.dot ?? chip.fg
   const border = chip.borderedDot ? `border: 1.5px solid ${chip.fg};` : ''
@@ -461,8 +468,8 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
   const ar = model.locale === 'ar'
   const auditRows = model.audit.map(row => `<tr style="border-top: 1px solid #EEF0F3; vertical-align: top">
     <td style="padding: 10px 16px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-variant-numeric: tabular-nums; line-height: 1.4"><time datetime="${escapeHtml(row.datetime)}">${show(row.time, ar)}</time></td>
-    <td style="padding: 10px 16px; line-height: 1.4"><div style="display: flex; flex-direction: column"><span style="font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 13px">${show(row.actor, ar)}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5D6B7E">${show(row.from, ar)}</span></div></td>
-    <td style="padding: 10px 16px; line-height: 1.4"><div style="display: flex; flex-direction: column"><span>${row.actionHtml ?? show(row.action, ar)}</span>${row.target ? `<span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5D6B7E; overflow-wrap: anywhere">${show(row.target, ar)}</span>` : ''}</div></td>
+    <td style="padding: 10px 16px; line-height: 1.4"><div style="display: flex; flex-direction: column">${monoSpan(row.actor, show(row.actor, ar), "font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 13px")}${monoSpan(row.from, show(row.from, ar), "font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5D6B7E")}</div></td>
+    <td style="padding: 10px 16px; line-height: 1.4"><div style="display: flex; flex-direction: column"><span>${row.actionHtml ?? show(row.action, ar)}</span>${row.target ? monoSpan(row.target, show(row.target, ar), "font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5D6B7E; overflow-wrap: anywhere") : ''}</div></td>
     <td style="padding: 10px 16px; line-height: 1.4"><div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px">${pill(row.result)}${row.detail ? `<span style="font-size: 12px; color: #5D6B7E">${show(row.detail, ar)}</span>` : ''}</div></td>
   </tr>`).join('')
   const meters = model.meters.map(meter => `<div style="display: flex; flex-direction: column; gap: 6px">
@@ -474,7 +481,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
     <dt style="display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #475467"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; ${item.ring ? `border: 1.5px solid ${item.dot}` : `background: ${item.dot}`}"></span>${show(item.label, ar)}</dt>
     <dd style="margin: 0; font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums">${show(item.value, ar)}</dd>
   </div>`).join('')
-  const near = model.near.map((item, index) => `<li style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; font-size: 13px;${index ? ' border-top: 1px solid #EEF0F3' : ''}"><span style="font-family: 'IBM Plex Mono', monospace">${show(item.name, ar)}</span><span style="color: ${escapeHtml(item.color)}; font-weight: 600; font-variant-numeric: tabular-nums">${show(item.note, ar)}</span></li>`).join('')
+  const near = model.near.map((item, index) => `<li style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; font-size: 13px;${index ? ' border-top: 1px solid #EEF0F3' : ''}">${monoSpan(item.name, show(item.name, ar), "font-family: 'IBM Plex Mono', monospace")}<span style="color: ${escapeHtml(item.color)}; font-weight: 600; font-variant-numeric: tabular-nums">${show(item.note, ar)}</span></li>`).join('')
   const hostRows = model.hostRows.map(row => {
     let value = show(row.value, ar)
     if (ar && row.ddStyle.includes('overflow-wrap')) {
@@ -600,7 +607,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
 </div>`
 }
 
-const mono = (text: string): string => `<span style="font-family: 'IBM Plex Mono', monospace">${escapeHtml(text)}</span>`
+const mono = (text: string): string => monoSpan(text, escapeHtml(text), "font-family: 'IBM Plex Mono', monospace")
 
 const running = (label = 'Running'): DashboardChip => ({ label, bg: '#E7F5EE', fg: '#0E7A4E', dot: '#0E7A4E', borderedDot: true })
 

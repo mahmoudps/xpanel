@@ -27,6 +27,7 @@ import {
   renderThresholdMeter,
 } from '../tokens.ts'
 import { auditActionHtml, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
+import { isArabicSentence } from '../arabic-type.ts'
 import { renderWhmDashboard, whmDashboardFromProps, type DashboardHostSample } from '../board-port/xwhm-dashboard.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
@@ -184,7 +185,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
       <span class="xp-brand__mark" aria-hidden="true">x</span>
       <div>
         <strong>xWHM</strong>
-        <div><bdi dir="ltr" class="xp-mono">${escapeHtml(hostname)}</bdi></div>
+        <div>${isArabicSentence(hostname) ? `<span class="xp-ar-sentence">${escapeHtml(hostname)}</span>` : `<bdi dir="ltr" class="xp-mono">${escapeHtml(hostname)}</bdi>`}</div>
       </div>
     </div>
 
@@ -331,9 +332,9 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
       ${section === 'server-info' ? `<section class="xp-card" data-host-info="true" aria-labelledby="whm-server-info-heading">
         <div class="xp-card__header"><h1 id="whm-server-info-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1></div>
         <div class="xp-kpi-grid" data-host-info-grid="true">
-          <div class="xp-field"><span class="xp-label">${isAr ? 'الحمل' : 'Load'}</span><strong data-host-load="true" class="xp-mono" dir="ltr">${isAr ? 'جار القراءة' : 'Reading'}</strong></div>
-          <div class="xp-field"><span class="xp-label">${isAr ? 'الذاكرة' : 'Memory'}</span><strong data-host-memory="true" class="xp-mono" dir="ltr">${isAr ? 'جار القراءة' : 'Reading'}</strong></div>
-          <div class="xp-field"><span class="xp-label">${isAr ? 'القرص' : 'Disk'}</span><strong data-host-disk="true" class="xp-mono" dir="ltr">${isAr ? 'جار القراءة' : 'Reading'}</strong></div>
+          <div class="xp-field"><span class="xp-label">${isAr ? 'الحمل' : 'Load'}</span><strong data-host-load="true" class="${isAr ? 'xp-ar-sentence' : 'xp-mono'}"${isAr ? '' : ' dir="ltr"'}>${isAr ? 'جار القراءة' : 'Reading'}</strong></div>
+          <div class="xp-field"><span class="xp-label">${isAr ? 'الذاكرة' : 'Memory'}</span><strong data-host-memory="true" class="${isAr ? 'xp-ar-sentence' : 'xp-mono'}"${isAr ? '' : ' dir="ltr"'}>${isAr ? 'جار القراءة' : 'Reading'}</strong></div>
+          <div class="xp-field"><span class="xp-label">${isAr ? 'القرص' : 'Disk'}</span><strong data-host-disk="true" class="${isAr ? 'xp-ar-sentence' : 'xp-mono'}"${isAr ? '' : ' dir="ltr"'}>${isAr ? 'جار القراءة' : 'Reading'}</strong></div>
         </div>
         <p class="xp-help" data-host-info-status role="status"></p>
       </section>` : ''}
@@ -742,7 +743,7 @@ ${section === 'ips' ? `        <!-- Server IP Pool Table -->
                   <td class="xp-mono">IPv${ip.version}</td>
                   <td><code class="xp-mono"><bdi dir="ltr">${escapeHtml(ip.interfaceName)}</bdi></code></td>
                   <td>${renderStatusBadge(ip.role === 'mail' ? 'warn' : 'ok', ip.role)}</td>
-                  <td class="xp-mono"><bdi dir="ltr">${escapeHtml(ip.ownerKind)}${ip.ownerId ? ` (${escapeHtml((ip.ownerKind === 'account' ? accounts.find(account => account.id === ip.ownerId)?.username : resellers.find(reseller => reseller.id === ip.ownerId)?.username) ?? (isAr ? 'المالك غير متاح' : 'Owner unavailable'))})` : ''}</bdi></td>
+                  <td class="xp-mono"><bdi dir="ltr">${escapeHtml(ip.ownerKind)}${ip.ownerId ? ` (${(() => { const named = ip.ownerKind === 'account' ? accounts.find(account => account.id === ip.ownerId)?.username : resellers.find(reseller => reseller.id === ip.ownerId)?.username; return named ? escapeHtml(named) : isAr ? '<span class="xp-ar-sentence">المالك غير متاح</span>' : 'Owner unavailable' })()})` : ''}</bdi></td>
                   <td class="xp-mono"><bdi dir="ltr">${escapeHtml(ip.ptrHostname ?? '—')}</bdi></td>
                   <td>${renderStatusBadge(ip.isPrimary ? 'ok' : 'suspended', ip.isPrimary ? 'Primary' : 'Secondary')}</td>
                 </tr>

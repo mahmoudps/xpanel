@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
-import { ARABIC_TYPE_CSS, BOARD_SANS_LTR, BOARD_SANS_RTL } from './arabic-type.ts'
+import { ARABIC_TYPE_CSS, BOARD_SANS_LTR, BOARD_SANS_RTL, isArabicSentence } from './arabic-type.ts'
 import { isolateLtrRuns, metaPieces } from './bidi-runs.ts'
-import { renderFidelityDocument as renderDashboard } from './board-port/xwhm-dashboard.ts'
+import { renderFidelityDocument as renderDashboard, renderWhmDashboard, whmDashboardFromProps } from './board-port/xwhm-dashboard.ts'
+import { renderInbox, xmailInboxFromProps } from './board-port/xmail-inbox.ts'
 import { renderFidelityDocument as renderHome } from './board-port/xpanel-home.fixture.ts'
 import { DESIGN_TOKENS_CSS } from './tokens.ts'
 
@@ -82,5 +83,52 @@ describe('Arabic typography layer', () => {
     assert.deepEqual(metaPieces('مستخدمان'), [{ kind: 'value', text: 'مستخدمان' }])
     assert.equal(isolateLtrRuns('طُبّق 13:48 UTC'), 'طُبّق <bdi dir="ltr">13:48 UTC</bdi>')
     assert.equal(isolateLtrRuns('3.2 / 10 GB'), '3.2 / 10 GB')
+  })
+
+  it('sets a whole Arabic sentence in the sans stack and keeps identifiers mono', () => {
+    assert.equal(isArabicSentence('لا حسابات قرب الحد'), true)
+    assert.equal(isArabicSentence('سجل داخلي'), true)
+    assert.equal(isArabicSentence('صندوق بريد'), true)
+    assert.equal(isArabicSentence('جار القراءة'), true)
+    assert.equal(isArabicSentence('المالك غير متاح'), true)
+    assert.equal(isArabicSentence('الجيل 142'), true)
+    assert.equal(isArabicSentence('karim'), false)
+    assert.equal(isArabicSentence('omar-clinic.net'), false)
+    assert.equal(isArabicSentence('info@alice-shop.com'), false)
+    assert.equal(isArabicSentence('/home/omar/public_html'), false)
+    assert.equal(isArabicSentence('nginx 1.24.0'), false)
+    assert.equal(isArabicSentence('None'), false)
+    const dashboard = renderWhmDashboard(whmDashboardFromProps({ locale: 'ar', nearLimits: [] }))
+    assert.match(dashboard, /class="xp-ar-sentence"[^>]*>لا حسابات قرب الحد</)
+    assert.equal(dashboard.includes("font-family: 'IBM Plex Mono', monospace\">لا حسابات قرب الحد"), false)
+    const english = renderWhmDashboard(whmDashboardFromProps({ locale: 'en', nearLimits: [] }))
+    assert.match(english, /font-family: 'IBM Plex Mono', monospace">None</)
+    assert.equal(english.includes('class="xp-ar-sentence"'), false)
+    assert.equal(english.includes('dir="rtl"'), false)
+  })
+
+  it('lets a live-shaped inbox row and address shrink inside the page', () => {
+    const message = {
+      uid: 7,
+      folder: 'INBOX',
+      from: 'procurement.notices@very-long-vendor-name.example.test',
+      fromName: 'International Procurement Notices Desk',
+      to: 'orders.and.customer.care.desk@alice-shop.example.test',
+      cc: 'karim.mansour.operations@alice-shop.example.test',
+      subject: 'Shipment',
+      preview: 'Friday',
+      body: 'Friday',
+      receivedAt: '2026-10-22T14:00:00Z',
+      unread: true,
+    }
+    for (const locale of ['en', 'ar'] as const) {
+      const html = renderInbox(xmailInboxFromProps({ locale, mailbox: 'owner@department.alice-shop.example.test', messages: [message] }))
+      assert.match(html, /data-mail-name="true" style="min-width: 0/)
+      assert.match(html, /data-mail-addr="true" style="min-width: 0; max-width: 100%[^"]*overflow-wrap: anywhere/)
+      assert.match(html, /data-mail-mailbox="true" style="min-width: 0[^"]*overflow-wrap: anywhere/)
+    }
+    assert.match(ARABIC_TYPE_CSS, /data-mail-addr/)
+    assert.match(ARABIC_TYPE_CSS, /xp-ar-sentence/)
+    assert.match(ARABIC_TYPE_CSS, /a\[data-usage-link\]/)
   })
 })
