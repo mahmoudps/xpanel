@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
-import { renderLoginSurface, type LoginSurfaceProps } from './surfaces/login.ts'
+import { loginDocumentTitle, renderLoginSurface, type LoginSurfaceProps } from './surfaces/login.ts'
 import { renderWebApp } from './app.ts'
 
 const audiences = ['xpanel', 'xwhm', 'xmail'] as const
-const brands = { xpanel: 'xPanel', xwhm: 'xWHM', xmail: 'xMail' }
-const headings = { xpanel: { en: 'Account sign in', ar: 'دخول الحساب' }, xwhm: { en: 'Server sign in', ar: 'دخول إدارة الخادم' }, xmail: { en: 'Mail sign in', ar: 'دخول البريد' } }
+const headings = {
+  xpanel: { en: 'Sign in to xPanel', ar: 'تسجيل الدخول إلى <bdi dir="ltr">xPanel</bdi>' },
+  xwhm: { en: 'Sign in to xWHM', ar: 'تسجيل الدخول إلى <bdi dir="ltr">xWHM</bdi>' },
+  xmail: { en: 'Sign in to xMail', ar: 'تسجيل الدخول إلى <bdi dir="ltr">xMail</bdi>' },
+}
 
 describe('listener-specific sign-in presentation', () => {
   for (const audience of audiences) {
@@ -16,14 +19,15 @@ describe('listener-specific sign-in presentation', () => {
         const heading = html.match(/<h1[^>]*>(.*?)<\/h1>/s)?.[1]
         assert.equal(heading, headings[audience][locale])
         const document = renderWebApp({ surface: 'login', locale, login: { audience } })
-        assert.ok(document.includes('<title>' + brands[audience] + ' — ' + headings[audience][locale] + '</title>'))
+        assert.ok(document.includes('<title>' + loginDocumentTitle(audience, locale) + '</title>'))
         assert.ok(document.includes('href="/assets/favicon-' + audience + '.svg"'))
         assert.equal((document.match(/<main\b/g) ?? []).length, 1)
         assert.equal((document.match(/<h1\b/g) ?? []).length, 1)
         assert.match(document, /<main[^>]+aria-labelledby="login-heading"/)
         assert.match(document, /<header[^>]+role="banner"/)
         assert.match(document, /<form[^>]+aria-labelledby="login-heading"[^>]+data-login-form/)
-        assert.match(html, new RegExp('<span class="xp-brand__name" dir="ltr">' + brands[audience] + '</span>'))
+        assert.match(html, /<span style="[^"]*">xPanel<\/span>/)
+        assert.doesNotMatch(html, /xp-brand__name|xp-login-theme/)
         const reveal = html.match(/<button[^>]+data-action="toggle-password"[\s\S]*?<\/button>/)?.[0]
         assert.ok(reveal)
         assert.match(reveal, /type="button"/)
@@ -36,7 +40,8 @@ describe('listener-specific sign-in presentation', () => {
 
         assert.equal((html.match(/<h1\b/g) ?? []).length, 1)
         assert.match(html, /<form[^>]+aria-labelledby="login-heading"[^>]+data-login-form/)
-        assert.doesNotMatch(html, /id="login-description"|<aside|<footer|xp-login-step|xp-login-emblem/)
+        assert.match(html, /<footer[^>]+role="contentinfo"/)
+        assert.doesNotMatch(html, /id="login-description"|<aside|xp-login-step|xp-login-emblem/)
         for (const field of ['login-username', 'login-password', 'login-otp', 'login-recovery-code']) {
           assert.ok(html.includes('for="' + field + '"'))
           assert.ok(html.includes('id="' + field + '"'))
@@ -62,7 +67,7 @@ describe('listener-specific sign-in presentation', () => {
   it('keeps malformed or target-only identities on the generic document title and icon', () => {
     for (const login of [{ targetSurface: 'xmail' }, { audience: '__proto__' }, { audience: '\"><svg onload=unsafe()>' }] as LoginSurfaceProps[]) {
       const html = renderWebApp({ surface: 'login', login })
-      assert.ok(html.includes('<title>xPanel Sign In — xPanel Control Plane</title>'))
+      assert.ok(html.includes('<title>Sign in — xPanel</title>'))
       assert.ok(html.includes('href="/assets/favicon.svg"'))
       assert.doesNotMatch(html, /<div\b[^>]*\bdata-login-audience=|onload=unsafe/)
     }
@@ -75,10 +80,10 @@ describe('listener-specific sign-in presentation', () => {
     assert.doesNotMatch(legacy, /data-login-audience/)
     assert.match(legacy, /Sign in to xPanel/)
     const scoped = renderLoginSurface({ audience: 'xmail', targetSurface: 'xwhm' })
-    assert.match(scoped, /Mail sign in/)
-    const links = scoped.match(/href="[^"]+"/g) ?? []
-    assert.equal(links.length, 2)
-    assert.ok(links.every(link => link.includes('target=xmail')))
+    assert.match(scoped, /Sign in to xMail/)
+    assert.match(scoped, /href="\/login\?lang=ar&amp;theme=dark&amp;target=xmail"/)
+    assert.match(scoped, /href="\/mail\/inbox"/)
+    assert.doesNotMatch(scoped, /target=xwhm/)
   })
 
   it('rejects malformed presentation selectors before rendering attributes or links', () => {
@@ -87,37 +92,29 @@ describe('listener-specific sign-in presentation', () => {
     assert.match(html, /target=xpanel/)
   })
 
-  it('asks xMail for the mailbox address', () => {
+  it('asks xMail for the email address', () => {
     const html = renderLoginSurface({ audience: 'xmail', locale: 'en' })
-    assert.match(html, /Mailbox address/)
-    assert.doesNotMatch(html, /Hosting account username/)
+    assert.match(html, /Email address/)
+    assert.doesNotMatch(html, /Mailbox address|Hosting account username/)
     assert.doesNotMatch(html, /Mail workspace|Your hosting, in one place|Account access|sign-in address|Mail tools/)
     assert.doesNotMatch(html, /type="email"|IMAP|SMTP|Sieve|delivery|name="email"/)
   })
 
   it('keeps administrator recovery commands out of public sign-in pages', () => {
-    for (const audience of ['xpanel', 'xmail'] as const) {
+    for (const audience of ['xpanel', 'xmail', 'xwhm'] as const) {
       const html = renderLoginSurface({ audience })
-      assert.match(html, /This page cannot reset a password/)
-      assert.doesNotMatch(html, /reset-password|disable-2fa/)
-      assert.match(html, /<details[^>]+data-account-recovery><summary>Sign-in help<\/summary>/)
-      assert.doesNotMatch(html, /<details[^>]+open/)
+      assert.doesNotMatch(html, /reset-password|disable-2fa|data-account-recovery|data-admin-note|<pre\b|<details/)
     }
-    for (const html of [renderLoginSurface({ audience: 'xwhm' }), renderLoginSurface()]) {
-      assert.match(html, /data-admin-note/)
-      assert.match(html, /Server administrator/)
-      assert.match(html, /operations runbook/)
-      assert.doesNotMatch(html, /reset-password|disable-2fa|<pre\b/)
-      assert.doesNotMatch(html, /<details[^>]+open/)
-    }
+    assert.match(renderLoginSurface({ audience: 'xwhm' }), /Forgot the root password\? Reset it from the server shell\./)
+    assert.match(renderLoginSurface({ audience: 'xpanel' }), /Forgot your password\? Your hosting provider can reset it from xWHM\./)
+    assert.match(renderLoginSurface(), /Sign in to xPanel/)
   })
 
-  it('names the panel, labels the theme control, and links only safe sibling origins', () => {
+  it('names the panel and links only safe sibling origins', () => {
     const bare = renderLoginSurface({ audience: 'xpanel', theme: 'light' })
     assert.match(bare, /data-login-product="xpanel"/)
-    assert.match(bare, /aria-label="Dark theme"/)
-    assert.match(bare, /class="xp-login-theme__label"/)
-    assert.match(bare, /data-password-label>Show</)
+    assert.doesNotMatch(bare, /aria-label="Dark theme"|xp-login-theme__label/)
+    assert.match(bare, /data-password-label hidden>Show</)
     assert.doesNotMatch(bare, /data-panel-link|mailto:/)
     const linked = renderLoginSurface({
       audience: 'xpanel', theme: 'light', supportEmail: 'ops@example.test',
@@ -148,5 +145,24 @@ describe('listener-specific sign-in presentation', () => {
       assert.match(html, /&lt;script&gt;/)
       assert.match(html, /&lt;img/)
     }
+  })
+
+  it('keeps the artboard sample off the live sign-in page', () => {
+    const live = renderLoginSurface({ audience: 'xwhm', locale: 'en' })
+    assert.doesNotMatch(live, /Orbit-plex-4127-lane|srv1\.xpanel\.test|203\.0\.113\.7|v1\.4\.2|data-login-companion/)
+    assert.match(live, /data-login-lockout[^>]*hidden/)
+    assert.match(live, /data-auth-state="credentials"/)
+    const board = renderWebApp({
+      surface: 'login', locale: 'en', theme: 'light',
+      login: {
+        audience: 'xwhm', username: 'root', passwordPreview: 'Orbit-plex-4127-lane', companionLockout: true,
+        host: { hostname: 'srv1.xpanel.test', clientIp: '203.0.113.7', serverIp: '10.0.0.12', version: '1.4.2' },
+        lockout: { locked: true, lockedUntil: '2026-10-22T14:19:00Z', lastAttemptAt: '2026-10-22T14:04:00Z', failures: 5, windowMinutes: 15, clientIp: '203.0.113.7', minutesRemaining: 14 },
+      },
+    })
+    assert.match(board, /data-login-companion="true"/)
+    assert.match(board, /data-auth-state="credentials"/)
+    assert.match(board, /Sign-in is paused for 14 minutes after 5 failed attempts/)
+    assert.doesNotMatch(board, /data-dc-tpl|id="dc-root"|data-sc-name/)
   })
 })

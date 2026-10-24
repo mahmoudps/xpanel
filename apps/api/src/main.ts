@@ -165,6 +165,16 @@ export const createDefaultWebRenderer = async (deps: {
     }
     if (url.pathname === '/login') {
       const email = await supportEmail()
+      let hostname = ''
+      try {
+        const settings = await deps.store.getServerSettings()
+        if (settings?.hostname) hostname = settings.hostname
+      } catch { /* Sign-in stays available when server settings cannot be read. */ }
+      let version = ''
+      try {
+        const parsed = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version?: unknown }
+        if (typeof parsed.version === 'string') version = parsed.version
+      } catch { /* A missing package version stays blank on the page. */ }
       return serveWebUi(req, async () => ({
         surface: 'login',
         ...(email ? { supportEmail: email } : {}),
@@ -173,6 +183,10 @@ export const createDefaultWebRenderer = async (deps: {
           ...(deps.entryPoint ? { audience: deps.entryPoint, targetSurface: deps.entryPoint } : {}),
           ...(email ? { supportEmail: email } : {}),
           ...(panelLinks.length ? { panels: panelLinks } : {}),
+          host: {
+            ...(hostname ? { hostname } : {}),
+            ...(version ? { version } : {}),
+          },
         },
       }))
     }
