@@ -1,7 +1,11 @@
 import { DatabaseSync } from 'node:sqlite'
 import { fail } from '@xpanel/core'
 import { migrate, type MigrateResult } from './migrate.ts'
-import { sqliteRunner, type Row, type SqlRunner } from './sql-runner.ts'
+import { assertSqliteConnectionSetupAllowed, canonicalSqliteFilename, closeSqliteRunner, sqliteRunner, type Row, type SqlRunner } from './sql-runner.ts'
+import { initializeOperationalMetadata } from './repos/official-references.ts'
+
+const nativeExec = DatabaseSync.prototype.exec
+const nativeClose = DatabaseSync.prototype.close
 
 /** SQL runner (or transaction runner) passed to repository functions. */
 export type Db = SqlRunner
@@ -15,6 +19,8 @@ export interface DbHandle {
 }
 
 export interface CreateDbOptions {
+  /** Strict operation acknowledgements require verified file-backed WAL + synchronous FULL. */
+  durability?: 'normal' | 'strict'
   /** SQLite busy timeout in milliseconds, default 5000 (0..600000). */
   busyTimeoutMs?: number
   /** Enable WAL journal mode (default true for file databases). */
@@ -48,28 +54,35 @@ const checkBusyTimeout = (ms: number | undefined): number => {
  * and `journal_mode = WAL`. Call `migrate(handle.runner)` at startup.
  */
 export const createDb = (pathOrUrl: string, opts: CreateDbOptions = {}): DbHandle => {
-  const filename = resolveSqlitePath(pathOrUrl)
-  const busyTimeoutMs = checkBusyTimeout(opts.busyTimeoutMs)
-  const sqlite = new DatabaseSync(filename)
-  sqlite.exec('PRAGMA foreign_keys = ON')
-  sqlite.exec(`PRAGMA busy_timeout = ${busyTimeoutMs}`)
-  if (filename !== ':memory:' && opts.wal !== false) {
-    sqlite.exec('PRAGMA journal_mode = WAL')
-    sqlite.exec('PRAGMA synchronous = NORMAL')
+  const filename = canonicalSqliteFilename(resolveSqlitePath(pathOrUrl))
+  if (opts.durability !== undefined && opts.durability !== 'normal' && opts.durability !== 'strict') {
+    fail('VALIDATION', 'durability must be normal or strict')
   }
-  const runner = sqliteRunner(sqlite)
-  let closed = false
+  if (opts.durability === 'strict' && (filename === ':memory:' || opts.wal === false)) {
+    fail('PRECONDITION_FAILED', 'strict durability requires a file-backed WAL database')
+  }
+  const busyTimeoutMs = checkBusyTimeout(opts.busyTimeoutMs)
+  assertSqliteConnectionSetupAllowed(filename)
+  const sqlite = new DatabaseSync(filename)
+  let runner: SqlRunner
+  try {
+    Reflect.apply(nativeExec, sqlite, ['PRAGMA foreign_keys = ON'])
+    Reflect.apply(nativeExec, sqlite, [`PRAGMA busy_timeout = ${busyTimeoutMs}`])
+    if (filename !== ':memory:' && opts.wal !== false) {
+      Reflect.apply(nativeExec, sqlite, ['PRAGMA journal_mode = WAL'])
+      Reflect.apply(nativeExec, sqlite, [opts.durability === 'strict' ? 'PRAGMA synchronous = FULL' : 'PRAGMA synchronous = NORMAL'])
+    }
+    runner = sqliteRunner(sqlite, { strictDurability: opts.durability === 'strict' })
+  } catch (error) {
+    Reflect.apply(nativeClose, sqlite, [])
+    throw error
+  }
   return {
     db: runner,
     sqlite,
     query: (text, params) => runner.query(text, params),
     runner,
-    async close(): Promise<void> {
-      if (!closed) {
-        closed = true
-        sqlite.close()
-      }
-    },
+    close: () => closeSqliteRunner(runner),
   }
 }
 
@@ -77,15 +90,17 @@ export interface TestDbHandle extends DbHandle {
   migration: MigrateResult
 }
 
-/** In-memory SQLite database with all migrations applied. */
+/** In-memory diagnostic database with explicit migration and initialization. */
 export const createTestDb = async (opts: { migrate?: boolean } = {}): Promise<TestDbHandle> => {
   const handle = createDb(':memory:')
-  const migration =
-    opts.migrate === false
+  try {
+    const migration = opts.migrate === false
       ? { applied: [], alreadyApplied: [], unknownApplied: [], version: 0 }
       : await migrate(handle.runner)
-  return {
-    ...handle,
-    migration,
+    if (opts.migrate !== false) await initializeOperationalMetadata(handle.db)
+    return { ...handle, migration }
+  } catch (error) {
+    await handle.close()
+    throw error
   }
 }

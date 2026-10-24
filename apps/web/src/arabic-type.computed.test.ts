@@ -250,6 +250,7 @@ const liveDashboard = (locale: 'ar' | 'en' = 'ar'): string => {
   const body = renderWhmDashboard(whmDashboardFromProps({
     locale,
     principal: { username: 'root' },
+    visibility: { principal: { kind: 'root', id: 'computed-fixture-root', username: 'root' } },
     nearLimits: [],
     hostSample: { engine: 'nginx 1.24.0 → Apache 2.4.58' },
     auditEntries: [

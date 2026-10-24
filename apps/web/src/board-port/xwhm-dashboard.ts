@@ -1,4 +1,5 @@
-import type { Account, AuditEntry, Certificate, Plan, ServerIpEntry } from '@xpanel/core'
+import { canOpenRegisteredRoute, type VisibilityContext } from '@xpanel/catalog'
+import type { Account, AuditEntry, Certificate, HostLimitObservation, Plan, ServerIpEntry } from '@xpanel/core'
 import { ARABIC_TYPE_CSS, isArabicSentence } from '../arabic-type.ts'
 import { isolateLtrRuns } from '../bidi-runs.ts'
 import { auditActionHtml, auditActionLabel, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
@@ -38,9 +39,11 @@ export interface DashboardHostSample {
   apacheTest?: { ok: boolean; at: string }
   /** Plan controllers present in cgroup.subtree_control. Absent when that file was not read. */
   enforcedLimits?: { cpu: boolean; memory: boolean; io: boolean; pids: boolean }
+  observedLimits?: HostLimitObservation
 }
 
 interface DashboardProps {
+  visibility?: VisibilityContext
   locale?: Locale
   theme?: 'light' | 'dark'
   realtimeEnabled?: boolean
@@ -119,6 +122,7 @@ export interface DashboardNotice {
 }
 
 export interface WhmDashboardModel {
+  visibility?: VisibilityContext
   locale: Locale
   theme: 'light' | 'dark'
   realtimeEnabled: boolean
@@ -313,6 +317,14 @@ export const mapAgentHostInfo = (info: unknown): DashboardHostSample | null => {
   const enforcedLimits = cpuEnforced !== undefined && memoryEnforced !== undefined && ioEnforced !== undefined && pidsEnforced !== undefined
     ? { cpu: cpuEnforced, memory: memoryEnforced, io: ioEnforced, pids: pidsEnforced }
     : undefined
+  const observed = agentRecord(identity?.observedLimits)
+  const checked = agentNumber(observed, 'checkedAccounts'), unread = agentNumber(observed, 'unavailableAccounts')
+  const gapKeys = new Set(['memory', 'pids', 'io', 'cpu', 'disk'])
+  const gaps = Array.isArray(observed?.gaps) && observed.gaps.every(value => typeof value === 'string' && gapKeys.has(value)) ? observed.gaps as HostLimitObservation['gaps'] : undefined
+  const status = observed?.status
+  const observedLimits: HostLimitObservation | undefined = checked !== undefined && unread !== undefined && Number.isSafeInteger(checked) && Number.isSafeInteger(unread) && checked >= 0 && unread >= 0 && gaps
+    && (status === 'unavailable' || (checked > 0 && unread === 0 && (status === 'verified' && gaps.length === 0 || status === 'gaps' && gaps.length > 0)))
+    ? { status, checkedAccounts: checked, unavailableAccounts: unread, gaps } : undefined
   const sample: DashboardHostSample = {
     ...(agentNumber(load, 'load1') !== undefined ? { load1: agentNumber(load, 'load1') } : {}),
     ...(agentNumber(load, 'load5') !== undefined ? { load5: agentNumber(load, 'load5') } : {}),
@@ -337,6 +349,7 @@ export const mapAgentHostInfo = (info: unknown): DashboardHostSample | null => {
     ...(nginxTest ? { nginxTest } : {}),
     ...(apacheTest ? { apacheTest } : {}),
     ...(enforcedLimits ? { enforcedLimits } : {}),
+    ...(observedLimits ? { observedLimits } : {}),
   }
   return sample
 }
@@ -406,6 +419,8 @@ const pill = (chip: DashboardChip, mono = false): string => {
 const linkStyle = 'display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; color: #C9D3E1; text-decoration: none; font-size: 14px'
 const activeStyle = 'display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; background: #1D2B40; color: #FFFFFF; font-weight: 600; box-shadow: inset 3px 0 0 #6EA0FF; text-decoration: none; font-size: 14px'
 
+const canOpen = (model: WhmDashboardModel, route: string): boolean => canOpenRegisteredRoute(route, model.visibility)
+
 const navHtml = (model: WhmDashboardModel): string => {
   const ar = model.locale === 'ar'
   const index = ar ? 1 : 0
@@ -413,7 +428,9 @@ const navHtml = (model: WhmDashboardModel): string => {
     ? 'display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; background: #1D2B40; color: #FFFFFF; font-weight: 600; box-shadow: inset -3px 0 0 #6EA0FF; text-decoration: none; font-size: 14px'
     : activeStyle
   const groups = NAV.map(group => {
-    const items = group.items.map(item => {
+    const admitted = group.items.filter(item => canOpen(model, item.href))
+    if (admitted.length === 0) return ''
+    const items = admitted.map(item => {
       const current = item.href === model.activeHref
       const label = show(item.label[index] ?? '', ar)
       const labelBody = label.includes('<') ? `<span>${label}</span>` : label
@@ -544,7 +561,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
           <h1 style="margin: 0; font-size: 22px; font-weight: 600; line-height: 1.3">${show(model.title, ar)}</h1>
           ${lede}
         </div>
-        <a href="/whm/accounts/new" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #1D5BD6; background: #1D5BD6; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none">${svg('<path d="M12 5v14M5 12h14"></path>', 18, false)}${show(model.createLabel, ar)}</a>
+        ${canOpen(model, '/whm/accounts/new') ? `<a href="/whm/accounts/new" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #1D5BD6; background: #1D5BD6; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none">${svg('<path d="M12 5v14M5 12h14"></path>', 18, false)}${show(model.createLabel, ar)}</a>` : ''}
       </div>
       <section aria-label="Notices" style="display: flex; flex-wrap: wrap; gap: 16px">${model.notices.map(noticeHtml).join('')}</section>
       <div style="display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start">
@@ -557,8 +574,8 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
             <p style="margin: 0; font-size: 14px; color: #344054; line-height: 1.6; max-width: 68ch">${show(model.reconcilerLede, ar)}</p>
             <dl style="margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px">${model.reconcilerTiles.map(item => tile(item.label, item.value, item.note, ar, item.chip, item.monoLabel)).join('')}</dl>
             <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: auto">
-              <button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer">${show(model.driftButton, ar)}</button>
-              <a href="/whm/audit" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.driftLink, ar)}</a>
+              ${canOpen(model, '/whm/audit') ? `<button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer">${show(model.driftButton, ar)}</button>` : ''}
+              ${canOpen(model, '/whm/audit') ? `<a href="/whm/audit" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.driftLink, ar)}</a>` : ''}
               <span role="status" style="font-size: 12px; font-weight: 500; color: #0E7A4E">${show(model.driftStatus, ar)}</span>
             </div>
           </section>
@@ -582,7 +599,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
               </table>
             </div>
             <div style="display: flex; padding: 8px 18px; border-top: 1px solid #EEF0F3">
-              <a href="/whm/audit" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.auditLink, ar)}</a>
+              ${canOpen(model, '/whm/audit') ? `<a href="/whm/audit" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.auditLink, ar)}</a>` : ''}
             </div>
           </section>
         </div>
@@ -596,8 +613,8 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
               <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid #EEF0F3; border-radius: 10px">${near}</ul>
             </div>
             <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: auto">
-              <a href="/whm/accounts" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-size: 14px; font-weight: 600; text-decoration: none">${show(model.viewAccounts, ar)}</a>
-              <a href="/whm/resellers" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.resellersLink, ar)}</a>
+              ${canOpen(model, '/whm/accounts') ? `<a href="/whm/accounts" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-size: 14px; font-weight: 600; text-decoration: none">${show(model.viewAccounts, ar)}</a>` : ''}
+              ${canOpen(model, '/whm/resellers') ? `<a href="/whm/resellers" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.resellersLink, ar)}</a>` : ''}
             </div>
           </section>
           <section aria-labelledby="host-title" style="min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 24px; border-radius: 12px; background: #FFFFFF; border: 1px solid #E2E6EC">
@@ -619,7 +636,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
             </div>
             <ul style="list-style: none; margin: 0; padding: 0; border-top: 1px solid #E2E6EC">${services}</ul>
             <div style="display: flex; padding: 8px 18px; border-top: 1px solid #EEF0F3">
-              <a href="/whm/services" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.servicesLink, ar)}</a>
+              ${canOpen(model, '/whm/services') ? `<a href="/whm/services" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.servicesLink, ar)}</a>` : ''}
             </div>
           </section>
         </div>
@@ -634,6 +651,7 @@ const mono = (text: string): string => monoSpan(text, escapeHtml(text), "font-fa
 const running = (label = 'Running'): DashboardChip => ({ label, bg: '#E7F5EE', fg: '#0E7A4E', dot: '#0E7A4E', borderedDot: true })
 
 export const whmDashboardFixture = (): WhmDashboardModel => ({
+  visibility: { principal: { kind: 'root', id: 'fixture-root', username: 'root' } },
   locale: 'en',
   theme: 'light',
   realtimeEnabled: false,
@@ -655,7 +673,7 @@ export const whmDashboardFixture = (): WhmDashboardModel => ({
   searchPlaceholder: 'Search tools and accounts',
   notices: [
     { tone: 'warn', html: `<span><strong style="font-weight: 600">3 certificates renew within 30 days:</strong> ${mono('alice-shop.com')} (2026-11-04), ${mono('nour.dev')} (2026-11-12), ${mono('omar-clinic.net')} (2026-11-19). AutoSSL renews them; check any domain that no longer points here. <a href="/whm/ssl" style="color: #1D5BD6; font-weight: 600">Review certificates</a></span>` },
-    { tone: 'info', html: `<span><strong style="font-weight: 600">Upgrade ${mono('v1.5.0')} is available</strong> (this server runs ${mono('v1.4.2')}). It installs side by side with a snapshot and a health check, and rolls back automatically if the check fails. Homes, mail and customer databases are not touched. <a href="/whm/upgrade" style="color: #1D5BD6; font-weight: 600">Review the upgrade</a></span>` },
+    { tone: 'info', html: `<span><strong style="font-weight: 600">Upgrade ${mono('v1.5.0')} is available</strong> (this server runs ${mono('v1.4.2')}). It installs side by side with a snapshot and a health check, and rolls back automatically if the check fails. Homes, mail and customer databases are not touched. <a href="/whm/server/upgrade" style="color: #1D5BD6; font-weight: 600">Review the upgrade</a></span>` },
   ],
   reconcilerTitle: 'Reconciler',
   reconcilerStatus: okChip('In sync'),
@@ -739,6 +757,7 @@ export const whmDashboardFixture = (): WhmDashboardModel => ({
 const domain = (name: string): string => `<bdi dir="ltr"><span style="font-family: 'IBM Plex Mono', monospace">${escapeHtml(name)}</span></bdi>`
 
 export const whmDashboardFixtureAr = (): WhmDashboardModel => ({
+  visibility: { principal: { kind: 'root', id: 'fixture-root', username: 'root' } },
   locale: 'ar',
   theme: 'light',
   realtimeEnabled: false,
@@ -760,7 +779,7 @@ export const whmDashboardFixtureAr = (): WhmDashboardModel => ({
   searchPlaceholder: 'ابحث في الأدوات والحسابات',
   notices: [
     { tone: 'warn', html: `<span><strong style="font-weight: 600"><bdi dir="ltr">3</bdi> شهادات تُجدَّد خلال <bdi dir="ltr">30</bdi> يوماً:</strong> ${domain('alice-shop.com')} <bdi dir="ltr">(2026-11-04)</bdi>، ${domain('nour.dev')} <bdi dir="ltr">(2026-11-12)</bdi>، ${domain('omar-clinic.net')} <bdi dir="ltr">(2026-11-19)</bdi>. يجددها <bdi dir="ltr">AutoSSL</bdi>؛ راجع أي نطاق لم يعد يشير إلى هنا. <a href="/whm/ssl" style="color: #1D5BD6; font-weight: 600">مراجعة الشهادات</a></span>` },
-    { tone: 'info', html: `<span><strong style="font-weight: 600">الترقية <bdi dir="ltr">v1.5.0</bdi> متاحة</strong> (هذا الخادم يعمل <bdi dir="ltr">v1.4.2</bdi>). تُثبَّت إلى جانب لقطة وفحص سلامة، وتتراجع تلقائياً إذا فشل الفحص. لا تُمس المنازل ولا البريد ولا قواعد بيانات العملاء. <a href="/whm/upgrade" style="color: #1D5BD6; font-weight: 600">مراجعة الترقية</a></span>` },
+    { tone: 'info', html: `<span><strong style="font-weight: 600">الترقية <bdi dir="ltr">v1.5.0</bdi> متاحة</strong> (هذا الخادم يعمل <bdi dir="ltr">v1.4.2</bdi>). تُثبَّت إلى جانب لقطة وفحص سلامة، وتتراجع تلقائياً إذا فشل الفحص. لا تُمس المنازل ولا البريد ولا قواعد بيانات العملاء. <a href="/whm/server/upgrade" style="color: #1D5BD6; font-weight: 600">مراجعة الترقية</a></span>` },
   ],
   reconcilerTitle: 'الموفّق',
   reconcilerStatus: okChip('متزامن'),
@@ -851,17 +870,12 @@ const meterPercent = (used: number, total: number): { now: string; pct: string }
 }
 
 const controllersNoteFromLimits = (
-  limits: DashboardHostSample['enforcedLimits'],
+  limits: DashboardHostSample['observedLimits'],
   ar: boolean,
 ): string => {
-  if (!limits) return '—'
-  if (limits.cpu && limits.memory && limits.io && limits.pids) {
-    return ar ? 'كل حدود الخطط مفروضة على هذا المضيف.' : 'All plan limits are enforced on this host.'
-  }
-  if (limits.cpu && limits.memory && limits.pids && !limits.io) {
-    return ar ? 'حد الكتابة على القرص غير مفروض على هذا المضيف.' : 'IO write limits are not enforced on this host.'
-  }
-  return ar ? 'بعض حدود الخطط غير مفروضة على هذا المضيف.' : 'Some plan limits are not enforced on this host.'
+  if (!limits || limits.status === 'unavailable' || limits.checkedAccounts < 1 || limits.unavailableAccounts > 0) return ar ? 'التحقق من حدود الخطط غير متاح.' : 'Plan-limit verification is unavailable.'
+  if (limits.status === 'verified' && limits.gaps.length === 0) return ar ? 'حدود الحسابات المقروءة تطابق حدود الخطط المعيّنة.' : 'Observed account caps match assigned plan limits.'
+  return ar ? 'حدود الحسابات المقروءة لا تطابق جميع حدود الخطط المعيّنة.' : 'Observed account caps do not match all assigned plan limits.'
 }
 
 const certificateRows = (
@@ -1030,6 +1044,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
   const meter = (label: string): DashboardMeter => ({ label, value: '—', now: '0', pct: '0%', color: '#1D5BD6', note: '—', noteColor: '#5D6B7E' })
   return {
     locale,
+    visibility: props.visibility,
     theme: props.theme ?? 'light',
     realtimeEnabled: props.realtimeEnabled === true,
     hostname,
@@ -1110,8 +1125,8 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
         : meter(ar ? 'العقد على «/home»' : 'Inodes on /home'),
     ],
     resourcesFoot: ar
-      ? 'كل حساب محصور داخل شريحته <bdi dir="ltr"><code style="font-family: \'IBM Plex Mono\', monospace">xpanel-&lt;uid&gt;.slice</code></bdi>، فلا يأخذ موقع واحد الخادم كله.'
-      : 'Each account is limited inside its own <code style="font-family: \'IBM Plex Mono\', monospace">xpanel-&lt;uid&gt;.slice</code>, so one busy site cannot take the whole server.',
+      ? 'حدود موارد الحسابات مضبوطة في شرائح منفصلة. نتيجة التحقق من المضيف معروضة على حدة.'
+      : 'Account resource caps are configured in per-account slices. Host verification is reported separately.',
     auditTitle: ar ? 'آخر التدقيق' : 'Recent audit entries',
     auditWhen: audit.length ? (ar ? 'الأوقات بتوقيت «UTC»' : 'Times in UTC') : '—',
     auditHeads: ar ? ['الوقت', 'الفاعل', 'الإجراء', 'النتيجة'] : ['Time', 'Actor', 'Action', 'Result'],
@@ -1145,7 +1160,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     ],
     controllersTitle: ar ? 'متحكمات «cgroup v2»' : 'cgroup v2 controllers',
     controllers: ['cpu', 'io', 'memory', 'pids'],
-    controllersNote: controllersNoteFromLimits(props.hostSample?.enforcedLimits, ar),
+    controllersNote: controllersNoteFromLimits(props.hostSample?.observedLimits, ar),
     servicesTitle: ar ? 'الخدمات' : 'Services',
     servicesMeta: serviceRoster.length ? (ar ? `«${runningServices} / ${existingServices.length}»` : `${runningServices} / ${existingServices.length}`) : '—',
     services: services.length ? services : [emptyService],
@@ -1181,4 +1196,4 @@ export const renderFidelityDocument = (dir: 'ltr' | 'rtl' = 'ltr'): string =>
   documentShell(dir === 'rtl' ? whmDashboardFixtureAr() : whmDashboardFixture())
 
 export const renderLiveDocument = (dir: 'ltr' | 'rtl' = 'ltr'): string =>
-  documentShell(whmDashboardFromProps({ locale: dir === 'rtl' ? 'ar' : 'en', principal: { username: 'root' } }))
+  documentShell(whmDashboardFromProps({ locale: dir === 'rtl' ? 'ar' : 'en', principal: { username: 'root' }, visibility: { principal: { kind: 'root', id: 'fixture-root', username: 'root' } } }))

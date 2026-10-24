@@ -1,4 +1,6 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, createPublicKey, randomUUID } from 'node:crypto'
+import { isIP } from 'node:net'
+import { services as mailServices } from '@xpanel/render'
 import { join } from 'node:path'
 import {
   fail,
@@ -36,6 +38,8 @@ export interface ExtendedRouteHelpers {
   db: Db
   store: StateStore
   homeBaseDir?: string
+  /** Authenticated agent result. Private key material must never cross this boundary. */
+  readDkimPublicMaterial?: (caller: AuthenticatedCaller, domain: string) => Promise<{ selector: string; publicKeyPem: string } | null>
   requireCaller: (req: Request, opts?: { allowUnverifiedMfa?: boolean }) => Promise<AuthenticatedCaller>
   assertRoot: (caller: AuthenticatedCaller, action: string) => Promise<void>
   assertCanAccessAccount: (
@@ -2528,40 +2532,42 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         await requireDomainAccount(helpers.store, caller, domainName, 'dns.email_auth.batch')
         await assertExistingZoneOwner(caller, domainName)
       }
-      const ipv4 =
-        body.ipv4 ??
-        (await helpers.store.listServerIps()).find((ip) => ip.version === 4)?.address ??
-        '203.0.113.10'
+      const ipv4 = body.ipv4 ?? (await helpers.store.listServerIps()).find((ip) => ip.version === 4 && ip.isPrimary)?.address
+      if (ipv4 !== undefined && isIP(ipv4) !== 4) return fail('VALIDATION', 'SPF IPv4 address is invalid')
+      if (!helpers.readDkimPublicMaterial) return fail('PRECONDITION_FAILED', 'verified DKIM signing material is unavailable')
       const provisioned: { domain: string; spf: string; dkim: string; dmarc: string }[] = []
+      const prepared = []
 
       for (const domName of targetNames) {
         const existingZone = await helpers.store.getDnsZone(domName)
         const domObj = allDomains.find((d) => d.name === domName)
-        const baseRecords = (existingZone?.records ?? []).filter(
-          (r) =>
-            !(r.type === 'TXT' && r.name === '@' && r.content.startsWith('v=spf1')) &&
-            !(r.type === 'TXT' && r.name === 'default._domainkey') &&
-            !(r.type === 'TXT' && r.name === '_dmarc'),
-        )
-        const spf = `v=spf1 a mx ip4:${ipv4} ~all`
-        const dkimPub = createHash('sha256').update(`dkim:${domName}`).digest('base64')
-        const dkim = `v=DKIM1; k=rsa; p=${dkimPub}`
-        const dmarc = `v=DMARC1; p=quarantine; rua=mailto:postmaster@${domName}`
-
-        const nextRecords: DnsRecord[] = [
-          ...baseRecords,
-          { id: randomUUID(), zone: domName, name: '@', type: 'TXT', ttl: 14400, content: spf, priority: null },
-          {
-            id: randomUUID(),
-            zone: domName,
-            name: 'default._domainkey',
-            type: 'TXT',
-            ttl: 14400,
-            content: dkim,
-            priority: null,
-          },
-          { id: randomUUID(), zone: domName, name: '_dmarc', type: 'TXT', ttl: 14400, content: dmarc, priority: null },
-        ]
+        const material = await helpers.readDkimPublicMaterial(caller, domName)
+        if (!material || typeof material.publicKeyPem !== 'string' || typeof material.selector !== 'string' || material.publicKeyPem.includes('PRIVATE KEY')) return fail('PRECONDITION_FAILED', 'verified DKIM signing material is unavailable')
+        const owner = (name: string): string => name.toLowerCase().replace(/\.$/, '').replace(new RegExp(`\\.${domName.replace(/\./g, '\\.')}$`), '')
+        const records = existingZone?.records ?? []
+        const existingDkim = records.find(r => r.type === 'TXT' && owner(r.name) === `${material.selector}._domainkey`)
+        let dkimRecord: ReturnType<typeof mailServices.dkimDnsRecord>
+        try {
+          const key = createPublicKey(material.publicKeyPem)
+          if (key.asymmetricKeyType !== 'rsa' || (key.asymmetricKeyDetails?.modulusLength ?? 0) < 2048) throw new Error('invalid DKIM key')
+          dkimRecord = mailServices.dkimDnsRecord(domName, material.selector, key.export({ type: 'spki', format: 'pem' }).toString(), { ttl: existingDkim?.ttl ?? 14400 })
+        } catch {
+          return fail('PRECONDITION_FAILED', 'verified DKIM signing material is unavailable')
+        }
+        const spfRecords = records.filter(r => r.type === 'TXT' && ['@', domName].includes(owner(r.name)) && /^v=spf1(?:\s|$)/i.test(r.content))
+        const dmarcRecords = records.filter(r => r.type === 'TXT' && owner(r.name) === '_dmarc')
+        if (spfRecords.length === 0 && !ipv4) return fail('PRECONDITION_FAILED', 'a primary IPv4 address is required to publish SPF')
+        const spf = spfRecords[0]?.content ?? `v=spf1 a mx ip4:${ipv4} ~all`
+        const dkim = dkimRecord.content
+        const dmarc = dmarcRecords[0]?.content ?? `v=DMARC1; p=quarantine; rua=mailto:postmaster@${domName}`
+        const nextRecords: DnsRecord[] = records.filter(r => !(r.type === 'TXT' && owner(r.name) === dkimRecord.name))
+        if (spfRecords.length === 0) nextRecords.push({ id: randomUUID(), zone: domName, name: '@', type: 'TXT', ttl: 14400, content: spf, priority: null })
+        nextRecords.push({ id: existingDkim?.id ?? randomUUID(), ...dkimRecord, type: 'TXT' })
+        if (dmarcRecords.length === 0) nextRecords.push({ id: randomUUID(), zone: domName, name: '_dmarc', type: 'TXT', ttl: 14400, content: dmarc, priority: null })
+        prepared.push({ domName, existingZone, domObj, nextRecords, spf, dkim, dmarc })
+      }
+      // Validate every requested signing key before changing any desired zone.
+      for (const { domName, existingZone, domObj, nextRecords, spf, dkim, dmarc } of prepared) {
         await helpers.store.saveDnsZone({
           id: existingZone?.id ?? randomUUID(),
           accountId: existingZone?.accountId ?? domObj?.accountId ?? null,

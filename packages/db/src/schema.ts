@@ -1,3 +1,30 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { checksumOf, MIGRATIONS_DIR } from './migrate.ts'
+
+export const OPERATIONAL_MIGRATION_NAMES = ['0001_init.sql', '0002_mailbox_sessions.sql', '0003_job_references_reconcile.sql'] as const
+export const OPERATIONAL_SCHEMA_VERSION = OPERATIONAL_MIGRATION_NAMES.length
+
+const reviewedMigrations = OPERATIONAL_MIGRATION_NAMES.map((name, index) => Object.freeze({
+  version: index + 1, name, checksum: checksumOf(readFileSync(join(MIGRATIONS_DIR, name), 'utf8')),
+}))
+
+/** The initializer receipt and applied rows must match this build's exact reviewed source. */
+export const isReviewedOperationalMigrationSet = (value: unknown): boolean => Array.isArray(value)
+  && value.length === reviewedMigrations.length
+  && value.every((row: unknown, index: number) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return false
+    const entry = row as Record<string, unknown>
+    const expected = reviewedMigrations[index]!
+    return Object.keys(entry).length === 3 && entry.version === expected.version
+      && entry.name === expected.name && entry.checksum === expected.checksum
+  })
+
+export const matchesReviewedOperationalMigrations = (receipt: unknown, applied: unknown): boolean => {
+  if (typeof receipt !== 'string' || !isReviewedOperationalMigrationSet(applied)) return false
+  try { return isReviewedOperationalMigrationSet(JSON.parse(receipt)) && JSON.stringify(applied) === receipt } catch { return false }
+}
+
 export const UPGRADE_STATUSES = ['pending', 'running', 'succeeded', 'failed', 'rolled_back'] as const
 export const UPGRADE_PHASES = ['precheck', 'snapshot', 'stage', 'migrate', 'switch', 'health-check', 'rollback'] as const
 export const GENERATION_STATUSES = ['pending', 'tested', 'active', 'superseded', 'failed', 'rolled_back'] as const
@@ -16,6 +43,15 @@ export const OPERATIONAL_TABLES = [
   'config_generations',
   'upgrades',
   'jobs',
+  'job_runtime_leases',
+  'operational_identity',
+  'official_reference_counters',
+  'official_reference_ledger',
+  'legacy_reference_reviews',
+  'legacy_reference_repairs',
+  'reconcile_host_epochs',
+  'reconcile_operations',
+  'reconcile_operation_effects',
   'metrics_history',
   'audit_log',
 ] as const

@@ -210,6 +210,7 @@ describe('xMail mailbox inbox', () => {
   })
 
   it('binds the mailbox document to the stored quota and only the settings that were written', async () => {
+    let reads = 0
     const boxes = new Map<string, Box>([
       ['inbox@alpha.example.test', { password: 'alpha-secret', messages: [message(7, 'Alpha note', 'Hello from alpha')], sent: [] }],
     ])
@@ -223,6 +224,7 @@ describe('xMail mailbox inbox', () => {
         return boxes.get(mailbox)!.messages.map(({ body: _body, ...summary }) => summary)
       },
       async read(mailbox, password, uid) {
+        reads += 1
         await this.verify(mailbox, password)
         const found = boxes.get(mailbox)!.messages.find(item => item.uid === uid)
         if (!found) return fail('NOT_FOUND', 'message not found')
@@ -240,6 +242,7 @@ describe('xMail mailbox inbox', () => {
       db: database.db, store: state.store, serverSecret: SECRET, sessionId, transport,
     })
     const before = await read()
+    expect(reads).toBe(1)
     expect(before.mailbox).toBe('inbox@alpha.example.test')
     expect(before.quotaLimitMb).toBe(100)
     expect(before).not.toHaveProperty('quotaUsedMb')
@@ -249,6 +252,11 @@ describe('xMail mailbox inbox', () => {
     expect(before.identityDkim).toBeUndefined()
     expect(before.identitySize).toBeUndefined()
     expect(before.mailListFailed).toBeUndefined()
+    const refresh = await loadMailDocument({ db: database.db, store: state.store, serverSecret: SECRET, sessionId, transport, readFirst: false })
+    expect(reads).toBe(1)
+    expect(refresh.messages?.map(item => [item.subject, item.body, item.bodyPending, item.unread])).toEqual([['Alpha note', '', true, true]])
+    expect(refresh.mailbox).toBe('inbox@alpha.example.test')
+    expect(refresh.quotaLimitMb).toBe(100)
 
     const extended = new ExtendedFeaturesStore(state.store.rootDir)
     await extended.saveVacationResponder('inbox@alpha.example.test', { enabled: true, subject: 'Away', body: 'Out of office' })

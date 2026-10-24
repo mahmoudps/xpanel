@@ -7,7 +7,8 @@ import { createGeneration, createTestDb, getGeneration, latestActive, type TestD
 import { profileFor } from '@xpanel/os'
 import { createTestStateStore, type TestStateStoreHandle } from '@xpanel/state'
 import { FakeHostExecutor } from './executor.ts'
-import { HostReconciler, rollbackReloadAction, sha256Text, type ReconcileJournalPhase } from './reconciler.ts'
+import { compileDesiredGeneration, HostReconciler, rollbackReloadAction, sha256Text, type ReconcileJournalPhase } from './reconciler.ts'
+import { SERIAL_RE } from './zone-serial.ts'
 
 const ARGON2 =
   '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g'
@@ -116,6 +117,42 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     })
     return { plan, account, fl }
   }
+
+  it('bumps a stamped zone after body drift, then remains stable without changing TTLs', async () => {
+    const { account } = await seedEnvironment()
+    await stateHandle.store.saveDnsZone({ id: randomUUID(), accountId: account.id, name: 'alice.example.com', serial: 2026102400, records: [{ id: randomUUID(), zone: 'alice.example.com', name: 'www', type: 'A', ttl: 300, content: '192.0.2.10', priority: null }] })
+    const reconciler = new HostReconciler({ store: stateHandle.store, db: dbHandle.db, executor, os })
+    await reconciler.reconcile({ actor: 'root', mailAuth: null })
+    const path = '/var/lib/powerdns/zones/alice.example.com.zone'
+    const original = executor.files.get(path)!
+    assert.ok(original.content.includes('; xpanel-content '))
+    executor.files.set(path, { ...original, content: original.content.replace('192.0.2.10', '192.0.2.11') })
+    await reconciler.reconcile({ actor: 'root', mailAuth: null })
+    const repaired = executor.files.get(path)!.content
+    assert.ok(Number(SERIAL_RE.exec(repaired)?.[2]) > Number(SERIAL_RE.exec(original.content)?.[2]))
+    assert.ok(repaired.includes('192.0.2.10'))
+    assert.ok(repaired.includes('300'))
+    await reconciler.reconcile({ actor: 'root', mailAuth: null })
+    assert.equal(executor.files.get(path)!.content, repaired)
+  })
+
+  it('uses per-account IO devices without falling back to a global device, while retaining explicit overrides', async () => {
+    const { account } = await seedEnvironment()
+    const snapshot = await stateHandle.store.readSnapshot()
+    const mapped = compileDesiredGeneration(snapshot, { os, ioDevices: ['/dev/block/8:1'], ioDevicesByAccount: new Map([[account.id, []]]) })
+    const slice = mapped.files.find(file => file.path.endsWith(`/xpanel-${account.uid}.slice`))!
+    assert.equal(slice.content.includes('IOWriteBandwidthMax='), false)
+    const explicit = compileDesiredGeneration(snapshot, { os, ioDevices: ['/dev/block/8:3'] })
+    assert.ok(explicit.files.find(file => file.path.endsWith(`/xpanel-${account.uid}.slice`))!.content.includes('/dev/block/8:3'))
+    executor.files.set('/proc/self/mountinfo', { path: '/proc/self/mountinfo', content: '1 0 8:1 / / rw - ext4 /dev/sda1 rw\n2 1 0:40 / /home rw - tmpfs tmpfs rw\n', mode: 0o444, owner: 'root', group: 'root' })
+    executor.files.set('/sys/fs/cgroup/cgroup.subtree_control', { path: '/sys/fs/cgroup/cgroup.subtree_control', content: 'cpu memory io pids', mode: 0o444, owner: 'root', group: 'root' })
+    const automatic = new HostReconciler({ store: stateHandle.store, db: dbHandle.db, executor, os })
+    await automatic.reconcile({ actor: 'root', mailAuth: null })
+    assert.equal(executor.files.get(slice.path)!.content.includes('IOWriteBandwidthMax='), false)
+    const overridden = new HostReconciler({ store: stateHandle.store, db: dbHandle.db, executor, os, ioDevices: ['/dev/block/8:3'] })
+    await overridden.reconcile({ actor: 'root', mailAuth: null, force: true })
+    assert.ok(executor.files.get(slice.path)!.content.includes('/dev/block/8:3'))
+  })
 
   it('A19: validates candidate configs in isolated staging before touching live paths; syntax failure never writes broken config to live targets', async () => {
     await seedEnvironment()

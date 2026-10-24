@@ -3,6 +3,7 @@ import { LOGIN_CLIENT_SCRIPT } from './login-client.ts'
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import { defaultPlan, type Account } from '@xpanel/core'
+import { planEditorRequest } from './plan-editor.ts'
 import {
   BROWSER_REALTIME_SCRIPT,
   createLiveEventStore,
@@ -28,6 +29,7 @@ import {
 // Explicit synthetic renderer observations. None are production defaults or live-host proof.
 const fixtureAt = '2026-10-22T14:05:00Z'
 const fixturePlan = { ...defaultPlan({ id: 'fixture-plan', name: 'Synthetic plan', featureListId: 'fixture-features' }), shell: 'jailed' as const }
+const fixtureFeatureList = { id: fixturePlan.featureListId, name: 'Synthetic tools' }
 const fixtureAccount: Account = {
   id: 'fixture-account', username: 'alice', uid: 20014, gid: 20014, home: '/home/alice', primaryDomain: 'alice-shop.com',
   planId: fixturePlan.id, ownerId: null, status: 'active', suspendReason: null, contactEmail: 'owner@alice-shop.com',
@@ -47,6 +49,7 @@ const panelFixture: PanelSurfaceProps = {
 const whmFixture: WhmSurfaceProps = {
   principal: { kind: 'root', id: 'fixture-root', username: 'synthetic-root' }, hostname: 'srv1.xpanel.test', adminSessionIp: '203.0.113.7',
   ioSnapshot: SYNTHETIC_WHM_IO_SNAPSHOT, accounts: [fixtureAccount, { ...fixtureAccount, id: 'fixture-other', username: 'omar', uid: 20016, gid: 20016 }], plans: [fixturePlan],
+  featureLists: [fixtureFeatureList],
   services: ['nginx', 'apache', 'php-fpm', 'mariadb', 'dovecot', 'postfix', 'pdns', 'nftables'].map(name => ({ name, unit: `${name}.service`, version: 'fixture', active: true, enabled: true, rssMb: 24, role: 'Synthetic observation' })),
   resellers: [{ id: 'fixture-reseller', username: 'fixture-reseller', acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 10240, totalBandwidthMb: 102400, oversell: false, nameservers: [], delegatedIps: [] }],
   ipPool: [{ id: 'fixture-ip', address: '10.0.0.12', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: 'Synthetic address' }],
@@ -169,10 +172,14 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     }
     // Plans & cgroup v2 limits + explicit Unlimited
     assert.match(html, /for="plan-cpu-quota">CPU \(%\)<\/label>/)
-    assert.match(html, /for="plan-memory-max">Memory \(MB\)<\/label>/)
+    assert.match(html, /for="plan-memory-max">Memory \(MiB\)<\/label>/)
     assert.match(html, /for="plan-tasks-max">Processes<\/label>/)
-    assert.match(html, /name="unlimitedAddonDomains" value="unlimited"/)
-    assert.match(html, /Unlimited addon domains/)
+    assert.match(html, /for="plan-ioReadBps">Disk read \(MiB\/s\)<\/label>/)
+    assert.match(html, /for="plan-ioWriteBps">Disk write \(MiB\/s\)<\/label>/)
+    assert.match(html, /name="unlimited\.addonDomains"[^>]*data-plan-unlimited="addonDomains"/)
+    assert.match(html, /for="plan-addonDomains-unlimited"[^>]*>[\s\S]*?<span>Unlimited<\/span>/)
+    assert.match(html, /name="featureListId"[^>]*required>[\s\S]*?<option value="fixture-features" selected>Synthetic tools<\/option>/)
+    assert.doesNotMatch(html, /name="ioMaxMbps"|data-plan-editor-form=/)
     // Accounts & type-to-confirm terminate guard
     assert.match(html, /data-type-to-confirm="true"/)
     // Resellers & 14-privilege ACL matrix
@@ -222,6 +229,58 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     assert.match(html, /data-action="start-transfer"/)
     assert.doesNotMatch(html, /cpmove-ziad\.tar\.gz/)
     assertAllBadgesHaveSvgAndLabel(html)
+  })
+
+  it('renders one current native plan editor with real metadata and explicit create/edit/unavailable selection', () => {
+    const storedPlan = { ...fixturePlan, id: '10000000-0000-4000-8000-000000000001', featureListId: '20000000-0000-4000-8000-000000000001' }
+    const metadata: WhmSurfaceProps = {
+      plans: [storedPlan], accounts: [{ ...fixtureAccount, planId: storedPlan.id }],
+      featureLists: [{ id: storedPlan.featureListId, name: 'Synthetic tools' }],
+    }
+    const create = whmAt('/whm/plans', { ...metadata, planEditorState: { kind: 'create' } })
+    const edit = whmAt('/whm/plans', { ...metadata, planEditorState: { kind: 'edit', plan: storedPlan } })
+    const nativeForm = (html: string): string => {
+      assert.equal([...html.matchAll(/<form\b[^>]*\bdata-native-plan-editor\b/g)].length, 1)
+      assert.doesNotMatch(html, /data-plan-editor-form=|name="ioMaxMbps"/)
+      return /<form\b[^>]*\bdata-native-plan-editor\b[\s\S]*?<\/form>/.exec(html)![0]
+    }
+    const createForm = nativeForm(create), editForm = nativeForm(edit)
+    assert.match(createForm, /action="\/api\/plans" method="post"/)
+    assert.match(createForm, /data-plan-editable="true"/)
+    assert.doesNotMatch(createForm, /data-plan-id=/)
+    assert.match(editForm, new RegExp(`data-plan-id="${storedPlan.id}"`))
+    assert.match(editForm, /name="name"[^>]*value="Synthetic plan"/)
+    assert.match(editForm, /name="featureListId"[^>]*required/)
+    assert.match(editForm, new RegExp(`<option value="${storedPlan.featureListId}" selected>Synthetic tools<\/option>`))
+    for (const key of ['diskMb', 'bandwidthMbMonth', 'ioReadBps', 'ioWriteBps', 'ioReadIops', 'ioWriteIops', 'memoryMb', 'maxProcesses', 'cpuPercent', 'addonDomains', 'aliasDomains', 'subdomains', 'mailboxes', 'forwarders', 'mailingLists', 'ftpAccounts', 'databases', 'phpWorkers', 'defaultMailboxQuotaMb']) {
+      assert.match(editForm, new RegExp(`name="${key}"`))
+      assert.match(editForm, new RegExp(`name="unlimited\\.${key}"`))
+    }
+    assert.match(editForm, /name="ioReadBps"[^>]*value="50"/)
+    assert.match(editForm, /name="ioWriteBps"[^>]*value="25"/)
+    assert.match(editForm, /data-native-plan-save disabled/)
+    assert.match(edit, /data-plan-delete-dialog/)
+    const { id: _id, ...payload } = storedPlan
+    const renderedEditId = /data-plan-id="([^"]+)"/.exec(editForm)![1]!
+    const post = planEditorRequest(payload)
+    assert.equal(post.method, 'POST')
+    assert.equal(post.path, '/api/plans')
+    assert.equal(Object.hasOwn(post.body, 'ownerId'), true)
+    const patch = planEditorRequest(payload, renderedEditId)
+    assert.equal(patch.method, 'PATCH')
+    assert.equal(patch.path, '/api/plans/' + storedPlan.id)
+    assert.equal(Object.hasOwn(patch.body, 'ownerId'), false)
+    assert.match(BROWSER_REALTIME_SCRIPT, /\[data-native-plan-editor\]/)
+    assert.doesNotMatch(BROWSER_REALTIME_SCRIPT, /\[data-plan-editor-form\]/)
+    const unread = nativeForm(whmAt('/whm/plans', { ...metadata, featureLists: [] }))
+    assert.match(unread, /data-plan-editable="false"/)
+    assert.match(unread, /feature list is unavailable/)
+    assert.doesNotMatch(unread, new RegExp(`>${storedPlan.featureListId}<`))
+    for (const planEditorState of [{ kind: 'unavailable' as const }, { kind: 'edit' as const, plan: { ...storedPlan, id: '30000000-0000-4000-8000-000000000001' } }]) {
+      const unavailable = whmAt('/whm/plans', { ...metadata, planEditorState })
+      assert.match(unavailable, /The requested plan is unavailable/)
+      assert.doesNotMatch(unavailable, /\bdata-native-plan-editor\b|data-plan-editor-form=/)
+    }
   })
 
   it('renders xPanel surface with Slice Meters, Multi-IP Domains, Dynamic userdata Config Editor, Website Analytics, Jailed File Manager (0640/0750), and Jailed Shell Terminal', () => {
@@ -308,7 +367,7 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     const routeCases: [string, (route: string) => string, string, string[]][] = [
       ['/whm/accounts', whmAt, 'data-section="accounts-isolation"', ['data-section="service-health"', 'data-section="plans-feature-lists"', 'data-create-account-form="true"']],
       ['/whm/accounts/new', whmAt, 'data-create-account-form="true"', ['data-terminate-account-form="true"', 'data-section="service-health"']],
-      ['/whm/plans', whmAt, 'data-plan-editor-form="true"', ['data-section="accounts-isolation"', 'data-section="nftables-firewall"']],
+      ['/whm/plans', whmAt, 'data-native-plan-editor', ['data-plan-editor-form="true"', 'data-section="accounts-isolation"', 'data-section="nftables-firewall"']],
       ['/whm/server/ips', whmAt, 'data-ip-pool-table="true"', ['data-mail-ip-config-form="true"']],
       ['/whm/email/outbound', whmAt, 'data-mail-ip-config-form="true"', ['data-ip-pool-table="true"', 'data-add-ip-form="true"']],
       ['/domains', panelAt, 'data-domains-table="true"', ['data-userdata-form="true"', 'data-file-manager-table="true"']],

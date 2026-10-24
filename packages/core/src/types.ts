@@ -37,6 +37,16 @@ export interface ResourceLimits {
   cpuPercent: Limit
 }
 
+export type AccountLimitGap = 'memory' | 'pids' | 'io' | 'cpu' | 'disk'
+
+/** A read-only comparison of assigned plans with observed host caps, not workload qualification. */
+export interface HostLimitObservation {
+  status: 'verified' | 'gaps' | 'unavailable'
+  checkedAccounts: number
+  unavailableAccounts: number
+  gaps: AccountLimitGap[]
+}
+
 export interface PlanCaps {
   addonDomains: Limit
   aliasDomains: Limit
@@ -544,6 +554,20 @@ export type LiveEvent =
         sizeBytes: number
         unreadCount: number
       }
+    }
+  | {
+      id: string
+      at: string
+      kind: 'mail.changed'
+      scope: LiveEventScope
+      data: { folder: 'INBOX' }
+    }
+  | {
+      id: string
+      at: string
+      kind: 'mail.flags'
+      scope: LiveEventScope
+      data: { mailbox: string; folder: 'INBOX'; uid: number; flags: string[] }
     }
   | {
       id: string

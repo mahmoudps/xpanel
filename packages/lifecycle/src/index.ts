@@ -37,6 +37,7 @@ export type {
   ReleaseInfo,
   UpgradeLayout,
   UpgradeOutcome,
+  UpgradeHostOutcome,
   UpgradePlan,
   UpgradeResult,
   UpgradeStepLog,
@@ -55,6 +56,7 @@ export type {
   UpgradePorts,
   UpgradeRow,
   UpgradeStatus,
+  UpgradeSafetyPort,
 } from './upgrade/ports.ts'
 
 // backup and restore (the account backup wizard)

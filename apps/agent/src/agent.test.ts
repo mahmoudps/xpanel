@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, it } from 'vitest'
+import { afterEach, beforeEach, describe, it, vi } from 'vitest'
 import { defaultFirewallRules, isXpanelError, suggestServerSettings } from '@xpanel/core'
 import type { LiveEvent } from '@xpanel/core'
 import { createRootPrincipal, createTestDb, createUserPrincipal, latestActive, listAudit, listMetricsHistory, type TestDbHandle } from '@xpanel/db'
@@ -398,15 +398,18 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
     assert.equal(crossAccountShell.status, 403)
     assert.equal(bob.username, 'bob')
 
-    // 1. Sample IO analytics & collect metrics as root
+    // 1. Cached IO reads cannot manufacture samples; metric collection remains explicit.
+    const ioRead = vi.spyOn(executor, 'readSliceMetrics')
     const ioRes = await app.fetch(new Request('http://agent.local/analytics/io', { headers: rootHeaders }))
-    assert.equal(ioRes.status, 200)
-    const ioBody = (await ioRes.json()) as {
-      accounts: { username: string; statusLevel: string; readBytesPerSec: number }[]
-    }
-    assert.equal(ioBody.accounts[0]?.username, 'alice')
-    assert.equal(ioBody.accounts[0]?.statusLevel, 'warn')
-    assert.equal(events.some((e) => e.kind === 'io.analytics'), true)
+    assert.equal(ioRes.status, 503)
+    assert.deepEqual(await ioRes.json(), { available: false, snapshot: null, reason: 'not-sampled', fieldReasons: {}, observedAt: null })
+    assert.equal(ioRead.mock.calls.length, 0)
+    ioRead.mockRestore()
+    assert.equal(events.some((e) => e.kind === 'io.analytics'), false)
+    const accountIoRes = await app.fetch(new Request('http://agent.local/analytics/io', { headers: aliceHeaders }))
+    assert.equal(accountIoRes.status, 403)
+    const selectedIoRes = await app.fetch(new Request('http://agent.local/analytics/io?uid=1001', { headers: rootHeaders }))
+    assert.equal(selectedIoRes.status, 422)
 
     const metricsRes = await app.fetch(
       new Request('http://agent.local/metrics/collect', { method: 'POST', headers: rootHeaders }),
@@ -552,22 +555,20 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
       executor,
       os,
     })
-    const brokenExecutor = new FakeHostExecutor()
-    brokenExecutor.readSliceMetrics = async () => {
-      throw new Error('SECRET_INTERNAL_STACK_PATH_/var/lib/xpanel/private')
-    }
     await seedServerAndAccount('jailed')
 
     const app = createAgentApp({
       reconciler,
       store: stateHandle.store,
       db: dbHandle.db,
-      executor: brokenExecutor,
+      executor,
       os: { id: os.id, versionId: os.versionId, family: os.family },
       agentToken: AGENT_TOKEN,
     })
 
+    const metadataRead = vi.spyOn(stateHandle.store, 'readSnapshot').mockRejectedValueOnce(new Error('SECRET_INTERNAL_STACK_PATH_/var/lib/xpanel/private'))
     const res = await app.fetch(new Request('http://agent.local/analytics/io', { headers: agentCallerHeaders({ principalId: rootPrincipalId, token: AGENT_TOKEN }) }))
+    metadataRead.mockRestore()
     assert.equal(res.status, 500)
     const body = (await res.json()) as { detail: string; title: string }
     assert.equal(body.title, 'INTERNAL_ERROR')

@@ -1,9 +1,84 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createRootPrincipal, createTestDb } from '@xpanel/db'
+import { createTestStateStore } from '@xpanel/state'
+import { defaultPlan, type Account } from '@xpanel/core'
+import { profileFor } from '@xpanel/os'
+import * as hostIdentity from './host-identity.ts'
+import { createAgentApp } from './server.ts'
+import { HostReconciler } from './reconciler.ts'
 import { createProductionHostTargetMatcher, LinuxHostExecutor, MAILDIR_BOX_RE } from './executor.ts'
 import { parseLoadavg, parseMeminfo } from './host-info.ts'
 import { classifyHostBinaries, probeAuditLog, readHostMeasurements } from './host-probes.ts'
 
 describe('host capability probes', () => {
+  it('reports host limit evidence unavailable when the account or plan read fails, despite all controllers', async () => {
+    const state = await createTestStateStore()
+    const database = await createTestDb()
+    const certificate = vi.spyOn(hostIdentity, 'readServedCertificatePem').mockResolvedValue(null)
+    class Reader extends LinuxHostExecutor {
+      ioMax = '8:2 rbps=1 wbps=1 riops=1 wiops=1'
+      override async readFile(path: string): Promise<string | null> {
+        if (path === '/proc/loadavg') return '0.1 0.2 0.3 1/100 1'
+        if (path === '/proc/meminfo') return 'MemTotal: 2048 kB\nMemAvailable: 1024 kB\n'
+        if (path.endsWith('/cgroup.subtree_control')) return 'cpu memory io pids'
+        if (path === '/proc/self/mountinfo') return '1 0 8:2 / /home rw - ext4 /dev/sda2 rw\n'
+        return null
+      }
+      override async runCommand(argv: string[]) {
+        if (argv[0] === '/usr/sbin/repquota') return { ok: true, code: 0, stdout: 'Block limits\nalice -- 0 0 1048576 0 0 0\n', stderr: '' }
+        return { ok: argv[0] === '/usr/bin/df', code: 0, stdout: 'Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/sda1 100000 20000 80000 20% /\n', stderr: '' }
+      }
+      override async readSliceMetrics(uid: number) { return { uid, cpuUsageUsec: 0, memoryCurrentBytes: 1234, ioReadBytes: 0, ioWriteBytes: 0, pidsCurrent: 4, memoryMax: '1', pidsMax: '1', cpuMax: '1 100000', ioMax: this.ioMax } }
+    }
+    try {
+      const principal = await createRootPrincipal(database.db, { username: 'root', passwordHash: '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNo' })
+      const executor = new Reader()
+      const os = profileFor('ID=ubuntu\nVERSION_ID="24.04"\n')
+      const app = createAgentApp({ store: state.store, db: database.db, executor, reconciler: new HostReconciler({ store: state.store, db: database.db, executor, os }), os, agentToken: 'a'.repeat(64) })
+      for (const method of ['listAccounts', 'listPlans'] as const) {
+        const failed = vi.spyOn(state.store, method).mockRejectedValueOnce(new Error('unread'))
+        const response = await app.fetch(new Request('http://agent.local/host/info', { headers: { 'x-xpanel-agent-token': 'a'.repeat(64), 'x-xpanel-principal-id': principal.id } }))
+        expect(response.status).toBe(200)
+        const body = await response.json() as { identity: hostIdentity.HostIdentity }
+        expect(body.identity.enforcedLimits).toEqual({ cpu: true, memory: true, io: true, pids: true })
+        expect(body.identity.observedLimits?.status).toBe('unavailable')
+        failed.mockRestore()
+      }
+      const plan = defaultPlan({ id: 'plan', name: 'Standard', featureListId: 'features' })
+      plan.resources = { ...plan.resources, diskMb: 1024, memoryMb: 1024, maxProcesses: 64, cpuPercent: 100, ioReadBps: 1000, ioWriteBps: 1000, ioReadIops: 10, ioWriteIops: 10 }
+      const accounts = vi.spyOn(state.store, 'listAccounts').mockResolvedValue([{ id: 'account', username: 'alice', uid: 20001, home: '/home/alice', planId: 'plan', status: 'active' } as Account])
+      const plans = vi.spyOn(state.store, 'listPlans').mockResolvedValue([plan])
+      const mismatch = await app.fetch(new Request('http://agent.local/host/info', { headers: { 'x-xpanel-agent-token': 'a'.repeat(64), 'x-xpanel-principal-id': principal.id } }))
+      expect(mismatch.status).toBe(200)
+      const evidence = await mismatch.json() as { identity: hostIdentity.HostIdentity }
+      expect(evidence.identity.observedLimits).toEqual({ status: 'gaps', checkedAccounts: 1, unavailableAccounts: 0, gaps: ['memory', 'pids', 'io', 'cpu'] })
+      const owned = vi.spyOn(state.store, 'getAccountByUsername').mockResolvedValue({ id: 'account', username: 'alice', uid: 20001, home: '/home/alice', planId: 'plan', status: 'active' } as Account)
+      const assigned = vi.spyOn(state.store, 'getPlan').mockResolvedValue(plan)
+      const usage = async () => {
+        const response = await app.fetch(new Request('http://agent.local/host/account-usage?username=alice', { headers: { 'x-xpanel-agent-token': 'a'.repeat(64), 'x-xpanel-principal-id': principal.id } }))
+        expect(response.status).toBe(200)
+        return response.json() as Promise<{ ioEnforced: boolean | null; memoryBytes: number; processCount: number }>
+      }
+      expect((await usage()).ioEnforced).toBe(false)
+      executor.ioMax = '8:2 rbps=1000 wbps=1000 riops=10 wiops=10'
+      expect(await usage()).toMatchObject({ ioEnforced: true, memoryBytes: 1234, processCount: 4 })
+      assigned.mockResolvedValueOnce(null)
+      expect((await usage()).ioEnforced).toBeNull()
+      assigned.mockRejectedValueOnce(new Error('unread plan'))
+      expect((await usage()).ioEnforced).toBeNull()
+      executor.ioMax = '8:9 rbps=1000 wbps=1000 riops=10 wiops=10'
+      expect((await usage()).ioEnforced).toBe(false)
+      owned.mockRestore()
+      assigned.mockRestore()
+      accounts.mockRestore()
+      plans.mockRestore()
+    } finally {
+      certificate.mockRestore()
+      await state.close()
+      await database.close()
+    }
+  })
+
   it('passes a probe only when its binary is present', async () => {
     const present = new Set(['/usr/sbin/useradd', '/usr/sbin/apache2', '/usr/bin/mariadb'])
     const probes = classifyHostBinaries(path => present.has(path), false)
@@ -88,6 +163,10 @@ describe('host capability probes', () => {
     expect(match('/var/spool/postfix/etc', 'write')).toBe(false)
     expect(match('/proc/cpuinfo', 'read')).toBe(true)
     expect(match('/proc/cpuinfo', 'write')).toBe(false)
+    expect(match('/proc/self/mountinfo', 'read')).toBe(true)
+    expect(match('/proc/self/mountinfo', 'write')).toBe(false)
+    expect(match('/proc/self/mountinfo', 'remove')).toBe(false)
+    expect(match('/proc/1/mountinfo', 'read')).toBe(false)
     expect(match('/proc/stat', 'read')).toBe(false)
     expect(match('/etc/xpanel/runtime.env', 'read')).toBe(true)
     expect(match('/etc/xpanel/runtime.env', 'write')).toBe(true)

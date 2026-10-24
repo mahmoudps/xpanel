@@ -84,6 +84,7 @@ const openWire = async (
 const serve = async (
   hub: LiveEventHub,
   authenticate: () => Promise<EventSubscriber | null>,
+  onConnected?: Parameters<LiveEventHub['attachToServer']>[2],
 ): Promise<number> => {
   const server: Server = createServer()
   const connections = new Set<Socket>()
@@ -91,7 +92,7 @@ const serve = async (
     connections.add(socket)
     socket.once('close', () => connections.delete(socket))
   })
-  hub.attachToServer(server, authenticate)
+  hub.attachToServer(server, authenticate, onConnected)
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   cleanup.push(() => {
     for (const socket of connections) socket.destroy()
@@ -111,6 +112,34 @@ const event = (id: string, accountId: string | null = null): LiveEvent => ({
 })
 
 describe('WebSocket live authorization and transport security', () => {
+  it('aborts a mailbox watch after current authorization expires', async () => {
+    let authorized = true
+    let watchSignal: AbortSignal | undefined
+    const hub = new LiveEventHub({ heartbeatIntervalMs: 20, pongTimeoutMs: 500 })
+    const mailbox: EventSubscriber = { kind: 'user', id: 'mailbox-user', accountId: 'account-a', mailboxLogin: 'alice@example.test' }
+    const port = await serve(hub, async () => authorized ? mailbox : null, (_request, _subscriber, signal) => { watchSignal = signal })
+    const client = await openWire(port)
+    assert.equal(client.status, 101)
+    assert.equal(watchSignal?.aborted, false)
+    authorized = false
+    await eventually(() => client.closed)
+    assert.equal(watchSignal?.aborted, true)
+    assert.equal(hub.clientCount, 0)
+  })
+
+  it('closes the old mailbox watch when a same-account mailbox binding changes', async () => {
+    let login = 'alice@example.test'
+    let watchSignal: AbortSignal | undefined
+    const hub = new LiveEventHub()
+    const port = await serve(hub, async () => ({ kind: 'user', id: 'mailbox-user', accountId: 'account-a', mailboxLogin: login }), (_request, _subscriber, signal) => { watchSignal = signal })
+    const client = await openWire(port)
+    login = 'bob@example.test'
+    hub.broadcast({ id: 'old-mailbox-private', at: new Date().toISOString(), kind: 'mail.changed', scope: { accountId: 'account-a', mailboxLogin: 'alice@example.test' }, data: { folder: 'INBOX' } })
+    await eventually(() => client.closed)
+    assert.equal(client.bytes.includes(Buffer.from('old-mailbox-private')), false)
+    assert.equal(watchSignal?.aborted, true)
+  })
+
   it('rechecks authorization before sending an event after a connection has been revoked', async () => {
     let authorized = true
     const hub = new LiveEventHub()
@@ -280,6 +309,20 @@ describe('WebSocket live authorization and transport security', () => {
 })
 
 describe('event hub scope and retained history', () => {
+  it('delivers and replays mailbox invalidations only to root and the bound mailbox', () => {
+    const hub = new LiveEventHub()
+    const subscribers: EventSubscriber[] = [ROOT, { kind: 'reseller', id: 'reseller-a', ownedAccountIds: ['account-a'] }, { kind: 'user', accountId: 'account-a' }, { kind: 'user', accountId: 'account-a', mailboxLogin: 'alice@example.test' }, { kind: 'user', accountId: 'account-a', mailboxLogin: 'bob@example.test' }, { kind: 'user', accountId: 'account-b', mailboxLogin: 'alice@example.test' }]
+    const deliveries = subscribers.map(() => [] as string[])
+    subscribers.forEach((subscriber, index) => hub.registerClient(subscriber, event => deliveries[index]!.push(event.id)))
+    const changed: LiveEvent = { id: 'mailbox-changed', at: new Date().toISOString(), kind: 'mail.changed', scope: { accountId: 'account-a', mailboxLogin: 'alice@example.test' }, data: { folder: 'INBOX' } }
+    hub.broadcast(changed)
+    assert.deepEqual(deliveries, [['mailbox-changed'], [], [], ['mailbox-changed'], [], []])
+    assert.deepEqual(subscribers.map(subscriber => hub.recentEventsFor(subscriber).length), [1, 0, 0, 1, 0, 0])
+    const malformed: LiveEvent = { ...changed, kind: 'mail.flags', data: { mailbox: 'alice@example.test', folder: 'INBOX', uid: 0, flags: ['\\Seen'] } }
+    assert.equal(hub.broadcast(malformed), 0)
+    assert.deepEqual(hub.recentEventsFor(ROOT).map(event => event.id), ['mailbox-changed'])
+  })
+
   it('keeps root, reseller, account and mailbox deliveries in their authorized scope', () => {
     const hub = new LiveEventHub()
     const received: string[][] = [[], [], [], []]

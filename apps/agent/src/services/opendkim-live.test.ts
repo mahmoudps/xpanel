@@ -2,7 +2,7 @@ import { createPublicKey } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import type { HostAction } from '@xpanel/core'
 import { FakeHostExecutor } from '../executor.ts'
-import { currentDkimSelector, ensureOpenDkimSigning, mailAuthZoneAdditions, parseOpenDkimSigning } from './opendkim-live.ts'
+import { currentDkimSelector, ensureOpenDkimSigning, mailAuthZoneAdditions, parseOpenDkimSigning, readOpenDkimPublicMaterial } from './opendkim-live.ts'
 
 const backups = (executor: FakeHostExecutor, path: string): string[] =>
   [...executor.files.keys()].filter(key => key.startsWith(`${path}.bak.`))
@@ -29,6 +29,12 @@ describe('live OpenDKIM writer', () => {
     expect(key?.mode).toBe(0o600)
     expect(key?.owner).toBe('opendkim')
     expect(key?.group).toBe('opendkim')
+    const material = await readOpenDkimPublicMaterial(executor, 'demo.example.test')
+    expect(material?.selector).toBe(selector)
+    expect(material?.publicKeyPem).toBe(createPublicKey(key?.content ?? '').export({ type: 'spki', format: 'pem' }).toString())
+    expect(JSON.stringify(material)).not.toContain('PRIVATE KEY')
+    expect(await readOpenDkimPublicMaterial(executor, '../invalid')).toBeNull()
+    expect(await readOpenDkimPublicMaterial(executor, 'absent.example.test')).toBeNull()
     expect(createPublicKey(key?.content ?? '').asymmetricKeyDetails?.modulusLength).toBe(2048)
     const signing = executor.files.get('/etc/opendkim/signing.json')?.content ?? ''
     expect(signing).not.toContain('PRIVATE KEY')
@@ -36,12 +42,21 @@ describe('live OpenDKIM writer', () => {
     expect(executor.files.get('/etc/opendkim/KeyTable')?.content).toContain(`${selector}._domainkey.demo.example.test demo.example.test:${selector}:${keyPath}`)
     expect(executor.files.get('/etc/opendkim/SigningTable')?.content).toContain(`*@demo.example.test`)
     expect(executor.files.get('/etc/opendkim/TrustedHosts')?.content).toContain('127.0.0.1')
-    expect(executor.files.get('/etc/opendkim/TrustedHosts')?.content).toContain('demo.example.test')
+    expect(executor.files.get('/etc/opendkim/TrustedHosts')?.content).not.toContain('demo.example.test')
+    expect(executor.files.get('/etc/opendkim/InternalHosts')?.content).toContain('127.0.0.1')
+    expect(executor.files.get('/etc/opendkim/InternalHosts')?.content).not.toContain('demo.example.test')
     const conf = executor.files.get('/etc/opendkim.conf')?.content ?? ''
     expect(conf).toContain('Syslog yes')
     expect(conf).toContain('Socket local:/var/spool/postfix/opendkim/opendkim.sock')
     expect(conf).toContain('KeyTable refile:/etc/opendkim/KeyTable')
     expect(conf).toContain('SigningTable refile:/etc/opendkim/SigningTable')
+    for (const directive of ['InternalHosts', 'ExternalIgnoreList']) {
+      const target = new RegExp(`^${directive} refile:(.+)$`, 'm').exec(conf)?.[1]
+      const effective = executor.files.get(target ?? '')?.content ?? ''
+      expect(effective).toContain('127.0.0.1')
+      expect(effective).not.toContain('demo.example.test')
+      expect(effective).not.toContain('*.')
+    }
     expect(executor.dirs.get('/var/spool/postfix/opendkim')).toEqual({ mode: 0o750, owner: 'opendkim', group: 'postfix' })
     expect(argv).toContainEqual(['/usr/sbin/usermod', '-a', '-G', 'opendkim', 'postfix'])
     expect(executor.units.get('opendkim.service')?.active).toBe(true)
@@ -55,6 +70,11 @@ describe('live OpenDKIM writer', () => {
     expect(backups(executor, '/etc/opendkim.conf')).toHaveLength(1)
     expect(executor.files.get(keyPath)?.content).toBe(key?.content)
     expect(verbs.filter(verb => verb === 'restart opendkim.service')).toHaveLength(1)
+    expect(verbs.filter(verb => verb === 'reload opendkim.service')).toHaveLength(0)
+
+    await ensureOpenDkimSigning(executor, ['demo.example.test'], new Date('2026-11-02T00:00:00.000Z'))
+    expect(verbs.filter(verb => verb === 'restart opendkim.service')).toHaveLength(1)
+    expect(verbs.filter(verb => verb === 'reload opendkim.service')).toHaveLength(0)
   })
 
   it('adds DKIM, SPF, and DMARC without replacing records the zone already has', () => {
@@ -75,5 +95,33 @@ describe('live OpenDKIM writer', () => {
       { name: 'xp202610._domainkey', type: 'TXT', content: 'v=DKIM1; k=rsa; p=abc' },
     ], signing)
     expect(kept).toEqual([])
+  })
+
+  it('removes a domain that is no longer signed from SigningTable and InternalHosts', async () => {
+    const executor = new FakeHostExecutor()
+    executor.files.set('/etc/opendkim.conf', { path: '/etc/opendkim.conf', content: 'Syslog yes\n', mode: 0o644, owner: 'root', group: 'root' })
+    const now = new Date('2026-10-24T00:00:00.000Z')
+    await ensureOpenDkimSigning(executor, ['old.example.test', 'kept.example.test'], now)
+    await ensureOpenDkimSigning(executor, ['kept.example.test'], now)
+    const signing = executor.files.get('/etc/opendkim/SigningTable')?.content ?? ''
+    const internal = executor.files.get('/etc/opendkim/InternalHosts')?.content ?? ''
+    const trusted = executor.files.get('/etc/opendkim/TrustedHosts')?.content ?? ''
+    const material = executor.files.get('/etc/opendkim/signing.json')?.content ?? ''
+    expect(signing).toContain('*@kept.example.test')
+    expect(signing).not.toContain('old.example.test')
+    expect(internal).not.toContain('kept.example.test')
+    expect(internal).not.toContain('old.example.test')
+    expect(trusted).toContain('127.0.0.1')
+    expect(trusted).not.toContain('old.example.test')
+    expect(trusted).not.toContain('kept.example.test')
+    expect(material).not.toContain('old.example.test')
+    expect(material).toContain('kept.example.test')
+    expect(await readOpenDkimPublicMaterial(executor, 'old.example.test')).toBeNull()
+    const kept = await readOpenDkimPublicMaterial(executor, 'kept.example.test')
+    expect(kept?.selector).toBe('xp202610')
+    const keyPath = `/etc/opendkim/keys/kept.example.test/${kept?.selector}.private`
+    const key = executor.files.get(keyPath)!
+    executor.files.set(keyPath, { ...key, content: 'not a private signing key' })
+    expect(await readOpenDkimPublicMaterial(executor, 'kept.example.test')).toBeNull()
   })
 })

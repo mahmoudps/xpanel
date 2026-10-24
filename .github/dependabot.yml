@@ -1,0 +1,12 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 5
+    open-pull-requests-limit: 3
+
+# Audit npm dependencies with the pinned pnpm workflow. Enable lockfile update
+# automation only after support for the current pnpm version is verified.

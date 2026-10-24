@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
-import { assertJailedShellAllowed, fail, isUnlimited } from '@xpanel/core'
+import { assertJailedShellAllowed, assertResourceConfigurationBinding, fail, isUnlimited, parseResourceObservationSnapshot, RESOURCE_SAMPLE_INTERVAL_MS } from '@xpanel/core'
 import type {
   Account,
+  CanonicalIoAnalyticsUnavailable,
   AccountIoRank,
   Domain,
   Id,
@@ -16,6 +17,15 @@ import type {
 } from '@xpanel/core'
 import { system } from '@xpanel/render'
 import type { AccountSliceMetrics, AgentExecutor } from './executor.ts'
+import type { StateSnapshot, StateStore } from '@xpanel/state'
+import { readLifecyclePublicStatus } from '../../../scripts/lifecycle-admission.mjs'
+import { LinuxResourceObservationSampler, type ResourceSamplerReading } from './resource-observations.ts'
+
+export type CanonicalIoAnalyticsRead = CanonicalIoAnalyticsUnavailable | { readonly available: true; readonly snapshot: IoAnalyticsSnapshot }
+
+export const unavailableIoAnalytics = (
+  reason: CanonicalIoAnalyticsUnavailable['reason'], fieldReasons: Readonly<Record<string, string>> = {}, observedAt: string | null = null,
+): CanonicalIoAnalyticsUnavailable => Object.freeze({ available: false, snapshot: null, reason, fieldReasons: Object.freeze({ ...fieldReasons }), observedAt })
 
 export type SliceRuntimeMetrics = AccountSliceMetrics
 
@@ -186,6 +196,74 @@ export class IoAnalyticsEngine {
   private readonly cpuCores: number
   private readonly clockMs: () => number
 
+  /** Cached, configuration-bound production projection. Parsing does not qualify kernel origin. */
+  readResourceObservation(reading: ResourceSamplerReading, state: StateSnapshot): CanonicalIoAnalyticsRead {
+    if (reading.observation === null) return unavailableIoAnalytics(reading.state === 'blocked' || reading.state === 'failed' ? 'invalid' : 'not-sampled')
+    let observed
+    const active = state.accounts.filter(account => account.status === 'active')
+    try {
+      observed = parseResourceObservationSnapshot(reading.observation.snapshot)
+    } catch { return unavailableIoAnalytics('invalid') }
+    try { assertResourceConfigurationBinding(observed, { revision: state.checksum, accountIds: active.map(account => account.id) }) }
+    catch { return unavailableIoAnalytics('configuration-changed') }
+    if (reading.state !== 'ready' || reading.observation.freshness !== 'fresh') {
+      return unavailableIoAnalytics(reading.observation.freshness === 'stale' ? 'stale' : 'invalid', {}, observed.observedAt)
+    }
+    const reasons: Record<string, string> = Object.create(null)
+    const value = (name: string, field: { value: number | null; availability: string }): number | null => {
+      if (field.availability !== 'known' || typeof field.value !== 'number' || !Number.isFinite(field.value) || field.value < 0) {
+        reasons[name] = field.availability === 'known' ? 'invalid' : field.availability
+        return null
+      }
+      return field.value
+    }
+    const host = observed.host.fields
+    const cpuPercent = value('cpuPercent', host.cpuBusyPercent)
+    const memoryUsedBytes = value('memoryUsedBytes', host.memoryUsedBytes)
+    const memoryTotalBytes = value('memoryTotalBytes', host.memoryTotalBytes)
+    const loadAvg1m = value('loadAvg1m', host.loadAvg1m)
+    const psiSomeAvg10 = value('psiSomeAvg10', host.ioPressureSomeAvg10)
+    const psiFullAvg10 = value('psiFullAvg10', host.ioPressureFullAvg10)
+    const awaitMs = value('awaitMs', observed.deferred.aggregateAwaitMs)
+    const byId = new Map(observed.accounts.map(account => [account.accountId, account]))
+    const plans = new Map(state.plans.map(plan => [plan.id, plan]))
+    const ranks: AccountIoRank[] = []
+    for (const account of active) {
+      const sample = byId.get(account.id), plan = plans.get(account.planId)
+      const prefix = 'accounts.' + account.username + '.'
+      if (!sample || !plan) { reasons[prefix + 'identity'] = sample ? 'missing-plan' : 'missing'; continue }
+      const fields = sample.fields
+      const readBytesPerSec = value(prefix + 'readBytesPerSec', fields.readBytesPerSec)
+      const writeBytesPerSec = value(prefix + 'writeBytesPerSec', fields.writeBytesPerSec)
+      const readIops = value(prefix + 'readIops', fields.readIops)
+      const writeIops = value(prefix + 'writeIops', fields.writeIops)
+      const accountCpu = value(prefix + 'cpuPercent', fields.cpuPercent)
+      const memoryCurrentBytes = value(prefix + 'memoryCurrentBytes', fields.memoryCurrentBytes)
+      const pidsCurrent = value(prefix + 'pidsCurrent', fields.pidsCurrent)
+      if (readBytesPerSec === null || writeBytesPerSec === null || readIops === null || writeIops === null || accountCpu === null || memoryCurrentBytes === null || pidsCurrent === null) continue
+      let statusLevel: AccountIoRank['statusLevel'] = 'ok'
+      for (const [usage, cap] of [[readBytesPerSec, plan.resources.ioReadBps], [writeBytesPerSec, plan.resources.ioWriteBps], [readIops, plan.resources.ioReadIops], [writeIops, plan.resources.ioWriteIops]] as const) {
+        if (cap === 'unlimited' || cap <= 0) continue
+        const severity = usageSeverity(usage / cap * 100)
+        if (severity === 'critical' || severity === 'warn' && statusLevel === 'ok') statusLevel = severity
+      }
+      ranks.push({ accountId: account.id, username: account.username, uid: account.uid, readBytesPerSec, writeBytesPerSec,
+        readIops, writeIops, cpuPercent: accountCpu, memoryCurrentBytes, memoryLimitMb: plan.resources.memoryMb,
+        pidsCurrent, pidsLimit: plan.resources.maxProcesses, statusLevel })
+    }
+    if (Object.keys(reasons).length > 0 || cpuPercent === null || memoryUsedBytes === null || memoryTotalBytes === null || loadAvg1m === null || psiSomeAvg10 === null || psiFullAvg10 === null || awaitMs === null) {
+      return unavailableIoAnalytics('incomplete', reasons, observed.observedAt)
+    }
+    ranks.sort((a, b) => b.readBytesPerSec + b.writeBytesPerSec - a.readBytesPerSec - a.writeBytesPerSec)
+    const sum = (key: 'readBytesPerSec' | 'writeBytesPerSec' | 'readIops' | 'writeIops'): number => ranks.reduce((total, account) => total + account[key], 0)
+    const current: IoAnalyticsPoint = { at: observed.observedAt, readBytesPerSec: sum('readBytesPerSec'), writeBytesPerSec: sum('writeBytesPerSec'),
+      readIops: sum('readIops'), writeIops: sum('writeIops'), cpuPercent, memoryUsedBytes, memoryTotalBytes, loadAvg1m, psiSomeAvg10, psiFullAvg10, awaitMs }
+    if (memoryTotalBytes <= 0 || Object.entries(current).some(([key, number]) => key !== 'at' && (typeof number !== 'number' || !Number.isFinite(number) || number < 0))) {
+      return unavailableIoAnalytics('invalid', { aggregate: 'invalid' }, observed.observedAt)
+    }
+    return { available: true, snapshot: { at: observed.observedAt, current, history: [current], accounts: ranks } }
+  }
+
   constructor(opts: { memoryTotalBytes?: number; cpuCores?: number; clockMs?: () => number } = {}) {
     this.memoryTotalBytes = opts.memoryTotalBytes ?? DEFAULT_HOST_MEMORY_TOTAL_BYTES
     this.cpuCores = opts.cpuCores !== undefined && opts.cpuCores > 0 ? opts.cpuCores : 1
@@ -206,6 +284,7 @@ export class IoAnalyticsEngine {
     }
   }
 
+  /** Portable executor diagnostic; production reads use the daemon-owned cached resource pipeline. */
   async sample(
     accounts: readonly Account[],
     plansById: ReadonlyMap<Id, Plan>,
@@ -432,28 +511,118 @@ export class IoAnalyticsEngine {
     return snapshot
   }
 
-  latestSnapshot(): IoAnalyticsSnapshot {
-    const at = new Date().toISOString()
-    const fallback: IoAnalyticsPoint = {
-      at,
-      readBytesPerSec: 0,
-      writeBytesPerSec: 0,
-      readIops: 0,
-      writeIops: 0,
-      awaitMs: 0,
-      psiSomeAvg10: 0,
-      psiFullAvg10: 0,
-      cpuPercent: 0,
-      memoryUsedBytes: 0,
-      memoryTotalBytes: this.memoryTotalBytes,
-      loadAvg1m: 0,
-    }
+  latestSnapshot(): IoAnalyticsSnapshot | null {
+    const current = this.history[this.history.length - 1]
+    if (!current) return null
     return {
-      at,
-      current: this.history[this.history.length - 1] ?? fallback,
+      at: current.at,
+      current,
       history: [...this.history],
       accounts: [],
     }
+  }
+}
+
+/** One daemon-owned kernel sampler. Requests read its cache and cannot choose UIDs or paths. */
+export class CanonicalIoResourcePipeline {
+  private sampler: LinuxResourceObservationSampler | undefined
+  private timer: ReturnType<typeof setInterval> | undefined
+  private refreshing: Promise<void> | undefined
+  private stopping: Promise<void> | undefined
+  private running = false
+  private manuallyPaused = false
+  private state: 'stopped' | 'active' | 'paused' | 'invalid' = 'stopped'
+  private lastPublished: string | undefined
+  private readonly options: { store: StateStore; engine: IoAnalyticsEngine; onEvent?: (event: LiveEvent) => void }
+
+  constructor(options: { store: StateStore; engine: IoAnalyticsEngine; onEvent?: (event: LiveEvent) => void }) { this.options = options }
+
+  async start(): Promise<void> {
+    if (this.running || this.stopping) fail('PRECONDITION_FAILED', 'the canonical resource pipeline is already active or stopping')
+    this.running = true
+    await this.refresh()
+    this.timer = setInterval(() => { void this.refresh() }, RESOURCE_SAMPLE_INTERVAL_MS)
+    this.timer.unref?.()
+  }
+
+  private configuration(snapshot: StateSnapshot) {
+    return { revision: snapshot.checksum, accounts: snapshot.accounts.filter(account => account.status === 'active')
+      .map(account => ({ accountId: account.id, uid: account.uid })) }
+  }
+
+  private refresh(): Promise<void> {
+    if (!this.running || this.manuallyPaused) return Promise.resolve()
+    return this.refreshing ??= this.refreshOnce().catch(async () => {
+      this.state = 'invalid'
+      await this.sampler?.stop().catch(() => undefined)
+    }).finally(() => { this.refreshing = undefined })
+  }
+
+  private async refreshOnce(): Promise<void> {
+    const barrier = await readLifecyclePublicStatus()
+    if (!this.running) return
+    if (barrier.active) {
+      this.state = 'paused'
+      await this.sampler?.stop()
+      return
+    }
+    const snapshot = await this.options.store.readSnapshot()
+    if (!this.running || this.manuallyPaused) return
+    if (!this.sampler) this.sampler = new LinuxResourceObservationSampler(this.configuration(snapshot))
+    else this.sampler.setConfiguration(this.configuration(snapshot))
+    if (this.state !== 'active') this.sampler.start()
+    this.state = 'active'
+    const reading = this.sampler.readLatest()
+    const result = this.options.engine.readResourceObservation(reading, snapshot)
+    if (result.available && reading.observation) {
+      const identity = reading.observation.snapshot.producer.epoch + ':' + reading.observation.snapshot.producer.sequence
+      if (identity !== this.lastPublished) {
+        this.lastPublished = identity
+        this.options.onEvent?.({ id: randomUUID(), at: result.snapshot.at, kind: 'io.analytics',
+          scope: { accountId: null, resellerId: null }, data: result.snapshot })
+      }
+    }
+  }
+
+  async read(snapshot: StateSnapshot): Promise<CanonicalIoAnalyticsRead> {
+    try {
+      if ((await readLifecyclePublicStatus()).active) {
+        this.state = 'paused'
+        void this.sampler?.stop().catch(() => { this.state = 'invalid' })
+        return unavailableIoAnalytics('paused')
+      }
+    } catch {
+      this.state = 'invalid'
+      void this.sampler?.stop().catch(() => undefined)
+      return unavailableIoAnalytics('invalid')
+    }
+    if (!this.running || this.manuallyPaused || this.state === 'paused') return unavailableIoAnalytics(this.manuallyPaused || this.state === 'paused' ? 'paused' : 'not-sampled')
+    if (this.state !== 'active' || !this.sampler) return unavailableIoAnalytics('invalid')
+    return this.options.engine.readResourceObservation(this.sampler.readLatest(), snapshot)
+  }
+
+  async pause(): Promise<void> {
+    this.manuallyPaused = true
+    this.state = 'paused'
+    await this.refreshing
+    await this.sampler?.stop()
+  }
+
+  async resume(): Promise<void> {
+    if (!this.running || this.stopping) fail('PRECONDITION_FAILED', 'the canonical resource pipeline is stopped')
+    this.manuallyPaused = false
+    await this.refresh()
+  }
+
+  stop(): Promise<void> {
+    this.running = false
+    this.state = 'stopped'
+    if (this.timer) clearInterval(this.timer)
+    this.timer = undefined
+    return this.stopping ??= (async () => {
+      await this.refreshing
+      await this.sampler?.stop()
+    })()
   }
 }
 

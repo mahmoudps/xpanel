@@ -1,3 +1,4 @@
+import { ACCOUNT_FILE_HELPER_PROTOCOL_VERSION } from './account-file-runner.ts'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
@@ -267,7 +268,7 @@ describe('account file execution boundary', () => {
   })
 })
 
-describe('NativeAccountFileRunner protocol v1 and child process boundaries', () => {
+describe('NativeAccountFileRunner protocol v2 and child process boundaries', () => {
   let fixture: string
   let home: string
 
@@ -280,6 +281,37 @@ describe('NativeAccountFileRunner protocol v1 and child process boundaries', () 
 
   afterEach(async () => {
     await rm(fixture, { recursive: true, force: true })
+  })
+
+  it('preserves maximum binary upload and download inside the supervised protocol request and response budgets', async () => {
+    const payload = Buffer.alloc(MAX_BINARY_BYTES, 255).toString('base64')
+    const runner = new NativeAccountFileRunner({
+      binaryPath: '/opt/xpanel/bin/xpanel-account-files',
+      requireCgroup: true,
+      cgroupPathForAccount: current => `/sys/fs/cgroup/xpanel.slice/xpanel-${current.uid}.slice`,
+      spawner: async ({ stdinPayload }) => {
+        const parsed = JSON.parse(stdinPayload) as { protocolVersion: number; context: { workerUnit: string }; request: AccountFileRequest }
+        assert.equal(parsed.protocolVersion, ACCOUNT_FILE_HELPER_PROTOCOL_VERSION)
+        assert.match(parsed.context.workerUnit, /^xpanel-files-29101-[0-9a-f]{32}\.service$/)
+        if (parsed.request.op === 'put-bytes') {
+          assert.ok(Buffer.byteLength(stdinPayload) > 2 * 1024 * 1024)
+          assert.ok(Buffer.byteLength(stdinPayload) < 4 * 1024 * 1024)
+          assert.equal(decodeFileBase64(parsed.request.contentBase64).byteLength, MAX_BINARY_BYTES)
+        }
+        const result = parsed.request.op === 'get-bytes'
+          ? { path: parsed.request.path, contentBase64: payload, sizeBytes: MAX_BINARY_BYTES, mtime: timestamp }
+          : entry('public_html/maximum.bin', 'file', MAX_BINARY_BYTES)
+        return { exitCode: 0, signal: null, pid: 9001, stderr: '', stdout: JSON.stringify({
+          protocolVersion: ACCOUNT_FILE_HELPER_PROTOCOL_VERSION, ok: true, op: parsed.request.op,
+          worker: { pid: 4001, uid: account.uid, gid: account.gid, cgroup: `/xpanel.slice/xpanel-${account.uid}.slice/${parsed.context.workerUnit}` }, result,
+        }) }
+      },
+    })
+    const manager = new JailedFileManager(home, 512, { account, runner })
+    assert.equal((await manager.putBytes('public_html/maximum.bin', payload)).sizeBytes, MAX_BINARY_BYTES)
+    const downloaded = await manager.getBytes('public_html/maximum.bin')
+    assert.equal(downloaded.sizeBytes, MAX_BINARY_BYTES)
+    assert.equal(downloaded.contentBase64, payload)
   })
 
   const nodeScriptSpawner = (script: string): HelperProcessSpawner => ({
@@ -339,7 +371,7 @@ describe('NativeAccountFileRunner protocol v1 and child process boundaries', () 
       })
     })
 
-  it('validates every confined file operation over the protocol v1 JSON envelope and records worker telemetry', async () => {
+  it('validates every confined file operation over the protocol v2 JSON envelope and records worker telemetry', async () => {
     const receivedPayloads: Record<string, unknown>[] = []
     const runner = new NativeAccountFileRunner({
       binaryPath: '/opt/xpanel/bin/xpanel-account-files',
@@ -395,7 +427,7 @@ describe('NativeAccountFileRunner protocol v1 and child process boundaries', () 
           pid: 4410,
           stderr: '',
           stdout: `${JSON.stringify({
-            protocolVersion: 1,
+            protocolVersion: ACCOUNT_FILE_HELPER_PROTOCOL_VERSION,
             ok: true,
             op: req.op,
             worker: {
@@ -435,7 +467,7 @@ describe('NativeAccountFileRunner protocol v1 and child process boundaries', () 
     {
       label: 'protocol version mismatch',
       stdout: JSON.stringify({
-        protocolVersion: 2,
+        protocolVersion: ACCOUNT_FILE_HELPER_PROTOCOL_VERSION + 1,
         ok: true,
         op: 'read',
         worker: { pid: 100, uid: 29101, gid: 29101, cgroup: '/' },
@@ -453,7 +485,7 @@ describe('NativeAccountFileRunner protocol v1 and child process boundaries', () 
     {
       label: 'operation mismatch',
       stdout: JSON.stringify({
-        protocolVersion: 1,
+        protocolVersion: ACCOUNT_FILE_HELPER_PROTOCOL_VERSION,
         ok: true,
         op: 'write',
         worker: { pid: 100, uid: 29101, gid: 29101, cgroup: '/' },
@@ -463,7 +495,7 @@ describe('NativeAccountFileRunner protocol v1 and child process boundaries', () 
     {
       label: 'worker UID remained root (0)',
       stdout: JSON.stringify({
-        protocolVersion: 1,
+        protocolVersion: ACCOUNT_FILE_HELPER_PROTOCOL_VERSION,
         ok: true,
         op: 'read',
         worker: { pid: 100, uid: 0, gid: 29101, cgroup: '/' },
@@ -473,7 +505,7 @@ describe('NativeAccountFileRunner protocol v1 and child process boundaries', () 
     {
       label: 'worker UID mismatch',
       stdout: JSON.stringify({
-        protocolVersion: 1,
+        protocolVersion: ACCOUNT_FILE_HELPER_PROTOCOL_VERSION,
         ok: true,
         op: 'read',
         worker: { pid: 100, uid: 29102, gid: 29101, cgroup: '/' },
@@ -483,7 +515,7 @@ describe('NativeAccountFileRunner protocol v1 and child process boundaries', () 
     {
       label: 'worker cgroup slice mismatch',
       stdout: JSON.stringify({
-        protocolVersion: 1,
+        protocolVersion: ACCOUNT_FILE_HELPER_PROTOCOL_VERSION,
         ok: true,
         op: 'read',
         worker: { pid: 100, uid: 29101, gid: 29101, cgroup: '/user.slice' },
@@ -520,7 +552,7 @@ describe('NativeAccountFileRunner protocol v1 and child process boundaries', () 
         pid: 512,
         stderr: '',
         stdout: JSON.stringify({
-          protocolVersion: 1,
+          protocolVersion: ACCOUNT_FILE_HELPER_PROTOCOL_VERSION,
           ok: false,
           op: 'write',
           worker: { pid: 512, uid: account.uid, gid: account.gid, cgroup: '/xpanel.slice/xpanel-29101.slice' },

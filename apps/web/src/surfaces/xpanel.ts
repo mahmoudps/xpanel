@@ -26,6 +26,13 @@ import {
 import { renderAccountResources, resourceRowsFromPlan } from '../board-canvas.ts'
 import { renderXpanelHome, xpanelHomeFromProps } from '../board-port/xpanel-home.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
+import { renderComposedXpanel } from '../board-port/composed/render.ts'
+import { composedRouteSpecs } from '../board-port/composed/all.ts'
+import { copyOf } from '../board-port/composed/types.ts'
+import { renderEmailAccountsExtension, emailAccountsRouteSpec } from '../board-port/extensions/email-accounts.ts'
+import { renderAccountPagesExtension, accountPageRouteSpecs } from '../board-port/extensions/account-pages.ts'
+import { renderStoreExtension, storeRouteSpecs } from '../board-port/extensions/store.ts'
+import { renderResourcesBoard } from '../board-port/extensions/resources-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
 
@@ -45,6 +52,7 @@ export interface PanelSurfaceProps {
   locale?: Locale
   theme?: 'dark' | 'light'
   realtimeEnabled?: boolean
+  xmailOrigin?: string
   account?: Account
   plan?: Plan
   activeRoute?: string
@@ -95,7 +103,36 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
   const plan = props.plan
   const activeRoute = normalizeSurfaceRoute('xpanel', props.activeRoute ?? '/home')
   const section = resolveSurfaceSection('xpanel', activeRoute)
-  const pageTitle = getSurfacePageTitle('xpanel', section, locale, activeRoute)
+  const composedPrincipal = props.visibility?.principal
+  const accountExtensionSpec = accountPageRouteSpecs.find(row => row.route === activeRoute)
+  const storeExtensionSpec = storeRouteSpecs.find(row => row.route === activeRoute)
+    ?? (activeRoute === '/software/installer' ? storeRouteSpecs.find(row => row.route === '/software/store') : undefined)
+  const scopedCollections = {
+    ...(props.domains !== undefined ? { domains: { state: 'read' as const, items: props.domains } } : {}),
+    ...(props.serviceUsers !== undefined ? { users: { state: 'read' as const, items: props.serviceUsers } } : {}),
+  }
+  const extensionHtml = composedPrincipal?.kind === 'user' && composedPrincipal.accountId === account.id
+    ? activeRoute === '/email/accounts' ? renderEmailAccountsExtension({ locale, principal: composedPrincipal, account,
+      ...(plan ? { plan } : {}), ...scopedCollections,
+      mutationsQualified: visibleNavigation(props.visibility, props.catalog).some(surface => surface.sections.some(group => group.pages.some(page => page.route === '/email/accounts'))),
+    }) : accountExtensionSpec ? renderAccountPagesExtension({ locale, route: activeRoute, principal: composedPrincipal, account,
+      ...(plan ? { plan } : {}), theme, ...scopedCollections,
+    }) : storeExtensionSpec ? renderStoreExtension({ locale, route: activeRoute, principal: composedPrincipal, account,
+      ...(scopedCollections.domains ? { domains: scopedCollections.domains } : {}),
+    }) : undefined : undefined
+  const extensionSpec = activeRoute === '/email/accounts' ? emailAccountsRouteSpec : accountExtensionSpec ?? storeExtensionSpec
+  const composedHtml = renderComposedXpanel({
+    locale, route: activeRoute, account,
+    ...(composedPrincipal ? { principal: composedPrincipal } : {}),
+    ...(composedPrincipal?.kind === 'reseller' && props.visibility?.reseller
+      ? { reseller: { id: composedPrincipal.id, acl: props.visibility.reseller.acl } } : {}),
+    ...(props.plan !== undefined ? { plan: props.plan } : {}),
+    ...(props.domains !== undefined ? { domains: props.domains } : {}),
+    ...(props.serviceUsers !== undefined ? { serviceUsers: props.serviceUsers } : {}),
+    ...(props.usage !== undefined ? { usage: props.usage } : {}),
+  })
+  const composedSpec = composedHtml !== undefined ? composedRouteSpecs.find(row => row.surface === 'xpanel' && row.route === activeRoute) : undefined
+  const pageTitle = extensionSpec ? copyOf(extensionSpec.title, locale) : composedSpec ? copyOf(composedSpec.title, locale) : getSurfacePageTitle('xpanel', section, locale, activeRoute)
   const activeDomain = props.activeDomain ?? account.primaryDomain
   const generationId = props.generationId !== undefined && Number.isSafeInteger(props.generationId) && props.generationId > 0 ? props.generationId : undefined
   const domains = props.domains ?? []
@@ -138,6 +175,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
       locale,
       theme,
       realtimeEnabled: props.realtimeEnabled === true,
+      ...(props.xmailOrigin ? { xmailOrigin: props.xmailOrigin } : {}),
       account,
       ...(homePlan ? { plan: homePlan } : {}),
       domains,
@@ -181,7 +219,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
       </div>
     </div>
 
-    ${renderDesignNav('xpanel', locale, activeRoute, qualifiedRoutes)}`,
+    ${renderDesignNav('xpanel', locale, activeRoute, qualifiedRoutes, visibility)}`,
     topbar: `      <div class="xp-topbar__start">
         ${renderPageSearchButton(locale)}
 
@@ -212,8 +250,8 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
           <button type="button" class="xp-btn xp-btn--ghost" data-action="logout">${escapeHtml(isAr ? 'تسجيل الخروج' : 'Sign out')}</button>
         </div>
       </div>`,
-    content: `      ${actionBannerHtml}
-${section === 'resources' ? renderAccountResources(locale, account.uid, resourceRowsFromPlan(plan?.resources ?? null)) : ''}
+    content: extensionHtml !== undefined ? actionBannerHtml + extensionHtml : composedHtml !== undefined ? actionBannerHtml + composedHtml : `      ${actionBannerHtml}
+${section === 'resources' ? `<div style="display:grid;gap:32px;min-inline-size:0">${renderAccountResources(locale, account.uid, resourceRowsFromPlan(plan?.resources ?? null))}${renderResourcesBoard({ context: { locale, route: activeRoute, ...(composedPrincipal ? { principal: composedPrincipal } : {}), account, ...(plan ? { plan } : {}) }, ...(props.usage ? { reading: { accountId: account.id, available: true, snapshot: props.usage, observedAt: null } } : {}) })}</div>` : ''}
       ${section === 'domains' ? `      <!-- 2. Domains & Multi-IP Binding Table -->
       <section class="xp-card" id="xpanel-domains" data-section="domains-multi-ip" aria-labelledby="xpanel-domains-heading">
         <div class="xp-card__header">

@@ -7,6 +7,7 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <linux/fs.h>
+#include <linux/magic.h>
 #include <linux/openat2.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -19,6 +20,7 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
+#include <sys/vfs.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -34,7 +36,7 @@
 #define RENAME_NOREPLACE (1U << 0)
 #endif
 
-#define XP_PROTOCOL_VERSION 1
+#define XP_PROTOCOL_VERSION 2
 #define XP_MAX_STDIN_BYTES (4 * 1024 * 1024)
 #define XP_MAX_EDIT_BYTES_CEILING (1024 * 1024)
 #define XP_MAX_BINARY_BYTES (2 * 1024 * 1024)
@@ -158,6 +160,8 @@ static const char *errno_to_name(int err) {
     case ENOSPC: return "ENOSPC";
     case EROFS: return "EROFS";
     case EMLINK: return "EMLINK";
+    case EOVERFLOW: return "EOVERFLOW";
+    case EPROTO: return "EPROTO";
     case ELOOP: return "ELOOP";
     case ENAMETOOLONG: return "ENAMETOOLONG";
     case ENOSYS: return "ENOSYS";
@@ -209,29 +213,60 @@ static void write_all_stdout(const char *buf, size_t len) {
   }
 }
 
-static void read_self_cgroup(char out[512]) {
+static bool canonical_cgroup_path(const char *path) {
+  if (!path || path[0] != '/') return false;
+  if (path[1] == '\0') return true;
+  const char *segment = path + 1;
+  for (const char *p = segment; ; p++) {
+    unsigned char c = (unsigned char)*p;
+    if (c != '\0' && (c <= 0x20 || c == 0x7f || c == '\\')) return false;
+    if (c == '/' || c == '\0') {
+      size_t len = (size_t)(p - segment);
+      if (len == 0 || (len == 1 && segment[0] == '.') ||
+          (len == 2 && segment[0] == '.' && segment[1] == '.')) return false;
+      if (c == '\0') return true;
+      segment = p + 1;
+    }
+  }
+}
+
+static bool read_self_cgroup(char out[512]) {
+  snprintf(out, 512, "unknown");
   int fd = open("/proc/self/cgroup", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-  if (fd < 0) {
-    if (out[0] == '\0') snprintf(out, 512, "unknown");
-    return;
+  if (fd < 0) return false;
+  char buf[4096];
+  size_t used = 0;
+  bool failed = false;
+  while (used < sizeof(buf) - 1) {
+    ssize_t n = read(fd, buf + used, sizeof(buf) - 1 - used);
+    if (n < 0) { if (errno == EINTR) continue; failed = true; break; }
+    if (n == 0) break;
+    used += (size_t)n;
   }
-  char buf[1024];
-  ssize_t n = read(fd, buf, sizeof(buf) - 1);
+  if (used == sizeof(buf) - 1) {
+    char extra;
+    ssize_t n;
+    do { n = read(fd, &extra, 1); } while (n < 0 && errno == EINTR);
+    if (n != 0) failed = true;
+  }
   close(fd);
-  if (n <= 0) {
-    if (out[0] == '\0') snprintf(out, 512, "unknown");
-    return;
+  if (failed || used == 0) return false;
+  buf[used] = '\0';
+  bool found = false;
+  for (char *line = buf; line && *line; ) {
+    char *next = strchr(line, '\n');
+    if (next) *next++ = '\0';
+    if (strncmp(line, "0::", 3) == 0) {
+      const char *path = line + 3;
+      size_t len = strlen(path);
+      if (found || len >= 512 || !canonical_cgroup_path(path)) return false;
+      memcpy(out, path, len + 1);
+      found = true;
+    }
+    line = next;
   }
-  buf[n] = '\0';
-  char *nl = strchr(buf, '\n');
-  if (nl) *nl = '\0';
-  char *colon1 = strchr(buf, ':');
-  char *colon2 = colon1 ? strchr(colon1 + 1, ':') : NULL;
-  if (colon2 && colon2[1] != '\0') {
-    snprintf(out, 512, "%.511s", colon2 + 1);
-  } else {
-    snprintf(out, 512, "%.511s", buf);
-  }
+  if (!found) snprintf(out, 512, "unknown");
+  return found;
 }
 
 static void refresh_worker_state(void) {
@@ -897,51 +932,162 @@ static int open_and_verify_home_root(const char *home_root, uid_t account_uid, g
   return home_fd;
 }
 
-static void enter_account_cgroup(const char *cgroup_path, bool require_cgroup) {
-  if (!cgroup_path || cgroup_path[0] == '\0') {
-    if (require_cgroup) {
-      respond_error("PRECONDITION_FAILED", ENOENT, "account cgroup slice path is required");
-    }
-    return;
+static void require_root_owned_fd(int fd, bool directory, const char *message) {
+  struct stat st;
+  if (fstat(fd, &st) != 0 || (directory ? !S_ISDIR(st.st_mode) : !S_ISREG(st.st_mode)) ||
+      st.st_uid != 0 || st.st_gid != 0 || (st.st_mode & 0022) != 0) {
+    respond_error("PRECONDITION_FAILED", EACCES, message);
   }
-  if (strncmp(cgroup_path, "/sys/fs/cgroup/", 15) != 0 || strstr(cgroup_path, "..") != NULL) {
-    respond_error("VALIDATION", EINVAL, "cgroupPath must be under /sys/fs/cgroup/");
+}
+
+static int open_confined_cgroup_dir(int parent_fd, const char *name) {
+  int fd = xp_openat2(parent_fd, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC, 0, XP_RESOLVE_CONFINED);
+  if (fd < 0) respond_error("PRECONDITION_FAILED", errno, "required account cgroup directory is unavailable");
+  require_root_owned_fd(fd, true, "account cgroup directories must be root-owned and nondelegated");
+  return fd;
+}
+
+static void read_cgroup_text_at(int parent_fd, const char *name, char *out, size_t cap) {
+  int fd = xp_openat2(parent_fd, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0, XP_RESOLVE_CONFINED);
+  if (fd < 0) respond_error("PRECONDITION_FAILED", errno, "required cgroup controller interface is unavailable");
+  require_root_owned_fd(fd, false, "cgroup controller interfaces must be root-owned and nondelegated");
+  size_t used = 0;
+  while (used < cap - 1) {
+    ssize_t n = read(fd, out + used, cap - 1 - used);
+    if (n < 0) { if (errno == EINTR) continue; respond_error("PRECONDITION_FAILED", errno, "cgroup controller interface read failed"); }
+    if (n == 0) break;
+    used += (size_t)n;
   }
-  if (mkdir(cgroup_path, 0755) != 0 && errno != EEXIST) {
-    if (!require_cgroup && errno == ENOENT) return;
-    respond_error("PRECONDITION_FAILED", errno, "failed to ensure account cgroup slice directory");
+  if (used == cap - 1) {
+    char extra;
+    ssize_t n;
+    do { n = read(fd, &extra, 1); } while (n < 0 && errno == EINTR);
+    if (n != 0) respond_error("PRECONDITION_FAILED", EOVERFLOW, "cgroup controller interface exceeded the bounded read");
   }
-  char leaf_path[1024];
-  int leaf_len = snprintf(leaf_path, sizeof(leaf_path), "%s/xpanel-files.scope", cgroup_path);
-  if (leaf_len > 0 && (size_t)leaf_len < sizeof(leaf_path)) {
-    (void)mkdir(leaf_path, 0755);
-  }
-  char procs_path[1024];
-  snprintf(procs_path, sizeof(procs_path), "%s/xpanel-files.scope/cgroup.procs", cgroup_path);
-  int fd = open(procs_path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
-  if (fd < 0) {
-    snprintf(procs_path, sizeof(procs_path), "%s/cgroup.procs", cgroup_path);
-    fd = open(procs_path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
-  }
-  if (fd < 0) {
-    if (!require_cgroup && errno == ENOENT) return;
-    respond_error("PRECONDITION_FAILED", errno, "failed to open account cgroup.procs for worker placement");
-  }
-  char pid_str[32];
-  int len = snprintf(pid_str, sizeof(pid_str), "%d\n", (int)getpid());
-  ssize_t written = write(fd, pid_str, (size_t)len);
-  int write_err = errno;
   close(fd);
-  if (written != (ssize_t)len) {
-    respond_error("PRECONDITION_FAILED", write_err ? write_err : EIO, "failed to attach worker PID to account cgroup.procs");
+  out[used] = '\0';
+  while (used > 0 && (out[used - 1] == '\n' || out[used - 1] == '\r')) out[--used] = '\0';
+}
+
+static bool positive_decimal(const char *value) {
+  if (!value || !value[0]) return false;
+  for (const char *p = value; *p; p++) if (*p < '0' || *p > '9') return false;
+  errno = 0;
+  char *end = NULL;
+  unsigned long long parsed = strtoull(value, &end, 10);
+  return errno == 0 && end && *end == '\0' && parsed > 0;
+}
+
+static bool valid_cpu_max(const char *value, bool worker_budget) {
+  char quota[32], period[32], extra;
+  if (sscanf(value, "%31s %31s %c", quota, period, &extra) != 2 || !positive_decimal(period)) return false;
+  if (strcmp(quota, "max") == 0) return !worker_budget;
+  if (!positive_decimal(quota)) return false;
+  if (!worker_budget) return true;
+  return strtoull(quota, NULL, 10) <= strtoull(period, NULL, 10);
+}
+
+static void verify_controller_contract(int parent_fd, int leaf_fd) {
+  char value[4096];
+  read_cgroup_text_at(parent_fd, "cgroup.type", value, sizeof(value));
+  if (strcmp(value, "domain") != 0) respond_error("PRECONDITION_FAILED", EINVAL, "account cgroup must be a valid domain");
+  read_cgroup_text_at(parent_fd, "memory.max", value, sizeof(value));
+  if (strcmp(value, "max") != 0 && !positive_decimal(value)) respond_error("PRECONDITION_FAILED", EINVAL, "invalid account memory controller contract");
+  read_cgroup_text_at(parent_fd, "pids.max", value, sizeof(value));
+  if (strcmp(value, "max") != 0 && !positive_decimal(value)) respond_error("PRECONDITION_FAILED", EINVAL, "invalid account pids controller contract");
+  read_cgroup_text_at(parent_fd, "cpu.max", value, sizeof(value));
+  if (!valid_cpu_max(value, false)) respond_error("PRECONDITION_FAILED", EINVAL, "invalid account CPU controller contract");
+  read_cgroup_text_at(parent_fd, "io.max", value, sizeof(value));
+
+  read_cgroup_text_at(leaf_fd, "cgroup.type", value, sizeof(value));
+  if (strcmp(value, "domain") != 0) respond_error("PRECONDITION_FAILED", EINVAL, "file worker cgroup must be a valid domain leaf");
+  read_cgroup_text_at(leaf_fd, "cgroup.subtree_control", value, sizeof(value));
+  if (value[0] != '\0') respond_error("PRECONDITION_FAILED", EINVAL, "file worker cgroup cannot distribute controllers to children");
+  read_cgroup_text_at(leaf_fd, "memory.max", value, sizeof(value));
+  if (strcmp(value, "67108864") != 0) respond_error("PRECONDITION_FAILED", EINVAL, "file worker memory safety budget is not applied");
+  read_cgroup_text_at(leaf_fd, "memory.swap.max", value, sizeof(value));
+  if (strcmp(value, "0") != 0) respond_error("PRECONDITION_FAILED", EINVAL, "file worker swap safety budget is not applied");
+  read_cgroup_text_at(leaf_fd, "pids.max", value, sizeof(value));
+  if (strcmp(value, "1") != 0) respond_error("PRECONDITION_FAILED", EINVAL, "file worker process safety budget is not applied");
+  read_cgroup_text_at(leaf_fd, "cpu.max", value, sizeof(value));
+  if (!valid_cpu_max(value, true)) respond_error("PRECONDITION_FAILED", EINVAL, "file worker CPU safety budget is not applied");
+
+  int scan_fd = dup(leaf_fd);
+  if (scan_fd < 0) respond_error("PRECONDITION_FAILED", errno, "file worker leaf inspection failed");
+  DIR *dirp = fdopendir(scan_fd);
+  if (!dirp) { close(scan_fd); respond_error("PRECONDITION_FAILED", errno, "file worker leaf inspection failed"); }
+  struct dirent *entry;
+  errno = 0;
+  while ((entry = readdir(dirp)) != NULL) {
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+    struct stat st;
+    if (fstatat(dirfd(dirp), entry->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0 || S_ISDIR(st.st_mode) || S_ISLNK(st.st_mode)) {
+      closedir(dirp);
+      respond_error("PRECONDITION_FAILED", EINVAL, "file worker must occupy a nondelegated leaf without child cgroups");
+    }
+    errno = 0;
   }
-  char actual_cg[512] = {0};
-  read_self_cgroup(actual_cg);
-  const char *expected_suffix = cgroup_path + strlen("/sys/fs/cgroup");
-  if (strstr(actual_cg, expected_suffix) == NULL) {
-    respond_error("PRECONDITION_FAILED", EPERM, "worker cgroup verification did not match target slice");
+  int scan_error = errno;
+  closedir(dirp);
+  if (scan_error) respond_error("PRECONDITION_FAILED", scan_error, "file worker leaf inspection failed");
+}
+
+static void verify_account_cgroup(const char *cgroup_path, const char *worker_unit, uid_t account_uid) {
+  char expected_parent[160], unit_prefix[80], account_name[64];
+  snprintf(account_name, sizeof(account_name), "xpanel-%u.slice", (unsigned int)account_uid);
+  snprintf(expected_parent, sizeof(expected_parent), "/sys/fs/cgroup/xpanel.slice/%s", account_name);
+  snprintf(unit_prefix, sizeof(unit_prefix), "xpanel-files-%u-", (unsigned int)account_uid);
+  size_t prefix_len = strlen(unit_prefix);
+  if (strcmp(cgroup_path, expected_parent) != 0 ||
+      strncmp(worker_unit, unit_prefix, prefix_len) != 0 || strlen(worker_unit) != prefix_len + 32 + strlen(".service") ||
+      strcmp(worker_unit + prefix_len + 32, ".service") != 0) {
+    respond_error("VALIDATION", EINVAL, "file worker identity must match the canonical account UID slice and generated service");
   }
-  snprintf(g_worker.cgroup, sizeof(g_worker.cgroup), "%s", actual_cg);
+  for (size_t i = prefix_len; i < prefix_len + 32; i++) {
+    if (!((worker_unit[i] >= '0' && worker_unit[i] <= '9') || (worker_unit[i] >= 'a' && worker_unit[i] <= 'f'))) {
+      respond_error("VALIDATION", EINVAL, "file worker service identifier is invalid");
+    }
+  }
+
+  int etc_fd = open("/etc", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (etc_fd < 0) respond_error("PRECONDITION_FAILED", errno, "account unit policy directory is unavailable");
+  require_root_owned_fd(etc_fd, true, "account unit policy directory must be root-owned and nondelegated");
+  int systemd_fd = xp_openat2(etc_fd, "systemd", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC, 0, XP_RESOLVE_CONFINED);
+  close(etc_fd);
+  if (systemd_fd < 0) respond_error("PRECONDITION_FAILED", errno, "account unit policy directory is unavailable");
+  require_root_owned_fd(systemd_fd, true, "account unit policy ancestors must be root-owned and nondelegated");
+  int policy_dir_fd = xp_openat2(systemd_fd, "system", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC, 0, XP_RESOLVE_CONFINED);
+  close(systemd_fd);
+  if (policy_dir_fd < 0) respond_error("PRECONDITION_FAILED", errno, "account unit policy directory is unavailable");
+  require_root_owned_fd(policy_dir_fd, true, "account unit policy directory must be root-owned and nondelegated");
+  int policy_fd = xp_openat2(policy_dir_fd, account_name, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC, 0, XP_RESOLVE_CONFINED);
+  close(policy_dir_fd);
+  if (policy_fd < 0) respond_error("PRECONDITION_FAILED", errno, "provisioned account slice policy is required");
+  require_root_owned_fd(policy_fd, false, "account slice policy must be root-owned and nondelegated");
+
+  int mount_fd = open("/sys/fs/cgroup", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (mount_fd < 0) respond_error("PRECONDITION_FAILED", errno, "cgroup v2 mount is unavailable");
+  struct statfs mount_info;
+  if (fstatfs(mount_fd, &mount_info) != 0 || (unsigned long)mount_info.f_type != (unsigned long)CGROUP2_SUPER_MAGIC) {
+    respond_error("PRECONDITION_FAILED", EINVAL, "native file workers require the unified cgroup v2 mount");
+  }
+  require_root_owned_fd(mount_fd, true, "cgroup mount must be root-owned and nondelegated");
+  int xpanel_fd = open_confined_cgroup_dir(mount_fd, "xpanel.slice");
+  int parent_fd = open_confined_cgroup_dir(xpanel_fd, account_name);
+  int leaf_fd = open_confined_cgroup_dir(parent_fd, worker_unit);
+  verify_controller_contract(parent_fd, leaf_fd);
+  char expected_membership[512], actual_membership[512];
+  int expected_len = snprintf(expected_membership, sizeof(expected_membership), "%s/%s", expected_parent + strlen("/sys/fs/cgroup"), worker_unit);
+  if (expected_len < 0 || (size_t)expected_len >= sizeof(expected_membership) ||
+      !read_self_cgroup(actual_membership) || strcmp(actual_membership, expected_membership) != 0) {
+    respond_error("PRECONDITION_FAILED", EPERM, "file worker is not in its exact systemd account service cgroup");
+  }
+  snprintf(g_worker.cgroup, sizeof(g_worker.cgroup), "%s", actual_membership);
+  close(leaf_fd);
+  close(parent_fd);
+  close(xpanel_fd);
+  close(mount_fd);
+  close(policy_fd);
 }
 
 static void drop_privileges_irreversibly(int home_dirfd, uid_t uid, gid_t gid) {
@@ -2216,9 +2362,15 @@ int main(int argc, char **argv) {
   }
 
   const char *cgroup_path = NULL;
-  (void)jv_get_str(ctx, "cgroupPath", &cgroup_path, NULL);
+  const char *worker_unit = NULL;
+  size_t cgroup_path_len = 0, worker_unit_len = 0;
   bool require_cgroup = false;
-  (void)jv_get_bool(ctx, "requireCgroup", &require_cgroup);
+  if (!jv_get_bool(ctx, "requireCgroup", &require_cgroup) || !require_cgroup ||
+      !jv_get_str(ctx, "cgroupPath", &cgroup_path, &cgroup_path_len) ||
+      !jv_get_str(ctx, "workerUnit", &worker_unit, &worker_unit_len) ||
+      cgroup_path_len != strlen(cgroup_path) || worker_unit_len != strlen(worker_unit)) {
+    respond_error("PRECONDITION_FAILED", EINVAL, "confined systemd file worker context is required");
+  }
   int64_t hold_open_ms = 0;
   if (jv_get_int(ctx, "holdOpenMs", &hold_open_ms)) {
     if (hold_open_ms < 0 || hold_open_ms > 2000) {
@@ -2227,11 +2379,11 @@ int main(int argc, char **argv) {
     g_worker.hold_open_ms = hold_open_ms;
   }
 
-  /* 1. Open and verify homeRoot descriptor while root */
-  int home_dirfd = open_and_verify_home_root(home_root, account_uid, account_gid);
+  /* 1. Verify systemd placement and worker budgets before any tenant home access. */
+  verify_account_cgroup(cgroup_path, worker_unit, account_uid);
 
-  /* 2. Place worker into cgroup v2 slice before dropping privileges or accessing tenant files */
-  enter_account_cgroup(cgroup_path, require_cgroup);
+  /* 2. Open and verify the trusted homeRoot descriptor while still root. */
+  int home_dirfd = open_and_verify_home_root(home_root, account_uid, account_gid);
 
   /* 3. Irreversibly drop supplementary groups, GID, UID, and set PR_SET_NO_NEW_PRIVS */
   drop_privileges_irreversibly(home_dirfd, account_uid, account_gid);

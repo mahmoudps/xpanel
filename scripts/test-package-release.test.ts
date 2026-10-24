@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   DEV_ONLY_PACKAGES,
   DESIGN_REFERENCE_INPUTS,
@@ -16,6 +16,7 @@ import {
   parseTarGzBuffer,
   parseSystemdUnitContract,
   unpackVerifiedRelease,
+  unpackAuthenticatedRelease,
   verifyReleaseArchive,
   verifyReleaseArtifact,
 } from './package-release.mjs'
@@ -589,4 +590,71 @@ describe('release privacy scan', () => {
     })}\n`)
     expect(scanReleasePrivacy(sourceRoot).violations).toEqual([])
   })
+})
+
+describe('authenticated source staging diagnostics (no native-root qualification)', () => {
+  afterEach(() => { vi.doUnmock('node:fs'); vi.doUnmock('./release-verifier.mjs'); vi.resetModules() })
+
+  it('retains license/community files, the builtin verifier, and explicit lifecycle bridge source closure', async () => {
+    const sourceRoot = makeSourceFixture()
+    writeSourceFile(sourceRoot, 'scripts/lifecycle-root-safety.mjs', 'export const diagnosticBridge = true\n')
+    writeSourceFile(sourceRoot, 'scripts/lifecycle-root-safety.d.mts', 'export declare const diagnosticBridge: boolean\n')
+    writeSourceFile(sourceRoot, 'bin/xpanel-ctl', '#!/usr/bin/env bash\nexit 0\n')
+    writeSourceFile(sourceRoot, 'apps/api/src/main.ts', 'import "../../../scripts/lifecycle-root-safety.mjs"\n')
+    const built = await buildReleaseArtifact({ sourceRoot, outputDir: makeTempDir(), createTarball: false })
+    const paths = new Set(built.manifest.files.map((file: { path: string }) => file.path))
+    for (const path of ['LICENSE', 'README.md', 'SECURITY.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md', 'CLA.md', 'scripts/management-tls.mjs', 'scripts/release-verifier.mjs', 'scripts/release-verifier.d.mts', 'scripts/lifecycle-root-safety.mjs', 'scripts/lifecycle-root-safety.d.mts']) expect(paths.has(path)).toBe(true)
+    expect(readFileSync(join(built.stagingDir, 'LICENSE'), 'utf8')).toBe(readFileSync(join(sourceRoot, 'LICENSE'), 'utf8'))
+    expect(built.sbom.excludedDevPackages).toContain('es-module-lexer')
+    expect(built.manifest.files.find((file: { path: string }) => file.path === 'bin/xpanel-ctl')?.mode).toBe(0o755)
+    expect(paths.has('scripts/package-release.mjs')).toBe(false)
+  })
+
+  it('refuses caller-supplied authority and retains the actual Linux/root boundary', async () => {
+    const trust = { archivePath: '/missing-release', expectedArchiveSha256: 'a'.repeat(64), signingKey: 'synthetic-staging-trust-key-at-least-32-bytes', keyId: 'diagnostic', stagingRoot: makeTempDir() }
+    for (const field of ['statProvider', 'writeFileHook', 'authenticatedArchive', 'validateStage']) {
+      await expect(unpackAuthenticatedRelease({ ...trust, [field]: () => true })).rejects.toMatchObject({ code: 'AUTHENTICATED_OPTIONS' })
+    }
+    if (process.platform !== 'linux' || process.geteuid?.() !== 0) {
+      await expect(unpackAuthenticatedRelease(trust)).rejects.toMatchObject({ code: 'LINUX_ROOT_REQUIRED' })
+      expect(readdirSync(trust.stagingRoot)).toEqual([])
+    }
+  })
+
+  it('caps the extraction parser independently of the gzip input size', () => {
+    const bytes = createTarGzBuffer([{ name: 'bounded.txt', content: Buffer.alloc(65536) }])
+    expect(() => parseTarGzBuffer(bytes, 1024)).toThrow()
+    expect(() => parseTarGzBuffer(bytes, 512 * 1024 * 1024 + 1)).toThrow()
+  })
+
+  it('delegates staging to the single runtime extractor inside the retained authenticated lifetime', async () => {
+    const fs = await vi.importActual<typeof import('node:fs')>('node:fs')
+    const strict = await vi.importActual<any>('./release-verifier.mjs')
+    const root = makeSourceFixture(), output = makeTempDir(), stagingRoot = makeTempDir()
+    const signingKey = 'synthetic-staging-trust-key-at-least-32-bytes', keyId = 'diagnostic-staging'
+    const built = await buildReleaseArtifact({ sourceRoot: root, outputDir: output, signingKey, keyId })
+    let held = false, delegated = false, liveReport: any
+    vi.doMock('./release-verifier.mjs', () => ({
+      ...strict,
+      withAuthenticatedReleaseArchive: async (path: string, trust: unknown, use: (input: unknown) => Promise<unknown>) => {
+        const report = await strict.verifyAuthenticatedReleaseArchive(path, trust), fd = fs.openSync(path, 'r')
+        liveReport = report; held = true
+        try { return { report, value: await use({ report, fd }) } } finally { fs.closeSync(fd); held = false }
+      },
+      stageAuthenticatedReleaseArchive: async (path: string, trust: any) => {
+        expect(path).toBe(stagingRoot); expect(held).toBe(true)
+        expect(trust.authenticatedArchive).toBe(liveReport)
+        expect(trust.signingKey).toBe(signingKey); expect(trust.keyId).toBe(keyId)
+        expect(Object.keys(trust).sort()).toEqual(['authenticatedArchive', 'keyId', 'signingKey'])
+        delegated = true
+        return { ok: true, activated: false, installReady: false, runtimeDependenciesVerified: false }
+      },
+    }))
+    vi.resetModules()
+    const module = await import('./package-release.mjs')
+    const result = await module.unpackAuthenticatedRelease({ archivePath: built.archivePath!, expectedArchiveSha256: built.archiveSha256!, signingKey, keyId, stagingRoot })
+    expect(delegated).toBe(true); expect(held).toBe(false)
+    expect(result).toMatchObject({ ok: true, activated: false, installReady: false, runtimeDependenciesVerified: false })
+  })
+
 })

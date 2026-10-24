@@ -1,4 +1,4 @@
-import type { Principal } from '@xpanel/core'
+import type { MfaRuntimeMode, Principal } from '@xpanel/core'
 import type { Locale } from '../i18n.ts'
 import { t } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
@@ -13,6 +13,7 @@ export const ACCOUNT_SECURITY_ROUTES = new Set([
 export interface AccountSecurityCardProps {
   locale: Locale
   totpEnabled: boolean
+  mfaMode?: MfaRuntimeMode
   principalKind: Principal['kind']
   surface: 'xwhm' | 'xpanel' | 'xmail'
 }
@@ -28,6 +29,15 @@ const cliHint = (locale: Locale): string => {
 export const renderAccountSecurityCard = (props: AccountSecurityCardProps): string => {
   const { locale, totpEnabled, principalKind, surface } = props
   const rootOperator = principalKind === 'root' && surface === 'xwhm'
+  if (props.mfaMode === 'disabled') {
+    const notice = locale === 'ar'
+      ? 'التحقق الثنائي معطّل في بيئة التطوير. تبقى العوامل ورموز الاسترداد المحفوظة دون تغيير. لا تتوفر إدارة العوامل في هذا الوضع.'
+      : 'Two-factor verification is disabled in development. Saved factors and recovery codes stay unchanged. Factor management is unavailable in this mode.'
+    return `<section class="xp-card xp-account-security" data-account-security="two-factor" data-auth-state="development-disabled" data-mfa-disabled data-mfa-configured="${totpEnabled}" aria-labelledby="account-security-heading">
+      <h2 id="account-security-heading">${line(locale, 'security.2fa.heading')}</h2>
+      <p class="xp-prose" role="status">${escapeHtml(notice)}</p>
+    </section>`
+  }
   if (totpEnabled) {
     return `<section class="xp-card xp-account-security" data-account-security="two-factor" data-mfa-enabled="true" aria-labelledby="account-security-heading">
       <h2 id="account-security-heading">${line(locale, 'security.2fa.heading')}</h2>

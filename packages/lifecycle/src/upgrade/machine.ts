@@ -24,7 +24,7 @@ export interface UpgradeLayout {
   stateDir: string
   snapshotsDir: string
   lockFile: string
-  /** while present the API refuses state-changing requests, so a snapshot restore loses nothing */
+  /** Diagnostic marker only. Actual writer admission is enforced by UpgradeSafetyPort. */
   maintenanceFile: string
 }
 
@@ -35,7 +35,7 @@ export const DEFAULT_LAYOUT: UpgradeLayout = {
   stagingDir: '/opt/xpanel/staging',
   downloadsDir: '/opt/xpanel/downloads',
   stateDir: '/var/lib/xpanel',
-  snapshotsDir: '/var/lib/xpanel/snapshots',
+  snapshotsDir: '/var/lib/xpanel-lifecycle/backups',
   lockFile: '/var/lib/xpanel/upgrade.lock',
   maintenanceFile: '/var/lib/xpanel/maintenance.json',
 }
@@ -74,10 +74,13 @@ export interface UpgradeStepLog {
   detail: string
 }
 
-export type UpgradeOutcome = 'refused' | 'succeeded' | 'failed' | 'rolled_back' | 'rollback_failed'
+export type UpgradeHostOutcome = 'succeeded' | 'failed' | 'rolled_back' | 'rollback_failed'
+export type UpgradeOutcome = 'refused' | 'retirement_pending' | UpgradeHostOutcome
 
 export interface UpgradeResult {
   outcome: UpgradeOutcome
+  /** Observed host flow only; it never grants writer-admission retirement. */
+  hostOutcome: UpgradeHostOutcome | null
   /** set for refusals; the API maps it to an HTTP status */
   code: ErrorCode | null
   from: string | null
@@ -116,12 +119,6 @@ export const isCustomerDataPath = (p: string): boolean =>
 const stateSnapshotArgv = (t: LifecycleTools, stateDir: string, file: string): string[] =>
   [t.tar, '--create', '--gzip', `--file=${file}`, `--directory=${stateDir}`, 'state']
 
-const stateRestoreArgv = (t: LifecycleTools, stateDir: string, file: string): string[] =>
-  [t.tar, '--extract', '--gzip', `--file=${file}`, `--directory=${stateDir}`, '--no-same-owner']
-
-const releaseUnpackArgv = (t: LifecycleTools, archive: string, dir: string): string[] =>
-  [t.tar, '--extract', '--gzip', `--file=${archive}`, `--directory=${dir}`, '--no-same-owner', '--no-overwrite-dir']
-
 const normalizeLayout = (partial: Partial<UpgradeLayout> | undefined): UpgradeLayout => {
   const l = { ...DEFAULT_LAYOUT, ...(partial ?? {}) }
   for (const [k, v] of Object.entries(l)) {
@@ -131,9 +128,10 @@ const normalizeLayout = (partial: Partial<UpgradeLayout> | undefined): UpgradeLa
   for (const k of ['releasesDir', 'stagingDir', 'downloadsDir', 'currentLink'] as const) {
     if (!isUnder(l[k], l.root) || l[k] === l.root) fail('VALIDATION', `layout.${k} must be inside ${l.root}`)
   }
-  for (const k of ['snapshotsDir', 'lockFile', 'maintenanceFile'] as const) {
+  for (const k of ['lockFile', 'maintenanceFile'] as const) {
     if (!isUnder(l[k], l.stateDir) || l[k] === l.stateDir) fail('VALIDATION', `layout.${k} must be inside ${l.stateDir}`)
   }
+  if (l.snapshotsDir !== DEFAULT_LAYOUT.snapshotsDir && (!isUnder(l.snapshotsDir, l.stateDir) || l.snapshotsDir === l.stateDir)) fail('VALIDATION', 'custom snapshots directory must be inside panel state; production still requires root-private admission')
   const dirs = [l.releasesDir, l.stagingDir, l.downloadsDir]
   if (dirs.some((a, i) => dirs.some((b, j) => i !== j && isUnder(a, b)))) fail('VALIDATION', 'releases, staging and downloads directories must not nest')
   return l
@@ -150,7 +148,8 @@ const normalizeHealth = (h: { attempts: number; intervalMs: number } | undefined
 const normalizePanelUnits = (units: readonly string[]): string[] => {
   const out = [...new Set(units.map((u) => assertUnitName(u)))]
   if (out.length === 0) fail('VALIDATION', 'at least one panel unit is required')
-  if (out.includes(UPGRADE_UNIT)) fail('VALIDATION', `${UPGRADE_UNIT} runs the upgrade and cannot be one of the restarted panel units`)
+  const coordinator = out.find(unit => unit === UPGRADE_UNIT || unit === 'xpanel-lifecycle.service')
+  if (coordinator) fail('VALIDATION', `${coordinator} runs the upgrade and cannot be one of the restarted panel units`)
   return out
 }
 
@@ -188,7 +187,7 @@ const versionFromTarget = (target: string | null, layout: UpgradeLayout): string
 
 const assertWritable = (l: UpgradeLayout, p: string): void => {
   assertSafeAbsPath(p, 'write path')
-  if (isCustomerDataPath(p) || ![l.root, l.stateDir].some((r) => isUnder(p, r))) fail('FORBIDDEN', `upgrade may not write ${p}`)
+  if (isCustomerDataPath(p) || ![l.root, l.stateDir, l.snapshotsDir].some((r) => isUnder(p, r))) fail('FORBIDDEN', `upgrade may not write ${p}`)
 }
 
 /** Defense in depth: the upgrader can only write panel-owned paths. */
@@ -204,7 +203,7 @@ const guardFs = (fs: FsPort, l: UpgradeLayout): FsPort => ({
   remove: async (p) => { assertWritable(l, p); await fs.remove(p) },
 })
 
-export type LockState = 'running' | 'rollback-failed'
+export type LockState = 'running' | 'rollback-failed' | 'retirement-pending'
 
 export interface LockInfo {
   state: LockState
@@ -235,6 +234,9 @@ interface Ctx {
   migrated: string[]
   healthProblems: string[]
   rollbackErrors: string[]
+  effectsStarted: boolean
+  writersStopped: boolean
+  hostOutcome: UpgradeHostOutcome | null
 }
 
 const nowIso = (c: Ctx): string => c.ports.clock.now().toISOString()
@@ -245,6 +247,7 @@ const log = (c: Ctx, step: string, ok: boolean, detail: string): void => {
 
 const result = (c: Ctx, outcome: UpgradeOutcome, reason: string | null, code: ErrorCode | null = null): UpgradeResult => ({
   outcome,
+  hostOutcome: c.hostOutcome,
   code,
   from: c.from,
   to: c.plan.release.version,
@@ -260,6 +263,7 @@ const result = (c: Ctx, outcome: UpgradeOutcome, reason: string | null, code: Er
 
 /** What the root sees in xWHM next to the upgrade row. */
 const report = (c: Ctx): Record<string, unknown> => ({
+  hostOutcome: c.hostOutcome,
   checks: c.checks,
   generations: { previous: c.previousGeneration, next: c.newGeneration },
   migrations: c.migrated,
@@ -269,7 +273,6 @@ const report = (c: Ctx): Record<string, unknown> => ({
 })
 
 const audit = async (c: Ctx, action: string, outcome: 'ok' | 'denied' | 'failed', reason: string | null): Promise<void> => {
-  try {
     await c.ports.audit.record(auditEntry(c.plan.actor, action, 'xpanel', {
       from: c.from,
       to: c.plan.release.version,
@@ -278,10 +281,8 @@ const audit = async (c: Ctx, action: string, outcome: 'ok' | 'denied' | 'failed'
       previousGeneration: c.previousGeneration,
       newGeneration: c.newGeneration,
       rollbackErrors: c.rollbackErrors,
+      hostOutcome: c.hostOutcome,
     }, outcome, { now: c.ports.clock.now() }))
-  } catch (e) {
-    log(c, 'audit', false, errorMessage(e))
-  }
 }
 
 const refuse = async (c: Ctx, code: ErrorCode, reason: string): Promise<UpgradeResult> => {
@@ -320,6 +321,7 @@ const pointCurrentAt = async (c: Ctx, target: string, suffix: string): Promise<v
   if ((await c.fs.readlink(tmp)) !== null || (await c.fs.exists(tmp))) await c.fs.remove(tmp)
   await c.fs.symlink(target, tmp)
   await c.fs.rename(tmp, l.currentLink)
+  await c.ports.safety.syncPath(posix.dirname(l.currentLink))
   const now = await c.fs.readlink(l.currentLink)
   if (now !== target) throw new Error(`current link points to ${String(now)}, expected ${target}`)
 }
@@ -328,15 +330,34 @@ const writeAtomic = async (c: Ctx, path: string, content: string, mode = 0o600):
   const tmp = `${path}.${c.stamp}.tmp`
   if (await c.fs.exists(tmp)) await c.fs.remove(tmp)
   await c.fs.writeFileExclusive(tmp, content, mode)
+  await c.ports.safety.syncPath(tmp)
   await c.fs.rename(tmp, path)
+  await c.ports.safety.syncPath(posix.dirname(path))
 }
 
-/** World-readable on purpose: the unprivileged API reads it to answer 503 with the reason. */
-const maintenance = async (c: Ctx, on: boolean): Promise<void> => {
+/** World-readable diagnostic; this file alone never proves that writers are fenced. */
+const maintenance = async (c: Ctx): Promise<void> => {
   const file = c.plan.layout.maintenanceFile
-  if (on) await writeAtomic(c, file, `${JSON.stringify({ reason: 'upgrade', to: c.plan.release.version, since: nowIso(c) })}\n`, 0o644)
-  else if (await c.fs.exists(file)) await c.fs.remove(file)
-  log(c, 'maintenance', true, on ? 'on' : 'off')
+  await writeAtomic(c, file, `${JSON.stringify({ reason: 'upgrade', to: c.plan.release.version, since: nowIso(c) })}\n`, 0o644)
+  log(c, 'maintenance', true, 'on; retirement requires a separately qualified coordinator')
+}
+
+const retirementPath = (layout: UpgradeLayout): string => posix.join(layout.snapshotsDir, 'retirement-attention.json')
+const RETIREMENT_REQUIRED = 'durable lifecycle retirement is pending; maintenance and recovery evidence remain retained'
+
+/** Permanent attention evidence, never a self-issued finalization grant or a replacement kernel fence. */
+const retainRetirementAttention = async (ports: UpgradePorts, fs: FsPort, layout: UpgradeLayout, evidence: Record<string, unknown>): Promise<void> => {
+  await fs.mkdirp(layout.snapshotsDir, 0o700)
+  const path = retirementPath(layout)
+  try {
+    await fs.writeFileExclusive(path, `${JSON.stringify({ schemaVersion: 1, status: 'retirement_pending', ...evidence })}\n`, 0o600)
+  } catch (error) {
+    if (errorCode(error) !== 'EEXIST') throw error
+    // Existence is sufficient to refuse future entry. Existing evidence is never overwritten.
+  }
+  await ports.safety.syncPath(path)
+  await ports.safety.syncPath(layout.snapshotsDir)
+  await ports.safety.syncPath(posix.dirname(layout.snapshotsDir))
 }
 
 const lockInfo = (c: Ctx, state: LockState): string =>
@@ -373,7 +394,7 @@ interface HealthInput {
   before: AccountIdentity[] | null
 }
 
-/** converged == desired, identities unchanged, canary served by its own uid, panel login works. */
+/** Converged desired state, unchanged identities, actual canary UID and qualified control-plane service readiness. */
 const healthProblems = async ({ ports, canary, before }: HealthInput): Promise<string[]> => {
   const p: string[] = []
   const st = await probe(() => ports.reconciler.status(), 'reconciler status', p)
@@ -386,8 +407,8 @@ const healthProblems = async ({ ports, canary, before }: HealthInput): Promise<s
     if (expected === undefined) p.push(`canary account ${canary} is unknown`)
     else if (served !== undefined && served !== expected) p.push(`canary ${canary} served by uid ${String(served)} instead of ${expected}`)
   }
-  const login = await probe(() => ports.health.panelLogin(), 'panel login', p)
-  if (login === false) p.push('panel login failed')
+  const qualifiedControlPlane = await probe(() => ports.health.qualifiedControlPlane(), 'qualified control-plane readiness', p)
+  if (qualifiedControlPlane !== true) p.push('qualified control-plane readiness failed')
   return p
 }
 
@@ -414,24 +435,21 @@ const bestEffort = async (c: Ctx, step: string, fn: () => Promise<void>, critica
   }
 }
 
-type FinalOutcome = Exclude<UpgradeOutcome, 'refused'>
+type FinalOutcome = UpgradeHostOutcome
 
 const finish = async (c: Ctx, outcome: FinalOutcome, reason: string | null): Promise<UpgradeResult> => {
+  c.hostOutcome = outcome
+  await retainRetirementAttention(c.ports, c.fs, c.plan.layout, { hostOutcome: outcome, recordId: c.recordId, from: c.from, to: c.plan.release.version, observedAt: nowIso(c), report: report(c) })
+  const pendingReason = [reason, RETIREMENT_REQUIRED].filter(Boolean).join('; ')
   if (c.recordId) {
     const id = c.recordId
-    await bestEffort(c, 'history', async () => {
-      if (outcome === 'rolled_back' || outcome === 'rollback_failed') await c.ports.history.setPhase(id, 'rollback')
-      await c.ports.history.finish(id, {
-        status: outcome === 'succeeded' ? 'succeeded' : outcome === 'rolled_back' ? 'rolled_back' : 'failed',
-        healthReport: report(c),
-        error: outcome === 'succeeded' ? null : [reason, ...c.rollbackErrors].filter(Boolean).join('; '),
-        toSchemaVersion: outcome === 'succeeded' ? c.plan.release.schemaVersion : outcome === 'rolled_back' ? c.fromSchema : null,
-      })
-    }, false)
+    if (outcome === 'rolled_back' || outcome === 'rollback_failed') await c.ports.history.setPhase(id, 'rollback')
+    // The native terminal producer owns the single final DB transition after physical proof.
+    // A host-flow return cannot finish the row while writer admission is still retained.
   }
-  if (outcome !== 'rollback_failed') await bestEffort(c, 'maintenance', () => maintenance(c, false), false)
-  await audit(c, `upgrade.${outcome}`, outcome === 'succeeded' ? 'ok' : 'failed', reason)
-  return result(c, outcome, reason)
+  await audit(c, outcome === 'rollback_failed' ? 'upgrade.rollback_failed' : 'upgrade.retirement_pending', 'failed', pendingReason)
+  // No final grant is composed. Never unlink the final barriers, even after healthy host observations.
+  return result(c, outcome === 'rollback_failed' ? outcome : 'retirement_pending', pendingReason, 'PRECONDITION_FAILED')
 }
 
 /**
@@ -441,6 +459,21 @@ const finish = async (c: Ctx, outcome: FinalOutcome, reason: string | null): Pro
 const abortBeforeSwitch = async (c: Ctx, cause: unknown, releaseDir: string): Promise<UpgradeResult> => {
   const reason = errorMessage(cause)
   log(c, 'abort', false, reason)
+  if (c.effectsStarted) {
+    if (!c.writersStopped) {
+      c.rollbackErrors.push('writer stop did not settle; no automatic restart or rollback is allowed')
+      return finish(c, 'rollback_failed', reason)
+    }
+    try {
+      await c.ports.safety.assertWritersQuiescent(c.plan.panelUnits)
+      await c.ports.safety.assertCompatibility({ direction: 'rollback', fromVersion: c.plan.release.version, toVersion: c.from as string, currentSchema: await c.ports.migrator.currentSchema(), targetSchema: c.fromSchema as number })
+      await c.ports.safety.assertWriteBarrier()
+      await panelUnits(c, 'abort:start-panel', 'start')
+    } catch (error) {
+      c.rollbackErrors.push(`abort: ${errorMessage(error)}`)
+      return finish(c, 'rollback_failed', reason)
+    }
+  }
   if (c.staging) { const s = c.staging; await bestEffort(c, 'cleanup:staging', () => c.fs.remove(s), false) }
   if (c.releaseCreated) await bestEffort(c, 'cleanup:release', () => c.fs.remove(releaseDir), false)
   return finish(c, 'failed', reason)
@@ -451,21 +484,24 @@ const rollback = async (c: Ctx, cause: unknown, releaseDir: string): Promise<Upg
   c.phase = 'rollback'
   log(c, 'rollback', false, reason)
   const prevTarget = c.previousTarget as string
-  const prevGen = c.previousGeneration as GenerationId
-  const snapshot = c.snapshot as string
-  const panelUser = c.plan.panelUser
   await bestEffort(c, 'rollback:phase', () => c.ports.history.setPhase(c.recordId as string, 'rollback'), false)
-  await bestEffort(c, 'rollback:link', () => pointCurrentAt(c, prevTarget, '-rollback'), true)
-  await bestEffort(c, 'rollback:stop-panel', () => panelUnits(c, 'rollback:stop-panel', 'stop'), true)
-  await bestEffort(
-    c,
-    'rollback:state',
-    () => run(c, 'rollback:state', { kind: 'exec', argv: stateRestoreArgv(c.plan.tools, c.plan.layout.stateDir, snapshot), runAsUser: panelUser }),
-    true,
-  )
-  await bestEffort(c, 'rollback:start-panel', () => panelUnits(c, 'rollback:start-panel', 'start'), true)
+  try {
+    // Never move code, restore data or restart anything after uncertain writer termination.
+    await panelUnits(c, 'rollback:stop-panel', 'stop')
+    await c.ports.safety.assertWritersQuiescent(c.plan.panelUnits)
+    c.writersStopped = true
+    await c.ports.safety.assertCompatibility({ direction: 'rollback', fromVersion: c.plan.release.version, toVersion: c.from as string, currentSchema: await c.ports.migrator.currentSchema(), targetSchema: c.fromSchema as number })
+    await c.ports.safety.assertWriteBarrier()
+    await pointCurrentAt(c, prevTarget, '-rollback')
+    await panelUnits(c, 'rollback:start-panel', 'start')
+  } catch (error) {
+    c.rollbackErrors.push(`rollback:admission: ${errorMessage(error)}`)
+    return finish(c, 'rollback_failed', reason)
+  }
   await bestEffort(c, 'rollback:generation', async () => {
-    const r = await c.ports.reconciler.activate(prevGen)
+    // Reconcile CURRENT authority. An old generation can re-enable revoked hosting policy.
+    const r = await c.ports.reconciler.reconcile(`binary rollback ${c.plan.release.version} -> ${c.from}; preserve current authority`)
+    c.newGeneration = r.generationId
     await applyUnits(c, 'rollback:generation', r.units)
   }, true)
   await bestEffort(c, 'rollback:verify', async () => {
@@ -481,12 +517,14 @@ const rollback = async (c: Ctx, cause: unknown, releaseDir: string): Promise<Upg
 const snapshotStep = async (c: Ctx): Promise<void> => {
   const l = c.plan.layout
   const file = posix.join(l.snapshotsDir, `${c.stamp}.tar.gz`)
-  const panelUser = c.plan.panelUser
   await enterPhase(c, 'snapshot', { snapshotPath: file })
-  await run(c, 'snapshot:dir', { kind: 'ensure-dir', path: l.snapshotsDir, mode: 0o700, owner: panelUser, group: panelUser })
+  await run(c, 'snapshot:dir', { kind: 'ensure-dir', path: l.snapshotsDir, mode: 0o700, owner: 'root', group: 'root' })
   if (await c.fs.exists(file)) throw new Error(`snapshot ${file} already exists`)
-  await run(c, 'snapshot', { kind: 'exec', argv: stateSnapshotArgv(c.plan.tools, l.stateDir, file), runAsUser: panelUser })
+  await run(c, 'snapshot', { kind: 'exec', argv: stateSnapshotArgv(c.plan.tools, l.stateDir, file), runAsUser: 'root' })
   if (!(await c.fs.exists(file))) throw new Error(`tar snapshot did not produce ${file}`)
+  await c.ports.safety.snapshotControlPlane(file)
+  await c.ports.safety.syncPath(file)
+  await c.ports.safety.syncPath(l.snapshotsDir)
   c.snapshot = file
   c.previousGeneration = await c.ports.reconciler.currentGeneration()
   log(c, 'generation', true, `previous generation ${c.previousGeneration}`)
@@ -499,10 +537,15 @@ const stageStep = async (c: Ctx, releaseDir: string): Promise<void> => {
   await c.fs.mkdirp(staging, 0o755)
   c.staging = staging
   if ((await c.fs.sha256(archivePath)) !== c.plan.release.sha256) throw new Error('release archive changed after the preflight checksum')
-  await run(c, 'unpack', { kind: 'exec', argv: releaseUnpackArgv(c.plan.tools, archivePath, staging) })
+  await c.ports.safety.verifyRelease(c.plan.release)
+  await c.ports.safety.unpackVerifiedRelease(staging, c.plan.release)
+  log(c, 'unpack', true, 'authenticated retained source; closed before publication')
   const marker = await c.fs.readFile(posix.join(staging, 'VERSION'))
   if (marker?.trim() !== version) throw new Error(`unpacked release reports version ${String(marker?.trim())}, expected ${version}`)
+  await c.ports.safety.verifyStagedRelease(staging)
+  await c.ports.safety.syncPath(staging)
   await c.fs.rename(staging, releaseDir)
+  await c.ports.safety.syncPath(c.plan.layout.releasesDir)
   c.staging = null
   c.releaseCreated = true
   log(c, 'release', true, releaseDir)
@@ -525,6 +568,7 @@ const migrateStep = async (c: Ctx, releaseDir: string): Promise<void> => {
 }
 
 const activateStep = async (c: Ctx): Promise<void> => {
+  await c.ports.safety.assertWriteBarrier()
   await panelUnits(c, 'panel', 'restart')
   await run(c, 'acme-dir', { kind: 'ensure-dir', path: ACME_DIR, mode: 0o755, owner: 'root', group: 'root' })
   await run(c, 'acme-acl', { kind: 'exec', argv: acmeTraverseAclArgv('nginx') })
@@ -540,6 +584,9 @@ const isInFlight = (row: UpgradeRow | null): boolean => row !== null && (row.sta
 const precheck = async (c: Ctx): Promise<UpgradeResult | null> => {
   const { history, reconciler, system, transfers, migrator } = c.ports
   const l = c.plan.layout
+  await c.ports.safety.assertOwnedExecution(c.plan.panelUnits)
+  await c.ports.safety.assertWriteBarrier()
+  await c.ports.safety.verifyRelease(c.plan.release)
   const last = await history.latest()
   if (isInFlight(last)) {
     return refuse(c, 'PRECONDITION_FAILED', `upgrade ${last?.fromVersion} -> ${last?.toVersion} is still ${last?.status}; recover to a stable state first`)
@@ -554,6 +601,9 @@ const precheck = async (c: Ctx): Promise<UpgradeResult | null> => {
     system.freeBytes(l.root), system.os(), transfers.activeCount(), migrator.currentSchema(),
   ])
   c.fromSchema = currentSchema
+  await c.ports.safety.assertCompatibility({ direction: 'forward', fromVersion: c.from, toVersion: c.plan.release.version, currentSchema, targetSchema: c.plan.release.schemaVersion })
+  // Admit fallback against the prospective schema before applying even an expand-only migration.
+  await c.ports.safety.assertCompatibility({ direction: 'rollback', fromVersion: c.plan.release.version, toVersion: c.from, currentSchema: c.plan.release.schemaVersion, targetSchema: currentSchema })
   const pre = preflight({
     freeBytes,
     releaseBytes: c.plan.release.bytes,
@@ -576,8 +626,6 @@ const precheck = async (c: Ctx): Promise<UpgradeResult | null> => {
 }
 
 const execute = async (c: Ctx): Promise<UpgradeResult> => {
-  const refused = await precheck(c)
-  if (refused) return refused
   const l = c.plan.layout
   const releaseDir = posix.join(l.releasesDir, c.plan.release.version)
   const row = await c.ports.history.create({
@@ -592,7 +640,11 @@ const execute = async (c: Ctx): Promise<UpgradeResult> => {
 
   try {
     await enterPhase(c, 'precheck')
-    await maintenance(c, true)
+    await maintenance(c)
+    c.effectsStarted = true
+    await panelUnits(c, 'stop-writers', 'stop')
+    await c.ports.safety.assertWritersQuiescent(c.plan.panelUnits)
+    c.writersStopped = true
     await snapshotStep(c)
     await stageStep(c, releaseDir)
     await migrateStep(c, releaseDir)
@@ -601,6 +653,7 @@ const execute = async (c: Ctx): Promise<UpgradeResult> => {
   }
   try {
     await enterPhase(c, 'switch')
+    await c.ports.safety.assertWritersQuiescent(c.plan.panelUnits)
     await pointCurrentAt(c, releaseDir, '')
     log(c, 'switch', true, `${c.previousTarget} -> ${releaseDir}`)
   } catch (e) {
@@ -638,15 +691,27 @@ const newCtx = (ports: UpgradePorts, plan: NormalizedPlan): Ctx => ({
   migrated: [],
   healthProblems: [],
   rollbackErrors: [],
+  effectsStarted: false,
+  writersStopped: false,
+  hostOutcome: null,
 })
 
 /**
- * The lock is taken with O_EXCL before anything is read, so two upgrades can never
- * interleave. A failed rollback leaves it in place (state rollback-failed): only
- * recoverUpgrade, after a verified healthy state, releases it.
+ * Called only inside mandatory operational exclusion. The O_EXCL file is diagnostic
+ * evidence, not the kernel mutex. Native retirement is owned outside this model port.
  */
 const withLock = async (c: Ctx, body: () => Promise<UpgradeResult>): Promise<UpgradeResult> => {
   const lock = c.plan.layout.lockFile
+  if (await c.fs.exists(retirementPath(c.plan.layout))) return refuse(c, 'CONFLICT', RETIREMENT_REQUIRED)
+  if (await c.fs.exists(lock)) {
+    const held = await readLock(c.fs, lock)
+    return refuse(c, 'CONFLICT', held?.state === 'rollback-failed'
+      ? `the last upgrade (to ${held.to}) failed to roll back; recover it first`
+      : 'another upgrade is in progress (lock file present)')
+  }
+  if (await c.fs.exists(c.plan.layout.maintenanceFile)) return refuse(c, 'PRECONDITION_FAILED', 'retained maintenance requires explicit lifecycle recovery')
+  const refused = await precheck(c)
+  if (refused) return refused
   try {
     await c.fs.writeFileExclusive(lock, lockInfo(c, 'running'), 0o600)
   } catch (e) {
@@ -662,8 +727,7 @@ const withLock = async (c: Ctx, body: () => Promise<UpgradeResult>): Promise<Upg
     res = await body()
     return res
   } finally {
-    if (res?.outcome === 'rollback_failed') await bestEffort(c, 'lock', () => writeAtomic(c, lock, lockInfo(c, 'rollback-failed')), false)
-    else await bestEffort(c, 'unlock', () => c.fs.remove(lock), false)
+    await writeAtomic(c, lock, lockInfo(c, !res || res.outcome === 'rollback_failed' ? 'rollback-failed' : 'retirement-pending'))
   }
 }
 
@@ -672,7 +736,7 @@ export const readLock = async (fs: FsPort, path: string): Promise<LockInfo | nul
   if (raw === null) return null
   try {
     const v = JSON.parse(raw) as Partial<LockInfo>
-    return v && (v.state === 'running' || v.state === 'rollback-failed')
+    return v && (v.state === 'running' || v.state === 'rollback-failed' || v.state === 'retirement-pending')
       ? { state: v.state, recordId: typeof v.recordId === 'string' ? v.recordId : null, actor: String(v.actor ?? ''), to: String(v.to ?? ''), at: String(v.at ?? '') }
       : null
   } catch {
@@ -683,11 +747,13 @@ export const readLock = async (fs: FsPort, path: string): Promise<LockInfo | nul
 /**
  * Side-by-side upgrade: preflight, state snapshot, unpack next to the running release,
  * expand-only migrations, atomic link switch, reconcile with reloads, health gate.
- * Any failure after the switch rolls the link, the state tree and the generation back.
+ * Binary fallback reconciles current authority. Historical DB/state/generations are never replayed.
+ * Host completion remains retirement_pending until a genuine retirement protocol is qualified.
  */
 export const runUpgrade = async (ports: UpgradePorts, input: UpgradePlan): Promise<UpgradeResult> => {
+  if (!ports.safety || typeof ports.safety.withExclusive !== 'function') return fail('PRECONDITION_FAILED', 'operational lifecycle safety admission is required')
   const c = newCtx(ports, normalizeUpgradePlan(input))
-  return withLock(c, () => execute(c))
+  return ports.safety.withExclusive(() => withLock(c, () => execute(c)))
 }
 
 export interface RecoverInput {
@@ -699,7 +765,9 @@ export interface RecoverInput {
 }
 
 export interface RecoverResult {
+  status: 'retirement_pending'
   version: string
+  recordId: string | null
   closedRecordId: string | null
   problems: string[]
 }
@@ -707,37 +775,44 @@ export interface RecoverResult {
 /**
  * Operator path after an interrupted upgrade or a failed rollback, once the server was
  * repaired by hand. Refused while the upgrade unit still runs; accepted only when the
- * health checks pass on a valid release link. Releases the lock and maintenance mode.
+ * health checks pass on a valid release link. Records observations but retains all barriers.
  */
-export const recoverUpgrade = async (ports: UpgradePorts, input: RecoverInput): Promise<RecoverResult> => {
+const recoverWithinGuard = async (ports: UpgradePorts, input: RecoverInput): Promise<RecoverResult> => {
   const actor = assertRoot(input?.actor, 'recover an upgrade')
   const note = assertText(input.note, 'recovery note', 1000)
   const tools = lifecycleTools(input.os)
   const canary = input.canary === null ? null : assertUsername(input.canary, 'canary account')
   const layout = normalizeLayout(input.layout)
   const fs = guardFs(ports.fs, layout)
+  await ports.safety.assertOwnedExecution(DEFAULT_PANEL_UNITS)
+  await ports.safety.assertWriteBarrier()
   const lock = await readLock(fs, layout.lockFile)
   const lockPresent = lock !== null || (await fs.exists(layout.lockFile))
   const last = await ports.history.latest()
   if (!lockPresent && !isInFlight(last)) return fail('PRECONDITION_FAILED', 'nothing to recover: no upgrade lock and no upgrade in flight')
   const active = await ports.host.apply({ kind: 'exec', argv: [tools.systemctl, 'is-active', '--quiet', UPGRADE_UNIT] })
   if (active.code === 0) return fail('CONFLICT', `${UPGRADE_UNIT} is still running`)
+  if (active.code !== 3) return fail('PRECONDITION_FAILED', 'upgrade unit state is unknown; recovery cannot clear admission')
   const version = versionFromTarget(await fs.readlink(layout.currentLink), layout)
   if (!version) return fail('PRECONDITION_FAILED', `${layout.currentLink} does not point at a release`)
   const problems = await healthProblems({ ports, canary, before: null })
   if (problems.length) return fail('PRECONDITION_FAILED', `server is not healthy yet: ${problems.join('; ')}`, { problems })
-  let closedRecordId: string | null = null
-  if (last && isInFlight(last)) {
-    await ports.history.finish(last.id, {
-      status: 'failed',
-      healthReport: { recovered: { by: actor.username, note, version } },
-      error: `interrupted during ${last.phase ?? 'start'}; recovered by ${actor.username}: ${note}`,
-      toSchemaVersion: null,
-    })
-    closedRecordId = last.id
+  await retainRetirementAttention(ports, fs, layout, { recoveryObserved: true, version, recordId: last?.id ?? null, observedAt: ports.clock.now().toISOString() })
+  const recordId = last && isInFlight(last) ? last.id : null
+  await ports.audit.record(auditEntry(actor, 'upgrade.recovery_observed', 'xpanel', { note, version, lock, recordId, closedRecordId: null, retirementPending: true }, 'failed', { now: ports.clock.now() }))
+  return { status: 'retirement_pending', version, recordId, closedRecordId: null, problems: [RETIREMENT_REQUIRED] }
+}
+
+export const recoverUpgrade = async (ports: UpgradePorts, input: RecoverInput): Promise<RecoverResult> => {
+  if (!ports.safety || typeof ports.safety.withExclusive !== 'function') return fail('PRECONDITION_FAILED', 'operational lifecycle safety admission is required')
+  // Reject malformed requests before the native producer announces an operation.
+  const validated: RecoverInput = {
+    ...input,
+    actor: assertRoot(input?.actor, 'recover an upgrade'),
+    note: assertText(input.note, 'recovery note', 1000),
+    canary: input.canary === null ? null : assertUsername(input.canary, 'canary account'),
+    layout: normalizeLayout(input.layout),
   }
-  if (await fs.exists(layout.maintenanceFile)) await fs.remove(layout.maintenanceFile)
-  if (lockPresent) await fs.remove(layout.lockFile)
-  await ports.audit.record(auditEntry(actor, 'upgrade.recovered', 'xpanel', { note, version, lock, closedRecordId }, 'ok', { now: ports.clock.now() }))
-  return { version, closedRecordId, problems }
+  lifecycleTools(validated.os)
+  return ports.safety.withExclusive(() => recoverWithinGuard(ports, validated))
 }

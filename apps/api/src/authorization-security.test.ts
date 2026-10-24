@@ -186,7 +186,7 @@ describe('HTTP authorization security regressions', () => {
     let releaseSnapshot: () => void = () => {}
     const resume = new Promise<void>(resolve => { releaseSnapshot = resolve })
     let armed = true
-    const traced = new Proxy(db.db, { get(target, key) {
+    const traced = new Proxy({ ...db.db }, { get(target, key) {
       const value = Reflect.get(target, key)
       if (key === 'query') return async (...args: Parameters<typeof target.query>) => {
         const rows = await target.query(...args)
@@ -201,7 +201,7 @@ describe('HTTP authorization security regressions', () => {
     } })
     const concurrent = createApiApp({ db: traced, store: state.store, serverSecret: SERVER_SECRET })
     const changing = concurrent.fetch(new Request('http://localhost/api/auth/change-password', { method: 'POST', headers: { cookie, 'x-csrf-token': csrfToken, 'content-type': 'application/json' }, body: JSON.stringify({ currentPassword: 'GeneratedFixturePassword!', newPassword: 'StaleCallerReplacementPassword!' }) }))
-    await snapshot
+    await Promise.race([snapshot, changing.then(response => { throw new Error(`Password change returned ${response.status} before the credential snapshot barrier`) })])
     await setPasswordHash(db.db, aliceId, adminHash, { forceChange: true })
     releaseSnapshot()
     expect((await changing).status).toBe(401)
@@ -349,7 +349,7 @@ describe('HTTP authorization security regressions', () => {
     const observedLookup = new Promise<void>(resolve => { releaseLookup = resolve })
     let resumeLookup: () => void = () => {}
     const resume = new Promise<void>(resolve => { resumeLookup = resolve })
-    const traced = new Proxy(db.db, { get(target, key) {
+    const traced = new Proxy({ ...db.db }, { get(target, key) {
       const value = Reflect.get(target, key)
       if (key === 'query') return async (...args: Parameters<typeof target.query>) => {
         const rows = await target.query(...args)
@@ -360,7 +360,7 @@ describe('HTTP authorization security regressions', () => {
     } })
     const concurrent = createApiApp({ db: traced, store: state.store, serverSecret: SERVER_SECRET })
     const login = concurrent.fetch(new Request('http://localhost/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'alice', password: 'GeneratedFixturePassword!' }) }))
-    await observedLookup
+    await Promise.race([observedLookup, login.then(response => { throw new Error(`Login returned ${response.status} before the credential lookup barrier`) })])
     await setPasswordHash(db.db, aliceId, newHash)
     resumeLookup()
     const response = await login

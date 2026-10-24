@@ -71,7 +71,7 @@ async function inspect(page) {
   })
 }
 
-async function inspectNativeInputEdges(page, ids) {
+export async function inspectNativeInputEdges(page, ids) {
   const labels = await page.evaluate(ids => ids.map(id => {
     const input = document.getElementById(id), label = document.querySelector('label[for="' + id + '"]')
     if (!input || !label || !input.value || !input.checkVisibility() || !label.checkVisibility() || !label.textContent.trim()) return { id, missing: true }

@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
 import { request as httpRequest } from 'node:http'
 import { randomUUID } from 'node:crypto'
+import { createServer as createNetServer, type Socket } from 'node:net'
 import { afterEach, beforeEach, describe, it } from 'vitest'
 import WebSocket from 'ws'
 import { createApiToken, createResellerPrincipal, createRootPrincipal, createSession, createTestDb, createUserPrincipal, revokeSession } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
-import { computeTotpCode, deriveCsrfToken, sha256Hex } from './auth.ts'
+import { fail } from '@xpanel/core'
+import { computeTotpCode, deriveCsrfToken, sha256Hex, verifyPasswordArgon2id } from './auth.ts'
+import type { MailboxTransport } from './mail/inbox.ts'
 import { ENTRY_POINTS, sessionCookieName, sessionTokenHash, type EntryPoint } from './entry-points.ts'
 import { createApiApp, listenApiServer, type ApiServerDeps } from './server.ts'
 import { ExtendedFeaturesStore } from './extended-routes.ts'
@@ -33,9 +36,28 @@ const fixture = async () => {
   const user = await createUserPrincipal(database.db, { username: 'alice', passwordHash: HASH, accountId: account.id })
   await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
   await createResellerPrincipal(database.db, { username: 'reseller', passwordHash: HASH })
+  // A disposable silent listener prevents a watch from reaching any installed mail service.
+  const imapSockets = new Set<Socket>()
+  const imap = createNetServer(socket => { imapSockets.add(socket); socket.on('error', () => {}); socket.once('close', () => imapSockets.delete(socket)) })
+  await new Promise<void>(resolve => imap.listen(0, '127.0.0.1', resolve))
+  cleanup.push(async () => { for (const socket of imapSockets) socket.destroy(); await new Promise<void>(resolve => imap.close(() => resolve())) })
+  const imapAddress = imap.address()
+  assert.ok(imapAddress && typeof imapAddress === 'object')
+  const mailboxTransport: MailboxTransport = {
+    async verify(login, password) {
+      const serviceUser = await state.store.getServiceUserByLogin(login)
+      const storedHash = serviceUser ? await state.store.getServiceUserHash(serviceUser.id) : null
+      const hash = storedHash?.startsWith('{ARGON2ID}') ? storedHash.slice('{ARGON2ID}'.length) : storedHash
+      if (!serviceUser?.services.email || typeof hash !== 'string' || !await verifyPasswordArgon2id(password, hash)) fail('UNAUTHENTICATED', 'invalid mailbox credentials')
+    },
+    async list() { return [] }, async read() { return fail('NOT_FOUND', 'message not found') }, async remove() {},
+    async send() { return { messageId: '<synthetic-entry-point@example.test>' } },
+  }
   const servers = new Map<EntryPoint, Awaited<ReturnType<typeof listenApiServer>>>()
   for (const profile of profiles) {
-    const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: profile, publicOrigin: origin(profile), allowedOrigins: [origin(profile)], secureCookies: true, requireOriginHeader: true, lockoutThreshold: 20 })
+    const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: profile, publicOrigin: origin(profile), allowedOrigins: [origin(profile)], secureCookies: true, requireOriginHeader: true, lockoutThreshold: 20,
+      ...(profile === 'xmail' ? { mailboxTransport, mailboxEnvironment: { XPANEL_IMAP_HOST: '127.0.0.1', XPANEL_IMAP_PORT: String(imapAddress.port), XPANEL_IMAP_TIMEOUT_MS: '100' } } : {}),
+    })
     const listener = await listenApiServer(app, { host: '127.0.0.1', port: 0 })
     cleanup.push(() => { listener.server.closeAllConnections(); return listener.close() })
     servers.set(profile, listener)
@@ -66,7 +88,7 @@ const fixture = async () => {
     ws.once('unexpected-response', (_req, response) => { response.resume(); ws.terminate(); resolve(response.statusCode!) })
     ws.on('error', error => { if (!String(error).includes('closed before')) reject(error) })
   })
-  return { database, state, account, user, servers, request, login, websocketStatus }
+  return { database, state, account, feature, user, servers, request, login, websocketStatus }
 }
 
 describe('interactive entry point isolation on real HTTP and WebSocket listeners', () => {
@@ -180,13 +202,32 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
   })
 
   it('authorizes same-profile WebSockets, including xMail, and denies renamed replay and a wrong origin', async () => {
-    const panel = await f.login('xpanel'); const mail = await f.login('xmail')
+    const panel = await f.login('xpanel')
+    const accountMail = await f.login('xmail')
+    assert.equal(accountMail.response.status, 200)
+    assert.equal(await f.websocketStatus('xmail', accountMail.cookie), 401)
+    const serviceUser = await f.state.store.createServiceUser({ accountId: f.account.id, login: 'inbox@alice.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: HASH })
+    const mail = await f.login('xmail', serviceUser.login)
+    assert.equal(mail.response.status, 200)
+    assert.ok(mail.cookie.startsWith('__Host-xmail_session='))
     assert.equal(await f.websocketStatus('xpanel', panel.cookie), 101)
     assert.equal(await f.websocketStatus('xpanel', `${sessionCookieName('xpanel', true)}=${mail.raw}`), 401)
     assert.equal(await f.websocketStatus('xpanel', panel.cookie, { origin: origin('xmail') }), 401)
     assert.equal(await f.websocketStatus('xpanel', panel.cookie, { authorization: 'Bearer xp_unsupported_fixture' }), 401)
     assert.equal(await f.websocketStatus('xmail', mail.cookie), 101)
+    assert.equal(await f.websocketStatus('xmail', mail.cookie, { origin: origin('xpanel') }), 401)
+    assert.equal(await f.websocketStatus('xmail', mail.cookie, { authorization: 'Bearer xp_unsupported_fixture' }), 401)
     assert.equal(await f.websocketStatus('xwhm', `${sessionCookieName('xwhm', true)}=${panel.raw}`), 401)
+    await f.database.db.query('DELETE FROM mailbox_sessions WHERE mailbox = $1', [serviceUser.login])
+    assert.equal(await f.websocketStatus('xmail', mail.cookie), 401)
+    const renewed = await f.login('xmail', serviceUser.login)
+    assert.equal(renewed.response.status, 200)
+    assert.equal(await f.websocketStatus('xmail', renewed.cookie), 101)
+    await f.state.store.updateFeatureList(f.feature.id, { disabled: ['email-accounts'] })
+    assert.equal(await f.websocketStatus('xmail', renewed.cookie), 401)
+    await f.state.store.updateFeatureList(f.feature.id, { disabled: [] })
+    await f.state.store.updateServiceUser(serviceUser.id, { services: { email: false, ftp: true, webdisk: false } })
+    assert.equal(await f.websocketStatus('xmail', renewed.cookie), 401)
   })
 
   it('retains root bootstrap, TOTP and single-use recovery inside the administrative audience', async () => {

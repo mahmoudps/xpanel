@@ -43,7 +43,8 @@ export interface MigratorPort {
 export interface HealthPort {
   /** uid that actually served a request for the canary account's host, or null */
   servedUid(username: string): Promise<number | null>
-  panelLogin(): Promise<boolean>
+  /** Native fenced service/process and private IPC readiness; this does not prove user authentication or MFA. */
+  qualifiedControlPlane(): Promise<boolean>
 }
 
 export interface SystemProbePort {
@@ -79,7 +80,34 @@ export interface UpgradeHistoryPort {
   ): Promise<void>
 }
 
+/**
+ * Mandatory operational admission. These ports are test seams, not proof by structural typing.
+ * Production must bind them to actual host exclusion, owned execution, authenticated artifacts,
+ * current authority contracts and an enforced writer barrier through durable settlement.
+ * withExclusive supplies exclusion only, never a durable retirement grant. This engine
+ * retains its attention evidence and returns retirement_pending until that separate protocol
+ * is qualified; a callback returning normally cannot authorize clearing the last barrier.
+ */
+export interface UpgradeSafetyPort {
+  withExclusive<T>(callback: () => Promise<T>): Promise<T>
+  assertOwnedExecution(panelUnits: readonly string[]): Promise<void>
+  assertWritersQuiescent(panelUnits: readonly string[]): Promise<void>
+  assertWriteBarrier(): Promise<void>
+  verifyRelease(release: { version: string; schemaVersion: number; archivePath: string; sha256: string; bytes: number }): Promise<void>
+  /** Extract only from the authenticated retained FD; return after source revalidation and FD close. */
+  unpackVerifiedRelease(path: string, release: { version: string; schemaVersion: number; archivePath: string; sha256: string; bytes: number }): Promise<void>
+  /** Reverify and fsync every staged file and directory before the engine may publish the tree. */
+  verifyStagedRelease(path: string): Promise<void>
+  /** Verify exact migration hashes, state/protocol contracts and reader compatibility, not schema integers alone. */
+  assertCompatibility(input: { direction: 'forward' | 'rollback'; fromVersion: string; toVersion: string; currentSchema: number; targetSchema: number }): Promise<void>
+  /** Mandatory WAL-safe DB/metadata backup, distinct from the state tar and never used to rewind authority. */
+  snapshotControlPlane(snapshotPath: string): Promise<void>
+  /** fsync the named regular file or directory; callers also sync containing directories. */
+  syncPath(path: string): Promise<void>
+}
+
 export interface UpgradePorts {
+  safety: UpgradeSafetyPort
   host: HostPort
   fs: FsPort
   reconciler: ReconcilerPort

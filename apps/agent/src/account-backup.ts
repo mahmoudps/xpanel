@@ -8,7 +8,7 @@ import type { AgentExecutor } from './executor.ts'
 export const DEFAULT_BACKUP_DIR = '/var/lib/xpanel/backups'
 export const MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024
 
-const USERNAME_RE = /^[a-z][a-z0-9]{2,15}$/
+const USERNAME_RE = /^[a-z][a-z0-9]{0,15}$/
 const STAMP_RE = /^[0-9]{8}T[0-9]{6}Z$/
 
 export interface BackupAccountTarget {
