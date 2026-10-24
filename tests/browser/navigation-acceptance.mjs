@@ -18,6 +18,7 @@ const states = routes.flatMap(route => [360, 768, 1280, 1440].flatMap(width => [
   id: `navigate-${route.path.replaceAll('/', '-').replace(/^-/, '')}-${locale}-${width}`, kind: 'navigation', ...route, width, locale,
 }))))
 for (const locale of ['en', 'ar']) {
+  for (const width of [390, 1440]) states.push({ id: `audit-spacing-${locale}-${width}`, kind: 'audit-spacing', path: '/whm/audit', width, locale })
   for (const boundary of ['sheet-close', 'toolbar-summary', 'palette-return']) states.push({ id: `boundary-${boundary}-${locale}`, kind: boundary, path: '/domains', width: boundary === 'palette-return' ? 960 : 959, locale })
   for (const [kind, width] of [['home-sheet-close', 800], ['home-palette-return', 801]]) states.push({ id: `boundary-${kind}-${locale}`, kind, path: '/home', width, locale })
   for (const [path, fields] of [
@@ -617,6 +618,116 @@ async function contextualShortcuts(page, state, expect, observations) {
   observations.push({ check: 'contextual-chord-shortcuts', surface: state.surface, checks: completed })
 }
 
+export async function measureAuditGeometry(page) {
+  return page.evaluate(() => {
+    const section = document.querySelector('[data-section="audit-log"]')
+    const rect = element => element.getBoundingClientRect()
+    const glyph = element => {
+      if (!element) return null
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), boxes = []
+      let node
+      while ((node = walker.nextNode())) {
+        if (!node.textContent.trim()) continue
+        const range = document.createRange(); range.selectNodeContents(node)
+        boxes.push(...[...range.getClientRects()].filter(box => box.width > 0 && box.height > 0))
+      }
+      return boxes.length ? { left: Math.min(...boxes.map(box => box.left)), right: Math.max(...boxes.map(box => box.right)), top: Math.min(...boxes.map(box => box.top)), bottom: Math.max(...boxes.map(box => box.bottom)) } : null
+    }
+    const rtl = document.dir === 'rtl', card = rect(section), style = getComputedStyle(section)
+    const header = rect(section.querySelector('.xp-card__header')), formElement = section.querySelector('[data-audit-filters]')
+    const form = rect(formElement), table = rect(section.querySelector('.xp-table-wrap'))
+    const fields = [...formElement.querySelectorAll('.xp-field')]
+    const submit = rect(formElement.querySelector('button[type="submit"]'))
+    const border = { top: parseFloat(style.borderTopWidth), right: parseFloat(style.borderRightWidth), bottom: parseFloat(style.borderBottomWidth), left: parseFloat(style.borderLeftWidth) }
+    const pagerGroups = [...section.querySelectorAll(':scope > [data-audit-pager],:scope > .xp-btn-group')]
+    const pagerLinks = pagerGroups.flatMap(group => [...group.querySelectorAll('a[href]')])
+    const values = [...section.querySelectorAll('tbody .xp-audit-value')]
+    const mobileFields = values.map(value => {
+      const label = value.parentElement.querySelector('.xp-audit-mobile-label'), badge = value.querySelector('.xp-badge')
+      const labelGlyph = glyph(label), valueGlyph = badge ? rect(badge) : glyph(value)
+      return { label_visible: getComputedStyle(label).display !== 'none', value_nonempty: !!value.textContent.trim(), value_kind: badge ? 'painted_badge_box' : 'actual_text_node_range', gap: rect(value).top - rect(label).bottom, edge_delta: labelGlyph && valueGlyph ? Math.abs(rtl ? labelGlyph.right - valueGlyph.right : labelGlyph.left - valueGlyph.left) : null, value_below_label: !labelGlyph || !valueGlyph || valueGlyph.top >= labelGlyph.bottom + 7 }
+    })
+    const headers = [...section.querySelectorAll('thead th')]
+    const rows = [...section.querySelectorAll('tbody tr')]
+    const desktopColumns = headers.map((th, index) => {
+      const value = rows.map(row => row.cells[index]?.querySelector('.xp-audit-value')).find(element => element?.textContent.trim())
+      const badge = value?.querySelector('.xp-badge'), labelGlyph = glyph(th), content = badge ? rect(badge) : glyph(value)
+      const box = rect(th)
+      return { column: index, header_visible: box.width > 0 && box.height > 0 && !!labelGlyph, value_nonempty: !!value, value_kind: badge ? 'painted_badge_box' : 'actual_text_node_range', edge_delta: labelGlyph && content ? Math.abs(rtl ? labelGlyph.right - content.right : labelGlyph.left - content.left) : null }
+    })
+    const technicalColumns = [0, 1, 3].map(index => {
+      const value = rows.map(row => row.cells[index]?.querySelector('.xp-audit-value')).find(element => element?.textContent.trim())
+      const tokens = [...(value?.querySelectorAll('bdi[dir="ltr"]') ?? [])].filter(token => token.textContent.trim())
+      return { column: index, tokens: tokens.length, isolated: tokens.length > 0 && tokens.every(token => getComputedStyle(token).direction === 'ltr' && getComputedStyle(token).unicodeBidi.includes('isolate')) }
+    })
+    return {
+      viewport: innerWidth, direction: document.dir, document_width: document.documentElement.scrollWidth,
+      padding: { top: header.top - card.top - border.top, bottom_from_table: card.bottom - table.bottom - border.bottom, inline_start: rtl ? card.right - border.right - form.right : form.left - card.left - border.left, inline_end: rtl ? form.left - card.left - border.left : card.right - border.right - form.right },
+      title_to_form: form.top - header.bottom, form_to_table: table.top - form.bottom,
+      label_to_input: fields.map(field => rect(field.querySelector('input')).top - rect(field.querySelector('label')).bottom),
+      field_siblings: fields.slice(1).map((field, index) => rect(field).top - rect(fields[index]).bottom),
+      label_input_edges: fields.map(field => { const label = glyph(field.querySelector('label')), input = rect(field.querySelector('input')); return label ? Math.abs(rtl ? label.right - input.right : label.left - input.left) : null }),
+      last_field_to_submit: fields.length ? submit.top - rect(fields.at(-1)).bottom : null,
+      controls: [...formElement.querySelectorAll('input,button[type="submit"]')].map(control => ({ id: control.id || 'filter-submit', width: rect(control).width, height: rect(control).height })),
+      pager_groups: pagerGroups.length, pager_links: pagerLinks.length, empty_pager_groups: pagerGroups.filter(group => !group.querySelector('a[href]')).length,
+      record_sibling_gaps: rows.flatMap(row => [...row.cells].slice(1).map((cell, index) => rect(cell).top - rect(row.cells[index]).bottom)),
+      record_padding: rows.filter(row => row.querySelector('.xp-audit-value')).map(row => {
+        const outer = rect(row), first = rect(row.cells[0]), last = rect(row.cells[row.cells.length - 1]), border = getComputedStyle(row)
+        return { top: first.top - outer.top - parseFloat(border.borderTopWidth), bottom: outer.bottom - last.bottom - parseFloat(border.borderBottomWidth), inline_start: rtl ? outer.right - parseFloat(border.borderRightWidth) - first.right : first.left - outer.left - parseFloat(border.borderLeftWidth), inline_end: rtl ? first.left - outer.left - parseFloat(border.borderLeftWidth) : outer.right - parseFloat(border.borderRightWidth) - first.right }
+      }),
+      mobile_fields: mobileFields, desktop_columns: desktopColumns, technical_columns: technicalColumns,
+    }
+  })
+}
+
+export function assertAuditGeometry(metrics, state) {
+  const expectedPadding = state.width <= 640 ? 16 : 24
+  assert.equal(metrics.viewport, state.width)
+  assert.ok(metrics.document_width <= metrics.viewport + 1, 'Audit geometry must fit without horizontal overflow')
+  assert.equal(metrics.title_to_form, 24, 'Audit heading and filter form must have a 24px group gap')
+  assert.equal(metrics.form_to_table, 24, 'Audit filters and table must have a 24px group gap')
+  assert.equal(metrics.label_to_input.length, 3)
+  assert.deepEqual(metrics.label_to_input, [8, 8, 8], 'Each real filter input must sit 8px below its label')
+  assert.deepEqual(metrics.field_siblings, [16, 16], 'Adjacent filter fields must have 16px gaps')
+  assert.equal(metrics.last_field_to_submit, 16, 'The submit action must remain 16px after the last field')
+  assert.deepEqual(metrics.label_input_edges, [0, 0, 0], 'Filter controls must share their labels logical alignment edge')
+  assert.equal(metrics.controls.length, 4)
+  for (const control of metrics.controls) assert.ok(control.width >= 44 && control.height >= 44, `Audit control ${control.id} must retain a 44px target`)
+  assert.equal(metrics.pager_links, 0, 'This fixture has no earlier or older audit-page links')
+  assert.equal(metrics.empty_pager_groups, 0, 'A no-links audit page must not render an empty pagination group')
+  assert.equal(metrics.pager_groups, 0, 'The no-links fixture must end with the actual table')
+  for (const [edge, gap] of Object.entries(metrics.padding)) assert.equal(gap, expectedPadding, `The actual audit card ${edge} padding must be ${expectedPadding}px`)
+  assert.equal(metrics.desktop_columns.length, 5)
+  assert.equal(metrics.technical_columns.length, 3)
+  assert.ok(metrics.technical_columns.every(column => column.isolated), 'Actual date, actor and target values must retain LTR isolation')
+  if (state.width <= 390) {
+    assert.equal(metrics.record_sibling_gaps.length, 4)
+    assert.ok(metrics.record_sibling_gaps.every(gap => gap === 16), 'Real mobile audit fields must retain 16px sibling gaps')
+    assert.equal(metrics.record_padding.length, 1)
+    for (const padding of metrics.record_padding) for (const gap of Object.values(padding)) assert.equal(gap, 16, 'Actual mobile record padding must be 16px on every edge')
+    assert.equal(metrics.mobile_fields.length, 5)
+    for (const field of metrics.mobile_fields) {
+      assert.equal(field.label_visible, true)
+      assert.equal(field.gap, 8, 'A mobile audit value must sit 8px below its real label')
+      assert.equal(field.value_below_label, true)
+      if (field.value_nonempty) assert.ok(field.edge_delta <= 1, 'Mobile label and painted audit value must share the logical edge')
+    }
+  } else {
+    for (const column of metrics.desktop_columns) {
+      assert.equal(column.header_visible, true)
+      assert.equal(column.value_nonempty, true)
+      assert.ok(column.edge_delta <= 1, `Audit column ${column.column} header glyphs and actual painted cell content must share their logical edge`)
+    }
+  }
+}
+
+async function auditSpacing(page, state, expect, observations) {
+  await expect(page.locator('[data-section="audit-log"]')).toBeVisible()
+  const metrics = await measureAuditGeometry(page)
+  observations.push({ check: 'actual-audit-filter-table-spacing', metrics, pagination_scope: 'No-links fixture; real older/newest links remain covered by renderer tests.' })
+  assertAuditGeometry(metrics, state)
+}
+
 export async function runNavigationAcceptance({ output, filter } = {}) {
   assert.equal(process.versions.node, readFileSync(join(root, '.node-version'), 'utf8').trim(), 'Use the pinned workspace launcher')
   const destination = resolve(output ?? join(root, 'test-results/navigation', `run-${new Date().toISOString().replaceAll(/[-:.]/g, '')}`))
@@ -657,6 +768,7 @@ export async function runNavigationAcceptance({ output, filter } = {}) {
         outcome.geometry = geometry
         if (state.kind === 'navigation') await navigate(page, state, expect, outcome.observations)
         else if (state.kind === 'fields') await fields(page, state, expect, outcome.observations)
+        else if (state.kind === 'audit-spacing') await auditSpacing(page, state, expect, outcome.observations)
         else if (state.kind === 'summary') await summary(page, state, expect, outcome.observations)
         else if (state.kind === 'palette-filter') await paletteFilter(page, state, expect, outcome.observations)
         else if (state.kind === 'palette-scroll') await paletteScroll(page, state, expect, outcome.observations, async suffix => {

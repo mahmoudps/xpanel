@@ -233,7 +233,71 @@ html[lang="ar"] .xp-board-port[data-home-phone="true"],
   overflow-x: hidden !important;
   overflow-y: auto !important;
 }
+[data-section="audit-log"] {
+  display: grid;
+  gap: var(--xp-space-card, 24px);
+  padding: var(--xp-space-card, 24px);
+}
+[data-section="audit-log"] > .xp-card__header,
+[data-section="audit-log"] .xp-page-title { margin: 0; }
+@media (max-width: 640px) {
+  [data-section="audit-log"] { padding: var(--xp-space-field, 16px); }
+}
+[data-section="audit-log"] .xp-audit-mobile-label {
+  display: none;
+  font-family: var(--xp-font-sans-ltr, ${BOARD_SANS_LTR});
+  font-size: 14px;
+  font-weight: 500;
+  line-height: var(--xp-leading-label, 22px);
+  color: var(--xp-text-muted);
+}
+${ar('[data-section="audit-log"] .xp-audit-mobile-label')} {
+  font-family: var(--xp-font-sans-rtl, ${BOARD_SANS_RTL});
+}
+[data-section="audit-log"] .xp-audit-value { min-inline-size: 0; }
+@media (min-width: 391px) {
+  [data-section="audit-log"] th { text-align: start; }
+}
+[data-section="audit-log"] [data-audit-filters] input { min-block-size: 44px; }
 @media (max-width: 390px) {
+  [data-section="audit-log"] :is(table, thead, tbody, tr) {
+    display: block !important;
+    width: 100% !important;
+    min-inline-size: 0;
+    box-sizing: border-box;
+  }
+  [data-section="audit-log"] thead tr {
+    display: flex !important;
+    flex-wrap: wrap;
+  }
+  [data-section="audit-log"] th {
+    display: block !important;
+    flex: 1 1 auto;
+    width: auto !important;
+    min-block-size: 44px;
+    padding-inline: 4px;
+  }
+  [data-section="audit-log"] tbody {
+    display: grid !important;
+    gap: var(--xp-space-card, 24px);
+    margin-block-start: var(--xp-space-card, 24px);
+  }
+  [data-section="audit-log"] tbody tr {
+    display: grid !important;
+    gap: var(--xp-space-field, 16px);
+    padding: var(--xp-space-field, 16px);
+  }
+  [data-section="audit-log"] td {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    min-inline-size: 0;
+    height: auto;
+    padding: 0;
+    font-size: 16px;
+  }
+  [data-section="audit-log"] td.xp-mono .xp-audit-value { font-size: 14px; }
+  [data-section="audit-log"] .xp-audit-mobile-label { display: block; }
   ${ar(':is(table, thead, tbody, tr, th, td):not(.xp-table):not(.xp-table *):not(.xp-accounts__table):not(.xp-accounts__table *)')} {
     display: block !important;
     width: 100% !important;

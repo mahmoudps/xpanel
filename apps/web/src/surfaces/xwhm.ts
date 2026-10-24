@@ -149,6 +149,8 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
   const auditAction = auditList?.action ?? ''
   const auditTarget = auditList?.target ?? ''
   const auditBefore = auditList?.before ?? ''
+  const auditHeaders = ['UTC', isAr ? 'المستخدم' : 'User', isAr ? 'الإجراء' : 'Action', isAr ? 'الهدف' : 'Target', isAr ? 'النتيجة' : 'Outcome'] as const
+  const auditMobileLabel = (label: string): string => `<span class="xp-audit-mobile-label" aria-hidden="true">${escapeHtml(label)}</span>`
   const auditHref = (before?: string): string => {
     const params = new URLSearchParams()
     if (auditActor) params.set('actor', auditActor)
@@ -942,23 +944,25 @@ ${section === 'audit' ? `<section class="xp-card" data-section="audit-log">
               <h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>
             </div>
             <form method="get" action="/whm/audit" data-audit-filters="true" class="xp-form-group">
-              <label class="xp-label" for="audit-actor">${isAr ? 'الفاعل' : 'Actor'}</label>
-              <input id="audit-actor" name="actor" maxlength="128" value="${escapeHtml(auditActor)}">
-              <label class="xp-label" for="audit-action">${isAr ? 'الإجراء' : 'Action'}</label>
-              <input id="audit-action" name="action" maxlength="128" value="${escapeHtml(auditAction)}">
-              <label class="xp-label" for="audit-target">${isAr ? 'الهدف' : 'Target'}</label>
-              <input id="audit-target" name="target" maxlength="480" value="${escapeHtml(auditTarget)}">
+              <div class="xp-field">
+                <label class="xp-label" for="audit-actor">${isAr ? 'الفاعل' : 'Actor'}</label>
+                <input id="audit-actor" name="actor" maxlength="128" value="${escapeHtml(auditActor)}">
+              </div>
+              <div class="xp-field">
+                <label class="xp-label" for="audit-action">${isAr ? 'الإجراء' : 'Action'}</label>
+                <input id="audit-action" name="action" maxlength="128" value="${escapeHtml(auditAction)}">
+              </div>
+              <div class="xp-field">
+                <label class="xp-label" for="audit-target">${isAr ? 'الهدف' : 'Target'}</label>
+                <input id="audit-target" name="target" maxlength="480" value="${escapeHtml(auditTarget)}">
+              </div>
               <button type="submit" class="xp-btn">${isAr ? 'تصفية' : 'Filter'}</button>
             </form>
             <div class="xp-table-wrap">
               <table class="xp-table">
                 <thead>
                   <tr>
-                    <th>UTC</th>
-                    <th>${isAr ? 'المستخدم' : 'User'}</th>
-                    <th>${isAr ? 'الإجراء' : 'Action'}</th>
-                    <th>${isAr ? 'الهدف' : 'Target'}</th>
-                    <th>${isAr ? 'النتيجة' : 'Outcome'}</th>
+                    ${auditHeaders.map(label => `<th scope="col">${escapeHtml(label)}</th>`).join('')}
                   </tr>
                 </thead>
                 <tbody>
@@ -966,11 +970,11 @@ ${section === 'audit' ? `<section class="xp-card" data-section="audit-log">
                     .map(
                       (entry) => `
                     <tr data-audit-id="${escapeHtml(entry.id)}">
-                      <td class="xp-mono xp-tabular"><time datetime="${escapeHtml(entry.at)}">${escapeHtml(formatAsciiDate(entry.at, { includeTime: true }))}</time></td>
-                      <td class="xp-mono"><bdi dir="ltr">${escapeHtml(auditActorLabel(entry.actor))}</bdi></td>
-                      <td>${auditActionHtml(entry.action, locale, entry)}</td>
-                      <td><bdi dir="ltr">${escapeHtml(auditTargetLabel(entry.target, locale))}</bdi></td>
-                      <td>${renderStatusBadge(entry.outcome === 'ok' ? 'ok' : entry.outcome === 'denied' ? 'warn' : 'critical', auditOutcomeLabel(entry.action, entry.outcome, locale))}</td>
+                      <td class="xp-mono xp-tabular">${auditMobileLabel(auditHeaders[0])}<div class="xp-audit-value"><time datetime="${escapeHtml(entry.at)}"><bdi dir="ltr">${escapeHtml(formatAsciiDate(entry.at, { includeTime: true }))}</bdi></time></div></td>
+                      <td class="xp-mono">${auditMobileLabel(auditHeaders[1])}<div class="xp-audit-value"><bdi dir="ltr">${escapeHtml(auditActorLabel(entry.actor))}</bdi></div></td>
+                      <td>${auditMobileLabel(auditHeaders[2])}<div class="xp-audit-value">${auditActionHtml(entry.action, locale, entry)}</div></td>
+                      <td>${auditMobileLabel(auditHeaders[3])}<div class="xp-audit-value"><bdi dir="ltr">${escapeHtml(auditTargetLabel(entry.target, locale))}</bdi></div></td>
+                      <td>${auditMobileLabel(auditHeaders[4])}<div class="xp-audit-value">${renderStatusBadge(entry.outcome === 'ok' ? 'ok' : entry.outcome === 'denied' ? 'warn' : 'critical', auditOutcomeLabel(entry.action, entry.outcome, locale))}</div></td>
                     </tr>
                   `,
                     )
@@ -978,10 +982,10 @@ ${section === 'audit' ? `<section class="xp-card" data-section="audit-log">
                 </tbody>
               </table>
             </div>
-            <nav data-audit-pager="true">
+            ${auditBefore || (auditList?.hasMore && auditList.oldestId) ? `<nav data-audit-pager="true">
               ${auditBefore ? `<a href="${escapeHtml(auditHref())}">${isAr ? 'الأحدث' : 'Newest'}</a>` : ''}
               ${auditList?.hasMore && auditList.oldestId ? `<a data-audit-older="true" href="${escapeHtml(auditHref(auditList.oldestId))}">${isAr ? 'الأقدم' : 'Older'}</a>` : ''}
-            </nav>
+            </nav>` : ''}
           </section>` : ''}
 ${section === 'upgrade' ? `<section class="xp-card" data-section="root-lifecycle"><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1><p class="xp-prose"><bdi dir="ltr">${escapeHtml(version)} → ${escapeHtml(availableVersion)}</bdi></p><p class="xp-prose">${isAr ? 'راجع فحص الترقية قبل تأكيد أي تغيير.' : 'Review the upgrade preflight before confirming any change.'}</p><button type="button" class="xp-btn xp-btn--primary" data-action="start-upgrade" ${isRoot && props.availableVersion ? '' : 'disabled'}>${isAr ? 'فحص الترقية' : 'Check upgrade'}</button></section>` : ''}
 ${section === 'transfer' ? `<section class="xp-card" data-section="root-lifecycle"><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1><p class="xp-prose">${isAr ? 'اختر مصدر النقل وراجع الحسابات قبل الاستيراد.' : 'Choose the transfer source and review its accounts before importing.'}</p><button type="button" class="xp-btn xp-btn--primary" data-action="start-transfer" ${isRoot ? '' : 'disabled'}>${isAr ? 'بدء النقل' : 'Start transfer'}</button></section>` : ''}
