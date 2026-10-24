@@ -1,6 +1,6 @@
 import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto'
 import { posix } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { XpanelError, fail } from '@xpanel/core'
 import type { AuditEntry, HostAction, OsProfile, Principal } from '@xpanel/core'
 import { createTestDb, listUpgrades, loadMigrations, parseMigration } from '@xpanel/db'
@@ -9,6 +9,7 @@ import {
   createBackupPlan,
   exportAccountArchive,
   importAccountArchive,
+  runUpgrade,
 } from '@xpanel/lifecycle'
 import type {
   AccountArchiveManifest,
@@ -26,6 +27,7 @@ import type {
   ManifestStep,
   SinkItem,
   UnitChange,
+  UpgradeSafetyPort,
 } from '@xpanel/lifecycle'
 import { parseOsRelease, profileFor } from '@xpanel/os'
 import { gzipSync } from 'node:zlib'
@@ -62,6 +64,15 @@ import {
   verifyReleaseArtifactSignature,
 } from './upgrade-runner.ts'
 import type { ReleaseVerificationKey, SignedReleaseManifest } from './upgrade-runner.ts'
+
+// This test-only module replacement exercises model sequencing; it is not native admission.
+const modelSafety = vi.hoisted(() => ({ current: undefined as UpgradeSafetyPort | undefined }))
+vi.mock('../../../../scripts/lifecycle-root-safety.mjs', () => ({
+  createNativeUpgradeSafety: async () => {
+    if (!modelSafety.current) throw new Error('no synthetic lifecycle safety installed')
+    return modelSafety.current
+  },
+}))
 
 // ---------------------------------------------------------------------------
 // Portable Test Helpers (In-memory FsPort, HostPort, ClockPort, Tar builder)
@@ -1573,7 +1584,7 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
     const activatedGenerations: number[] = []
     let desiredStateContent = '{"rev":1}'
     const snapshots = new Map<string, { desiredState: string }>()
-    let panelLoginOk = true
+    let qualifiedControlPlaneOk = true
     let canaryHttp: { httpStatus: number; servedByUid: number | null; cgroupSlice: string | null; serviceActive: boolean } = {
       httpStatus: 200,
       servedByUid: 1001,
@@ -1617,6 +1628,15 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
       },
     }
 
+    // Explicit portable model seam. Production dependencies do not accept this field.
+    modelSafety.current = {
+        withExclusive: async callback => callback(),
+        assertOwnedExecution: async () => {}, assertWritersQuiescent: async () => {},
+        assertWriteBarrier: async () => {}, verifyRelease: async () => {},
+        unpackVerifiedRelease: async (path, release) => { const r = await host.apply({ kind: 'exec', argv: ['/usr/bin/tar', '--extract', '--gzip', `--file=${release.archivePath}`, `--directory=${path}`, '--no-same-owner', '--no-overwrite-dir'] }); if (r.code) throw new Error('synthetic extraction failed') },
+        verifyStagedRelease: async () => {}, assertCompatibility: async () => {},
+        snapshotControlPlane: async () => {}, syncPath: async () => {},
+      }
     const runner = new PanelUpgradeRunner({
       db: testDb.db,
       fs,
@@ -1667,14 +1687,10 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
       probeFreeBytes: async () => 50_000_000,
       probeOsRelease: async () => parseOsRelease('ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME=noble\n'),
       probeActiveTransfers: async () => 0,
-      probePanelLogin: async () => panelLoginOk,
+      probeQualifiedControlPlane: async () => qualifiedControlPlaneOk,
       probeCanaryHttp: async () => canaryHttp,
       snapshotControlPlaneDb: async (snapPath) => {
         snapshots.set(snapPath, { desiredState: desiredStateContent })
-      },
-      restoreControlPlaneDb: async (snapPath) => {
-        const snap = snapshots.get(snapPath)
-        if (snap) desiredStateContent = snap.desiredState
       },
     })
 
@@ -1713,8 +1729,8 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
       getCurrentGen: () => currentGen,
       getDesiredStateContent: () => desiredStateContent,
       activatedGenerations,
-      setPanelLoginOk: (ok: boolean) => {
-        panelLoginOk = ok
+      setQualifiedControlPlaneOk: (ok: boolean) => {
+        qualifiedControlPlaneOk = ok
       },
       setCanaryHttp: (c: typeof canaryHttp) => {
         canaryHttp = c
@@ -1744,7 +1760,19 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
     )
   })
 
-  it('automatically rolls back release pointer, state snapshot & generation when post-upgrade health probe fails, then succeeds on second upgrade attempt without manual DB deletion', async () => {
+  it('cannot use ordinary production ports or fallback parameters to bypass native safety', async () => {
+    const h = await createUpgradeTestHarness()
+    try {
+      const before = JSON.stringify([...h.fs.nodes])
+      await expect(runUpgrade(h.runner.ports, h.basePlan)).rejects.toThrow(/native lifecycle safety/)
+      expect(JSON.stringify([...h.fs.nodes])).toBe(before)
+      await expect(h.runner.recoverInterruptedUpgrade({ actor: ROOT, os: { family: 'debian' }, note: 'forged repair', canary: null, fallbackVersion: '1.0.0', fallbackGenerationId: 41 })).rejects.toThrow(/automatic recovery/)
+      expect(JSON.stringify([...h.fs.nodes])).toBe(before)
+      expect(h.activatedGenerations).toEqual([])
+    } finally { await h.testDb.close() }
+  })
+
+  it('diagnoses binary rollback preserving current authority and blocks retry pending retirement, through synthetic ports', async () => {
     const h = await createUpgradeTestHarness()
     try {
       // 1. Inject post-switch canary cgroup/UID failure on first upgrade attempt
@@ -1756,27 +1784,28 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
       })
 
       const firstAttempt = await h.runner.executeSignedUpgrade(h.basePlan, h.signedManifest)
-      expect(firstAttempt.outcome).toBe('rolled_back')
+      expect(firstAttempt).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'rolled_back' })
       expect(firstAttempt.reason).toMatch(/cgroup slice mismatch/)
 
-      // Verify release symlink, desired state snapshot, and config generation rolled back to 1.0.0 / gen 41!
+      // Only the binary pointer rolls back. Current authority is reconciled, never rewound.
       expect(await h.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
       expect(await h.fs.exists('/opt/xpanel/releases/1.1.0')).toBe(false)
-      expect(h.getCurrentGen()).toBe(41)
-      expect(h.activatedGenerations).toEqual([41])
-      expect(h.getDesiredStateContent()).toBe('{"rev":1}')
-      expect(await h.fs.exists('/var/lib/xpanel/upgrade.lock')).toBe(false)
-      expect(await h.fs.exists('/var/lib/xpanel/maintenance.json')).toBe(false)
+      expect(h.getCurrentGen()).toBe(43)
+      expect(h.activatedGenerations).toEqual([])
+      expect(h.getDesiredStateContent()).toBe('{"rev":43}')
+      expect(await h.fs.exists('/var/lib/xpanel/upgrade.lock')).toBe(true)
+      expect(await h.fs.exists('/var/lib/xpanel/maintenance.json')).toBe(true)
+      expect(await h.fs.exists('/var/lib/xpanel-lifecycle/backups/retirement-attention.json')).toBe(true)
 
       // Customer data in /home/alice was never touched
       expect(await h.fs.readFile('/home/alice/public_html/index.php')).toBe('<?php echo "alice live";')
 
-      // SQLite upgrades history table has 1 row with status 'rolled_back'
+      // Host rollback is observed, but durable operation completion remains unqualified.
       const rowsAfterRollback = await listUpgrades(h.testDb.db)
       expect(rowsAfterRollback).toHaveLength(1)
-      expect(rowsAfterRollback[0]?.status).toBe('rolled_back')
+      expect(rowsAfterRollback[0]?.status).toBe('running')
 
-      // 2. Fix canary health probe and run a SECOND upgrade attempt without touching SQLite rows manually!
+      // A fixed canary cannot grant retirement or bypass the retained evidence.
       h.clock.ms += 60_000
       h.setCanaryHttp({
         httpStatus: 200,
@@ -1786,20 +1815,19 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
       })
 
       const secondAttempt = await h.runner.executeSignedUpgrade(h.basePlan, h.signedManifest)
-      expect(secondAttempt.outcome).toBe('succeeded')
-      expect(await h.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.1.0')
-      expect(h.getCurrentGen()).toBe(42)
+      expect(secondAttempt.outcome).toBe('refused')
+      expect(await h.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
+      expect(h.getCurrentGen()).toBe(43)
 
       const rowsAfterSuccess = await listUpgrades(h.testDb.db)
-      expect(rowsAfterSuccess).toHaveLength(2)
-      expect(rowsAfterSuccess[0]?.status).toBe('succeeded')
-      expect(rowsAfterSuccess[1]?.status).toBe('rolled_back')
+      expect(rowsAfterSuccess).toHaveLength(1)
+      expect(rowsAfterSuccess[0]?.status).toBe('running')
     } finally {
       await h.testDb.close()
     }
   })
 
-  it('recovers from an interrupted upgrade via recoverInterruptedUpgrade and allows a subsequent upgrade to succeed', async () => {
+  it('records interrupted upgrade health without releasing barriers or admitting a subsequent upgrade', async () => {
     const h = await createUpgradeTestHarness()
     try {
       // Simulate an in-flight interrupted upgrade row in SQLite + leftover lock & maintenance files
@@ -1818,25 +1846,26 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
       expect(refused.outcome).toBe('refused')
       expect(refused.code).toBe('CONFLICT')
 
-      // Run recoverInterruptedUpgrade to repair symlink/generation, verify health, close stale row, and remove lock
+      // Observe health and close the stale row; no historical state or admission is restored.
       const recovered = await h.runner.recoverInterruptedUpgrade({
         actor: ROOT,
         os: { family: 'debian' },
         note: 'recovered after simulated crash during switch phase',
         canary: 'alice',
-        fallbackVersion: '1.0.0',
-        fallbackGenerationId: 41,
       })
       expect(recovered.version).toBe('1.0.0')
-      expect(recovered.closedRecordId).toBe(created.id)
-      expect(await h.fs.exists('/var/lib/xpanel/upgrade.lock')).toBe(false)
-      expect(await h.fs.exists('/var/lib/xpanel/maintenance.json')).toBe(false)
+      expect(recovered.status).toBe('retirement_pending')
+      expect(recovered.recordId).toBe(created.id)
+      expect(recovered.closedRecordId).toBeNull()
+      expect(await h.fs.exists('/var/lib/xpanel/upgrade.lock')).toBe(true)
+      expect(await h.fs.exists('/var/lib/xpanel/maintenance.json')).toBe(true)
+      expect(await h.fs.exists('/var/lib/xpanel-lifecycle/backups/retirement-attention.json')).toBe(true)
 
-      // Now the subsequent valid upgrade attempt succeeds cleanly!
+      // A new attempt cannot treat an observed recovery as a final retirement grant.
       h.clock.ms += 60_000
       const succeeded = await h.runner.executeSignedUpgrade(h.basePlan, h.signedManifest)
-      expect(succeeded.outcome).toBe('succeeded')
-      expect(await h.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.1.0')
+      expect(succeeded.outcome).toBe('refused')
+      expect(await h.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
     } finally {
       await h.testDb.close()
     }

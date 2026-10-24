@@ -11,6 +11,8 @@ import { StateStore, createTestStateStore } from '@xpanel/state'
 import { WRITER_MUTEX_FILE } from '../../../packages/state/src/writer-mutex.ts'
 import * as dbApi from '@xpanel/db'
 import type { AgentApp } from '@xpanel/agent'
+import { XpanelError } from '@xpanel/core'
+import * as lifecycleAdmission from '../../../scripts/lifecycle-admission.mjs'
 import { deriveCsrfToken } from './auth.ts'
 import { sessionCookieName, sessionTokenHash } from './entry-points.ts'
 import { createApiApp, INGRESS_SECRET_HEADER, listenApiServer } from './server.ts'
@@ -504,13 +506,36 @@ describe('account mutation outcomes and race boundaries', () => {
   it('reports identity-establishment failure after host apply without claiming rollback or issuing login', async () => {
     vi.spyOn(dbApi, 'createUserPrincipal').mockRejectedValueOnce(new Error(RAW_HOST_MARKER))
     const response = await f.perform('create')
-    expect(response.status).toBe(503)
     const text = await response.text()
+    expect(response.status, text).toBe(503)
+    expect(response.headers.get('set-cookie')).toBeNull()
+    expect(response.headers.get('content-type')).toContain('application/problem+json')
     expect(text).not.toContain(RAW_HOST_MARKER)
-    expect(JSON.parse(text).details).toMatchObject({ verificationRequired: true, stateChanged: true, reason: 'identity_establishment_unverified' })
+    expect(JSON.parse(text), text).toMatchObject({ code: 'SERVICE_UNAVAILABLE', details: { verificationRequired: true, stateChanged: true, reason: 'identity_establishment_unverified' } })
     expect(await findPrincipalByUsername(f.database.db, 'newowner7')).toBeNull()
     expect(await f.state.store.getAccountByUsername('newowner7')).not.toBeNull()
     expect(await f.accountSuccess()).toEqual([])
+    expect(f.calls()).toBe(1)
+  })
+
+  it.each(['typed', 'unknown'] as const)('keeps %s admission retirement failure fail-closed after the request callback', async kind => {
+    // Modeled retirement failure, not a native kernel/FD qualification fixture.
+    vi.spyOn(lifecycleAdmission, 'withLifecycleWriterAdmission').mockImplementationOnce(async callback => {
+      const response = await callback() as Response
+      expect(response.status).toBe(201)
+      throw kind === 'typed'
+        ? new XpanelError('PRECONDITION_FAILED', RAW_HOST_MARKER, { unsafeDiagnostic: RAW_HOST_MARKER })
+        : new Error(RAW_HOST_MARKER)
+    })
+    const response = await f.perform('create')
+    expect(response.status).toBe(503)
+    expect(response.headers.get('retry-after')).toBe('5')
+    expect(response.headers.get('set-cookie')).toBeNull()
+    const text = await response.text()
+    expect(text).not.toContain(RAW_HOST_MARKER)
+    expect(text).not.toContain('PRECONDITION_FAILED')
+    expect(JSON.parse(text)).toEqual({ error: 'Lifecycle writer admission is unavailable.' })
+    expect(await f.state.store.getAccountByUsername('newowner7')).not.toBeNull()
     expect(f.calls()).toBe(1)
   })
 

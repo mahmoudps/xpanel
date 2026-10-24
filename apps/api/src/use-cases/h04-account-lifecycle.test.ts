@@ -16,6 +16,7 @@ import {
   findActiveApiTokenByHash,
   findActiveSessionByTokenHash,
   findPrincipalByAccountId,
+  initializeOperationalMetadata,
   listIndexedAccounts,
   migrate,
 } from '@xpanel/db'
@@ -66,6 +67,7 @@ async function createTestHarness() {
   const stateRoot = join(dir, 'state')
   const dbHandle = createDb(':memory:')
   await migrate(dbHandle.runner)
+  await initializeOperationalMetadata(dbHandle.db)
 
   const store = new StateStore(stateRoot)
 
@@ -142,7 +144,7 @@ async function createTestHarness() {
   const executor = new FakeHostExecutor()
   const reconciler = new HostReconciler({
     store,
-    db: dbHandle.runner,
+    db: dbHandle.db,
     executor,
     os,
     quotaFilesystem: '/',
@@ -150,7 +152,7 @@ async function createTestHarness() {
 
   const coordinator = new AccountLifecycleCoordinator({
     store,
-    db: dbHandle.runner,
+    db: dbHandle.db,
     reconciler,
     executor,
   })
@@ -158,7 +160,7 @@ async function createTestHarness() {
   return {
     dir,
     store,
-    db: dbHandle.runner,
+    db: dbHandle.db,
     dbHandle,
     executor,
     reconciler,

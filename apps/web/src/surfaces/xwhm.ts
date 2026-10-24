@@ -3,6 +3,7 @@ import type {
   Account,
   AuditEntry,
   Certificate,
+  FeatureList,
   FirewallRule,
   IoAnalyticsSnapshot,
   MailIpConfig,
@@ -12,6 +13,9 @@ import type {
   ResellerAcl,
   ServerIpEntry,
 } from '@xpanel/core'
+import { canManagePlan } from '@xpanel/core'
+import { renderPlanEditor } from '../plan-editor.ts'
+import { accountListModel, accountListRowAttributes, accountPlanPreviewModel, renderAccountListControls, renderAccountPlanPreview } from '../account-list.ts'
 import { renderServerIoMonitorChart } from '../charts.ts'
 import { formatDisplayName } from '../display-name.ts'
 import { type Locale, t } from '../i18n.ts'
@@ -30,6 +34,10 @@ import { auditActionHtml, auditActorLabel, auditOutcomeLabel, auditTargetLabel }
 import { isArabicSentence } from '../arabic-type.ts'
 import { renderWhmDashboard, whmDashboardFromProps, type DashboardHostSample } from '../board-port/xwhm-dashboard.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
+import { renderComposedXwhm } from '../board-port/composed/render.ts'
+import { composedRouteSpecs } from '../board-port/composed/all.ts'
+import { copyOf } from '../board-port/composed/types.ts'
+import { renderStoreExtension, storeRouteSpecs } from '../board-port/extensions/store.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
 
@@ -75,6 +83,8 @@ export interface WhmSurfaceProps {
   ioSnapshot?: IoAnalyticsSnapshot
   services?: WhmServiceHealthRow[]
   plans?: Plan[]
+  featureLists?: readonly Pick<FeatureList, 'id' | 'name'>[]
+  planEditorState?: { kind: 'create' } | { kind: 'edit'; plan: Plan } | { kind: 'unavailable' }
   accounts?: Account[]
   resellers?: Reseller[]
   ipPool?: ServerIpEntry[]
@@ -128,7 +138,18 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
   const isRoot = principal.kind === 'root'
   const activeRoute = normalizeSurfaceRoute('xwhm', props.activeRoute ?? '/whm')
   const section = resolveSurfaceSection('xwhm', activeRoute)
-  const pageTitle = getSurfacePageTitle('xwhm', section, locale, activeRoute)
+  const storeSpec = storeRouteSpecs.find(row => row.route === activeRoute) ?? (activeRoute === '/whm/software/site-software' ? storeRouteSpecs.find(row => row.route === '/whm/software/store') : undefined)
+  const extensionHtml = storeSpec ? renderStoreExtension({ locale, route: activeRoute, principal, ...(props.plans !== undefined ? { plans: { state: 'read', items: props.plans } } : {}) }) : undefined
+  const composedResellerAcl = props.visibility?.reseller?.acl
+    ?? (principal.kind === 'reseller' && props.activeReseller?.id === principal.id ? props.activeReseller.acl : undefined)
+  const composedHtml = renderComposedXwhm({
+    locale, route: activeRoute, principal,
+    ...(principal.kind === 'reseller' && composedResellerAcl ? { reseller: { id: principal.id, acl: composedResellerAcl } } : {}),
+    ...(props.accounts !== undefined ? { accounts: props.accounts } : {}),
+    ...(props.resellers !== undefined ? { resellers: props.resellers } : {}),
+  })
+  const composedSpec = composedHtml !== undefined ? composedRouteSpecs.find(row => row.surface === 'xwhm' && row.route === activeRoute) : undefined
+  const pageTitle = storeSpec ? copyOf(storeSpec.title, locale) : composedSpec ? copyOf(composedSpec.title, locale) : getSurfacePageTitle('xwhm', section, locale, activeRoute)
   const hostname = props.hostname ?? (isAr ? 'الخادم' : 'Server')
   const version = props.version ?? (isAr ? 'غير متاح' : 'Unavailable')
   const availableVersion = props.availableVersion ?? (isAr ? 'غير متاح' : 'Unavailable')
@@ -164,6 +185,21 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
   const whmNav = visibleNavigation(props.visibility, props.catalog).find((n) => n.surface === 'xwhm')
   const qualifiedRoutes = new Set((whmNav?.sections ?? []).flatMap(section => section.pages.map(page => page.route)))
   const heldAcls = new Set<ResellerAcl>(props.visibility?.reseller?.acl ?? props.activeReseller?.acl ?? [])
+  const list = accountListModel({ principal, activeReseller: props.activeReseller, accounts: props.accounts, plans: props.plans, resellers: props.resellers })
+  const canManageVisiblePlan = (plan: Plan): boolean => (isRoot || heldAcls.has('manage-plans')) && canManagePlan(principal, plan)
+  const requestedPlan = props.planEditorState?.kind === 'edit' ? props.planEditorState.plan : undefined
+  const selectedPlan = requestedPlan ? plans.find(plan => plan.id === requestedPlan.id) : undefined
+  const planEditorUnavailable = props.planEditorState?.kind === 'unavailable' || (props.planEditorState?.kind === 'edit' && !selectedPlan)
+  const planHref = (id?: string): string => {
+    const query = new URLSearchParams({ lang: locale, theme })
+    if (id) query.set('planId', id)
+    return `/whm/plans?${query.toString()}`
+  }
+  const navigationVisibility: VisibilityContext = props.visibility ?? {
+    principal,
+    ...(principal.kind === 'reseller' ? { reseller: { acl: [...heldAcls] } } : {}),
+    disabledFeatures: new Set(),
+  }
 
   const switchLangCode = isAr ? 'en' : 'ar'
   const switchLangLabel = isAr ? 'English' : 'العربية'
@@ -173,7 +209,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
     : ''
 
   if (section === 'overview') return ensureAccessibleSurfaceHtml(renderWhmDashboard(whmDashboardFromProps({
-    locale, theme, realtimeEnabled: props.realtimeEnabled === true, principal, hostname: props.hostname, panelHostname: props.panelHostname, version: props.version, availableVersion: props.availableVersion,
+    locale, theme, realtimeEnabled: props.realtimeEnabled === true, principal, visibility: navigationVisibility, hostname: props.hostname, panelHostname: props.panelHostname, version: props.version, availableVersion: props.availableVersion,
     generationId: props.generationId, accounts: props.accounts, resellers: props.resellers, ipPool: props.ipPool,
     plans: props.plans, services, auditEntries, hostSample: props.hostSample, driftCount: props.driftCount,
     ...(props.driftCheckedAt ? { driftCheckedAt: props.driftCheckedAt } : {}),
@@ -193,7 +229,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
       </div>
     </div>
 
-    ${renderDesignNav('xwhm', locale, activeRoute, qualifiedRoutes)}`,
+    ${renderDesignNav('xwhm', locale, activeRoute, qualifiedRoutes, navigationVisibility)}`,
     topbar: `      <div class="xp-topbar__start">
         ${renderPageSearchButton(locale)}
       </div>
@@ -219,7 +255,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
           <button type="button" class="xp-btn xp-btn--ghost" data-action="logout">${escapeHtml(isAr ? 'تسجيل الخروج' : 'Sign out')}</button>
         </div>
       </div>`,
-    content: `      ${actionBannerHtml}
+    content: extensionHtml !== undefined ? actionBannerHtml + extensionHtml : composedHtml !== undefined ? actionBannerHtml + composedHtml : `      ${actionBannerHtml}
 ${section === 'overview' ? `      <section class="xp-card" data-section="overview-attention">
         <div class="xp-card__header"><div><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1><p class="xp-prose"><bdi dir="ltr">${escapeHtml(hostname)}</bdi></p></div></div>
         <div class="xp-kpi-grid" data-section="whm-kpi-cards">
@@ -346,9 +382,11 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
       <section class="xp-card xp-accounts${section === 'create-account' ? ' xp-accounts--create' : ''}" id="whm-accounts" data-section="accounts-isolation" data-accounts-workspace aria-labelledby="whm-accounts-heading">
         <div class="xp-card__header xp-accounts__header">
           <h1 id="whm-accounts-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-          ${section === 'accounts' ? `<span class="xp-help xp-tabular">${isAr ? 'الحسابات: ' + accounts.length : accounts.length + (accounts.length === 1 ? ' account' : ' accounts')}</span>` : ''}
+          ${section === 'accounts' && (list.state === 'ready' || list.state === 'empty') ? `<span class="xp-help xp-tabular">${isAr ? 'الحسابات: ' + list.accounts.length : list.accounts.length + (list.accounts.length === 1 ? ' account' : ' accounts')}</span>` : ''}
           </div>
         ${section === 'accounts' ? `
+        <div class="xp-form-group" style="gap:var(--xp-space-card)" data-account-list-layout>
+        ${renderAccountListControls(list, locale)}
         <div class="xp-table-wrap xp-accounts__table-wrap">
           <table class="xp-table xp-accounts__table">
           <thead>
@@ -360,12 +398,12 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           <th scope="col">${isAr ? 'الإجراءات' : 'Actions'}</th>
         </tr>
           </thead>
-          <tbody>${accounts.map(acc => {
+          <tbody>${list.accounts.map(acc => {
           const canSuspend = isRoot || heldAcls.has('suspend-account')
           const canTerminate = isRoot || heldAcls.has('terminate-account')
           const statusLabel = acc.status === 'active' ? t(locale, 'common.status.active') : acc.status === 'suspended' ? t(locale, 'common.status.suspended') : isAr ? 'قيد الإنهاء' : 'Terminating'
           const attributes = `data-account-id="${escapeHtml(acc.id)}" data-username="${escapeHtml(acc.username)}" data-domain="${escapeHtml(acc.primaryDomain)}"`
-          return `<tr data-account-row="${escapeHtml(acc.username)}">
+          return `<tr data-account-row="${escapeHtml(acc.username)}" ${accountListRowAttributes(acc)}>
           <td>
           <div class="xp-accounts__identity">
           <strong>
@@ -449,11 +487,12 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           </tr>`
         }).join('') || `<tr>
           <td colspan="5">
-          <p class="xp-accounts__empty">${isAr ? 'لا توجد حسابات.' : 'No accounts.'}</p>
+          <p class="xp-accounts__empty">${list.state === 'forbidden' ? (isAr ? 'عرض الحسابات غير مسموح.' : 'Account listing is not permitted.') : list.state === 'unavailable' ? (isAr ? 'قائمة الحسابات غير متاحة.' : 'The account list is unavailable.') : (isAr ? 'لا توجد حسابات.' : 'No accounts.')}</p>
           </td>
           </tr>`}</tbody>
           </table>
           </div>
+        </div>
         <dialog class="xp-account-dialog" data-account-dialog aria-labelledby="xp-account-dialog-title" aria-describedby="xp-account-dialog-description">
           <form method="dialog" data-account-action-form novalidate>
             <div class="xp-account-dialog__header">
@@ -497,7 +536,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
         ${section === 'create-account' ? `<form class="xp-form-group" id="whm-create-account-drawer" action="/api/accounts" method="post" data-create-account-form="true">
           <div class="xp-accounts__field">
           <label class="xp-label" for="new-acc-username">${isAr ? 'اسم المستخدم' : 'Username'}</label>
-          <input id="new-acc-username" name="username" type="text" class="xp-input xp-mono" dir="ltr" required pattern="[a-z][a-z0-9]{2,15}" placeholder="salma" />
+          <input id="new-acc-username" name="username" type="text" class="xp-input xp-mono" dir="ltr" required pattern="[a-z][a-z0-9]{0,15}" placeholder="salma" />
           </div>
           <div class="xp-accounts__field">
           <label class="xp-label" for="new-acc-domain">${isAr ? 'النطاق الأساسي' : 'Primary domain'}</label>
@@ -532,6 +571,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           <label class="xp-label" for="new-acc-ipv6">${isAr ? 'عنوان IPv6 (اختياري)' : 'IPv6 address (optional)'}</label>
           <input id="new-acc-ipv6" name="ipv6" type="text" class="xp-input xp-mono" dir="ltr" value="" />
           </div>
+          ${renderAccountPlanPreview(accountPlanPreviewModel({ principal, activeReseller: props.activeReseller, accounts: props.accounts, plans: props.plans, resellers: props.resellers }), locale)}
           <p class="xp-help" data-account-create-status role="status" aria-live="polite" tabindex="-1" hidden></p>
           <button type="submit" class="xp-btn xp-btn--primary" ${plans.length && (isRoot || heldAcls.has('create-account')) ? '' : 'disabled'}>${escapeHtml(t(locale, 'accounts.create'))}</button>
         </form>` : ''}
@@ -547,8 +587,10 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           </div>
           ${renderStatusBadge('ok', `${plans.length} ${isAr ? 'خطة' : 'plans'}`)}
         </div>
+        <div class="xp-form-group" style="gap:var(--xp-space-card);min-inline-size:0" data-plan-list-group>
+        ${isRoot || heldAcls.has('manage-plans') ? `<div class="xp-plan-editor-actions" data-plan-list-toolbar><a class="xp-btn" href="${escapeHtml(planHref())}">${isAr ? 'إنشاء خطة' : 'Create plan'}</a></div>` : ''}
 
-        <div class="xp-table-wrap">
+        <div class="xp-table-wrap" data-plan-table-region role="region" tabindex="0" aria-labelledby="whm-plans-heading">
           <table class="xp-table">
             <thead>
               <tr>
@@ -559,6 +601,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
                 <th>${isAr ? 'العمليات' : 'Processes'}</th>
                 <th>${isAr ? 'النطاقات الإضافية' : 'Addon Domains'}</th>
                 <th>${isAr ? 'الصدفة المعزولة' : 'Jailed Shell'}</th>
+                <th scope="col">${isAr ? 'الإجراءات' : 'Actions'}</th>
               </tr>
             </thead>
             <tbody>
@@ -566,20 +609,21 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
                 .map(
                   (plan) => `
                 <tr data-plan-row="${escapeHtml(plan.name)}">
-                  <td><strong>${escapeHtml(formatDisplayName(plan.name))}</strong></td>
+                  <td><strong data-plan-name>${escapeHtml(formatDisplayName(plan.name))}</strong></td>
                   <td class="xp-mono xp-tabular">${renderLtrValue(`${plan.resources.diskMb === 'unlimited' ? 'unlimited' : `${plan.resources.diskMb / 1024} GB`} / ${plan.resources.bandwidthMbMonth === 'unlimited' ? 'unlimited' : `${plan.resources.bandwidthMbMonth / 1024} GB`}`, 'xp-plan-resource-value')}</td>
                   <td class="xp-mono xp-tabular">${renderLtrValue(`${plan.resources.cpuPercent}% / ${plan.resources.memoryMb} MB`, 'xp-plan-resource-value')}</td>
                   <td class="xp-mono xp-tabular">${renderLtrValue(`${plan.resources.ioReadBps === 'unlimited' ? 'unlimited' : formatBytes(plan.resources.ioReadBps)}/s · ${plan.resources.ioWriteBps === 'unlimited' ? 'unlimited' : formatBytes(plan.resources.ioWriteBps)}/s`, 'xp-plan-resource-value')}</td>
                   <td class="xp-mono xp-tabular">${plan.resources.maxProcesses}</td>
                   <td class="xp-mono xp-tabular">${String(plan.caps.addonDomains)}</td>
                   <td>${renderStatusBadge(plan.shell === 'jailed' ? 'ok' : 'suspended', plan.shell === 'jailed' ? (isAr ? 'معزولة' : 'jailed') : (isAr ? 'بدون' : 'none'))}</td>
-                  <td><button type="button" class="xp-btn" data-plan-delete="${escapeHtml(plan.id)}">${isAr ? 'حذف' : 'Delete'}</button></td>
+                  <td>${canManageVisiblePlan(plan) ? `<div class="xp-accounts__actions"><a class="xp-btn" href="${escapeHtml(planHref(plan.id))}">${isAr ? 'تعديل' : 'Edit'}</a><button type="button" class="xp-btn" data-plan-delete="${escapeHtml(plan.id)}">${isAr ? 'حذف' : 'Delete'}</button></div>` : `<span class="xp-help">${isAr ? 'للقراءة فقط' : 'Read only'}</span>`}</td>
                 </tr>
               `,
                 )
                 .join('')}
             </tbody>
           </table>
+        </div>
         </div>
 
         <dialog class="xp-account-dialog" data-plan-delete-dialog aria-labelledby="plan-delete-title">
@@ -595,49 +639,16 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
             </div>
           </form>
         </dialog>
-        <!-- Create / Edit Plan Drawer Form with Explicit Unlimited Checkboxes -->
-        <form class="xp-card xp-form-group" style="margin-block-start: var(--xp-space-card);" action="/api/plans" method="post" data-plan-editor-form="true">
-          <div class="xp-card__header">
-            <h3>${isAr ? 'إنشاء / تعديل خطة' : 'Create / edit plan'}</h3>
-          </div>
-          <div class="xp-kpi-grid">
-            <div class="xp-field">
-              <label class="xp-label" for="plan-name">${isAr ? 'اسم الخطة' : 'Plan Name'}</label>
-              <input id="plan-name" name="name" type="text" class="xp-input" required maxlength="64" />
-            </div>
-            <div class="xp-field">
-              <label class="xp-label" for="plan-cpu-quota">${isAr ? 'المعالج (%)' : 'CPU (%)'}</label>
-              <input id="plan-cpu-quota" name="cpuPercent" type="number" class="xp-input xp-mono" value="200" />
-            </div>
-            <div class="xp-field">
-              <label class="xp-label" for="plan-memory-max">${isAr ? 'الذاكرة (MB)' : 'Memory (MB)'}</label>
-              <input id="plan-memory-max" name="memoryMb" type="number" class="xp-input xp-mono" value="2048" />
-            </div>
-            <div class="xp-field">
-              <label class="xp-label" for="plan-io-max">${isAr ? 'قراءة / كتابة القرص (MB/s)' : 'Disk read / write (MB/s)'}</label>
-              <input id="plan-io-max" name="ioMaxMbps" type="text" class="xp-input xp-mono" dir="ltr" value="100 / 50" />
-            </div>
-            <div class="xp-field">
-              <label class="xp-label" for="plan-tasks-max">${isAr ? 'العمليات' : 'Processes'}</label>
-              <input id="plan-tasks-max" name="maxProcesses" type="number" class="xp-input xp-mono" value="128" />
-            </div>
-            <div class="xp-field">
-              <label class="xp-label" for="plan-shell-toggle">${isAr ? 'وصول الطرفية المعزولة' : 'Jailed shell access'}</label>
-              <select id="plan-shell-toggle" name="shell" class="xp-select">
-                <option value="jailed">${isAr ? 'طرفية معزولة' : 'Jailed shell'}</option>
-                <option value="none">${isAr ? 'معطل' : 'Disabled'}</option>
-              </select>
-            </div>
-          </div>
-          <div class="xp-plan-editor-actions">
-            <label class="xp-plan-cap-option">
-              <input type="checkbox" name="unlimitedAddonDomains" value="unlimited" />
-              <span>${isAr ? 'نطاقات إضافية غير محدودة' : 'Unlimited addon domains'}</span>
-            </label>
-            <p class="xp-help" data-plan-status role="status" hidden></p>
-            <button type="submit" class="xp-btn xp-btn--primary">${escapeHtml(t(locale, 'common.reviewAndApply'))}</button>
-          </div>
-        </form>
+        <div class="xp-form-group" style="margin-block-start:var(--xp-space-section);min-inline-size:0">
+          ${planEditorUnavailable ? `<p class="xp-help" role="alert">${isAr ? 'الخطة المطلوبة غير متاحة.' : 'The requested plan is unavailable.'}</p>` : renderPlanEditor({
+            locale,
+            ...(selectedPlan ? { plan: selectedPlan } : {}),
+            featureLists: props.featureLists ?? [],
+            ownerId: selectedPlan?.ownerId ?? (principal.kind === 'reseller' ? principal.id : null),
+            canManage: (isRoot || heldAcls.has('manage-plans')) && (!selectedPlan || canManagePlan(principal, selectedPlan)),
+            allowUnlimited: isRoot || heldAcls.has('allow-unlimited-plans'),
+          })}
+        </div>
       </section>
 
       <!-- Resellers Capacity Caps, Overselling Switch & 14-ACL Matrix -->
@@ -761,7 +772,7 @@ ${section === 'ips' ? `        <!-- Server IP Pool Table -->
 ` : ''}        <!-- Add IPv4/IPv6 + Postfix Outbound Mail IP Configuration -->
         <div class="xp-golden-grid" style="margin-block-start: var(--xp-space-card);">
           <!-- Mail Outbound IP Configuration (MailIpConfig) -->
-${section === 'mail-ips' && mailIpConfig ? `          <form class="xp-card xp-form-group" action="/api/whm/mail-ips" method="post" data-mail-ip-config-form="true">
+${section === 'mail-ips' && mailIpConfig ? `          <form class="xp-card xp-form-group" action="/api/mail/ips" method="post" data-mail-ip-config-form="true" data-mail-ip-editable="${isRoot ? 'true' : 'false'}">
             <div class="xp-card__header">
               <h3>${escapeHtml(t(locale, 'mailIp.title'))}</h3>
             </div>
@@ -791,12 +802,14 @@ ${section === 'mail-ips' && mailIpConfig ? `          <form class="xp-card xp-fo
               </div>
             </div>
 
-            <div>
-              <div class="xp-label">${escapeHtml(t(locale, 'mailIp.overrides'))}</div>
-              <pre class="xp-terminal" dir="ltr"><bdi dir="ltr">${escapeHtml(mailIpConfig.domainOverrides.map(override => [override.domainName, override.ipv4, override.ipv6, override.heloHostname].filter(Boolean).join(' · ')).join('\n') || (isAr ? 'لا توجد إعدادات خاصة بالنطاقات.' : 'No domain overrides are configured.'))}</bdi></pre>
+            <div class="xp-field">
+              <div class="xp-label" id="mail-ip-overrides-label">${escapeHtml(t(locale, 'mailIp.overrides'))}</div>
+              <pre class="xp-field-value xp-mono" dir="ltr" role="region" aria-labelledby="mail-ip-overrides-label" style="margin:0;white-space:pre-wrap"><bdi dir="ltr" data-mail-ip-overrides>${escapeHtml(mailIpConfig.domainOverrides.map(override => [override.domainName, override.ipv4, override.ipv6, override.heloHostname].filter(Boolean).join(' · ')).join('\n') || (isAr ? 'لا توجد إعدادات خاصة بالنطاقات.' : 'No domain overrides are configured.'))}</bdi></pre>
             </div>
 
-            <button type="submit" class="xp-btn xp-btn--primary">${escapeHtml(t(locale, 'common.reviewAndApply'))}</button>
+            <p class="xp-help" data-mail-ip-status role="status" aria-live="polite" tabindex="-1" hidden></p>
+            <noscript><p class="xp-help">${isAr ? 'يتطلب حفظ إعدادات البريد تشغيل JavaScript.' : 'Saving mail settings requires JavaScript.'}</p></noscript>
+            <button type="submit" class="xp-btn xp-btn--primary" disabled>${escapeHtml(t(locale, 'common.reviewAndApply'))}</button>
           </form>
 
 ` : ''}

@@ -3,6 +3,9 @@
 # names and certificate paths with the reviewed deployment configuration.
 # Use an explicit public address, not a wildcard that conflicts with a legacy
 # loopback listener. Never expose private HTTP ports through the firewall.
+# This static example is not an installed certificate or readiness claim.
+# The optional management-tls lifecycle renders its own dedicated files; do not
+# install both listeners. Its exact configured names retain WebSocket upgrades.
 map $http_upgrade $xpanel_connection_upgrade {
     default upgrade;
     '' close;

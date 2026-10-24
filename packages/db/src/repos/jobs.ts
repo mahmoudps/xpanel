@@ -14,7 +14,9 @@ import type { Id } from '@xpanel/core'
 import type { Db } from '../client.ts'
 import { JOB_STATUSES } from '../schema.ts'
 import { withSqliteErrors } from '../sqlite-errors.ts'
+import { assertRegisteredDatabaseRunner } from '../sql-runner.ts'
 import { clampLimit, first, mustExist, nowIso } from './util.ts'
+import { requireOperationalIdentity, reserveOfficialJobReferenceTx } from './official-references.ts'
 
 export type JobStatus = (typeof JOB_STATUSES)[number]
 export type JobFailureClass = 'retryable' | 'permanent' | 'unknown_outcome'
@@ -22,6 +24,7 @@ export type JobFailureClass = 'retryable' | 'permanent' | 'unknown_outcome'
 const FAILURE_CLASSES: readonly JobFailureClass[] = ['retryable', 'permanent', 'unknown_outcome']
 
 export interface JobRecord {
+  referenceCode: string | null
   id: Id
   kind: string
   accountId: Id | null
@@ -54,7 +57,7 @@ export interface DurableJobRecord extends JobRecord {
   cancelReason: string | null
   failureClass: JobFailureClass | null
   needsAttention: boolean
-  referenceCode: string
+  referenceCode: string | null
 }
 
 interface JobRow {
@@ -72,6 +75,7 @@ interface JobRow {
   started_at: string | null
   finished_at: string | null
   updated_at: string
+  reference_code?: string | null
   [k: string]: unknown
 }
 
@@ -99,39 +103,12 @@ const DEFAULT_LEASE_MS = 30_000
 const MIN_LEASE_MS = 50
 const MAX_LEASE_MS = 3_600_000
 
-const JOB_RUNTIME_LEASES_DDL = `
-CREATE TABLE IF NOT EXISTS job_runtime_leases (
-  job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
-  idempotency_key TEXT UNIQUE,
-  request_fingerprint TEXT NOT NULL DEFAULT '',
-  target_revision INTEGER,
-  lease_owner TEXT,
-  fencing_token INTEGER NOT NULL DEFAULT 0 CHECK (fencing_token >= 0),
-  lease_expires_at TEXT,
-  attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
-  max_attempts INTEGER NOT NULL DEFAULT 3 CHECK (max_attempts >= 1),
-  checkpoint_step TEXT,
-  checkpoint_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(checkpoint_json) AND json_type(checkpoint_json) = 'object'),
-  completed_steps_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(completed_steps_json) AND json_type(completed_steps_json) = 'array'),
-  cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK (cancel_requested IN (0, 1)),
-  cancel_reason TEXT,
-  failure_class TEXT CHECK (failure_class IS NULL OR failure_class IN ('retryable', 'permanent', 'unknown_outcome')),
-  needs_attention INTEGER NOT NULL DEFAULT 0 CHECK (needs_attention IN (0, 1)),
-  reference_code TEXT NOT NULL UNIQUE,
-  updated_at TEXT NOT NULL
-) STRICT;
-CREATE INDEX IF NOT EXISTS job_runtime_leases_owner_idx ON job_runtime_leases (lease_owner, lease_expires_at);
-`
-
-/**
- * Lazily initializes the operational `job_runtime_leases` table so existing migration
- * checksums and strict schema table lists remain untouched until durable job operations run.
- */
-export const ensureJobDurabilityTables = async (db: Db): Promise<void> => {
-  await db.exec(JOB_RUNTIME_LEASES_DDL)
+const assertGenericJob = (job: Pick<JobRecord, 'kind'>): void => {
+  if (job.kind === 'host.reconcile') fail('PRECONDITION_FAILED', 'host.reconcile requires the dedicated verified operation repository')
 }
 
 const fromRow = (r: JobRow): JobRecord => ({
+  referenceCode: r.reference_code ?? null,
   id: r.id,
   kind: r.kind,
   accountId: r.account_id,
@@ -165,7 +142,7 @@ const fromDurableRow = (r: DurableJobJoinedRow): DurableJobRecord => ({
   cancelReason: r.cancel_reason ?? null,
   failureClass: r.failure_class ?? null,
   needsAttention: r.needs_attention === 1,
-  referenceCode: r.reference_code ?? `XP-JOB-000000`,
+  referenceCode: r.reference_code ?? null,
 })
 
 const canonicalizeValue = (val: unknown): unknown => {
@@ -196,14 +173,6 @@ export const computeJobRequestFingerprint = (input: {
   return createHash('sha256').update(JSON.stringify(payload), 'utf8').digest('hex')
 }
 
-const allocateNextReferenceCode = async (tx: Db): Promise<string> => {
-  const rows = await tx.query<{ seq: number }>(
-    `SELECT COALESCE(MAX(rowid), 0) + 1 AS seq FROM job_runtime_leases`,
-  )
-  const seq = rows[0]?.seq ?? 1
-  return `XP-JOB-${String(seq).padStart(6, '0')}`
-}
-
 const queryDurableJobTx = async (tx: Db, id: Id): Promise<DurableJobRecord | null> => {
   if (!isUuid(id)) return null
   const rows = await tx.query<DurableJobJoinedRow>(
@@ -224,9 +193,10 @@ const queryDurableJobTx = async (tx: Db, id: Id): Promise<DurableJobRecord | nul
        l.cancel_reason,
        l.failure_class,
        l.needs_attention,
-       l.reference_code
+       r.reference_code
      FROM jobs j
      LEFT JOIN job_runtime_leases l ON l.job_id = j.id
+     LEFT JOIN official_reference_ledger r ON r.entity_id=j.id AND r.kind='job' AND r.publication_state='issued' AND r.tombstoned_at IS NULL
      WHERE j.id = $1`,
     [id.toLowerCase()],
   )
@@ -234,19 +204,12 @@ const queryDurableJobTx = async (tx: Db, id: Id): Promise<DurableJobRecord | nul
   return row ? fromDurableRow(row) : null
 }
 
-const ensureLeaseRowForLegacyJobTx = async (tx: Db, jobId: Id, now: string): Promise<void> => {
-  const existing = await tx.query<{ job_id: string }>(
-    `SELECT job_id FROM job_runtime_leases WHERE job_id = $1`,
-    [jobId],
-  )
-  if (existing.length > 0) return
-  const refCode = await allocateNextReferenceCode(tx)
-  await tx.query(
-    `INSERT INTO job_runtime_leases (
-       job_id, idempotency_key, request_fingerprint, reference_code, updated_at
-     ) VALUES ($1, NULL, '', $2, $3)`,
-    [jobId, refCode, now],
-  )
+const ensureLeaseRowForLegacyJobTx = async (tx: Db, jobId: Id): Promise<void> => {
+  const job = mustExist(await queryDurableJobTx(tx, jobId), 'job', jobId)
+  assertGenericJob(job)
+  if (job.referenceCode === null) fail('PRECONDITION_FAILED', 'legacy job requires explicit audited reference repair before execution')
+  const [row] = await tx.query<{ reference_code: string }>('SELECT reference_code FROM job_runtime_leases WHERE job_id=$1', [jobId])
+  if (!row || row.reference_code !== job.referenceCode) fail('PRECONDITION_FAILED', 'job reference/runtime metadata requires explicit repair')
 }
 
 export const createJob = (
@@ -260,42 +223,19 @@ export const createJob = (
     detail?: Record<string, unknown>
     logPath?: string | null
   },
-): Promise<JobRecord> =>
-  withSqliteErrors(async () => {
-    const id = input.id !== undefined ? assertId(input.id, 'id') : randomUUID()
-    if (typeof input.kind !== 'string' || !JOB_KIND_RE.test(input.kind)) {
-      fail('VALIDATION', 'job kind must look like backup.create')
-    }
-    const accountId = assertIdOrNull(input.accountId ?? null, 'accountId')
-    const actor = assertLine(input.actor, 255, 'actor', { allowEmpty: false })
-    const summary = assertLine(input.summary ?? '', 512, 'summary')
-    const rawDetail = input.detail ?? {}
-    if (typeof rawDetail !== 'object' || rawDetail === null || Array.isArray(rawDetail)) {
-      fail('VALIDATION', 'job detail must be an object')
-    }
-    const detail = redactSecrets(rawDetail)
-    const logPath = input.logPath == null ? null : assertAbsPath(input.logPath, 'logPath')
-    const now = nowIso()
-    const rows = await db.query<JobRow>(
-      `INSERT INTO jobs (
-        id, kind, account_id, actor, status, progress, summary, detail, log_path, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, 'queued', 0, $5, $6, $7, $8, $9)
-      RETURNING *`,
-      [id, input.kind, accountId, actor, summary, JSON.stringify(detail), logPath, now, now],
-    )
-    return fromRow(rows[0]!)
-  })
+): Promise<JobRecord> => enqueueDurableJob(db, input)
 
 export const getJob = async (db: Db, id: Id): Promise<JobRecord | null> => {
   if (!isUuid(id)) return null
-  const rows = await db.query<JobRow>(`SELECT * FROM jobs WHERE id = $1`, [id.toLowerCase()])
+  await requireOperationalIdentity(db)
+  const rows = await db.query<JobRow>(`SELECT j.*,r.reference_code FROM jobs j LEFT JOIN official_reference_ledger r ON r.entity_id=j.id AND r.kind='job' AND r.publication_state='issued' AND r.tombstoned_at IS NULL WHERE j.id = $1`, [id.toLowerCase()])
   const row = first(rows)
   return row ? fromRow(row) : null
 }
 
 export const getDurableJob = async (db: Db, id: Id): Promise<DurableJobRecord | null> => {
   if (!isUuid(id)) return null
-  await ensureJobDurabilityTables(db)
+  await requireOperationalIdentity(db)
   return queryDurableJobTx(db, id.toLowerCase())
 }
 
@@ -309,6 +249,7 @@ export const updateJobProgress = (
     const jid = assertId(id, 'id')
     const pct = assertInt(progress, 0, 100, 'progress')
     const current = mustExist(await getJob(db, jid), 'job', jid)
+    assertGenericJob(current)
     if (current.status !== 'queued' && current.status !== 'running') {
       fail('PRECONDITION_FAILED', `job is already ${current.status}`, { id: jid, status: current.status })
     }
@@ -322,7 +263,7 @@ export const updateJobProgress = (
        RETURNING *`,
       [pct, nextSummary, startedAt, now, jid],
     )
-    return fromRow(mustExist(rows[0], 'job', jid))
+    return fromRow({ ...mustExist(rows[0], 'job', jid), reference_code: current.referenceCode })
   })
 
 export const finishJob = (
@@ -339,6 +280,7 @@ export const finishJob = (
     const jid = assertId(id, 'id')
     const status = oneOf(outcome.status, ['succeeded', 'failed', 'cancelled'] as const, 'status')
     const current = mustExist(await getJob(db, jid), 'job', jid)
+    assertGenericJob(current)
     if (current.status !== 'queued' && current.status !== 'running') {
       fail('PRECONDITION_FAILED', `job is already ${current.status}`, { id: jid, status: current.status })
     }
@@ -363,13 +305,14 @@ export const finishJob = (
        RETURNING *`,
       [status, progress, summary, JSON.stringify(detail), error, startedAt, now, now, jid],
     )
-    return fromRow(mustExist(rows[0], 'job', jid))
+    return fromRow({ ...mustExist(rows[0], 'job', jid), reference_code: current.referenceCode })
   })
 
 export const listJobs = async (
   db: Db,
   opts: { accountId?: Id; status?: JobStatus; limit?: number } = {},
 ): Promise<JobRecord[]> => {
+  await requireOperationalIdentity(db)
   const limit = clampLimit(opts.limit, 50, 500)
   const clauses: string[] = []
   const params: unknown[] = []
@@ -384,7 +327,7 @@ export const listJobs = async (
   params.push(limit)
   const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
   const rows = await db.query<JobRow>(
-    `SELECT * FROM jobs ${where} ORDER BY created_at DESC LIMIT $${params.length}`,
+    `SELECT j.*,(SELECT r.reference_code FROM official_reference_ledger r WHERE r.entity_id=j.id AND r.kind='job' AND r.publication_state='issued' AND r.tombstoned_at IS NULL) AS reference_code FROM jobs j ${where} ORDER BY created_at DESC LIMIT $${params.length}`,
     params,
   )
   return rows.map(fromRow)
@@ -416,7 +359,9 @@ export const enqueueDurableJob = (
   input: EnqueueDurableJobInput,
 ): Promise<DurableJobRecord & { deduplicated: boolean }> =>
   withSqliteErrors(async () => {
-    await ensureJobDurabilityTables(db)
+    assertRegisteredDatabaseRunner(db)
+    await requireOperationalIdentity(db)
+    assertGenericJob({ kind: input.kind })
     const id = input.id !== undefined ? assertId(input.id, 'id') : randomUUID()
     if (typeof input.kind !== 'string' || !JOB_KIND_RE.test(input.kind)) {
       fail('VALIDATION', 'job kind must look like backup.create')
@@ -473,7 +418,7 @@ export const enqueueDurableJob = (
       }
 
       const now = nowIso()
-      const refCode = await allocateNextReferenceCode(tx)
+      const refCode = await reserveOfficialJobReferenceTx(tx, { jobId: id, at: new Date(now) })
       await tx.query(
         `INSERT INTO jobs (
           id, kind, account_id, actor, status, progress, summary, detail, log_path, created_at, updated_at
@@ -510,8 +455,9 @@ export const acquireJobLease = (
   input: AcquireJobLeaseInput,
 ): Promise<DurableJobRecord | null> =>
   withSqliteErrors(async () => {
-    await ensureJobDurabilityTables(db)
+    await requireOperationalIdentity(db)
     const workerId = assertLine(input.workerId, 128, 'workerId', { allowEmpty: false })
+    if (input.kind === 'host.reconcile') assertGenericJob({ kind: input.kind })
     const leaseDurationMs =
       input.leaseDurationMs === undefined
         ? DEFAULT_LEASE_MS
@@ -533,7 +479,7 @@ export const acquireJobLease = (
 
         if (input.jobId !== undefined) {
           const jid = assertId(input.jobId, 'jobId')
-          await ensureLeaseRowForLegacyJobTx(tx, jid, now)
+          await ensureLeaseRowForLegacyJobTx(tx, jid)
           const current = mustExist(await queryDurableJobTx(tx, jid), 'job', jid)
 
           if (current.status === 'succeeded' || current.status === 'failed' || current.status === 'cancelled') {
@@ -598,7 +544,8 @@ export const acquireJobLease = (
             `SELECT j.id
              FROM jobs j
              LEFT JOIN job_runtime_leases l ON l.job_id = j.id
-             WHERE ($1 IS NULL OR j.kind = $1)
+             JOIN official_reference_ledger r ON r.entity_id=j.id AND r.kind='job' AND r.publication_state='issued' AND r.tombstoned_at IS NULL
+             WHERE j.kind != 'host.reconcile' AND ($1 IS NULL OR j.kind = $1)
                AND COALESCE(l.cancel_requested, 0) = 0
                AND COALESCE(l.needs_attention, 0) = 0
                AND COALESCE(l.attempt, 0) < COALESCE(l.max_attempts, 3)
@@ -612,7 +559,7 @@ export const acquireJobLease = (
           )
           const cand = first(candidates)
           if (!cand) return { kind: 'none' }
-          await ensureLeaseRowForLegacyJobTx(tx, cand.id, now)
+          await ensureLeaseRowForLegacyJobTx(tx, cand.id)
           targetJobId = cand.id
         }
 
@@ -669,6 +616,7 @@ const assertActiveLeaseOwnerTx = async (
   now: string,
 ): Promise<DurableJobRecord> => {
   const current = mustExist(await queryDurableJobTx(tx, jobId), 'job', jobId)
+  assertGenericJob(current)
   if (current.fencingToken !== fencingToken) {
     fail('CONFLICT', 'stale fencing token rejected', {
       id: jobId,
@@ -713,7 +661,7 @@ export const renewJobLease = (
   input: RenewJobLeaseInput,
 ): Promise<DurableJobRecord> =>
   withSqliteErrors(async () => {
-    await ensureJobDurabilityTables(db)
+    await requireOperationalIdentity(db)
     const jobId = assertId(input.jobId, 'jobId')
     const workerId = assertLine(input.workerId, 128, 'workerId', { allowEmpty: false })
     const fencingToken = assertInt(input.fencingToken, 1, 1_000_000_000, 'fencingToken')
@@ -756,7 +704,7 @@ export const saveJobCheckpoint = (
   input: SaveJobCheckpointInput,
 ): Promise<DurableJobRecord> =>
   withSqliteErrors(async () => {
-    await ensureJobDurabilityTables(db)
+    await requireOperationalIdentity(db)
     const jobId = assertId(input.jobId, 'jobId')
     const workerId = assertLine(input.workerId, 128, 'workerId', { allowEmpty: false })
     const fencingToken = assertInt(input.fencingToken, 1, 1_000_000_000, 'fencingToken')
@@ -821,15 +769,16 @@ export const requestJobCancellation = (
   input: RequestJobCancellationInput,
 ): Promise<DurableJobRecord> =>
   withSqliteErrors(async () => {
-    await ensureJobDurabilityTables(db)
+    await requireOperationalIdentity(db)
     const jobId = assertId(input.jobId, 'jobId')
     const actor = assertLine(input.actor, 255, 'actor', { allowEmpty: false })
     const reason = input.reason !== undefined ? assertLine(input.reason, 512, 'reason') : `cancelled by ${actor}`
     const now = (input.now ?? new Date()).toISOString()
 
     return db.transaction(async (tx) => {
-      await ensureLeaseRowForLegacyJobTx(tx, jobId, now)
       const current = mustExist(await queryDurableJobTx(tx, jobId), 'job', jobId)
+      assertGenericJob(current)
+      if (current.referenceCode === null && current.status === 'running') fail('PRECONDITION_FAILED', 'unnumbered running legacy job requires review before cancellation')
       if (current.status === 'cancelled') return current
       if (current.status === 'succeeded' || current.status === 'failed') {
         fail('PRECONDITION_FAILED', `cannot cancel job in terminal status ${current.status}`, {
@@ -888,7 +837,7 @@ export const completeJobWithLease = (
   input: CompleteJobWithLeaseInput,
 ): Promise<DurableJobRecord> =>
   withSqliteErrors(async () => {
-    await ensureJobDurabilityTables(db)
+    await requireOperationalIdentity(db)
     const jobId = assertId(input.jobId, 'jobId')
     const workerId = assertLine(input.workerId, 128, 'workerId', { allowEmpty: false })
     const fencingToken = assertInt(input.fencingToken, 1, 1_000_000_000, 'fencingToken')
@@ -992,7 +941,7 @@ export const executeLeasedJobStep = async <T>(
     toCheckpointData?: (result: T) => Record<string, unknown>
   },
 ): Promise<{ skipped: boolean; cancelled: boolean; result?: T; job: DurableJobRecord }> => {
-  await ensureJobDurabilityTables(db)
+  await requireOperationalIdentity(db)
   const now = (opts.now ?? new Date()).toISOString()
   const precheck = await db.transaction(async (tx) =>
     assertActiveLeaseOwnerTx(tx, assertId(opts.jobId, 'jobId'), opts.workerId, opts.fencingToken, now),

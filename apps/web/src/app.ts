@@ -1,10 +1,10 @@
-import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
-import { canSeeAccount, type Account, type Plan } from '@xpanel/core'
-import { panelLabel, renderSecurityNavLink, renderSupportNotice, renderUserMenu, roleLabel, type PanelLink } from './chrome.ts'
+import { canonicalNavigationRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
+import { canSeeAccount, type Account, type MfaRuntimeMode, type Plan } from '@xpanel/core'
+import { panelLabel, renderSecurityNavLink, renderSupportNotice, renderUserMenu, roleLabel, safePanelLinks, type PanelLink } from './chrome.ts'
 import { formatDisplayName } from './display-name.ts'
 import { dirForLocale, type Locale, SUPPORTED_LOCALES, t } from './i18n.ts'
 import { isStatusCode, renderStatusBody, statusPageCopy, type StatusPageModel } from './status-page.ts'
-import { designHeading, renderDesignMain, renderDesignNav } from './design-board.ts'
+import { designHeading, renderDesignMain, renderDesignNav, renderDisabledScreen } from './design-board.ts'
 import { ACCOUNT_SECURITY_ROUTES, renderAccountSecurityCard } from './surfaces/account-security.ts'
 import { type LoginSurfaceProps, renderLoginSurface } from './surfaces/login.ts'
 import { type MailSurfaceProps, renderMailSurface } from './surfaces/xmail.ts'
@@ -12,6 +12,10 @@ import { type PanelSurfaceProps, renderPanelSurface } from './surfaces/xpanel.ts
 import { renderWhmSurface, type WhmSurfaceProps } from './surfaces/xwhm.ts'
 import { LOGIN_CLIENT_SCRIPT } from './login-client.ts'
 import { contextualizeDocumentLinks, resolveWebDocumentRoute } from './document-routes.ts'
+import { composedRouteSpecs, nativeComposedRoutePaths } from './board-port/composed/all.ts'
+import { copyOf } from './board-port/composed/types.ts'
+import { accountPageRouteSpecs } from './board-port/extensions/account-pages.ts'
+import { storeRouteSpecs } from './board-port/extensions/store.ts'
 import { getSurfaceNavigationLabel, getSurfacePageTitle, renderSurfaceShell, resolveSurfaceSection } from './shell.ts'
 import {
   type AsyncActionBannerProps,
@@ -40,6 +44,7 @@ export interface WorkspaceSummary {
 
 export interface WebAppRenderState {
   surface: WebSurfaceKind
+  mfaRuntimeMode?: MfaRuntimeMode
   visibility?: VisibilityContext
   workspaceSummary?: WorkspaceSummary
   catalog?: readonly CatalogTool[]
@@ -152,7 +157,7 @@ const renderWorkspaceSummary = (state: WebAppRenderState, locale: Locale): strin
   const emptyAccount = state.surface === 'xpanel' && !authorized
     ? `<p class="xp-prose" data-workspace-account-empty="true">${isAr ? 'لا يتوفر حساب مصرح به لعرضه.' : 'No authorized account is available to display.'}</p>`
     : ''
-  const mfaLink = state.surface === 'xwhm' && principal.kind === 'root' && state.security?.totpEnabled === false && state.activeRoute !== '/whm/security/sign-in'
+  const mfaLink = state.mfaRuntimeMode !== 'disabled' && state.surface === 'xwhm' && principal.kind === 'root' && state.security?.totpEnabled === false && state.activeRoute !== '/whm/security/sign-in'
     ? `<p class="xp-prose" data-mfa-optional-link><a href="/whm/security/sign-in">${escapeHtml(t(locale, 'security.2fa.workspaceLink'))}</a></p>`
     : ''
   return `<section class="xp-card" data-workspace-identity="true"${state.surface === 'xpanel' ? ' data-workspace-account-overview="true"' : ''} aria-labelledby="xp-workspace-summary-title">
@@ -181,6 +186,10 @@ export const workspacePageHeading = (surface: WebSurfaceKind, locale: Locale, ac
   if (security) return security
   const design = designHeading(activeRoute, locale)
   if (design) return design
+  const extension = [...accountPageRouteSpecs, ...storeRouteSpecs].find(row => row.surface === surface && row.route === activeRoute)
+  if (extension) return copyOf(extension.title, locale)
+  const composed = !nativeComposedRoutePaths.has(activeRoute) ? composedRouteSpecs.find(row => row.surface === surface && row.route === activeRoute) : undefined
+  if (composed) return copyOf(composed.title, locale)
   const panel = surface === 'xwhm' || surface === 'xmail' ? surface : 'xpanel'
   return getSurfacePageTitle(panel, resolveSurfaceSection(panel, activeRoute), locale, activeRoute)
 }
@@ -200,12 +209,14 @@ const renderUnavailableWorkspace = (
   const principal = state?.visibility?.principal
   const pageHeading = workspacePageHeading(surface, locale, path)
   const securityPage = ACCOUNT_SECURITY_ROUTES.has(path)
+  const disabledRouteAttribute = panelSurface === 'xpanel' && path === '/domains/reverse-proxy'
+    ? ' data-unqualified-route="/domains/reverse-proxy"' : ''
   const qualifiedRoutes = new Set((state?.visibility ? visibleNavigation(state.visibility, state.catalog) : []).filter(item => item.surface === panelSurface).flatMap(item => item.sections.flatMap(section => section.pages.map(page => page.route))))
-  const design = securityPage ? '' : renderDesignMain(path, locale)
+  const design = securityPage ? '' : (renderDesignMain(path, locale) || renderDisabledScreen(pageHeading, locale))
   return renderSurfaceShell({
     surface: panelSurface,
     locale,
-    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${panelLabel(panelSurface)}</strong></div>${renderDesignNav(panelSurface, locale, path, qualifiedRoutes)}${panelSurface === 'xmail' ? renderSecurityNavLink('xmail', locale, path) : ''}`,
+    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${panelLabel(panelSurface)}</strong></div>${renderDesignNav(panelSurface, locale, path, qualifiedRoutes, state?.visibility)}${panelSurface === 'xmail' ? renderSecurityNavLink('xmail', locale, path) : ''}`,
     topbar: renderUserMenu({
       locale,
       theme,
@@ -216,7 +227,7 @@ const renderUnavailableWorkspace = (
       ...(principal ? { username: principal.username, role: roleLabel(principal.kind, locale) } : {}),
       signedIn: authenticated && principal !== undefined,
     }),
-    content: `<section class="xp-workspace-summary" data-surface="${surface}" data-tool-availability="unverified"${securityPage ? ' data-security-page="true"' : ''}>
+    content: `<section class="xp-workspace-summary" data-surface="${surface}" data-tool-availability="unverified"${disabledRouteAttribute}${securityPage ? ' data-security-page="true"' : ''}>
   ${securityPage ? `<h1 class="xp-page-title">${escapeHtml(pageHeading)}</h1>` : design || `<h1 class="xp-page-title">${escapeHtml(pageHeading)}</h1>`}
   ${actionState ? renderAsyncActionState({ ...actionState, locale }) : ''}
   ${state && !securityPage ? renderWorkspaceSummary(state, locale) : ''}
@@ -284,7 +295,7 @@ export function renderWebApp(state: WebAppRenderState): string {
   const activeRoute = state.activeRoute ?? (state.surface === 'xwhm' ? '/whm' : state.surface === 'xmail' ? '/mail/inbox' : state.surface === 'login' ? '/login' : '/home')
   const securityPrincipal = state.visibility?.principal.kind
   const routeMatches = (pages: ReturnType<typeof visibleNavigation>): boolean =>
-    pages.some(item => item.surface === state.surface && item.sections.some(section => section.pages.some(page => page.route === activeRoute)))
+    pages.some(item => item.surface === state.surface && item.sections.some(section => section.pages.some(page => page.route === canonicalNavigationRoute(activeRoute))))
   let routeReady = routeMatches(visibleNavigation(state.visibility, state.catalog))
   const sessionPrincipal = state.visibility?.principal
   const accountRecordReady = sessionPrincipal?.kind === 'user'
@@ -335,6 +346,7 @@ export function renderWebApp(state: WebAppRenderState): string {
         ...(state.panels ? { panels: state.panels } : {}),
         ...(state.supportEmail ? { supportEmail: state.supportEmail } : {}),
         ...state.login,
+        mfaMode: state.mfaRuntimeMode ?? 'optional',
       })
       break
     case 'xwhm':
@@ -357,6 +369,7 @@ export function renderWebApp(state: WebAppRenderState): string {
         generationId,
         ...(state.actionState !== undefined && { actionState: state.actionState }),
         ...state.panel,
+        xmailOrigin: safePanelLinks(state.panels).find(panel => panel.surface === 'xmail')?.origin,
         realtimeEnabled: hasVerifiedSurface && state.realtimeEnabled !== false,
         activeRoute,
         ...(state.catalog ? { catalog: state.catalog } : {}),
@@ -382,6 +395,7 @@ export function renderWebApp(state: WebAppRenderState): string {
     const card = renderAccountSecurityCard({
       locale,
       totpEnabled: state.security.totpEnabled,
+      mfaMode: state.mfaRuntimeMode ?? 'optional',
       principalKind: securityPrincipal,
       surface: state.surface,
     })
@@ -401,7 +415,7 @@ export function renderWebApp(state: WebAppRenderState): string {
       : ''
 
   return `<!doctype html>
-<html lang="${locale}" dir="${dir}" data-theme="${theme}" data-density="${density}" data-surface="${state.error ? statusSurface : state.surface}" data-realtime-enabled="${hasVerifiedSurface && state.realtimeEnabled !== false}"${state.error && isStatusCode(state.error.status) ? ` data-status="${state.error.status}"` : ''}>
+<html lang="${locale}" dir="${dir}" data-theme="${theme}" data-density="${density}" data-surface="${state.error ? statusSurface : state.surface}" data-mfa-mode="${state.mfaRuntimeMode === 'disabled' ? 'disabled' : 'optional'}" data-realtime-enabled="${hasVerifiedSurface && state.realtimeEnabled !== false}"${state.error && isStatusCode(state.error.status) ? ` data-status="${state.error.status}"` : ''}>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />

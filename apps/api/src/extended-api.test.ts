@@ -2,13 +2,15 @@ import assert from 'node:assert/strict'
 import { access, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, it } from 'vitest'
+import { afterEach, beforeEach, describe, it, vi } from 'vitest'
 import { createAgentApp, FakeHostExecutor, HostReconciler } from '@xpanel/agent'
-import { createDb, createRootPrincipal, listAudit, migrate } from '@xpanel/db'
+import { createDb, createRootPrincipal, createUserPrincipal, listAudit, migrate } from '@xpanel/db'
+import { defaultPlan } from '@xpanel/core'
 import { profileFor } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { CSRF_HEADER_NAME, hashPasswordArgon2id, parseCookies, SESSION_COOKIE_NAME } from './auth.ts'
 import { startPanelServer } from './main.ts'
+import * as mailDocuments from './mail/document.ts'
 import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
 
 interface HttpSessionClient {
@@ -61,7 +63,7 @@ const createHttpClient = (baseUrl: string, setCookieHeader: string | null, csrfT
 
 describe('@xpanel/api extended HTTP contracts with explicit fake host execution', () => {
   let tmpDir: string
-  let serverHandle: Awaited<ReturnType<typeof startPanelServer>>
+  let serverHandle: Extract<Awaited<ReturnType<typeof startPanelServer>>, { quarantined: false }>
   let baseUrl: string
   let agentDb: ReturnType<typeof createDb>
   beforeEach(async () => {
@@ -80,7 +82,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
       os: { id: os.id, versionId: os.versionId, family: os.family },
       homeBaseDir: join(tmpDir, 'host'),
     })
-    serverHandle = await startPanelServer({
+    const started = await startPanelServer({
       port: 0,
       host: '127.0.0.1',
       dbPath,
@@ -92,6 +94,11 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
       agentToken: TEST_AGENT_TOKEN,
       serverSecret: TEST_SERVER_SECRET,
     })
+    if (started.quarantined) {
+      await started.close()
+      throw new Error('The ordinary HTTP fixture unexpectedly entered lifecycle quarantine')
+    }
+    serverHandle = started
     baseUrl = `http://127.0.0.1:${serverHandle.port}`
   })
 
@@ -148,16 +155,74 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.match(securityHtml, /data-auth-setup-form/)
     assert.doesNotMatch(securityHtml, /must complete enrollment|data-mfa-optional-link/)
 
-    const panelPage = await root.request('/panel')
-    assert.equal(panelPage.status, 200)
-    assert.match(await panelPage.text(), /data-surface="xpanel"/)
+    for (const path of ['/panel', '/mail?lang=ar&theme=light']) {
+      const denied = await root.request(path)
+      assert.equal(denied.status, 403)
+      const html = await denied.text()
+      assert.match(html, /data-status-page="403"/)
+      assert.doesNotMatch(html, /data-tool-availability="unverified"|data-board-port="xpanel-home"/)
+      assert.doesNotMatch(html, /<(?:div|section|main)\b[^>]*data-mail-layout=/)
+    }
 
-    const mailPage = await root.request('/mail?lang=ar&theme=light')
-    assert.equal(mailPage.status, 200)
-    const mailHtml = await mailPage.text()
-    assert.match(mailHtml, /data-surface="xmail"/)
-    assert.match(mailHtml, /dir="rtl"/)
-    assert.match(mailHtml, /data-theme="light"/)
+    const featureList = await serverHandle.store.createFeatureList({ name: 'Document features', ownerId: null, disabled: [] })
+    const { id: _seedId, ...planInput } = defaultPlan({ name: 'Document plan', featureListId: featureList.id })
+    const plan = await serverHandle.store.createPlan(planInput)
+    const password = 'DocumentOwnerPassword!2026'
+    const passwordHash = await hashPasswordArgon2id(password)
+    await serverHandle.store.saveServerIp({ address: '192.0.2.31', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const account = await serverHandle.store.createAccount({ username: 'docowner', passwordHash, primaryDomain: 'docowner.example.test', planId: plan.id, ownerId: null,
+      contactEmail: 'private-document-contact@example.test', ipv4: '192.0.2.31', shell: 'none',
+      php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 1, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} },
+    })
+    assert.equal(account.status, 'active')
+    const user = await createUserPrincipal(serverHandle.db, { username: account.username, accountId: account.id, passwordHash })
+    const owner = await loginOverHttp(account.username, password)
+    let snapshotReads = 0
+    const mailRead = vi.spyOn(mailDocuments, 'loadMailDocument')
+    const readSnapshot = serverHandle.store.readSnapshot.bind(serverHandle.store)
+    serverHandle.store.readSnapshot = async () => { snapshotReads++; return readSnapshot() }
+    try {
+      for (const path of ['/panel', '/mail']) {
+        const denied = await root.request(path)
+        assert.equal(denied.status, 403)
+        const html = await denied.text()
+        assert.match(html, /data-status-page="403"/)
+        for (const value of [account.id, account.primaryDomain, account.home, account.ipv4, account.contactEmail, plan.name, passwordHash]) assert.ok(!html.includes(value), 'The root role does not expose owner data on owner-only documents')
+        assert.equal(snapshotReads, 0)
+        assert.equal(mailRead.mock.calls.length, 0)
+      }
+      for (const locale of ['en', 'ar']) {
+        const home = await owner.request(`/panel?lang=${locale}&theme=light`)
+        assert.equal(home.status, 200)
+        const homeHtml = await home.text()
+        assert.match(homeHtml, /data-surface="xpanel"/)
+        assert.match(homeHtml, /data-board-port="xpanel-home"/)
+        assert.ok(homeHtml.includes(account.primaryDomain))
+        assert.ok(homeHtml.includes(plan.name))
+        for (const path of ['/panel/domains', '/mail']) {
+          const document = await owner.request(`${path}?lang=${locale}&theme=light`)
+          assert.equal(document.status, 200)
+          assert.match(document.headers.get('content-type') ?? '', /text\/html/)
+          const html = await document.text()
+          assert.ok(html.includes(`lang="${locale}"`))
+          assert.ok(html.includes(`dir="${locale === 'ar' ? 'rtl' : 'ltr'}"`))
+          assert.match(html, /data-theme="light"/)
+          assert.ok(html.includes(`data-surface="${path === '/mail' ? 'xmail' : 'xpanel'}"`))
+          assert.match(html, /data-tool-availability="unverified"/)
+          assert.match(html, /disabled data-wiring="soon"/)
+          assert.match(html, /<html\b[^>]*data-realtime-enabled="false"/)
+          assert.doesNotMatch(html, /data-status-page="404"|data-board-port="xpanel-home"/)
+          assert.doesNotMatch(html, /<(?:div|section|main)\b[^>]*data-mail-layout=/)
+          for (const value of [account.id, plan.id, featureList.id, user.id, account.home, account.ipv4, account.contactEmail, password, passwordHash]) assert.ok(!html.includes(value), 'Unqualified documents must not expose full account or authentication data')
+          if (path === '/panel/domains') {
+            assert.ok(html.includes(account.primaryDomain))
+            assert.ok(html.includes(plan.name))
+          }
+          assert.equal(snapshotReads, 0, 'Unqualified documents do not hydrate a full hosting snapshot')
+          assert.equal(mailRead.mock.calls.length, 0, 'Unqualified mail documents do not enter the provider-backed mail loader')
+        }
+      }
+    } finally { serverHandle.store.readSnapshot = readSnapshot; mailRead.mockRestore() }
   })
 
   it('2. Stored extended feature HTTP contracts and generated configuration with fake host execution', async () => {

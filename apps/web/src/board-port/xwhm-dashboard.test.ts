@@ -3,15 +3,60 @@ import { describe, it } from 'vitest'
 import type { Account, AuditEntry, Plan } from '@xpanel/core'
 import { resolveWebDocumentRoute } from '../document-routes.ts'
 import { renderWhmSurface } from '../surfaces/xwhm.ts'
-import { renderWhmDashboard, whmDashboardFixture, whmDashboardFixtureAr, whmDashboardFromProps } from './xwhm-dashboard.ts'
+import { mapAgentHostInfo, renderWhmDashboard, whmDashboardFixture, whmDashboardFixtureAr, whmDashboardFromProps } from './xwhm-dashboard.ts'
+
+const rootVisibility = { principal: { kind: 'root' as const, id: 'fixture-root', username: 'root' } }
 
 describe('xWHM dashboard board port', () => {
+  it('does not infer root navigation authority from a display username', () => {
+    const html = renderWhmDashboard(whmDashboardFromProps({ principal: { username: 'root' } }))
+    assert.equal(html.includes('data-nav-route='), false)
+    assert.equal(html.includes('href="/whm/accounts/new"'), false)
+    assert.equal(html.includes('href="/whm/server/upgrade"'), false)
+  })
+
+  it('adds the create-account CTA only for its explicit reseller ACL', () => {
+    const principal = { kind: 'reseller' as const, id: 'fixture-reseller', username: 'reseller' }
+    const html = renderWhmDashboard(whmDashboardFromProps({ principal, visibility: { principal, reseller: { acl: ['create-account'] } } }))
+    assert.ok(html.includes('href="/whm/accounts/new"'))
+    for (const route of ['/whm/accounts', '/whm/server/upgrade', '/whm/resellers', '/whm/audit']) assert.equal(html.includes(`href="${route}"`), false, route)
+  })
+
+  it.each(['en', 'ar'] as const)('keeps %s root-only navigation and CTAs out of a list-accounts reseller dashboard', locale => {
+    const principal = { kind: 'reseller' as const, id: 'fixture-reseller', username: 'reseller' }
+    const html = renderWhmSurface({ locale, activeRoute: '/whm', principal, visibility: { principal, reseller: { acl: ['list-accounts'] } } })
+    assert.ok(html.includes('href="/whm/accounts"'))
+    for (const route of ['/whm/accounts/new', '/whm/resellers', '/whm/audit', '/whm/services', '/whm/server/setup', '/whm/server/upgrade', '/whm/security/firewall']) {
+      assert.equal(html.includes(`href="${route}"`), false, route)
+    }
+  })
+
+  it('uses observed assigned-cap evidence and never treats delegated controllers as enforcement proof', () => {
+    const identity = { enforcedLimits: { cpu: true, memory: true, io: true, pids: true } }
+    const unknown = whmDashboardFromProps({ hostSample: mapAgentHostInfo({ identity }) })
+    assert.equal(unknown.controllersNote, 'Plan-limit verification is unavailable.')
+    for (const observedLimits of [
+      { status: 'unavailable', checkedAccounts: 0, unavailableAccounts: 1, gaps: [] },
+      { status: 'verified', checkedAccounts: 1, unavailableAccounts: 1, gaps: [] },
+      { status: 'verified', checkedAccounts: 0, unavailableAccounts: 0, gaps: [] },
+      { status: 'verified', checkedAccounts: 1, unavailableAccounts: 0, gaps: ['memory'] },
+    ]) {
+      const model = whmDashboardFromProps({ hostSample: mapAgentHostInfo({ identity: { ...identity, observedLimits } }) })
+      assert.equal(model.controllersNote, 'Plan-limit verification is unavailable.')
+    }
+    const match = whmDashboardFromProps({ hostSample: mapAgentHostInfo({ identity: { observedLimits: { status: 'verified', checkedAccounts: 1, unavailableAccounts: 0, gaps: [] } } }) })
+    assert.equal(match.controllersNote, 'Observed account caps match assigned plan limits.')
+    const wrong = whmDashboardFromProps({ hostSample: mapAgentHostInfo({ identity: { ...identity, observedLimits: { status: 'gaps', checkedAccounts: 1, unavailableAccounts: 0, gaps: ['memory', 'io'] } } }) })
+    assert.equal(wrong.controllersNote, 'Observed account caps do not match all assigned plan limits.')
+    assert.equal(renderWhmDashboard(unknown).includes('All plan limits are enforced on this host.'), false)
+  })
+
   it('links Upgrade to the canonical registered server document', () => {
     const target = '/whm/server/upgrade'
     assert.deepEqual(resolveWebDocumentRoute(target), { surface: 'xwhm', activeRoute: target })
     assert.equal(resolveWebDocumentRoute('/whm/upgrade'), null)
     for (const locale of ['en', 'ar'] as const) {
-      const html = renderWhmDashboard(whmDashboardFromProps({ locale, principal: { username: 'root' } }))
+      const html = renderWhmDashboard(whmDashboardFromProps({ locale, principal: { username: 'root' }, visibility: rootVisibility }))
       assert.ok(html.includes(`href="${target}"`))
       assert.equal(html.includes('href="/whm/upgrade"'), false)
     }
@@ -27,7 +72,7 @@ describe('xWHM dashboard board port', () => {
   })
 
   it('keeps the same cards when the host has not reported measurements', () => {
-    const html = renderWhmDashboard(whmDashboardFromProps({ locale: 'en', principal: { username: 'root' } }))
+    const html = renderWhmDashboard(whmDashboardFromProps({ locale: 'en', principal: { username: 'root' }, visibility: rootVisibility }))
     for (const marker of ['id="rec-title"', 'id="host-title"', 'Server resources', 'role="meter"', 'Near a limit', '>Create account</a>']) {
       assert.ok(html.includes(marker), marker)
     }

@@ -11,6 +11,8 @@ import type {
 import { dirForLocale, t, type Locale } from './i18n.ts'
 import { escapeHtml, renderLtrValue, renderStatusBadge } from './tokens.ts'
 import { SHELL_MOTION_CLIENT_SCRIPT } from './shell-motion.ts'
+import { PLAN_EDITOR_CLIENT_SCRIPT } from './plan-editor.ts'
+import { ACCOUNT_LIST_CLIENT_SCRIPT } from './account-list.ts'
 import { xwhmPageAdapters } from './pages/xwhm-adapters.ts'
 
 export type WsConnectionState = 'connected' | 'reconnecting' | 'offline'
@@ -270,6 +272,8 @@ export function reduceLiveEvent(
 
     case 'metrics.tick':
     case 'mail.received':
+    case 'mail.changed':
+    case 'mail.flags':
     case 'security.ban':
       return state
   }
@@ -587,6 +591,10 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       updateWebsiteAnalyticsDom(event.data);
     } else if (event.kind === 'terminal.output') {
       appendTerminalOutputDom(event.data);
+    } else if (event.kind === 'mail.changed' || event.kind === 'mail.flags' || event.kind === 'mail.received') {
+      if (event.scope && typeof event.scope.mailboxLogin === 'string') {
+        document.dispatchEvent(new CustomEvent('xpanel:mail-invalidated', { detail: { mailbox: event.scope.mailboxLogin } }));
+      }
     }
   }
 
@@ -1930,32 +1938,88 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         window.xpanelSessionRequest('POST', '/api/accounts/' + form.getAttribute('data-account-id') + '/password', { password: password }).then(reload).catch(function (error) { note(status, failText(error)); });
       });
     });
-    document.querySelectorAll('[data-plan-editor-form]').forEach(function (form) {
+    document.querySelectorAll('[data-mail-ip-config-form]').forEach(function (form) {
+      var save = form.querySelector('button[type="submit"]');
+      var status = form.querySelector('[data-mail-ip-status]');
+      var keys = ['mode', 'defaultIpv4', 'defaultIpv6', 'defaultHelo'];
+      var modes = ['server-default', 'account-ip', 'domain-ip', 'custom-map'];
+      var editable = form.getAttribute('data-mail-ip-editable') === 'true';
+      if (!save || !status || !keys.every(function (key) { return form.querySelector('[name="' + key + '"]'); })) return;
+      var busy = false, reviewRequired = false;
+      function read() {
+        var values = {};
+        keys.forEach(function (key) { values[key] = form.querySelector('[name="' + key + '"]').value.trim(); });
+        return values;
+      }
+      function normalize(value) { return value == null ? '' : String(value); }
+      function comparable(key, value) {
+        var text = normalize(value);
+        if (!text) return '';
+        try {
+          if (key === 'defaultIpv6') return new URL('http://[' + text + ']/').hostname;
+          if (key === 'defaultHelo') { var hostname = new URL('http://' + text + '/').hostname; return hostname.endsWith('.') ? hostname.slice(0, -1) : hostname; }
+        } catch (_) { return text; }
+        return text;
+      }
+      function validConfig(config) {
+        return config && modes.indexOf(config.mode) >= 0 && keys.slice(1).every(function (key) { return config[key] === null || typeof config[key] === 'string'; })
+          && Array.isArray(config.domainOverrides) && config.domainOverrides.length <= 2048
+          && config.domainOverrides.every(function (item) { return item && typeof item.domainName === 'string' && item.domainName.length > 0 && ['ipv4', 'ipv6', 'heloHostname'].every(function (key) { return item[key] === null || typeof item[key] === 'string'; }); });
+      }
+      var baseline = read();
+      function changed(values) { return keys.filter(function (key) { return values[key] !== baseline[key]; }); }
+      function refresh() { save.disabled = !editable || busy || reviewRequired || changed(read()).length === 0; }
+      function mailNote(message, state) { note(status, message); status.setAttribute('data-state', state); status.setAttribute('role', state === 'failed' ? 'alert' : 'status'); }
+      form.addEventListener('input', refresh);
+      form.addEventListener('change', refresh);
+      window.addEventListener('beforeunload', function (event) {
+        if (changed(read()).length === 0 && !reviewRequired) return;
+        event.preventDefault(); event.returnValue = '';
+      });
       form.addEventListener('submit', function (event) {
         event.preventDefault();
-        var status = form.querySelector('[data-plan-status]');
-        var openAddon = form.querySelector('[name="' + 'un' + 'limitedAddonDomains"]');
-        var body = {
-          name: form.querySelector('[name="name"]').value.trim(),
-          shell: form.querySelector('[name="shell"]').value,
-          resources: {
-            cpuPercent: Number(form.querySelector('[name="cpuPercent"]').value),
-            memoryMb: Number(form.querySelector('[name="memoryMb"]').value),
-            maxProcesses: Number(form.querySelector('[name="maxProcesses"]').value),
-            diskMb: 10240,
-            bandwidthMbMonth: 'un' + 'limited',
-            ioReadBps: 50000000,
-            ioWriteBps: 25000000,
-            ioReadIops: 2000,
-            ioWriteIops: 2000,
-          },
-          caps: {
-            addonDomains: openAddon && openAddon.checked ? 'un' + 'limited' : 10,
-            aliasDomains: 10, subdomains: 20, mailboxes: 20, forwarders: 20, mailingLists: 5, ftpAccounts: 10, databases: 10, phpWorkers: 8,
-          },
-        };
-        window.xpanelSessionRequest('POST', '/api/plans', body).then(reload).catch(function (error) { note(status, failText(error)); });
+        var desired = read(), edits = changed(desired);
+        if (!editable || busy || reviewRequired || edits.length === 0 || !form.reportValidity() || modes.indexOf(desired.mode) < 0) return;
+        var controls = Array.prototype.map.call(form.querySelectorAll('input,select,button'), function (control) { return { control: control, disabled: control.disabled }; });
+        var wrote = false, submitted;
+        busy = true; form.setAttribute('aria-busy', 'true'); controls.forEach(function (item) { item.control.disabled = true; });
+        mailNote(ar ? 'جارٍ مراجعة الإعدادات الحالية…' : 'Checking current settings…', 'loading');
+        Promise.resolve().then(function () { return window.xpanelSessionRequest('GET', '/api/mail/ips'); }).then(function (current) {
+          var config = current && current.config;
+          if (!validConfig(config)) throw { mailIpState: 'unread' };
+          if (edits.some(function (key) { return comparable(key, config[key]) !== comparable(key, baseline[key]) && comparable(key, config[key]) !== comparable(key, desired[key]); })) throw { mailIpState: 'conflict' };
+          submitted = { mode: config.mode, defaultIpv4: config.defaultIpv4, defaultIpv6: config.defaultIpv6, defaultHelo: config.defaultHelo, domainOverrides: config.domainOverrides };
+          edits.forEach(function (key) { submitted[key] = key === 'mode' ? desired[key] : desired[key] || null; });
+          wrote = true;
+          mailNote(ar ? 'جارٍ الحفظ…' : 'Saving…', 'loading');
+          return window.xpanelSessionRequest('PUT', '/api/mail/ips', submitted);
+        }).then(function (result) {
+          var saved = result && result.config;
+          var overrides = validConfig(saved) ? new Map(saved.domainOverrides.map(function (item) { return [item.domainName, item]; })) : null;
+          var matches = overrides && keys.every(function (key) { return comparable(key, saved[key]) === comparable(key, submitted[key]); }) && saved.domainOverrides.length === submitted.domainOverrides.length
+            && overrides.size === submitted.domainOverrides.length && submitted.domainOverrides.every(function (item) { var found = overrides.get(item.domainName); return found && ['ipv4', 'ipv6', 'heloHostname'].every(function (key) { return found[key] === item[key]; }); });
+          if (!matches) {
+            reviewRequired = true;
+            mailNote(ar ? 'تعذر التحقق من النتيجة. راجع إعدادات البريد قبل إعادة المحاولة.' : 'The result could not be verified. Review mail settings before retrying.', 'failed');
+            return;
+          }
+          keys.forEach(function (key) { form.querySelector('[name="' + key + '"]').value = normalize(saved[key]); });
+          var mapText = form.querySelector('[data-mail-ip-overrides]');
+          if (mapText) mapText.textContent = saved.domainOverrides.map(function (item) { return [item.domainName, item.ipv4, item.ipv6, item.heloHostname].filter(Boolean).join(' · '); }).join(String.fromCharCode(10)) || (ar ? 'لا توجد إعدادات خاصة بالنطاقات.' : 'No domain overrides are configured.');
+          baseline = read();
+          mailNote(ar ? 'حُفظت إعدادات البريد. التحقق من تسليم البريد غير مؤكد.' : 'Mail settings saved. Delivery verification is not confirmed.', 'pending');
+        }).catch(function (error) {
+          reviewRequired = wrote && (error && error.details && (error.details.stateChanged === true || error.details.verificationRequired === true) || [400, 401, 403, 404, 409, 412, 422].indexOf(error && error.status) < 0);
+          var message = error && error.mailIpState === 'conflict' ? (ar ? 'تغيرت إعدادات البريد منذ فتح النموذج. أعد التحميل وراجعها.' : 'Mail settings changed since this form loaded. Reload and review them.')
+            : !wrote ? (ar ? 'تعذر قراءة إعدادات البريد الحالية. لم تُرسل تغييرات.' : 'Current mail settings could not be read. No changes were sent.')
+            : reviewRequired ? (ar ? 'النتيجة غير مؤكدة. راجع إعدادات البريد قبل إعادة المحاولة.' : 'The result is uncertain. Review mail settings before retrying.')
+            : (ar ? 'رُفضت إعدادات البريد. راجع القيم والصلاحيات.' : 'Mail settings were refused. Review the values and permissions.');
+          mailNote(message, 'failed');
+        }).finally(function () {
+          busy = false; form.removeAttribute('aria-busy'); controls.forEach(function (item) { item.control.disabled = item.disabled; }); refresh();
+        });
       });
+      refresh();
     });
     bindToolDialog('[data-database-delete-dialog]', function (open) {
       document.querySelectorAll('[data-remove-database]').forEach(function (button) {
@@ -2132,57 +2196,6 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         files({ op: 'write', path: path, content: editor.value }).then(function () { note(fileStatus, ar ? 'تم الحفظ.' : 'Saved.'); return refresh(); }).catch(function (error) { note(fileStatus, failText(error)); });
       });
       refresh();
-    }
-    var mailLive = document.querySelector('[data-mail-live="true"]');
-    if (mailLive) {
-      var list = mailLive.querySelector('[data-live-mail-list]');
-      var reader = mailLive.querySelector('[data-mail-pane="reading-pane"], [data-mail-pane="empty"]');
-      function showMessage(message) {
-        if (!reader) return;
-        reader.textContent = '';
-        var heading = document.createElement('h2');
-        heading.textContent = message.subject || (ar ? 'بدون موضوع' : 'No subject');
-        var meta = document.createElement('p');
-        meta.textContent = (message.from || '') + ' → ' + (message.to || '');
-        var body = document.createElement('div');
-        body.textContent = message.body || '';
-        var remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'xp-btn';
-        remove.textContent = ar ? 'حذف' : 'Delete';
-        remove.addEventListener('click', function () {
-          window.xpanelSessionRequest('DELETE', '/api/webmail/inbox/' + message.uid).then(loadInbox).catch(function (error) { note(list, failText(error)); });
-        });
-        reader.appendChild(heading);
-        reader.appendChild(meta);
-        reader.appendChild(body);
-        reader.appendChild(remove);
-      }
-      function paintInbox(messages) {
-        if (!list) return;
-        list.textContent = '';
-        if (!messages.length) {
-          var empty = document.createElement('p');
-          empty.className = 'xp-mail-empty';
-          empty.textContent = ar ? 'لا توجد رسائل في هذا المجلد.' : 'No messages in this folder.';
-          list.appendChild(empty);
-          return;
-        }
-        messages.forEach(function (message) {
-          var row = document.createElement('button');
-          row.type = 'button';
-          row.className = 'xp-mail-row';
-          row.textContent = (message.unread ? '• ' : '') + (message.from || '') + ' — ' + (message.subject || '');
-          row.addEventListener('click', function () {
-            window.xpanelSessionRequest('GET', '/api/webmail/inbox/' + message.uid).then(function (data) { showMessage(data.message || data); }).catch(function (error) { note(list, failText(error)); });
-          });
-          list.appendChild(row);
-        });
-      }
-      function loadInbox() {
-        return window.xpanelSessionRequest('GET', '/api/webmail/inbox').then(function (data) { paintInbox(data.messages || []); }).catch(function (error) { note(list, failText(error)); });
-      }
-      loadInbox();
     }
     var sendButton = document.querySelector('[data-mail-send="true"]');
     if (sendButton) sendButton.addEventListener('click', function () {
@@ -2405,4 +2418,6 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     if (document.documentElement.dataset.realtimeEnabled !== 'false') connectWebSocket();
   }
 })();
+${PLAN_EDITOR_CLIENT_SCRIPT}
+${ACCOUNT_LIST_CLIENT_SCRIPT}
 `

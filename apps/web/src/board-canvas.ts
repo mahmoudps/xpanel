@@ -221,7 +221,7 @@ const canvases: Readonly<Record<string, (locale: Locale) => string>> = {
 export const renderBoardCanvas = (route: string, locale: Locale): string => canvases[route]?.(locale) ?? ''
 
 const fact = (locale: Locale, label: Copy, value: string): string =>
-  `<div class="xp-fact"><dt>${h(tx(locale, label))}</dt><dd><bdi dir="ltr">${h(value)}</bdi></dd></div>`
+  `<div class="xp-fact"><dt style="color:var(--xp-text-secondary)">${h(tx(locale, label))}</dt><dd><bdi dir="ltr">${h(value)}</bdi></dd></div>`
 
 export interface ResourceLimitRow {
   readonly label: Copy
@@ -267,6 +267,7 @@ export const renderAccountResources = (locale: Locale, uid: number, rows: readon
   const applied = tx(locale, unavailable)
   const live = tx(locale, ['No reading yet', 'لا قراءة بعد'])
   return `<section class="xp-board-canvas" data-section="slice-resources" data-board-layout="/resources" aria-labelledby="xpanel-resources-heading">
+    <style>[data-section="slice-resources"] #xpanel-resources-heading{font-size:var(--xp-type-page)!important;line-height:var(--xp-leading-page)!important}</style>
     <header class="xp-board-head">
       <div>
         <h1 id="xpanel-resources-heading" class="xp-page-title">${h(tx(locale, ['Resources & quotas', 'الموارد والحصص']))}</h1>

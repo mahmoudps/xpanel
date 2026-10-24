@@ -23,18 +23,56 @@ const summaryPlan: Plan = {
 const summaryOwner: Principal = { kind: 'user', id: 'private-principal-id', username: 'owner7', accountId: summaryAccount.id }
 
 describe('verified production availability', () => {
-  it.each(['xwhm', 'xpanel', 'xmail'] as const)('shows an honest unavailable workspace for %s without publishing service actions', surface => {
-    const html = renderWebApp({ surface, locale: 'en' })
+  it.each(['xwhm', 'xpanel', 'xmail'] as const)('keeps an anonymous %s workspace unavailable without admitting registered navigation', surface => {
+    const html = renderWebApp({
+      surface, locale: 'en',
+      whm: { accounts: [summaryAccount] },
+      panel: { account: summaryAccount, plan: summaryPlan },
+      mail: { mailbox: 'private-mailbox-marker@example.test', messages: [] },
+    })
     expect(html).toContain('data-tool-availability="unverified"')
-    expect(html).toContain('data-nav-wiring="soon"')
     expect(html).toContain(surface === 'xwhm' ? 'Server dashboard' : surface === 'xmail' ? 'Inbox' : 'Home')
     expect(html).not.toContain('data-action="logout"')
+    expect(html).not.toMatch(/data-nav-route=|data-nav-wiring=|data-workspace-identity=|data-workspace-account-overview=/)
     const sidebar = /<aside class="xp-sidebar"[\s\S]*?<\/aside>/.exec(html)?.[0] ?? ''
-    expect(sidebar).toContain('data-security-link="true"')
-    expect(sidebar).toContain('data-nav-route=')
+    // The public account menu retains a security destination; it grants no workspace admission.
+    const securityRoute = surface === 'xwhm' ? '/whm/security/sign-in' : surface === 'xmail' ? '/mail/settings/security' : '/security/account'
+    expect(html).toMatch(new RegExp(`href="${securityRoute}[^\"]*" data-security-link="true"`))
+    if (surface === 'xmail') expect(sidebar).toContain('data-security-link="true"')
+    else expect(sidebar).not.toContain('data-security-link="true"')
+    expect(sidebar.replace(/<a\b[^>]*data-security-link="true"[^>]*>[\s\S]*?<\/a>/g, '')).not.toMatch(/<a\b/)
     expect(html).not.toMatch(/<form\b|data-cmdk-item="/)
     expect(html).not.toContain('alice-shop.com')
-    expect(html).not.toContain('data-generation-chip=')
+    expect(html).not.toMatch(/data-generation-chip=|data-service-row=|data-account-row=|data-mail-uid=|data-realtime-enabled="true"/)
+    for (const marker of ['owner7.example.test', 'Configured plan7', 'private-mailbox-marker', 'private-account-id', 'private-contact-marker']) expect(html).not.toContain(marker)
+  })
+
+  it.each([
+    { surface: 'xwhm', route: '/whm', navigation: '/whm/accounts', forbidden: ['/home', '/mail/inbox'], principal: { kind: 'root', id: 'private-root-id', username: 'administrator7' } },
+    { surface: 'xpanel', route: '/resources', navigation: '/resources', forbidden: ['/whm/accounts', '/whm/server/setup'], principal: summaryOwner },
+    { surface: 'xmail', route: '/mail/inbox', navigation: '/mail/compose', forbidden: ['/whm/accounts', '/whm/server/setup', '/home'], principal: summaryOwner },
+  ] as const)('shows only role-admitted unqualified navigation and minimal identity on $surface', row => {
+    const html = renderWebApp({
+      surface: row.surface, locale: 'en', activeRoute: row.route, catalog: [],
+      visibility: { principal: row.principal, disabledFeatures: new Set() },
+      whm: { accounts: [summaryAccount] },
+      panel: { recentAudit: [{ action: 'private-audit-action-marker', target: 'private-audit-target-marker' }] },
+      mail: { mailbox: 'private-mailbox-marker@example.test', messages: [], composeDraft: { to: 'private-recipient-marker@example.test', cc: '', subject: 'private-subject-marker', body: 'private-body-marker' } },
+    })
+    expect(html).toContain('data-tool-availability="unverified"')
+    expect(html).toContain(`data-nav-route="${row.navigation}" data-nav-wiring="soon"`)
+    expect(html).toContain('Coming soon')
+    expect(html).toMatch(/<button\b[^>]*disabled[^>]*data-wiring="soon"/)
+    const sidebar = /<aside class="xp-sidebar"[\s\S]*?<\/aside>/.exec(html)?.[0] ?? ''
+    for (const route of row.forbidden) expect(sidebar).not.toContain(`data-nav-route="${route}"`)
+    expect(html).toContain('data-workspace-identity="true"')
+    expect(html).toContain(row.principal.username)
+    expect(html.match(/data-workspace-field="([^"]+)"/g)).toEqual(['data-workspace-field="username"', 'data-workspace-field="role"'])
+    expect(html).toContain('data-action="logout"')
+    // Unqualified documents omit the qualified-only palette, including an owner's eligible Home link.
+    expect(html).not.toMatch(/id="xp-cmdk-modal"|data-cmdk-item="/)
+    expect(html).not.toMatch(/<form\b|data-generation-chip=|data-service-row=|data-account-row=|data-mail-uid=|data-realtime-enabled="true"/)
+    for (const marker of ['owner7.example.test', 'Configured plan7', row.principal.id, 'private-account-id', 'private-contact-marker', 'private-audit-action-marker', 'private-audit-target-marker', 'private-mailbox-marker', 'private-recipient-marker', 'private-subject-marker', 'private-body-marker']) expect(html).not.toContain(marker)
   })
 
   it('does not publish provider payloads just because a principal is authenticated', () => {

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'temp/**']
   pull_request:
   workflow_dispatch:
 
@@ -32,6 +32,9 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Compile account-file helper (no native hosting qualification)
+        if: matrix.layer == 'unit'
+        run: node helpers/account-files/build.mjs --output "$RUNNER_TEMP/xpanel-account-files"
       - run: node scripts/test-suite.mjs ${{ matrix.layer }}
 
   typecheck:
@@ -98,6 +101,19 @@ jobs:
 
       - name: Exercise advisory account IP allocation workflows (synthetic data)
         run: node scripts/toolchain.mjs node tests/browser/ip-allocation-acceptance.mjs --output=test-results/ip-allocation-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Exercise current mailbox refresh with actual Chromium (synthetic mail, no delivery proof)
+        env:
+          XPANEL_REQUIRE_BROWSER_TESTS: '1'
+        run: node scripts/toolchain.mjs pnpm exec vitest run apps/web/src/xmail-live-refresh.test.ts --maxWorkers=1
+      - name: Exercise development-disabled MFA and native login boundaries (synthetic data)
+        run: node scripts/toolchain.mjs node tests/browser/mfa-runtime-acceptance.mjs --output=test-results/mfa-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Exercise registered composed views and strict field geometry (synthetic data)
+        run: node scripts/toolchain.mjs node tests/browser/composed-acceptance.mjs --output=test-results/composed-ui-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Exercise native plans, scoped accounts and outbound settings (synthetic APIs)
+        run: node scripts/toolchain.mjs node tests/browser/native-workflows-acceptance.mjs --output=test-results/native-workflows-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Exercise scoped mail, preferences, store and resource views (synthetic data)
+        run: node scripts/toolchain.mjs node tests/browser/extensions-acceptance.mjs --output=test-results/extensions-ui-${{ github.run_id }}-${{ github.run_attempt }}
 
   qualification-prerequisites:
     if: github.event_name == 'workflow_dispatch'

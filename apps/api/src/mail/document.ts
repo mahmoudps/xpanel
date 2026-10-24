@@ -210,6 +210,8 @@ export const loadMailDocument = async (input: {
   sessionId: string | null
   transport: MailboxTransport
   folder?: string
+  /** A list refresh must not automatically mark a message Seen. */
+  readFirst?: boolean
   /** Postfix main.cf text. Absent when the file could not be read. */
   postfixMain?: string | null
   /** Result of a socket connect as the postfix user. Omitted means the probe did not run. */
@@ -319,7 +321,7 @@ export const loadMailDocument = async (input: {
       bodyPending: true,
     }))
     const first = messages[0]
-    if (first) {
+    if (first && input.readFirst !== false) {
       try {
         const full = await input.transport.read(record.mailbox, password, first.uid, folder)
         first.body = full.body

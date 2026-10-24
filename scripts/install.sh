@@ -22,6 +22,7 @@ PINNED_NODE_VERSION="$(tr -d '\r\n' < "$SCRIPT_DIR/../.node-version")"
 NODE_BIN="${XPANEL_NODE_BIN:-/usr/bin/node}"
 AGENT_GID="ALLOCATED_AT_INSTALL"
 BACKUP_STAMP="$(date -u +%Y%m%dT%H%M%SZ).$$"
+MANAGEMENT_TLS_ARGS=()
 
 for arg in "$@"; do
   case "$arg" in
@@ -67,8 +68,11 @@ for arg in "$@"; do
     --with-modsecurity)
       WITH_MODSECURITY=1
       ;;
+    --management-hostname=*|--management-address=*|--acme-email=*|--accept-acme-terms)
+      MANAGEMENT_TLS_ARGS+=("$arg")
+      ;;
     --help|-h)
-      echo "Usage: $0 [--dry-run] [--os-release=/etc/os-release] [--engine=apache|openlitespeed] [--php=8.3] [--apache-mpm=itk|prefork] [--with-mail] [--with-dns] [--with-ftp] [--with-mariadb] [--with-modsecurity]"
+      echo "Usage: $0 [--dry-run] [--os-release=/etc/os-release] [--engine=apache|openlitespeed] [--php=8.3] [--apache-mpm=itk|prefork] [--with-mail] [--with-dns] [--with-ftp] [--with-mariadb] [--with-modsecurity] [--management-hostname=NAME --management-address=IP --acme-email=EMAIL --accept-acme-terms]"
       exit 0
       ;;
     *)
@@ -86,6 +90,13 @@ fi
 if [[ ! "$PINNED_NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "ERROR: .node-version must contain one exact stable Node version." >&2
   exit 1
+fi
+
+# TLS is an explicit complete option bundle. Planning validates it without DNS,
+# issuance, privileged files or service changes; no partial settings are adopted.
+if ((${#MANAGEMENT_TLS_ARGS[@]})); then
+  [[ "$("$NODE_BIN" --version)" == "v$PINNED_NODE_VERSION" ]] || { echo "ERROR: Management TLS requires the pinned Node runtime." >&2; exit 1; }
+  "$NODE_BIN" "$SCRIPT_DIR/management-tls.mjs" plan "${MANAGEMENT_TLS_ARGS[@]}" > /dev/null
 fi
 
 # Parse os-release safely without executing arbitrary shell code
@@ -705,6 +716,11 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "install -d -m 0755 root:root /var/lib/xpanel/acme"
   echo "setfacl -m u:nginx:x /var/lib/xpanel"
   echo "runuser -u nginx -- test -x /var/lib/xpanel and read /var/lib/xpanel/acme"
+  if ((${#MANAGEMENT_TLS_ARGS[@]})); then
+    echo "--- Explicit management TLS plan (no CA or service operation) ---"
+    "$NODE_BIN" "$SCRIPT_DIR/management-tls.mjs" plan "${MANAGEMENT_TLS_ARGS[@]}"
+    echo "Actual provisioning invokes configure and prepare; application bootstrap remains separate."
+  fi
   if [[ "$WITH_MAIL" -eq 1 ]]; then
     echo "--- Local mail ---"
     echo "Dovecot conf.d/11-xpanel-mailboxes.conf (passwd-file and Postfix auth socket)"
@@ -842,8 +858,12 @@ write_config "$TMPFILES_CONF" render_tmpfiles_conf
 chmod 0660 /var/lib/xpanel/control.db
 
 echo "[6/6] Reloading systemd daemon and enabling services..."
+if ((${#MANAGEMENT_TLS_ARGS[@]})); then
+  "$NODE_BIN" "$INSTALL_ROOT/scripts/management-tls.mjs" configure "${MANAGEMENT_TLS_ARGS[@]}"
+  "$NODE_BIN" "$INSTALL_ROOT/scripts/management-tls.mjs" prepare
+fi
 systemctl daemon-reload
 systemctl enable xpanel.slice xpanel-agent.service xpanel-api.service
-echo "xPanel installation complete."
-echo "Services are enabled but not started. Provision the root identity locally via reset-password --password-stdin, configure HTTPS origins, then enroll root MFA before administrative use."
+echo "xPanel provisioning steps completed; live host qualification remains pending."
+echo "Services are enabled but not started. Provision the root identity locally via reset-password --password-stdin, verify configured HTTPS origins, and choose optional MFA before administrative use."
 echo "Live installation, reboot, tenant isolation and restore qualification remain required."

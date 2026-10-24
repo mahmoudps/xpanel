@@ -193,10 +193,10 @@ describe('live truth surfaces', () => {
     assert.match(moved.reconcilerTiles.find(tile => tile.label === 'الانحراف')?.note ?? '', /انحراف/)
     assert.match(moved.reconcilerTiles.find(tile => tile.label === 'الانحراف')?.note ?? '', /14:04 UTC/)
     assert.equal(whmDashboardFromProps({}).reconcilerTiles.find(tile => tile.label === 'Drift')?.note, '—')
-    assert.equal(whmDashboardFromProps({}).controllersNote, '—')
-    assert.equal(whmDashboardFromProps({ hostSample: { enforcedLimits: { cpu: true, memory: true, io: true, pids: true } } }).controllersNote, 'All plan limits are enforced on this host.')
-    assert.equal(whmDashboardFromProps({ hostSample: { enforcedLimits: { cpu: true, memory: true, io: false, pids: true } } }).controllersNote, 'IO write limits are not enforced on this host.')
-    assert.equal(whmDashboardFromProps({ locale: 'ar', hostSample: { enforcedLimits: { cpu: false, memory: true, io: true, pids: true } } }).controllersNote, 'بعض حدود الخطط غير مفروضة على هذا المضيف.')
+    assert.equal(whmDashboardFromProps({}).controllersNote, 'Plan-limit verification is unavailable.')
+    assert.equal(whmDashboardFromProps({ hostSample: { enforcedLimits: { cpu: true, memory: true, io: true, pids: true } } }).controllersNote, 'Plan-limit verification is unavailable.')
+    assert.equal(whmDashboardFromProps({ hostSample: { observedLimits: { status: 'gaps', checkedAccounts: 1, unavailableAccounts: 0, gaps: ['io'] } } }).controllersNote, 'Observed account caps do not match all assigned plan limits.')
+    assert.equal(whmDashboardFromProps({ locale: 'ar', hostSample: { observedLimits: { status: 'unavailable', checkedAccounts: 1, unavailableAccounts: 1, gaps: [] } } }).controllersNote, 'التحقق من حدود الخطط غير متاح.')
     const arabicHome = xpanelHomeFromProps({
       locale: 'ar',
       account: { username: 'demohost', uid: 20000, home: '/home/demohost', primaryDomain: 'demo.example.test', ipv4: '192.0.2.10' },

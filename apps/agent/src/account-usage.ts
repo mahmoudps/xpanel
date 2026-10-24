@@ -1,4 +1,7 @@
 import type { AgentExecutor } from './executor.ts'
+import type { ResourceLimits } from '@xpanel/core'
+import { compareAccountLimits } from './limit-gaps.ts'
+import { ioDeviceForMount } from './io-device.ts'
 
 const USERNAME = /^[a-z][a-z0-9]{0,15}$/
 const PHP_VERSIONS = ['8.5', '8.4', '8.3', '8.2', '8.1', '8.0', '7.4'] as const
@@ -10,17 +13,8 @@ export interface AccountUsageSample {
   processCount: number | null
   /** Access logs are not parsed. The panel says so instead of showing a dash. */
   bandwidth: 'unmeasured'
-  /** False when `io.max` is missing or `wbps=max`. Null when the slice was not read. */
+  /** True only for matching assigned IO caps on the home device; null for missing evidence. */
   ioEnforced: boolean | null
-}
-
-/** A numeric `wbps=` is a real cap. `wbps=max` and a missing file are not. */
-export const ioWriteEnforced = (ioMax: string | null | undefined): boolean => {
-  if (!ioMax) return false
-  return ioMax.split('\n').some(line => {
-    const match = /\bwbps=(\d+|max)\b/.exec(line)
-    return match !== null && match[1] !== 'max'
-  })
 }
 
 const activeUnit = async (executor: AgentExecutor, unit: string): Promise<boolean> => {
@@ -38,7 +32,7 @@ const activeUnit = async (executor: AgentExecutor, unit: string): Promise<boolea
  */
 export const readAccountUsage = async (
   executor: AgentExecutor,
-  input: { username: string; uid: number; home: string },
+  input: { username: string; uid: number; home: string; resources?: ResourceLimits },
 ): Promise<AccountUsageSample> => {
   const sample: AccountUsageSample = {
     phpVersion: null,
@@ -66,7 +60,15 @@ export const readAccountUsage = async (
     if (slice) {
       sample.memoryBytes = slice.memoryCurrentBytes
       sample.processCount = slice.pidsCurrent
-      sample.ioEnforced = ioWriteEnforced(slice.ioMax ?? null)
+      if (input.resources && input.resources.ioWriteBps !== 'unlimited') {
+        const mountinfo = await executor.readFile('/proc/self/mountinfo')
+        const device = mountinfo ? ioDeviceForMount(mountinfo, input.home) : null
+        const comparison = compareAccountLimits({ ...input.resources, memoryMb: 'unlimited', maxProcesses: 'unlimited', cpuPercent: 'unlimited', diskMb: 'unlimited' }, {
+          memoryMax: null, pidsMax: null, cpuMax: null, diskQuotaHardKb: null,
+          ioMax: slice.ioMax ?? null, ioDevices: device ? [device] : null,
+        })
+        sample.ioEnforced = comparison.unavailable ? null : !comparison.gaps.includes('io')
+      }
     }
   } catch { /* A missing slice stays null. */ }
   return sample

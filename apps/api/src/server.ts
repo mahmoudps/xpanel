@@ -1,3 +1,4 @@
+import { lifecycleAdmissionResponse, withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { chmod, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -7,6 +8,7 @@ import { agentCallerHeaders } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
 import { groups, visibleTools, visibleNavigation } from '@xpanel/catalog'
 import {
+  bindMfaRuntimePolicy,
   fail,
   isXpanelError,
   isUuid,
@@ -18,6 +20,7 @@ import {
   validateUsername,
 } from '@xpanel/core'
 import type {
+  MfaRuntimePolicy,
   Account,
   AuditEntry,
   DomainCustomConfig,
@@ -115,7 +118,8 @@ import { ENTRY_POINTS, entryPointAllowsApiRoute, entryPointAllowsRole, sessionTo
 import type { EntryPoint } from './entry-points.ts'
 import { loadQualifiedCatalog } from './host-catalog.ts'
 import { renderTotpQrSvg } from './totp-qr.ts'
-import { createLocalMailboxTransport, establishMailboxSession, mailFolderName, mailboxAddressIndex, openMailboxSession, parseMailboxSend, revokeMailboxIdentity, rewriteMailboxIds } from './mail/inbox.ts'
+import { createLocalMailboxTransport, establishMailboxSession, mailFolderName, mailboxAddressIndex, openAuthorizedMailboxSession, openMailboxSession, parseMailboxSend, revokeMailboxIdentity, rewriteMailboxIds } from './mail/inbox.ts'
+import { imapDialPlan, mailboxLiveEvent, watchMailboxIdle } from './mail/idle.ts'
 import type { MailboxTransport } from './mail/inbox.ts'
 import { deleteMailboxSession } from '@xpanel/db'
 
@@ -233,6 +237,8 @@ export interface ApiServerDeps {
   agentApp?: AgentApp
   agentToken?: string
   serverSecret: string
+  /** Frozen trusted process policy shared with the document renderer. */
+  mfaRuntimePolicy?: MfaRuntimePolicy
   allowedOrigins?: readonly string[]
   trustedProxyAddresses?: readonly string[]
   ingressSecret?: string
@@ -245,6 +251,8 @@ export interface ApiServerDeps {
   lockoutDurationMs?: number
   homeBaseDir?: string
   mailboxTransport?: MailboxTransport
+  /** Trusted startup mail settings, captured once for transports and live watches. */
+  mailboxEnvironment?: Readonly<NodeJS.ProcessEnv>
   webRenderer?: (req: Request) => Promise<Response> | Response
   /** Exact HTTPS origins of the three panels, used by the misdirected-host page. */
   publicPanels?: Partial<Record<EntryPoint, string>>
@@ -254,6 +262,7 @@ export interface ApiApp {
   fetch(req: Request, context?: TransportContext): Promise<Response>
   hub: LiveEventHub
   authenticateUpgrade(req: IncomingMessage, context?: TransportContext): Promise<EventSubscriber | null>
+  watchMailbox(req: IncomingMessage, signal: AbortSignal): void
 }
 
 const readJsonBody = async <T = Record<string, unknown>>(req: Request): Promise<T> => {
@@ -295,6 +304,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     if (parsed.protocol !== 'https:' || parsed.origin !== publicOrigin) return fail('PRECONDITION_FAILED', 'publicOrigin must be an exact HTTPS origin')
   }
   const serverSecret = deps.serverSecret
+  const mfaRuntimePolicy = bindMfaRuntimePolicy(deps.mfaRuntimePolicy)
   if (typeof serverSecret !== 'string' || Buffer.byteLength(serverSecret, 'utf8') < 32) fail('PRECONDITION_FAILED', 'a protected server secret of at least 32 bytes is required')
   const ingressSecret = deps.ingressSecret
   if (ingressSecret !== undefined && (typeof ingressSecret !== 'string' || Buffer.byteLength(ingressSecret, 'utf8') < 32)) {
@@ -422,6 +432,19 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   }
 
   const hub = deps.hub ?? new LiveEventHub()
+  const mailInput = deps.mailboxEnvironment ?? process.env
+  const mailboxEnvironment: NodeJS.ProcessEnv = Object.freeze(Object.fromEntries([
+    'XPANEL_IMAP_HOST', 'XPANEL_IMAP_PORT', 'XPANEL_IMAP_TLS', 'XPANEL_IMAP_TIMEOUT_MS',
+    'XPANEL_SMTP_HOST', 'XPANEL_SMTP_PORT', 'XPANEL_SMTP_TIMEOUT_MS',
+  ].map(key => [key, mailInput[key]])))
+  const idleHost = mailboxEnvironment.XPANEL_IMAP_HOST || '127.0.0.1'
+  const idlePort = Number(mailboxEnvironment.XPANEL_IMAP_PORT || '143')
+  const idlePlan = imapDialPlan(idleHost, idlePort, mailboxEnvironment.XPANEL_IMAP_TLS)
+  const idleTimeout = Number(mailboxEnvironment.XPANEL_IMAP_TIMEOUT_MS || '15000')
+  const idleTarget = idlePlan && Number.isSafeInteger(idleTimeout) && idleTimeout > 0 && idleTimeout <= 120_000
+    ? Object.freeze({ host: idleHost, port: idlePort, tls: idlePlan.tls, timeoutMs: idleTimeout }) : null
+  const pendingIdle = new WeakMap<IncomingMessage, { mailbox: string; password: string; accountId: string }>()
+  const idleWatching = new WeakSet<IncomingMessage>()
   const lockoutThreshold = deps.lockoutThreshold ?? 5
   const lockoutDurationMs = deps.lockoutDurationMs ?? 15 * 60_000
 
@@ -506,7 +529,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     }
   }
 
-  const authenticateUpgrade = async (req: IncomingMessage, context?: TransportContext): Promise<EventSubscriber | null> => {
+  const authenticateUpgradeInner = async (req: IncomingMessage, context?: TransportContext): Promise<EventSubscriber | null> => {
     const headers = new Headers()
     for (const [k, v] of Object.entries(req.headers)) {
       if (typeof v === 'string') headers.set(k, v)
@@ -528,12 +551,21 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (deps.requireSecureCookies && !isVerifiedHttps(webReq) && (entryPoint || (!deps.secureCookies && !headers.has('authorization')))) {
         return null
       }
-      const caller = await authenticateRequest(deps.db, webReq, { serverSecret, clientIp: extractClientIp(webReq), touchSession: false, entryPoint })
+      const caller = await authenticateRequest(deps.db, webReq, { serverSecret, clientIp: extractClientIp(webReq), touchSession: false, entryPoint, mfaRuntimePolicy })
       if (!caller || !caller.mfaVerified) return null
       if (caller.apiTokenId !== null) assertApiScope(caller, 'events:read')
-      if (isMailboxPrincipal(caller)) {
-        if (caller.principal.kind !== 'user' || !caller.principal.accountId) return null
-        return buildSubscriberForCaller(caller)
+      const mailboxIdentity = isMailboxPrincipal(caller)
+        || (caller.principal.kind === 'user' && (/^mbx[0-9a-f]{28}$/i.test(caller.principal.username) || caller.principal.username.includes('@')))
+      if (mailboxIdentity || (entryPoint === 'xmail' && caller.principal.kind === 'user')) {
+        if (!idleTarget) return null
+        const opened = await openAuthorizedMailboxSession(deps.db, deps.store, serverSecret, caller)
+        if (!idleWatching.has(req)) pendingIdle.set(req, {
+          mailbox: opened.record.mailbox, password: opened.password, accountId: opened.record.accountId,
+        })
+        return {
+          kind: 'user', id: caller.principal.id, username: caller.principal.username,
+          accountId: opened.record.accountId, mailboxLogin: opened.record.mailbox,
+        }
       }
       await assertRequestAuthorized(deps.store, caller, new Request(new URL('/api/events/recent', webReq.url), { headers }))
       return buildSubscriberForCaller(caller)
@@ -544,7 +576,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
 
   const requireCaller = async (req: Request, opts?: { allowUnverifiedMfa?: boolean; allowInvalidCsrf?: boolean }): Promise<AuthenticatedCaller> => {
     const clientIp = extractClientIp(req)
-    const caller = await authenticateRequest(deps.db, req, { serverSecret, clientIp, entryPoint })
+    const caller = await authenticateRequest(deps.db, req, { serverSecret, clientIp, entryPoint, mfaRuntimePolicy })
     if (!caller) {
       return fail('UNAUTHENTICATED', 'authentication required')
     }
@@ -833,9 +865,24 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     resolveResellerId,
     emitAudit,
     triggerReconcile,
+    readDkimPublicMaterial: async (caller, domain) => {
+      if (!deps.agentApp || !deps.agentToken) return null
+      try {
+        const response = await deps.agentApp.fetch(new Request('http://agent.local/host/dkim-public?domain=' + encodeURIComponent(domain), {
+          headers: agentCallerHeaders({ principalId: caller.principal.id, token: deps.agentToken }),
+        }))
+        if (!response.ok) return null
+        const text = await response.text()
+        if (text.length > 20_000) return null
+        const body = JSON.parse(text) as { selector?: unknown; publicKeyPem?: unknown }
+        if (typeof body.selector !== 'string' || typeof body.publicKeyPem !== 'string'
+          || body.selector.length > 63 || body.publicKeyPem.includes('PRIVATE KEY')) return null
+        return { selector: body.selector, publicKeyPem: body.publicKeyPem }
+      } catch { return null }
+    },
   })
 
-  const fetch = async (req: Request, context?: TransportContext): Promise<Response> => {
+  const fetchInner = async (req: Request, context?: TransportContext): Promise<Response> => {
     if (context) {
       let peer: string | null = null
       if (context.remoteAddress !== undefined) {
@@ -931,7 +978,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
               db: deps.db,
               store: deps.store,
               serverSecret,
-              transport: deps.mailboxTransport ?? createLocalMailboxTransport(),
+              transport: deps.mailboxTransport ?? createLocalMailboxTransport(mailboxEnvironment),
               entryPoint,
               mailbox: username,
               password,
@@ -980,6 +1027,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             csrfToken: mailboxCsrf,
             passwordChangeRequired: false,
             mfaEnrollmentRequired: false,
+            mfaMode: mfaRuntimePolicy.mode,
           }, 200, { 'set-cookie': mailboxCookie })
         }
 
@@ -1018,8 +1066,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           }
         }
 
-        if (principalRecord.totpEnabled && !principalRecord.totpSecretEnc) return fail('PRECONDITION_FAILED', 'two-factor key recovery is required')
-        if (principalRecord.totpEnabled && principalRecord.totpSecretEnc) {
+        if (mfaRuntimePolicy.mode !== 'disabled' && principalRecord.totpEnabled && !principalRecord.totpSecretEnc) return fail('PRECONDITION_FAILED', 'two-factor key recovery is required')
+        if (mfaRuntimePolicy.mode !== 'disabled' && principalRecord.totpEnabled && principalRecord.totpSecretEnc) {
           const secretBase32 = unsealTotpSecret(principalRecord.totpSecretEnc, serverSecret)
           if (typeof body.totpCode === 'string' && body.totpCode.trim().length > 0) {
             const step = verifyTotpStep(secretBase32, body.totpCode)
@@ -1047,7 +1095,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           expiresAt,
           ip,
           userAgent: req.headers.get('user-agent') ?? 'xpanel-client',
-          mfaVerified: principalRecord.totpEnabled,
+          mfaVerified: mfaRuntimePolicy.mode !== 'disabled' && principalRecord.totpEnabled,
           expectedPasswordHash: principalRecord.passwordHash,
           expectedTotpEnabled: principalRecord.totpEnabled,
           expectedSealedSecret: principalRecord.totpSecretEnc,
@@ -1087,7 +1135,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             actor: principal.username,
             action: 'auth.login',
             target: `principal:${principal.username}`,
-            detail: { sessionId: session.id, mfa: principalRecord.totpEnabled },
+            detail: { sessionId: session.id, mfa: session.mfaVerified, mfaMode: mfaRuntimePolicy.mode },
             outcome: 'ok',
             principalId: principal.id,
             ip,
@@ -1109,6 +1157,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             },
             csrfToken,
             totpEnabled: principalRecord.totpEnabled,
+            mfaMode: mfaRuntimePolicy.mode,
             passwordChangeRequired: principalRecord.forcePasswordChange,
             mfaEnrollmentRequired: false,
           },
@@ -1142,6 +1191,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           ...(entryPoint ? { entryPoint, home: ENTRY_POINTS[entryPoint].home } : {}),
           principal: caller.principal,
           totpEnabled: caller.principalRecord.totpEnabled,
+          mfaMode: mfaRuntimePolicy.mode,
           passwordChangeRequired: caller.principalRecord.forcePasswordChange,
           mfaEnrollmentRequired: false,
           csrfToken: caller.sessionToken ? deriveCsrfToken(caller.sessionToken, serverSecret, entryPoint) : null,
@@ -1181,6 +1231,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
 
       if (method === 'POST' && pathname === '/api/auth/2fa/setup') {
         const caller = await requireCaller(req)
+        if (mfaRuntimePolicy.mode === 'disabled') return fail('FORBIDDEN', 'two-factor changes are disabled in development')
         if (!caller.sessionId) return fail('FORBIDDEN', 'two-factor enrollment requires an interactive session')
         if (caller.principalRecord.totpEnabled) return fail('CONFLICT', 'two-factor authentication is already enabled')
         const body = await readJsonBody<{ password?: string }>(req)
@@ -1202,6 +1253,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
 
       if (method === 'POST' && pathname === '/api/auth/2fa/enable') {
         const caller = await requireCaller(req)
+        if (mfaRuntimePolicy.mode === 'disabled') return fail('FORBIDDEN', 'two-factor changes are disabled in development')
         if (!caller.sessionId) return fail('FORBIDDEN', 'two-factor enrollment requires an interactive session')
         const body = await readJsonBody<{ code?: string }>(req)
         if (Object.keys(body).some(key => key !== 'code')) return fail('VALIDATION', 'only the verification code is accepted')
@@ -1228,6 +1280,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
 
       if (method === 'POST' && pathname === '/api/auth/2fa/disable') {
         const caller = await requireCaller(req)
+        if (mfaRuntimePolicy.mode === 'disabled') return fail('FORBIDDEN', 'two-factor changes are disabled in development')
         if (!caller.sessionId) return fail('FORBIDDEN', 'two-factor changes require an interactive session')
         const body = await readJsonBody<{ password?: string; code?: string; recoveryCode?: string }>(req)
         if (typeof body.password !== 'string' || !await verifyPasswordArgon2id(body.password, caller.principalRecord.passwordHash)) return fail('UNAUTHENTICATED', 'current password is required')
@@ -1614,7 +1667,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         }
       }
 
-      const mailboxTransport = deps.mailboxTransport ?? createLocalMailboxTransport()
+      const mailboxTransport = deps.mailboxTransport ?? createLocalMailboxTransport(mailboxEnvironment)
       const moveMatch = /^\/api\/webmail\/inbox\/([1-9]\d*)\/move$/.exec(pathname)
       const inboxMatch = /^\/api\/webmail\/inbox\/([1-9]\d*)$/.exec(pathname)
       if (pathname === '/api/webmail/inbox' && method === 'GET') {
@@ -1681,14 +1734,14 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
                   'content-type': 'application/json',
                   ...agentCallerHeaders({ principalId: caller.principal.id, token: deps.agentToken! }),
                 },
-                body: JSON.stringify({ mailbox, rawMime }),
+                body: JSON.stringify({ mailbox, rawMime, purpose: 'webmail-send' }),
               }))
               if (!response.ok) return null
               const body = await response.json() as { rawMime?: unknown }
               return typeof body.rawMime === 'string' ? body.rawMime : null
             }
           : undefined
-        const sending = deps.mailboxTransport ?? createLocalMailboxTransport(process.env, signSent ? { signSent } : {})
+        const sending = deps.mailboxTransport ?? createLocalMailboxTransport(mailboxEnvironment, signSent ? { signSent } : {})
         const sent = await sending.send(opened.record.mailbox, opened.password, parseMailboxSend(await readJsonBody(req)))
         return jsonResponse({ mailbox: opened.record.mailbox, messageId: sent.messageId, savedToSent: sent.savedToSent === true }, 201)
       }
@@ -1713,7 +1766,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         await assertRoot(caller, 'server.services.restart')
         return callAgent(`/host/services/${serviceRestart[1]}/restart`, { method: 'POST', caller, body: {} })
       }
-      const accountBackup = /^\/api\/backups\/accounts\/([a-z][a-z0-9]{2,15})$/.exec(pathname)
+      const accountBackup = /^\/api\/backups\/accounts\/([a-z][a-z0-9]{0,15})$/.exec(pathname)
       if (accountBackup && (method === 'GET' || method === 'POST')) {
         const caller = await requireCaller(req)
         await assertRoot(caller, 'backup.account')
@@ -1725,7 +1778,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       }
 
       // ---- Accounts: Jailed Files & Shell (Proxied to Agent) -------------------------
-      const accountFilesMatch = /^\/api\/accounts\/([a-z][a-z0-9]{2,15})\/files$/.exec(pathname)
+      const accountFilesMatch = /^\/api\/accounts\/([a-z][a-z0-9]{0,15})\/files$/.exec(pathname)
       if (method === 'POST' && accountFilesMatch) {
         const caller = await requireCaller(req)
         const username = accountFilesMatch[1]!
@@ -1740,7 +1793,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         })
       }
 
-      const accountCertificatesMatch = /^\/api\/accounts\/([a-z][a-z0-9]{2,15})\/certificates$/.exec(pathname)
+      const accountCertificatesMatch = /^\/api\/accounts\/([a-z][a-z0-9]{0,15})\/certificates$/.exec(pathname)
       if (method === 'POST' && accountCertificatesMatch) {
         const caller = await requireCaller(req)
         const username = accountCertificatesMatch[1]!
@@ -1806,7 +1859,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         return jsonResponse({ certificate: stored, reconcile })
       }
 
-      const accountShellMatch = /^\/api\/accounts\/([a-z][a-z0-9]{2,15})\/shell$/.exec(pathname)
+      const accountShellMatch = /^\/api\/accounts\/([a-z][a-z0-9]{0,15})\/shell$/.exec(pathname)
       if (method === 'POST' && accountShellMatch) {
         const caller = await requireCaller(req)
         const username = accountShellMatch[1]!
@@ -3103,11 +3156,43 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     }
   }
 
-  return {
-    fetch,
-    hub,
-    authenticateUpgrade,
+  const watchMailbox = (req: IncomingMessage, signal: AbortSignal): void => {
+    const row = pendingIdle.get(req)
+    pendingIdle.delete(req)
+    if (!row || signal.aborted || !idleTarget || idleWatching.has(req)) return
+    idleWatching.add(req)
+    watchMailboxIdle({ ...idleTarget, mailbox: row.mailbox, password: row.password, signal,
+      onPush: push => hub.broadcast(mailboxLiveEvent(push, { accountId: row.accountId, mailbox: row.mailbox })),
+    })
   }
+
+  // Bounded HTTP/WS authorization settles SH; idle sockets hold no writer lease.
+  const authenticateUpgrade = async (req: IncomingMessage, context?: TransportContext): Promise<EventSubscriber | null> => {
+    try {
+      const probe = new Request(`http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`)
+      if (await lifecycleAdmissionResponse(probe)) return null
+      return await withLifecycleWriterAdmission(() => authenticateUpgradeInner(req, context))
+    } catch { return null }
+  }
+  const fetch = async (req: Request, context?: TransportContext): Promise<Response> => {
+    const denied = await lifecycleAdmissionResponse(req)
+    if (denied) return denied
+    const url = new URL(req.url)
+    if (req.method === 'GET' && url.pathname === '/api/health' && url.search === '') return fetchInner(req, context)
+    try {
+      return await withLifecycleWriterAdmission(async () => {
+        try { return await fetchInner(req, context) }
+        catch (error) {
+          // Async route failures keep their sanitized public outcome inside admission.
+          // Physical admission/retirement errors still reach the fail-closed outer catch.
+          if (isXpanelError(error)) return problemResponse(error, url.pathname, req.method.toUpperCase())
+          throw error
+        }
+      })
+    } catch { return new Response(JSON.stringify({ error: 'Lifecycle writer admission is unavailable.' }), { status: 503, headers: { 'content-type': 'application/problem+json', 'retry-after': '5', 'cache-control': 'no-store' } }) }
+  }
+
+  return { fetch, hub, authenticateUpgrade, watchMailbox }
 }
 
 export interface ListenApiServerOptions {
@@ -3141,7 +3226,7 @@ export const listenApiServer = async (
         res.end(Buffer.from(await response.arrayBuffer()))
       }
       const requestPath = (req.url ?? '/').split('?')[0] ?? '/'
-      const accountFileWrite = req.method === 'POST' && /^\/api\/accounts\/[a-z][a-z0-9]{2,15}\/files$/.test(requestPath)
+      const accountFileWrite = req.method === 'POST' && /^\/api\/accounts\/[a-z][a-z0-9]{0,15}\/files$/.test(requestPath)
       const maxBodyBytes = accountFileWrite ? 3 * 1024 * 1024 : 1024 * 1024
       try {
         const declaredLength = req.headers['content-length']
@@ -3192,6 +3277,8 @@ export const listenApiServer = async (
     app.hub.attachToServer(srv, (req) => {
       if (trustedIngress) trustedIngressRequests.add(req)
       return app.authenticateUpgrade(req, { trustedIngress })
+    }, (req, _subscriber, signal) => {
+      app.watchMailbox(req, signal)
     })
     return srv
   }

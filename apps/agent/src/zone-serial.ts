@@ -1,9 +1,22 @@
+import { createHash } from 'node:crypto'
+
 /** BIND serial token written by `renderBindZone` (`N ; serial`). */
 export const SERIAL_RE = /^(\s*)(\d+)(\s*;\s*serial\b)/m
+const CONTENT_HASH_RE = /(?:^|\n); xpanel-content ([0-9a-f]{64})\n?$/
 
 const SERIAL_CAP = 4_294_967_295
 
 const serialToken = (text: string): string => text.replace(SERIAL_RE, '$1SERIAL$3')
+const zoneBody = (text: string): string => text.replace(CONTENT_HASH_RE, '\n').replace(/\s*$/, '\n')
+
+/** Hash the actual body, excluding its serial and final content marker. */
+export const zoneContentHash = (text: string): string =>
+  createHash('sha256').update(serialToken(zoneBody(text)), 'utf8').digest('hex')
+
+export const stampZoneContent = (text: string): string => {
+  const body = zoneBody(text)
+  return `${body}; xpanel-content ${zoneContentHash(body)}\n`
+}
 
 const utcStamp = (now: Date): number => {
   const month = String(now.getUTCMonth() + 1).padStart(2, '0')
@@ -29,8 +42,8 @@ const fileSerial = (text: string): number => {
 }
 
 /**
- * Serial to write. No previous file keeps the state serial. An unchanged body
- * keeps the higher of the state and file serials. A changed body bumps that floor.
+ * Only a valid stamp of the actual previous body AND matching desired content
+ * can keep the serial. Unstamped files migrate once; altered files bump once.
  */
 export const chooseZoneSerial = (
   stateSerial: number,
@@ -41,6 +54,7 @@ export const chooseZoneSerial = (
   const state = Number.isSafeInteger(stateSerial) && stateSerial > 0 ? stateSerial : 0
   if (previousText === null) return state
   const floor = Math.max(state, fileSerial(previousText))
-  if (serialToken(previousText) === serialToken(rendered)) return floor
+  const stored = CONTENT_HASH_RE.exec(previousText)?.[1]
+  if (stored && stored === zoneContentHash(previousText) && stored === zoneContentHash(rendered)) return floor
   return bumpSoaSerial(floor, now)
 }

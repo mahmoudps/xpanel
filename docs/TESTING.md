@@ -75,7 +75,7 @@ External font requests are part of the current readiness measurement. Network re
 node scripts/toolchain.mjs node tests/browser/login-surface-acceptance.mjs --output=test-results/login-visual
 ```
 
-The output directory must be new. The [login harness](../tests/browser/login-surface-acceptance.mjs) defines 60 states: 3 immutable login audiences, EN/AR, light/dark and widths 320/360/390/768/1440px. It checks compact form visibility, real loaded fonts, text contrast, label/value geometry, touch targets, keyboard behavior and long synthetic error wrapping. The shared [applied-font contract](../tests/browser/applied-font-contract.mjs) uses Chromium CDP glyph observations to verify the actual proportional brand and locale heading faces; a computed stack, available font or fallback does not pass. Its HTTP fixtures reject mutations; they do not authenticate users, bind the public management ports, terminate TLS or prove cookie/CSRF isolation.
+The output directory must be new. The [login harness](../tests/browser/login-surface-acceptance.mjs) defines 60 states: 3 immutable login audiences, EN/AR, light/dark and widths 320/360/390/768/1440px. It checks compact form visibility, real loaded fonts, text contrast, label/value geometry, touch targets, keyboard behavior and long synthetic error wrapping. The shared [applied-font contract](../tests/browser/applied-font-contract.mjs) uses Chromium CDP glyph observations to verify the dedicated Mono wordmark and proportional locale heading faces; a computed stack, available font or fallback does not pass. Its HTTP fixtures reject mutations; they do not authenticate users, bind the public management ports, terminate TLS or prove cookie/CSRF isolation.
 
 The complementary portable HTTP/startup tests exercise actual listener/profile security and startup cleanup:
 
@@ -91,7 +91,7 @@ These tests cover declared local contracts with disposable stores and fake host 
 node scripts/toolchain.mjs node tests/browser/navigation-acceptance.mjs --output=test-results/navigation-ui
 ```
 
-Use a new output directory for every run. This independent suite defines 76 cases. It exercises Forward as well as Back, actual theme and language links, active-route uniqueness, responsive focus return including the 959/960px boundary, long-form scroll, keyboard shortcuts, reduced motion and local interaction timing. The added page-palette cases cover localized filtering, no matches and clearing, complete available-page enumeration, Arrow Up/Down wrapping, Enter navigation, constrained list scrolling, preserved native input/textarea typing and surface-specific shortcut context. They compare the palette with available navigation and require its absence when the catalog exposes no qualified tools.
+Use a new output directory for every run. This independent suite defines 84 cases. It exercises Forward as well as Back, actual theme and language links, active-route uniqueness, responsive focus return including the 959/960px boundary, long-form scroll, keyboard shortcuts, reduced motion and local interaction timing. The page-palette cases cover localized filtering, no matches and clearing, complete available-page enumeration, Arrow Up/Down wrapping, Enter navigation, constrained list scrolling, preserved native input/textarea typing and surface-specific shortcut context. They compare the palette with available navigation and require its absence when the catalog exposes no qualified tools. Audit cases additionally measure actual field, group and card spacing and desktop header/value glyph edges.
 
 Final full-suite results must be bound to the exact export. The suite also checks actual text-node edges for a nonempty bounded workspace summary against the unqualified catalog, with explicitly synthetic account data. The existing application and HTTP tests establish their own authentication and ownership assertions; the visual fixture does not authenticate users or execute hosting operations.
 
@@ -99,7 +99,28 @@ Reduced-motion cases retain the normal modal focus requirements. A tiny transiti
 
 The genuine long-scroll cases use the real account-creation form in a shorter 390x600 viewport. They still require more than 100px of actual content overflow and an initial scroll greater than 100px before opening navigation, then verify the observed position after closing. A compact form that fits a taller viewport cannot prove this contract; do not add synthetic padding or skip the precondition.
 
-Typography checks must distinguish font readiness from visual consistency. Inspect the computed role sizes and line heights, Sans brands and ordinary controls, technical-only monospace, consistent field/card spacing and the independent 44px targets. Include English and Arabic, light and dark, mobile and desktop. Loaded font faces alone do not prove consistent type hierarchy or reference parity.
+Typography checks must distinguish font readiness from visual consistency. Inspect the computed role sizes and line heights, proportional ordinary controls, the narrowly defined Mono wordmarks, technical monospace, consistent field/card spacing and the independent 44px targets. Include English and Arabic, light and dark, mobile and desktop. Loaded font faces alone do not prove consistent type hierarchy or reference parity.
+
+## Registered views and current management workflows
+
+```bash
+node scripts/toolchain.mjs node tests/browser/mfa-runtime-acceptance.mjs --output=test-results/mfa-runtime
+node scripts/toolchain.mjs node tests/browser/composed-acceptance.mjs --output=test-results/composed
+node scripts/toolchain.mjs node tests/browser/native-workflows-acceptance.mjs --output=test-results/native-workflows
+node scripts/toolchain.mjs node tests/browser/extensions-acceptance.mjs --output=test-results/extensions
+```
+
+Each output directory must be new. These runners define 8 development-disabled MFA presentation states, 472 registered-route states, 12 native management workflow states and 112 extension states. They retain before/after source fingerprints, bounded representative/failure screenshots and complete case results. Insufficient disk headroom leaves unexecuted cases pending; it never turns them into passes or skips.
+
+The management and extension fixtures use dark phone and light desktop states in English and Arabic. They do not cover the inverse theme/viewport pairs. MFA uses light sign-in and security pages. The registered-route matrix retains the reverse-proxy destination's actual disabled role boundary rather than granting owner access to root-only aaPanel tools. Unread collections require an unread state without invented rows or values. Exact typography roles follow [STANDARDS.md](STANDARDS.md); captions, labels, human values and technical content remain distinct.
+
+The current inbox's separate Chromium regression drives the real WebSocket dispatcher and rendered board with synthetic mailbox data:
+
+```bash
+XPANEL_REQUIRE_BROWSER_TESTS=1 node scripts/toolchain.mjs pnpm exec vitest run apps/web/src/xmail-live-refresh.test.ts --maxWorkers=1
+```
+
+CI sets this flag so an unavailable browser fails instead of silently skipping the regression. The four English/Arabic phone/desktop states check read-only refresh, preserved selection/query/filter, invalidation coalescing, undo and truthful failure states. Authentication, sealed mailbox authority, factor persistence and development-to-production session behavior remain separate HTTP tests. Synthetic browser success cannot qualify hosting operations, SMTP delivery, IMAP service deployment or native lifecycle execution.
 
 Keep the before-fix failures and their screenshots. Click-to-render samples, document timing, long tasks and layout-shift observations describe this laboratory fixture; they do not establish production INP, capacity or a whole-project completion percentage. Bounded state-read and response-construction changes require a separate controlled before/after measurement with representative data and unchanged security/freshness assertions. Include linked-account, plan and feature-policy changes; account deletion/suspension; lock contention and cross-process consistency. Record real lease/fencing metadata writes rather than claiming that a read projection is write-free. Qualified service snapshots and the inherited R01 consistency gap remain separate. Review these measurements separately from interface acceptance; fixture timings and Windows process RSS do not establish production INP, Linux memory budgets or capacity.
 

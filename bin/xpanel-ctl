@@ -1,0 +1,33 @@
+#!/bin/bash
+set -euo pipefail
+unset NODE_OPTIONS NODE_PATH
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+SELF="$(readlink -f -- "${BASH_SOURCE[0]}")"
+ROOT="$(cd -- "$(dirname -- "$SELF")/.." && pwd -P)"
+CLI="$ROOT/scripts/xpanel-ctl.mjs"
+NODE=/usr/bin/node
+
+fail() { printf '%s\n' 'LIFECYCLE_BOOTSTRAP_UNTRUSTED: Trusted lifecycle bootstrap is unavailable.' >&2; exit 3; }
+trusted() {
+  local path="$1" mode uid
+  while :; do
+    [[ ! -L "$path" ]] || fail
+    uid="$(stat -c '%u' -- "$path")" || fail
+    mode="$(stat -c '%a' -- "$path")" || fail
+    [[ "$uid" == 0 ]] || fail
+    (( (8#$mode & 0022) == 0 )) || fail
+    [[ "$path" == / ]] && break
+    path="$(dirname -- "$path")"
+  done
+}
+
+[[ -f "$CLI" && -x "$NODE" ]] || fail
+for arg in "$@"; do
+  if [[ "$arg" == --apply ]]; then
+    [[ "$EUID" == 0 && "$(uname -s)" == Linux ]] || fail
+    trusted "$SELF"
+    trusted "$CLI"
+    trusted "$(readlink -f -- "$NODE")"
+  fi
+done
+exec "$NODE" "$CLI" "$@"

@@ -1,17 +1,18 @@
-import { spawn } from 'node:child_process'
-import { createHash, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, open } from 'node:fs/promises'
 import { dirname, isAbsolute, resolve } from 'node:path'
-import { fail, isXpanelError, XpanelError } from '@xpanel/core'
+import { fail, isXpanelError } from '@xpanel/core'
 import type { ErrorCode } from '@xpanel/core'
 import type { AccountFileContext, AccountFileRequest, AccountFileRunner } from './file-manager.ts'
+import { SystemdAccountFileWorkerPool } from './systemd-file-worker.ts'
 
-export const ACCOUNT_FILE_HELPER_PROTOCOL_VERSION = 1
+export const ACCOUNT_FILE_HELPER_PROTOCOL_VERSION = 2
 export const MAX_HELPER_STDIN_BYTES = 4 * 1024 * 1024
 export const MAX_HELPER_STDOUT_BYTES = 4 * 1024 * 1024
 export const MAX_HELPER_STDERR_BYTES = 64 * 1024
 export const DEFAULT_HELPER_TIMEOUT_MS = 15_000
+export const DEFAULT_FILE_WORKER_INCIDENT_DIR = '/var/lib/xpanel-agent/file-worker-incidents'
 export const MIN_CONFINED_ACCOUNT_ID = 1000
 export const MAX_CONFINED_ACCOUNT_ID = 65_533
 
@@ -84,6 +85,10 @@ export interface NativeAccountFileRunnerOptions {
   onLiveWorker?: (info: { pid: number; envelope: HelperResponseEnvelope }) => Promise<void> | void
   /** Optional callback receiving structured telemetry from each completed helper execution. */
   onObservation?: (observation: HelperExecutionObservation) => void
+  /** Root-only operational incidents, outside the canonical StateStore tree. */
+  incidentDir?: string
+  /** Latched operational readiness failure; never awaited by a worker. */
+  onRecoveryRequired?: () => void | Promise<void>
   /** Test-only process spawner override for portable protocol unit tests on non-Linux hosts. */
   spawner?: HelperProcessSpawner
 }
@@ -172,99 +177,6 @@ export const verifyHelperBinary = async (binaryPath: string, expectedSha256?: st
   }
 }
 
-const defaultProcessSpawner: HelperProcessSpawner = ({
-  binaryPath,
-  stdinPayload,
-  timeoutMs,
-  maxStdoutBytes,
-  maxStderrBytes,
-  onStdoutLine,
-}) =>
-  new Promise<HelperProcessSpawnResult>((resolvePromise, rejectPromise) => {
-    const child = spawn(binaryPath, [], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { PATH: '/usr/bin:/bin', LC_ALL: 'C.UTF-8' },
-      windowsHide: true,
-    })
-
-    const pid = child.pid ?? 0
-    const stdoutChunks: Buffer[] = []
-    const stderrChunks: Buffer[] = []
-    let stdoutBytes = 0
-    let stderrBytes = 0
-    let stdoutOversize = false
-    let timedOut = false
-    let lineDelivered = false
-    let pendingHook: Promise<void> = Promise.resolve()
-
-    const timer = setTimeout(() => {
-      timedOut = true
-      child.kill('SIGKILL')
-    }, timeoutMs)
-    timer.unref?.()
-
-    child.on('error', (err) => {
-      clearTimeout(timer)
-      rejectPromise(err)
-    })
-
-    child.stdout.on('data', (chunk: Buffer) => {
-      stdoutBytes += chunk.length
-      if (stdoutBytes > maxStdoutBytes) {
-        stdoutOversize = true
-        child.kill('SIGKILL')
-        return
-      }
-      stdoutChunks.push(Buffer.from(chunk))
-      if (onStdoutLine && !lineDelivered && pid > 0) {
-        const combined = Buffer.concat(stdoutChunks).toString('utf8')
-        const nlIdx = combined.indexOf('\n')
-        if (nlIdx >= 0) {
-          lineDelivered = true
-          const firstLine = combined.slice(0, nlIdx)
-          pendingHook = Promise.resolve(onStdoutLine(firstLine, pid)).catch(() => undefined)
-        }
-      }
-    })
-
-    child.stderr.on('data', (chunk: Buffer) => {
-      if (stderrBytes < maxStderrBytes) {
-        const remaining = maxStderrBytes - stderrBytes
-        stderrChunks.push(Buffer.from(chunk.subarray(0, remaining)))
-      }
-      stderrBytes += chunk.length
-    })
-
-    child.stdin.on('error', () => {
-      /* Child may close stdin early on validation failure; stdout response carries the structured error. */
-    })
-    child.stdin.end(stdinPayload, 'utf8')
-
-    child.on('close', async (exitCode, signal) => {
-      clearTimeout(timer)
-      await pendingHook
-      if (stdoutOversize) {
-        rejectPromise(
-          new XpanelError('CONFIG_TEST_FAILED', 'confined file helper output exceeded maximum response size'),
-        )
-        return
-      }
-      if (timedOut) {
-        rejectPromise(
-          new XpanelError('SERVICE_UNAVAILABLE', 'confined file helper timed out and was terminated'),
-        )
-        return
-      }
-      resolvePromise({
-        exitCode,
-        signal,
-        stdout: Buffer.concat(stdoutChunks).toString('utf8'),
-        stderr: Buffer.concat(stderrChunks).toString('utf8'),
-        pid,
-      })
-    })
-  })
-
 const parseEnvelope = (rawStdout: string, expectedOp: AccountFileRequest['op']): HelperResponseEnvelope => {
   const trimmed = rawStdout.trim()
   if (!trimmed) {
@@ -325,6 +237,15 @@ const parseEnvelope = (rawStdout: string, expectedOp: AccountFileRequest['op']):
   }
 }
 
+const canonicalCgroupPath = (path: string): boolean => {
+  if (!path.startsWith('/') || /[\u0000-\u0020\u007f\\]/.test(path)) return false
+  return path === '/' || path.slice(1).split('/').every((part) => part.length > 0 && part !== '.' && part !== '..')
+}
+
+const isWithinCgroup = (actual: string, expected: string): boolean =>
+  canonicalCgroupPath(actual) && canonicalCgroupPath(expected) &&
+  (actual === expected || actual.startsWith(expected + '/'))
+
 export class NativeAccountFileRunner implements AccountFileRunner {
   readonly binaryPath: string
   readonly expectedSha256: string | undefined
@@ -336,6 +257,7 @@ export class NativeAccountFileRunner implements AccountFileRunner {
   private readonly onLiveWorker: ((info: { pid: number; envelope: HelperResponseEnvelope }) => Promise<void> | void) | undefined
   private readonly onObservation: ((observation: HelperExecutionObservation) => void) | undefined
   private readonly spawner: HelperProcessSpawner | undefined
+  private readonly workerPool: SystemdAccountFileWorkerPool | undefined
 
   readonly observations: HelperExecutionObservation[] = []
 
@@ -369,6 +291,19 @@ export class NativeAccountFileRunner implements AccountFileRunner {
     this.onLiveWorker = opts.onLiveWorker
     this.onObservation = opts.onObservation
     this.spawner = opts.spawner
+    this.workerPool = opts.spawner ? undefined : new SystemdAccountFileWorkerPool({
+      incidentDir: opts.incidentDir ?? DEFAULT_FILE_WORKER_INCIDENT_DIR,
+      verifyExecutable: verifyHelperBinary,
+      onRecoveryRequired: opts.onRecoveryRequired,
+    })
+  }
+
+  async initialize(): Promise<void> {
+    await this.workerPool?.initialize()
+  }
+
+  async close(): Promise<void> {
+    await this.workerPool?.close()
   }
 
   get lastObservation(): HelperExecutionObservation | undefined {
@@ -381,61 +316,79 @@ export class NativeAccountFileRunner implements AccountFileRunner {
       fail('VALIDATION', 'an absolute trusted homeRoot is required')
     }
 
-    if (!this.spawner) {
-      await verifyHelperBinary(this.binaryPath, this.expectedSha256)
-    }
-
     const cgroupPath = this.cgroupPathForAccount?.(context.account)
-    if (this.requireCgroup && (!cgroupPath || !cgroupPath.startsWith('/sys/fs/cgroup/'))) {
+    if (this.requireCgroup && (!cgroupPath || !cgroupPath.startsWith('/sys/fs/cgroup/') || !canonicalCgroupPath(cgroupPath))) {
       fail('PRECONDITION_FAILED', 'account cgroup v2 slice path is required for confined file operations')
     }
-
-    const stdinPayload = JSON.stringify({
-      protocolVersion: ACCOUNT_FILE_HELPER_PROTOCOL_VERSION,
-      context: {
-        username: context.account.username,
-        uid: context.account.uid,
-        gid: context.account.gid,
-        home: context.account.home,
-        homeRoot: context.homeRoot,
-        diskQuotaMb: context.diskQuotaMb === 'unlimited' ? 0 : context.diskQuotaMb,
-        maxEditBytes: context.maxEditBytes,
-        maxFileMode: context.maxFileMode,
-        maxDirMode: context.maxDirMode,
-        maxListEntries: context.maxListEntries,
-        ...(cgroupPath ? { cgroupPath } : {}),
-        requireCgroup: this.requireCgroup,
-        ...(this.holdOpenMs > 0 ? { holdOpenMs: this.holdOpenMs } : {}),
-      },
-      request,
-    })
-
-    if (Buffer.byteLength(stdinPayload, 'utf8') > MAX_HELPER_STDIN_BYTES) {
-      fail('LIMIT_EXCEEDED', 'account file request exceeds maximum helper stdin size')
+    if (!this.spawner && (!this.requireCgroup || !cgroupPath)) {
+      fail('PRECONDITION_FAILED', 'native file operations require a confined systemd worker')
+    }
+    const workerUnit = 'xpanel-files-' + context.account.uid + '-' + randomBytes(16).toString('hex') + '.service'
+    const assertWorkerTelemetry = (envelope: HelperResponseEnvelope): void => {
+      if (envelope.worker.uid !== context.account.uid || envelope.worker.gid !== context.account.gid ||
+          envelope.worker.uid < MIN_CONFINED_ACCOUNT_ID || envelope.worker.gid < MIN_CONFINED_ACCOUNT_ID || envelope.worker.pid <= 0) {
+        fail('CONFIG_TEST_FAILED', 'confined file helper worker UID/GID telemetry did not match account identity', { operation: request.op })
+      }
+      if (this.requireCgroup && cgroupPath) {
+        const expected = cgroupPath.slice('/sys/fs/cgroup'.length)
+        if (!isWithinCgroup(envelope.worker.cgroup, expected) ||
+            (!this.spawner && envelope.worker.cgroup !== expected + '/' + workerUnit)) {
+          fail('CONFIG_TEST_FAILED', 'confined file helper worker cgroup telemetry did not match required service', { operation: request.op })
+        }
+      }
     }
 
-    const spawner = this.spawner ?? defaultProcessSpawner
+    const prepareInput = async (signal?: AbortSignal): Promise<HelperProcessSpawnInput> => {
+      signal?.throwIfAborted()
+      if (!this.spawner) await verifyHelperBinary(this.binaryPath, this.expectedSha256)
+      signal?.throwIfAborted()
+      const stdinPayload = JSON.stringify({
+        protocolVersion: ACCOUNT_FILE_HELPER_PROTOCOL_VERSION,
+        context: {
+          username: context.account.username,
+          uid: context.account.uid,
+          gid: context.account.gid,
+          home: context.account.home,
+          homeRoot: context.homeRoot,
+          diskQuotaMb: context.diskQuotaMb === 'unlimited' ? 0 : context.diskQuotaMb,
+          maxEditBytes: context.maxEditBytes,
+          maxFileMode: context.maxFileMode,
+          maxDirMode: context.maxDirMode,
+          maxListEntries: context.maxListEntries,
+          ...(cgroupPath ? { cgroupPath } : {}),
+          requireCgroup: this.requireCgroup,
+          workerUnit,
+          ...(this.holdOpenMs > 0 ? { holdOpenMs: this.holdOpenMs } : {}),
+        },
+        request,
+      })
+      if (Buffer.byteLength(stdinPayload, 'utf8') > MAX_HELPER_STDIN_BYTES) {
+        fail('LIMIT_EXCEEDED', 'account file request exceeds maximum helper stdin size')
+      }
+      return {
+        binaryPath: this.binaryPath, stdinPayload, timeoutMs: this.timeoutMs,
+        maxStdoutBytes: this.maxStdoutBytes, maxStderrBytes: MAX_HELPER_STDERR_BYTES,
+        ...(this.onLiveWorker ? {
+          onStdoutLine: async (line: string) => {
+            try {
+              const envelope = parseEnvelope(line, request.op)
+              if (!envelope.ok) return
+              assertWorkerTelemetry(envelope)
+              await this.onLiveWorker?.({ pid: envelope.worker.pid, envelope })
+            } catch {
+              /* Final protocol validation still decides the operation result. */
+            }
+          },
+        } : {}),
+      }
+    }
     let spawnResult: HelperProcessSpawnResult
     try {
-      spawnResult = await spawner({
-        binaryPath: this.binaryPath,
-        stdinPayload,
-        timeoutMs: this.timeoutMs,
-        maxStdoutBytes: this.maxStdoutBytes,
-        maxStderrBytes: MAX_HELPER_STDERR_BYTES,
-        ...(this.onLiveWorker
-          ? {
-              onStdoutLine: async (line, pid) => {
-                try {
-                  const env = parseEnvelope(line, request.op)
-                  await this.onLiveWorker?.({ pid, envelope: env })
-                } catch {
-                  /* Validation errors will be handled after process close. */
-                }
-              },
-            }
-          : {}),
-      })
+      spawnResult = this.spawner
+        ? await this.spawner(await prepareInput())
+        : await this.workerPool!.run(async (signal) => ({
+            ...await prepareInput(signal), uid: context.account.uid, workerUnit, cgroupPath: cgroupPath!,
+          }))
     } catch (err) {
       if (isXpanelError(err)) throw err
       return fail('PRECONDITION_FAILED', 'confined account file helper could not be executed', {
@@ -495,32 +448,7 @@ export class NativeAccountFileRunner implements AccountFileRunner {
       })
     }
 
-    if (
-      envelope.worker.uid !== context.account.uid ||
-      envelope.worker.gid !== context.account.gid ||
-      envelope.worker.uid < MIN_CONFINED_ACCOUNT_ID ||
-      envelope.worker.gid < MIN_CONFINED_ACCOUNT_ID ||
-      envelope.worker.pid <= 0
-    ) {
-      return fail('CONFIG_TEST_FAILED', 'confined file helper worker UID/GID telemetry did not match account identity', {
-        operation: request.op,
-        expectedUid: context.account.uid,
-        actualUid: envelope.worker.uid,
-        expectedGid: context.account.gid,
-        actualGid: envelope.worker.gid,
-      })
-    }
-
-    if (this.requireCgroup && cgroupPath) {
-      const expectedSuffix = cgroupPath.slice('/sys/fs/cgroup'.length)
-      if (!envelope.worker.cgroup.includes(expectedSuffix)) {
-        return fail('CONFIG_TEST_FAILED', 'confined file helper worker cgroup telemetry did not match required slice', {
-          operation: request.op,
-          expectedCgroup: expectedSuffix,
-          actualCgroup: envelope.worker.cgroup,
-        })
-      }
-    }
+    assertWorkerTelemetry(envelope)
 
     const observation: HelperExecutionObservation = {
       ...envelope.worker,

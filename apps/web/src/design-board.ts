@@ -1,3 +1,4 @@
+import { canOpenRegisteredRoute, visibleRegisteredNavigation, type VisibilityContext } from '@xpanel/catalog'
 import type { Locale } from './i18n.ts'
 import { escapeHtml } from './tokens.ts'
 import { renderBoardCanvas } from './board-canvas.ts'
@@ -279,8 +280,9 @@ export const designHeading = (route: string, locale: Locale): string | undefined
 
 const copy = (value: Copy, locale: Locale): string => locale === 'ar' ? value[1] : value[0]
 
-export const renderDesignNav = (surface: DesignPage['surface'], locale: Locale, activeRoute: string, qualifiedRoutes: ReadonlySet<string>): string => {
-  const pages = productDesignPages().filter(item => item.surface === surface)
+export const renderDesignNav = (surface: DesignPage['surface'], locale: Locale, activeRoute: string, qualifiedRoutes: ReadonlySet<string>, visibility?: VisibilityContext): string => {
+  const admittedRoutes = new Set(visibleRegisteredNavigation(visibility).filter(item => item.surface === surface).flatMap(item => item.sections.flatMap(section => section.pages.map(page => page.route))))
+  const pages = productDesignPages().filter(item => item.surface === surface && admittedRoutes.has(item.route))
   const groups: { name: string; id: string; items: DesignPage[] }[] = []
   for (const item of pages) {
     const name = copy(item.group, locale)
@@ -295,10 +297,16 @@ export const renderDesignNav = (surface: DesignPage['surface'], locale: Locale, 
     const label = copy(item.label, locale)
     const security = item.route === '/security/account' || item.route === '/whm/security'
     return `<li><a class="xp-nav-item${current ? ' xp-nav-item--active' : ''}${item.route === '/mail/compose' ? ' xp-mail-compose-link' : ''}" href="${escapeHtml(item.route)}" data-nav-route="${escapeHtml(item.route)}" data-nav-wiring="${live ? 'live' : 'soon'}"${security ? ' data-security-link="true"' : ''}${current ? ' aria-current="page"' : ''}><span>${escapeHtml(label)}</span>${live ? '' : `<span class="xp-nav-soon">${escapeHtml(soonLabel)}</span>`}</a></li>`
-  }).join('')}${surface === 'xpanel' && group.items.some(item => item.route === '/email/accounts') ? `<li><a class="xp-nav-item${activeRoute === '/mail/inbox' ? ' xp-nav-item--active' : ''}" href="/mail/inbox" data-nav-route="/mail/inbox" data-nav-wiring="live"${activeRoute === '/mail/inbox' ? ' aria-current="page"' : ''}><span>xMail</span></a></li>` : ''}</ul></div>`).join('')}</nav>`
+  }).join('')}${surface === 'xpanel' && canOpenRegisteredRoute('/mail/inbox', visibility) && group.items.some(item => item.route === '/email/accounts') ? `<li><a class="xp-nav-item${activeRoute === '/mail/inbox' ? ' xp-nav-item--active' : ''}" href="/mail/inbox" data-nav-route="/mail/inbox" data-nav-wiring="${qualifiedRoutes.has('/mail/inbox') ? 'live' : 'soon'}"${activeRoute === '/mail/inbox' ? ' aria-current="page"' : ''}><span>xMail</span>${qualifiedRoutes.has('/mail/inbox') ? '' : `<span class="xp-nav-soon">${escapeHtml(soonLabel)}</span>`}</a></li>` : ''}</ul></div>`).join('')}</nav>`
 }
 
 const disabledControl = (id: string, label: string): string => `<div class="xp-field"><label for="${escapeHtml(id)}">${escapeHtml(label)}</label><input id="${escapeHtml(id)}" type="text" value="" disabled data-wiring="soon"></div>`
+
+/** Empty document for a registered route without a dedicated data adapter. */
+export const renderDisabledScreen = (title: string, locale: Locale): string => {
+  const label = copy(soon, locale), body = copy(noneBody, locale)
+  return `<section class="xp-design-page" data-wiring="soon" data-catalog-screen="true"><header class="xp-board-head"><div><h1 class="xp-page-title">${escapeHtml(title)}</h1><p class="xp-prose xp-design-page__lede">${escapeHtml(body)}</p></div><div class="xp-board-actions"><button type="button" class="xp-btn xp-btn--primary" disabled data-wiring="soon">${escapeHtml(label)}</button><p class="xp-help" data-wiring-hint="soon">${escapeHtml(label)}</p></div></header><div class="xp-design-empty" role="status"><h2>${escapeHtml(label)}</h2><p class="xp-prose">${escapeHtml(body)}</p></div></section>`
+}
 
 const renderBoardSection = (route: string, block: BoardSection, index: number, locale: Locale): string => {
   const title = copy(block.title, locale)
@@ -377,7 +385,7 @@ export const renderHomeToolGrid = (locale: Locale, qualifiedRoutes: ReadonlySet<
   return `<div class="xp-home-tools">${groups.map(group => `<section class="xp-board-section xp-tool-card" data-tool-card="true"><header class="xp-board-section__head"><h3>${escapeHtml(group.name)}</h3></header><ul class="xp-home-tool-list">${group.items.map(item => {
     const wired = item.live && qualifiedRoutes.has(item.route)
     return `<li><a class="xp-home-tool" href="${escapeHtml(item.route)}"><span>${escapeHtml(copy(item.label, locale))}</span>${wired ? '' : `<span class="xp-nav-soon">${escapeHtml(soonLabel)}</span>`}</a></li>`
-  }).join('')}${group.name === copy(email, locale) ? `<li><a class="xp-home-tool" href="/mail/inbox"><span>xMail</span></a></li>` : ''}</ul></section>`).join('')}</div>`
+  }).join('')}${group.name === copy(email, locale) ? `<li><a class="xp-home-tool" href="/mail/inbox"><span>xMail</span>${qualifiedRoutes.has('/mail/inbox') ? '' : `<span class="xp-nav-soon">${escapeHtml(soonLabel)}</span>`}</a></li>` : ''}</ul></section>`).join('')}</div>`
 }
 
 export const renderDesignMain = (route: string, locale: Locale): string => {

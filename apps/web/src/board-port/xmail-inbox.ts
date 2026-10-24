@@ -10,6 +10,8 @@ const PORT_CSS = `.xp-board-port{line-height:normal;font-size:16px;font-kerning:
 .xp-board-port a{color:#1D5BD6}.xp-board-port a:hover{color:#1546A8}
 .xp-board-port :focus-visible{outline:2px solid #1D5BD6;outline-offset:2px}
 .xp-board-port p{max-inline-size:none}
+.xp-board-port [data-mail-refresh-status]{margin:0;padding:var(--xp-space-field,16px);font-size:14.5px;line-height:1.75}
+@media(min-width:960px){.xp-board-port [data-mail-refresh-status]{padding:var(--xp-space-card,24px)}}
 @media(min-width:960px){.xp-board-port[data-mail-layout="reference"] [data-xp-sidebar]{flex:0 0 200px!important;inline-size:200px}}`
 
 const glyph = (inner: string, size = 18): string =>
@@ -212,6 +214,10 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
   var text = function (name) { return root.getAttribute(name) || '' }
   var targets = []
   var imagesLoaded = {}
+  var pendingActions = 0
+  var refreshQueued = false
+  var refreshing = false
+  var refreshTimer = null
   try { targets = JSON.parse(root.getAttribute('data-move-targets') || '[]') } catch (e) { targets = [] }
   var paintFilters = function () {
     var filters = root.querySelectorAll('[data-mail-filter]')
@@ -224,20 +230,22 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
       filters[i].style.boxShadow = on ? '0 1px 2px rgba(16, 24, 40, 0.08)' : 'none'
     }
   }
-  var paint = function () {
+  var paint = function (readOnly) {
     if (!list) return 0
     var q = query && query.value ? query.value.trim().toLowerCase() : ''
     var rows = list.querySelectorAll('[data-mail-open]')
     var shown = 0
     var removed = 0
+    var available = 0
     for (var i = 0; i < rows.length; i++) {
       var button = rows[i]
       var row = button.parentNode
       if (row.getAttribute('data-removed') === 'true') {
         row.style.display = 'none'
-        removed += 1
+        if (row.getAttribute('data-refresh-tombstone') !== 'true') removed += 1
         continue
       }
+      available += 1
       var unread = button.getAttribute('data-unread') === 'true'
       var attach = button.getAttribute('data-attach') === '1'
       var search = (button.getAttribute('data-search') || '').toLowerCase()
@@ -248,6 +256,7 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
     if (pager) {
       var listState = root.getAttribute('data-list-state') || 'messages'
       if ((listState === 'unread' || listState === 'failed') && rows.length === 0) pager.textContent = '\u2014'
+      else if (listState === 'empty' && available === 0) pager.textContent = pager.getAttribute('data-rest') || ''
       else {
         var loaded = pager.getAttribute('data-loaded') || '0'
         var total = Number(pager.getAttribute('data-total') || loaded)
@@ -258,7 +267,7 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
     }
     var empty = root.querySelector('[data-mail-filter-empty]')
     var slot = root.querySelector('[data-mail-list-slot]')
-    var wantEmpty = shown === 0 && rows.length > 0
+    var wantEmpty = shown === 0 && available > 0
     if (!empty && slot && wantEmpty) {
       empty = document.createElement('div')
       empty.setAttribute('data-mail-filter-empty', 'true')
@@ -288,7 +297,7 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
     if (article && blank) {
       var showing = article.querySelector('#msg-subject')
       if (hidden && showing) article.innerHTML = blank.innerHTML
-      if (!hidden && !showing) show(current.getAttribute('data-mail-open'))
+      if (!hidden && !showing && readOnly !== true) show(current.getAttribute('data-mail-open'))
     }
     return shown
   }
@@ -480,6 +489,7 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
         current.parentNode.setAttribute('data-removed', 'true')
         paint()
         var path = '/api/webmail/inbox/' + encodeURIComponent(uid)
+        pendingActions += 1
         var pending = name === 'move' || (name === 'delete' && !trashNow)
           ? window.xpanelSessionRequest('POST', path + '/move', { folder: name === 'delete' ? 'Trash' : folderId, from: fromFolder })
           : window.xpanelSessionRequest('DELETE', path + '?folder=' + encodeURIComponent(fromFolder) + '&confirm=delete')
@@ -508,7 +518,7 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
           var detail = err && err.details && arabic && err.details.messageAr ? err.details.messageAr : ''
           status.textContent = detail || (err && err.message ? err.message : text('data-move-failed'))
           paint()
-        })
+        }).finally(completeAction)
         return
       }
       finish(true)
@@ -516,8 +526,16 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
     if (name === 'undo') {
       var undoBar = root.querySelector('[data-mail-undo]')
       var id = undoBar && undoBar.getAttribute('data-removed-id')
-      var restoreRow = function () {
+      var restoreRow = function (result) {
         var back = id && list && list.querySelector('[data-mail-open="' + id + '"]')
+        if (back && result && Number.isInteger(result.uid) && result.uid > 0 && result.uid <= 4294967295) {
+          var restoredId = 'uid-' + result.uid
+          var cached = store && store.content.querySelector('[data-reading-id="' + id + '"]')
+          if (cached) cached.setAttribute('data-reading-id', restoredId)
+          back.setAttribute('data-mail-open', restoredId)
+          back.setAttribute('data-mail-uid', String(result.uid))
+          id = restoredId
+        }
         if (back) back.parentNode.removeAttribute('data-removed')
         if (undoBar) undoBar.remove()
         if (id) show(id)
@@ -525,6 +543,7 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
       }
       var undoUid = undoBar && undoBar.getAttribute('data-undo-uid')
       if (root.getAttribute('data-product') === 'true' && undoUid && typeof window.xpanelSessionRequest === 'function') {
+        pendingActions += 1
         window.xpanelSessionRequest('POST', '/api/webmail/inbox/' + encodeURIComponent(undoUid) + '/move', {
           folder: undoBar.getAttribute('data-undo-to') || 'INBOX',
           from: undoBar.getAttribute('data-undo-from') || 'Trash',
@@ -539,7 +558,7 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
             if (slot) slot.insertBefore(status, slot.firstChild)
           }
           status.textContent = err && err.message ? err.message : text('data-move-failed')
-        })
+        }).finally(completeAction)
         return
       }
       restoreRow()
@@ -550,6 +569,137 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
       if (openId) imagesLoaded[openId.getAttribute('data-mail-open')] = true
       if (note) note.remove()
     }
+  })
+  // Keep the current board and its interaction state; only import trusted read-only view data.
+  var safeClone = function (node) {
+    var copy = document.importNode(node, true)
+    var forbidden = copy.querySelectorAll('script,iframe,object,embed,style,link,meta,base,form,img,video,audio,source')
+    for (var i = 0; i < forbidden.length; i++) forbidden[i].remove()
+    var elements = Array.prototype.slice.call(copy.querySelectorAll('*'))
+    if (copy.nodeType === 1) elements.unshift(copy)
+    elements.forEach(function (element) {
+      Array.prototype.slice.call(element.attributes || []).forEach(function (attribute) {
+        var name = attribute.name.toLowerCase()
+        if (name.indexOf('on') === 0 || name === 'srcdoc') element.removeAttribute(attribute.name)
+        if (name === 'href' || name === 'src') {
+          try { if (new URL(attribute.value, window.location.href).origin !== window.location.origin || !/^https?:/i.test(new URL(attribute.value, window.location.href).protocol)) element.removeAttribute(attribute.name) }
+          catch (error) { element.removeAttribute(attribute.name) }
+        }
+      })
+    })
+    return copy
+  }
+  var refreshStatus = function (failed) {
+    var status = root.querySelector('[data-mail-refresh-status]')
+    if (!failed) { if (status) status.remove(); return }
+    if (!status) {
+      status = document.createElement('p')
+      status.setAttribute('data-mail-refresh-status', 'true')
+      status.setAttribute('role', 'status')
+      var slot = root.querySelector('[data-mail-list-slot]')
+      if (slot) slot.insertBefore(status, slot.firstChild)
+    }
+    status.textContent = rtl ? 'تعذر تحديث البريد. البيانات المعروضة هي آخر بيانات تم تحميلها.' : 'Mail could not be refreshed. Showing the last loaded data.'
+  }
+  var completeAction = function () {
+    pendingActions = Math.max(0, pendingActions - 1)
+    if (refreshQueued) scheduleRefresh()
+  }
+  var refresh = function () {
+    refreshTimer = null
+    if (!root.isConnected || refreshing || pendingActions > 0 || !refreshQueued) return
+    refreshQueued = false
+    refreshing = true
+    var folder = root.getAttribute('data-mail-folder') || 'INBOX'
+    var mailbox = root.getAttribute('data-mailbox') || ''
+    var url = new URL(window.location.href)
+    if (url.origin !== window.location.origin || url.pathname !== '/mail/inbox') { refreshing = false; return }
+    url.searchParams.set('folder', folder)
+    window.fetch(url.href, { method: 'GET', credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'text/html', 'x-xpanel-mail-refresh': 'list' } }).then(function (response) {
+      if (!response.ok || response.redirected || (response.url && new URL(response.url, url.href).origin !== url.origin)) throw new Error('mail refresh unavailable')
+      return response.text()
+    }).then(function (html) {
+      if (!root.isConnected || folder !== (root.getAttribute('data-mail-folder') || 'INBOX') || mailbox !== root.getAttribute('data-mailbox')) return
+      if (pendingActions > 0) { refreshQueued = true; return }
+      var incoming = new DOMParser().parseFromString(html, 'text/html').querySelector('[data-board-port="xmail-inbox"]')
+      if (!incoming || incoming.getAttribute('data-mailbox') !== mailbox || (incoming.getAttribute('data-mail-folder') || 'INBOX') !== folder || ['messages', 'empty'].indexOf(incoming.getAttribute('data-list-state')) === -1) throw new Error('mail refresh unavailable')
+      var nextList = incoming.querySelector('[data-mail-list]')
+      var nextStore = incoming.querySelector('#xmail-reading')
+      if (!nextList || !nextStore || !list || !store) throw new Error('mail refresh unavailable')
+      var selected = list.querySelector('[aria-current="true"]')
+      var selectedId = selected && selected.getAttribute('data-mail-open')
+      var focus = document.activeElement && document.activeElement.getAttribute('data-mail-open')
+      var undo = root.querySelector('[data-mail-undo]')
+      var undoButton = undo && undo.querySelector('[data-mail-action="undo"]')
+      var undoId = undo && undoButton && !undoButton.hidden ? undo.getAttribute('data-removed-id') : null
+      var removed = Array.prototype.slice.call(list.querySelectorAll('[data-removed="true"]')).filter(function (row) {
+        var button = row.querySelector('[data-mail-open]')
+        return undoId && button && button.getAttribute('data-mail-open') === undoId
+      })
+      var replacement = safeClone(nextList)
+      var replacementStore = safeClone(nextStore.content)
+      var rows = replacement.querySelectorAll('[data-mail-open]')
+      for (var i = 0; i < rows.length; i++) {
+        var uidText = rows[i].getAttribute('data-mail-uid')
+        var uid = Number(uidText)
+        if (!Number.isInteger(uid) || uid <= 0 || uid > 4294967295 || String(uid) !== uidText || rows[i].getAttribute('data-mail-open') !== 'uid-' + uid) throw new Error('mail refresh unavailable')
+        var on = rows[i].getAttribute('data-mail-open') === selectedId
+        rows[i].setAttribute('aria-current', on ? 'true' : 'false')
+        rows[i].style.background = on ? '#F3F7FE' : '#FFFFFF'
+        rows[i].style.boxShadow = on ? barOn : 'none'
+      }
+      removed.forEach(function (row) {
+        var button = row.querySelector('[data-mail-open]')
+        var id = button && button.getAttribute('data-mail-open')
+        var newer = id && replacement.querySelector('[data-mail-open="' + id + '"]')
+        if (newer) newer.parentNode.setAttribute('data-removed', 'true')
+        else { var tombstone = row.cloneNode(true); tombstone.setAttribute('data-refresh-tombstone', 'true'); replacement.appendChild(tombstone) }
+        var oldPane = id && store.content.querySelector('[data-reading-id="' + id + '"]')
+        if (oldPane && !replacementStore.querySelector('[data-reading-id="' + id + '"]')) replacementStore.appendChild(safeClone(oldPane))
+      })
+      var scroll = list.parentNode.scrollTop
+      list.replaceChildren.apply(list, Array.prototype.slice.call(replacement.childNodes))
+      store.content.replaceChildren(replacementStore)
+      root.setAttribute('data-list-state', incoming.getAttribute('data-list-state'))
+      var oldState = root.querySelectorAll('[data-mail-list-state],[data-mail-empty-list]')
+      for (var s = 0; s < oldState.length; s++) oldState[s].remove()
+      var empty = incoming.querySelector('[data-mail-empty-list]')
+      if (empty) list.parentNode.appendChild(safeClone(empty))
+      var nextPager = incoming.querySelector('[data-mail-pager]')
+      if (pager && nextPager) ['data-loaded', 'data-total', 'data-rest'].forEach(function (name) { pager.setAttribute(name, nextPager.getAttribute(name) || '') })
+      var summary = root.querySelector('[data-mail-count-summary]')
+      var nextSummary = incoming.querySelector('[data-mail-count-summary]')
+      if (summary && nextSummary) summary.replaceChildren.apply(summary, Array.prototype.slice.call(safeClone(nextSummary).childNodes))
+      var counts = root.querySelectorAll('[data-mail-count]')
+      for (var c = 0; c < counts.length; c++) {
+        var counterpart = incoming.querySelector('[data-mail-count="' + counts[c].getAttribute('data-mail-count') + '"]')
+        if (counterpart) counts[c].replaceWith(safeClone(counterpart))
+        else counts[c].remove()
+      }
+      var observedCounts = incoming.querySelectorAll('[data-mail-count]')
+      var anchors = root.querySelectorAll('a[data-nav-route]')
+      for (var n = 0; n < observedCounts.length; n++) {
+        if (root.querySelector('[data-mail-count="' + observedCounts[n].getAttribute('data-mail-count') + '"]')) continue
+        var route = observedCounts[n].parentNode.getAttribute('data-nav-route')
+        for (var a = 0; a < anchors.length; a++) { if (anchors[a].getAttribute('data-nav-route') === route) { anchors[a].appendChild(safeClone(observedCounts[n])); break } }
+      }
+      paint(true)
+      list.parentNode.scrollTop = scroll
+      if (focus) { var focused = list.querySelector('[data-mail-open="' + focus + '"]'); if (focused) focused.focus({ preventScroll: true }) }
+      refreshStatus(false)
+    }).catch(function () { if (root.isConnected) refreshStatus(true) }).finally(function () {
+      refreshing = false
+      if (refreshQueued) scheduleRefresh()
+    })
+  }
+  var scheduleRefresh = function () {
+    refreshQueued = true
+    if (refreshTimer === null && !refreshing && pendingActions === 0) refreshTimer = window.setTimeout(refresh, 50)
+  }
+  document.addEventListener('xpanel:mail-invalidated', function (event) {
+    var detail = event.detail
+    if (root.getAttribute('data-product') !== 'true' || !detail || typeof detail.mailbox !== 'string' || detail.mailbox.toLowerCase() !== (root.getAttribute('data-mailbox') || '').toLowerCase()) return
+    scheduleRefresh()
   })
   if (query) query.addEventListener('input', paint)
   var opened = list && list.querySelector('[aria-current="true"]')
@@ -568,7 +718,7 @@ export const renderInbox = (model: InboxModel): string => {
   const filterBtn = (key: string, label: string, on: boolean): string =>
     `<button type="button" data-mail-filter="${key}" aria-pressed="${on ? 'true' : 'false'}" style="min-height: 44px; min-width: 44px; padding: 0 12px; border-radius: 8px; border: none; background: ${on ? '#FFFFFF' : 'transparent'}; color: ${on ? '#101828' : '#475467'}; font-family: inherit; font-size: 13px; font-weight: ${on ? '600' : '500'}; box-shadow: ${on ? '0 1px 2px rgba(16, 24, 40, 0.08)' : 'none'}">${escapeHtml(label)}</button>`
   const listEmpty = model.folderEmpty
-    ? `<div style="display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 24px; text-align: center"><h2 style="margin: 0; font-size: 16px; font-weight: 600">${ar ? 'لا توجد رسائل في هذا المجلد.' : 'No messages in this folder.'}</h2><p style="margin: 0; font-size: 13px; color: #5D6B7E; line-height: 1.6; max-width: 280px">${ar ? 'لا رسائل في هذا المجلد.' : 'Nothing in this folder is waiting to be read.'}</p></div>`
+    ? `<div data-mail-empty-list="true" style="display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 24px; text-align: center"><h2 style="margin: 0; font-size: 16px; font-weight: 600">${ar ? 'لا توجد رسائل في هذا المجلد.' : 'No messages in this folder.'}</h2><p style="margin: 0; font-size: 13px; color: #5D6B7E; line-height: 1.6; max-width: 280px">${ar ? 'لا رسائل في هذا المجلد.' : 'Nothing in this folder is waiting to be read.'}</p></div>`
     : ''
   const article = selected
     ? `<article data-mail-pane="reading-pane" data-mail-article="true" aria-label="${ar ? 'لوحة القراءة' : 'Reading pane'}" style="flex: 2.618 1 420px; min-width: 0; background: #FFFFFF; display: flex; flex-direction: column">${readingInner(selected, model)}</article>`
@@ -606,7 +756,7 @@ export const renderInbox = (model: InboxModel): string => {
     ${model.actionHtml}
     <section aria-labelledby="list-title" data-mail-pane="message-list" style="flex: 1.618 1 320px; min-width: 0; background: #FFFFFF; border-inline-end: 1px solid #E2E6EC; display: flex; flex-direction: column">
       <div style="padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid #E2E6EC">
-        <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap"><h1 id="list-title" style="margin: 0; font-size: 20px; font-weight: 600">${escapeHtml(model.title)}</h1><span style="font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums">${escapeHtml(model.countText.replace(/ · \d+ (?:unread|غير مقروء)$/, ''))}<span data-mail-unread="${model.unreadCount ?? 0}">${escapeHtml((model.unreadCount ?? 0) > 0 ? model.countText.match(/ · \d+ (?:unread|غير مقروء)$/)?.[0] ?? '' : '')}</span></span></div>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap"><h1 id="list-title" style="margin: 0; font-size: 20px; font-weight: 600">${escapeHtml(model.title)}</h1><span data-mail-count-summary="true" style="font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums">${escapeHtml(model.countText.replace(/ · \d+ (?:unread|غير مقروء)$/, ''))}<span data-mail-unread="${model.unreadCount ?? 0}">${escapeHtml((model.unreadCount ?? 0) > 0 ? model.countText.match(/ · \d+ (?:unread|غير مقروء)$/)?.[0] ?? '' : '')}</span></span></div>
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><div role="group" aria-label="${ar ? 'عرض' : 'Show'}" style="display: inline-flex; padding: 2px; border-radius: 10px; background: #EEF0F3; gap: 2px">${filterBtn('all', ar ? 'الكل' : 'All', true)}${filterBtn('unread', ar ? 'غير المقروء' : 'Unread', false)}${filterBtn('attachments', ar ? 'مع مرفقات' : 'With attachments', false)}</div><span style="flex: 1 1 0"></span><button type="button" aria-label="${ar ? 'التحقق من البريد الجديد' : 'Check for new mail'}" style="width: 44px; height: 44px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 4v7h-7"></path></svg></button></div>
       </div>
       <div data-mail-list-slot="true">

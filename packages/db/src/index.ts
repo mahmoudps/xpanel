@@ -1,4 +1,5 @@
 export * from './client.ts'
+export * from './host-operation-guard.ts'
 export * from './migrate.ts'
 export * from './schema.ts'
 export * from './sql-lexer.ts'

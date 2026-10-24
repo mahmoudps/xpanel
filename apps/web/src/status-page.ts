@@ -130,7 +130,7 @@ export function renderStatusBody(model: StatusPageModel): string {
   return renderSurfaceShell({
     surface: model.surface,
     locale: model.locale,
-    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><div><strong>${panelLabel(model.surface)}</strong>${subtitle}</div></div>${renderDesignNav(model.surface, model.locale, model.path, qualified)}`,
+    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><div><strong>${panelLabel(model.surface)}</strong>${subtitle}</div></div>${renderDesignNav(model.surface, model.locale, model.path, qualified, model.visibility)}`,
     topbar: renderUserMenu({
       locale: model.locale,
       theme: model.theme,

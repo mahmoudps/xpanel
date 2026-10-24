@@ -1,5 +1,6 @@
+import { spawnSync } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { chmod, chown, link, lstat, mkdir, mkdtemp, open, readdir, readFile, rm, rmdir, stat, symlink, unlink, writeFile } from 'node:fs/promises'
+import { chmod, chown, link, lstat, mkdir, mkdtemp, open, readdir, readFile, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { isXpanelError } from '@xpanel/core'
@@ -8,15 +9,16 @@ import { buildAccountFileHelper } from '../../../helpers/account-files/build.mjs
 import { executorLinuxPreflight } from '../../../scripts/test-linux-preflight.mjs'
 import { LinuxHostExecutor } from './executor.ts'
 import { JailedFileManager, NativeAccountFileRunner, verifyHelperBinary } from './file-manager.ts'
+import { ACCOUNT_FILE_HELPER_PROTOCOL_VERSION } from './account-file-runner.ts'
+import type { NativeAccountFileRunnerOptions } from './account-file-runner.ts'
 
 const observations: Record<string, unknown>[] = []
 const cleanupErrors: string[] = []
 const nonce = randomBytes(5).toString('hex')
 const userA = `xpaf${nonce}a`
 const userB = `xpaf${nonce}b`
-const slice = `xpaf-${nonce}.slice`
-const slicePath = `/run/systemd/system/${slice}`
-const cgroupSliceDir = `/sys/fs/cgroup/${slice}`
+const fixtureSlices: { unit: string; path: string; sha256?: string }[] = []
+const nativeRunners: NativeAccountFileRunner[] = []
 const createdUsers: string[] = []
 const createdGroups: string[] = []
 const createdMailSpools: { path: string; uid: number }[] = []
@@ -49,7 +51,17 @@ async function unusedUid(base: number): Promise<number> {
   for (let candidate = base; candidate < base + 1000; candidate++) {
     const user = await executor.runCommand(['/usr/bin/getent', 'passwd', String(candidate)])
     const group = await executor.runCommand(['/usr/bin/getent', 'group', String(candidate)])
-    if (user.code === 2 && group.code === 2) return candidate
+    if (user.code !== 2 || group.code !== 2) continue
+    const unit = 'xpanel-' + candidate + '.slice'
+    const state = await executor.runCommand(['/usr/bin/systemctl', 'show', '--property=LoadState', '--value', unit])
+    if (!state.ok || state.stdout.trim() !== 'not-found') continue
+    try { await lstat('/etc/systemd/system/' + unit); continue } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    try { await stat('/sys/fs/cgroup/xpanel.slice/' + unit); continue } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    return candidate
   }
   throw new Error('No unused fixture UID/GID was available')
 }
@@ -92,17 +104,25 @@ beforeAll(async () => {
   helperBinaryPath = receipt.binaryPath
   helperSha256 = receipt.binarySha256
 
+  uidA = await unusedUid(49200 + Number.parseInt(nonce.slice(0, 3), 16))
+  uidB = await unusedUid(uidA + 1)
+  for (const uid of [uidA, uidB]) {
+    const unit = `xpanel-${uid}.slice`
+    const path = `/etc/systemd/system/${unit}`
+    await expect(lstat(path)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(`/sys/fs/cgroup/xpanel.slice/${unit}`)).rejects.toMatchObject({ code: 'ENOENT' })
+    fixtureSlices.push({ unit, path })
+  }
+
   executor = new LinuxHostExecutor({
     trustedHostTargets: [
-      { path: slicePath, operations: ['read', 'write', 'remove'] },
+      ...fixtureSlices.map(({ path }) => ({ path, operations: ['read', 'write', 'remove'] as ('read' | 'write' | 'remove')[] })),
       { path: homeA, operations: ['ensure-directory', 'remove'] },
       { path: homeB, operations: ['ensure-directory', 'remove'] },
     ],
   })
 
-  uidA = await unusedUid(49200 + Number.parseInt(nonce.slice(0, 3), 16))
   await createIdentity(userA, uidA, homeA)
-  uidB = await unusedUid(uidA + 1)
   await createIdentity(userB, uidB, homeB)
 
   await executor.runAction({ kind: 'ensure-dir', path: homeA, mode: 0o750, owner: userA, group: userA })
@@ -114,15 +134,15 @@ beforeAll(async () => {
   await writeFile(tenantBProtectedFile, 'tenant-b-protected-marker-content', { mode: 0o640 })
   await chown(tenantBProtectedFile, uidB, uidB)
 
-  await executor.writeFile({
-    path: slicePath,
-    mode: 0o644,
-    owner: 'root',
-    group: 'root',
-    content: '[Unit]\nDescription=xPanel S04 account-files slice\n[Slice]\nMemoryAccounting=yes\nTasksAccounting=yes\nMemoryMax=64M\nTasksMax=32\n',
-  })
+  for (const item of fixtureSlices) {
+    await executor.writeFile({
+      path: item.path, mode: 0o644, owner: 'root', group: 'root',
+      content: '[Unit]\nDescription=xPanel S04 disposable account slice\n[Slice]\nMemoryAccounting=yes\nTasksAccounting=yes\nCPUAccounting=yes\nIOAccounting=yes\nMemoryMax=128M\nTasksMax=64\nCPUQuota=200%\n',
+    })
+    item.sha256 = await sha256(item.path)
+  }
   await executor.runAction({ kind: 'systemd-daemon-reload' })
-  await executor.runAction({ kind: 'systemd', verb: 'start', unit: slice })
+  for (const { unit } of fixtureSlices) await executor.runAction({ kind: 'systemd', verb: 'start', unit })
 
   observations.push({
     fixture: {
@@ -132,7 +152,7 @@ beforeAll(async () => {
       uidA,
       userB,
       uidB,
-      slice,
+      slices: fixtureSlices.map(({ unit }) => unit),
       helperBinaryPath,
       helperSha256,
       sourceSha256: receipt.sourceSha256,
@@ -142,6 +162,12 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!root) return
+  for (const runner of nativeRunners) await runner.close().catch((error) => cleanupErrors.push(String(error)))
+  if (cleanupErrors.length) {
+    const output = process.env.XPANEL_QUALIFICATION_OBSERVATIONS
+    if (output) await writeFile(output, JSON.stringify({ package: 'S04', observations, cleanup: { ok: false, preserved: true, errors: cleanupErrors } }, null, 2) + '\n')
+    throw new Error('native fixture preserved because worker termination requires inspected recovery')
+  }
   if (quotaMounted) {
     const res = await executor.runCommand(['/usr/bin/umount', quotaMount])
     if (res.ok) quotaMounted = false
@@ -152,10 +178,13 @@ afterAll(async () => {
     if (res.ok) quotaDevice = ''
     else cleanupErrors.push(`Could not detach loop device: ${res.stderr}`)
   }
-  await rmdir(`${cgroupSliceDir}/xpanel-files.scope`).catch(() => undefined)
-  await rmdir(cgroupSliceDir).catch(() => undefined)
-  await executor.runCommand(['/usr/bin/systemctl', 'stop', slice]).catch(() => undefined)
-  await rm(slicePath, { force: true }).catch((e) => cleanupErrors.push(String(e)))
+  for (const item of fixtureSlices.toReversed()) {
+    if (!item.sha256) continue
+    const stopped = await executor.runCommand(['/usr/bin/systemctl', 'stop', item.unit])
+    if (!stopped.ok) { cleanupErrors.push('could not stop owned account slice'); continue }
+    if (await sha256(item.path) !== item.sha256) { cleanupErrors.push('owned account slice policy changed; preserved'); continue }
+    await rm(item.path).catch((error) => cleanupErrors.push(String(error)))
+  }
   await executor.runCommand(['/usr/bin/systemctl', 'daemon-reload']).catch(() => undefined)
 
   for (const name of createdUsers.toReversed()) {
@@ -188,6 +217,19 @@ afterAll(async () => {
   expect(cleanupErrors).toEqual([])
 }, 60_000)
 
+const createConfinedRunner = (options: Pick<NativeAccountFileRunnerOptions, 'holdOpenMs' | 'onLiveWorker'> = {}) => {
+  const runner = new NativeAccountFileRunner({
+    binaryPath: helperBinaryPath,
+    expectedSha256: helperSha256,
+    cgroupPathForAccount: (account) => '/sys/fs/cgroup/xpanel.slice/xpanel-' + account.uid + '.slice',
+    requireCgroup: true,
+    incidentDir: join(root, 'agent-runtime', 'file-worker-incidents'),
+    ...options,
+  })
+  nativeRunners.push(runner)
+  return runner
+}
+
 describe('S04 Native Account File Helper on disposable Linux VM (A15, A16, A17)', () => {
   it('verifies the compiled helper binary ownership, mode 0755, and SHA-256 digest', async () => {
     const digest = await verifyHelperBinary(helperBinaryPath, helperSha256)
@@ -195,6 +237,41 @@ describe('S04 Native Account File Helper on disposable Linux VM (A15, A16, A17)'
     await expect(verifyHelperBinary(helperBinaryPath, '0'.repeat(64))).rejects.toMatchObject({
       code: 'PRECONDITION_FAILED',
     })
+  })
+
+  it('A15 denial: native protocol2 has no direct or unconfined execution mode and verifies placement before home access', async () => {
+    const target = join(homeA, 'denial-sentinel.txt')
+    await writeFile(target, 'unchanged-native-denial-marker', { mode: 0o640 })
+    await chown(target, uidA, uidA)
+    const before = await sha256(target)
+    const parent = '/sys/fs/cgroup/xpanel.slice/xpanel-' + uidA + '.slice'
+    const workerUnit = 'xpanel-files-' + uidA + '-' + 'a'.repeat(32) + '.service'
+    const base = {
+      protocolVersion: ACCOUNT_FILE_HELPER_PROTOCOL_VERSION,
+      context: { username: userA, uid: uidA, gid: uidA, homeRoot: homeA, cgroupPath: parent, workerUnit, requireCgroup: true },
+      request: { op: 'write', path: 'denial-sentinel.txt', content: 'must-not-write', overwrite: true, mode: 0o640 },
+    }
+    const cases = [
+      { name: 'old-protocol', input: { ...base, protocolVersion: 1 }, code: 'CONFIG_TEST_FAILED' },
+      { name: 'omitted-cgroup-requirement', input: { ...base, context: { ...base.context, requireCgroup: undefined } }, code: 'PRECONDITION_FAILED' },
+      { name: 'disabled-cgroup-requirement', input: { ...base, context: { ...base.context, requireCgroup: false } }, code: 'PRECONDITION_FAILED' },
+      { name: 'missing-worker-unit', input: { ...base, context: { ...base.context, workerUnit: undefined } }, code: 'PRECONDITION_FAILED' },
+      { name: 'neighbor-account-parent', input: { ...base, context: { ...base.context, cgroupPath: parent + '-neighbor' } }, code: 'VALIDATION' },
+      { name: 'missing-systemd-leaf-before-invalid-home', input: { ...base, context: { ...base.context, homeRoot: '/missing-home-must-not-be-opened' } }, code: 'PRECONDITION_FAILED' },
+    ]
+    for (const item of cases) {
+      const result = spawnSync(helperBinaryPath, [], { input: JSON.stringify(item.input), encoding: 'utf8', timeout: 5000, maxBuffer: 64 * 1024 })
+      expect(result.error, item.name).toBeUndefined()
+      expect(result.status, item.name).not.toBe(0)
+      const envelope = JSON.parse(result.stdout) as { protocolVersion: number; ok: boolean; error: { code: string }; worker: { uid: number } }
+      expect(envelope.protocolVersion, item.name).toBe(ACCOUNT_FILE_HELPER_PROTOCOL_VERSION)
+      expect(envelope.ok, item.name).toBe(false)
+      expect(envelope.error.code, item.name).toBe(item.code)
+      expect(envelope.worker.uid, item.name).toBe(0)
+      expect(await sha256(target), item.name).toBe(before)
+    }
+    await unlink(target)
+    observations.push({ scenario: 'A15-native-cgroup-denials', cases: cases.map(({ name }) => name), tenantCanaryUnchanged: true })
   })
 
   it('A15: executes all 9 operations under the account UID/GID and cgroup slice, verified via live /proc/<pid>', async () => {
@@ -207,11 +284,7 @@ describe('S04 Native Account File Helper on disposable Linux VM (A15, A16, A17)'
       cgroupText: string
     }[] = []
 
-    const runner = new NativeAccountFileRunner({
-      binaryPath: helperBinaryPath,
-      expectedSha256: helperSha256,
-      cgroupPathForAccount: () => cgroupSliceDir,
-      requireCgroup: true,
+    const runner = createConfinedRunner({
       holdOpenMs: 120,
       onLiveWorker: async ({ pid }) => {
         const [statusText, cgroupText] = await Promise.all([
@@ -296,7 +369,7 @@ describe('S04 Native Account File Helper on disposable Linux VM (A15, A16, A17)'
       expect(check.gidLine.split(/\s+/)).toEqual([String(uidA), String(uidA), String(uidA), String(uidA)])
       expect(check.groupsLine).toBe('')
       expect(check.noNewPrivsLine).toBe('1')
-      expect(check.cgroupText).toContain(`/${slice}`)
+      expect(check.cgroupText).toMatch(new RegExp('^0::/xpanel\\.slice/xpanel-' + uidA + '\\.slice/xpanel-files-' + uidA + '-[0-9a-f]{32}\\.service$'))
     }
 
     observations.push({
@@ -306,12 +379,55 @@ describe('S04 Native Account File Helper on disposable Linux VM (A15, A16, A17)'
     })
   })
 
+  it('A15: fits maximum text and short-name list workloads inside measured worker safety budgets', async () => {
+    const samples: { memoryPeakBytes: number; threads: number; uid: number }[] = []
+    const runner = createConfinedRunner({
+      holdOpenMs: 200,
+      onLiveWorker: async ({ pid, envelope }) => {
+        const [status, peak] = await Promise.all([
+          readFile('/proc/' + pid + '/status', 'utf8'),
+          readFile('/sys/fs/cgroup' + envelope.worker.cgroup + '/memory.peak', 'utf8'),
+        ])
+        samples.push({ memoryPeakBytes: Number(peak.trim()), threads: Number(/^Threads:[ \t]+(\d+)$/m.exec(status)?.[1]), uid: envelope.worker.uid })
+      },
+    })
+    const accountA = { username: userA, uid: uidA, gid: uidA, home: '/home/' + userA }
+    const manager = new JailedFileManager(homeA, 1024, { account: accountA, runner })
+    const payload = 'x'.repeat(1024 * 1024)
+    const binaryPayload = Buffer.alloc(2 * 1024 * 1024, 255).toString('base64')
+    const filePath = join(homeA, 'maximum-text.txt')
+    const binaryPath = join(homeA, 'maximum-binary.bin')
+    const directory = join(homeA, 'maximum-list')
+    await mkdir(directory, { mode: 0o750 })
+    await chown(directory, uidA, uidA)
+    try {
+      for (let index = 0; index < 10_000; index++) {
+        const path = join(directory, 'f' + String(index).padStart(5, '0'))
+        await writeFile(path, '', { mode: 0o640 })
+        await chown(path, uidA, uidA)
+      }
+      expect((await manager.writeText('maximum-text.txt', payload, { overwrite: false })).sizeBytes).toBe(payload.length)
+      expect((await manager.readText('maximum-text.txt')).content).toBe(payload)
+      expect((await manager.putBytes('maximum-binary.bin', binaryPayload, { overwrite: false })).sizeBytes).toBe(2 * 1024 * 1024)
+      expect((await manager.getBytes('maximum-binary.bin')).contentBase64).toBe(binaryPayload)
+      expect((await manager.list('maximum-list')).length).toBe(10_000)
+      expect(samples.length).toBe(5)
+      for (const sample of samples) {
+        expect(sample.uid).toBe(uidA)
+        expect(sample.threads).toBe(1)
+        expect(sample.memoryPeakBytes).toBeGreaterThan(0)
+        expect(sample.memoryPeakBytes).toBeLessThanOrEqual(64 * 1024 * 1024)
+      }
+      observations.push({ scenario: 'A15-worker-budget-workloads', maxTextBytes: payload.length, maxShortNameEntries: 10_000, samples })
+    } finally {
+      await rm(filePath, { force: true })
+      await rm(binaryPath, { force: true })
+      await rm(directory, { recursive: true, force: true })
+    }
+  }, 60_000)
+
   it('A15 denial: refuses access to root-owned or foreign-UID files without falling back to privileged agent I/O', async () => {
-    const runner = new NativeAccountFileRunner({
-      binaryPath: helperBinaryPath,
-      expectedSha256: helperSha256,
-      cgroupPathForAccount: () => cgroupSliceDir,
-      requireCgroup: true,
+    const runner = createConfinedRunner({
     })
     const accountA = { username: userA, uid: uidA, gid: uidA, home: `/home/${userA}` }
     const fm = new JailedFileManager(homeA, 1024, { account: accountA, runner })
@@ -336,11 +452,7 @@ describe('S04 Native Account File Helper on disposable Linux VM (A15, A16, A17)'
     const outsideBeforeHash = await sha256(outsideProtectedFile)
     const tenantBBeforeHash = await sha256(tenantBProtectedFile)
 
-    const runner = new NativeAccountFileRunner({
-      binaryPath: helperBinaryPath,
-      expectedSha256: helperSha256,
-      cgroupPathForAccount: () => cgroupSliceDir,
-      requireCgroup: true,
+    const runner = createConfinedRunner({
     })
     const accountA = { username: userA, uid: uidA, gid: uidA, home: `/home/${userA}` }
     const fm = new JailedFileManager(homeA, 1024, { account: accountA, runner })
@@ -495,12 +607,7 @@ describe('S04 Native Account File Helper on disposable Linux VM (A15, A16, A17)'
         filesystem: quotaMount,
       })
 
-      const runner = new NativeAccountFileRunner({
-        binaryPath: helperBinaryPath,
-        expectedSha256: helperSha256,
-        cgroupPathForAccount: () => cgroupSliceDir,
-        requireCgroup: true,
-      })
+      const runner = createConfinedRunner()
 
       const fmA = new JailedFileManager(qHomeA, 1, {
         account: { username: userA, uid: uidA, gid: uidA, home: `/home/${userA}` },
