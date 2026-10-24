@@ -112,6 +112,7 @@ export function renderStatusBody(model: StatusPageModel): string {
     <p class="xp-status-code" dir="ltr">${model.status}</p>
     <h1 class="xp-page-title">${escapeHtml(copy.title)}</h1>
     <p class="xp-prose">${escapeHtml(copy.explanation)}</p>
+    <p class="xp-mono" dir="ltr"><bdi dir="ltr">${escapeHtml(model.path)}</bdi></p>
     ${support}
     <div class="xp-status-actions">${actions.join('')}${panelActions}</div>
   </section>`
