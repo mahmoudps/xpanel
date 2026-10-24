@@ -71,12 +71,12 @@ describe('public login document identity and static icons', () => {
   it('does not promote a URL target into a document title or profile icon', async () => {
     const generic = await serveWebUi(new Request('http://localhost/login?target=xwhm&audience=xmail'))
     const genericHtml = await generic.text()
-    expect(genericHtml).toContain('<title>xPanel Sign In — xPanel Control Plane</title>')
+    expect(genericHtml).toContain('<title>Sign in — xPanel</title>')
     expect(genericHtml).toContain('href="/assets/favicon.svg"')
     expect(genericHtml).not.toMatch(/<div\b[^>]*\bdata-login-audience=/)
     const bound = await serveWebUi(new Request('http://localhost/login?target=xwhm&lang=ar'), () => ({ surface: 'login', login: { audience: 'xmail', targetSurface: 'xmail' } }))
     const boundHtml = await bound.text()
-    expect(boundHtml).toContain('<title>xMail — دخول البريد</title>')
+    expect(boundHtml).toContain('<title>تسجيل الدخول — xMail</title>')
     expect(boundHtml).toContain('href="/assets/favicon-xmail.svg"')
   })
 

@@ -6,7 +6,7 @@ import { dirForLocale, type Locale, SUPPORTED_LOCALES, t } from './i18n.ts'
 import { isStatusCode, renderStatusBody, statusPageCopy, type StatusPageModel } from './status-page.ts'
 import { designHeading, renderDesignMain, renderDesignNav } from './design-board.ts'
 import { ACCOUNT_SECURITY_ROUTES, renderAccountSecurityCard } from './surfaces/account-security.ts'
-import { type LoginSurfaceProps, renderLoginSurface } from './surfaces/login.ts'
+import { loginDocumentTitle, type LoginSurfaceProps, renderLoginSurface } from './surfaces/login.ts'
 import { type MailSurfaceProps, renderMailSurface } from './surfaces/xmail.ts'
 import { type PanelSurfaceProps, renderPanelSurface } from './surfaces/xpanel.ts'
 import { renderWhmSurface, type WhmSurfaceProps } from './surfaces/xwhm.ts'
@@ -273,11 +273,6 @@ export function renderWebApp(state: WebAppRenderState): string {
   }
 
   const loginAudience = state.surface === 'login' && (state.login?.audience === 'xpanel' || state.login?.audience === 'xwhm' || state.login?.audience === 'xmail') ? state.login.audience : undefined
-  const loginIdentity = loginAudience ? {
-    xpanel: { brand: 'xPanel', en: 'Account sign in', ar: 'دخول الحساب' },
-    xwhm: { brand: 'xWHM', en: 'Server sign in', ar: 'دخول إدارة الخادم' },
-    xmail: { brand: 'xMail', en: 'Mail sign in', ar: 'دخول البريد' },
-  }[loginAudience] : undefined
   const faviconHref = loginAudience ? `/assets/favicon-${loginAudience}.svg` : '/assets/favicon.svg'
 
   let surfaceBodyHtml = ''
@@ -303,11 +298,9 @@ export function renderWebApp(state: WebAppRenderState): string {
   const pageHeading = workspacePageHeading(state.surface, locale, activeRoute)
   const pageTitle = state.title ?? (state.error && isStatusCode(state.error.status)
     ? `${statusPageCopy(state.error.status, locale).title} — ${panelLabel(statusSurface)}`
-    : loginIdentity
-      ? `${loginIdentity.brand} — ${loginIdentity[locale]}`
-      : state.surface === 'login'
-        ? `${t(locale, 'surface.login')} — ${t(locale, 'app.title')}`
-        : `${pageHeading} — ${panelLabel(state.surface === 'xwhm' || state.surface === 'xmail' ? state.surface : 'xpanel')}`)
+    : state.surface === 'login'
+      ? loginDocumentTitle(loginAudience, locale)
+      : `${pageHeading} — ${panelLabel(state.surface === 'xwhm' || state.surface === 'xmail' ? state.surface : 'xpanel')}`)
   if (state.error && isStatusCode(state.error.status)) {
     const principal = state.visibility?.principal
     surfaceBodyHtml = renderStatusBody({

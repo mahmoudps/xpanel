@@ -13,7 +13,10 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     mismatch: 'كلمتا المرور الجديدتان غير متطابقتين.', changed: 'تم تغيير كلمة المرور. سجل الدخول مجددًا.',
     session: 'تعذر التحقق من الجلسة. سجل الدخول مجددًا.', unexpected: 'استجابة غير متوقعة من الخادم.',
     show: 'إظهار كلمة المرور', hide: 'إخفاء كلمة المرور', required: 'يلزم تغيير كلمة المرور.',
-    timeout: 'انتهت مهلة الطلب. حاول مجددًا.'
+    timeout: 'انتهت مهلة الطلب. حاول مجددًا.',
+    paused: 'توقف تسجيل الدخول.', again: 'حاول مجددًا بعد ', minutes: ' دقيقة',
+    pausedFor: 'توقف تسجيل الدخول لمدة ', after: ' بعد ', attempts: ' محاولات فاشلة.',
+    useCode: 'استخدم رمز التحقق', useRecovery: 'استخدم رمز استرداد'
   } : {
     failed: 'The request could not be completed. Try again.', invalid: 'Invalid username or password.',
     code: 'The verification code is invalid or no longer usable.', recovery: 'The recovery code is invalid.',
@@ -24,7 +27,10 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     mismatch: 'The new passwords do not match.', changed: 'Password changed. Sign in again.',
     session: 'The session could not be verified. Sign in again.', unexpected: 'Unexpected server response.',
     show: 'Show password', hide: 'Hide password', required: 'A password change is required.',
-    timeout: 'The request timed out. Try again.'
+    timeout: 'The request timed out. Try again.',
+    paused: 'Sign-in is paused.', again: 'Try again in ', minutes: ' minutes',
+    pausedFor: 'Sign-in is paused for ', after: ' after ', attempts: ' failed attempts.',
+    useCode: 'Use an authenticator code', useRecovery: 'Use a recovery code'
   };
   var csrfToken = null;
   var principal = null;
@@ -41,7 +47,22 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
   function show(selector, visible) { var node = document.querySelector(selector); if (node) node.hidden = !visible; }
   function message(text, error) {
     if (errorBox) { errorBox.textContent = error ? text : ''; errorBox.hidden = !error; }
-    if (statusBox) statusBox.textContent = error ? '' : text;
+    if (statusBox) { statusBox.textContent = error ? '' : text; statusBox.hidden = Boolean(error) || !text; }
+  }
+  function loginStep(name) {
+    var companion = shell && shell.getAttribute('data-login-companion') === 'true';
+    document.querySelectorAll('[data-login-step]').forEach(function (node) {
+      var stepName = node.getAttribute('data-login-step');
+      node.hidden = !(stepName === name || (name === 'recovery' && stepName === 'totp'));
+    });
+    var recovery = name === 'recovery';
+    show('[data-login-code]', !recovery && name === 'totp');
+    show('[data-login-recovery]', recovery);
+    if (companion) return;
+    var flow = document.querySelector('[data-login-flow]');
+    var lockout = document.querySelector('[data-login-lockout]');
+    if (flow) flow.hidden = name === 'locked';
+    if (lockout) lockout.hidden = name !== 'locked';
   }
   function setState(state) { if (shell) shell.setAttribute('data-auth-state', state); }
   function busy(form, active) {
@@ -77,6 +98,9 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     show('[data-auth-recovery]', name === 'recovery-codes');
     show('[data-auth-password-change]', name === 'password-change-required');
     show('[data-auth-cancel]', name === 'enrollment' || name === 'recovery-codes' || name === 'password-change-required');
+    if (name === 'credentials') loginStep('password');
+    else if (name === 'mfa-required') loginStep('totp');
+    else if (name === 'locked') loginStep('locked');
     setState(name);
   }
 
@@ -125,10 +149,28 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     if (error.message === 'invalid recovery code') return copy.recovery;
     return ar && error.status ? copy.failed + ' (' + error.status + ')' : error.message || copy.failed;
   }
-  function lock(deadline) {
+  function stamp(ms) {
+    var date = new Date(ms);
+    var pad = function (value) { return String(value).padStart(2, '0'); };
+    return date.getUTCFullYear() + '-' + pad(date.getUTCMonth() + 1) + '-' + pad(date.getUTCDate()) + ' ' + pad(date.getUTCHours()) + ':' + pad(date.getUTCMinutes()) + ' UTC';
+  }
+  function lock(deadline, failures) {
     lockedUntil = deadline;
     step('locked');
     if (errorBox) errorBox.setAttribute('data-lockout-state', 'locked');
+    var minutes = Math.max(0, Math.ceil((deadline - Date.now()) / 60000));
+    var sentence = document.querySelector('[data-lockout-sentence]');
+    if (sentence) sentence.textContent = typeof failures === 'number' ? copy.pausedFor + minutes + copy.minutes + copy.after + failures + copy.attempts : copy.paused;
+    var again = document.querySelector('[data-lockout-again]');
+    if (again) again.textContent = copy.again + minutes + copy.minutes;
+    var until = document.querySelector('[data-lockout-until]');
+    if (until) until.textContent = stamp(deadline);
+    var typed = document.getElementById('login-username');
+    var username = typed ? typed.value.trim() : '';
+    var tried = document.querySelector('[data-lockout-user]');
+    if (tried && username) tried.textContent = username;
+    var lockedUser = document.getElementById('locked-user');
+    if (lockedUser && username) lockedUser.value = username;
     message(copy.locked + new Date(deadline).toISOString() + ' UTC', true);
     if (login) busy(login, false);
     clearTimeout(lockTimer);
@@ -141,7 +183,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
   function authError(error) {
     var details = error.details || {};
     if (details.lockedOut && typeof details.lockedUntil === 'string' && Date.parse(details.lockedUntil) > Date.now()) {
-      lock(Date.parse(details.lockedUntil)); return;
+      lock(Date.parse(details.lockedUntil), typeof details.failures === 'number' ? details.failures : undefined); return;
     }
     if (details.mfaRequired === true) {
       step('mfa-required'); show('[data-auth-mfa-fields]', true);
@@ -165,7 +207,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     busy(login, false);
     var deadline = Date.parse(shell.getAttribute('data-locked-until') || '');
     var retry = Number(shell.getAttribute('data-retry-after'));
-    if (shell.getAttribute('data-auth-state') === 'locked') {
+    if (shell.getAttribute('data-auth-state') === 'locked' && shell.getAttribute('data-login-companion') !== 'true') {
       if (Number.isFinite(deadline) && deadline > Date.now()) lock(deadline);
       else if (retry > 0) lock(Date.now() + retry * 1000);
       else { lockedUntil = Infinity; busy(login, false); }
@@ -254,6 +296,28 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
       if (hideIcon) hideIcon.toggleAttribute('hidden', !visible);
       if (label) label.textContent = visible ? (ar ? 'إخفاء' : 'Hide') : (ar ? 'إظهار' : 'Show');
       if (typeof start === 'number' && typeof end === 'number') input.setSelectionRange(start, end, direction || 'none');
+    } else if (action === 'toggle-recovery') {
+      event.preventDefault();
+      var recoveryBox = document.querySelector('[data-login-recovery]');
+      var showRecovery = Boolean(recoveryBox && recoveryBox.hidden);
+      show('[data-login-code]', !showRecovery);
+      show('[data-login-recovery]', showRecovery);
+      var otp = document.getElementById('login-otp');
+      var recoveryInput = document.getElementById('login-recovery-code');
+      if (showRecovery && otp) otp.value = '';
+      if (!showRecovery && recoveryInput) recoveryInput.value = '';
+      button.textContent = showRecovery ? copy.useCode : copy.useRecovery;
+    } else if (action === 'login-back') {
+      event.preventDefault();
+      var otpBack = document.getElementById('login-otp');
+      var recoveryBack = document.getElementById('login-recovery-code');
+      if (otpBack) otpBack.value = '';
+      if (recoveryBack) recoveryBack.value = '';
+      show('[data-auth-mfa-fields]', false);
+      step('credentials');
+      message('', false);
+      var usernameField = document.getElementById('login-username');
+      if (usernameField) usernameField.focus();
     } else if (action === 'restart-enrollment') {
       clearEnrollment(); show('[data-auth-enrollment-details]', false); if (setup) setup.hidden = false; step('enrollment'); message(copy.enrollment, false);
     } else if (action === 'acknowledge-recovery') {
