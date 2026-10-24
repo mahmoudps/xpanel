@@ -28,6 +28,7 @@ import {
 } from '../tokens.ts'
 import { auditActionHtml, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
 import { isArabicSentence } from '../arabic-type.ts'
+import { renderComposedXwhm } from '../board-port/composed/all.ts'
 import { renderWhmDashboard, whmDashboardFromProps, type DashboardHostSample } from '../board-port/xwhm-dashboard.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
@@ -169,6 +170,19 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
   const actionBannerHtml = props.actionState
     ? renderAsyncActionState({ ...props.actionState, locale })
     : ''
+  const composedHtml = renderComposedXwhm({
+    route: activeRoute,
+    locale,
+    accounts,
+    resellers,
+    services,
+    ipPool,
+    ...(mailIpConfig ? { mailIpConfig } : {}),
+    generations,
+    ...(ioSnapshot ? { ioSnapshot } : {}),
+    ...(generationId !== undefined ? { generationId } : {}),
+    isRoot,
+  })
 
   if (section === 'overview') return ensureAccessibleSurfaceHtml(renderWhmDashboard(whmDashboardFromProps({
     locale, principal, hostname: props.hostname, panelHostname: props.panelHostname, version: props.version, availableVersion: props.availableVersion,
@@ -217,7 +231,8 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
           <button type="button" class="xp-btn xp-btn--ghost" data-action="logout">${escapeHtml(isAr ? 'تسجيل الخروج' : 'Sign out')}</button>
         </div>
       </div>`,
-    content: `      ${actionBannerHtml}
+    content: composedHtml !== undefined ? `      ${actionBannerHtml}
+${composedHtml}` : `      ${actionBannerHtml}
 ${section === 'overview' ? `      <section class="xp-card" data-section="overview-attention">
         <div class="xp-card__header"><div><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1><p class="xp-prose"><bdi dir="ltr">${escapeHtml(hostname)}</bdi></p></div></div>
         <div class="xp-kpi-grid" data-section="whm-kpi-cards">
