@@ -42,6 +42,9 @@ describe('Arabic typography layer', () => {
     assert.equal(ARABIC_TYPE_CSS.includes('0.06em'), false)
     assert.ok(DESIGN_TOKENS_CSS.includes(BOARD_SANS_RTL))
     assert.ok(DESIGN_TOKENS_CSS.includes('html[lang="ar"]'))
+    assert.match(DESIGN_TOKENS_CSS, /html\[lang="ar"\] \{[^}]*--xp-leading-body: 28px/)
+    assert.equal(/html\[lang="ar"\] \{[^}]*--xp-leading-body: 26px/.test(DESIGN_TOKENS_CSS), false)
+    assert.match(ARABIC_TYPE_CSS, /html\[lang="ar"\] body,\nhtml\[dir=rtl\] body \{ font-family: [^;]+; line-height: 1\.75; \}/)
   })
 
   it('moves the board-port face onto a class the RTL rule can override', () => {

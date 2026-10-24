@@ -3,11 +3,19 @@ import { navigation } from './data/navigation.ts'
 import type { CatalogTool, NavPage, NavSurface } from './types.ts'
 import { visibleTools, type VisibilityContext } from './visibility.ts'
 
+const pagesByRoute = new Map(navigation.flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => [page.route, page] as const))))
+
 const allowsPageRole = (page: NavPage, ctx: VisibilityContext): boolean => {
   if (ctx.principal.kind === 'user') return page.roles.includes('owner')
   if (ctx.principal.kind === 'root') return page.roles.some(role => role === 'root' || role.startsWith('reseller'))
   return page.roles.some(role => role === 'reseller'
     || (role.startsWith('reseller:') && ctx.reseller?.acl.some(acl => role === `reseller:${acl}`)))
+}
+
+/** True when the route is in the registry and this principal's role may open it. */
+export const routeOpenTo = (route: string, ctx: VisibilityContext): boolean => {
+  const page = pagesByRoute.get(route)
+  return page !== undefined && allowsPageRole(page, ctx)
 }
 
 /** A page exposes multiple actions, so every represented capability must be available. */

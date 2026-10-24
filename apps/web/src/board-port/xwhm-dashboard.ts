@@ -1,4 +1,5 @@
-import type { Account, AuditEntry, Certificate, Plan, ServerIpEntry } from '@xpanel/core'
+import { routeOpenTo, type VisibilityContext } from '@xpanel/catalog'
+import type { Account, AuditEntry, Certificate, Plan, ResellerAcl, ServerIpEntry } from '@xpanel/core'
 import { ARABIC_TYPE_CSS, isArabicSentence } from '../arabic-type.ts'
 import { isolateLtrRuns } from '../bidi-runs.ts'
 import { auditActionHtml, auditActionLabel, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
@@ -41,7 +42,7 @@ export interface DashboardHostSample {
 
 interface DashboardProps {
   locale?: Locale
-  principal?: { username: string }
+  principal?: { username: string; kind?: 'root' | 'reseller'; acl?: readonly ResellerAcl[] }
   hostname?: string
   /** Panel vhost, shown beside the system hostname when the two differ. */
   panelHostname?: string
@@ -119,6 +120,8 @@ export interface WhmDashboardModel {
   locale: Locale
   hostname: string
   username: string
+  /** Omitted on the root sample. A reseller drops registry routes their role cannot open. */
+  viewer?: { kind: 'root' | 'reseller'; acl: readonly ResellerAcl[] }
   versionLabel: string
   generationLabel: string
   generationTone: 'live' | 'empty'
@@ -205,7 +208,7 @@ const NAV: Array<{ id: string; label: [string, string]; items: Array<{ href: str
   { id: 'nav-g-ops', label: ['Operations', 'التشغيل'], items: [
     { href: '/whm/backups', label: ['Backups', 'النسخ'], icon: '<rect x="3" y="4" width="18" height="5" rx="1"></rect><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"></path>' },
     { href: '/whm/transfers', label: ['Transfer tool', 'أداة النقل'], icon: '<path d="M4 8h14l-4-4M20 16H6l4 4"></path>' },
-    { href: '/whm/upgrade', label: ['Upgrade', 'الترقية'], icon: '<circle cx="12" cy="12" r="9"></circle><path d="M12 16V8M8.5 11.5L12 8l3.5 3.5"></path>' },
+    { href: '/whm/server/upgrade', label: ['Upgrade', 'الترقية'], icon: '<circle cx="12" cy="12" r="9"></circle><path d="M12 16V8M8.5 11.5L12 8l3.5 3.5"></path>' },
     { href: '/whm/audit', label: ['Audit log', 'سجل التدقيق'], icon: '<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"></path><path d="M14 3v5h5M8.5 13h7M8.5 17h7"></path>' },
   ] },
 ]
@@ -398,6 +401,19 @@ const pill = (chip: DashboardChip, mono = false): string => {
   return `<span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: ${chip.bg}; color: ${chip.fg}; font-size: 12px; font-weight: 600;${font}"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: ${dot}; ${border}"></span>${escapeHtml(chip.label)}</span>`
 }
 
+const viewerContext = (model: WhmDashboardModel): VisibilityContext => {
+  const viewer = model.viewer ?? { kind: 'root' as const, acl: [] }
+  if (viewer.kind === 'reseller') {
+    return {
+      principal: { kind: 'reseller', id: 'reseller', username: model.username },
+      reseller: { acl: [...viewer.acl] },
+    }
+  }
+  return { principal: { kind: 'root', id: 'root', username: model.username } }
+}
+
+const canOpen = (model: WhmDashboardModel, route: string): boolean => routeOpenTo(route, viewerContext(model))
+
 const linkStyle = 'display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; color: #C9D3E1; text-decoration: none; font-size: 14px'
 const activeStyle = 'display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; background: #1D2B40; color: #FFFFFF; font-weight: 600; box-shadow: inset 3px 0 0 #6EA0FF; text-decoration: none; font-size: 14px'
 
@@ -408,7 +424,9 @@ const navHtml = (model: WhmDashboardModel): string => {
     ? 'display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; background: #1D2B40; color: #FFFFFF; font-weight: 600; box-shadow: inset -3px 0 0 #6EA0FF; text-decoration: none; font-size: 14px'
     : activeStyle
   const groups = NAV.map(group => {
-    const items = group.items.map(item => {
+    const visible = group.items.filter(item => canOpen(model, item.href))
+    if (visible.length === 0) return ''
+    const items = visible.map(item => {
       const current = item.href === model.activeHref
       const label = show(item.label[index] ?? '', ar)
       const labelBody = label.includes('<') ? `<span>${label}</span>` : label
@@ -536,7 +554,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
           <h1 style="margin: 0; font-size: 22px; font-weight: 600; line-height: 1.3">${show(model.title, ar)}</h1>
           ${lede}
         </div>
-        <a href="/whm/accounts/new" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #1D5BD6; background: #1D5BD6; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none">${svg('<path d="M12 5v14M5 12h14"></path>', 18, false)}${show(model.createLabel, ar)}</a>
+        ${canOpen(model, '/whm/accounts/new') ? `<a href="/whm/accounts/new" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #1D5BD6; background: #1D5BD6; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none">${svg('<path d="M12 5v14M5 12h14"></path>', 18, false)}${show(model.createLabel, ar)}</a>` : ''}
       </div>
       <section aria-label="Notices" style="display: flex; flex-wrap: wrap; gap: 16px">${model.notices.map(noticeHtml).join('')}</section>
       <div style="display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start">
@@ -550,7 +568,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
             <dl style="margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px">${model.reconcilerTiles.map(item => tile(item.label, item.value, item.note, ar, item.chip, item.monoLabel)).join('')}</dl>
             <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: auto">
               <button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer">${show(model.driftButton, ar)}</button>
-              <a href="/whm/audit" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.driftLink, ar)}</a>
+              ${canOpen(model, '/whm/audit') ? `<a href="/whm/audit" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.driftLink, ar)}</a>` : ''}
               <span role="status" style="font-size: 12px; font-weight: 500; color: #0E7A4E">${show(model.driftStatus, ar)}</span>
             </div>
           </section>
@@ -574,7 +592,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
               </table>
             </div>
             <div style="display: flex; padding: 8px 18px; border-top: 1px solid #EEF0F3">
-              <a href="/whm/audit" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.auditLink, ar)}</a>
+              ${canOpen(model, '/whm/audit') ? `<a href="/whm/audit" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.auditLink, ar)}</a>` : ''}
             </div>
           </section>
         </div>
@@ -588,8 +606,8 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
               <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid #EEF0F3; border-radius: 10px">${near}</ul>
             </div>
             <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: auto">
-              <a href="/whm/accounts" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-size: 14px; font-weight: 600; text-decoration: none">${show(model.viewAccounts, ar)}</a>
-              <a href="/whm/resellers" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.resellersLink, ar)}</a>
+              ${canOpen(model, '/whm/accounts') ? `<a href="/whm/accounts" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-size: 14px; font-weight: 600; text-decoration: none">${show(model.viewAccounts, ar)}</a>` : ''}
+              ${canOpen(model, '/whm/resellers') ? `<a href="/whm/resellers" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.resellersLink, ar)}</a>` : ''}
             </div>
           </section>
           <section aria-labelledby="host-title" style="min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 24px; border-radius: 12px; background: #FFFFFF; border: 1px solid #E2E6EC">
@@ -611,7 +629,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
             </div>
             <ul style="list-style: none; margin: 0; padding: 0; border-top: 1px solid #E2E6EC">${services}</ul>
             <div style="display: flex; padding: 8px 18px; border-top: 1px solid #EEF0F3">
-              <a href="/whm/services" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.servicesLink, ar)}</a>
+              ${canOpen(model, '/whm/services') ? `<a href="/whm/services" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: #1D5BD6">${show(model.servicesLink, ar)}</a>` : ''}
             </div>
           </section>
         </div>
@@ -645,7 +663,7 @@ export const whmDashboardFixture = (): WhmDashboardModel => ({
   searchPlaceholder: 'Search tools and accounts',
   notices: [
     { tone: 'warn', html: `<span><strong style="font-weight: 600">3 certificates renew within 30 days:</strong> ${mono('alice-shop.com')} (2026-11-04), ${mono('nour.dev')} (2026-11-12), ${mono('omar-clinic.net')} (2026-11-19). AutoSSL renews them; check any domain that no longer points here. <a href="/whm/ssl" style="color: #1D5BD6; font-weight: 600">Review certificates</a></span>` },
-    { tone: 'info', html: `<span><strong style="font-weight: 600">Upgrade ${mono('v1.5.0')} is available</strong> (this server runs ${mono('v1.4.2')}). It installs side by side with a snapshot and a health check, and rolls back automatically if the check fails. Homes, mail and customer databases are not touched. <a href="/whm/upgrade" style="color: #1D5BD6; font-weight: 600">Review the upgrade</a></span>` },
+    { tone: 'info', html: `<span><strong style="font-weight: 600">Upgrade ${mono('v1.5.0')} is available</strong> (this server runs ${mono('v1.4.2')}). It installs side by side with a snapshot and a health check, and rolls back automatically if the check fails. Homes, mail and customer databases are not touched. <a href="/whm/server/upgrade" style="color: #1D5BD6; font-weight: 600">Review the upgrade</a></span>` },
   ],
   reconcilerTitle: 'Reconciler',
   reconcilerStatus: okChip('In sync'),
@@ -748,7 +766,7 @@ export const whmDashboardFixtureAr = (): WhmDashboardModel => ({
   searchPlaceholder: 'ابحث في الأدوات والحسابات',
   notices: [
     { tone: 'warn', html: `<span><strong style="font-weight: 600"><bdi dir="ltr">3</bdi> شهادات تُجدَّد خلال <bdi dir="ltr">30</bdi> يوماً:</strong> ${domain('alice-shop.com')} <bdi dir="ltr">(2026-11-04)</bdi>، ${domain('nour.dev')} <bdi dir="ltr">(2026-11-12)</bdi>، ${domain('omar-clinic.net')} <bdi dir="ltr">(2026-11-19)</bdi>. يجددها <bdi dir="ltr">AutoSSL</bdi>؛ راجع أي نطاق لم يعد يشير إلى هنا. <a href="/whm/ssl" style="color: #1D5BD6; font-weight: 600">مراجعة الشهادات</a></span>` },
-    { tone: 'info', html: `<span><strong style="font-weight: 600">الترقية <bdi dir="ltr">v1.5.0</bdi> متاحة</strong> (هذا الخادم يعمل <bdi dir="ltr">v1.4.2</bdi>). تُثبَّت إلى جانب لقطة وفحص سلامة، وتتراجع تلقائياً إذا فشل الفحص. لا تُمس المنازل ولا البريد ولا قواعد بيانات العملاء. <a href="/whm/upgrade" style="color: #1D5BD6; font-weight: 600">مراجعة الترقية</a></span>` },
+    { tone: 'info', html: `<span><strong style="font-weight: 600">الترقية <bdi dir="ltr">v1.5.0</bdi> متاحة</strong> (هذا الخادم يعمل <bdi dir="ltr">v1.4.2</bdi>). تُثبَّت إلى جانب لقطة وفحص سلامة، وتتراجع تلقائياً إذا فشل الفحص. لا تُمس المنازل ولا البريد ولا قواعد بيانات العملاء. <a href="/whm/server/upgrade" style="color: #1D5BD6; font-weight: 600">مراجعة الترقية</a></span>` },
   ],
   reconcilerTitle: 'الموفّق',
   reconcilerStatus: okChip('متزامن'),
@@ -1020,6 +1038,10 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     locale,
     hostname,
     username: props.principal?.username ?? '—',
+    viewer: {
+      kind: props.principal?.kind === 'reseller' ? 'reseller' : 'root',
+      acl: props.principal?.acl ?? [],
+    },
     versionLabel: version,
     generationLabel: generationId !== undefined ? (ar ? `الجيل «${generationId}» · نشط` : `Generation ${generationId} · active`) : '—',
     generationTone: generationId !== undefined ? 'live' : 'empty',

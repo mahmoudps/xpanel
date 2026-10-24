@@ -165,8 +165,9 @@ describe('production web renderer boundary regressions', () => {
     const home = await observe('root-mfa-unenrolled:/whm', await render(request('/whm', cookie)), 200)
     expect(home).toContain('data-mfa-optional-link')
     expect(home).not.toMatch(/Multi-factor enrollment is required|must complete enrollment/)
-    const accounts = await observe('root-mfa-unenrolled:/whm/accounts', await render(request('/whm/accounts', cookie)), 404)
-    expect(accounts).toContain('data-status-page="404"')
+    const accounts = await observe('root-mfa-unenrolled:/whm/accounts', await render(request('/whm/accounts', cookie)), 200)
+    expect(accounts).toContain('data-tool-availability="unverified"')
+    expect(accounts).not.toContain('data-status-page="404"')
     expect(accounts).not.toMatch(/Multi-factor enrollment is required|must complete enrollment/)
     const security = await observe('root-mfa-unenrolled:security', await render(request('/whm/security/sign-in', cookie)), 200)
     expect(security).toContain('data-mfa-recommendation')
@@ -183,9 +184,10 @@ describe('production web renderer boundary regressions', () => {
     const home = await observe('unverified-catalog:/whm', await render(request('/whm', cookie)), 200)
     expect.soft(home.includes('data-tool-availability="unverified"')).toBe(true)
     expect.soft(/alice-shop\.com|srv1\.xpanel\.test/.test(home)).toBe(false)
-    const accounts = await observe('unverified-catalog:/whm/accounts', await render(request('/whm/accounts', cookie)), 404)
-    expect.soft(accounts.includes('data-status-page="404"')).toBe(true)
-    expect.soft(accounts.includes('data-tool-availability="unverified"')).toBe(false)
+    const accounts = await observe('unverified-catalog:/whm/accounts', await render(request('/whm/accounts', cookie)), 200)
+    expect.soft(accounts.includes('data-status-page="404"')).toBe(false)
+    expect.soft(accounts.includes('data-tool-availability="unverified"')).toBe(true)
+    expect.soft(accounts.includes('Coming soon')).toBe(true)
     expect.soft(/alice-shop\.com|srv1\.xpanel\.test/.test(accounts)).toBe(false)
   })
 
@@ -201,23 +203,24 @@ describe('production web renderer boundary regressions', () => {
     expect(inbox!.workspaceSummary).toEqual({})
     for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(inbox).not.toHaveProperty(key)
     for (const path of ['/whm/accounts', '/panel/files/manager']) {
-      await observe(`empty-state:${path}`, await render(request(path, cookie)), 404)
+      await observe(`empty-state:${path}`, await render(request(path, cookie)), 200)
       const supplied = hydration.at(-1)
       expect(supplied).toBeDefined()
       const visibility = supplied!.visibility as { principal: { kind: string } }
       observations.push({ id: `hydration:${path}`, visibilityPrincipalKind: visibility.principal.kind,
         catalogOverridden: supplied!.catalog !== undefined,
-        fullStateSupplied: ['whm', 'panel', 'mail', 'generationId', 'workspaceSummary'].some(key => key in supplied!),
+        fullStateSupplied: ['whm', 'panel', 'mail', 'generationId'].some(key => key in supplied!),
       })
       expect(visibility.principal.kind).toBe('root')
       expect(supplied!.catalog).toBeUndefined()
-      expect(supplied!.error).toMatchObject({ status: 404 })
-      for (const key of ['whm', 'panel', 'mail', 'generationId', 'workspaceSummary']) expect(supplied).not.toHaveProperty(key)
+      expect(supplied!.error).toBeUndefined()
+      expect(supplied!.workspaceSummary).toEqual({})
+      for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(supplied).not.toHaveProperty(key)
     }
     expect(snapshotReads).toBe(0)
   })
 
-  it('uses a styled 404 for unknown and unqualified routes and keeps the workspace on home', async () => {
+  it('uses a styled 404 only for an unknown route and keeps built routes on the workspace', async () => {
     const principal = await root()
     const cookie = await session(principal.id)
     const render = await renderer()
@@ -230,9 +233,9 @@ describe('production web renderer boundary regressions', () => {
     expect(signedUnknown).toContain('data-user-menu')
     expect(signedUnknown).toContain('data-action="logout"')
     expect(signedUnknown).not.toContain('>Sign in<')
-    const domains = await observe('route-404:domains', await render(request('/panel/domains', cookie)), 404)
-    expect(domains).toContain('data-status-page="404"')
-    expect(domains).toContain('Back to workspace')
+    const domains = await observe('route-soon:domains', await render(request('/panel/domains', cookie)), 200)
+    expect(domains).not.toContain('data-status-page="404"')
+    expect(domains).toContain('data-tool-availability="unverified"')
     expect(domains).toContain('data-nav-route="/domains" data-nav-wiring="soon"')
     expect(domains).toContain('Coming soon')
     expect(domains).not.toContain('Not yet available')

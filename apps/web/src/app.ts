@@ -1,10 +1,10 @@
-import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
+import { routeOpenTo, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { canSeeAccount, type Account, type Plan } from '@xpanel/core'
 import { panelLabel, renderSecurityNavLink, renderSupportNotice, renderUserMenu, roleLabel, type PanelLink } from './chrome.ts'
 import { formatDisplayName } from './display-name.ts'
 import { dirForLocale, type Locale, SUPPORTED_LOCALES, t } from './i18n.ts'
 import { isStatusCode, renderStatusBody, statusPageCopy, type StatusPageModel } from './status-page.ts'
-import { designHeading, renderDesignMain, renderDesignNav } from './design-board.ts'
+import { designHeading, renderDesignMain, renderDesignNav, renderDisabledScreen } from './design-board.ts'
 import { ACCOUNT_SECURITY_ROUTES, renderAccountSecurityCard } from './surfaces/account-security.ts'
 import { type LoginSurfaceProps, renderLoginSurface } from './surfaces/login.ts'
 import { type MailSurfaceProps, renderMailSurface } from './surfaces/xmail.ts'
@@ -201,11 +201,13 @@ const renderUnavailableWorkspace = (
   const pageHeading = workspacePageHeading(surface, locale, path)
   const securityPage = ACCOUNT_SECURITY_ROUTES.has(path)
   const qualifiedRoutes = new Set((state?.visibility ? visibleNavigation(state.visibility, state.catalog) : []).filter(item => item.surface === panelSurface).flatMap(item => item.sections.flatMap(section => section.pages.map(page => page.route))))
-  const design = securityPage ? '' : renderDesignMain(path, locale)
+  const visibility = state?.visibility
+  const openRoute = panelSurface === 'xwhm' && visibility ? (route: string) => routeOpenTo(route, visibility) : undefined
+  const design = securityPage ? '' : (renderDesignMain(path, locale) || renderDisabledScreen(pageHeading, locale))
   return renderSurfaceShell({
     surface: panelSurface,
     locale,
-    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${panelLabel(panelSurface)}</strong></div>${renderDesignNav(panelSurface, locale, path, qualifiedRoutes)}${panelSurface === 'xmail' ? renderSecurityNavLink('xmail', locale, path) : ''}`,
+    sidebar: `<div class="xp-sidebar__brand"><span class="xp-brand__mark" aria-hidden="true">x</span><strong>${panelLabel(panelSurface)}</strong></div>${renderDesignNav(panelSurface, locale, path, qualifiedRoutes, openRoute)}${panelSurface === 'xmail' ? renderSecurityNavLink('xmail', locale, path) : ''}`,
     topbar: renderUserMenu({
       locale,
       theme,
@@ -217,7 +219,7 @@ const renderUnavailableWorkspace = (
       signedIn: authenticated && principal !== undefined,
     }),
     content: `<section class="xp-workspace-summary" data-surface="${surface}" data-tool-availability="unverified"${securityPage ? ' data-security-page="true"' : ''}>
-  ${securityPage ? `<h1 class="xp-page-title">${escapeHtml(pageHeading)}</h1>` : design || `<h1 class="xp-page-title">${escapeHtml(pageHeading)}</h1>`}
+  ${securityPage ? `<h1 class="xp-page-title">${escapeHtml(pageHeading)}</h1>` : design}
   ${actionState ? renderAsyncActionState({ ...actionState, locale }) : ''}
   ${state && !securityPage ? renderWorkspaceSummary(state, locale) : ''}
   ${securityPage ? '' : renderSupportNotice(locale, state?.supportEmail)}
