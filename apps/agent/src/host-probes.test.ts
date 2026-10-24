@@ -86,6 +86,8 @@ describe('host capability probes', () => {
     expect(match('/var/spool/postfix/opendkim', 'ensure-directory')).toBe(true)
     expect(match('/var/spool/postfix/opendkim', 'write')).toBe(false)
     expect(match('/var/spool/postfix/etc', 'write')).toBe(false)
+    expect(match('/proc/self/mountinfo', 'read')).toBe(true)
+    expect(match('/proc/self/mountinfo', 'write')).toBe(false)
     expect(match('/proc/cpuinfo', 'read')).toBe(true)
     expect(match('/proc/cpuinfo', 'write')).toBe(false)
     expect(match('/proc/stat', 'read')).toBe(false)

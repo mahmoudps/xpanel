@@ -14,6 +14,7 @@ import { hashPasswordArgon2id } from '../auth.ts'
 import { sessionTokenHash } from '../entry-points.ts'
 import type { EntryPoint } from '../entry-points.ts'
 import { attachmentsFromBodyStructure, ImapProtocolClient, type ImapFetchedMessage } from './imap.ts'
+import { imapDialPlan } from './idle.ts'
 import { smtpHumanCopy, SmtpSubmissionClient } from './smtp.ts'
 
 export interface MailAttachmentSummary {
@@ -203,8 +204,8 @@ const summaryOf = (message: ImapFetchedMessage): InboxSummary => {
   }
 }
 
-const withImap = async <T>(host: string, port: number, mailbox: string, password: string, fn: (client: ImapProtocolClient) => Promise<T>, timeoutMs = 15_000): Promise<T> => {
-  const client = new ImapProtocolClient({ host, port, tls: false, timeoutMs })
+const withImap = async <T>(host: string, port: number, tls: boolean, mailbox: string, password: string, fn: (client: ImapProtocolClient) => Promise<T>, timeoutMs = 15_000): Promise<T> => {
+  const client = new ImapProtocolClient({ host, port, tls, timeoutMs })
   try {
     await client.connect()
     await client.login(mailbox, password)
@@ -235,13 +236,19 @@ export const createLocalMailboxTransport = (
   const smtpHost = env.XPANEL_SMTP_HOST || '127.0.0.1'
   const smtpPort = Number(env.XPANEL_SMTP_PORT || '587')
   const smtpTimeout = Number(env.XPANEL_SMTP_TIMEOUT_MS || '20000')
+  // Port 143 is cleartext and loopback-only. A non-loopback host needs 993 or XPANEL_IMAP_TLS=1.
+  const imapPlan = imapDialPlan(imapHost, imapPort, env.XPANEL_IMAP_TLS)
+  const imap = async <T>(mailbox: string, password: string, fn: (client: ImapProtocolClient) => Promise<T>): Promise<T> => {
+    if (!imapPlan) return fail('PRECONDITION_FAILED', 'cleartext mail is limited to loopback; use port 993 or XPANEL_IMAP_TLS=1')
+    return withImap(imapHost, imapPort, imapPlan.tls, mailbox, password, fn, imapTimeout)
+  }
   return {
     async verify(mailbox, password) {
-      await withImap(imapHost, imapPort, mailbox, password, async () => undefined, imapTimeout)
+      await imap(mailbox, password, async () => undefined)
     },
     async list(mailbox, password, folder = 'INBOX') {
       const name = mailFolderName(folder)
-      return withImap(imapHost, imapPort, mailbox, password, async client => {
+      return imap(mailbox, password, async client => {
         const uids = await client.searchAllUids(name)
         if (uids.length === 0) return []
         const messages: ImapFetchedMessage[] = []
@@ -250,31 +257,31 @@ export const createLocalMailboxTransport = (
           messages.push(...fetched.messages)
         }
         return messages.map(summaryOf).sort((left, right) => right.uid - left.uid)
-      }, imapTimeout)
+      })
     },
     async read(mailbox, password, uid, folder = 'INBOX') {
       const name = mailFolderName(folder)
-      return withImap(imapHost, imapPort, mailbox, password, async client => {
+      return imap(mailbox, password, async client => {
         const fetched = await client.fetchMessagesByUid(name, uid)
         const message = fetched.messages.find(item => item.uid === uid)
         if (!message) return fail('NOT_FOUND', 'message not found')
         await client.storeFlagsByUid(name, uid, 'add', ['\\Seen'])
         return { ...summaryOf(message), unread: false, body: message.parsed.textBody }
-      }, imapTimeout)
+      })
     },
     async remove(mailbox, password, uid, folder = 'INBOX') {
       const name = mailFolderName(folder)
-      await withImap(imapHost, imapPort, mailbox, password, client => client.deleteByUid(name, uid), imapTimeout)
+      await imap(mailbox, password, client => client.deleteByUid(name, uid))
     },
     async move(mailbox, password, uid, fromFolder, toFolder) {
       const from = mailFolderName(fromFolder)
       const to = mailFolderName(toFolder)
       if (from === to) return
-      const destination = await withImap(imapHost, imapPort, mailbox, password, client => client.moveOrCopyByUid(from, uid, to, 'move'), imapTimeout)
+      const destination = await imap(mailbox, password, client => client.moveOrCopyByUid(from, uid, to, 'move'))
       return typeof destination === 'number' ? { uid: destination } : undefined
     },
     async counts(mailbox, password) {
-      return withImap(imapHost, imapPort, mailbox, password, async client => {
+      return imap(mailbox, password, async client => {
         const rows: MailFolderCount[] = []
         for (const folder of MAIL_FOLDERS) {
           const status = await client.folderStatus(folder)
@@ -282,10 +289,10 @@ export const createLocalMailboxTransport = (
           rows.push({ folder, total: status.messages, unread: status.unseen })
         }
         return rows
-      }, imapTimeout)
+      })
     },
     async quota(mailbox, password) {
-      return withImap(imapHost, imapPort, mailbox, password, async client => {
+      return imap(mailbox, password, async client => {
         const measured = await client.quotaRoot()
         if (measured) {
           const usedBytes = measured.usedKb * 1024
@@ -301,7 +308,7 @@ export const createLocalMailboxTransport = (
           bytes += fetched.messages.reduce((sum, item) => sum + item.sizeBytes, 0)
         }
         return { usedMb: Math.round((bytes / (1024 * 1024)) * 10) / 10, usedBytes: bytes }
-      }, imapTimeout)
+      })
     },
     async send(mailbox, password, input) {
       const loopback = smtpHost === '127.0.0.1' || smtpHost === '::1' || smtpHost === 'localhost'
@@ -331,7 +338,7 @@ export const createLocalMailboxTransport = (
           : submitted
         if (copy) {
           try {
-            await withImap(imapHost, imapPort, mailbox, password, client => client.appendMessage('Sent', copy, ['\\Seen']), imapTimeout)
+            await imap(mailbox, password, client => client.appendMessage('Sent', copy, ['\\Seen']))
             savedToSent = true
           } catch {
             savedToSent = false

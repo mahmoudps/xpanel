@@ -23,6 +23,12 @@ export interface AccountSliceMetrics {
   pidsCurrent: number
   /** Raw `io.max`. Null when the file is absent. `wbps=max` is not a plan cap. */
   ioMax?: string | null
+  /** Raw `memory.max`. Null when the file is absent. `max` is not a plan cap. */
+  memoryMax?: string | null
+  /** Raw `pids.max`. */
+  pidsMax?: string | null
+  /** Raw `cpu.max` (`quota period`). */
+  cpuMax?: string | null
 }
 
 export interface AgentExecutor {
@@ -222,6 +228,9 @@ export class FakeHostExecutor implements AgentExecutor {
         ioWriteBytes: 0,
         pidsCurrent: 0,
         ioMax: null,
+        memoryMax: null,
+        pidsMax: null,
+        cpuMax: null,
       }
     )
   }
@@ -310,7 +319,7 @@ const SYSTEM_EXACT_TARGETS = new Set<string>([
 
 /** Read-only host facts. A path is granted only when it is listed here, and no other /proc path is readable. */
 const HOST_MEASUREMENT_READS = new Set<string>([
-  '/proc/loadavg', '/proc/meminfo', '/proc/uptime', '/proc/cpuinfo',
+  '/proc/loadavg', '/proc/meminfo', '/proc/uptime', '/proc/cpuinfo', '/proc/self/mountinfo',
   '/etc/os-release', '/usr/lib/os-release', '/opt/xpanel/VERSION',
   '/sys/fs/cgroup/xpanel.slice/cgroup.subtree_control',
   '/sys/fs/cgroup/cgroup.subtree_control',
@@ -776,12 +785,15 @@ export class LinuxHostExecutor implements AgentExecutor {
         throw error
       }
     }
-    const [cpuStat, memCur, ioStat, pidsCur, ioMax] = await Promise.all([
+    const [cpuStat, memCur, ioStat, pidsCur, ioMax, memoryMax, pidsMax, cpuMax] = await Promise.all([
       readText('cpu.stat'),
       readText('memory.current'),
       readText('io.stat'),
       readText('pids.current'),
       readText('io.max'),
+      readText('memory.max'),
+      readText('pids.max'),
+      readText('cpu.max'),
     ])
     if (cpuStat === null || memCur === null || pidsCur === null) return null
     const cpuMatch = /^usage_usec\s+(\d+)/m.exec(cpuStat)
@@ -801,6 +813,9 @@ export class LinuxHostExecutor implements AgentExecutor {
       ioWriteBytes,
       pidsCurrent: Number(pidsCur.trim()) || 0,
       ioMax,
+      memoryMax: memoryMax?.trim() ?? null,
+      pidsMax: pidsMax?.trim() ?? null,
+      cpuMax: cpuMax?.trim() ?? null,
     }
   }
 }

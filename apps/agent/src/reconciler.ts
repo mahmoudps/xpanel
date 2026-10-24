@@ -32,7 +32,8 @@ import type { AgentExecutor } from './executor.ts'
 import { applyPostfixLocalDelivery, retirePostfixLocalDelivery } from './services/local-mail.ts'
 import { ensureOpenDkimSigning, mailAuthZoneAdditions, type OpenDkimSigning } from './services/opendkim-live.ts'
 import { removedMaildirPaths } from './services/mail.ts'
-import { chooseZoneSerial } from './zone-serial.ts'
+import { resolveAccountIoDevices } from './io-device.ts'
+import { chooseZoneSerial, stampZoneContent } from './zone-serial.ts'
 import {
   buildGenerationManifest,
   computeFilesChecksum,
@@ -66,6 +67,8 @@ export interface CompileOptions {
   os: OsProfile
   quotaFilesystem?: string | null
   ioDevices?: string[]
+  /** Per-account devices. An empty list leaves that account's io.max unset. */
+  ioDevicesByAccount?: ReadonlyMap<string, readonly string[]>
   zoneDir?: string
   now?: Date
   /** DKIM material already written by the live mail writer. Absent leaves the zone unchanged. */
@@ -216,10 +219,12 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     // Provision Linux group, user, 0750 home dirs, and filesystem quota
     preActions.push(...system.accountProvisionActions(account, plan, os, { quotaFilesystem }))
 
+    const accountDevices = [...(opts.ioDevicesByAccount?.get(account.id) ?? ioDevices)]
+
     // Account systemd slice & logind user slice drop-in. The drop-in directory is
     // created before the atomic write so user-<uid>.slice.d/.tmp can be published.
-    files.push(system.renderAccountSlice(account, plan.resources, ioDevices, { systemdDir: os.paths.systemdDir }))
-    const loginDropin = system.renderLoginSliceDropin(account, plan.resources, ioDevices, { systemdDir: os.paths.systemdDir })
+    files.push(system.renderAccountSlice(account, plan.resources, accountDevices, { systemdDir: os.paths.systemdDir }))
+    const loginDropin = system.renderLoginSliceDropin(account, plan.resources, accountDevices, { systemdDir: os.paths.systemdDir })
     files.push(loginDropin)
     preActions.push({
       kind: 'ensure-dir',
@@ -229,7 +234,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       group: 'root',
     })
     postActions.push(
-      ...system.sliceUpdateActions(account, plan.resources, ioDevices, { systemdDir: os.paths.systemdDir }),
+      ...system.sliceUpdateActions(account, plan.resources, accountDevices, { systemdDir: os.paths.systemdDir }),
     )
     needsDaemonReload = true
 
@@ -497,7 +502,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     const drafted = renderZone(zone.serial)
     const previous = opts.previousZones ? (opts.previousZones.get(path) ?? null) : null
     const serial = chooseZoneSerial(zone.serial, previous, drafted, now)
-    const content = serial === zone.serial ? drafted : renderZone(serial)
+    const content = stampZoneContent(serial === zone.serial ? drafted : renderZone(serial))
     files.push({
       path,
       content,
@@ -1147,11 +1152,17 @@ export class HostReconciler {
     ]
     const previousManifest = currentGen ? await this.journal.readManifest(currentGen.id) : null
     const appliedSnapshot = currentGen ? await this.deps.store.readGenerationSnapshot(currentGen.id) : null
-    const compileMail = (mailAuth: OpenDkimSigning | null, previousZones?: ReadonlyMap<string, string>) => {
+    const compileMail = (
+      mailAuth: OpenDkimSigning | null,
+      previousZones?: ReadonlyMap<string, string>,
+      io?: { devices?: readonly string[]; byAccount?: ReadonlyMap<string, readonly string[]> },
+    ) => {
+      const devices = io ? io.devices : this.deps.ioDevices
       const next = compileDesiredGeneration(snapshot, {
         os: this.deps.os,
         quotaFilesystem: this.deps.quotaFilesystem ?? null,
-        ...(this.deps.ioDevices && { ioDevices: this.deps.ioDevices }),
+        ...(devices && devices.length > 0 ? { ioDevices: [...devices] } : {}),
+        ...(io?.byAccount ? { ioDevicesByAccount: io.byAccount } : {}),
         ...(this.deps.zoneDir && { zoneDir: this.deps.zoneDir }),
         ...(mailAuth ? { mailAuth } : {}),
         ...(previousZones ? { previousZones } : {}),
@@ -1204,7 +1215,20 @@ export class HostReconciler {
         if (text !== null) previousZones.set(path, text)
       } catch { /* An unreadable zone file keeps the serial already in state. */ }
     }
-    const refreshed = compileMail(mailAuth, previousZones)
+    let io: { devices?: readonly string[]; byAccount?: ReadonlyMap<string, readonly string[]> } | undefined
+    if (this.deps.ioDevices && this.deps.ioDevices.length > 0) {
+      io = { devices: this.deps.ioDevices }
+    } else {
+      try {
+        const byAccount = await resolveAccountIoDevices(
+          this.deps.executor,
+          snapshot.accounts,
+          this.deps.quotaFilesystem ?? '/home',
+        )
+        if (byAccount) io = { byAccount }
+      } catch { /* No device leaves IO unenforced and the sentence says so. */ }
+    }
+    const refreshed = compileMail(mailAuth, previousZones, io)
     const nextChecksum = computeFilesChecksum(refreshed.files)
     if (nextChecksum !== filesChecksum) {
       compiled = refreshed

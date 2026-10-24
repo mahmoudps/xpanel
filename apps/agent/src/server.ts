@@ -21,10 +21,11 @@ import { AcmeCertificateServiceAdapter } from './services/acme.ts'
 import { createHttp01AcmeClient } from './services/acme-client.ts'
 import { probeAuditLog, probeHostCapabilities, readHostMeasurements } from './host-probes.ts'
 import { readAccountUsage } from './account-usage.ts'
-import { readPublicOriginSync } from './agent-origin.ts'
+import { readPanelPublicOriginSync, readPublicOriginSync } from './agent-origin.ts'
 import { readHostConfigChecks, readHostIdentity, readServedCertificatePem, PANEL_LISTENER_PORT } from './host-identity.ts'
 import { probeDkimOutcome } from './services/dkim-probe.ts'
-import { signMailboxSubmission } from './services/dkim-sign.ts'
+import { createSignRateLimit, signMailboxSubmission, submissionFromDomains } from './services/dkim-sign.ts'
+import { gapsForAccount, parseRepquota, unionLimitGaps, type ObservedAccountLimits } from './limit-gaps.ts'
 import { parseDf, parseDfInodes, parseLoadavg, parseMeminfo } from './host-info.ts'
 import { readHostServices, restartHostService } from './host-services.ts'
 import { createAccountBackup, listAccountBackups, restoreAccountBackup, DEFAULT_BACKUP_DIR } from './account-backup.ts'
@@ -233,6 +234,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       : null
   const ioEngine = deps.ioAnalytics ?? new IoAnalyticsEngine()
   const webEngine = deps.websiteAnalytics ?? new WebsiteAnalyticsEngine()
+  const allowDkimSign = createSignRateLimit()
 
   const resolveAccountHome = (accountHome: string, username: string): string => {
     if (!deps.homeBaseDir) return accountHome
@@ -493,18 +495,60 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         const body = await readObjectBody(req)
         const mailbox = typeof body.mailbox === 'string' ? body.mailbox.trim().toLowerCase() : ''
         const rawMime = typeof body.rawMime === 'string' ? body.rawMime : ''
+        const purpose = body.purpose
+        const auditSign = async (outcome: 'ok' | 'denied' | 'failed', detail: Record<string, unknown>): Promise<void> => {
+          await appendAudit(deps.db, {
+            actor: caller.actor,
+            action: 'host.dkim-sign',
+            target: `mailbox:${mailbox || 'unknown'}`,
+            detail,
+            outcome,
+          })
+        }
+        if (purpose !== 'webmail-send') {
+          await auditSign('denied', { reason: 'purpose' })
+          return fail('FORBIDDEN', 'signing is only available to the webmail send path')
+        }
         if (!/^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(mailbox) || mailbox.length > 254) {
+          await auditSign('denied', { reason: 'mailbox' })
           return fail('VALIDATION', 'mailbox address is invalid')
         }
-        if (rawMime.length === 0 || rawMime.length > 12_000_000) return fail('VALIDATION', 'submitted message is empty or too large')
+        const mimeBytes = Buffer.byteLength(rawMime, 'utf8')
+        if (mimeBytes === 0 || mimeBytes > 12_000_000) {
+          await auditSign('denied', { reason: 'size', bytes: mimeBytes })
+          return fail('VALIDATION', 'submitted message is empty or too large')
+        }
         const user = await deps.store.getServiceUserByLogin(mailbox)
         if (!user?.services.email) return fail('NOT_FOUND', 'mailbox not found')
         const account = await deps.store.getAccount(user.accountId)
         if (!account) return fail('NOT_FOUND', 'account not found')
-        await assertAccountCaller(caller, account, 'host.dkim-sign')
+        const ownsAccount = caller.role === 'root'
+          || (caller.role === 'reseller' && caller.resellerId !== null && account.ownerId === caller.resellerId && account.status === 'active')
+          || (caller.role === 'user' && caller.accountId === account.id && account.status === 'active')
+        if (!ownsAccount) {
+          await auditSign('denied', { reason: 'cross-account', accountId: account.id })
+          return fail('FORBIDDEN', 'caller is not authorized to sign for this mailbox')
+        }
+        const fromDomains = submissionFromDomains(rawMime)
+        const domains = new Set((await deps.store.listDomains({ accountId: account.id })).map(domain => domain.name.toLowerCase()))
+        const mailboxDomain = mailbox.slice(mailbox.lastIndexOf('@') + 1)
+        domains.add(mailboxDomain)
+        if (!fromDomains || fromDomains.some(domain => !domains.has(domain)) || new Set(fromDomains).size !== 1) {
+          await auditSign('denied', { reason: 'from-domain', fromDomain: fromDomains?.[0] ?? null })
+          return fail('FORBIDDEN', 'the From domain is not one of this account')
+        }
+        const fromDomain = fromDomains[0]!
+        if (!allowDkimSign(account.id)) {
+          await auditSign('denied', { reason: 'rate' })
+          return fail('FORBIDDEN', 'signing rate limit exceeded')
+        }
         if (!deps.executor) return jsonResponse({ signed: false }, 404)
-        const signed = await signMailboxSubmission(deps.executor, mailbox, rawMime)
-        if (!signed) return jsonResponse({ signed: false })
+        const signed = await signMailboxSubmission(deps.executor, mailbox, rawMime, fromDomain)
+        if (!signed) {
+          await auditSign('failed', { reason: 'unsigned', fromDomain })
+          return jsonResponse({ signed: false })
+        }
+        await auditSign('ok', { fromDomain, purpose: 'webmail-send' })
         return jsonResponse({ rawMime: signed })
       }
 
@@ -581,7 +625,42 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
             runCommand: (argv) => host.runCommand(argv),
             readServedCertificate: (servername?: string) => readServedCertificatePem('127.0.0.1', PANEL_LISTENER_PORT, 2000, servername),
             publicOrigin: () => readPublicOriginSync(),
+            panelOrigin: () => readPanelPublicOriginSync(),
           })
+          try {
+            const accounts = (await deps.store.listAccounts()).filter(account => account.status === 'active')
+            if (accounts.length > 0) {
+              const quotaFs = process.env.XPANEL_QUOTA_FS && process.env.XPANEL_QUOTA_FS !== 'none'
+                ? process.env.XPANEL_QUOTA_FS
+                : '/home'
+              let quotaUsers: Set<string> | null = null
+              try {
+                const quota = await host.runCommand(['/usr/sbin/repquota', '-n', '-u', quotaFs])
+                if (quota.ok) quotaUsers = parseRepquota(quota.stdout)
+              } catch { /* An unreadable quota report leaves disk unchecked. */ }
+              const rows = []
+              for (const account of accounts) {
+                const plan = await deps.store.getPlan(account.planId)
+                if (!plan) continue
+                let observed: ObservedAccountLimits | null = null
+                try {
+                  const slice = await host.readSliceMetrics(account.uid)
+                  if (slice) {
+                    const named = quotaUsers?.has(account.username) || quotaUsers?.has(`#${account.uid}`)
+                    observed = {
+                      memoryMax: slice.memoryMax ?? null,
+                      pidsMax: slice.pidsMax ?? null,
+                      cpuMax: slice.cpuMax ?? null,
+                      ioMax: slice.ioMax ?? null,
+                      diskQuota: quotaUsers === null ? null : named === true,
+                    }
+                  }
+                } catch { /* A missing slice counts the finite plan limits as open. */ }
+                rows.push(gapsForAccount(plan.resources, observed))
+              }
+              if (rows.length > 0) identity.unenforcedLimits = unionLimitGaps(rows)
+            }
+          } catch { /* The controller sentence remains when account limits cannot be read. */ }
           let configChecks: Awaited<ReturnType<typeof readHostConfigChecks>> = {}
           try {
             configChecks = await readHostConfigChecks(host)

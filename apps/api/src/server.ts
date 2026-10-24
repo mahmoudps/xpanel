@@ -116,6 +116,7 @@ import type { EntryPoint } from './entry-points.ts'
 import { loadQualifiedCatalog } from './host-catalog.ts'
 import { renderTotpQrSvg } from './totp-qr.ts'
 import { createLocalMailboxTransport, establishMailboxSession, mailFolderName, mailboxAddressIndex, openMailboxSession, parseMailboxSend, revokeMailboxIdentity, rewriteMailboxIds } from './mail/inbox.ts'
+import { imapDialPlan, mailboxLiveEvent, watchMailboxIdle } from './mail/idle.ts'
 import type { MailboxTransport } from './mail/inbox.ts'
 import { deleteMailboxSession } from '@xpanel/db'
 
@@ -254,6 +255,7 @@ export interface ApiApp {
   fetch(req: Request, context?: TransportContext): Promise<Response>
   hub: LiveEventHub
   authenticateUpgrade(req: IncomingMessage, context?: TransportContext): Promise<EventSubscriber | null>
+  watchMailbox(req: IncomingMessage, signal: AbortSignal): void
 }
 
 const readJsonBody = async <T = Record<string, unknown>>(req: Request): Promise<T> => {
@@ -422,6 +424,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   }
 
   const hub = deps.hub ?? new LiveEventHub()
+  const pendingIdle = new WeakMap<IncomingMessage, { mailbox: string; password: string; accountId: string }>()
+  const idleWatching = new WeakSet<IncomingMessage>()
   const lockoutThreshold = deps.lockoutThreshold ?? 5
   const lockoutDurationMs = deps.lockoutDurationMs ?? 15 * 60_000
 
@@ -531,9 +535,38 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       const caller = await authenticateRequest(deps.db, webReq, { serverSecret, clientIp: extractClientIp(webReq), touchSession: false, entryPoint })
       if (!caller || !caller.mfaVerified) return null
       if (caller.apiTokenId !== null) assertApiScope(caller, 'events:read')
-      if (isMailboxPrincipal(caller)) {
+      const mailboxIdentity = isMailboxPrincipal(caller)
+        || (caller.principal.kind === 'user' && /^mbx[0-9a-f]{8,}$/i.test(caller.principal.username))
+      if (mailboxIdentity || (entryPoint === 'xmail' && caller.principal.kind === 'user')) {
         if (caller.principal.kind !== 'user' || !caller.principal.accountId) return null
-        return buildSubscriberForCaller(caller)
+        let mailboxLogin: string | undefined
+        try {
+          if (caller.sessionId) {
+            const opened = await openMailboxSession(deps.db, serverSecret, caller.sessionId)
+            if (opened.record.accountId === caller.principal.accountId) {
+              mailboxLogin = opened.record.mailbox
+              if (!idleWatching.has(req)) {
+                pendingIdle.set(req, {
+                  mailbox: opened.record.mailbox,
+                  password: opened.password,
+                  accountId: opened.record.accountId,
+                })
+              }
+            }
+          }
+        } catch { /* A missing mailbox session fails closed for a mailbox identity. */ }
+        if (mailboxLogin) {
+          const account = await deps.store.getAccount(caller.principal.accountId, { username: caller.principal.username })
+          if (!account || account.status !== 'active') return null
+          return {
+            kind: 'user',
+            id: caller.principal.id,
+            username: caller.principal.username,
+            accountId: caller.principal.accountId,
+            mailboxLogin,
+          }
+        }
+        if (mailboxIdentity) return null
       }
       await assertRequestAuthorized(deps.store, caller, new Request(new URL('/api/events/recent', webReq.url), { headers }))
       return buildSubscriberForCaller(caller)
@@ -1681,7 +1714,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
                   'content-type': 'application/json',
                   ...agentCallerHeaders({ principalId: caller.principal.id, token: deps.agentToken! }),
                 },
-                body: JSON.stringify({ mailbox, rawMime }),
+                body: JSON.stringify({ mailbox, rawMime, purpose: 'webmail-send' }),
               }))
               if (!response.ok) return null
               const body = await response.json() as { rawMime?: unknown }
@@ -3103,10 +3136,34 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     }
   }
 
+  const watchMailbox = (req: IncomingMessage, signal: AbortSignal): void => {
+    const row = pendingIdle.get(req)
+    pendingIdle.delete(req)
+    if (!row || signal.aborted) return
+    idleWatching.add(req)
+    const host = process.env.XPANEL_IMAP_HOST || '127.0.0.1'
+    const port = Number(process.env.XPANEL_IMAP_PORT || '143')
+    // Port 143 is cleartext and loopback-only. Port 993, or XPANEL_IMAP_TLS=1, uses TLS.
+    const plan = imapDialPlan(host, port, process.env.XPANEL_IMAP_TLS)
+    if (!plan) return
+    watchMailboxIdle({
+      host,
+      port,
+      tls: plan.tls,
+      mailbox: row.mailbox,
+      password: row.password,
+      signal,
+      onPush: (push) => {
+        hub.broadcast(mailboxLiveEvent(push, { accountId: row.accountId, mailbox: row.mailbox }))
+      },
+    })
+  }
+
   return {
     fetch,
     hub,
     authenticateUpgrade,
+    watchMailbox,
   }
 }
 
@@ -3192,6 +3249,8 @@ export const listenApiServer = async (
     app.hub.attachToServer(srv, (req) => {
       if (trustedIngress) trustedIngressRequests.add(req)
       return app.authenticateUpgrade(req, { trustedIngress })
+    }, (req, _subscriber, signal) => {
+      app.watchMailbox(req, signal)
     })
     return srv
   }

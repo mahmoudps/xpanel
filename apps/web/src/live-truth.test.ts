@@ -197,6 +197,9 @@ describe('live truth surfaces', () => {
     assert.equal(whmDashboardFromProps({ hostSample: { enforcedLimits: { cpu: true, memory: true, io: true, pids: true } } }).controllersNote, 'All plan limits are enforced on this host.')
     assert.equal(whmDashboardFromProps({ hostSample: { enforcedLimits: { cpu: true, memory: true, io: false, pids: true } } }).controllersNote, 'IO write limits are not enforced on this host.')
     assert.equal(whmDashboardFromProps({ locale: 'ar', hostSample: { enforcedLimits: { cpu: false, memory: true, io: true, pids: true } } }).controllersNote, 'بعض حدود الخطط غير مفروضة على هذا المضيف.')
+    assert.equal(whmDashboardFromProps({ hostSample: { unenforcedLimits: [] } }).controllersNote, 'All plan limits are enforced on this host.')
+    assert.equal(whmDashboardFromProps({ hostSample: { unenforcedLimits: ['io'] } }).controllersNote, 'IO write limits are not enforced on this host.')
+    assert.equal(whmDashboardFromProps({ hostSample: { unenforcedLimits: ['memory', 'io', 'disk'] } }).controllersNote, 'memory, IO write, and disk quota limits are not enforced on this host.')
     const arabicHome = xpanelHomeFromProps({
       locale: 'ar',
       account: { username: 'demohost', uid: 20000, home: '/home/demohost', primaryDomain: 'demo.example.test', ipv4: '192.0.2.10' },
@@ -301,6 +304,28 @@ server {
       assert.match(noticeText, /other\.example\.test/)
       assert.match(noticeText, /days/)
     }
+    const mailFirst = spawnSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-keyout', '/tmp/xpanel-truth-san.pem', '-out', '/dev/stdout', '-days', '6', '-nodes', '-subj', '/CN=panel.example.test', '-addext', 'subjectAltName=DNS:mail.example.test,DNS:panel.example.test'], { encoding: 'utf8' })
+    const sanPem = mailFirst.status === 0 && mailFirst.stdout.includes('BEGIN CERTIFICATE') ? mailFirst.stdout : null
+    if (sanPem) {
+      const parsed = certificateFromPem(sanPem, Date.now())
+      assert.equal(parsed?.names[0], 'panel.example.test')
+      assert.equal(parsed?.names.includes('mail.example.test'), true)
+      const labeled = whmDashboardFromProps({ certificates: [{ names: parsed?.names ?? [], notAfter: new Date(Date.now() + 6 * 86_400_000).toISOString() }], now: Date.now() })
+      const html = labeled.notices.map(item => item.html).join(' ')
+      const panelAt = html.indexOf('panel.example.test')
+      const mailAt = html.indexOf('mail.example.test')
+      assert.ok(panelAt >= 0 && mailAt > panelAt)
+    }
+    const panelRow = await readHostIdentity({
+      readFile: async () => null,
+      runCommand: async (argv) => argv[0]?.endsWith('/nginx') && argv[1] === '-T'
+        ? { ok: true, stdout: 'server { listen 127.0.0.1:8443 ssl; server_name panel.example.test whm.example.test; }\n', stderr: '' }
+        : { ok: false, stdout: '', stderr: '' },
+      readServedCertificate: async () => certificate,
+      publicOrigin: () => 'https://whm.example.test',
+      panelOrigin: () => 'https://panel.example.test',
+    })
+    assert.equal(panelRow.panelDomain, 'panel.example.test')
     const layered = `
 server { listen 127.0.0.1:8443 ssl; server_name _; }
 server { listen 127.0.0.1:8443 ssl; server_name panel.example.test; }

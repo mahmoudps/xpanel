@@ -548,6 +548,18 @@ export type LiveEvent =
   | {
       id: string
       at: string
+      kind: 'mail.flags'
+      scope: LiveEventScope
+      data: {
+        mailbox: string
+        folder: string
+        uid: number
+        flags: string[]
+      }
+    }
+  | {
+      id: string
+      at: string
       kind: 'security.ban'
       scope: LiveEventScope
       data: {

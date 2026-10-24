@@ -55,6 +55,7 @@ interface QueuedEvent {
 }
 
 type AuthenticateUpgrade = (req: IncomingMessage) => Promise<EventSubscriber | null>
+type ConnectedHook = (req: IncomingMessage, subscriber: EventSubscriber, signal: AbortSignal) => void
 
 const accountSet = (subscriber: EventSubscriber): ReadonlySet<Id> =>
   new Set(subscriber.ownedAccountIds ?? [])
@@ -220,7 +221,7 @@ export class LiveEventHub {
     }
   }
 
-  attachToServer(server: HttpServer, authenticate: AuthenticateUpgrade): void {
+  attachToServer(server: HttpServer, authenticate: AuthenticateUpgrade, onConnected?: ConnectedHook): void {
     const transport = new WebSocketServer({
       noServer: true,
       clientTracking: false,
@@ -239,7 +240,7 @@ export class LiveEventHub {
         return
       }
       this.#pendingUpgrades++
-      void this.#upgrade(req, socket, head, authenticate, transport, ownConnections)
+      void this.#upgrade(req, socket, head, authenticate, transport, ownConnections, onConnected)
         .catch(() => socket.destroy())
         .finally(() => { this.#pendingUpgrades-- })
     })
@@ -252,6 +253,7 @@ export class LiveEventHub {
     authenticate: AuthenticateUpgrade,
     transport: WebSocketServer,
     ownConnections: Set<() => void>,
+    onConnected?: ConnectedHook,
   ): Promise<void> {
     socket.once('error', () => socket.destroy())
     const deadline = setTimeout(() => socket.destroy(), AUTHENTICATION_TIMEOUT_MS)
@@ -273,7 +275,9 @@ export class LiveEventHub {
         return
       }
       transport.handleUpgrade(req, socket, head, (ws) => {
-        const close = this.#connect(ws, req, subscriber, authenticate)
+        const session = new AbortController()
+        const close = this.#connect(ws, req, subscriber, authenticate, () => session.abort())
+        onConnected?.(req, subscriber, session.signal)
         ownConnections.add(close)
         ws.once('close', () => ownConnections.delete(close))
         const afterSeqParam = url.searchParams.get('afterSeq') ?? url.searchParams.get('cursor')
@@ -293,7 +297,7 @@ export class LiveEventHub {
     }
   }
 
-  #connect(ws: WebSocket, req: IncomingMessage, initial: EventSubscriber, authenticate: AuthenticateUpgrade) {
+  #connect(ws: WebSocket, req: IncomingMessage, initial: EventSubscriber, authenticate: AuthenticateUpgrade, onEnd?: () => void) {
     const queue: QueuedEvent[] = []
     let queuedBytes = 0
     let flushing = false
@@ -314,6 +318,7 @@ export class LiveEventHub {
       queuedBytes = 0
       registration.unregister()
       this.#networkClosers.delete(disconnect)
+      onEnd?.()
     }
     const disconnect = () => {
       cleanup()
