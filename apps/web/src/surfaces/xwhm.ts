@@ -28,7 +28,7 @@ import {
 } from '../tokens.ts'
 import { auditActionHtml, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
 import { isArabicSentence } from '../arabic-type.ts'
-import { renderWhmDashboard, whmDashboardFromProps, type DashboardHostSample } from '../board-port/xwhm-dashboard.ts'
+import { renderWhmDashboard, whmDashboardFromProps, type DashboardHostSample, type WhmDashboardModel } from '../board-port/xwhm-dashboard.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 
@@ -100,6 +100,8 @@ export interface WhmSurfaceProps {
   nearLimits?: Array<{ name: string; note: string }>
   certificates?: readonly Pick<Certificate, 'names' | 'notAfter'>[]
   actionState?: AsyncActionBannerProps
+  /** Harness only. Board-sample model for the pixel gate. Production leaves this unset. */
+  dashboardPort?: WhmDashboardModel
 }
 
 const ALL_RESELLER_ACLS: readonly ResellerAcl[] = [
@@ -170,7 +172,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
     ? renderAsyncActionState({ ...props.actionState, locale })
     : ''
 
-  if (section === 'overview') return ensureAccessibleSurfaceHtml(renderWhmDashboard(whmDashboardFromProps({
+  if (section === 'overview') return ensureAccessibleSurfaceHtml(renderWhmDashboard(props.dashboardPort ?? whmDashboardFromProps({
     locale, principal, hostname: props.hostname, panelHostname: props.panelHostname, version: props.version, availableVersion: props.availableVersion,
     generationId: props.generationId, accounts: props.accounts, resellers: props.resellers, ipPool: props.ipPool,
     plans: props.plans, services, auditEntries, hostSample: props.hostSample, driftCount: props.driftCount,

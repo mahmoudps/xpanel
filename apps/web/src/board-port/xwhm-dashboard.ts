@@ -1166,5 +1166,9 @@ ${renderWhmDashboard(model)}
 export const renderFidelityDocument = (dir: 'ltr' | 'rtl' = 'ltr'): string =>
   documentShell(dir === 'rtl' ? whmDashboardFixtureAr() : whmDashboardFixture())
 
+/** Live-shaped dashboard for no-scroll and truth checks. Not the board sample. */
+export const liveShapedDashboard = (dir: 'ltr' | 'rtl' = 'ltr'): WhmDashboardModel =>
+  whmDashboardFromProps({ locale: dir === 'rtl' ? 'ar' : 'en', principal: { username: 'root' } })
+
 export const renderLiveDocument = (dir: 'ltr' | 'rtl' = 'ltr'): string =>
-  documentShell(whmDashboardFromProps({ locale: dir === 'rtl' ? 'ar' : 'en', principal: { username: 'root' } }))
+  documentShell(liveShapedDashboard(dir))

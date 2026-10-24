@@ -191,12 +191,18 @@ export const renderFidelityDocument = (kind: 'ltr' | 'ar' | 'phone' = 'ltr'): st
   return documentShell(`${renderDesktop(xpanelHomeFixture())}${HOME_SCRIPT}`, 'en', 'Home — xPanel')
 }
 
-export const renderLiveDocument = (kind: 'ltr' | 'ar' | 'phone' = 'ltr'): string => {
+/** Live-shaped home for no-scroll and truth checks. Not the board sample. */
+export const liveShapedHome = (kind: 'ltr' | 'ar' | 'phone' = 'ltr') => {
   const locale = kind === 'ar' ? 'ar' : 'en'
-  const model = xpanelHomeFromProps({
+  return xpanelHomeFromProps({
     locale,
     account: { username: 'owner', uid: 1000, home: '/home/owner', primaryDomain: 'example.test', ipv4: '192.0.2.10' },
   })
+}
+
+export const renderLiveDocument = (kind: 'ltr' | 'ar' | 'phone' = 'ltr'): string => {
+  const locale = kind === 'ar' ? 'ar' : 'en'
+  const model = liveShapedHome(kind)
   if (kind === 'phone') return documentShell(`${renderPhone({ ...model.phone, titleTag: 'h1' })}${HOME_SCRIPT}`, 'en', 'Home on phone — xPanel')
   return documentShell(renderXpanelHome(model), locale, locale === 'ar' ? 'الرئيسية — xPanel' : 'Home — xPanel')
 }

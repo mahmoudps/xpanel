@@ -31,7 +31,7 @@ const fixtureCustom = (): FolderLink[] => [
   { id: 'invoices', label: 'Invoices 2026', href: 'MailInbox.dc.html', icon: 'folder', current: false },
 ]
 
-const fixtureModel = (): InboxModel => ({
+export const inboxBoardModel = (): InboxModel => ({
   locale: 'en',
   product: false,
   mailbox: 'info@alice-shop.com',
@@ -96,6 +96,9 @@ ${body}
 </body>
 </html>`
 
-export const renderFidelityDocument = (): string => documentShell(renderInbox(fixtureModel()))
+export const renderFidelityDocument = (): string => documentShell(renderInbox(inboxBoardModel()))
 
-export const renderLiveDocument = (locale: Locale = 'en'): string => documentShell(renderInbox(xmailInboxFromProps({ locale, mailbox: 'owner@example.test' })))
+/** Live-shaped inbox for no-scroll and truth checks. Not the board sample. */
+export const liveShapedInbox = (locale: Locale = 'en'): InboxModel => xmailInboxFromProps({ locale, mailbox: 'owner@example.test' })
+
+export const renderLiveDocument = (locale: Locale = 'en'): string => documentShell(renderInbox(liveShapedInbox(locale)))

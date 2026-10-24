@@ -17,7 +17,7 @@ const fixtureFolders = (): FolderLink[] => [
   { label: 'Archive', href: 'MailInbox.dc.html', icon: 'archive', current: false },
 ]
 
-const fixtureModel = (): ComposeModel => ({
+export const composeBoardModel = (): ComposeModel => ({
   feedback: { sendOk: 'Sent to 3 recipients at 14:06 UTC and signed with DKIM for alice-shop.com. A copy is in Sent.', saved: 'Draft saved 14:06 UTC', savedNote: 'Draft saved to Drafts at 14:06 UTC.' },
   locale: 'en',
   product: false,
@@ -94,5 +94,9 @@ ${body}
 </html>`
 
 
-export const renderFidelityDocument = (): string => documentShell(renderCompose(fixtureModel()))
-export const renderLiveDocument = (locale: Locale = 'en'): string => documentShell(renderCompose(xmailComposeFromProps({ locale, mailbox: 'owner@example.test' })))
+export const renderFidelityDocument = (): string => documentShell(renderCompose(composeBoardModel()))
+
+/** Live-shaped composer for no-scroll and truth checks. Not the board sample. */
+export const liveShapedCompose = (locale: Locale = 'en'): ComposeModel => xmailComposeFromProps({ locale, mailbox: 'owner@example.test' })
+
+export const renderLiveDocument = (locale: Locale = 'en'): string => documentShell(renderCompose(liveShapedCompose(locale)))
