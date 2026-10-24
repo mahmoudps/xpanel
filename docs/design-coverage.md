@@ -40,7 +40,7 @@ Update this file in every PR that changes a row. Names, routes, and status only.
 | Home · Audit log/WhmAudit.dc.html | xWHM | /whm/audit | Not started | — | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/22) |
 | Accounts · Accounts/WhmAccounts.dc.html | xWHM | /whm/accounts | PR open | — | not measured | real; pending fields empty-state coming soon | [PR](https://github.com/mahmoudps/xpanel/pull/27) |
 | Accounts · Create account/WhmAccountCreate.dc.html | xWHM | /whm/accounts/new | PR open | — | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/28) |
-| Plans · Plans/WhmPlans.dc.html | xWHM | /whm/plans | PR open | 0.00% page, worst tile 0.00% at 1280×3105, refused: byte-identical. 1px pad fails at 2.02% | none: no transition, animation, or spring. Hover is an instant color change | real | — |
+| Plans · Plans/WhmPlans.dc.html | xWHM | /whm/plans | PR open | 0.00% page, worst tile 0.00% at 1280×3105, refused: byte-identical. 1px pad fails at 2.02% | none: no transition, animation, or spring. Hover is an instant color change | real | [PR](https://github.com/mahmoudps/xpanel/pull/62) |
 | Plans · Feature lists/WhmFeatures.dc.html | xWHM | /whm/plans/features | Not started | — | not measured | empty-state coming soon | — |
 | Resellers · Resellers/WhmResellers.dc.html | xWHM | /whm/resellers | Not started | — | not measured | real | — |
 | Domains, DNS & SSL · Domains/WhmDomains.dc.html | xWHM | /whm/domains | Not started | — | not measured | empty-state coming soon | — |
