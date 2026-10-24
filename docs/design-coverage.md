@@ -1,8 +1,8 @@
 # Design coverage
 
-**2 of 44 boards done.**
+**2 of 44 boards done. 0 are Merged+gated.**
 
-Done means the row is Merged+gated or Blocked with a reason. Nothing in this ledger is Merged+gated. The strict gate is ≤0.5% of the page and ≤1% of every 200×200 tile, with the board's sample content injected only in the test, on the product route. A merged screen stays **Not started** until that gate is in a merged commit. Local numbers below are from an uncommitted run and are not a merge. The open Accounts, Create account, and Email PRs were measured on the product route with live-shaped data (1.94%, 6.76%, and 3.20%). Those figures are not the strict method, so their static-gate cell stays a dash.
+Done means the row is Merged+gated or Blocked with a reason. The strict gate is [#32](https://github.com/mahmoudps/xpanel/pull/32): ≤0.5% of the page and ≤1% of every 200×200 tile, on the product route, with a DOM proof, a byte-identical pair refused, and a 1px pad that must fail. Board sample content stays in the test fixture. A merged screen stays **Not started** until that gate accepts it in a merged commit. This run accepts 0 screens. Home and Home phone are 0.00% and refused because the two captures are the same bytes. Dashboard, Inbox, and Compose miss the tile limit and are not byte-identical. The open Accounts, Create account, and Email PRs were measured with live-shaped data (1.94%, 6.76%, and 3.20%). Those figures are not this gate, so their static-gate cell stays a dash.
 
 The claude-export has 44 `.dc.html` files. The only variant files are Home (English), Home (Arabic), and Home (phone). There is no separate empty, error, or modal file. HTTP 403, 404, 421, 500, and 503 are product error responses without a board.
 
@@ -16,8 +16,8 @@ Update this file in every PR that changes a row. Names, routes, and status only.
 
 | Board file | Surface | Product route | Status | Static gate % | Motion gate | Data binding | PR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| General · Home/PanelHome.dc.html | xPanel | /home | Not started | 0.00% page, 0% tiles (local, not merged) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/14) |
-| General · Home — phone/PanelHomeMobile.dc.html | xPanel | /home (390×844) | Not started | 0.00% page, 0% tiles (local, not merged) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/14) |
+| General · Home/PanelHome.dc.html | xPanel | /home | Not started | 0.00% pixels, refused: byte-identical ([#32](https://github.com/mahmoudps/xpanel/pull/32)) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/14) |
+| General · Home — phone/PanelHomeMobile.dc.html | xPanel | /home (390×844) | Not started | 0.00% pixels, refused: byte-identical ([#32](https://github.com/mahmoudps/xpanel/pull/32)) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/14) |
 | General · Home — Arabic (RTL)/PanelHomeAr.dc.html | xPanel | /home?lang=ar | Blocked: Arabic typography (#20) is a visual check, not a pixel gate | — | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/20) |
 | General · Resources & quotas/PanelResources.dc.html | xPanel | /resources | Not started | — | not measured | real | — |
 | Email · Email accounts/PanelEmail.dc.html | xPanel | /email/accounts | PR open | — | not measured | real; pending fields empty-state coming soon | [PR](https://github.com/mahmoudps/xpanel/pull/30) |
@@ -36,7 +36,7 @@ Update this file in every PR that changes a row. Names, routes, and status only.
 | Design system/Main.dc.html | xPanel | /design/system | Not started | — | not measured | — | — |
 | Navigation map — all 187 pages/NavMap.dc.html | xPanel | /design/navigation | Not started | — | not measured | — | — |
 | Premium components/Components.dc.html | xPanel | /design/components | Not started | — | not measured | — | — |
-| Home · Dashboard/WhmDashboard.dc.html | xWHM | /whm | Not started | 0.57% page, worst tile 6.74% (fail, local) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/15) |
+| Home · Dashboard/WhmDashboard.dc.html | xWHM | /whm | Not started | 0.57% page, worst tile 6.74% (fail, [#32](https://github.com/mahmoudps/xpanel/pull/32)) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/15) |
 | Home · Audit log/WhmAudit.dc.html | xWHM | /whm/audit | Not started | — | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/22) |
 | Accounts · Accounts/WhmAccounts.dc.html | xWHM | /whm/accounts | PR open | — | not measured | real; pending fields empty-state coming soon | [PR](https://github.com/mahmoudps/xpanel/pull/27) |
 | Accounts · Create account/WhmAccountCreate.dc.html | xWHM | /whm/accounts/new | PR open | — | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/28) |
@@ -56,8 +56,8 @@ Update this file in every PR that changes a row. Names, routes, and status only.
 | xWHM Software · PHP/WhmPhp.dc.html | xWHM | /whm/software/php | Not started | — | not measured | empty-state coming soon | — |
 | Server · Setup & settings/WhmSetup.dc.html | xWHM | /whm/server/setup | Not started | — | not measured | empty-state coming soon | — |
 | Server · Upgrade/WhmUpgrade.dc.html | xWHM | /whm/server/upgrade | Not started | — | not measured | real | — |
-| Mail · Inbox/MailInbox.dc.html | xMail | /mail/inbox | Not started | 0.88% page, worst tile 10.90% (fail, local) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/16) |
-| Mail · Compose/MailCompose.dc.html | xMail | /mail/compose | Not started | 1.38% page, worst tile 9.88% (fail, local) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/17) |
+| Mail · Inbox/MailInbox.dc.html | xMail | /mail/inbox | Not started | 0.88% page, worst tile 10.90% (fail, [#32](https://github.com/mahmoudps/xpanel/pull/32)) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/16) |
+| Mail · Compose/MailCompose.dc.html | xMail | /mail/compose | Not started | 1.38% page, worst tile 9.88% (fail, [#32](https://github.com/mahmoudps/xpanel/pull/32)) | not measured | real | [PR](https://github.com/mahmoudps/xpanel/pull/17) |
 | Sign in/Login.dc.html | auth | /login | Not started | — | not measured | real | — |
 | Build map/BuildMap.dc.html | — | — | Blocked: no product route | — | not measured | — | — |
 
