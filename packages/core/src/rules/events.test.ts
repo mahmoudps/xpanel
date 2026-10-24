@@ -55,7 +55,8 @@ describe('canReceiveLiveEvent RBAC scoping', () => {
     const owned = new Set(['acc-a'])
     expect(canReceiveLiveEvent(res1, serverEvent, owned)).toBe(false)
     expect(canReceiveLiveEvent(res1, accountAEvent, owned)).toBe(true)
-    expect(canReceiveLiveEvent(res1, mailEvent, owned)).toBe(true)
+    expect(canReceiveLiveEvent(res1, mailEvent, owned)).toBe(false)
+    expect(canReceiveLiveEvent(res1, { ...mailEvent, id: 'evt-flags', kind: 'mail.flags', data: { mailbox: 'billing@alice-shop.com', folder: 'INBOX', uid: 42, flags: ['\\Seen'] } }, owned)).toBe(false)
     expect(canReceiveLiveEvent(res2, accountAEvent, new Set(['acc-b']))).toBe(false)
   })
 
@@ -64,7 +65,15 @@ describe('canReceiveLiveEvent RBAC scoping', () => {
     const bob = { kind: 'user' as const, id: 'u-2', accountId: 'acc-b', username: 'bob' }
     expect(canReceiveLiveEvent(alice, serverEvent)).toBe(false)
     expect(canReceiveLiveEvent(alice, accountAEvent)).toBe(true)
-    expect(canReceiveLiveEvent(alice, mailEvent)).toBe(true)
+    expect(canReceiveLiveEvent(alice, mailEvent)).toBe(false)
+    expect(canReceiveLiveEvent(
+      { kind: 'user', accountId: 'acc-a', mailboxLogin: 'billing@alice-shop.com' },
+      mailEvent,
+    )).toBe(true)
+    expect(canReceiveLiveEvent(
+      { kind: 'user', accountId: 'acc-a', mailboxLogin: 'other@alice-shop.com' },
+      mailEvent,
+    )).toBe(false)
     expect(canReceiveLiveEvent(bob, accountAEvent)).toBe(false)
   })
 

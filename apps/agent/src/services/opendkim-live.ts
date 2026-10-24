@@ -39,6 +39,8 @@ export const currentDkimSelector = (now = new Date()): string => {
 const stampOf = (signing: OpenDkimSigning): string =>
   createHash('sha256').update(JSON.stringify(signing), 'utf8').digest('hex')
 
+const fileHash = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
+
 export const parseOpenDkimSigning = (text: string | null): OpenDkimSigning => {
   if (!text) return { domains: {} }
   try {
@@ -113,10 +115,6 @@ export const ensureOpenDkimSigning = async (
     const domain = safeDomain(name)
     if (domain) wanted.add(domain)
   }
-  for (const name of Object.keys(previous.domains)) {
-    const domain = safeDomain(name)
-    if (domain) wanted.add(domain)
-  }
 
   const dirs: HostAction[] = [
     { kind: 'ensure-dir', path: OPENDKIM_DIR, mode: 0o755, owner: 'root', group: 'root' },
@@ -130,12 +128,14 @@ export const ensureOpenDkimSigning = async (
 
   const signing: OpenDkimSigning = { domains: {} }
   let changed = false
+  const tracked: { path: string; previous: string; next: string }[] = []
   for (const domain of [...wanted].sort()) {
     const kept = previous.domains[domain]
     const selector = kept?.selector ?? currentDkimSelector(now)
     services.assertDkimSelector(selector)
     const keyPath = `${OPENDKIM_KEYS}/${domain}/${selector}.private`
-    let privatePem = await executor.readFile(keyPath)
+    const onDiskKey = (await executor.readFile(keyPath)) ?? ''
+    let privatePem: string | null = onDiskKey || null
     let publicKey = ''
     if (privatePem && !privatePem.includes('BEGIN PRIVATE KEY') && !privatePem.includes('BEGIN RSA PRIVATE KEY')) privatePem = null
     if (privatePem) {
@@ -154,22 +154,25 @@ export const ensureOpenDkimSigning = async (
     }
     const record = services.dkimDnsRecord(domain, selector, publicKey, { keyType: 'rsa' })
     signing.domains[domain] = { selector, publicKeyPem: publicKey, dnsTxt: record.content }
+    tracked.push({ path: keyPath, previous: onDiskKey, next: privatePem })
     if (!kept || kept.selector !== selector || kept.dnsTxt !== record.content) changed = true
   }
 
   const signingText = `${JSON.stringify(signing, null, 2)}\n`
+  tracked.push({ path: SIGNING_PATH, previous: (await executor.readFile(SIGNING_PATH)) ?? '', next: signingText })
   if (await writeOwned(executor, { path: SIGNING_PATH, content: signingText, mode: 0o644, owner: 'root', group: 'root' })) changed = true
 
   const keyLines = ['# Managed by xPanel: OpenDKIM KeyTable']
   const signLines = ['# Managed by xPanel: OpenDKIM SigningTable']
   const trustLines = ['# Managed by xPanel: OpenDKIM TrustedHosts', '127.0.0.1', '::1', 'localhost']
+  const internalLines = ['# Managed by xPanel: OpenDKIM InternalHosts', '127.0.0.1', '::1', 'localhost']
   for (const domain of Object.keys(signing.domains).sort()) {
     const row = signing.domains[domain]!
     const keyName = `${row.selector}._domainkey.${domain}`
     const keyPath = `${OPENDKIM_KEYS}/${domain}/${row.selector}.private`
     keyLines.push(`${keyName} ${domain}:${row.selector}:${keyPath}`)
     signLines.push(`*@${domain} ${keyName}`)
-    trustLines.push(domain, `*.${domain}`)
+    internalLines.push(domain, `*.${domain}`)
   }
   const table = (path: string, lines: string[]): RenderedFile => ({
     path,
@@ -178,11 +181,14 @@ export const ensureOpenDkimSigning = async (
     owner: 'root',
     group: 'opendkim',
   })
-  for (const file of [
+  const tables = [
     table(`${OPENDKIM_DIR}/KeyTable`, keyLines),
     table(`${OPENDKIM_DIR}/SigningTable`, signLines),
     table(`${OPENDKIM_DIR}/TrustedHosts`, trustLines),
-  ]) {
+    table(`${OPENDKIM_DIR}/InternalHosts`, internalLines),
+  ]
+  for (const file of tables) {
+    tracked.push({ path: file.path, previous: (await executor.readFile(file.path)) ?? '', next: file.content })
     if (await writeOwned(executor, file)) changed = true
   }
 
@@ -194,11 +200,12 @@ export const ensureOpenDkimSigning = async (
     `Socket local:${OPENDKIM_SOCKET_PATH}`,
     'KeyTable refile:/etc/opendkim/KeyTable',
     'SigningTable refile:/etc/opendkim/SigningTable',
-    'ExternalIgnoreList refile:/etc/opendkim/TrustedHosts',
-    'InternalHosts refile:/etc/opendkim/TrustedHosts',
+    'ExternalIgnoreList refile:/etc/opendkim/InternalHosts',
+    'InternalHosts refile:/etc/opendkim/InternalHosts',
   ].join('\n')
   const existingConf = (await executor.readFile(OPENDKIM_CONF)) ?? ''
   const nextConf = services.replaceManagedBlock(existingConf, managed)
+  tracked.push({ path: OPENDKIM_CONF, previous: existingConf, next: nextConf })
   const wantedSocket = `local:${OPENDKIM_SOCKET_PATH}`
   let previousSocket: string | null = null
   for (const line of existingConf.split('\n')) {
@@ -210,6 +217,16 @@ export const ensureOpenDkimSigning = async (
   const socketChanged = previousSocket !== wantedSocket
   const confWritten = await writeOwned(executor, { path: OPENDKIM_CONF, content: nextConf, mode: 0o644, owner: 'root', group: 'root' })
   if (confWritten) changed = true
+  const digest = (pick: 'previous' | 'next'): string => {
+    const hash = createHash('sha256')
+    for (const entry of tracked) {
+      hash.update(entry.path, 'utf8')
+      hash.update('\0', 'utf8')
+      hash.update(fileHash(pick === 'next' ? entry.next : entry.previous), 'utf8')
+    }
+    return hash.digest('hex')
+  }
+  const filesChanged = digest('previous') !== digest('next')
 
   try {
     await executor.runAction({ kind: 'exec', argv: ['/usr/sbin/usermod', '-a', '-G', 'opendkim', 'postfix'] })
@@ -220,7 +237,7 @@ export const ensureOpenDkimSigning = async (
       try {
         await executor.runCommand(['/usr/bin/systemctl', 'is-active', 'opendkim.service'])
       } catch { /* milter_default_action stays accept when the health check cannot run. */ }
-    } else if (changed) {
+    } else if (filesChanged) {
       await executor.runAction({ kind: 'systemd', verb: 'reload', unit: 'opendkim.service' })
     }
   } catch { /* A missing OpenDKIM unit must not stop the rest of the mail stack. */ }

@@ -37,6 +37,8 @@ export interface DashboardHostSample {
   apacheTest?: { ok: boolean; at: string }
   /** Plan controllers present in cgroup.subtree_control. Absent when that file was not read. */
   enforcedLimits?: { cpu: boolean; memory: boolean; io: boolean; pids: boolean }
+  /** Finite plan limits missing on at least one account. Empty means every checked limit is applied. */
+  unenforcedLimits?: Array<'memory' | 'pids' | 'io' | 'cpu' | 'disk'>
 }
 
 interface DashboardProps {
@@ -308,6 +310,11 @@ export const mapAgentHostInfo = (info: unknown): DashboardHostSample | null => {
   const enforcedLimits = cpuEnforced !== undefined && memoryEnforced !== undefined && ioEnforced !== undefined && pidsEnforced !== undefined
     ? { cpu: cpuEnforced, memory: memoryEnforced, io: ioEnforced, pids: pidsEnforced }
     : undefined
+  const gapKeys = ['memory', 'pids', 'io', 'cpu', 'disk'] as const
+  const rawGaps = identity?.unenforcedLimits
+  const unenforcedLimits = Array.isArray(rawGaps)
+    ? gapKeys.filter(key => rawGaps.includes(key))
+    : undefined
   const sample: DashboardHostSample = {
     ...(agentNumber(load, 'load1') !== undefined ? { load1: agentNumber(load, 'load1') } : {}),
     ...(agentNumber(load, 'load5') !== undefined ? { load5: agentNumber(load, 'load5') } : {}),
@@ -332,6 +339,7 @@ export const mapAgentHostInfo = (info: unknown): DashboardHostSample | null => {
     ...(nginxTest ? { nginxTest } : {}),
     ...(apacheTest ? { apacheTest } : {}),
     ...(enforcedLimits ? { enforcedLimits } : {}),
+    ...(unenforcedLimits ? { unenforcedLimits } : {}),
   }
   return sample
 }
@@ -838,10 +846,36 @@ const meterPercent = (used: number, total: number): { now: string; pct: string }
   return { now: String(value), pct: `${value}%` }
 }
 
+const GAP_LABELS: Record<'memory' | 'pids' | 'io' | 'cpu' | 'disk', { en: string; ar: string }> = {
+  memory: { en: 'memory', ar: 'الذاكرة' },
+  pids: { en: 'process count', ar: 'عدد العمليات' },
+  io: { en: 'IO write', ar: 'الكتابة على القرص' },
+  cpu: { en: 'CPU', ar: 'المعالج' },
+  disk: { en: 'disk quota', ar: 'حصة القرص' },
+}
+
+const joinEnglish = (items: string[]): string => {
+  if (items.length <= 1) return items[0] ?? ''
+  if (items.length === 2) return `${items[0]} and ${items[1]}`
+  return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`
+}
+
 const controllersNoteFromLimits = (
   limits: DashboardHostSample['enforcedLimits'],
   ar: boolean,
+  unenforced?: DashboardHostSample['unenforcedLimits'],
 ): string => {
+  if (unenforced) {
+    if (unenforced.length === 0) {
+      return ar ? 'كل حدود الخطط مفروضة على هذا المضيف.' : 'All plan limits are enforced on this host.'
+    }
+    if (unenforced.length === 1 && unenforced[0] === 'io') {
+      return ar ? 'حد الكتابة على القرص غير مفروض على هذا المضيف.' : 'IO write limits are not enforced on this host.'
+    }
+    const labels = unenforced.map(key => ar ? GAP_LABELS[key].ar : GAP_LABELS[key].en)
+    if (ar) return `الحدود غير المفروضة: ${labels.join('، ')}.`
+    return `${joinEnglish(labels)} limits are not enforced on this host.`
+  }
   if (!limits) return '—'
   if (limits.cpu && limits.memory && limits.io && limits.pids) {
     return ar ? 'كل حدود الخطط مفروضة على هذا المضيف.' : 'All plan limits are enforced on this host.'
@@ -855,14 +889,15 @@ const controllersNoteFromLimits = (
 const certificateRows = (
   certificates: readonly Pick<Certificate, 'names' | 'notAfter'>[],
   now: number,
-): { name: string; date: string; days: number }[] => {
-  const rows: { name: string; date: string; days: number }[] = []
+): { name: string; sans: string; date: string; days: number }[] => {
+  const rows: { name: string; sans: string; date: string; days: number }[] = []
   for (const certificate of certificates) {
     const when = Date.parse(certificate.notAfter)
     if (!Number.isFinite(when)) continue
     const name = certificate.names.find(item => item.length > 0)
     if (!name) continue
-    rows.push({ name, date: formatUtcDay(certificate.notAfter), days: Math.ceil((when - now) / 86_400_000) })
+    const sans = certificate.names.filter(item => item.length > 0 && item !== name).join(', ')
+    rows.push({ name, sans, date: formatUtcDay(certificate.notAfter), days: Math.ceil((when - now) / 86_400_000) })
   }
   return rows
 }
@@ -960,8 +995,9 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
               ? rich(soon.length === 1 ? '«1» شهادة تُجدَّد خلال «30» يوماً:' : `«${soon.length}» شهادات تُجدَّد خلال «30» يوماً:`)
               : escapeHtml(soon.length === 1 ? '1 certificate renews within 30 days:' : `${soon.length} certificates renew within 30 days:`))
             : ''} ${listedCertificates.map(item => {
-            if (ar) return `<bdi dir="ltr">${mono(item.name)}</bdi> · ${rich(arDayCount(item.days))} <bdi dir="ltr">(${escapeHtml(item.date)})</bdi>`
-            return `${mono(item.name)} · ${escapeHtml(item.days === 1 ? '1 day' : `${item.days} days`)} (${mono(item.date)})`
+            const sans = item.sans ? `<br>${mono(item.sans)}` : ''
+            if (ar) return `<bdi dir="ltr">${mono(item.name)}</bdi>${sans} · ${rich(arDayCount(item.days))} <bdi dir="ltr">(${escapeHtml(item.date)})</bdi>`
+            return `${mono(item.name)}${sans} · ${escapeHtml(item.days === 1 ? '1 day' : `${item.days} days`)} (${mono(item.date)})`
           }).join(', ')}</span>`,
         }
   const planPhrase = planCount === null
@@ -1131,7 +1167,7 @@ export const whmDashboardFromProps = (props: DashboardProps): WhmDashboardModel 
     ],
     controllersTitle: ar ? 'متحكمات «cgroup v2»' : 'cgroup v2 controllers',
     controllers: ['cpu', 'io', 'memory', 'pids'],
-    controllersNote: controllersNoteFromLimits(props.hostSample?.enforcedLimits, ar),
+    controllersNote: controllersNoteFromLimits(props.hostSample?.enforcedLimits, ar, props.hostSample?.unenforcedLimits),
     servicesTitle: ar ? 'الخدمات' : 'Services',
     servicesMeta: serviceRoster.length ? (ar ? `«${runningServices} / ${existingServices.length}»` : `${runningServices} / ${existingServices.length}`) : '—',
     services: services.length ? services : [emptyService],

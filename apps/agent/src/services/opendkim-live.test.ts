@@ -36,7 +36,9 @@ describe('live OpenDKIM writer', () => {
     expect(executor.files.get('/etc/opendkim/KeyTable')?.content).toContain(`${selector}._domainkey.demo.example.test demo.example.test:${selector}:${keyPath}`)
     expect(executor.files.get('/etc/opendkim/SigningTable')?.content).toContain(`*@demo.example.test`)
     expect(executor.files.get('/etc/opendkim/TrustedHosts')?.content).toContain('127.0.0.1')
-    expect(executor.files.get('/etc/opendkim/TrustedHosts')?.content).toContain('demo.example.test')
+    expect(executor.files.get('/etc/opendkim/TrustedHosts')?.content).not.toContain('demo.example.test')
+    expect(executor.files.get('/etc/opendkim/InternalHosts')?.content).toContain('127.0.0.1')
+    expect(executor.files.get('/etc/opendkim/InternalHosts')?.content).toContain('demo.example.test')
     const conf = executor.files.get('/etc/opendkim.conf')?.content ?? ''
     expect(conf).toContain('Syslog yes')
     expect(conf).toContain('Socket local:/var/spool/postfix/opendkim/opendkim.sock')
@@ -55,6 +57,11 @@ describe('live OpenDKIM writer', () => {
     expect(backups(executor, '/etc/opendkim.conf')).toHaveLength(1)
     expect(executor.files.get(keyPath)?.content).toBe(key?.content)
     expect(verbs.filter(verb => verb === 'restart opendkim.service')).toHaveLength(1)
+    expect(verbs.filter(verb => verb === 'reload opendkim.service')).toHaveLength(0)
+
+    await ensureOpenDkimSigning(executor, ['demo.example.test'], new Date('2026-11-02T00:00:00.000Z'))
+    expect(verbs.filter(verb => verb === 'restart opendkim.service')).toHaveLength(1)
+    expect(verbs.filter(verb => verb === 'reload opendkim.service')).toHaveLength(0)
   })
 
   it('adds DKIM, SPF, and DMARC without replacing records the zone already has', () => {
@@ -75,5 +82,26 @@ describe('live OpenDKIM writer', () => {
       { name: 'xp202610._domainkey', type: 'TXT', content: 'v=DKIM1; k=rsa; p=abc' },
     ], signing)
     expect(kept).toEqual([])
+  })
+
+  it('removes a domain that is no longer signed from SigningTable and InternalHosts', async () => {
+    const executor = new FakeHostExecutor()
+    executor.files.set('/etc/opendkim.conf', { path: '/etc/opendkim.conf', content: 'Syslog yes\n', mode: 0o644, owner: 'root', group: 'root' })
+    const now = new Date('2026-10-24T00:00:00.000Z')
+    await ensureOpenDkimSigning(executor, ['old.example.test', 'kept.example.test'], now)
+    await ensureOpenDkimSigning(executor, ['kept.example.test'], now)
+    const signing = executor.files.get('/etc/opendkim/SigningTable')?.content ?? ''
+    const internal = executor.files.get('/etc/opendkim/InternalHosts')?.content ?? ''
+    const trusted = executor.files.get('/etc/opendkim/TrustedHosts')?.content ?? ''
+    const material = executor.files.get('/etc/opendkim/signing.json')?.content ?? ''
+    expect(signing).toContain('*@kept.example.test')
+    expect(signing).not.toContain('old.example.test')
+    expect(internal).toContain('kept.example.test')
+    expect(internal).not.toContain('old.example.test')
+    expect(trusted).toContain('127.0.0.1')
+    expect(trusted).not.toContain('old.example.test')
+    expect(trusted).not.toContain('kept.example.test')
+    expect(material).not.toContain('old.example.test')
+    expect(material).toContain('kept.example.test')
   })
 })

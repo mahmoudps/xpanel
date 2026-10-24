@@ -24,11 +24,13 @@ export interface HostIdentity {
   model?: string
   engine?: string
   version?: string
-  /** First DNS name on the panel certificate. */
+  /** Panel public origin, or the certificate name when that origin is unset. */
   panelDomain?: string
   certificates?: Array<{ names: string[]; notAfter: string }>
   /** Controllers enabled on the account-slice parent. Absent when the file was not read. */
   enforcedLimits?: { cpu: boolean; memory: boolean; io: boolean; pids: boolean }
+  /** Finite plan limits that at least one account is not applying. */
+  unenforcedLimits?: Array<'memory' | 'pids' | 'io' | 'cpu' | 'disk'>
 }
 
 export interface ObservedCertificate {
@@ -45,15 +47,17 @@ export const certificateFromPem = (pem: string, now = Date.now()): ObservedCerti
   } catch {
     return null
   }
-  const names: string[] = []
+  const sans: string[] = []
   for (const part of (cert.subjectAltName ?? '').split(',')) {
     const trimmed = part.trim()
-    if (trimmed.startsWith('DNS:')) names.push(trimmed.slice(4).trim())
-    else if (trimmed.startsWith('IP Address:')) names.push(trimmed.slice('IP Address:'.length).trim())
+    if (trimmed.startsWith('DNS:')) sans.push(trimmed.slice(4).trim())
+    else if (trimmed.startsWith('IP Address:')) sans.push(trimmed.slice('IP Address:'.length).trim())
   }
-  if (names.length === 0) {
-    const cn = /(?:^|,\s*)CN=([^,\n]+)/.exec(cert.subject)
-    if (cn?.[1]) names.push(cn[1].trim())
+  const cn = /(?:^|,\s*)CN=([^,\n]+)/.exec(cert.subject)?.[1]?.trim()
+  const names: string[] = []
+  if (cn) names.push(cn)
+  for (const name of sans) {
+    if (!names.includes(name)) names.push(name)
   }
   const when = Date.parse(cert.validTo)
   if (!Number.isFinite(when) || names.length === 0) return null
@@ -66,8 +70,10 @@ export interface HostIdentityReader {
   runCommand(argv: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }>
   /** PEM presented by the panel TLS listener. Pass a DNS name to send it as SNI. */
   readServedCertificate?(servername?: string): Promise<string | null>
-  /** API public origin, for example the WHM PUBLIC_ORIGIN. The host is the SNI name. */
+  /** API public origin, for example the WHM PUBLIC_ORIGIN. The host is an SNI name. */
   publicOrigin?(): string | null
+  /** Panel listener origin. This is the panel domain row, ahead of the WHM hostname. */
+  panelOrigin?(): string | null
 }
 
 /** The panel TLS listener. nginx's catch-all certificate is a different file. */
@@ -335,9 +341,10 @@ const readPanelCertificates = async (
       break
     }
   }
+  const panelHost = originHost(reader.panelOrigin?.() ?? null)
   const origin = originHost(reader.publicOrigin?.() ?? null)
   const serverNames = serverNamesForListen(dumped, PANEL_LISTENER_PORT)
-  const sniNames = [...new Set([...(origin ? [origin] : []), ...serverNames])]
+  const sniNames = [...new Set([...(panelHost ? [panelHost] : []), ...(origin ? [origin] : []), ...serverNames])]
   const pems: string[] = []
   const seenPem = new Set<string>()
   const take = async (servername?: string): Promise<string | null> => {
@@ -370,9 +377,10 @@ const readPanelCertificates = async (
   const rows: Array<{ names: string[]; notAfter: string }> = []
   const seen = new Set<string>()
   let panelDomain: string | undefined
+  if (panelHost) panelDomain = panelHost
   const originPem = origin ? namedByHost.get(origin) : undefined
   const originCert = originPem ? certificateFromPem(originPem) : null
-  if (origin && originCert?.names.includes(origin)) panelDomain = origin
+  if (!panelDomain && origin && originCert?.names.includes(origin)) panelDomain = origin
   if (!panelDomain) {
     for (const pem of namedByHost.values()) {
       const dns = certificateFromPem(pem)?.names.find(name => isIP(name) === 0)

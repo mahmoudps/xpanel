@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { FakeHostExecutor } from './executor.ts'
-import { mergeOriginIntoRuntime, parseEnvAssignments, syncRuntimePublicOrigin } from './agent-origin.ts'
+import { mergeOriginIntoRuntime, parseEnvAssignments, readPanelPublicOriginSync, readPublicOriginSync, syncRuntimePublicOrigin } from './agent-origin.ts'
 
 describe('runtime public origin', () => {
   it('copies origin keys from api.env and leaves the rest of runtime.env', async () => {
@@ -13,6 +13,12 @@ describe('runtime public origin', () => {
     expect(merged).not.toContain('XPANEL_ALLOWED_ORIGINS')
     expect(mergeOriginIntoRuntime(merged ?? '', api)).toBeNull()
     expect(parseEnvAssignments('XPANEL_WHM_PUBLIC_ORIGIN=bad\u0001value').size).toBe(0)
+    const env = {
+      XPANEL_WHM_PUBLIC_ORIGIN: 'https://whm.example.test',
+      XPANEL_PANEL_PUBLIC_ORIGIN: 'https://panel.example.test',
+    }
+    expect(readPublicOriginSync(env, [])).toBe('https://whm.example.test')
+    expect(readPanelPublicOriginSync(env, [])).toBe('https://panel.example.test')
 
     const executor = new FakeHostExecutor()
     const file = { mode: 0o640, owner: 'root', group: 'xpanel' }

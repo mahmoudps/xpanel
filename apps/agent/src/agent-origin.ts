@@ -86,6 +86,28 @@ export const syncRuntimePublicOrigin = async (executor: AgentExecutor): Promise<
   return true
 }
 
+const readNamedOriginSync = (
+  key: (typeof ORIGIN_KEYS)[number],
+  env: NodeJS.ProcessEnv,
+  files: readonly string[],
+): string | null => {
+  const fromEnv = clean(env[key] ?? '')
+  if (fromEnv) return fromEnv
+  for (const path of files) {
+    try {
+      const value = parseEnvAssignments(readFileSync(path, 'utf8')).get(key)
+      if (value) return value
+    } catch { /* A missing env file is the next source. */ }
+  }
+  return null
+}
+
+/** Panel row origin. The WHM hostname is a different listener and does not win. */
+export const readPanelPublicOriginSync = (
+  env: NodeJS.ProcessEnv = process.env,
+  files: readonly string[] = [RUNTIME_PATH, API_ENV_PATH],
+): string | null => readNamedOriginSync('XPANEL_PANEL_PUBLIC_ORIGIN', env, files)
+
 /**
  * Public origin for panel SNI. The process environment wins, then runtime.env,
  * then api.env. The agent reads the file so a merge is visible before restart.

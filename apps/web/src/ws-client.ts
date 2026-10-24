@@ -270,6 +270,7 @@ export function reduceLiveEvent(
 
     case 'metrics.tick':
     case 'mail.received':
+    case 'mail.flags':
     case 'security.ban':
       return state
   }
@@ -581,6 +582,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       updateWebsiteAnalyticsDom(event.data);
     } else if (event.kind === 'terminal.output') {
       appendTerminalOutputDom(event.data);
+    } else if (event.kind === 'mail.received' || event.kind === 'mail.flags') {
+      if (typeof window.xpanelReloadInbox === 'function') window.xpanelReloadInbox();
     }
   }
 
@@ -2176,6 +2179,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       function loadInbox() {
         return window.xpanelSessionRequest('GET', '/api/webmail/inbox').then(function (data) { paintInbox(data.messages || []); }).catch(function (error) { note(list, failText(error)); });
       }
+      window.xpanelReloadInbox = loadInbox;
       loadInbox();
     }
     var sendButton = document.querySelector('[data-mail-send="true"]');
