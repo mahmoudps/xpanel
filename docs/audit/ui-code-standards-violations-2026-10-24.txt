@@ -1,0 +1,1255 @@
+# UI code-standards violation lines
+# Generated 2026-10-24 by a static scan of apps/web/src/**/*.ts excluding *.test.ts.
+# Token definitions: apps/web/src/tokens.ts lines 1-730 are the SSOT block and are excluded from color/px counts.
+# A px or color hit is a literal outside that block. 1px hairlines and token-definition hex values inside :root are not in this list.
+# Off-4pt means the absolute px number is not divisible by 4. 0px is ignored. 1px is reported separately as a hairline.
+
+COLOR_LITERALS 839
+PX_LITERALS 2043
+PX_OFF_4PT_GRID 718
+PX_1PX_HAIRLINE 212
+
+## Physical direction properties
+apps/web/src/board-port/xwhm-dashboard.ts:390: const activeStyle = 'display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; background: #1D2B40; color: #FFFFFF; font-weight: 600; box-shadow: inset 3px 0 0 #6EA0FF; text-decoration: none; font-size: 14px'
+apps/web/src/board-port/xwhm-dashboard.ts:396: ? 'display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; background: #1D2B40; color: #FFFFFF; font-weight: 600; box-shadow: inset -3px 0 0 #6EA0FF; text-decoration: none; font-size: 14px'
+apps/web/src/mail-layout.ts:92: .xp-mail-row.is-selected { background: #f3f7fe; box-shadow: inset 3px 0 0 #1d5bd6; }
+apps/web/src/mail-layout.ts:93: [data-theme="dark"] .xp-mail-row.is-selected { background: var(--xp-bg-elevated); box-shadow: inset 3px 0 0 var(--xp-accent); }
+apps/web/src/mail-layout.ts:94: html[dir="rtl"] .xp-mail-row.is-selected { box-shadow: inset -3px 0 var(--xp-accent); }
+apps/web/src/mail-layout.ts:108: .xp-mail-field dd > bdi { display: block; text-align: left; }
+apps/web/src/mail-layout.ts:109: html[dir="rtl"] .xp-mail-field dd > bdi { text-align: right; }
+apps/web/src/mail-layout.ts:126: .xp-mail-compose-form :is(input[dir="auto"], textarea[dir="auto"]) { text-align: left; }
+apps/web/src/mail-layout.ts:127: html[dir="rtl"] .xp-mail-compose-form :is(input[dir="auto"], textarea[dir="auto"]) { text-align: right; }
+apps/web/src/shell-motion.ts:51: ? 'translateX(' + (style.direction === 'rtl' ? 24 : -24) + 'px)'
+apps/web/src/tokens.ts:1046: box-shadow: inset 3px 0 0 var(--xp-accent);
+apps/web/src/tokens.ts:1050: box-shadow: inset -3px 0 0 var(--xp-accent);
+apps/web/src/tokens.ts:1969: .xp-workspace-summary .xp-field-value > bdi[dir="ltr"] { text-align: left; }
+apps/web/src/tokens.ts:1970: html[dir="rtl"] .xp-workspace-summary .xp-field-value > bdi[dir="ltr"] { text-align: right; }
+apps/web/src/tokens.ts:2174: text-align: left;
+apps/web/src/tokens.ts:2178: text-align: right;
+apps/web/src/tokens.ts:2454: text-align: right;
+apps/web/src/tokens.ts:2565: 0% { transform: translateX(-100%); }
+apps/web/src/tokens.ts:2566: 100% { transform: translateX(260%); }
+apps/web/src/tokens.ts:2699: margin-left: auto;
+apps/web/src/tokens.ts:3168: .xp-accounts__technical bdi, .xp-account-dialog__identity bdi { display: block; overflow-wrap: anywhere; text-align: left; }
+apps/web/src/tokens.ts:3169: html[dir="rtl"] .xp-accounts__technical bdi, html[dir="rtl"] .xp-account-dialog__identity bdi { text-align: right; }
+apps/web/src/tokens.ts:3216: .xp-accounts__domain { display: block; text-align: left; }
+apps/web/src/tokens.ts:3217: html[dir="rtl"] .xp-accounts__domain { text-align: right; }
+
+## Durations and easings outside tokens
+apps/web/src/tokens.ts:2584: animation: xp-spin 0.9s linear infinite;
+apps/web/src/tokens.ts:2593: animation: xp-indet 1.4s ease-in-out infinite;
+apps/web/src/tokens.ts:2599: animation: xp-shimmer 1.4s linear infinite;
+apps/web/src/tokens.ts:2631: animation: xp-drain 8s linear infinite;
+apps/web/src/tokens.ts:2691: transition: width 0.6s ease;
+apps/web/src/shell-motion.ts:9: var preference = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+apps/web/src/shell-motion.ts:10: var duration = kind === 'mobile-nav' ? 200 : 160;
+apps/web/src/shell-motion.ts:51: ? 'translateX(' + (style.direction === 'rtl' ? 24 : -24) + 'px)'
+apps/web/src/shell-motion.ts:56: animations.push(surface.animate([{ transform: closed }, { transform: base }], { duration: duration, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'both' }));
+apps/web/src/shell-motion.ts:57: animations.push(backdrop.animate([{ opacity: 0 }, { opacity: opacity }], { duration: duration, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'both' }));
+apps/web/src/shell-motion.ts:59: animation.pause(); animation.currentTime = open ? 0 : duration;
+
+## Sub-24px size literals on lines that also mention a control or min-size
+apps/web/src/board-port/xmail-inbox.ts:158: width: 8px :: return `<li style="border-bottom: 1px solid #EEF0F3"><button type="button" data-mail-open="${escapeHtml(card.id)}" data-unread="${unread ? 'true' : 'false'}" data-attach="${attach 
+apps/web/src/board-port/xpanel-home.ts:807: min-width: 22px :: <kbd aria-hidden="true" style="position: absolute; inset-inline-end: 10px; top: 11px; min-width: 22px; height: 22px; padding: 0 6px; display: flex; align-items: center; justify-con
+apps/web/src/board-port/xwhm-dashboard.ts:437: min-width: 22px :: <kbd aria-hidden="true" style="position: absolute; inset-inline-end: 8px; min-width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius:
+apps/web/src/board-port/xwhm-dashboard.ts:479: height: 8px :: ${meter.showBar === false ? '' : `<div role="meter" aria-label="${escapeHtml(plain(meter.label))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${escapeHtml(meter.now)}" ar
+
+## px literals not divisible by 4 (excluding 0 and 1)
+apps/web/src/app.ts:109: 6px
+apps/web/src/arabic-type.ts:26: 13px
+apps/web/src/arabic-type.ts:26: 14px
+apps/web/src/arabic-type.ts:26: 999px
+apps/web/src/arabic-type.ts:29: 11px
+apps/web/src/arabic-type.ts:29: 999px
+apps/web/src/arabic-type.ts:64: 12.5px
+apps/web/src/arabic-type.ts:72: 14px
+apps/web/src/arabic-type.ts:75: 11px
+apps/web/src/arabic-type.ts:75: 999px
+apps/web/src/arabic-type.ts:80: 13px
+apps/web/src/arabic-type.ts:80: 14px
+apps/web/src/arabic-type.ts:86: 13px
+apps/web/src/arabic-type.ts:86: 15px
+apps/web/src/arabic-type.ts:87: 15px
+apps/web/src/arabic-type.ts:87: 17px
+apps/web/src/arabic-type.ts:88: 18px
+apps/web/src/arabic-type.ts:89: 22px
+apps/web/src/arabic-type.ts:90: 22px
+apps/web/src/arabic-type.ts:92: 2px
+apps/web/src/arabic-type.ts:96: 2px
+apps/web/src/arabic-type.ts:167: 14px
+apps/web/src/arabic-type.ts:170: 999px
+apps/web/src/arabic-type.ts:205: 999px
+apps/web/src/arabic-type.ts:225: 999px
+apps/web/src/arabic-type.ts:236: 390px
+apps/web/src/board-port/xmail-compose.fixture.ts:6: 22px
+apps/web/src/board-port/xmail-compose.fixture.ts:6: 13px
+apps/web/src/board-port/xmail-compose.fixture.ts:6: 14px
+apps/web/src/board-port/xmail-compose.fixture.ts:6: 3px
+apps/web/src/board-port/xmail-compose.fixture.ts:6: 13px
+apps/web/src/board-port/xmail-compose.fixture.ts:6: 6px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 10px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 10px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 10px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 13px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 22px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 22px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 10px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 10px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 10px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 13px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 22px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 22px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 10px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 10px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 10px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 13px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 22px
+apps/web/src/board-port/xmail-compose.fixture.ts:8: 22px
+apps/web/src/board-port/xmail-compose.fixture.ts:64: 6px
+apps/web/src/board-port/xmail-compose.fixture.ts:64: 2px
+apps/web/src/board-port/xmail-compose.fixture.ts:64: 999px
+apps/web/src/board-port/xmail-compose.fixture.ts:64: 6px
+apps/web/src/board-port/xmail-compose.fixture.ts:64: 6px
+apps/web/src/board-port/xmail-compose.fixture.ts:88: 2px
+apps/web/src/board-port/xmail-compose.fixture.ts:88: 2px
+apps/web/src/board-port/xmail-compose.ts:11: 2px
+apps/web/src/board-port/xmail-compose.ts:11: 2px
+apps/web/src/board-port/xmail-compose.ts:107: 999px
+apps/web/src/board-port/xmail-compose.ts:114: 10px
+apps/web/src/board-port/xmail-compose.ts:114: 14px
+apps/web/src/board-port/xmail-compose.ts:115: 10px
+apps/web/src/board-port/xmail-compose.ts:115: 14px
+apps/web/src/board-port/xmail-compose.ts:150: 6px
+apps/web/src/board-port/xmail-compose.ts:150: 2px
+apps/web/src/board-port/xmail-compose.ts:150: 10px
+apps/web/src/board-port/xmail-compose.ts:150: 999px
+apps/web/src/board-port/xmail-compose.ts:150: 13px
+apps/web/src/board-port/xmail-compose.ts:156: 13px
+apps/web/src/board-port/xmail-compose.ts:156: 6px
+apps/web/src/board-port/xmail-compose.ts:156: 6px
+apps/web/src/board-port/xmail-compose.ts:156: 6px
+apps/web/src/board-port/xmail-compose.ts:156: 34px
+apps/web/src/board-port/xmail-compose.ts:156: 6px
+apps/web/src/board-port/xmail-compose.ts:156: 13px
+apps/web/src/board-port/xmail-compose.ts:159: 6px
+apps/web/src/board-port/xmail-compose.ts:159: 6px
+apps/web/src/board-port/xmail-compose.ts:159: 6px
+apps/web/src/board-port/xmail-compose.ts:159: 10px
+apps/web/src/board-port/xmail-compose.ts:159: 10px
+apps/web/src/board-port/xmail-compose.ts:159: 34px
+apps/web/src/board-port/xmail-compose.ts:159: 34px
+apps/web/src/board-port/xmail-compose.ts:159: 10px
+apps/web/src/board-port/xmail-compose.ts:159: 10px
+apps/web/src/board-port/xmail-compose.ts:159: 13px
+apps/web/src/board-port/xmail-compose.ts:159: 2px
+apps/web/src/board-port/xmail-compose.ts:159: 2px
+apps/web/src/board-port/xmail-compose.ts:195: 6px
+apps/web/src/board-port/xmail-compose.ts:195: 2px
+apps/web/src/board-port/xmail-compose.ts:195: 10px
+apps/web/src/board-port/xmail-compose.ts:195: 999px
+apps/web/src/board-port/xmail-compose.ts:195: 13px
+apps/web/src/board-port/xmail-compose.ts:228: 10px
+apps/web/src/board-port/xmail-compose.ts:228: 14px
+apps/web/src/board-port/xmail-compose.ts:228: 10px
+apps/web/src/board-port/xmail-compose.ts:228: 13px
+apps/web/src/board-port/xmail-compose.ts:263: 13px
+apps/web/src/board-port/xmail-compose.ts:269: 13px
+apps/web/src/board-port/xmail-compose.ts:273: 13px
+apps/web/src/board-port/xmail-compose.ts:286: 14px
+apps/web/src/board-port/xmail-compose.ts:286: 14px
+apps/web/src/board-port/xmail-compose.ts:399: 10px
+apps/web/src/board-port/xmail-compose.ts:399: 18px
+apps/web/src/board-port/xmail-compose.ts:399: 17px
+apps/web/src/board-port/xmail-compose.ts:400: 38px
+apps/web/src/board-port/xmail-compose.ts:400: 14px
+apps/web/src/board-port/xmail-compose.ts:402: 13px
+apps/web/src/board-port/xmail-compose.ts:403: 150px
+apps/web/src/board-port/xmail-compose.ts:403: 10px
+apps/web/src/board-port/xmail-compose.ts:403: 6px
+apps/web/src/board-port/xmail-compose.ts:403: 3px
+apps/web/src/board-port/xmail-compose.ts:403: 6px
+apps/web/src/board-port/xmail-compose.ts:403: 3px
+apps/web/src/board-port/xmail-compose.ts:405: 14px
+apps/web/src/board-port/xmail-compose.ts:405: 14px
+apps/web/src/board-port/xmail-compose.ts:408: 18px
+apps/web/src/board-port/xmail-compose.ts:409: 14px
+apps/web/src/board-port/xmail-compose.ts:410: 2px
+apps/web/src/board-port/xmail-compose.ts:411: 2px
+apps/web/src/board-port/xmail-compose.ts:411: 11px
+apps/web/src/board-port/xmail-compose.ts:411: 2px
+apps/web/src/board-port/xmail-compose.ts:412: 2px
+apps/web/src/board-port/xmail-compose.ts:412: 14px
+apps/web/src/board-port/xmail-compose.ts:412: 11px
+apps/web/src/board-port/xmail-compose.ts:412: 2px
+apps/web/src/board-port/xmail-compose.ts:412: 10px
+apps/web/src/board-port/xmail-compose.ts:412: 14px
+apps/web/src/board-port/xmail-compose.ts:412: 10px
+apps/web/src/board-port/xmail-compose.ts:412: 14px
+apps/web/src/board-port/xmail-compose.ts:414: 26px
+apps/web/src/board-port/xmail-compose.ts:418: 2px
+apps/web/src/board-port/xmail-compose.ts:419: 6px
+apps/web/src/board-port/xmail-compose.ts:422: 13px
+apps/web/src/board-port/xmail-compose.ts:422: 14px
+apps/web/src/board-port/xmail-compose.ts:426: 6px
+apps/web/src/board-port/xmail-compose.ts:427: 13px
+apps/web/src/board-port/xmail-compose.ts:427: 14px
+apps/web/src/board-port/xmail-compose.ts:429: 10px
+apps/web/src/board-port/xmail-compose.ts:430: 18px
+apps/web/src/board-port/xmail-compose.ts:430: 10px
+apps/web/src/board-port/xmail-compose.ts:430: 14px
+apps/web/src/board-port/xmail-compose.ts:431: 10px
+apps/web/src/board-port/xmail-compose.ts:432: 14px
+apps/web/src/board-port/xmail-compose.ts:432: 14px
+apps/web/src/board-port/xmail-compose.ts:432: 14px
+apps/web/src/board-port/xmail-compose.ts:438: 14px
+apps/web/src/board-port/xmail-compose.ts:438: 14px
+apps/web/src/board-port/xmail-compose.ts:440: 18px
+apps/web/src/board-port/xmail-compose.ts:440: 14px
+apps/web/src/board-port/xmail-compose.ts:441: 14px
+apps/web/src/board-port/xmail-compose.ts:444: 26px
+apps/web/src/board-port/xmail-compose.ts:447: 14px
+apps/web/src/board-port/xmail-compose.ts:447: 13px
+apps/web/src/board-port/xmail-compose.ts:455: 6px
+apps/web/src/board-port/xmail-compose.ts:455: 10px
+apps/web/src/board-port/xmail-compose.ts:455: 999px
+apps/web/src/board-port/xmail-compose.ts:455: 6px
+apps/web/src/board-port/xmail-compose.ts:455: 6px
+apps/web/src/board-port/xmail-compose.ts:455: 1.5px
+apps/web/src/board-port/xmail-compose.ts:456: 13px
+apps/web/src/board-port/xmail-compose.ts:457: 14px
+apps/web/src/board-port/xmail-compose.ts:458: 14px
+apps/web/src/board-port/xmail-compose.ts:458: 14px
+apps/web/src/board-port/xmail-compose.ts:458: 14px
+apps/web/src/board-port/xmail-compose.ts:458: 14px
+apps/web/src/board-port/xmail-compose.ts:458: 14px
+apps/web/src/board-port/xmail-compose.ts:463: 14px
+apps/web/src/board-port/xmail-compose.ts:463: 14px
+apps/web/src/board-port/xmail-compose.ts:463: 14px
+apps/web/src/board-port/xmail-compose.ts:463: 14px
+apps/web/src/board-port/xmail-compose.ts:576: 10px
+apps/web/src/board-port/xmail-compose.ts:576: 10px
+apps/web/src/board-port/xmail-compose.ts:576: 10px
+apps/web/src/board-port/xmail-compose.ts:576: 13px
+apps/web/src/board-port/xmail-compose.ts:576: 22px
+apps/web/src/board-port/xmail-compose.ts:576: 22px
+apps/web/src/board-port/xmail-inbox.fixture.ts:91: 2px
+apps/web/src/board-port/xmail-inbox.fixture.ts:91: 2px
+apps/web/src/board-port/xmail-inbox.ts:11: 2px
+apps/web/src/board-port/xmail-inbox.ts:11: 2px
+apps/web/src/board-port/xmail-inbox.ts:119: 999px
+apps/web/src/board-port/xmail-inbox.ts:126: 10px
+apps/web/src/board-port/xmail-inbox.ts:126: 14px
+apps/web/src/board-port/xmail-inbox.ts:127: 10px
+apps/web/src/board-port/xmail-inbox.ts:127: 14px
+apps/web/src/board-port/xmail-inbox.ts:148: -3px
+apps/web/src/board-port/xmail-inbox.ts:148: 3px
+apps/web/src/board-port/xmail-inbox.ts:158: 10px
+apps/web/src/board-port/xmail-inbox.ts:158: 7px
+apps/web/src/board-port/xmail-inbox.ts:158: 2px
+apps/web/src/board-port/xmail-inbox.ts:158: 14px
+apps/web/src/board-port/xmail-inbox.ts:158: 6px
+apps/web/src/board-port/xmail-inbox.ts:158: 14px
+apps/web/src/board-port/xmail-inbox.ts:158: 13px
+apps/web/src/board-port/xmail-inbox.ts:170: 6px
+apps/web/src/board-port/xmail-inbox.ts:177: 14px
+apps/web/src/board-port/xmail-inbox.ts:177: 10px
+apps/web/src/board-port/xmail-inbox.ts:177: 12.5px
+apps/web/src/board-port/xmail-inbox.ts:183: 10px
+apps/web/src/board-port/xmail-inbox.ts:183: 10px
+apps/web/src/board-port/xmail-inbox.ts:183: 14px
+apps/web/src/board-port/xmail-inbox.ts:183: 10px
+apps/web/src/board-port/xmail-inbox.ts:183: 13px
+apps/web/src/board-port/xmail-inbox.ts:183: 13px
+apps/web/src/board-port/xmail-inbox.ts:186: 10px
+apps/web/src/board-port/xmail-inbox.ts:186: 13px
+apps/web/src/board-port/xmail-inbox.ts:186: 10px
+apps/web/src/board-port/xmail-inbox.ts:186: 10px
+apps/web/src/board-port/xmail-inbox.ts:186: 10px
+apps/web/src/board-port/xmail-inbox.ts:186: 34px
+apps/web/src/board-port/xmail-inbox.ts:186: 34px
+apps/web/src/board-port/xmail-inbox.ts:186: 10px
+apps/web/src/board-port/xmail-inbox.ts:186: 13px
+apps/web/src/board-port/xmail-inbox.ts:190: 14px
+apps/web/src/board-port/xmail-inbox.ts:190: 14px
+apps/web/src/board-port/xmail-inbox.ts:192: 14px
+apps/web/src/board-port/xmail-inbox.ts:192: 14px
+apps/web/src/board-port/xmail-inbox.ts:192: 14px
+apps/web/src/board-port/xmail-inbox.ts:192: 14px
+apps/web/src/board-port/xmail-inbox.ts:192: 14px
+apps/web/src/board-port/xmail-inbox.ts:192: 14px
+apps/web/src/board-port/xmail-inbox.ts:192: 6px
+apps/web/src/board-port/xmail-inbox.ts:192: 14px
+apps/web/src/board-port/xmail-inbox.ts:192: 13px
+apps/web/src/board-port/xmail-inbox.ts:192: 2px
+apps/web/src/board-port/xmail-inbox.ts:192: 13px
+apps/web/src/board-port/xmail-inbox.ts:192: 6px
+apps/web/src/board-port/xmail-inbox.ts:192: 6px
+apps/web/src/board-port/xmail-inbox.ts:192: 13px
+apps/web/src/board-port/xmail-inbox.ts:192: 6px
+apps/web/src/board-port/xmail-inbox.ts:192: 10px
+apps/web/src/board-port/xmail-inbox.ts:192: 999px
+apps/web/src/board-port/xmail-inbox.ts:192: 6px
+apps/web/src/board-port/xmail-inbox.ts:192: 6px
+apps/web/src/board-port/xmail-inbox.ts:192: 14px
+apps/web/src/board-port/xmail-inbox.ts:192: 14px
+apps/web/src/board-port/xmail-inbox.ts:195: 10px
+apps/web/src/board-port/xmail-inbox.ts:195: 13px
+apps/web/src/board-port/xmail-inbox.ts:209: -3px
+apps/web/src/board-port/xmail-inbox.ts:209: 3px
+apps/web/src/board-port/xmail-inbox.ts:222: 2px
+apps/web/src/board-port/xmail-inbox.ts:263: 10px
+apps/web/src/board-port/xmail-inbox.ts:268: 13px
+apps/web/src/board-port/xmail-inbox.ts:273: 18px
+apps/web/src/board-port/xmail-inbox.ts:273: 14px
+apps/web/src/board-port/xmail-inbox.ts:404: 50px
+apps/web/src/board-port/xmail-inbox.ts:404: 6px
+apps/web/src/board-port/xmail-inbox.ts:404: 10px
+apps/web/src/board-port/xmail-inbox.ts:404: 2px
+apps/web/src/board-port/xmail-inbox.ts:415: 14px
+apps/web/src/board-port/xmail-inbox.ts:448: 13px
+apps/web/src/board-port/xmail-inbox.ts:455: 13px
+apps/web/src/board-port/xmail-inbox.ts:501: 13px
+apps/web/src/board-port/xmail-inbox.ts:535: 13px
+apps/web/src/board-port/xmail-inbox.ts:567: 13px
+apps/web/src/board-port/xmail-inbox.ts:567: 2px
+apps/web/src/board-port/xmail-inbox.ts:569: 10px
+apps/web/src/board-port/xmail-inbox.ts:569: 13px
+apps/web/src/board-port/xmail-inbox.ts:584: 10px
+apps/web/src/board-port/xmail-inbox.ts:584: 18px
+apps/web/src/board-port/xmail-inbox.ts:584: 17px
+apps/web/src/board-port/xmail-inbox.ts:585: 38px
+apps/web/src/board-port/xmail-inbox.ts:585: 14px
+apps/web/src/board-port/xmail-inbox.ts:587: 13px
+apps/web/src/board-port/xmail-inbox.ts:588: 150px
+apps/web/src/board-port/xmail-inbox.ts:588: 10px
+apps/web/src/board-port/xmail-inbox.ts:588: 6px
+apps/web/src/board-port/xmail-inbox.ts:588: 3px
+apps/web/src/board-port/xmail-inbox.ts:588: 6px
+apps/web/src/board-port/xmail-inbox.ts:588: 3px
+apps/web/src/board-port/xmail-inbox.ts:590: 14px
+apps/web/src/board-port/xmail-inbox.ts:590: 14px
+apps/web/src/board-port/xmail-inbox.ts:593: 18px
+apps/web/src/board-port/xmail-inbox.ts:594: 14px
+apps/web/src/board-port/xmail-inbox.ts:595: 2px
+apps/web/src/board-port/xmail-inbox.ts:596: 2px
+apps/web/src/board-port/xmail-inbox.ts:596: 11px
+apps/web/src/board-port/xmail-inbox.ts:596: 2px
+apps/web/src/board-port/xmail-inbox.ts:596: 10px
+apps/web/src/board-port/xmail-inbox.ts:596: 13px
+apps/web/src/board-port/xmail-inbox.ts:597: 2px
+apps/web/src/board-port/xmail-inbox.ts:597: 14px
+apps/web/src/board-port/xmail-inbox.ts:597: 11px
+apps/web/src/board-port/xmail-inbox.ts:597: 2px
+apps/web/src/board-port/xmail-inbox.ts:597: 10px
+apps/web/src/board-port/xmail-inbox.ts:597: 14px
+apps/web/src/board-port/xmail-inbox.ts:597: 10px
+apps/web/src/board-port/xmail-inbox.ts:597: 14px
+apps/web/src/board-port/xmail-inbox.ts:604: 2px
+apps/web/src/board-port/xmail-inbox.ts:604: 10px
+apps/web/src/board-port/xmail-inbox.ts:604: 2px
+apps/web/src/board-port/xmail-inbox.ts:608: 10px
+apps/web/src/board-port/xmail-inbox.ts:608: 14px
+apps/web/src/board-port/xmail-inbox.ts:610: 10px
+apps/web/src/board-port/xmail-inbox.ts:610: 13px
+apps/web/src/board-port/xpanel-home.fixture.ts:54: 13px
+apps/web/src/board-port/xpanel-home.fixture.ts:55: 13px
+apps/web/src/board-port/xpanel-home.fixture.ts:59: 13px
+apps/web/src/board-port/xpanel-home.fixture.ts:60: 13px
+apps/web/src/board-port/xpanel-home.fixture.ts:61: 13px
+apps/web/src/board-port/xpanel-home.fixture.ts:64: 13px
+apps/web/src/board-port/xpanel-home.fixture.ts:65: 13px
+apps/web/src/board-port/xpanel-home.fixture.ts:66: 13px
+apps/web/src/board-port/xpanel-home.fixture.ts:179: 2px
+apps/web/src/board-port/xpanel-home.fixture.ts:179: 2px
+apps/web/src/board-port/xpanel-home.ts:52: 2px
+apps/web/src/board-port/xpanel-home.ts:52: 2px
+apps/web/src/board-port/xpanel-home.ts:188: 6px
+apps/web/src/board-port/xpanel-home.ts:188: 10px
+apps/web/src/board-port/xpanel-home.ts:188: 999px
+apps/web/src/board-port/xpanel-home.ts:188: 6px
+apps/web/src/board-port/xpanel-home.ts:188: 6px
+apps/web/src/board-port/xpanel-home.ts:352: 10px
+apps/web/src/board-port/xpanel-home.ts:353: -3px
+apps/web/src/board-port/xpanel-home.ts:359: 11px
+apps/web/src/board-port/xpanel-home.ts:363: 2px
+apps/web/src/board-port/xpanel-home.ts:382: 30px
+apps/web/src/board-port/xpanel-home.ts:382: 30px
+apps/web/src/board-port/xpanel-home.ts:384: 15px
+apps/web/src/board-port/xpanel-home.ts:385: 10px
+apps/web/src/board-port/xpanel-home.ts:385: 14px
+apps/web/src/board-port/xpanel-home.ts:397: 13px
+apps/web/src/board-port/xpanel-home.ts:398: 13px
+apps/web/src/board-port/xpanel-home.ts:400: 13px
+apps/web/src/board-port/xpanel-home.ts:404: 13px
+apps/web/src/board-port/xpanel-home.ts:406: 13px
+apps/web/src/board-port/xpanel-home.ts:407: 2px
+apps/web/src/board-port/xpanel-home.ts:438: 13px
+apps/web/src/board-port/xpanel-home.ts:439: 13px
+apps/web/src/board-port/xpanel-home.ts:736: 5px
+apps/web/src/board-port/xpanel-home.ts:736: 6px
+apps/web/src/board-port/xpanel-home.ts:736: 3px
+apps/web/src/board-port/xpanel-home.ts:736: 6px
+apps/web/src/board-port/xpanel-home.ts:736: 3px
+apps/web/src/board-port/xpanel-home.ts:742: 17px
+apps/web/src/board-port/xpanel-home.ts:743: 17px
+apps/web/src/board-port/xpanel-home.ts:750: 6px
+apps/web/src/board-port/xpanel-home.ts:750: 10px
+apps/web/src/board-port/xpanel-home.ts:752: 15px
+apps/web/src/board-port/xpanel-home.ts:758: 9px
+apps/web/src/board-port/xpanel-home.ts:758: 13px
+apps/web/src/board-port/xpanel-home.ts:764: 6px
+apps/web/src/board-port/xpanel-home.ts:764: 13px
+apps/web/src/board-port/xpanel-home.ts:772: 13px
+apps/web/src/board-port/xpanel-home.ts:773: 14px
+apps/web/src/board-port/xpanel-home.ts:775: 13px
+apps/web/src/board-port/xpanel-home.ts:777: 14px
+apps/web/src/board-port/xpanel-home.ts:777: 10px
+apps/web/src/board-port/xpanel-home.ts:777: 13px
+apps/web/src/board-port/xpanel-home.ts:777: 10px
+apps/web/src/board-port/xpanel-home.ts:777: 11px
+apps/web/src/board-port/xpanel-home.ts:779: 14px
+apps/web/src/board-port/xpanel-home.ts:779: 14px
+apps/web/src/board-port/xpanel-home.ts:781: 14px
+apps/web/src/board-port/xpanel-home.ts:782: 14px
+apps/web/src/board-port/xpanel-home.ts:785: 14px
+apps/web/src/board-port/xpanel-home.ts:786: 10px
+apps/web/src/board-port/xpanel-home.ts:787: 18px
+apps/web/src/board-port/xpanel-home.ts:790: 14px
+apps/web/src/board-port/xpanel-home.ts:792: 2px
+apps/web/src/board-port/xpanel-home.ts:793: 14px
+apps/web/src/board-port/xpanel-home.ts:793: 14px
+apps/web/src/board-port/xpanel-home.ts:795: 3px
+apps/web/src/board-port/xpanel-home.ts:795: 9px
+apps/web/src/board-port/xpanel-home.ts:795: 999px
+apps/web/src/board-port/xpanel-home.ts:806: 14px
+apps/web/src/board-port/xpanel-home.ts:807: 10px
+apps/web/src/board-port/xpanel-home.ts:807: 11px
+apps/web/src/board-port/xpanel-home.ts:807: 22px
+apps/web/src/board-port/xpanel-home.ts:807: 22px
+apps/web/src/board-port/xpanel-home.ts:807: 6px
+apps/web/src/board-port/xpanel-home.ts:807: 6px
+apps/web/src/board-port/xpanel-home.ts:810: 6px
+apps/web/src/board-port/xpanel-home.ts:810: 10px
+apps/web/src/board-port/xpanel-home.ts:810: 999px
+apps/web/src/board-port/xpanel-home.ts:812: 14px
+apps/web/src/board-port/xpanel-home.ts:813: 15px
+apps/web/src/board-port/xpanel-home.ts:815: 26px
+apps/web/src/board-port/xpanel-home.ts:818: 6px
+apps/web/src/board-port/xpanel-home.ts:819: 22px
+apps/web/src/board-port/xpanel-home.ts:820: 14px
+apps/web/src/board-port/xpanel-home.ts:822: 13px
+apps/web/src/board-port/xpanel-home.ts:828: 26px
+apps/web/src/board-port/xpanel-home.ts:834: 6px
+apps/web/src/board-port/xpanel-home.ts:835: 13px
+apps/web/src/board-port/xpanel-home.ts:843: 26px
+apps/web/src/board-port/xpanel-home.ts:844: 10px
+apps/web/src/board-port/xpanel-home.ts:851: 13px
+apps/web/src/board-port/xpanel-home.ts:853: 14px
+apps/web/src/board-port/xpanel-home.ts:869: 14px
+apps/web/src/board-port/xpanel-home.ts:870: 14px
+apps/web/src/board-port/xpanel-home.ts:871: 7px
+apps/web/src/board-port/xpanel-home.ts:871: 15px
+apps/web/src/board-port/xpanel-home.ts:871: 17px
+apps/web/src/board-port/xpanel-home.ts:871: 14px
+apps/web/src/board-port/xpanel-home.ts:871: 14px
+apps/web/src/board-port/xpanel-home.ts:871: 10px
+apps/web/src/board-port/xpanel-home.ts:871: 2px
+apps/web/src/board-port/xpanel-home.ts:871: 3px
+apps/web/src/board-port/xpanel-home.ts:871: 9px
+apps/web/src/board-port/xpanel-home.ts:871: 999px
+apps/web/src/board-port/xpanel-home.ts:877: 22px
+apps/web/src/board-port/xpanel-home.ts:878: 22px
+apps/web/src/board-port/xpanel-home.ts:882: 15px
+apps/web/src/board-port/xpanel-home.ts:883: 15px
+apps/web/src/board-port/xpanel-home.ts:884: 150px
+apps/web/src/board-port/xpanel-home.ts:884: 6px
+apps/web/src/board-port/xpanel-home.ts:884: 6px
+apps/web/src/board-port/xpanel-home.ts:884: 3px
+apps/web/src/board-port/xpanel-home.ts:884: 6px
+apps/web/src/board-port/xpanel-home.ts:884: 3px
+apps/web/src/board-port/xpanel-home.ts:890: 15px
+apps/web/src/board-port/xpanel-home.ts:891: 15px
+apps/web/src/board-port/xpanel-home.ts:901: 17px
+apps/web/src/board-port/xpanel-home.ts:902: 17px
+apps/web/src/board-port/xpanel-home.ts:904: 14px
+apps/web/src/board-port/xpanel-home.ts:905: 14px
+apps/web/src/board-port/xpanel-home.ts:909: 390px
+apps/web/src/board-port/xpanel-home.ts:913: 7px
+apps/web/src/board-port/xpanel-home.ts:913: 15px
+apps/web/src/board-port/xpanel-home.ts:915: 10px
+apps/web/src/board-port/xpanel-home.ts:915: 13px
+apps/web/src/board-port/xpanel-home.ts:916: 15px
+apps/web/src/board-port/xpanel-home.ts:920: 13px
+apps/web/src/board-port/xpanel-home.ts:928: 15px
+apps/web/src/board-port/xpanel-home.ts:929: 13px
+apps/web/src/board-port/xpanel-home.ts:931: 6px
+apps/web/src/board-port/xpanel-home.ts:934: 15px
+apps/web/src/board-port/xpanel-home.ts:1004: 10px
+apps/web/src/board-port/xpanel-home.ts:1021: 15px
+apps/web/src/board-port/xpanel-home.ts:1029: 13px
+apps/web/src/board-port/xpanel-home.ts:1030: 13px
+apps/web/src/board-port/xwhm-dashboard.ts:384: 1.5px
+apps/web/src/board-port/xwhm-dashboard.ts:386: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:386: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:386: 999px
+apps/web/src/board-port/xwhm-dashboard.ts:386: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:386: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:389: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:389: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:390: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:390: 3px
+apps/web/src/board-port/xwhm-dashboard.ts:390: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:396: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:396: -3px
+apps/web/src/board-port/xwhm-dashboard.ts:396: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:406: 11px
+apps/web/src/board-port/xwhm-dashboard.ts:407: 2px
+apps/web/src/board-port/xwhm-dashboard.ts:411: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:411: 18px
+apps/web/src/board-port/xwhm-dashboard.ts:412: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:412: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:413: 18px
+apps/web/src/board-port/xwhm-dashboard.ts:415: 17px
+apps/web/src/board-port/xwhm-dashboard.ts:431: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:431: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:432: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:432: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:436: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:437: 22px
+apps/web/src/board-port/xwhm-dashboard.ts:437: 22px
+apps/web/src/board-port/xwhm-dashboard.ts:437: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:440: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:440: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:440: 999px
+apps/web/src/board-port/xwhm-dashboard.ts:440: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:440: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:441: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:441: 999px
+apps/web/src/board-port/xwhm-dashboard.ts:443: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:444: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:444: 999px
+apps/web/src/board-port/xwhm-dashboard.ts:444: 13px
+apps/web/src/board-port/xwhm-dashboard.ts:444: 13px
+apps/web/src/board-port/xwhm-dashboard.ts:456: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:456: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:456: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:456: 13px
+apps/web/src/board-port/xwhm-dashboard.ts:456: 2px
+apps/web/src/board-port/xwhm-dashboard.ts:465: 18px
+apps/web/src/board-port/xwhm-dashboard.ts:466: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:466: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:466: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:472: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:472: 13px
+apps/web/src/board-port/xwhm-dashboard.ts:473: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:473: 13px
+apps/web/src/board-port/xwhm-dashboard.ts:474: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:475: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:477: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:478: 13px
+apps/web/src/board-port/xwhm-dashboard.ts:482: 2px
+apps/web/src/board-port/xwhm-dashboard.ts:483: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:483: 1.5px
+apps/web/src/board-port/xwhm-dashboard.ts:484: 26px
+apps/web/src/board-port/xwhm-dashboard.ts:486: 13px
+apps/web/src/board-port/xwhm-dashboard.ts:494: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:494: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:494: 999px
+apps/web/src/board-port/xwhm-dashboard.ts:494: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:494: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:496: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:497: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:497: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:497: 999px
+apps/web/src/board-port/xwhm-dashboard.ts:497: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:497: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:497: 1.5px
+apps/web/src/board-port/xwhm-dashboard.ts:501: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:503: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:504: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:509: 2px
+apps/web/src/board-port/xwhm-dashboard.ts:509: 2px
+apps/web/src/board-port/xwhm-dashboard.ts:518: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:520: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:524: 22px
+apps/web/src/board-port/xwhm-dashboard.ts:527: 18px
+apps/web/src/board-port/xwhm-dashboard.ts:527: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:530: 26px
+apps/web/src/board-port/xwhm-dashboard.ts:531: 26px
+apps/web/src/board-port/xwhm-dashboard.ts:537: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:538: 170px
+apps/web/src/board-port/xwhm-dashboard.ts:540: 18px
+apps/web/src/board-port/xwhm-dashboard.ts:540: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:541: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:541: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:550: 22px
+apps/web/src/board-port/xwhm-dashboard.ts:550: 26px
+apps/web/src/board-port/xwhm-dashboard.ts:559: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:560: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:564: 18px
+apps/web/src/board-port/xwhm-dashboard.ts:565: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:565: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:569: 26px
+apps/web/src/board-port/xwhm-dashboard.ts:573: 13px
+apps/web/src/board-port/xwhm-dashboard.ts:575: 13px
+apps/web/src/board-port/xwhm-dashboard.ts:576: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:579: 18px
+apps/web/src/board-port/xwhm-dashboard.ts:579: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:580: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:580: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:586: 10px
+apps/web/src/board-port/xwhm-dashboard.ts:586: 999px
+apps/web/src/board-port/xwhm-dashboard.ts:588: 13px
+apps/web/src/board-port/xwhm-dashboard.ts:590: 13px
+apps/web/src/board-port/xwhm-dashboard.ts:591: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:601: 18px
+apps/web/src/board-port/xwhm-dashboard.ts:602: 6px
+apps/web/src/board-port/xwhm-dashboard.ts:602: 14px
+apps/web/src/board-port/xwhm-dashboard.ts:1129: 2px
+apps/web/src/board-port/xwhm-dashboard.ts:1129: 2px
+apps/web/src/charts.ts:259: 6px
+apps/web/src/charts.ts:264: 6px
+apps/web/src/charts.ts:269: 6px
+apps/web/src/charts.ts:274: 6px
+apps/web/src/charts.ts:279: 6px
+apps/web/src/charts.ts:284: 6px
+apps/web/src/mail-layout.ts:68: 2px
+apps/web/src/mail-layout.ts:68: 999px
+apps/web/src/mail-layout.ts:92: 3px
+apps/web/src/mail-layout.ts:93: 3px
+apps/web/src/mail-layout.ts:94: -3px
+apps/web/src/mail-layout.ts:95: 7px
+apps/web/src/mail-layout.ts:95: 7px
+apps/web/src/mail-layout.ts:95: 7px
+apps/web/src/mail-layout.ts:121: 3px
+apps/web/src/surfaces/xpanel.ts:336: 10px
+apps/web/src/surfaces/xpanel.ts:345: 10px
+apps/web/src/surfaces/xpanel.ts:477: 6px
+apps/web/src/surfaces/xpanel.ts:477: 6px
+apps/web/src/surfaces/xpanel.ts:484: 10px
+apps/web/src/tokens.ts:775: 22px
+apps/web/src/tokens.ts:777: 26px
+apps/web/src/tokens.ts:778: 30px
+apps/web/src/tokens.ts:857: 14px
+apps/web/src/tokens.ts:899: 14px
+apps/web/src/tokens.ts:945: 17px
+apps/web/src/tokens.ts:953: 18px
+apps/web/src/tokens.ts:964: 6px
+apps/web/src/tokens.ts:988: 6px
+apps/web/src/tokens.ts:1025: 10px
+apps/web/src/tokens.ts:1031: 14px
+apps/web/src/tokens.ts:1032: 22px
+apps/web/src/tokens.ts:1046: 3px
+apps/web/src/tokens.ts:1050: -3px
+apps/web/src/tokens.ts:1053: 18px
+apps/web/src/tokens.ts:1057: 11px
+apps/web/src/tokens.ts:1063: 2px
+apps/web/src/tokens.ts:1066: 2px
+apps/web/src/tokens.ts:1068: 999px
+apps/web/src/tokens.ts:1070: 11px
+apps/web/src/tokens.ts:1074: 26px
+apps/web/src/tokens.ts:1080: 10px
+apps/web/src/tokens.ts:1089: 6px
+apps/web/src/tokens.ts:1089: 6px
+apps/web/src/tokens.ts:1091: 6px
+apps/web/src/tokens.ts:1096: 6px
+apps/web/src/tokens.ts:1096: 14px
+apps/web/src/tokens.ts:1096: 10px
+apps/web/src/tokens.ts:1115: 1.5px
+apps/web/src/tokens.ts:1123: 1.5px
+apps/web/src/tokens.ts:1125: 3px
+apps/web/src/tokens.ts:1131: 999px
+apps/web/src/tokens.ts:1135: 13px
+apps/web/src/tokens.ts:1146: 3px
+apps/web/src/tokens.ts:1147: 10px
+apps/web/src/tokens.ts:1149: 2px
+apps/web/src/tokens.ts:1152: 38px
+apps/web/src/tokens.ts:1153: 14px
+apps/web/src/tokens.ts:1159: 13px
+apps/web/src/tokens.ts:1167: 2px
+apps/web/src/tokens.ts:1172: 3px
+apps/web/src/tokens.ts:1173: 999px
+apps/web/src/tokens.ts:1183: 22px
+apps/web/src/tokens.ts:1184: 22px
+apps/web/src/tokens.ts:1187: 3px
+apps/web/src/tokens.ts:1192: 14px
+apps/web/src/tokens.ts:1193: 10px
+apps/web/src/tokens.ts:1199: 1.5px
+apps/web/src/tokens.ts:1215: 14px
+apps/web/src/tokens.ts:1217: 2px
+apps/web/src/tokens.ts:1221: 14px
+apps/web/src/tokens.ts:1233: 6px
+apps/web/src/tokens.ts:1234: 18px
+apps/web/src/tokens.ts:1235: 10px
+apps/web/src/tokens.ts:1236: 1.5px
+apps/web/src/tokens.ts:1240: 14px
+apps/web/src/tokens.ts:1243: 6px
+apps/web/src/tokens.ts:1244: 10px
+apps/web/src/tokens.ts:1244: 5px
+apps/web/src/tokens.ts:1246: 22px
+apps/web/src/tokens.ts:1246: 999px
+apps/web/src/tokens.ts:1251: -10px
+apps/web/src/tokens.ts:1267: 6px
+apps/web/src/tokens.ts:1267: 13px
+apps/web/src/tokens.ts:1270: 26px
+apps/web/src/tokens.ts:1270: 34px
+apps/web/src/tokens.ts:1271: 14px
+apps/web/src/tokens.ts:1272: 26px
+apps/web/src/tokens.ts:1274: 26px
+apps/web/src/tokens.ts:1277: 13px
+apps/web/src/tokens.ts:1283: 26px
+apps/web/src/tokens.ts:1287: 13px
+apps/web/src/tokens.ts:1296: 9px
+apps/web/src/tokens.ts:1298: 13px
+apps/web/src/tokens.ts:1299: 13px
+apps/web/src/tokens.ts:1300: 13px
+apps/web/src/tokens.ts:1302: 14px
+apps/web/src/tokens.ts:1302: 999px
+apps/web/src/tokens.ts:1302: 13px
+apps/web/src/tokens.ts:1304: 719px
+apps/web/src/tokens.ts:1455: 18px
+apps/web/src/tokens.ts:1468: 17px
+apps/web/src/tokens.ts:1622: 10px
+apps/web/src/tokens.ts:1654: 14px
+apps/web/src/tokens.ts:1664: 12.5px
+apps/web/src/tokens.ts:1698: 10px
+apps/web/src/tokens.ts:1699: 10px
+apps/web/src/tokens.ts:1705: 13px
+apps/web/src/tokens.ts:1721: 14px
+apps/web/src/tokens.ts:1723: 12.5px
+apps/web/src/tokens.ts:1736: 10px
+apps/web/src/tokens.ts:1838: 3px
+apps/web/src/tokens.ts:1850: 3px
+apps/web/src/tokens.ts:1883: 2px
+apps/web/src/tokens.ts:1884: 2px
+apps/web/src/tokens.ts:1888: 6px
+apps/web/src/tokens.ts:1892: 10px
+apps/web/src/tokens.ts:1906: 2px
+apps/web/src/tokens.ts:1907: 2px
+apps/web/src/tokens.ts:1911: 479px
+apps/web/src/tokens.ts:1924: 14px
+apps/web/src/tokens.ts:1928: 479px
+apps/web/src/tokens.ts:1986: 2px
+apps/web/src/tokens.ts:2015: 14px
+apps/web/src/tokens.ts:2016: 22px
+apps/web/src/tokens.ts:2026: 2px
+apps/web/src/tokens.ts:2026: 2px
+apps/web/src/tokens.ts:2034: 2px
+apps/web/src/tokens.ts:2043: 6px
+apps/web/src/tokens.ts:2045: 999px
+apps/web/src/tokens.ts:2061: 13px
+apps/web/src/tokens.ts:2076: 6px
+apps/web/src/tokens.ts:2078: 999px
+apps/web/src/tokens.ts:2086: 2px
+apps/web/src/tokens.ts:2087: 2px
+apps/web/src/tokens.ts:2162: 210px
+apps/web/src/tokens.ts:2425: 1.5px
+apps/web/src/tokens.ts:2524: 2px
+apps/web/src/tokens.ts:2525: 10px
+apps/web/src/tokens.ts:2526: 999px
+apps/web/src/tokens.ts:2613: -10px
+apps/web/src/tokens.ts:2617: 14px
+apps/web/src/tokens.ts:2629: 3px
+apps/web/src/tokens.ts:2660: 5px
+apps/web/src/tokens.ts:2683: 2px
+apps/web/src/tokens.ts:2695: 2px
+apps/web/src/tokens.ts:2726: 10px
+apps/web/src/tokens.ts:2736: 6px
+apps/web/src/tokens.ts:2860: 10px
+apps/web/src/tokens.ts:2861: 10px
+apps/web/src/tokens.ts:2862: 2px
+apps/web/src/tokens.ts:2863: 6px
+apps/web/src/tokens.ts:2875: 6px
+apps/web/src/tokens.ts:2882: 10px
+apps/web/src/tokens.ts:3147: 690px
+apps/web/src/tokens.ts:3155: 130px
+apps/web/src/tokens.ts:3161: 6px
+apps/web/src/tokens.ts:3161: 6px
+apps/web/src/tokens.ts:3161: 1.5px
+apps/web/src/tokens.ts:3161: 1.5px
+apps/web/src/tokens.ts:3161: -3px
+apps/web/src/tokens.ts:3162: 3px
+apps/web/src/tokens.ts:3203: 719px
+apps/web/src/tokens.ts:3219: 479px
+apps/web/src/tokens.ts:3228: 6px
+apps/web/src/ws-client.ts:1048: 10px
+
+## Non-token color literals
+apps/web/src/app.ts:426: #1D5BD6 #FFFFFF
+apps/web/src/app.ts:429: #1D5BD6 #FFFFFF
+apps/web/src/app.ts:430: #101828 #FFFFFF
+apps/web/src/app.ts:431: #087F5B #FFFFFF
+apps/web/src/arabic-type.ts:99: #1D5BD6
+apps/web/src/board-port/xmail-compose.fixture.ts:6: #475467 #D0D5DD #475467
+apps/web/src/board-port/xmail-compose.fixture.ts:8: #E2E6EC #EEF0F3 #344054 #E2E6EC #EEF0F3 #344054 #E2E6EC #EEF0F3 #344054
+apps/web/src/board-port/xmail-compose.fixture.ts:57: #5D6B7E
+apps/web/src/board-port/xmail-compose.fixture.ts:58: #5D6B7E
+apps/web/src/board-port/xmail-compose.fixture.ts:59: #1D5BD6
+apps/web/src/board-port/xmail-compose.fixture.ts:64: #E7F5EE #0E7A4E #0E7A4E
+apps/web/src/board-port/xmail-compose.fixture.ts:85: #F5F6F8 #101828
+apps/web/src/board-port/xmail-compose.fixture.ts:87: #1D5BD6 #1546A8
+apps/web/src/board-port/xmail-compose.fixture.ts:88: #1D5BD6
+apps/web/src/board-port/xmail-compose.ts:10: #1D5BD6 #1546A8
+apps/web/src/board-port/xmail-compose.ts:11: #1D5BD6
+apps/web/src/board-port/xmail-compose.ts:107: #1D5BD6 #FFFFFF
+apps/web/src/board-port/xmail-compose.ts:108: #475467
+apps/web/src/board-port/xmail-compose.ts:109: #344054
+apps/web/src/board-port/xmail-compose.ts:114: #1D5BD6 #E8EFFD
+apps/web/src/board-port/xmail-compose.ts:115: #344054
+apps/web/src/board-port/xmail-compose.ts:136: #D0D5DD
+apps/web/src/board-port/xmail-compose.ts:140: #C7D7F8 #E8EFFD #1D5BD6 #344054
+apps/web/src/board-port/xmail-compose.ts:144: #FEF3F2 #EEF0F3
+apps/web/src/board-port/xmail-compose.ts:145: #F4B8B2 #EEF0F3
+apps/web/src/board-port/xmail-compose.ts:146: #B42318 #475467 #101828
+apps/web/src/board-port/xmail-compose.ts:149: #B42318
+apps/web/src/board-port/xmail-compose.ts:150: #101828 #475467
+apps/web/src/board-port/xmail-compose.ts:156: #EEF0F3 #344054 #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-compose.ts:159: #E2E6EC #FFFFFF #EEF0F3 #344054 #E9ECF1 #1D5BD6 #475467
+apps/web/src/board-port/xmail-compose.ts:171: #C7D7F8
+apps/web/src/board-port/xmail-compose.ts:172: #E8EFFD
+apps/web/src/board-port/xmail-compose.ts:173: #1D5BD6 #344054
+apps/web/src/board-port/xmail-compose.ts:195: #FEF3F2 #EEF0F3 #F4B8B2 #EEF0F3 #101828
+apps/web/src/board-port/xmail-compose.ts:200: #B42318 #475467 #101828
+apps/web/src/board-port/xmail-compose.ts:206: #B42318
+apps/web/src/board-port/xmail-compose.ts:214: #475467
+apps/web/src/board-port/xmail-compose.ts:225: #A6DCC3 #F1FAF5 #F9C9A0 #FFF6EE #F4B8B2 #FEF3F2
+apps/web/src/board-port/xmail-compose.ts:263: #B42318
+apps/web/src/board-port/xmail-compose.ts:269: #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-compose.ts:273: #B42318 #B42318 #FFFFFF
+apps/web/src/board-port/xmail-compose.ts:286: #B42318
+apps/web/src/board-port/xmail-compose.ts:372: #E7F5EE #EEF0F3
+apps/web/src/board-port/xmail-compose.ts:373: #0E7A4E #344054
+apps/web/src/board-port/xmail-compose.ts:374: #0E7A4E
+apps/web/src/board-port/xmail-compose.ts:376: #5D6B7E
+apps/web/src/board-port/xmail-compose.ts:396: #F5F6F8 #101828
+apps/web/src/board-port/xmail-compose.ts:398: #FFFFFF #E2E6EC
+apps/web/src/board-port/xmail-compose.ts:399: #0E7A4E #FFFFFF #0E7A4E
+apps/web/src/board-port/xmail-compose.ts:400: #5D6B7E #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-compose.ts:402: #475467 #101828
+apps/web/src/board-port/xmail-compose.ts:403: #344054 #475467 #E9ECF1 #1D5BD6
+apps/web/src/board-port/xmail-compose.ts:405: #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-compose.ts:408: #FFFFFF #E2E6EC
+apps/web/src/board-port/xmail-compose.ts:409: #1D5BD6 #1546A8 #FFFFFF
+apps/web/src/board-port/xmail-compose.ts:411: #5D6B7E
+apps/web/src/board-port/xmail-compose.ts:412: #EEF0F3 #5D6B7E #344054 #475467 #344054 #475467
+apps/web/src/board-port/xmail-compose.ts:416: #E2E6EC #FFFFFF
+apps/web/src/board-port/xmail-compose.ts:417: #EEF0F3
+apps/web/src/board-port/xmail-compose.ts:418: #475467
+apps/web/src/board-port/xmail-compose.ts:419: #475467
+apps/web/src/board-port/xmail-compose.ts:422: #EEF0F3 #344054 #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-compose.ts:426: #5D6B7E
+apps/web/src/board-port/xmail-compose.ts:427: #EEF0F3 #344054 #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-compose.ts:429: #E2E6EC #F8F9FB
+apps/web/src/board-port/xmail-compose.ts:430: #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-compose.ts:432: #475467 #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-compose.ts:434: #5D6B7E
+apps/web/src/board-port/xmail-compose.ts:437: #EEF0F3
+apps/web/src/board-port/xmail-compose.ts:438: #B42318
+apps/web/src/board-port/xmail-compose.ts:440: #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-compose.ts:441: #1D5BD6 #1D5BD6 #FFFFFF
+apps/web/src/board-port/xmail-compose.ts:445: #E2E6EC #FFFFFF
+apps/web/src/board-port/xmail-compose.ts:448: #475467
+apps/web/src/board-port/xmail-compose.ts:449: #475467
+apps/web/src/board-port/xmail-compose.ts:450: #475467
+apps/web/src/board-port/xmail-compose.ts:451: #475467
+apps/web/src/board-port/xmail-compose.ts:454: #E2E6EC #FFFFFF
+apps/web/src/board-port/xmail-compose.ts:456: #475467
+apps/web/src/board-port/xmail-compose.ts:457: #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-compose.ts:458: #D0D5DD #FFFFFF #101828 #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-compose.ts:460: #E2E6EC #FFFFFF
+apps/web/src/board-port/xmail-compose.ts:461: #5D6B7E
+apps/web/src/board-port/xmail-compose.ts:463: #1D5BD6 #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-compose.ts:576: #E2E6EC #EEF0F3 #344054
+apps/web/src/board-port/xmail-inbox.fixture.ts:88: #F5F6F8 #101828
+apps/web/src/board-port/xmail-inbox.fixture.ts:90: #1D5BD6 #1546A8
+apps/web/src/board-port/xmail-inbox.fixture.ts:91: #1D5BD6
+apps/web/src/board-port/xmail-inbox.ts:10: #1D5BD6 #1546A8
+apps/web/src/board-port/xmail-inbox.ts:11: #1D5BD6
+apps/web/src/board-port/xmail-inbox.ts:119: #1D5BD6 #FFFFFF
+apps/web/src/board-port/xmail-inbox.ts:120: #475467
+apps/web/src/board-port/xmail-inbox.ts:121: #344054
+apps/web/src/board-port/xmail-inbox.ts:126: #1D5BD6 #E8EFFD
+apps/web/src/board-port/xmail-inbox.ts:127: #344054
+apps/web/src/board-port/xmail-inbox.ts:146: #1D5BD6
+apps/web/src/board-port/xmail-inbox.ts:147: #F3F7FE #FFFFFF
+apps/web/src/board-port/xmail-inbox.ts:148: #1D5BD6 #1D5BD6
+apps/web/src/board-port/xmail-inbox.ts:149: #101828 #5D6B7E
+apps/web/src/board-port/xmail-inbox.ts:158: #EEF0F3 #101828 #475467
+apps/web/src/board-port/xmail-inbox.ts:163: #101828 #E7F5EE
+apps/web/src/board-port/xmail-inbox.ts:164: #FFFFFF #0E7A4E
+apps/web/src/board-port/xmail-inbox.ts:167: #EEF0F3 #FEF3F2 #E7F5EE
+apps/web/src/board-port/xmail-inbox.ts:168: #344054 #B42318 #0E7A4E
+apps/web/src/board-port/xmail-inbox.ts:170: #344054
+apps/web/src/board-port/xmail-inbox.ts:177: #E2E6EC #F8F9FB #101828
+apps/web/src/board-port/xmail-inbox.ts:183: #C7D7F8 #F3F7FE #1D5BD6 #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-inbox.ts:186: #344054 #E2E6EC #FFFFFF #101828 #EEF0F3 #344054 #5D6B7E #475467
+apps/web/src/board-port/xmail-inbox.ts:190: #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-inbox.ts:192: #E2E6EC #D0D5DD #FFFFFF #101828 #F4B8B2 #FFFFFF #B42318 #EEF0F3 #475467 #475467 #344054 #475467 #101828
+apps/web/src/board-port/xmail-inbox.ts:195: #5D6B7E #5D6B7E
+apps/web/src/board-port/xmail-inbox.ts:209: #1D5BD6 #1D5BD6
+apps/web/src/board-port/xmail-inbox.ts:219: #FFFFFF
+apps/web/src/board-port/xmail-inbox.ts:220: #101828 #475467
+apps/web/src/board-port/xmail-inbox.ts:222: rgba(16, 24, 40, 0.08)
+apps/web/src/board-port/xmail-inbox.ts:268: #5D6B7E
+apps/web/src/board-port/xmail-inbox.ts:273: #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-inbox.ts:303: #5D6B7E
+apps/web/src/board-port/xmail-inbox.ts:332: #FFFFFF
+apps/web/src/board-port/xmail-inbox.ts:364: #F3F7FE #FFFFFF
+apps/web/src/board-port/xmail-inbox.ts:404: #E2E6EC #FFFFFF rgba(16, 24, 40, 0.12)
+apps/web/src/board-port/xmail-inbox.ts:415: #101828
+apps/web/src/board-port/xmail-inbox.ts:448: #101828 #FFFFFF
+apps/web/src/board-port/xmail-inbox.ts:455: #475467 #FFFFFF
+apps/web/src/board-port/xmail-inbox.ts:501: #FEF3F2 #B42318
+apps/web/src/board-port/xmail-inbox.ts:535: #FEF3F2 #B42318
+apps/web/src/board-port/xmail-inbox.ts:567: #FFFFFF #101828 #475467 rgba(16, 24, 40, 0.08)
+apps/web/src/board-port/xmail-inbox.ts:569: #5D6B7E
+apps/web/src/board-port/xmail-inbox.ts:572: #FFFFFF
+apps/web/src/board-port/xmail-inbox.ts:573: #FFFFFF
+apps/web/src/board-port/xmail-inbox.ts:581: #F5F6F8 #101828
+apps/web/src/board-port/xmail-inbox.ts:583: #FFFFFF #E2E6EC
+apps/web/src/board-port/xmail-inbox.ts:584: #0E7A4E #FFFFFF #0E7A4E
+apps/web/src/board-port/xmail-inbox.ts:585: #5D6B7E #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-inbox.ts:587: #475467 #101828
+apps/web/src/board-port/xmail-inbox.ts:588: #344054 #475467 #E9ECF1 #1D5BD6
+apps/web/src/board-port/xmail-inbox.ts:590: #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xmail-inbox.ts:593: #FFFFFF #E2E6EC
+apps/web/src/board-port/xmail-inbox.ts:594: #1D5BD6 #1D5BD6 #FFFFFF
+apps/web/src/board-port/xmail-inbox.ts:596: #5D6B7E #C9CFD8 #1D5BD6
+apps/web/src/board-port/xmail-inbox.ts:597: #EEF0F3 #5D6B7E #344054 #475467 #344054 #475467
+apps/web/src/board-port/xmail-inbox.ts:601: #FFFFFF #E2E6EC
+apps/web/src/board-port/xmail-inbox.ts:602: #E2E6EC
+apps/web/src/board-port/xmail-inbox.ts:603: #5D6B7E
+apps/web/src/board-port/xmail-inbox.ts:604: #EEF0F3 #D0D5DD #FFFFFF #344054
+apps/web/src/board-port/xmail-inbox.ts:610: #5D6B7E #1D5BD6
+apps/web/src/board-port/xpanel-home.fixture.ts:54: #5D6B7E
+apps/web/src/board-port/xpanel-home.fixture.ts:55: #5D6B7E
+apps/web/src/board-port/xpanel-home.fixture.ts:59: #E7F5EE #0E7A4E
+apps/web/src/board-port/xpanel-home.fixture.ts:60: #E7F5EE #0E7A4E
+apps/web/src/board-port/xpanel-home.fixture.ts:61: #FDECEA #B42318
+apps/web/src/board-port/xpanel-home.fixture.ts:64: #E7F5EE #0E7A4E
+apps/web/src/board-port/xpanel-home.fixture.ts:65: #E7F5EE #0E7A4E
+apps/web/src/board-port/xpanel-home.fixture.ts:66: #FDECEA #B42318
+apps/web/src/board-port/xpanel-home.fixture.ts:124: #E7F5EE #0E7A4E
+apps/web/src/board-port/xpanel-home.fixture.ts:145: #E7F5EE #0E7A4E
+apps/web/src/board-port/xpanel-home.fixture.ts:176: #F5F6F8 #101828
+apps/web/src/board-port/xpanel-home.fixture.ts:178: #1D5BD6 #1546A8
+apps/web/src/board-port/xpanel-home.fixture.ts:179: #1D5BD6
+apps/web/src/board-port/xpanel-home.ts:51: #1D5BD6 #1546A8
+apps/web/src/board-port/xpanel-home.ts:52: #1D5BD6
+apps/web/src/board-port/xpanel-home.ts:191: #B42318 #B54708 #1D5BD6
+apps/web/src/board-port/xpanel-home.ts:192: #B54708 #5D6B7E
+apps/web/src/board-port/xpanel-home.ts:352: #1D5BD6 #344054 #E8EFFD
+apps/web/src/board-port/xpanel-home.ts:353: #1D5BD6
+apps/web/src/board-port/xpanel-home.ts:358: #5D6B7E
+apps/web/src/board-port/xpanel-home.ts:359: #5D6B7E
+apps/web/src/board-port/xpanel-home.ts:378: #5D6B7E #98A2B3
+apps/web/src/board-port/xpanel-home.ts:384: #101828
+apps/web/src/board-port/xpanel-home.ts:385: #101828
+apps/web/src/board-port/xpanel-home.ts:386: #F3F7FE #E8EFFD #1D5BD6
+apps/web/src/board-port/xpanel-home.ts:388: #98A2B3
+apps/web/src/board-port/xpanel-home.ts:400: #5D6B7E
+apps/web/src/board-port/xpanel-home.ts:402: #B54708
+apps/web/src/board-port/xpanel-home.ts:588: #EEF0F3 #344054
+apps/web/src/board-port/xpanel-home.ts:735: #344054 #344054
+apps/web/src/board-port/xpanel-home.ts:736: #475467 #E9ECF1 #1D5BD6
+apps/web/src/board-port/xpanel-home.ts:742: #1D5BD6
+apps/web/src/board-port/xpanel-home.ts:743: #1D5BD6
+apps/web/src/board-port/xpanel-home.ts:747: #5D6B7E #5D6B7E
+apps/web/src/board-port/xpanel-home.ts:750: #FFFFFF #E2E6EC
+apps/web/src/board-port/xpanel-home.ts:758: #EEF0F3 #475467
+apps/web/src/board-port/xpanel-home.ts:762: #475467
+apps/web/src/board-port/xpanel-home.ts:763: #475467
+apps/web/src/board-port/xpanel-home.ts:764: #E9ECF1
+apps/web/src/board-port/xpanel-home.ts:771: #EEF0F3
+apps/web/src/board-port/xpanel-home.ts:773: #5D6B7E
+apps/web/src/board-port/xpanel-home.ts:775: #5D6B7E
+apps/web/src/board-port/xpanel-home.ts:777: #F9C9A0 #FFF6EE
+apps/web/src/board-port/xpanel-home.ts:779: #D0D5DD #FFFFFF #101828 #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xpanel-home.ts:783: #F5F6F8 #101828
+apps/web/src/board-port/xpanel-home.ts:785: #FFFFFF #E2E6EC
+apps/web/src/board-port/xpanel-home.ts:786: #1D5BD6
+apps/web/src/board-port/xpanel-home.ts:787: #101828 #FFFFFF
+apps/web/src/board-port/xpanel-home.ts:790: #E2E6EC #F8F9FB
+apps/web/src/board-port/xpanel-home.ts:793: #101828 #5D6B7E #101828 #5D6B7E
+apps/web/src/board-port/xpanel-home.ts:795: #EEF0F3 #344054
+apps/web/src/board-port/xpanel-home.ts:803: #FFFFFF #E2E6EC
+apps/web/src/board-port/xpanel-home.ts:806: #D0D5DD #F8F9FB #101828
+apps/web/src/board-port/xpanel-home.ts:807: #D0D5DD #FFFFFF #475467
+apps/web/src/board-port/xpanel-home.ts:810: #EEF0F3 #344054
+apps/web/src/board-port/xpanel-home.ts:812: #D0D5DD #FFFFFF #344054
+apps/web/src/board-port/xpanel-home.ts:813: #C7D7F8 #E8EFFD #1D5BD6
+apps/web/src/board-port/xpanel-home.ts:820: #475467
+apps/web/src/board-port/xpanel-home.ts:822: #475467
+apps/web/src/board-port/xpanel-home.ts:844: #FFFFFF #E2E6EC
+apps/web/src/board-port/xpanel-home.ts:848: #FFFFFF #E2E6EC
+apps/web/src/board-port/xpanel-home.ts:855: #FFFFFF #E2E6EC
+apps/web/src/board-port/xpanel-home.ts:869: #5D6B7E
+apps/web/src/board-port/xpanel-home.ts:870: #5D6B7E
+apps/web/src/board-port/xpanel-home.ts:871: #10182866 #FFFFFF #E2E6EC #E2E6EC #101828 #FFFFFF #1D5BD6 #D0D5DD #FFFFFF #344054 #E2E6EC #F8F9FB #EEF0F3 #344054
+apps/web/src/board-port/xpanel-home.ts:884: #FFFFFF #E2E6EC #475467 #E9ECF1
+apps/web/src/board-port/xpanel-home.ts:889: #FFFFFF #E2E6EC
+apps/web/src/board-port/xpanel-home.ts:891: #101828
+apps/web/src/board-port/xpanel-home.ts:893: #5D6B7E
+apps/web/src/board-port/xpanel-home.ts:894: #475467
+apps/web/src/board-port/xpanel-home.ts:897: #EEF0F3
+apps/web/src/board-port/xpanel-home.ts:901: #1D5BD6
+apps/web/src/board-port/xpanel-home.ts:902: #1D5BD6
+apps/web/src/board-port/xpanel-home.ts:907: #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xpanel-home.ts:908: #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xpanel-home.ts:909: #F5F6F8 #101828
+apps/web/src/board-port/xpanel-home.ts:911: #FFFFFF #E2E6EC
+apps/web/src/board-port/xpanel-home.ts:912: #D0D5DD #FFFFFF #344054
+apps/web/src/board-port/xpanel-home.ts:913: #101828 #FFFFFF
+apps/web/src/board-port/xpanel-home.ts:915: #D0D5DD #FFFFFF #344054
+apps/web/src/board-port/xpanel-home.ts:916: #C7D7F8 #E8EFFD #1D5BD6
+apps/web/src/board-port/xpanel-home.ts:920: #475467
+apps/web/src/board-port/xpanel-home.ts:935: #5D6B7E
+apps/web/src/board-port/xpanel-home.ts:1003: #FFFFFF #C9CFD8
+apps/web/src/board-port/xpanel-home.ts:1004: #FFFFFF #C9CFD8
+apps/web/src/board-port/xpanel-home.ts:1012: #5D6B7E
+apps/web/src/board-port/xpanel-home.ts:1029: #5D6B7E
+apps/web/src/board-port/xpanel-home.ts:1030: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:171: #E7F5EE #0E7A4E
+apps/web/src/board-port/xwhm-dashboard.ts:172: #FDECEA #B42318
+apps/web/src/board-port/xwhm-dashboard.ts:173: #EEF0F3 #344054
+apps/web/src/board-port/xwhm-dashboard.ts:389: #C9D3E1
+apps/web/src/board-port/xwhm-dashboard.ts:390: #1D2B40 #FFFFFF #6EA0FF
+apps/web/src/board-port/xwhm-dashboard.ts:396: #1D2B40 #FFFFFF #6EA0FF
+apps/web/src/board-port/xwhm-dashboard.ts:406: #8A99AF
+apps/web/src/board-port/xwhm-dashboard.ts:411: #0E1726 #C9D3E1
+apps/web/src/board-port/xwhm-dashboard.ts:413: #1D5BD6 #FFFFFF
+apps/web/src/board-port/xwhm-dashboard.ts:415: #FFFFFF
+apps/web/src/board-port/xwhm-dashboard.ts:416: #8A99AF
+apps/web/src/board-port/xwhm-dashboard.ts:425: #E7F5EE #EEF0F3
+apps/web/src/board-port/xwhm-dashboard.ts:426: #0E7A4E #344054
+apps/web/src/board-port/xwhm-dashboard.ts:431: #1D5BD6
+apps/web/src/board-port/xwhm-dashboard.ts:432: #1D5BD6
+apps/web/src/board-port/xwhm-dashboard.ts:433: #FFFFFF #E2E6EC
+apps/web/src/board-port/xwhm-dashboard.ts:435: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:436: #D0D5DD #F8F9FB #101828
+apps/web/src/board-port/xwhm-dashboard.ts:437: #D0D5DD #FFFFFF #475467
+apps/web/src/board-port/xwhm-dashboard.ts:441: #EEF0F3 #344054
+apps/web/src/board-port/xwhm-dashboard.ts:443: #D0D5DD #FFFFFF #344054
+apps/web/src/board-port/xwhm-dashboard.ts:444: #E2E6EC #FFFFFF #101828 #0E1726 #FFFFFF
+apps/web/src/board-port/xwhm-dashboard.ts:450: #F9C9A0 #C7D7F8
+apps/web/src/board-port/xwhm-dashboard.ts:451: #FFF6EE #F3F7FE
+apps/web/src/board-port/xwhm-dashboard.ts:452: #B54708 #1D5BD6
+apps/web/src/board-port/xwhm-dashboard.ts:461: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:462: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:466: #EEF0F3 #F8F9FB #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:471: #EEF0F3
+apps/web/src/board-port/xwhm-dashboard.ts:473: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:474: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:475: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:478: #475467
+apps/web/src/board-port/xwhm-dashboard.ts:479: #E9ECF1
+apps/web/src/board-port/xwhm-dashboard.ts:483: #475467
+apps/web/src/board-port/xwhm-dashboard.ts:486: #EEF0F3
+apps/web/src/board-port/xwhm-dashboard.ts:492: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:494: #E7F5EE #0E7A4E #0E7A4E
+apps/web/src/board-port/xwhm-dashboard.ts:495: #EEF0F3
+apps/web/src/board-port/xwhm-dashboard.ts:496: #5D6B7E #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:500: #475467
+apps/web/src/board-port/xwhm-dashboard.ts:501: #475467
+apps/web/src/board-port/xwhm-dashboard.ts:503: #475467
+apps/web/src/board-port/xwhm-dashboard.ts:504: #475467
+apps/web/src/board-port/xwhm-dashboard.ts:505: #F5F6F8 #101828
+apps/web/src/board-port/xwhm-dashboard.ts:508: #1D5BD6 #1546A8
+apps/web/src/board-port/xwhm-dashboard.ts:509: #1D5BD6
+apps/web/src/board-port/xwhm-dashboard.ts:510: #6EA0FF
+apps/web/src/board-port/xwhm-dashboard.ts:520: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:527: #1D5BD6 #1D5BD6 #FFFFFF
+apps/web/src/board-port/xwhm-dashboard.ts:532: #FFFFFF #E2E6EC
+apps/web/src/board-port/xwhm-dashboard.ts:537: #344054
+apps/web/src/board-port/xwhm-dashboard.ts:540: #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xwhm-dashboard.ts:541: #1D5BD6
+apps/web/src/board-port/xwhm-dashboard.ts:542: #0E7A4E
+apps/web/src/board-port/xwhm-dashboard.ts:545: #FFFFFF #E2E6EC
+apps/web/src/board-port/xwhm-dashboard.ts:548: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:551: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:553: #FFFFFF #E2E6EC
+apps/web/src/board-port/xwhm-dashboard.ts:556: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:558: #E2E6EC
+apps/web/src/board-port/xwhm-dashboard.ts:560: #F8F9FB #475467
+apps/web/src/board-port/xwhm-dashboard.ts:564: #EEF0F3
+apps/web/src/board-port/xwhm-dashboard.ts:565: #1D5BD6
+apps/web/src/board-port/xwhm-dashboard.ts:570: #FFFFFF #E2E6EC
+apps/web/src/board-port/xwhm-dashboard.ts:573: #475467
+apps/web/src/board-port/xwhm-dashboard.ts:576: #EEF0F3
+apps/web/src/board-port/xwhm-dashboard.ts:579: #D0D5DD #FFFFFF #101828
+apps/web/src/board-port/xwhm-dashboard.ts:580: #1D5BD6
+apps/web/src/board-port/xwhm-dashboard.ts:583: #FFFFFF #E2E6EC
+apps/web/src/board-port/xwhm-dashboard.ts:586: #EEF0F3 #344054
+apps/web/src/board-port/xwhm-dashboard.ts:592: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:595: #FFFFFF #E2E6EC
+apps/web/src/board-port/xwhm-dashboard.ts:598: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:600: #E2E6EC
+apps/web/src/board-port/xwhm-dashboard.ts:601: #EEF0F3
+apps/web/src/board-port/xwhm-dashboard.ts:602: #1D5BD6
+apps/web/src/board-port/xwhm-dashboard.ts:614: #E7F5EE #0E7A4E #0E7A4E
+apps/web/src/board-port/xwhm-dashboard.ts:635: #1D5BD6
+apps/web/src/board-port/xwhm-dashboard.ts:636: #1D5BD6
+apps/web/src/board-port/xwhm-dashboard.ts:655: #1D5BD6 #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:656: #1D5BD6 #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:657: #1D5BD6 #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:658: #1D5BD6 #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:674: #0E7A4E
+apps/web/src/board-port/xwhm-dashboard.ts:675: #B54708
+apps/web/src/board-port/xwhm-dashboard.ts:676: #344054
+apps/web/src/board-port/xwhm-dashboard.ts:681: #B42318
+apps/web/src/board-port/xwhm-dashboard.ts:682: #B54708
+apps/web/src/board-port/xwhm-dashboard.ts:712: #EEF0F3 #344054
+apps/web/src/board-port/xwhm-dashboard.ts:738: #1D5BD6
+apps/web/src/board-port/xwhm-dashboard.ts:739: #1D5BD6
+apps/web/src/board-port/xwhm-dashboard.ts:758: #1D5BD6 #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:759: #1D5BD6 #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:760: #1D5BD6 #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:761: #1D5BD6 #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:777: #0E7A4E
+apps/web/src/board-port/xwhm-dashboard.ts:778: #B54708
+apps/web/src/board-port/xwhm-dashboard.ts:779: #344054
+apps/web/src/board-port/xwhm-dashboard.ts:784: #B42318
+apps/web/src/board-port/xwhm-dashboard.ts:785: #B54708
+apps/web/src/board-port/xwhm-dashboard.ts:815: #EEF0F3 #344054
+apps/web/src/board-port/xwhm-dashboard.ts:992: #1D5BD6 #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:1048: #1D5BD6
+apps/web/src/board-port/xwhm-dashboard.ts:1052: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:1056: #1D5BD6 #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:1059: #1D5BD6 #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:1066: #1D5BD6
+apps/web/src/board-port/xwhm-dashboard.ts:1068: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:1082: #0E7A4E
+apps/web/src/board-port/xwhm-dashboard.ts:1083: #B54708
+apps/web/src/board-port/xwhm-dashboard.ts:1084: #344054
+apps/web/src/board-port/xwhm-dashboard.ts:1089: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:1091: #5D6B7E
+apps/web/src/board-port/xwhm-dashboard.ts:1092: #B54708
+apps/web/src/board-port/xwhm-dashboard.ts:1126: #F5F6F8 #101828
+apps/web/src/board-port/xwhm-dashboard.ts:1128: #1D5BD6 #1546A8
+apps/web/src/board-port/xwhm-dashboard.ts:1129: #1D5BD6
+apps/web/src/board-port/xwhm-dashboard.ts:1130: #6EA0FF
+apps/web/src/design-board.ts:328: #F5F6F8
+apps/web/src/design-board.ts:329: #101828
+apps/web/src/design-board.ts:330: #1D5BD6
+apps/web/src/design-board.ts:331: #0E7A4E
+apps/web/src/design-board.ts:332: #B54708
+apps/web/src/design-board.ts:333: #B42318
+apps/web/src/design-board.ts:344: #1D5BD6
+apps/web/src/mail-layout.ts:63: #1546a8
+apps/web/src/mail-layout.ts:64: #ffffff
+apps/web/src/mail-layout.ts:92: #f3f7fe #1d5bd6
+apps/web/src/surfaces/xpanel.ts:153: #EEF0F3
+apps/web/src/surfaces/xpanel.ts:154: #344054
+apps/web/src/tokens.ts:904: #0e1726
+apps/web/src/tokens.ts:905: #1f2c40
+apps/web/src/tokens.ts:906: #c9d3e1
+apps/web/src/tokens.ts:907: #0e1726
+apps/web/src/tokens.ts:908: #162235
+apps/web/src/tokens.ts:909: #131e30
+apps/web/src/tokens.ts:910: #f8fafc
+apps/web/src/tokens.ts:911: #c9d3e1
+apps/web/src/tokens.ts:912: #94a3b8
+apps/web/src/tokens.ts:913: #1f2c40
+apps/web/src/tokens.ts:914: #2d3f59
+apps/web/src/tokens.ts:915: #1d2b40
+apps/web/src/tokens.ts:916: #6ea0ff
+apps/web/src/tokens.ts:950: #1d5bd6
+apps/web/src/tokens.ts:952: #ffffff
+apps/web/src/tokens.ts:1082: #c9cfd8
+apps/web/src/tokens.ts:1096: #c7d7f8 #f3f7fe
+apps/web/src/tokens.ts:1097: #3a4d6b #1d2b40
+apps/web/src/tokens.ts:1104: #d0d5dd
+apps/web/src/tokens.ts:1105: #ffffff
+apps/web/src/tokens.ts:1106: #101828
+apps/web/src/tokens.ts:1109: #e2e6ec
+apps/web/src/tokens.ts:1110: #f0f2f5
+apps/web/src/tokens.ts:1111: #5d6b7e
+apps/web/src/tokens.ts:1115: #b42318
+apps/web/src/tokens.ts:1123: #1d5bd6
+apps/web/src/tokens.ts:1124: #ffffff
+apps/web/src/tokens.ts:1125: #e8effd
+apps/web/src/tokens.ts:1126: #101828
+apps/web/src/tokens.ts:1132: #d0d5dd
+apps/web/src/tokens.ts:1133: #ffffff
+apps/web/src/tokens.ts:1134: #344054
+apps/web/src/tokens.ts:1139: #e8effd
+apps/web/src/tokens.ts:1140: #1d5bd6
+apps/web/src/tokens.ts:1141: #c7d7f8
+apps/web/src/tokens.ts:1148: #eef0f3
+apps/web/src/tokens.ts:1157: #475467
+apps/web/src/tokens.ts:1165: #ffffff
+apps/web/src/tokens.ts:1166: #101828
+apps/web/src/tokens.ts:1167: rgba(16, 24, 40, 0.12)
+apps/web/src/tokens.ts:1175: #98a2b3
+apps/web/src/tokens.ts:1180: #1d5bd6
+apps/web/src/tokens.ts:1186: #ffffff
+apps/web/src/tokens.ts:1187: rgba(16, 24, 40, 0.3)
+apps/web/src/tokens.ts:1194: #e2e6ec
+apps/web/src/tokens.ts:1195: #ffffff
+apps/web/src/tokens.ts:1199: #1d5bd6
+apps/web/src/tokens.ts:1200: #f3f7fe
+apps/web/src/tokens.ts:1203: #e2e6ec
+apps/web/src/tokens.ts:1204: #f8f9fb
+apps/web/src/tokens.ts:1205: #475467
+apps/web/src/tokens.ts:1211: #e2e6ec
+apps/web/src/tokens.ts:1219: #475467
+apps/web/src/tokens.ts:1225: #1d5bd6
+apps/web/src/tokens.ts:1226: #1d5bd6
+apps/web/src/tokens.ts:1236: #9aa4b2
+apps/web/src/tokens.ts:1237: #f8f9fb
+apps/web/src/tokens.ts:1248: #101828
+apps/web/src/tokens.ts:1249: #ffffff
+apps/web/src/tokens.ts:1250: #101828
+apps/web/src/tokens.ts:1251: rgba(16, 24, 40, 0.3)
+apps/web/src/tokens.ts:1262: #e7f5ee #0e7a4e
+apps/web/src/tokens.ts:1263: #fdecea #b42318
+apps/web/src/tokens.ts:1278: #d0d5dd #101828
+apps/web/src/tokens.ts:1282: #f3f7fe #1d5bd6
+apps/web/src/tokens.ts:1297: #eef0f3
+apps/web/src/tokens.ts:1298: #475467
+apps/web/src/tokens.ts:1300: #0e1726 #e6edf7
+apps/web/src/tokens.ts:1302: #d0d5dd #344054
+apps/web/src/tokens.ts:1448: #101828
+apps/web/src/tokens.ts:1449: #ffffff
+apps/web/src/tokens.ts:1996: #d0d5dd
+apps/web/src/tokens.ts:1997: #5d6b7e
+apps/web/src/tokens.ts:1998: #f8f9fb
+apps/web/src/tokens.ts:2003: #3a4d6b
+apps/web/src/tokens.ts:2005: #8a99af
+apps/web/src/tokens.ts:2058: #0e1726
+apps/web/src/tokens.ts:2059: #ffffff
+apps/web/src/tokens.ts:2067: #e8effd
+apps/web/src/tokens.ts:2068: #1d5bd6
+apps/web/src/tokens.ts:2069: #c7d7f8
+apps/web/src/tokens.ts:2312: #b42318
+apps/web/src/tokens.ts:2313: #b42318
+apps/web/src/tokens.ts:2314: #ffffff
+apps/web/src/tokens.ts:2321: #1d5bd6
+apps/web/src/tokens.ts:2331: #f0f2f5
+apps/web/src/tokens.ts:2332: #e2e6ec
+apps/web/src/tokens.ts:2333: #5d6b7e
+apps/web/src/tokens.ts:2357: #8a99af
+apps/web/src/tokens.ts:2358: #808b9c
+apps/web/src/tokens.ts:2408: #f0f2f5
+apps/web/src/tokens.ts:2409: #e2e6ec
+apps/web/src/tokens.ts:2410: #5d6b7e
+apps/web/src/tokens.ts:2417: #f0f2f5
+apps/web/src/tokens.ts:2418: #e2e6ec
+apps/web/src/tokens.ts:2419: #5d6b7e
+apps/web/src/tokens.ts:2425: #b42318
+apps/web/src/tokens.ts:2429: #b42318
+apps/web/src/tokens.ts:2592: #1d5bd6
+apps/web/src/tokens.ts:2597: #eef0f3 #f8f9fb #eef0f3
+apps/web/src/tokens.ts:2603: #1d2b40 #2a3a52 #1d2b40
+apps/web/src/tokens.ts:2613: rgba(16, 24, 40, 0.18)
+apps/web/src/tokens.ts:2625: #f4b8b2
+apps/web/src/tokens.ts:2630: #6ea0ff
+apps/web/src/tokens.ts:2677: #e9ecf1
+apps/web/src/tokens.ts:2690: #1d5bd6
+apps/web/src/tokens.ts:2702: #1d5bd6
+apps/web/src/tokens.ts:2703: #b54708
+apps/web/src/tokens.ts:2704: #b42318
+apps/web/src/tokens.ts:3178: rgba(16, 24, 40, 0.12)
+apps/web/src/tokens.ts:3181: rgba(16, 24, 40, 0.4)
+apps/web/src/tokens.ts:3191: rgba(16, 24, 40, .4)
+apps/web/src/tokens.ts:3228: #ffffff
