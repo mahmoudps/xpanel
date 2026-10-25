@@ -20,11 +20,26 @@ const visible = () => Array.from(document.querySelectorAll<HTMLElement>('[data-a
 const filter = (selector: string, value: string) => { const input = document.querySelector<HTMLInputElement | HTMLSelectElement>(selector)!; input.value = value; input.dispatchEvent(new Event(input.tagName === 'INPUT' ? 'input' : 'change', { bubbles: true })) }
 
 describe('native username authority alignment', () => {
-  it('accepts core-valid lengths 1/2/3/16 on the actual visible create control without dropping the 7 native fields', () => {
+  it('accepts core-valid lengths 1/2/3/16 with every native field and explicit owner/shell controls', () => {
     document.body.innerHTML = renderWhmSurface({ activeRoute: '/whm/accounts/new', principal: root, accounts: [], plans: [plan] })
     const form = document.querySelector<HTMLFormElement>('[data-create-account-form]')!
     const username = form.querySelector<HTMLInputElement>('[name="username"]')!
-    expect(form.querySelectorAll('input[name],select[name]')).toHaveLength(7)
+    const nativeNames = ['username', 'primaryDomain', 'contactEmail', 'planId', 'password', 'ipAssignment', 'ipv6']
+    for (const name of nativeNames) {
+      const controls = form.querySelectorAll<HTMLInputElement | HTMLSelectElement>(`[name="${name}"]`)
+      expect(controls, `native control ${name} remains unique`).toHaveLength(1)
+      expect(controls[0]!.disabled, `native control ${name} remains available`).toBe(false)
+    }
+    expect(Array.from(form.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input[name],select[name]'), control => control.name)).toEqual([...nativeNames, 'ownerId', 'shell', 'shell'])
+    const owner = form.querySelector<HTMLInputElement>('input[name="ownerId"]')!
+    expect(owner.type).toBe('radio')
+    expect(owner.disabled).toBe(true)
+    const shells = Array.from(form.querySelectorAll<HTMLInputElement>('input[name="shell"]'))
+    expect(shells.map(control => control.value)).toEqual(['none', 'jailed'])
+    expect(shells.every(control => control.type === 'radio' && control.disabled)).toBe(true)
+    // This fixture has no qualified catalog: new actions must remain unavailable.
+    expect(form.querySelector<HTMLButtonElement>('[data-account-generate-password]')?.disabled).toBe(true)
+    expect(form.querySelector<HTMLButtonElement>('[data-account-toggle-password]')?.disabled).toBe(true)
     expect(form.querySelector('label[for="new-acc-username"]')).not.toBeNull()
     for (const value of ['a', 'ab', 'abc', 'abcdefghijklmnop']) {
       expect(validateUsername(value)).toBe(value)

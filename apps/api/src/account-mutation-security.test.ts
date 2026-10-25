@@ -168,6 +168,28 @@ describe('real HTTP account mutation security', () => {
   let f: Awaited<ReturnType<typeof fixture>>
   beforeEach(async () => { f = await fixture() })
 
+  it('reports an unknown result when the final read fails after account creation was committed', async () => {
+    const original = f.state.store.listDomains.bind(f.state.store)
+    vi.spyOn(f.state.store, 'listDomains').mockImplementation(async filter => {
+      if (filter?.accountId) {
+        const account = await f.state.store.getAccount(filter.accountId)
+        if (account?.username === 'newowner7') throw new Error(RAW_HOST_MARKER)
+      }
+      return original(filter)
+    })
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const response = await f.perform('create')
+    const text = await response.text()
+    expect(response.status).toBe(500)
+    expect(JSON.parse(text)).toMatchObject({ code: 'INTERNAL_ERROR', details: { unknownOutcome: true, verificationRequired: true } })
+    expect(JSON.parse(text).details).not.toHaveProperty('stateChanged')
+    expect(text).not.toContain(RAW_HOST_MARKER)
+    expect(await f.state.store.getAccountByUsername('newowner7')).toMatchObject({ primaryDomain: 'newowner7.example.test' })
+    expect(await findPrincipalByUsername(f.database.db, 'newowner7')).toMatchObject({ kind: 'user' })
+    expect(f.calls()).toBe(1)
+    expect(errorLog).toHaveBeenCalled()
+  })
+
   it.each(['missing-body', 'missing', 'empty', 'other-row', 'case-change', 'whitespace', 'wrong-type'])('refuses DELETE %s confirmation with zero lifecycle effects', async condition => {
     const beforeState = await f.fingerprints()
     const beforeIdentity = await f.identities()

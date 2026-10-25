@@ -11,7 +11,7 @@ export interface HostQualificationReport {
 }
 
 /**
- * Tools with a real agent operation, API route and screen.
+ * Implemented API and screen capabilities bound to connected-host probes.
  * A tool stays hidden until every probe it names has passed on this server.
  */
 export const PHASE1_TOOL_PROBES: Readonly<Record<string, readonly HostProbe[]>> = {
@@ -24,6 +24,10 @@ export const PHASE1_TOOL_PROBES: Readonly<Record<string, readonly HostProbe[]>> 
   'add-package': ['control-plane'],
   'edit-package': ['control-plane'],
   'delete-package': ['control-plane'],
+  'feature-list-crud': ['control-plane'],
+  'server-settings-edit': ['control-plane'],
+  'domain-php-settings': ['control-plane', 'apache'],
+  'dns-zone-records': ['control-plane', 'pdns'],
   domains: ['control-plane', 'apache'],
   'create-domain': ['control-plane', 'apache'],
   'email-accounts': ['control-plane', 'mail'],

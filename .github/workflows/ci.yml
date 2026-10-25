@@ -86,6 +86,9 @@ jobs:
       - name: Exercise 24 mail layout states (synthetic data, no delivery proof)
         run: node scripts/toolchain.mjs node tests/browser/mail-layout-acceptance.mjs --output=test-results/mail-layout-${{ github.run_id }}-${{ github.run_attempt }}
 
+      - name: Exercise functional mail formatting and safe paste (no visual assertions)
+        run: node scripts/toolchain.mjs node tests/browser/mail-compose-functional.mjs --out test-results/mail-compose-functional-${{ github.run_id }}-${{ github.run_attempt }}.json
+
       - name: Exercise 24 Accounts workflow states (synthetic API responses)
         run: node scripts/toolchain.mjs node tests/browser/accounts-acceptance.mjs --output=test-results/accounts-ui-${{ github.run_id }}-${{ github.run_attempt }}
 

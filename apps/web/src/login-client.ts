@@ -13,7 +13,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     mismatch: 'كلمتا المرور الجديدتان غير متطابقتين.', changed: 'تم تغيير كلمة المرور. سجل الدخول مجددًا.',
     session: 'تعذر التحقق من الجلسة. سجل الدخول مجددًا.', unexpected: 'استجابة غير متوقعة من الخادم.',
     show: 'إظهار كلمة المرور', hide: 'إخفاء كلمة المرور', required: 'يلزم تغيير كلمة المرور.',
-    timeout: 'انتهت مهلة الطلب. حاول مجددًا.'
+    timeout: 'انتهت مهلة الطلب. حاول مجددًا.', recoverySwitch: 'استخدم رمز استرداد', authenticatorSwitch: 'استخدم رمز تطبيق المصادقة'
   } : {
     failed: 'The request could not be completed. Try again.', invalid: 'Invalid username or password.',
     code: 'The verification code is invalid or no longer usable.', recovery: 'The recovery code is invalid.',
@@ -24,7 +24,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     mismatch: 'The new passwords do not match.', changed: 'Password changed. Sign in again.',
     session: 'The session could not be verified. Sign in again.', unexpected: 'Unexpected server response.',
     show: 'Show password', hide: 'Hide password', required: 'A password change is required.',
-    timeout: 'The request timed out. Try again.'
+    timeout: 'The request timed out. Try again.', recoverySwitch: 'Use a recovery code', authenticatorSwitch: 'Use an authenticator code'
   };
   var csrfToken = null;
   var principal = null;
@@ -139,6 +139,35 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
       step('credentials'); message('', false); if (login) busy(login, false);
     }, Math.max(1, Math.min(2147483647, deadline - Date.now())));
   }
+  // Presentation only: these selectors never authenticate, alter a listener audience or bypass a factor.
+  function selectLoginFactor(mode, focus) {
+    if (mfaDisabled || !login || (mode !== 'totp' && mode !== 'recovery')) return false;
+    var fields = document.querySelector('[data-auth-mfa-fields]');
+    if (!fields) return false;
+    var recovery = mode === 'recovery';
+    var otp = field(login, 'totpCode'), recoveryCode = field(login, 'recoveryCode');
+    if (recovery && otp) otp.value = '';
+    if (!recovery && recoveryCode) recoveryCode.value = '';
+    show('[data-login-factor="totp"]', !recovery);
+    show('[data-login-factor="recovery"]', recovery);
+    fields.setAttribute('data-factor-mode', mode);
+    var toggle = document.querySelector('[data-login-factor-toggle]');
+    if (toggle) { toggle.textContent = recovery ? copy.authenticatorSwitch : copy.recoverySwitch; toggle.setAttribute('aria-pressed', String(recovery)); }
+    var selected = recovery ? recoveryCode : otp;
+    if (focus && selected) selected.focus();
+    return true;
+  }
+  function changeLoginCredentials() {
+    if (!shell || !login || shell.getAttribute('data-auth-state') !== 'mfa-required' || lockedUntil > Date.now() || login.getAttribute('aria-busy') === 'true') return false;
+    clearCredentials();
+    selectLoginFactor('totp', false);
+    show('[data-auth-mfa-fields]', false);
+    var fields = document.querySelector('[data-auth-mfa-fields]');
+    if (fields) fields.setAttribute('data-2fa-step', 'unknown');
+    step('credentials'); message('', false); busy(login, false);
+    var username = field(login, 'username'); if (username) username.focus();
+    return true;
+  }
   function authError(error) {
     var details = error.details || {};
     if (details.lockedOut && typeof details.lockedUntil === 'string' && Date.parse(details.lockedUntil) > Date.now()) {
@@ -147,7 +176,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     if (details.mfaRequired === true && !mfaDisabled) {
       step('mfa-required'); show('[data-auth-mfa-fields]', true);
       var fields = document.querySelector('[data-auth-mfa-fields]'); if (fields) fields.setAttribute('data-2fa-step', 'required');
-      message(copy.mfa, false); var otp = document.getElementById('login-otp'); if (otp) otp.focus(); return;
+      message(copy.mfa, false); selectLoginFactor('totp', true); return;
     }
     message(localizedError(error), true);
   }
@@ -257,6 +286,13 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
       if (typeof start === 'number' && typeof end === 'number') input.setSelectionRange(start, end, direction || 'none');
       // Revealing a longer LTR value must keep its caret-end view on the RTL field edge.
       if (visible && document.documentElement.dir === 'rtl' && getComputedStyle(input).textAlign === 'right' && start === end && end === input.value.length) input.scrollLeft = input.scrollWidth;
+    } else if (action === 'change-login-credentials') {
+      event.preventDefault(); changeLoginCredentials();
+    } else if (action === 'toggle-login-factor') {
+      event.preventDefault();
+      if (!shell || !login || shell.getAttribute('data-auth-state') !== 'mfa-required' || lockedUntil > Date.now() || login.getAttribute('aria-busy') === 'true') return;
+      var fields = document.querySelector('[data-auth-mfa-fields]');
+      if (fields) selectLoginFactor(fields.getAttribute('data-factor-mode') === 'recovery' ? 'totp' : 'recovery', true);
     } else if (action === 'restart-enrollment') {
       clearEnrollment(); show('[data-auth-enrollment-details]', false); if (setup) setup.hidden = false; step('enrollment'); message(copy.enrollment, false);
     } else if (action === 'acknowledge-recovery') {

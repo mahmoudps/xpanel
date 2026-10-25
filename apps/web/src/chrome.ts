@@ -2,7 +2,7 @@ import { navigation, type NavSurface } from '@xpanel/catalog'
 import arCatalog from '../../../packages/catalog/src/locales/ar.json' with { type: 'json' }
 import { publicContactEmail } from './display-name.ts'
 import { t, type Locale } from './i18n.ts'
-import { escapeHtml } from './tokens.ts'
+import { escapeHtml, normalizeAsciiDigits } from './tokens.ts'
 
 export type PanelId = 'xpanel' | 'xwhm' | 'xmail'
 export type ThemeChoice = 'light' | 'dark'
@@ -91,16 +91,45 @@ export interface UserMenuModel {
   username?: string
   role?: string
   signedIn: boolean
+  links?: readonly PanelLink[]
+  activityHref?: string
+  menuLinks?: readonly { label: string; href: string }[]
 }
 
-const menuHref = (model: UserMenuModel, patch: Partial<Pick<UserMenuModel, 'locale' | 'theme' | 'density'>>): string => {
-  const params = new URLSearchParams()
-  params.set('lang', patch.locale ?? model.locale)
-  params.set('theme', patch.theme ?? model.theme)
-  params.set('density', patch.density ?? model.density)
-  if (model.accountId) params.set('accountId', model.accountId)
-  const path = model.path.startsWith('/') ? model.path : `/${model.path}`
-  return `${path}?${params.toString()}`
+export const surfaceContextHref = (model: UserMenuModel, patch: Partial<Pick<UserMenuModel, 'locale' | 'theme' | 'density'>> = {}): string => {
+  const path = model.path.startsWith('/') && !model.path.startsWith('//') ? model.path : '/'
+  const url = new URL(path, 'https://xpanel.invalid')
+  url.searchParams.set('lang', patch.locale ?? model.locale)
+  url.searchParams.set('theme', patch.theme ?? model.theme)
+  url.searchParams.set('density', patch.density ?? model.density)
+  if (model.accountId) url.searchParams.set('accountId', model.accountId)
+  return `${url.pathname}${url.search}${url.hash}`
+}
+
+const localMenuHref = (href: string): string | undefined => {
+  if (!href.startsWith('/') || href.startsWith('//') || /[\u0000-\u001f\u007f]/.test(href)) return undefined
+  try {
+    const url = new URL(href, 'https://xpanel.invalid')
+    return url.origin === 'https://xpanel.invalid' ? `${url.pathname}${url.search}${url.hash}` : undefined
+  } catch { return undefined }
+}
+
+const renderMenuLinks = (model: UserMenuModel): string => {
+  const params = new URLSearchParams({ lang: model.locale, theme: model.theme, density: model.density })
+  const panelPaths: Record<PanelId, string> = { xpanel: '/home', xwhm: '/whm', xmail: '/mail/inbox' }
+  const panels = safePanelLinks(model.links).filter(link => link.surface !== model.surface).map(link =>
+    `<a class="xp-menu-choice" data-panel-switch="${link.surface}" href="${escapeHtml(`${link.origin}${panelPaths[link.surface]}?${params.toString()}`)}">${panelLabel(link.surface)}</a>`)
+  const other = [...(model.menuLinks ?? [])]
+  if (model.activityHref) other.unshift({ label: model.locale === 'ar' ? 'سجل النشاط والمهام' : 'Activity & Jobs', href: model.activityHref })
+  const seen = new Set<string>()
+  const local = other.flatMap(link => {
+    const href = localMenuHref(link.href)
+    if (!href || seen.has(href)) return []
+    seen.add(href)
+    return [`<a class="xp-menu-choice" href="${escapeHtml(href)}">${escapeHtml(normalizeAsciiDigits(link.label))}</a>`]
+  })
+  const links = [...panels, ...local]
+  return links.length ? `<div class="xp-menu-navigation" role="group" aria-label="${model.locale === 'ar' ? 'التنقل' : 'Navigation'}">${links.join('')}</div>` : ''
 }
 
 /** Account menu in the top bar: identity, language, theme, row spacing and sign-out. */
@@ -110,18 +139,18 @@ export function renderUserMenu(model: UserMenuModel): string {
   const nextTheme: ThemeChoice = model.theme === 'dark' ? 'light' : 'dark'
   const languageLabel = isAr ? 'English' : 'العربية'
   const themeLabel = nextTheme === 'dark' ? (isAr ? 'الوضع الداكن' : 'Dark theme') : (isAr ? 'الوضع الفاتح' : 'Light theme')
-  const summaryName = model.signedIn && model.username ? model.username : (isAr ? 'الحساب' : 'Account')
+  const summaryName = normalizeAsciiDigits(model.signedIn && model.username ? model.username : (isAr ? 'الحساب' : 'Account'))
   const role = model.signedIn && model.role ? model.role : ''
-  const initial = (model.username?.trim().charAt(0) || (isAr ? 'ح' : 'a')).toLocaleLowerCase('en')
+  const initial = normalizeAsciiDigits(model.username?.trim().charAt(0) || (isAr ? 'ح' : 'a')).toLocaleLowerCase('en')
   const densityLink = (density: DensityChoice, label: string) => {
     const current = model.density === density
-    return `<a class="xp-menu-choice" href="${escapeHtml(menuHref(model, { density }))}" data-density-option="${density}"${current ? ' aria-current="true"' : ''}>${escapeHtml(label)}</a>`
+    return `<a class="xp-menu-choice" href="${escapeHtml(surfaceContextHref(model, { density }))}" data-density-option="${density}"${current ? ' aria-current="true"' : ''}>${escapeHtml(label)}</a>`
   }
   const sessionAction = model.signedIn
     ? `<button type="button" class="xp-btn xp-menu-signout" data-action="logout">${escapeHtml(isAr ? 'تسجيل الخروج' : 'Sign out')}</button>`
-    : `<a class="xp-btn xp-btn--primary" href="${escapeHtml(menuHref({ ...model, path: '/login' }, {}))}">${escapeHtml(isAr ? 'تسجيل الدخول' : 'Sign in')}</a>`
+    : `<a class="xp-btn xp-btn--primary" href="${escapeHtml(surfaceContextHref({ ...model, path: '/login' }, {}))}">${escapeHtml(isAr ? 'تسجيل الدخول' : 'Sign in')}</a>`
   return `<details class="xp-user-menu" data-user-menu>
-    <summary class="xp-user-menu__summary">
+    <summary class="xp-user-menu__summary" aria-label="${escapeHtml(isAr ? `قائمة المستخدم ${summaryName}` : `User menu for ${summaryName}`)}">
       <span class="xp-user-menu__avatar" aria-hidden="true">${escapeHtml(initial)}</span>
       <span class="xp-user-menu__identity">
         <span class="xp-user-menu__name"${model.username ? ' dir="ltr"' : ''}>${model.username ? `<bdi dir="ltr">${escapeHtml(summaryName)}</bdi>` : escapeHtml(summaryName)}</span>
@@ -129,13 +158,14 @@ export function renderUserMenu(model: UserMenuModel): string {
       </span>
     </summary>
     <div class="xp-user-menu__panel">
-      <a class="xp-menu-choice" href="${escapeHtml(menuHref(model, { locale: nextLocale }))}" lang="${nextLocale}" data-lang-switch="${nextLocale}">${escapeHtml(languageLabel)}</a>
-      <a class="xp-menu-choice" href="${escapeHtml(menuHref(model, { theme: nextTheme }))}" data-theme-toggle="${nextTheme}" title="${escapeHtml(themeLabel)}">${escapeHtml(themeLabel)}</a>
+      <a class="xp-menu-choice" href="${escapeHtml(surfaceContextHref(model, { locale: nextLocale }))}" lang="${nextLocale}" data-lang-switch="${nextLocale}">${escapeHtml(languageLabel)}</a>
+      <a class="xp-menu-choice" href="${escapeHtml(surfaceContextHref(model, { theme: nextTheme }))}" data-theme-toggle="${nextTheme}" title="${escapeHtml(themeLabel)}">${escapeHtml(themeLabel)}</a>
       <div class="xp-menu-density" role="group" aria-label="${escapeHtml(isAr ? 'تباعد الصفوف' : 'Row spacing')}">
         ${densityLink('comfortable', t(model.locale, 'common.density.comfortable'))}
         ${densityLink('compact', t(model.locale, 'common.density.compact'))}
       </div>
-      <a class="xp-menu-choice" href="${escapeHtml(accountSecurityRoute(model.surface ?? (model.path.startsWith('/whm') ? 'xwhm' : model.path.startsWith('/mail') ? 'xmail' : 'xpanel')))}" data-security-link="true">${escapeHtml(securityLabel(model.locale))}</a>
+      <a class="xp-menu-choice" href="${escapeHtml(surfaceContextHref({ ...model, path: accountSecurityRoute(model.surface ?? (model.path.startsWith('/whm') ? 'xwhm' : model.path.startsWith('/mail') ? 'xmail' : 'xpanel')) }))}" data-security-link="true">${escapeHtml(securityLabel(model.locale))}</a>
+      ${renderMenuLinks(model)}
       ${sessionAction}
     </div>
   </details>`

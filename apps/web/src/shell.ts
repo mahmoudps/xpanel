@@ -1,6 +1,6 @@
-import { renderPlannedNavigation, type PanelId } from './chrome.ts'
+import { renderPlannedNavigation, renderUserMenu, surfaceContextHref, type PanelId, type UserMenuModel } from './chrome.ts'
 import type { Locale } from './i18n.ts'
-import { escapeHtml, renderStatusBadge } from './tokens.ts'
+import { escapeHtml, normalizeAsciiDigits, renderStatusBadge } from './tokens.ts'
 import arCatalog from '../../../packages/catalog/src/locales/ar.json' with { type: 'json' }
 
 type SurfaceKind = SurfaceShellProps['surface']
@@ -72,6 +72,26 @@ export const renderLiveUpdatesIndicator = (locale: Locale, realtimeEnabled: bool
   const description = realtimeEnabled ? '' : ` aria-label="${label}" title="${label}"`
   return `<span data-ws-indicator="${realtimeEnabled ? 'disconnected' : 'unavailable'}" role="status"${description}>${renderStatusBadge('suspended', visibleLabel)}</span>`
 }
+
+export interface SurfaceToolbarProps extends UserMenuModel {
+  realtimeEnabled?: boolean
+  generationId?: number
+  version?: string
+}
+
+/** Shared account tools retain their actions while leaving room for the page search. */
+export const renderSurfaceToolbarEnd = (props: SurfaceToolbarProps): string => {
+  const isAr = props.locale === 'ar'
+  const nextLocale = isAr ? 'en' : 'ar'
+  const languageHref = surfaceContextHref(props, { locale: nextLocale })
+  const generation = Number.isSafeInteger(props.generationId) && props.generationId! > 0
+    ? `<span data-generation-chip="${props.generationId}">${renderStatusBadge('ok', `Gen #${props.generationId}`)}</span>` : ''
+  const version = props.version ? `<span class="xp-toolbar-version xp-mono"><bdi dir="ltr">${escapeHtml(normalizeAsciiDigits(props.version))}</bdi></span>` : ''
+  return `<div class="xp-topbar__end">${renderLiveUpdatesIndicator(props.locale, props.realtimeEnabled === true)}${generation}${version}<a href="${escapeHtml(languageHref)}" class="xp-btn xp-btn--quiet xp-toolbar-language" lang="${nextLocale}" data-lang-switch="${nextLocale}">${isAr ? 'English' : 'العربية'}</a>${renderUserMenu(props)}</div>`
+}
+
+export const renderSurfaceToolbar = (props: SurfaceToolbarProps & { leadingHtml?: string }): string =>
+  `<div class="xp-topbar__start">${renderPageSearchButton(props.locale)}${props.leadingHtml ?? ''}</div>${renderSurfaceToolbarEnd(props)}`
 
 const surfaceSections: Record<SurfaceShellProps['surface'], Readonly<Record<string, string>>> = {
   xpanel: {

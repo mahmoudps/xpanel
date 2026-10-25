@@ -1,4 +1,4 @@
-import { canonicalNavigationRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
+import { canOpenRegisteredRoute, canonicalNavigationRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { canSeeAccount, type Account, type MfaRuntimeMode, type Plan } from '@xpanel/core'
 import { panelLabel, renderSecurityNavLink, renderSupportNotice, renderUserMenu, roleLabel, safePanelLinks, type PanelLink } from './chrome.ts'
 import { formatDisplayName } from './display-name.ts'
@@ -7,7 +7,7 @@ import { isStatusCode, renderStatusBody, statusPageCopy, type StatusPageModel } 
 import { designHeading, renderDesignMain, renderDesignNav, renderDisabledScreen } from './design-board.ts'
 import { ACCOUNT_SECURITY_ROUTES, renderAccountSecurityCard } from './surfaces/account-security.ts'
 import { type LoginSurfaceProps, renderLoginSurface } from './surfaces/login.ts'
-import { type MailSurfaceProps, renderMailSurface } from './surfaces/xmail.ts'
+import { type MailSurfaceProps, renderMailSurface, renderUnavailableMailBody } from './surfaces/xmail.ts'
 import { type PanelSurfaceProps, renderPanelSurface } from './surfaces/xpanel.ts'
 import { renderWhmSurface, type WhmSurfaceProps } from './surfaces/xwhm.ts'
 import { LOGIN_CLIENT_SCRIPT } from './login-client.ts'
@@ -15,8 +15,11 @@ import { contextualizeDocumentLinks, resolveWebDocumentRoute } from './document-
 import { composedRouteSpecs, nativeComposedRoutePaths } from './board-port/composed/all.ts'
 import { copyOf } from './board-port/composed/types.ts'
 import { accountPageRouteSpecs } from './board-port/extensions/account-pages.ts'
+import { renderApprovedXpanelWorkspace } from './board-port/approved-xpanel-workspaces.ts'
+import { renderCommandPaletteModal } from './command-palette.ts'
+import { renderWhmDetailPage } from './board-port/approved-xwhm.ts'
 import { storeRouteSpecs } from './board-port/extensions/store.ts'
-import { getSurfaceNavigationLabel, getSurfacePageTitle, renderSurfaceShell, resolveSurfaceSection } from './shell.ts'
+import { getSurfacePageTitle, renderSurfaceShell, resolveSurfaceSection } from './shell.ts'
 import {
   type AsyncActionBannerProps,
   DESIGN_TOKENS_CSS,
@@ -68,78 +71,6 @@ export interface WebAppRenderState {
   error?: Omit<StatusPageModel, 'locale' | 'theme' | 'density' | 'surface' | 'path' | 'visibility'> & { surface?: StatusPageModel['surface'] }
   supportEmail?: string
   panels?: readonly PanelLink[]
-}
-
-const renderCommandPaletteModal = (
-  surface: WebSurfaceKind,
-  locale: Locale,
-  visibility?: VisibilityContext,
-  catalog?: readonly CatalogTool[],
-): string => {
-  const isAr = locale === 'ar'
-  const navSurfaceId = surface === 'login' ? 'xpanel' : surface
-  const navSurface = visibleNavigation(surface === 'login' ? undefined : visibility, catalog).find((n) => n.surface === navSurfaceId)
-  const quickPages = (navSurface?.sections ?? []).flatMap((sec) =>
-    sec.pages.map((page) => ({
-      section: getSurfaceNavigationLabel(navSurfaceId, 'section', sec, locale),
-      name: getSurfaceNavigationLabel(navSurfaceId, 'page', page, locale),
-      route: page.route,
-      keywords: page.keywords,
-    })),
-  )
-
-  return `
-<style>
-  .xp-cmdk-dialog { --xp-cmdk-panel-padding: var(--xp-space-card); }
-  @media (max-width: 959px) {
-    .xp-cmdk-dialog { --xp-cmdk-panel-padding: var(--xp-space-field); }
-    .xp-cmdk-dialog .xp-cmdk-result__route { flex-basis: 100%; margin-inline-start: 0; direction: inherit; text-align: start; }
-  }
-</style>
-<div id="xp-cmdk-modal" class="xp-modal-backdrop" data-xp-cmdk="true" hidden role="dialog" aria-modal="true" aria-labelledby="xp-cmdk-title">
-  <div class="xp-cmdk-dialog" style="padding: var(--xp-cmdk-panel-padding); display: flex; flex-direction: column; gap: var(--xp-space-card);">
-    <div class="xp-card__header" style="padding: 0; margin-block-end: 0;">
-      <strong id="xp-cmdk-title">${isAr ? 'الانتقال إلى صفحة' : 'Go to a page'}</strong>
-      <button type="button" class="xp-btn" data-action="close-cmdk" style="min-block-size: calc(var(--xp-space-field) * 3); min-inline-size: calc(var(--xp-space-field) * 3);">${escapeHtml(t(locale, 'common.close'))}</button>
-    </div>
-    <div style="display: flex; flex-direction: column; gap: var(--xp-space-card); min-inline-size: 0;">
-      <label class="xp-sr-only" for="xp-cmdk-input">${isAr ? 'ابحث عن صفحة' : 'Find a page'}</label>
-      <input
-        id="xp-cmdk-input"
-        type="search"
-        class="xp-input"
-        data-xp-filter-input="true"
-        data-cmdk-search="true"
-        role="combobox"
-        aria-autocomplete="list"
-        aria-haspopup="listbox"
-        aria-expanded="false"
-        aria-controls="xp-cmdk-results"
-        autocomplete="off"
-        maxlength="160"
-        placeholder="${isAr ? 'ابحث عن صفحة' : 'Find a page'}"
-      />
-      <ul id="xp-cmdk-results" class="xp-cmdk-results" data-cmdk-results role="listbox" aria-label="${isAr ? 'الصفحات' : 'Pages'}" style="list-style: none; margin: 0; padding: 0; max-block-size: min(280px, 45dvh); overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 6px;">
-        ${quickPages
-          .map(
-            (item, index) => `
-          <li data-cmdk-row role="presentation">
-            <a id="xp-cmdk-option-${index}" href="${escapeHtml(item.route)}" class="xp-nav-item xp-cmdk-result" data-cmdk-item="${escapeHtml(item.route)}" data-cmdk-search-text="${escapeHtml([item.name, item.section, item.route, ...item.keywords].join(' '))}" role="option" aria-selected="false" tabindex="-1">
-              <strong>${escapeHtml(item.name)}</strong>
-              <span class="xp-cmdk-result__section">— ${escapeHtml(item.section)}</span>
-              <code class="xp-mono xp-cmdk-result__route"><bdi dir="ltr">${escapeHtml(item.route)}</bdi></code>
-            </a>
-          </li>
-        `,
-          )
-          .join('')}
-      </ul>
-      <p data-cmdk-empty role="status" style="margin: 0;"${quickPages.length ? ' hidden' : ''}>${isAr ? 'لا توجد صفحات مطابقة.' : 'No matching pages.'}</p>
-      <p class="xp-sr-only" data-cmdk-status aria-live="polite" aria-atomic="true" data-count-label="${isAr ? 'النتائج' : 'Results'}"></p>
-    </div>
-  </div>
-</div>
-`.trim()
 }
 
 const renderWorkspaceSummary = (state: WebAppRenderState, locale: Locale): string => {
@@ -220,7 +151,20 @@ const renderUnavailableWorkspace = (
   const disabledRouteAttribute = panelSurface === 'xpanel' && path === '/domains/reverse-proxy'
     ? ' data-unqualified-route="/domains/reverse-proxy"' : ''
   const qualifiedRoutes = new Set((state?.visibility ? visibleNavigation(state.visibility, state.catalog) : []).filter(item => item.surface === panelSurface).flatMap(item => item.sections.flatMap(section => section.pages.map(page => page.route))))
-  const design = securityPage ? '' : (renderDesignMain(path, locale) || renderDisabledScreen(pageHeading, locale))
+  // A registered, role-admitted document keeps its detailed read-only layout.
+  // Unqualified provider data is deliberately not forwarded to these renderers.
+  const admitted = canOpenRegisteredRoute(path, state?.visibility)
+  const detailed = !securityPage && admitted
+    ? panelSurface === 'xpanel'
+      ? renderApprovedXpanelWorkspace({ route: path, locale, readOnly: true })
+      : panelSurface === 'xwhm'
+        ? renderWhmDetailPage({ activeRoute: path, locale, capabilityUnavailable: true })
+        : renderUnavailableMailBody({ route: path, locale, theme })
+    : undefined
+  const canonicalPath = canonicalNavigationRoute(path)
+  const design = securityPage ? '' : (detailed || renderDesignMain(path, locale)
+    || (canonicalPath !== path ? renderDesignMain(canonicalPath, locale) : '')
+    || renderDisabledScreen(pageHeading, locale))
   return renderSurfaceShell({
     surface: panelSurface,
     locale,
@@ -364,6 +308,8 @@ export function renderWebApp(state: WebAppRenderState): string {
         generationId,
         ...(state.actionState !== undefined && { actionState: state.actionState }),
         ...state.whm,
+        density,
+        ...(state.panels ? { panels: state.panels } : {}),
         realtimeEnabled: hasVerifiedSurface && state.realtimeEnabled !== false,
         activeRoute,
         ...(state.catalog ? { catalog: state.catalog } : {}),
@@ -377,6 +323,7 @@ export function renderWebApp(state: WebAppRenderState): string {
         generationId,
         ...(state.actionState !== undefined && { actionState: state.actionState }),
         ...state.panel,
+        density,
         xmailOrigin: safePanelLinks(state.panels).find(panel => panel.surface === 'xmail')?.origin,
         realtimeEnabled: hasVerifiedSurface && state.realtimeEnabled !== false,
         activeRoute,
@@ -437,7 +384,10 @@ export function renderWebApp(state: WebAppRenderState): string {
 <body>
   ${reconcileBannerHtml}
   ${surfaceBodyHtml}
-  ${hasVerifiedSurface ? contextualizeDocumentLinks(renderCommandPaletteModal(state.surface, locale, state.visibility, state.catalog), context) : ''}
+  ${hasVerifiedSurface ? contextualizeDocumentLinks(renderCommandPaletteModal(state.surface, locale, state.visibility, state.catalog,
+    state.surface === 'xwhm' ? { accounts: state.whm?.accounts ?? [], domains: state.whm?.domains ?? [] }
+      : state.surface === 'xpanel' ? { accounts: state.panel?.account ? [state.panel.account] : [], domains: state.panel?.domains ?? [] }
+        : undefined), context) : ''}
   ${hasVerifiedSurface && state.liveState?.reconcile !== undefined ? renderActivityDrawer(fullLiveState, locale) : ''}
   <script id="xpanel-login-client">${LOGIN_CLIENT_SCRIPT}</script>
   ${state.surface !== 'login' && !state.error ? `<script id="xpanel-realtime-client">${BROWSER_REALTIME_SCRIPT}</script>` : ''}

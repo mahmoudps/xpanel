@@ -201,3 +201,36 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
   </div>`
   return ensureAccessibleSurfaceHtml(rawHtml.trim(), locale)
 }
+
+/** Preserves the existing mailbox layout without accepting private mailbox data or active actions. */
+export const renderUnavailableMailBody = (options: { route: string; locale: 'en' | 'ar'; theme?: 'dark' | 'light' }): string | undefined => {
+  const route = normalizeSurfaceRoute('xmail', options.route)
+  if (route !== '/mail/inbox' && route !== '/mail/compose') return undefined
+  const { locale } = options
+  const theme = options.theme ?? 'light'
+  const compose = route === '/mail/compose'
+  // Missing payload stays missing: neither a synthetic address nor an empty loaded inbox is supplied.
+  const rendered = compose
+    ? renderXmailCompose(xmailComposeFromProps({ mailbox: '', locale, theme }))
+    : renderXmailInbox(xmailInboxFromProps({ mailbox: '', locale, theme }))
+  const start = rendered.indexOf('<div data-xp-shell-content="true"')
+  const end = rendered.indexOf('<script id="xmail-')
+  if (start < 0 || end <= start) throw new Error('Mail document content boundary is unavailable')
+  const styles = rendered.match(/<style>[\s\S]*?<\/style>/)?.[0] ?? ''
+  const content = rendered.slice(start, end)
+    .replace(/<template\b[\s\S]*?<\/template>/g, '')
+    .replace(/<input\b[^>]*type="hidden"[^>]*>/g, '')
+    .replace(/<main\b/g, '<section').replace(/<\/main>/g, '</section>')
+    .replace(/\bid="main-content"/g, 'id="mail-unavailable-content"')
+    .replace(/<h1\b/g, '<h2').replace(/<\/h1>/g, '</h2>')
+    .replace(/<form\b/g, '<div').replace(/<\/form>/g, '</div>')
+    .replace(/\s(?:action|method|href|data-action|data-nav-route|data-mail-action|data-mail-send|data-mail-format|data-mail-format-action|data-mail-recip-input|data-mail-filter|data-mail-open)="[^"]*"/g, '')
+    .replace(/<a\b([^>]*)>/g, '<button type="button" disabled$1>').replace(/<\/a>/g, '</button>')
+    .replace(/<(button|input|select|textarea)\b([^>]*)>/g, (_match, tag: string, attributes: string) => `<${tag}${/\bdisabled\b/.test(attributes) ? '' : ' disabled'}${attributes}${tag === 'button' ? ' data-wiring="soon"' : ''}>`)
+    .replace(/contenteditable="true"/g, 'contenteditable="false" aria-disabled="true"')
+  const unavailable = locale === 'ar'
+    ? 'أدوات البريد غير مثبتة الجاهزية لهذا الحساب. لم تُقرأ بيانات الصندوق، ولا يمكن تنفيذ إجراء من هذه الواجهة.'
+    : 'Mail tools are not qualified for this account. Mailbox data has not been read and actions are unavailable here.'
+  const quota = locale === 'ar' ? 'حصة صندوق البريد: غير مقروءة' : 'Mailbox quota: not read'
+  return `<div class="xp-board-port" data-board-port="${compose ? 'xmail-compose' : 'xmail-inbox'}" data-mail-layout="reference" data-mail-read-only="true" data-mail-unavailable="${compose ? 'compose' : 'inbox'}" data-locale="${locale}"${locale === 'ar' ? ' dir="rtl"' : ''}>${styles}<div role="status" class="xp-help" style="padding:var(--xp-space-field,16px);display:flex;flex-direction:column;gap:8px"><p style="margin:0">${escapeHtml(unavailable)}</p><span data-quota-ratio="unknown">${escapeHtml(quota)}</span></div>${content}</div>`
+}

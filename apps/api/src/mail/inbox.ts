@@ -18,6 +18,7 @@ import type { EntryPoint } from '../entry-points.ts'
 import { attachmentsFromBodyStructure, ImapProtocolClient, type ImapFetchedMessage } from './imap.ts'
 import { imapDialPlan } from './idle.ts'
 import { smtpHumanCopy, SmtpSubmissionClient } from './smtp.ts'
+import { sanitizeEmailHtml } from './mime.ts'
 
 export interface MailAttachmentSummary {
   name: string
@@ -57,8 +58,11 @@ export interface InboxMessage extends InboxSummary {
 export interface MailboxSendInput {
   to: string
   cc?: string[]
+  bcc?: string[]
   subject: string
   text: string
+  /** Sanitized rich text; text remains the required plain-text alternative. */
+  html?: string
   idempotencyKey: string
 }
 
@@ -328,10 +332,12 @@ export const createLocalMailboxTransport = (
           idempotencyKey: input.idempotencyKey,
           authenticatedMailbox: mailbox,
           from: mailbox,
-          to: [input.to],
+          to: input.to.split(',').map(address => address.trim()),
           ...(input.cc && input.cc.length > 0 ? { cc: input.cc } : {}),
+          ...(input.bcc && input.bcc.length > 0 ? { bcc: input.bcc } : {}),
           subject: input.subject,
           textBody: input.text,
+          ...(input.html ? { htmlBody: input.html } : {}),
         })
         let savedToSent = false
         const submitted = result.rawMime
@@ -479,16 +485,37 @@ export const openAuthorizedMailboxSession = async (
   return opened
 }
 
-export const parseMailboxSend = (body: { to?: unknown; cc?: unknown; subject?: unknown; text?: unknown }): MailboxSendInput => {
-  const to = typeof body.to === 'string' ? body.to.trim().toLowerCase() : ''
+const MAX_MAILBOX_RECIPIENTS = 100
+const MAX_MAILBOX_BODY_BYTES = 100_000
+
+const mailboxRecipients = (value: unknown, field: 'to' | 'cc' | 'bcc'): string[] => {
+  if (value === undefined) return []
+  const raw = typeof value === 'string' ? value : fail('VALIDATION', `${field} recipient addresses are invalid`)
+  if (/[\r\n\u0000]/.test(raw)) fail('VALIDATION', `${field} recipient addresses are invalid`)
+  const parts = raw.split(/[,;]/).map(part => part.trim().toLowerCase()).filter(Boolean)
+  if (parts.length > MAX_MAILBOX_RECIPIENTS) fail('VALIDATION', 'too many recipient addresses')
+  if (parts.some(part => part.length > 254 || !RECIPIENT_RE.test(part))) fail('VALIDATION', `${field} recipient address is invalid`)
+  return [...new Set(parts)]
+}
+
+export const parseMailboxSend = (body: { to?: unknown; cc?: unknown; bcc?: unknown; subject?: unknown; text?: unknown; html?: unknown }): MailboxSendInput => {
+  const to = mailboxRecipients(body.to, 'to')
+  const cc = mailboxRecipients(body.cc, 'cc')
+  const bcc = mailboxRecipients(body.bcc, 'bcc')
   const subject = typeof body.subject === 'string' ? body.subject.trim() : ''
   const text = typeof body.text === 'string' ? body.text : ''
-  const cc = typeof body.cc === 'string'
-    ? body.cc.split(/[,;]/).map(part => part.trim().toLowerCase()).filter(part => RECIPIENT_RE.test(part))
-    : []
-  if (!RECIPIENT_RE.test(to)) fail('VALIDATION', 'a recipient address is required')
-  if (!subject || subject.length > 200) fail('VALIDATION', 'subject is required')
-  if (!text.trim() || text.length > 100_000) fail('VALIDATION', 'message text is required')
-  if (/[\u0000]/.test(subject) || /[\u0000]/.test(text)) fail('VALIDATION', 'message text is invalid')
-  return { to, subject, text, idempotencyKey: randomUUID(), ...(cc.length > 0 ? { cc } : {}) }
+  if (to.length === 0) fail('VALIDATION', 'a recipient address is required')
+  if (to.length + cc.length + bcc.length > MAX_MAILBOX_RECIPIENTS) fail('VALIDATION', 'too many recipient addresses')
+  if (!subject || subject.length > 200 || /[\r\n\u0000]/.test(subject)) fail('VALIDATION', 'subject is required and must be a single line')
+  if (!text.trim() || text.length > MAX_MAILBOX_BODY_BYTES || /[\u0000]/.test(text)) fail('VALIDATION', 'message text is required')
+  if (body.html !== undefined && (typeof body.html !== 'string' || /[\u0000]/.test(body.html))) fail('VALIDATION', 'message HTML is invalid')
+  const rawHtml = typeof body.html === 'string' ? body.html : ''
+  if (Buffer.byteLength(text, 'utf8') + Buffer.byteLength(rawHtml, 'utf8') > MAX_MAILBOX_BODY_BYTES) fail('VALIDATION', 'message body exceeds the byte limit')
+  const html = rawHtml ? sanitizeEmailHtml(rawHtml).sanitizedHtml : ''
+  return {
+    to: to.join(', '), subject, text, idempotencyKey: randomUUID(),
+    ...(cc.length > 0 ? { cc } : {}),
+    ...(bcc.length > 0 ? { bcc } : {}),
+    ...(html ? { html } : {}),
+  }
 }

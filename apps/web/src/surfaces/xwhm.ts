@@ -3,6 +3,8 @@ import type {
   Account,
   AuditEntry,
   Certificate,
+  Domain,
+  ServerSettings,
   FeatureList,
   FirewallRule,
   IoAnalyticsSnapshot,
@@ -18,6 +20,13 @@ import { renderPlanEditor } from '../plan-editor.ts'
 import { accountListModel, accountListRowAttributes, accountPlanPreviewModel, renderAccountListControls, renderAccountPlanPreview } from '../account-list.ts'
 import { renderServerIoMonitorChart } from '../charts.ts'
 import { formatDisplayName } from '../display-name.ts'
+import { roleLabel, type PanelLink } from '../chrome.ts'
+import { renderWhmDetailPage, renderWhmAuditExports, renderWhmAuditSupplement, renderWhmDnsSupplement } from '../board-port/approved-xwhm.ts'
+import { renderApprovedWhmBackups } from '../board-port/approved-whm-backups.ts'
+import { renderApprovedWhmResellers } from '../board-port/approved-whm-resellers.ts'
+import { renderApprovedWhmOperationsSupplement } from '../board-port/approved-whm-operations-components.ts'
+import { renderApprovedWhmPlanSupplement } from '../board-port/approved-whm-plan-components.ts'
+import { renderApprovedWhmAccountCreateFields, renderApprovedWhmAccountCreateStatus, renderApprovedWhmAccountBulkControls, renderApprovedWhmAccountSelection, renderApprovedWhmAccountActions, renderApprovedWhmAccountTableCells } from '../board-port/approved-whm-account-components.ts'
 import { type Locale, t } from '../i18n.ts'
 import {
   type AsyncActionBannerProps,
@@ -38,7 +47,7 @@ import { renderComposedXwhm } from '../board-port/composed/render.ts'
 import { composedRouteSpecs } from '../board-port/composed/all.ts'
 import { copyOf } from '../board-port/composed/types.ts'
 import { renderStoreExtension, storeRouteSpecs } from '../board-port/extensions/store.ts'
-import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
+import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton, renderSurfaceToolbar } from '../shell.ts'
 
 
 export interface WhmServiceHealthRow {
@@ -70,6 +79,11 @@ export interface WhmSurfaceProps {
   catalog?: readonly CatalogTool[]
   locale?: Locale
   theme?: 'dark' | 'light'
+  density?: 'comfortable' | 'compact'
+  panels?: readonly PanelLink[]
+  capabilityUnavailable?: boolean
+  serverSettings?: ServerSettings | null
+  domains?: readonly Domain[]
   realtimeEnabled?: boolean
   principal?: Principal
   activeReseller?: Reseller | null
@@ -83,7 +97,7 @@ export interface WhmSurfaceProps {
   ioSnapshot?: IoAnalyticsSnapshot
   services?: WhmServiceHealthRow[]
   plans?: Plan[]
-  featureLists?: readonly Pick<FeatureList, 'id' | 'name'>[]
+  featureLists?: readonly (Pick<FeatureList, 'id' | 'name'> & Partial<Pick<FeatureList, 'disabled' | 'ownerId'>>)[]
   planEditorState?: { kind: 'create' } | { kind: 'edit'; plan: Plan } | { kind: 'unavailable' }
   accounts?: Account[]
   resellers?: Reseller[]
@@ -100,6 +114,9 @@ export interface WhmSurfaceProps {
     before: string
     hasMore: boolean
     oldestId: string
+    outcome?: string
+    from?: string
+    to?: string
   }
   hostSample?: DashboardHostSample | null
   driftCount?: number | null
@@ -131,8 +148,10 @@ const ALL_RESELLER_ACLS: readonly ResellerAcl[] = [
 
 export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
   const locale: Locale = props.locale ?? 'en'
+  if (props.capabilityUnavailable) return ensureAccessibleSurfaceHtml(renderWhmDetailPage({ activeRoute: props.activeRoute, locale, capabilityUnavailable: true }) ?? renderUnavailableSurfaceShell('xwhm', locale), locale)
   const isAr = locale === 'ar'
   const theme = props.theme ?? 'dark'
+  const density = props.density ?? 'comfortable'
   const principal = props.visibility?.principal ?? props.principal
   if (!principal) return ensureAccessibleSurfaceHtml(renderUnavailableSurfaceShell('xwhm', locale), locale)
   const isRoot = principal.kind === 'root'
@@ -170,13 +189,19 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
   const auditAction = auditList?.action ?? ''
   const auditTarget = auditList?.target ?? ''
   const auditBefore = auditList?.before ?? ''
+  const auditOutcome = auditList?.outcome ?? ''
+  const auditFrom = auditList?.from ?? ''
+  const auditTo = auditList?.to ?? ''
   const auditHeaders = ['UTC', isAr ? 'المستخدم' : 'User', isAr ? 'الإجراء' : 'Action', isAr ? 'الهدف' : 'Target', isAr ? 'النتيجة' : 'Outcome'] as const
   const auditMobileLabel = (label: string): string => `<span class="xp-audit-mobile-label" aria-hidden="true">${escapeHtml(label)}</span>`
   const auditHref = (before?: string): string => {
-    const params = new URLSearchParams()
+    const params = new URLSearchParams({ lang: locale, theme, density })
     if (auditActor) params.set('actor', auditActor)
     if (auditAction) params.set('action', auditAction)
     if (auditTarget) params.set('target', auditTarget)
+    if (auditOutcome) params.set('outcome', auditOutcome)
+    if (auditFrom) params.set('from', auditFrom)
+    if (auditTo) params.set('to', auditTo)
     if (before) params.set('before', before)
     const query = params.toString()
     return query ? `/whm/audit?${query}` : '/whm/audit'
@@ -218,44 +243,8 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
     ...(props.nearLimits ? { nearLimits: props.nearLimits } : {}),
   })), locale)
 
-  const rawHtml = renderSurfaceShell({
-    surface: 'xwhm', locale,
-    attributes: `data-principal-kind="${escapeHtml(principal.kind)}"`,
-    sidebar: `    <div class="xp-sidebar__brand">
-      <span class="xp-brand__mark" aria-hidden="true">x</span>
-      <div>
-        <strong>xWHM</strong>
-        <div>${isArabicSentence(hostname) ? `<span class="xp-ar-sentence">${escapeHtml(hostname)}</span>` : `<bdi dir="ltr" class="xp-mono">${escapeHtml(hostname)}</bdi>`}</div>
-      </div>
-    </div>
-
-    ${renderDesignNav('xwhm', locale, activeRoute, qualifiedRoutes, navigationVisibility)}`,
-    topbar: `      <div class="xp-topbar__start">
-        ${renderPageSearchButton(locale)}
-      </div>
-
-      <div class="xp-topbar__end">
-        ${renderLiveUpdatesIndicator(locale, props.realtimeEnabled === true)}
-        ${generationId !== undefined ? `<span data-generation-chip="${generationId}">
-          ${renderStatusBadge('ok', `Gen #${generationId}`)}
-        </span>` : ''}
-        <a class="xp-btn" href="/whm/jobs">
-          <span>${isAr ? 'سجل النشاط والمهام' : 'Activity & Jobs'}</span>
-        </a>
-        <a href="?surface=xwhm&amp;lang=${switchLangCode}&amp;theme=${theme}" class="xp-btn" lang="${switchLangCode}" data-lang-switch="${switchLangCode}">
-          ${escapeHtml(switchLangLabel)}
-        </a>
-        <a href="?surface=xwhm&amp;lang=${locale}&amp;theme=${nextTheme}" class="xp-btn" data-theme-toggle="${nextTheme}">
-          ${escapeHtml(theme === 'dark' ? t(locale, 'common.theme.light') : t(locale, 'common.theme.dark'))}
-        </a>
-        <a href="/panel?lang=${locale}&amp;theme=${theme}" class="xp-btn xp-btn--ghost">xPanel</a>
-        <a href="/mail?lang=${locale}&amp;theme=${theme}" class="xp-btn xp-btn--ghost">xMail</a>
-        <div class="xp-account-actions">
-          <span class="xp-account-pill"><span class="xp-account-pill__avatar" aria-hidden="true">${escapeHtml(principal.username.slice(0, 1).toLowerCase())}</span><span class="xp-mono xp-account-actions__name" aria-label="${isAr ? 'المستخدم الحالي' : 'Current user'}">${escapeHtml(principal.username)}</span></span>
-          <button type="button" class="xp-btn xp-btn--ghost" data-action="logout">${escapeHtml(isAr ? 'تسجيل الخروج' : 'Sign out')}</button>
-        </div>
-      </div>`,
-    content: extensionHtml !== undefined ? actionBannerHtml + extensionHtml : composedHtml !== undefined ? actionBannerHtml + composedHtml : `      ${actionBannerHtml}
+  const detailHtml = renderWhmDetailPage({ ...props, activeRoute, locale })
+  const nativeContent = detailHtml !== undefined ? actionBannerHtml + detailHtml : extensionHtml !== undefined ? actionBannerHtml + extensionHtml : composedHtml !== undefined ? actionBannerHtml + composedHtml : `      ${actionBannerHtml}
 ${section === 'overview' ? `      <section class="xp-card" data-section="overview-attention">
         <div class="xp-card__header"><div><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1><p class="xp-prose"><bdi dir="ltr">${escapeHtml(hostname)}</bdi></p></div></div>
         <div class="xp-kpi-grid" data-section="whm-kpi-cards">
@@ -387,13 +376,19 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
         ${section === 'accounts' ? `
         <div class="xp-form-group" style="gap:var(--xp-space-card)" data-account-list-layout>
         ${renderAccountListControls(list, locale)}
+        ${renderApprovedWhmAccountBulkControls({ ...props, locale })}
         <div class="xp-table-wrap xp-accounts__table-wrap">
           <table class="xp-table xp-accounts__table">
           <thead>
           <tr>
+          <th scope="col">${isAr ? 'اختيار' : 'Select'}</th>
           <th scope="col">${isAr ? 'الحساب' : 'Account'}</th>
           <th scope="col">${isAr ? 'النطاق الأساسي' : 'Primary domain'}</th>
           <th scope="col">${isAr ? 'الخطة' : 'Plan'}</th>
+          <th scope="col">${isAr ? 'المالك' : 'Owner'}</th>
+          <th scope="col">IP</th>
+          <th scope="col">${isAr ? 'القرص' : 'Disk'}</th>
+          <th scope="col">${isAr ? 'نقل البيانات' : 'Bandwidth'}</th>
           <th scope="col">${isAr ? 'الحالة' : 'Status'}</th>
           <th scope="col">${isAr ? 'الإجراءات' : 'Actions'}</th>
         </tr>
@@ -404,6 +399,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           const statusLabel = acc.status === 'active' ? t(locale, 'common.status.active') : acc.status === 'suspended' ? t(locale, 'common.status.suspended') : isAr ? 'قيد الإنهاء' : 'Terminating'
           const attributes = `data-account-id="${escapeHtml(acc.id)}" data-username="${escapeHtml(acc.username)}" data-domain="${escapeHtml(acc.primaryDomain)}"`
           return `<tr data-account-row="${escapeHtml(acc.username)}" ${accountListRowAttributes(acc)}>
+          <td>${renderApprovedWhmAccountSelection({ ...props, locale }, acc.username)}</td>
           <td>
           <div class="xp-accounts__identity">
           <strong>
@@ -466,6 +462,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
             <p class="xp-help" data-account-password-status role="status" hidden></p>
             <button type="submit" class="xp-btn">${isAr ? 'تغيير كلمة المرور' : 'Change password'}</button>
           </form>` : ''}
+          ${renderApprovedWhmAccountActions({ ...props, locale }, acc.username)}
           </details>
           </div>
           </td>
@@ -477,6 +474,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           <span class="xp-accounts__mobile-label" aria-hidden="true">${isAr ? 'الخطة' : 'Plan'}</span>
           <span>${escapeHtml(plans.find(plan => plan.id === acc.planId)?.name ?? (isAr ? 'غير متاحة' : 'Unavailable'))}</span>
           </td>
+          ${renderApprovedWhmAccountTableCells({ ...props, locale }, acc.username)}
           <td>
           <span class="xp-accounts__mobile-label" aria-hidden="true">${isAr ? 'الحالة' : 'Status'}</span>
           <span data-account-status>${renderStatusBadge(acc.status === 'active' ? 'ok' : acc.status === 'suspended' ? 'suspended' : 'critical', statusLabel)}</span>
@@ -486,7 +484,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           </td>
           </tr>`
         }).join('') || `<tr>
-          <td colspan="5">
+          <td colspan="10">
           <p class="xp-accounts__empty">${list.state === 'forbidden' ? (isAr ? 'عرض الحسابات غير مسموح.' : 'Account listing is not permitted.') : list.state === 'unavailable' ? (isAr ? 'قائمة الحسابات غير متاحة.' : 'The account list is unavailable.') : (isAr ? 'لا توجد حسابات.' : 'No accounts.')}</p>
           </td>
           </tr>`}</tbody>
@@ -571,10 +569,11 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           <label class="xp-label" for="new-acc-ipv6">${isAr ? 'عنوان IPv6 (اختياري)' : 'IPv6 address (optional)'}</label>
           <input id="new-acc-ipv6" name="ipv6" type="text" class="xp-input xp-mono" dir="ltr" value="" />
           </div>
+          ${renderApprovedWhmAccountCreateFields({ ...props, locale })}
           ${renderAccountPlanPreview(accountPlanPreviewModel({ principal, activeReseller: props.activeReseller, accounts: props.accounts, plans: props.plans, resellers: props.resellers }), locale)}
           <p class="xp-help" data-account-create-status role="status" aria-live="polite" tabindex="-1" hidden></p>
           <button type="submit" class="xp-btn xp-btn--primary" ${plans.length && (isRoot || heldAcls.has('create-account')) ? '' : 'disabled'}>${escapeHtml(t(locale, 'accounts.create'))}</button>
-        </form>` : ''}
+        </form>${renderApprovedWhmAccountCreateStatus({ ...props, locale })}` : ''}
       </section>
 
 ` : ''}
@@ -955,8 +954,12 @@ ${section === 'mail-ips' && mailIpConfig ? `          <form class="xp-card xp-fo
 ${section === 'audit' ? `<section class="xp-card" data-section="audit-log">
             <div class="xp-card__header">
               <h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>
+              ${renderWhmAuditExports({ ...props, locale })}
             </div>
             <form method="get" action="/whm/audit" data-audit-filters="true" class="xp-form-group">
+              <input type="hidden" name="lang" value="${locale}">
+              <input type="hidden" name="theme" value="${theme}">
+              <input type="hidden" name="density" value="${density}">
               <div class="xp-field">
                 <label class="xp-label" for="audit-actor">${isAr ? 'الفاعل' : 'Actor'}</label>
                 <input id="audit-actor" name="actor" maxlength="128" value="${escapeHtml(auditActor)}">
@@ -969,7 +972,12 @@ ${section === 'audit' ? `<section class="xp-card" data-section="audit-log">
                 <label class="xp-label" for="audit-target">${isAr ? 'الهدف' : 'Target'}</label>
                 <input id="audit-target" name="target" maxlength="480" value="${escapeHtml(auditTarget)}">
               </div>
-              <button type="submit" class="xp-btn">${isAr ? 'تصفية' : 'Filter'}</button>
+              <div class="xp-whm-detail-fields">
+                <div class="xp-field"><label class="xp-label" for="audit-outcome">${isAr ? 'النتيجة' : 'Outcome'}</label><select id="audit-outcome" name="outcome"${isAr ? ' class="xp-ar-sentence"' : ''}><option value=""${isAr ? ' class="xp-ar-sentence"' : ''}>${isAr ? 'كل النتائج' : 'All outcomes'}</option>${[['ok', isAr ? 'نجاح' : 'Success'], ['denied', isAr ? 'مرفوض' : 'Denied'], ['failed', isAr ? 'فشل' : 'Failed']].map(([key, label]) => `<option value="${key}"${isAr ? ' class="xp-ar-sentence"' : ''}${auditOutcome === key ? ' selected' : ''}>${label}</option>`).join('')}</select></div>
+                <div class="xp-field"><label class="xp-label" for="audit-from">${isAr ? 'من (UTC)' : 'From (UTC)'}</label><input id="audit-from" name="from" type="datetime-local" step="0.001" value="${escapeHtml(auditFrom.replace(/Z$/, ''))}"></div>
+                <div class="xp-field"><label class="xp-label" for="audit-to">${isAr ? 'إلى (UTC)' : 'To (UTC)'}</label><input id="audit-to" name="to" type="datetime-local" step="0.001" value="${escapeHtml(auditTo.replace(/Z$/, ''))}"></div>
+              </div>
+              <div class="xp-plan-editor-actions"><a class="xp-btn" data-audit-clear href="/whm/audit?lang=${locale}&amp;theme=${theme}&amp;density=${density}">${isAr ? 'مسح التصفية' : 'Clear filters'}</a><button type="submit" class="xp-btn xp-btn--primary">${isAr ? 'تطبيق التصفية' : 'Apply filters'}</button></div>
             </form>
             <div class="xp-table-wrap">
               <table class="xp-table">
@@ -995,6 +1003,7 @@ ${section === 'audit' ? `<section class="xp-card" data-section="audit-log">
                 </tbody>
               </table>
             </div>
+            ${renderWhmAuditSupplement({ ...props, locale })}
             ${auditBefore || (auditList?.hasMore && auditList.oldestId) ? `<nav data-audit-pager="true">
               ${auditBefore ? `<a href="${escapeHtml(auditHref())}">${isAr ? 'الأحدث' : 'Newest'}</a>` : ''}
               ${auditList?.hasMore && auditList.oldestId ? `<a data-audit-older="true" href="${escapeHtml(auditHref(auditList.oldestId))}">${isAr ? 'الأقدم' : 'Older'}</a>` : ''}
@@ -1004,7 +1013,21 @@ ${section === 'upgrade' ? `<section class="xp-card" data-section="root-lifecycle
 ${section === 'transfer' ? `<section class="xp-card" data-section="root-lifecycle"><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1><p class="xp-prose">${isAr ? 'اختر مصدر النقل وراجع الحسابات قبل الاستيراد.' : 'Choose the transfer source and review its accounts before importing.'}</p><button type="button" class="xp-btn xp-btn--primary" data-action="start-transfer" ${isRoot ? '' : 'disabled'}>${isAr ? 'بدء النقل' : 'Start transfer'}</button></section>` : ''}
 ${section === 'security' ? `<section class="xp-card" data-section="account-security"><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1></section>` : ''}
 ${section === 'design' ? renderDesignMain(activeRoute, locale) : ''}
-${section === undefined || (section === 'io' && !ioSnapshot) || (section === 'mail-ips' && !mailIpConfig) ? renderSurfaceUnavailable(locale, '/whm') : ''}`,
+${section === undefined || (section === 'io' && !ioSnapshot) || (section === 'mail-ips' && !mailIpConfig) ? renderSurfaceUnavailable(locale, '/whm') : ''}`
+  const rawHtml = renderSurfaceShell({
+    surface: 'xwhm', locale,
+    attributes: `data-principal-kind="${escapeHtml(principal.kind)}"`,
+    sidebar: `    <div class="xp-sidebar__brand">
+      <span class="xp-brand__mark" aria-hidden="true">x</span>
+      <div>
+        <strong>xWHM</strong>
+        <div>${isArabicSentence(hostname) ? `<span class="xp-ar-sentence">${escapeHtml(hostname)}</span>` : `<bdi dir="ltr" class="xp-mono">${escapeHtml(hostname)}</bdi>`}</div>
+      </div>
+    </div>
+
+    ${renderDesignNav('xwhm', locale, activeRoute, qualifiedRoutes, navigationVisibility)}`,
+    topbar: renderSurfaceToolbar({ surface: 'xwhm', locale, theme, density, path: section === 'audit' ? auditHref(auditBefore || undefined) : activeRoute, username: principal.username, role: roleLabel(principal.kind, locale), signedIn: true, realtimeEnabled: props.realtimeEnabled, generationId, version: props.version, activityHref: '/whm/jobs', links: props.panels }),
+    content: section === 'backups' ? renderApprovedWhmBackups({ ...props, locale }, nativeContent) : section === 'resellers' ? renderApprovedWhmResellers({ ...props, locale }, nativeContent) : section === 'dns' ? `<div class="xp-form-group" data-whm-dns-workspace style="gap:var(--xp-space-section,32px)">${nativeContent}${renderWhmDnsSupplement({ ...props, locale })}</div>` : section === 'plans' ? nativeContent + renderApprovedWhmPlanSupplement({ ...props, locale }) : section === 'services' || section === 'firewall' ? nativeContent + renderApprovedWhmOperationsSupplement({ ...props, locale }) : nativeContent,
   })
   return ensureAccessibleSurfaceHtml(rawHtml.trim(), locale)
 }

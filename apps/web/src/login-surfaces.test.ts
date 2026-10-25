@@ -36,7 +36,13 @@ describe('listener-specific sign-in presentation', () => {
 
         assert.equal((html.match(/<h1\b/g) ?? []).length, 1)
         assert.match(html, /<form[^>]+aria-labelledby="login-heading"[^>]+data-login-form/)
-        assert.doesNotMatch(html, /id="login-description"|<aside|<footer|xp-login-step|xp-login-emblem/)
+        assert.match(html, /id="login-description"/)
+        assert.match(html, /<aside[^>]+aria-label=/)
+        assert.match(html, /<footer[^>]+role="contentinfo"/)
+        assert.match(html, /data-login-design="approved"/)
+        assert.match(html, /class="xp-login-profile-tabs"/)
+        assert.match(html, /data-login-success data-required-auth-state="authenticated"/)
+        assert.match(html, /data-login-lockout-details/)
         for (const field of ['login-username', 'login-password', 'login-otp', 'login-recovery-code']) {
           assert.ok(html.includes('for="' + field + '"'))
           assert.ok(html.includes('id="' + field + '"'))

@@ -1,3 +1,6 @@
+/// <reference lib="dom" />
+// @vitest-environment jsdom
+
 import { describe, expect, it } from 'vitest'
 import { tools } from '@xpanel/catalog'
 import { renderWebApp } from './app.ts'
@@ -16,6 +19,42 @@ const fixture = (overrides: MailSurfaceProps = {}): MailSurfaceProps => ({
   catalog: tools.map(tool => tool.status === 'out-of-scope' ? tool : ({ ...tool, status: 'verified' as const, delivery: { status: 'verified' as const, reason: 'Synthetic layout test only.', evidence: [] } })),
   activeRoute: '/mail/inbox', ...overrides,
 })
+
+
+// Parse real elements so script/CSS text cannot masquerade as a native form.
+// The sole allowed form is read-only inbox search; sending stays client-mediated.
+function expectLocalComposerSendBoundary(html: string, locale: 'en' | 'ar'): void {
+  const document = new DOMParser().parseFromString(html, 'text/html')
+  const forms = [...document.forms]
+  expect(forms).toHaveLength(1)
+  const search = forms[0]!
+  expect(search.getAttribute('role')).toBe('search')
+  expect(search.getAttribute('action')).toBe('/mail/inbox')
+  expect(search.getAttribute('method')).toBe('get')
+  expect([...search.elements].map(control => ({
+    tag: control.tagName, name: control.getAttribute('name'), type: (control as HTMLInputElement).type,
+  }))).toEqual([
+    { tag: 'INPUT', name: 'lang', type: 'hidden' },
+    { tag: 'INPUT', name: 'theme', type: 'hidden' },
+    { tag: 'INPUT', name: 'q', type: 'search' },
+  ])
+  expect(search.querySelector<HTMLInputElement>('[name="lang"]')?.value).toBe(locale)
+  expect(search.querySelector('[data-compose-form], [data-mail-send], [id^="compose-"]')).toBeNull()
+  expect([...document.querySelectorAll('[action]')]).toEqual([search])
+  expect(document.querySelector('[form], [formaction], [formmethod], [onsubmit]')).toBeNull()
+  const composer = document.querySelector('[data-compose-form="true"]')
+  expect(composer?.tagName).toBe('DIV')
+  expect(composer?.getAttribute('role')).toBe('group')
+  expect(composer?.closest('form')).toBeNull()
+  const send = document.querySelector<HTMLButtonElement>('[data-mail-send="true"]')
+  expect(send?.tagName).toBe('BUTTON')
+  expect(send?.type).toBe('button')
+  expect(send?.form).toBeNull()
+  const submitControls = [...document.querySelectorAll('button, input')].filter(control =>
+    ['submit', 'image'].includes((control as HTMLInputElement).type))
+  expect(submitControls).toHaveLength(0)
+  expect(html).not.toContain('/api/mail/send')
+}
 
 describe('bounded mail reference layout', () => {
   it.each(['/mail/inbox', '/mail/compose', '/mail/settings/filters', '/mail/settings/autoresponder'])('keeps one active authorized navigation link on %s', activeRoute => {
@@ -92,13 +131,27 @@ describe('bounded mail reference layout', () => {
     expect(html).toContain('data-compose-form="true"')
     expect(html).toContain('data-mail-send-availability="available"')
     expect(html).toContain('data-mail-send="true"')
-    expect(html).not.toMatch(/<form\b|\/api\/mail\/send|type="submit"/)
+    expectLocalComposerSendBoundary(html, locale)
     expect(html).toMatch(/<button type="button"[^>]+data-mail-send="true" aria-describedby="mail-send-status"/)
     for (const id of ['compose-from', 'compose-to', 'compose-subject', 'compose-body']) {
       expect(html).toContain(`for="${id}"`)
       expect(html).toContain(`id="${id}"`)
     }
     expect(html).not.toMatch(/data-action="(?:reply-message|forward-message|archive-message)"/)
+  })
+
+
+  it.each([
+    { name: 'API search action', mutate: (html: string) => html.replace('action="/mail/inbox"', 'action="/api/webmail/send"') },
+    { name: 'POST search', mutate: (html: string) => html.replace('method="get"', 'method="post"') },
+    { name: 'compose recipient in search', mutate: (html: string) => html.replace('</form>', '<input name="to" type="text"></form>') },
+    { name: 'extra native send form', mutate: (html: string) => html + '<form action="/api/webmail/send" method="post"><button type="submit">Send</button></form>' },
+    { name: 'submit send button', mutate: (html: string) => html.replace(/type="button"([^>]*data-mail-send="true")/, 'type="submit"$1') },
+    { name: 'send form association', mutate: (html: string) => html.replace('<form role="search"', '<form id="search-owner" role="search"').replace('data-mail-send="true"', 'data-mail-send="true" form="search-owner"') },
+    { name: 'send API formaction', mutate: (html: string) => html.replace('data-mail-send="true"', 'data-mail-send="true" formaction="/api/webmail/send"') },
+  ])('rejects $name at the native send boundary', ({ mutate }) => {
+    const html = renderMailSurface(fixture({ activeRoute: '/mail/compose', locale: 'en' }))
+    expect(() => expectLocalComposerSendBoundary(mutate(html), 'en')).toThrow()
   })
 
   it('shows stored compose identity and every filter, and does not invent a quota or a zero', () => {

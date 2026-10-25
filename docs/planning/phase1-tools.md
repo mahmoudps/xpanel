@@ -77,7 +77,7 @@ Terminate probes `GET /accounts/:user/purge`. Only `LinuxHostExecutor` answers `
 
 ## Lab
 
-On 65.108.84.27, after this build is deployed and `xpanel-agent` plus the API are restarted:
+On a configured test server, after this build is deployed and `xpanel-agent` plus the API are restarted:
 
 1. Open xWHM as root and xPanel as `demohost`.
 2. Groups whose probes passed are links. The others stay “Not yet available”.

@@ -77,12 +77,12 @@ describe('design board routes', () => {
     expect(html).not.toMatch(/<form\b|alice|3\.2|salma/)
     const cron = renderDesignMain('/advanced/cron', 'en')
     expect(cron).toContain('data-board-layout="/advanced/cron"')
-    expect(cron).toContain('No cron jobs yet')
+    expect(cron).toContain('The scheduled job list has not been read.')
     expect(cron).toContain('Scheduled jobs')
     expect(cron).toContain('Every 5 minutes')
     expect(cron).not.toMatch(/alice|20014|xpanel-cron/)
     expect(renderDesignMain('/files/backup', 'en')).toContain('What do you want to back up?')
-    expect(renderDesignMain('/whm/security/ssh', 'en')).toContain('No addresses banned by SSH')
+    expect(renderDesignMain('/whm/security/ssh', 'en')).toContain('The SSH ban list has not been read.')
     expect(renderDesignMain('/design/system', 'en')).toBe('')
     const system = withDesignPages(() => renderDesignMain('/design/system', 'en'))
     expect(system).toContain('data-token="accent"')
@@ -137,7 +137,11 @@ describe('design board routes', () => {
         ? { principal: { kind: 'root' as const, id: 'fixture-root', username: 'root' } }
         : { principal: { kind: 'user' as const, id: 'fixture-owner', username: 'owner', accountId: 'fixture-account' }, disabledFeatures: new Set<string>() }
       const html = renderWebApp({ surface, activeRoute: route, locale: 'en', visibility })
-      expect(html).toContain(`data-design-page="${route}"`)
+      const marker = route === '/software/php' || route === '/advanced/cron' || route === '/files/backup'
+        ? `data-approved-xpanel-workspace="${route}"`
+        : `data-whm-detail-route="${route}"`
+      expect(html).toContain(marker)
+      expect(html).toContain(surface === 'xpanel' ? 'data-workspace-mode="read-only"' : 'data-capability-state="unavailable"')
       expect(html).toContain('data-nav-wiring="soon"')
       expect(html).not.toMatch(/<form\b/)
     }
@@ -145,10 +149,32 @@ describe('design board routes', () => {
       locale: 'en', activeRoute: '/software/php',
       account: { id: 'a', username: 'owner', uid: 1, gid: 1, home: '/home/owner', primaryDomain: 'owner.example.test', planId: 'p', ownerId: null, status: 'active', suspendReason: null, contactEmail: 'owner@example.test', ipv4: '192.0.2.1', ipv6: null, extraIps: [], shell: 'none', createdAt: '2026-10-23T00:00:00Z' },
     })
-    expect(php).toContain('data-design-page="/software/php"')
+    expect(php).toContain('data-approved-xpanel-workspace="/software/php"')
     expect(php).not.toContain('192.0.2.1')
     const features = renderWhmSurface({ locale: 'en', activeRoute: '/whm/plans/features', principal: { kind: 'root', id: 'root', username: 'root' } })
-    expect(features).toContain('data-design-page="/whm/plans/features"')
+    expect(features).toContain('data-whm-detail-route="/whm/plans/features"')
     expect(features).not.toContain('data-plan-editor-form')
   })
+  it('keeps the complete component reference separate from host execution', () => {
+    const html = withDesignPages(() => renderDesignMain('/design/components', 'en'))
+    for (const component of ['quickbar', 'verification', 'steps', 'table', 'upload', 'drawer', 'errors', 'code', 'shortcuts']) expect(html).toContain(`data-component-specimen="${component}"`)
+    expect(html).toContain('Enrollment is optional.')
+    expect(html).toContain('No upload is in progress.')
+    expect(html).toContain('No host records are loaded in this specimen.')
+    expect(html).not.toMatch(/<form\b|\bfetch\s*\(|\/api\/|alice-shop|20014/)
+    const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1])
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('maps every registered destination rather than only the selected bespoke screens', () => {
+    const map = withDesignPages(() => renderDesignMain('/design/navigation', 'en'))
+    for (const route of ['/whm/software/modules', '/mail/settings/calendars', '/whm/security/ssh']) expect(map).toContain(`href="${route}"`)
+    expect(map).toContain('Route registration does not grant access')
+    expect(map).toContain('Additional document destinations')
+    const routes = [...map.matchAll(/data-reference-route="([^"]+)"/g)].map(match => match[1])
+    expect(routes).toHaveLength(203)
+    expect(new Set(routes).size).toBe(routes.length)
+    expect(map).not.toContain('all 187 pages')
+  })
+
 })
