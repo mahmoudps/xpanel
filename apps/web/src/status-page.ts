@@ -5,7 +5,7 @@ import type { Locale } from './i18n.ts'
 import { renderSurfaceShell } from './shell.ts'
 import { escapeHtml } from './tokens.ts'
 
-export type StatusCode = 403 | 404 | 421 | 500 | 503
+export type StatusCode = 400 | 403 | 404 | 421 | 500 | 503
 
 export interface StatusPageModel {
   status: StatusCode
@@ -40,6 +40,10 @@ interface Copy {
 export const statusPageCopy = (status: StatusCode, locale: Locale): Copy => {
   const ar = locale === 'ar'
   switch (status) {
+    case 400:
+      return ar
+        ? { title: 'تحقق من بيانات الطلب', explanation: 'يحتوي الطلب على قيمة غير صالحة. صحح المرشحات أو النطاق الزمني وأعد المحاولة.' }
+        : { title: 'Check the request details', explanation: 'The request contains an invalid value. Correct the filters or date range and try again.' }
     case 404:
       return ar
         ? { title: 'هذه الصفحة غير موجودة', explanation: 'العنوان لا يطابق صفحة في هذه اللوحة.' }
@@ -151,5 +155,5 @@ export function requestPrefersHtml(req: Request): boolean {
 }
 
 export function isStatusCode(value: number): value is StatusCode {
-  return value === 403 || value === 404 || value === 421 || value === 500 || value === 503
+  return value === 400 || value === 403 || value === 404 || value === 421 || value === 500 || value === 503
 }

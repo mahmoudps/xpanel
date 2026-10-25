@@ -55,7 +55,7 @@ describe('display names', () => {
 })
 
 describe('styled status pages', () => {
-  it.each([404, 403, 421, 500, 503] as const)('renders %s in English and Arabic inside or outside the shell', status => {
+  it.each([400, 404, 403, 421, 500, 503] as const)('renders %s in English and Arabic inside or outside the shell', status => {
     const signedIn = renderWebApp({
       surface: 'xpanel', locale: 'en', theme: 'light',
       visibility: { principal: owner },

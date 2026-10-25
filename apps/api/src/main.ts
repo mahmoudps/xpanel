@@ -6,7 +6,7 @@ import type { Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { agentCallerHeaders, loadAgentCredentialFile } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
-import { bindMfaRuntimePolicy, canSeeAccount, captureMfaRuntimePolicy, fail, hasAcl, type AuditEntry, type MfaRuntimePolicy, type OsProfile } from '@xpanel/core'
+import { bindMfaRuntimePolicy, canSeeAccount, captureMfaRuntimePolicy, fail, hasAcl, isXpanelError, type AuditEntry, type MfaRuntimePolicy, type OsProfile } from '@xpanel/core'
 import { canOpenRegisteredRoute, canonicalNavigationRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { mapAgentHostInfo, mapAgentServices } from '../../web/src/board-port/xwhm-dashboard.ts'
 import { publicContactEmail } from '../../web/src/display-name.ts'
@@ -15,6 +15,7 @@ import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { runCli } from './cli.ts'
 import { loadQualifiedCatalog } from './host-catalog.ts'
+import { parseAuditFilters } from './audit-filters.ts'
 import { loadMailDocument, messageSizeLimitBytes, messageSizeLimitFromPostconf, type MailDocument } from './mail/document.ts'
 import { auditActorQuery, auditTargetQuery, createLocalMailboxTransport, mailFolderName, mailboxAddressIndex, rewriteMailboxIds } from './mail/inbox.ts'
 import { createApiApp, ensureRootPrincipal, listenApiServer } from './server.ts'
@@ -160,7 +161,7 @@ export const createDefaultWebRenderer = async (deps: {
       return loaded.some(tool => tool.status === 'verified') ? loaded : undefined
     }
     const documentStatus = async (
-      status: 403 | 404,
+      status: 400 | 403 | 404,
       model: {
         surface: EntryPoint
         visibility?: VisibilityContext
@@ -299,7 +300,9 @@ export const createDefaultWebRenderer = async (deps: {
         visibility: { principal },
       }))
     }
-    const requiredAcl = surface === 'xmail' ? 'edit-account' : 'list-accounts'
+    const requiredAcl = surface === 'xmail' ? 'edit-account'
+      : surface === 'xwhm' && documentRoute.activeRoute === '/whm/plans/features' ? 'manage-feature-lists'
+      : 'list-accounts'
     if (principal.kind === 'reseller' && (!reseller || !hasAcl(principal, reseller, requiredAcl))) {
       return documentStatus(403, {
         surface,
@@ -443,6 +446,15 @@ export const createDefaultWebRenderer = async (deps: {
         },
       }))
     }
+    const auditRoute = surface === 'xwhm' && documentRoute.activeRoute === '/whm/audit' && principal.kind === 'root'
+    let auditFilters: AuditQuery = {}
+    if (auditRoute) {
+      try { auditFilters = parseAuditFilters(url.searchParams) }
+      catch (error) {
+        if (!isXpanelError(error) || error.code !== 'VALIDATION') throw error
+        return documentStatus(400, { surface, visibility: scopedVisibility, workspaceHref: '/whm/audit', catalog })
+      }
+    }
     // Qualified screens re-authorize against their fresh full snapshot, not the earlier projection.
     const snap = await deps.store.readSnapshot()
     const ownedAccounts = snap.accounts.filter((account) => canSeeAccount(principal, account))
@@ -474,12 +486,14 @@ export const createDefaultWebRenderer = async (deps: {
       disabledFeatures: new Set(featureList?.disabled ?? []),
     }
     const listedAccounts = principal.kind === 'reseller' && !hasAcl(principal, reseller, 'list-accounts') ? [] : ownedAccounts
+    const listedAccountIds = new Set(listedAccounts.map(account => account.id))
+    const visibleDomains = snap.domains.filter(domain => listedAccountIds.has(domain.accountId))
     const listedPlanIds = new Set(listedAccounts.map((a) => a.planId))
     const visiblePlans = snap.plans.filter((p) => principal.kind === 'root' || p.ownerId === principal.id || listedPlanIds.has(p.id))
     const visibleResellers = snap.resellers.filter((r) => principal.kind === 'root' || r.id === principal.id)
     const visibleFeatureLists = snap.featureLists
       .filter(item => principal.kind === 'root' || (principal.kind === 'reseller' && (item.ownerId === null || item.ownerId === principal.id)))
-      .map(({ id, name }) => ({ id, name }))
+      .map(({ id, name, disabled, ownerId }) => ({ id, name, disabled, ownerId }))
     const requestedPlanId = url.searchParams.has('planId') ? url.searchParams.get('planId') : null
     const selectedEditPlan = requestedPlanId !== null ? visiblePlans.find(item => item.id === requestedPlanId) : undefined
     const planEditorState = requestedPlanId === null ? { kind: 'create' as const }
@@ -492,14 +506,17 @@ export const createDefaultWebRenderer = async (deps: {
     const accountServiceUsers = snap.serviceUsers.filter((u) => u.accountId === account?.id).map((u) => ({ ...u, passwordHash: '' }))
     const active = await latestActive(deps.db)
     const dashboardRoute = surface === 'xwhm' && documentRoute.activeRoute === '/whm' && principal.kind === 'root'
-    const auditRoute = surface === 'xwhm' && documentRoute.activeRoute === '/whm/audit' && principal.kind === 'root'
     const AUDIT_PAGE_SIZE = 50
-    const typedActor = auditRoute ? (url.searchParams.get('actor') ?? '').trim().slice(0, 128) : ''
-    const typedAction = auditRoute ? (url.searchParams.get('action') ?? '').trim().slice(0, 128) : ''
-    const typedTarget = auditRoute ? (url.searchParams.get('target') ?? '').trim().slice(0, 480) : ''
-    const typedBefore = auditRoute ? (url.searchParams.get('before') ?? '').trim() : ''
-    const actionFilter = /^[a-z][a-z0-9_.:-]{0,127}$/.test(typedAction) ? typedAction : ''
-    const beforeId = /^[1-9][0-9]{0,14}$/.test(typedBefore) ? typedBefore : ''
+    const typedActor = auditFilters.actor ?? ''
+    const typedAction = auditFilters.action ?? ''
+    const typedTarget = auditFilters.target ?? ''
+    const actionFilter = typedAction
+    const beforeId = auditFilters.beforeId ?? ''
+    const auditBounds = {
+      ...(auditFilters.outcome ? { outcome: auditFilters.outcome } : {}),
+      ...(auditFilters.from ? { from: auditFilters.from } : {}),
+      ...(auditFilters.to ? { to: auditFilters.to } : {}),
+    }
     const actorFilters = typedActor ? [...new Set([typedActor, auditActorQuery(typedActor)])] : []
     const targetFilters = typedTarget ? [...new Set([typedTarget, auditTargetQuery(typedTarget)])] : []
     const collectAudit = async (query: AuditQuery): Promise<AuditEntry[]> => {
@@ -539,6 +556,7 @@ export const createDefaultWebRenderer = async (deps: {
       dashboardRoute ? previousGeneration(deps.db).catch(() => null) : null,
       auditRoute
         ? collectAudit({
+            ...auditBounds,
             limit: AUDIT_PAGE_SIZE + 1,
             ...(beforeId ? { beforeId } : {}),
             ...(actionFilter ? { action: actionFilter } : {}),
@@ -601,6 +619,7 @@ export const createDefaultWebRenderer = async (deps: {
         principal,
         activeReseller: reseller ?? null,
         accounts: listedAccounts,
+        domains: visibleDomains,
         plans: visiblePlans,
         featureLists: visibleFeatureLists,
         planEditorState,
@@ -609,12 +628,14 @@ export const createDefaultWebRenderer = async (deps: {
         ipPool: visibleIpPool,
         firewallRules: visibleFirewall,
         ...(principal.kind === 'root' && snap.server ? {
+          serverSettings: snap.server.settings,
           hostname: hostSample?.hostname ?? snap.server.settings.hostname,
           ...(hostSample?.panelDomain ? { panelHostname: hostSample.panelDomain } : {}),
         } : {}),
         ...(auditRoute ? {
           auditEntries: auditRows,
           auditList: {
+            ...auditBounds,
             actor: typedActor,
             action: typedAction,
             target: typedTarget,

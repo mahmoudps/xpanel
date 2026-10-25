@@ -44,7 +44,7 @@ export const visibleRegisteredNavigation = (
   })).filter(surface => surface.sections.length > 0)
 }
 
-/** A page exposes multiple actions, so every represented capability must be available. */
+/** Pages require their full capability set or an explicitly scoped implemented workspace. */
 export const visibleNavigation = (
   ctx?: VisibilityContext,
   catalog: readonly CatalogTool[] = tools,
@@ -65,7 +65,16 @@ export const visibleNavigation = (
     if (page.route === '/whm' && allowed.has('server-information')) return true
     // The audit log opens once the audit_log probe can read the log. The page's
     // other tools stay listed and do not have to be verified first.
-    return page.route === '/whm/audit' && allowed.has('audit-log')
+    if (page.route === '/whm/audit' && allowed.has('audit-log')) return true
+    // Only these native operations admit the workspace; broader page tools remain
+    // individually unqualified and their unavailable controls stay disabled.
+    if (page.route === '/whm/plans/features') return allowed.has('feature-list-crud')
+    if (['/whm/server/setup', '/whm/services/web', '/whm/security/ssh'].includes(page.route)) {
+      return allowed.has('server-settings-edit')
+    }
+    if (page.route === '/software/php') return allowed.has('domain-php-settings')
+    if (page.route === '/domains/zone-editor') return allowed.has('dns-zone-records')
+    return false
   }
   return design.map(surface => ({
     ...surface,

@@ -12,6 +12,11 @@ const PORT_CSS = `.xp-board-port{line-height:normal;font-size:16px;font-kerning:
 .xp-board-port p{max-inline-size:none}
 @media(min-width:960px){.xp-board-port[data-mail-layout="reference"] [data-xp-sidebar]{flex:0 0 200px!important;inline-size:200px}}
 .xp-board-port [data-mail-recip-box] > ul:empty{display:none}
+.xp-mail-vacation-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));gap:var(--xp-space-field,16px)}
+.xp-mail-vacation-field{display:flex;flex-direction:column;gap:var(--xp-space-label,8px);min-inline-size:0}
+.xp-mail-vacation-field label{font-size:13px;font-weight:600;color:var(--xp-text-secondary,#344054)}
+.xp-mail-vacation-field input{inline-size:100%;min-inline-size:0;min-block-size:44px;box-sizing:border-box;padding:8px 12px;border:1px solid var(--xp-control-edge,#808b9c);border-radius:8px;background:var(--xp-bg-surface,#FFFFFF);color:var(--xp-text-primary,#101828);font:inherit}
+.xp-mail-vacation-preview{margin:0;max-inline-size:100%;white-space:pre-wrap;overflow-wrap:anywhere;padding:var(--xp-space-field,16px);border-radius:8px;background:#0E1726;color:#E6EDF7;font:12px/1.6 'IBM Plex Mono',monospace}
 .xp-board-port[data-board-port="xmail-compose"] [data-mail-recip-box]:has(> input:read-only){background-color:#F2F4F7!important}
 .xp-board-port[data-board-port="xmail-compose"] #compose-from{appearance:none;line-height:24px;padding-inline-end:28px!important;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:right 16px center,right 12px center;background-size:4px 4px;background-repeat:no-repeat}
 html[dir="rtl"] .xp-board-port[data-board-port="xmail-compose"] #compose-from{padding-inline-start:28px!important;padding-inline-end:12px!important;background-position:left 12px center,left 16px center}
@@ -235,20 +240,112 @@ const COMPOSE_SCRIPT = `<script id="xmail-compose-client">
     var tone = colors[kind] || colors.error
     host.setAttribute('role', tone[2])
     host.style.cssText = 'margin:16px 24px 0;display:flex;gap:10px;padding:12px 14px;border-radius:10px;border:1px solid ' + tone[0] + ';background:' + tone[1] + ';font-size:13px;line-height:1.6'
+    host.hidden = false
     host.textContent = message
+  }
+  var editor = root.querySelector('#compose-body')
+  var savedRange = null
+  var selectionInsideEditor = function (range) {
+    return !!editor && !!range && editor.contains(range.startContainer) && editor.contains(range.endContainer)
+  }
+  var rememberSelection = function () {
+    if (!editor || typeof window.getSelection !== 'function') return
+    var selection = window.getSelection()
+    if (!selection || !selection.rangeCount) return
+    var range = selection.getRangeAt(0)
+    if (selectionInsideEditor(range)) savedRange = range.cloneRange()
+  }
+  var restoreSelection = function () {
+    if (!editor || typeof window.getSelection !== 'function') return false
+    var selection = window.getSelection()
+    if (!selection) return false
+    var range = savedRange && selectionInsideEditor(savedRange) ? savedRange.cloneRange() : document.createRange()
+    if (!savedRange || !selectionInsideEditor(savedRange)) { range.selectNodeContents(editor); range.collapse(false) }
+    editor.focus({ preventScroll: true })
+    selection.removeAllRanges()
+    selection.addRange(range)
+    return true
+  }
+  var quoteSelected = function () {
+    if (typeof window.getSelection !== 'function') return false
+    var selection = window.getSelection()
+    var node = selection && selection.anchorNode
+    var element = node && (node.nodeType === 1 ? node : node.parentElement)
+    var quote = element && element.closest && element.closest('blockquote')
+    return !!quote && !!editor && editor.contains(quote)
+  }
+  var syncFormatting = function () {
+    if (typeof window.getSelection !== 'function') return
+    var selection = window.getSelection()
+    if (!selection || !selection.rangeCount || !selectionInsideEditor(selection.getRangeAt(0))) return
+    var commands = { bold: 'bold', italic: 'italic', underline: 'underline', bullets: 'insertUnorderedList', numbers: 'insertOrderedList' }
+    root.querySelectorAll('[data-mail-format]').forEach(function (button) {
+      var key = button.getAttribute('data-mail-format')
+      if (button.getAttribute('data-mail-format-action') === 'true') return
+      var on = key === 'quote' ? quoteSelected() : typeof document.queryCommandState === 'function' && !!commands[key] && document.queryCommandState(commands[key])
+      paintToggle(button, !!on)
+    })
+  }
+  var applyFormat = function (key) {
+    var commands = { bold: 'bold', italic: 'italic', underline: 'underline', bullets: 'insertUnorderedList', numbers: 'insertOrderedList', quote: 'formatBlock', link: 'createLink', clear: 'removeFormat' }
+    if (!Object.prototype.hasOwnProperty.call(commands, key)) return
+    if (!editor || typeof document.execCommand !== 'function') { showFeedback('error', text('data-format-unavailable')); return }
+    rememberSelection()
+    var value = null
+    if (key === 'link') {
+      if (typeof window.prompt !== 'function') { showFeedback('error', text('data-format-unavailable')); return }
+      var input = window.prompt(text('data-format-link-prompt'), 'https://')
+      if (input === null) return
+      try {
+        var url = new URL(String(input).trim())
+        if (['http:', 'https:', 'mailto:'].indexOf(url.protocol) === -1 || url.username || url.password) throw new Error('unsafe link')
+        value = url.href
+      } catch (error) { showFeedback('error', text('data-format-link-invalid')); return }
+    }
+    if (!restoreSelection()) { showFeedback('error', text('data-format-unavailable')); return }
+    if (key === 'quote') value = quoteSelected() ? 'p' : 'blockquote'
+    try {
+      if (!document.execCommand(commands[key], false, value)) { showFeedback('error', text('data-format-unavailable')); return }
+      rememberSelection()
+      syncFormatting()
+    } catch (error) { showFeedback('error', text('data-format-unavailable')) }
+  }
+  if (editor) {
+    ;['mouseup', 'keyup', 'input', 'blur'].forEach(function (name) { editor.addEventListener(name, function () { rememberSelection(); syncFormatting() }) })
+    // Pasting plain text preserves normal paste while excluding remote images and active HTML.
+    editor.addEventListener('paste', function (event) {
+      if (!event.clipboardData || typeof window.getSelection !== 'function') return
+      event.preventDefault()
+      rememberSelection()
+      if (!restoreSelection()) return
+      var selection = window.getSelection()
+      if (!selection || !selection.rangeCount) return
+      var range = selection.getRangeAt(0)
+      if (!selectionInsideEditor(range)) return
+      var content = event.clipboardData.getData('text/plain')
+      var fragment = document.createDocumentFragment()
+      String(content).split(/\\r?\\n/).forEach(function (line, index) {
+        if (index) fragment.appendChild(document.createElement('br'))
+        fragment.appendChild(document.createTextNode(line))
+      })
+      var last = fragment.lastChild
+      range.deleteContents()
+      range.insertNode(fragment)
+      if (last) { range.setStartAfter(last); range.collapse(true); selection.removeAllRanges(); selection.addRange(range) }
+      rememberSelection()
+    })
+    if (typeof document.addEventListener === 'function') document.addEventListener('selectionchange', function () { rememberSelection(); syncFormatting() })
+    root.addEventListener('mousedown', function (event) {
+      if (event.target && event.target.closest && event.target.closest('[data-mail-format]')) { rememberSelection(); event.preventDefault() }
+    })
   }
   root.addEventListener('click', function (event) {
     var target = event.target
     if (!target || !target.closest) return
     var format = target.closest('[data-mail-format]')
-    if (format && format.getAttribute('data-mail-format-action') !== 'true') {
-      var key = format.getAttribute('data-mail-format')
-      var next = format.getAttribute('aria-pressed') !== 'true'
-      paintToggle(format, next)
-      if (next && (key === 'bullets' || key === 'numbers')) {
-        var other = root.querySelector('[data-mail-format="' + (key === 'bullets' ? 'numbers' : 'bullets') + '"]')
-        if (other) paintToggle(other, false)
-      }
+    if (format) {
+      event.preventDefault()
+      applyFormat(format.getAttribute('data-mail-format'))
       return
     }
     var action = target.closest('[data-mail-action]')
@@ -307,6 +404,10 @@ const COMPOSE_SCRIPT = `<script id="xmail-compose-client">
       if (opener) opener.setAttribute('aria-expanded', 'false')
     }
     if (name === 'vacation-save') {
+      if (product) {
+        showFeedback('error', text('data-vacation-unavailable'))
+        return
+      }
       var chip = root.querySelector('[data-mail-vacation-status]')
       if (chip) chip.textContent = text('data-vacation-on')
       var savedPanel = root.querySelector('[data-mail-vacation-panel]')
@@ -395,6 +496,10 @@ export const renderCompose = (model: ComposeModel): string => {
     ['data-discard-go', t('Discard draft', 'تجاهل المسودة')],
     ['data-inbox-href', model.inboxHref],
     ['data-vacation-on', t('On', 'يعمل')],
+    ['data-format-unavailable', t('Formatting could not be applied. Your message is unchanged.', 'تعذر تطبيق التنسيق. بقيت الرسالة دون تغيير.')],
+    ['data-format-link-prompt', t('Link address (https://, http:// or mailto:)', 'عنوان الرابط (https:// أو http:// أو mailto:)')],
+    ['data-format-link-invalid', t('Use an http, https or mailto link without embedded credentials.', 'استخدم رابط http أو https أو mailto دون بيانات دخول مضمنة.')],
+    ['data-vacation-unavailable', t('The responder was not saved. Saving responder rules is unavailable on this server.', 'لم يُحفظ الرد. حفظ قواعد الرد التلقائي غير متاح على هذا الخادم.')],
     ['data-send-empty', t('Not sent: the To field is empty. Your message is kept as it is.', 'لم تُرسل: حقل إلى فارغ. بقيت الرسالة كما هي.')],
     ['data-send-invalid', t('Not sent: an address is not valid. Fix or remove it and send again.', 'لم تُرسل: أحد العناوين غير صالح. صححه أو أزله ثم أعد الإرسال.')],
     ['data-send-wait', t('Waiting for the attachment to finish uploading. Send again when it is done, or remove it.', 'بانتظار اكتمال رفع المرفق. أعد الإرسال عند انتهائه، أو أزله.')],
@@ -407,7 +512,7 @@ export const renderCompose = (model: ComposeModel): string => {
 <a class="xp-skip-link" href="#main-content">${ar ? 'انتقل إلى المحتوى' : 'Skip to content'}</a>
 <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 12px 24px; background: #FFFFFF; border-bottom: 1px solid #E2E6EC">
   <a href="${escapeHtml(model.inboxHref)}" style="display: flex; align-items: center; gap: 10px; min-height: 44px; text-decoration: none"><span aria-hidden="true" style="width: 36px; height: 36px; border-radius: 8px; background: #0E7A4E; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 18px; font-weight: 600">x</span><span style="font-family: ${MONO}; font-size: 17px; font-weight: 500; color: #0E7A4E">${ar ? '<bdi dir="ltr">xMail</bdi>' : 'xMail'}</span></a>
-  <div role="search" aria-label="${t('Search mail', 'البحث في البريد')}" style="flex: 1 1 280px; max-width: 520px; position: relative; display: flex; align-items: center; margin: 0"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5D6B7E" stroke-width="2" stroke-linecap="round" style="position: absolute; inset-inline-start: 12px"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><input type="search" aria-label="${t('Search mail', 'البحث في البريد')}" placeholder="${t('Search sender, subject or text', 'ابحث عن المرسل أو الموضوع أو النص')}" style="width: 100%; min-height: 44px; padding-inline: 38px 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; font-family: inherit; font-size: 14px; color: #101828"></div>
+  <form role="search" action="${escapeHtml(model.inboxHref)}" method="get" aria-label="${t('Search mail', 'البحث في البريد')}" style="flex: 1 1 280px; max-width: 520px; position: relative; display: flex; align-items: center; margin: 0"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5D6B7E" stroke-width="2" stroke-linecap="round" style="position: absolute; inset-inline-start: 12px"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><input type="hidden" name="lang" value="${model.locale}"><input type="hidden" name="theme" value="${model.theme ?? 'light'}"><input type="search" name="q" aria-label="${t('Search mail', 'البحث في البريد')}" placeholder="${t('Search sender, subject or text', 'ابحث عن المرسل أو الموضوع أو النص')}" style="width: 100%; min-height: 44px; padding-inline: 38px 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; font-family: inherit; font-size: 14px; color: #101828"></form>
   <span style="flex: 1 1 0; min-width: 0"></span>
   <div style="display: flex; align-items: center; gap: 8px; min-width: 0"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#475467" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 7l9 6 9-6"></path></svg><span style="font-family: ${MONO}; font-size: 13px; color: #101828">${mailbox}</span></div>
   <div data-mail-quota style="display: flex; flex-direction: column; gap: 4px; min-width: 150px"><div style="display: flex; flex-direction: column; gap: 4px; font-size: 12px"><span data-mail-quota-label style="font-weight: 600; color: #344054">${t('Mailbox', 'صندوق البريد')}</span><span data-mail-quota-value style="color: #475467; font-variant-numeric: tabular-nums">${quota}</span></div><div data-quota-ratio="${model.quotaMeasured ? 'measured' : 'unknown'}" aria-hidden="true" style="height: 6px; border-radius: 3px; background: #E9ECF1; overflow: hidden"><div style="height: 6px; width: ${model.quotaPct}%; background: #1D5BD6; border-radius: 3px"></div></div></div>
@@ -468,7 +573,12 @@ export const renderCompose = (model: ComposeModel): string => {
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap"><h2 id="vac-title" style="margin: 0; font-size: 16px; font-weight: 600">${t('Vacation responder', 'الرد التلقائي')}</h2><span data-mail-vacation-status="true" style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: ${vacBg}; color: ${vacFg}; font-size: 12px; font-weight: 600"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: ${vacDot}; border: 1.5px solid ${vacFg}"></span>${escapeHtml(model.vacationStatus)}</span></div>
         <p style="margin: 0; font-size: 13px; color: #475467; line-height: 1.6">${t('Replies while you are away. Each sender gets at most one reply every 7 days. Saved as a Sieve vacation rule (RFC 5230) and run on delivery.', 'يرد أثناء غيابك. يحصل كل مرسل على رد واحد كل 7 أيام على الأكثر. يُحفظ كقاعدة Sieve vacation (RFC 5230) ويعمل عند التسليم.')}</p>
         <div style="display: flex; justify-content: flex-end"><button type="button" data-mail-action="vacation-open" aria-expanded="false" aria-controls="vac-form" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 14px; font-weight: 600">${escapeHtml(model.vacationOpenLabel)}</button></div>
-        <div id="vac-form" data-mail-vacation-panel="true" style="display: none; flex-direction: column; gap: 14px"><div style="display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap"><button type="button" data-mail-action="vacation-cancel" style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 14px; font-weight: 600">${t('Cancel', 'إلغاء')}</button><button type="button" data-mail-action="vacation-save" style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 14px; font-weight: 600">${t('Save responder', 'حفظ الرد')}</button></div></div>
+        <div id="vac-form" data-mail-vacation-panel="true" style="display: none; flex-direction: column; gap: var(--xp-space-field,16px)">
+          <div class="xp-mail-vacation-fields"><div class="xp-mail-vacation-field"><label for="vac-from">${t('First day', 'اليوم الأول')}</label><input id="vac-from" type="date" dir="ltr"${model.product ? ' readonly aria-describedby="mail-vacation-availability"' : ''} style="text-align:${ar ? 'right' : 'left'}"></div><div class="xp-mail-vacation-field"><label for="vac-to">${t('Last day', 'اليوم الأخير')}</label><input id="vac-to" type="date" dir="ltr"${model.product ? ' readonly aria-describedby="mail-vacation-availability"' : ''} style="text-align:${ar ? 'right' : 'left'}"></div></div>
+          <div class="xp-mail-vacation-field"><label for="vac-subject">${t('Reply subject', 'موضوع الرد')}</label><input id="vac-subject" type="text" dir="auto"${model.product ? ' readonly aria-describedby="mail-vacation-availability"' : ''}></div>
+          <pre class="xp-mail-vacation-preview" data-mail-vacation-preview="unavailable" aria-label="${t('Sieve rule preview', 'معاينة قاعدة Sieve')}">${t('No responder configuration has been read.', 'لم تُقرأ إعدادات الرد التلقائي.')}</pre>
+          ${model.product ? `<p id="mail-vacation-availability" role="note" style="margin:0;font-size:13px;line-height:1.6;color:#475467">${t('The schedule and rule are not available to edit here. Saving responder rules is unavailable on this server; no changes have been made.', 'الجدول والقاعدة غير متاحين للتحرير هنا. حفظ قواعد الرد التلقائي غير متاح على هذا الخادم؛ لم تُجرَ أي تغييرات.')}</p>` : ''}
+          <div style="display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap"><button type="button" data-mail-action="vacation-cancel" style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 14px; font-weight: 600">${t('Cancel', 'إلغاء')}</button><button type="button" data-mail-action="vacation-save"${model.product ? ' disabled aria-describedby="mail-vacation-availability"' : ''} style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 14px; font-weight: 600">${t('Save responder', 'حفظ الرد')}</button></div></div>
       </section>
       <section id="filters" aria-labelledby="filters-title" style="display: flex; flex-direction: column; gap: 12px; padding: 20px; border-radius: 12px; border: 1px solid #E2E6EC; background: #FFFFFF">
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap"><h2 id="filters-title" style="margin: 0; font-size: 16px; font-weight: 600">${t('Filters', 'الفلاتر')}</h2><span style="font-size: 12px; color: #5D6B7E">${escapeHtml(model.filterCount)}</span></div>

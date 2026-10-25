@@ -933,7 +933,8 @@ export const navigation: NavSurface[] = [
             ],
             "tools": [
               "zone-editor",
-              "dnssec"
+              "dnssec",
+              "dns-zone-records"
             ],
             "keywords": [
               "Zone Editor",
@@ -1363,7 +1364,8 @@ export const navigation: NavSurface[] = [
             ],
             "tools": [
               "php-version-selector",
-              "multiphp-ini-editor"
+              "multiphp-ini-editor",
+              "domain-php-settings"
             ],
             "keywords": [
               "PHP version selector",
@@ -2195,11 +2197,12 @@ export const navigation: NavSurface[] = [
             "primaryAction": "Create feature list",
             "roles": [
               "root",
-              "reseller:manage-plans"
+              "reseller:manage-feature-lists"
             ],
             "tools": [
               "feature-manager",
-              "tweak-packages"
+              "tweak-packages",
+              "feature-list-crud"
             ],
             "keywords": [
               "Feature Manager",
@@ -4471,7 +4474,8 @@ export const navigation: NavSurface[] = [
               "advanced-settings-browser",
               "tweak-system",
               "disk-quota-setup",
-              "aapanel-linux-tools"
+              "aapanel-linux-tools",
+              "server-settings-edit"
             ],
             "keywords": [
               "Tweak Settings",

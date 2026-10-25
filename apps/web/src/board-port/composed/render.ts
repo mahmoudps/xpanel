@@ -2,6 +2,7 @@ import { escapeHtml, formatBytes, normalizeAsciiDigits } from '../../tokens.ts'
 import { composedXpanelRoutes, composedXwhmRoutes, nativeComposedRoutePaths } from './all.ts'
 import { canReadSelectedAccount, canReadWhm, type ComposedContext } from './context.ts'
 import { copyOf, type ComposedRoute, type Copy } from './types.ts'
+import { COMPOSED_LAYOUT_CSS, renderComposedLayout } from './layout.ts'
 
 type ReadState = 'unread' | 'empty' | 'loaded' | 'denied' | 'unavailable' | 'failed'
 type Cell = { text: string; technical?: boolean }
@@ -84,8 +85,10 @@ export const renderComposedRoutes = (routes: readonly ComposedRoute[], context: 
   const title = copyOf(spec.title, context.locale)
   const view = readView(spec, context)
   const facts = view.facts?.length ? `<dl class="xp-composed-facts">${view.facts.map(row => `<div class="xp-composed-field"><dt>${escapeHtml(copyOf(row.label, context.locale))}</dt><dd>${valueHtml(row.value)}</dd></div>`).join('')}</dl>` : ''
-  const table = view.rows?.length ? `<div class="xp-composed-scroll" tabindex="0" role="region" aria-label="${escapeHtml(title)}"><table class="xp-table xp-composed-table"><caption class="sr-only">${escapeHtml(title)}</caption><thead><tr>${spec.columns.map(column => `<th scope="col">${escapeHtml(copyOf(column, context.locale))}</th>`).join('')}</tr></thead><tbody>${view.rows.map(row => `<tr>${spec.columns.map((column, index) => `<td><span class="xp-composed-cell-label" aria-hidden="true">${escapeHtml(copyOf(column, context.locale))}</span><span class="xp-composed-cell-value">${valueHtml(row[index] ?? cell(missing(context)))}</span></td>`).join('')}</tr>`).join('')}</tbody></table></div>` : ''
-  return `${styles}<section class="xp-composed-page" data-composed-route="${escapeHtml(spec.route)}" data-read-state="${view.state}" data-wiring="${view.state === 'loaded' || view.state === 'empty' ? 'read-only' : 'unavailable'}"><header class="xp-composed-heading"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(copyOf(spec.lede, context.locale))}</p></header><section class="xp-composed-card" aria-label="${escapeHtml(title)}"><h2>${escapeHtml(choose(context, 'Information', 'المعلومات'))}</h2><p role="status">${escapeHtml(copyOf(messages[view.state], context.locale))}</p>${facts}${table}</section></section>`
+  const emptyRow = `<tr><td colspan="${spec.columns.length}" class="xp-composed-empty-cell">${escapeHtml(copyOf(messages[view.state], context.locale))}</td></tr>`
+  const table = spec.columns.length && view.state !== 'denied' ? `<div class="xp-composed-scroll" tabindex="0" role="region" aria-label="${escapeHtml(title)}"><table class="xp-table xp-composed-table"><caption class="sr-only">${escapeHtml(title)}</caption><thead><tr>${spec.columns.map(column => `<th scope="col">${escapeHtml(copyOf(column, context.locale))}</th>`).join('')}</tr></thead><tbody>${view.rows?.length ? view.rows.map(row => `<tr>${spec.columns.map((column, index) => `<td><span class="xp-composed-cell-label" aria-hidden="true">${escapeHtml(copyOf(column, context.locale))}</span><span class="xp-composed-cell-value">${valueHtml(row[index] ?? cell(missing(context)))}</span></td>`).join('')}</tr>`).join('') : emptyRow}</tbody></table></div>` : ''
+  const body = renderComposedLayout(spec, context, { state: view.state, message: copyOf(messages[view.state], context.locale), facts, table })
+  return `${styles}${COMPOSED_LAYOUT_CSS}<section class="xp-composed-page" data-composed-route="${escapeHtml(spec.route)}" data-composed-layout="${escapeHtml(spec.layout)}" data-read-state="${view.state}" data-wiring="${view.state === 'loaded' || view.state === 'empty' ? 'read-only' : 'unavailable'}"><header class="xp-composed-heading"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(copyOf(spec.lede, context.locale))}</p></header>${body}</section>`
 }
 
 export const renderComposedXpanel = (context: ComposedContext): string | undefined => renderComposedRoutes(composedXpanelRoutes, context)

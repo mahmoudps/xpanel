@@ -18,6 +18,60 @@ const panel = (id: string, groupId: string, name: string, entity: string, summar
 
 const NATIVE: NativeTool[] = [
   {
+    tool: {
+      ...whm('feature-list-crud', 'whm-packages', 'Feature list records', 'feature-list',
+        'Create, rename, update disabled feature keys and delete unused feature lists within the caller’s ownership.'),
+      rootOnly: false,
+      resellerAcl: 'manage-feature-lists',
+    },
+    behaviors: [
+      'GET and POST /api/feature-lists list accessible records and create a named list with disabled feature keys',
+      'PATCH /api/feature-lists/:id updates the name or disabled keys; DELETE removes only an unused list',
+      'Root may manage all lists; resellers require manage-feature-lists and may manage only their own lists',
+      'A list referenced by a plan returns CONFLICT on deletion; this operation never reassigns plans',
+    ],
+    acceptance: 'An authorized root or owning reseller creates a list, reads it back, updates its disabled keys and deletes it when unused; a reseller without manage-feature-lists or another owner is refused, and deleting a list used by a plan returns CONFLICT without changing the plan.',
+  },
+  {
+    tool: whm('server-settings-edit', 'whm-server-configuration', 'Stored server settings', 'server-settings',
+      'Read and store the supported server settings and setup values; host activation requires separate verification.'),
+    behaviors: [
+      'Root reads GET /api/server/settings and saves supported fields with PUT while preserving unedited settings',
+      'The setup form uses POST /api/setup/wizard for supported desired values with initQuotas false',
+      'Web settings edit the desired engine, Apache MPM, backend ports and supported worker tuning; SSH settings edit the desired SSH port only',
+      'This capability records desired state; it does not qualify native service activation, quota initialization, SSH password or key management, or first-run completion semantics',
+    ],
+    acceptance: 'Root reads the current settings, saves supported edited values while preserving other settings and reads those values back; reseller and account callers are refused. The setup request does not initialize quotas, and storing an SSH port or web setting is not evidence of host activation.',
+  },
+  {
+    tool: {
+      ...panel('domain-php-settings', 'software', 'Domain PHP settings', 'domain',
+        'Read and update the desired PHP version, handler, FPM settings and INI values of an accessible domain.'),
+      featureKey: 'domains',
+    },
+    behaviors: [
+      'GET /api/domains lists the caller’s accessible domains; PATCH /api/domains/:id persists their supported PHP settings',
+      'Saving an edited PHP field merges with the current domain configuration and preserves unedited FPM and INI values',
+      'Account ownership and the domains feature key are enforced by the API; reseller writes require edit-account',
+      'This capability stores domain desired state and does not install PHP runtimes or extensions or qualify a running PHP-FPM pool',
+    ],
+    acceptance: 'An account with domains enabled updates the desired PHP configuration of its own domain and reads it back with unedited FPM and INI values preserved; a disabled domains feature or another account’s domain is refused. A successful save does not claim runtime installation or PHP-FPM activation.',
+  },
+  {
+    tool: {
+      ...panel('dns-zone-records', 'domains', 'DNS zone records', 'dns-zone',
+        'Read and replace supported DNS records for an accessible zone through the existing zone editor.'),
+      featureKey: 'zone-editor',
+    },
+    behaviors: [
+      'GET /api/dns/zones lists accessible zones and PUT /api/dns/zones/:name saves the supported complete record set',
+      'The editor preserves unedited records and supported record fields while adding, updating or removing a record',
+      'Account ownership and the zone-editor feature key are enforced by the API; resellers require manage-dns',
+      'This capability does not sign DNSSEC zones, manage signing keys or promise stale-serial conflict protection',
+    ],
+    acceptance: 'An account with zone-editor enabled reads its zone, adds or edits a valid record, removes a record and reads the stored set back without dropping unedited records; a disabled feature or another account’s zone is refused. DNSSEC and stale-serial protection remain outside this capability.',
+  },
+  {
     tool: whm('intrusion-detection', 'whm-security-center', 'Intrusion detection', 'ban',
       'Watches login failures across SSH, FTP, mail, the panel and web logins and bans attacking addresses in the nftables ban set.'),
     behaviors: [

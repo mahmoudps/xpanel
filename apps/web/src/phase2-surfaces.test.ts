@@ -1,9 +1,11 @@
+import { qualifyHostTools, tools } from '@xpanel/catalog'
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import { renderWhmSurface } from './index.ts'
 import type { WhmSurfaceProps } from './index.ts'
 
 const props: WhmSurfaceProps = {
+  catalog: qualifyHostTools(tools, { executor: 'linux', probes: { 'control-plane': 'passed' } }),
   principal: { kind: 'root', id: 'fixture-root', username: 'root' },
   accounts: [{ id: 'fixture-account', username: 'alice', uid: 20014, gid: 20014, home: '/home/alice', primaryDomain: 'alice.example.test', planId: 'plan', ownerId: null, status: 'active', suspendReason: null, contactEmail: 'owner@alice.example.test', ipv4: '192.0.2.10', ipv6: null, shell: 'none', createdAt: '2026-10-23T00:00:00Z' }],
   resellers: [],

@@ -1,4 +1,5 @@
 import { lifecycleAdmissionResponse, withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
+import { parseAuditFilters } from './audit-filters.ts'
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { chmod, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -218,7 +219,10 @@ const problemResponse = (err: unknown, instance: string, method = ''): Response 
       detail: 'Internal server error',
       code: 'INTERNAL_ERROR',
       instance,
-      details: { stateChanged: false },
+      // An unexpected exception may follow a committed write; it is not proof of rollback.
+      ...(!['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase()) && {
+        details: { unknownOutcome: true, verificationRequired: true },
+      }),
     }),
     {
       status: 500,
@@ -2958,8 +2962,21 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
 
       if (method === 'GET' && pathname === '/api/audit') {
         const caller = await requireCaller(req)
-        const limit = Number(url.searchParams.get('limit') ?? '100') || 100
-        const entries = await listAudit(deps.db, { limit })
+        let query: ReturnType<typeof parseAuditFilters>
+        try {
+          query = parseAuditFilters(url.searchParams)
+        } catch (error) {
+          if (isXpanelError(error) && error.code === 'VALIDATION') {
+            const problem = problemResponse(error, pathname, method)
+            return new Response(JSON.stringify({ ...await problem.json(), status: 400 }), {
+              status: 400, headers: problem.headers,
+            })
+          }
+          throw error
+        }
+        const entries = await listAudit(deps.db, query)
+        const targetsAccount = (target: string, username: string): boolean =>
+          target === `account:${username}` || target.startsWith(`account:${username}:`)
         if (caller.principal.kind === 'root') {
           return jsonResponse({ entries })
         }
@@ -2972,7 +2989,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
               (e) =>
                 e.actor === caller.principal.username ||
                 usernames.has(e.actor) ||
-                [...usernames].some((u) => e.target.includes(`account:${u}`)),
+                [...usernames].some((u) => targetsAccount(e.target, u)),
             ),
           })
         }
@@ -2980,7 +2997,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           entries: entries.filter(
             (e) =>
               e.actor === caller.principal.username ||
-              e.target.startsWith(`account:${caller.principal.username}`),
+              targetsAccount(e.target, caller.principal.username),
           ),
         })
       }

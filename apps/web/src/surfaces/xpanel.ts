@@ -1,3 +1,4 @@
+import type { PanelLink } from '../chrome.ts'
 import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import type {
   Account,
@@ -26,6 +27,7 @@ import {
 import { renderAccountResources, resourceRowsFromPlan } from '../board-canvas.ts'
 import { renderXpanelHome, xpanelHomeFromProps } from '../board-port/xpanel-home.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
+import { renderApprovedXpanelWorkspace } from '../board-port/approved-xpanel-workspaces.ts'
 import { renderComposedXpanel } from '../board-port/composed/render.ts'
 import { composedRouteSpecs } from '../board-port/composed/all.ts'
 import { copyOf } from '../board-port/composed/types.ts'
@@ -33,7 +35,7 @@ import { renderEmailAccountsExtension, emailAccountsRouteSpec } from '../board-p
 import { renderAccountPagesExtension, accountPageRouteSpecs } from '../board-port/extensions/account-pages.ts'
 import { renderStoreExtension, storeRouteSpecs } from '../board-port/extensions/store.ts'
 import { renderResourcesBoard } from '../board-port/extensions/resources-board.ts'
-import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
+import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderPageSearchButton, renderSurfaceToolbarEnd } from '../shell.ts'
 
 
 export interface JailedFileEntry {
@@ -51,8 +53,10 @@ export interface PanelSurfaceProps {
   catalog?: readonly CatalogTool[]
   locale?: Locale
   theme?: 'dark' | 'light'
+  density?: 'comfortable' | 'compact'
   realtimeEnabled?: boolean
   xmailOrigin?: string
+  panels?: readonly PanelLink[]
   account?: Account
   plan?: Plan
   activeRoute?: string
@@ -155,9 +159,6 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
     ? new Set(visibleNavigation(props.visibility, props.catalog).flatMap(item => item.sections.flatMap(section => section.pages.map(page => page.route))))
     : undefined
 
-  const switchLangCode = isAr ? 'en' : 'ar'
-  const switchLangLabel = isAr ? 'English' : 'العربية'
-  const nextTheme = theme === 'dark' ? 'light' : 'dark'
 
   const userIniLines = Object.entries(customConfig?.userIni ?? {})
     .map(([k, v]) => `${k} = ${v}`)
@@ -200,57 +201,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
     })), locale)
   }
 
-  const rawHtml = renderSurfaceShell({
-    surface: 'xpanel', locale,
-    attributes: `data-account="${escapeHtml(account.username)}" data-uid="${account.uid}"`,
-    sidebar: `    <div class="xp-sidebar__brand">
-      <span class="xp-brand__mark" aria-hidden="true">x</span>
-      <div>
-        <strong>xPanel</strong>
-        <div><bdi dir="ltr" class="xp-mono">${escapeHtml(account.primaryDomain)}</bdi></div>
-      </div>
-    </div>
-
-    <!-- Account summary -->
-    <div class="xp-card" style="padding: 12px; margin-block-end: 12px;" data-account-summary-card="true">
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <strong class="xp-mono"><bdi dir="ltr">${escapeHtml(account.username)}</bdi></strong>
-        ${plan ? renderStatusBadge('ok', formatDisplayName(plan.name)) : ''}
-      </div>
-    </div>
-
-    ${renderDesignNav('xpanel', locale, activeRoute, qualifiedRoutes, visibility)}`,
-    topbar: `      <div class="xp-topbar__start">
-        ${renderPageSearchButton(locale)}
-
-        <label class="xp-sr-only" for="xpanel-domain-switcher">${isAr ? 'اختر النطاق' : 'Active domain'}</label>
-        <select id="xpanel-domain-switcher" class="xp-select xp-mono" style="width: auto;" data-domain-switcher="true">
-          ${domains
-            .map(
-              (d) => `<option value="${escapeHtml(d.name)}" ${d.name === activeDomain ? 'selected' : ''}>${escapeHtml(d.name)} (${escapeHtml(isAr ? (d.kind === 'addon' ? 'إضافي' : d.kind === 'subdomain' ? 'فرعي' : d.kind === 'alias' ? 'اسم بديل' : 'أساسي') : d.kind)})</option>`,
-            )
-            .join('')}
-        </select>
-      </div>
-
-      <div class="xp-topbar__end">
-        ${renderLiveUpdatesIndicator(locale, props.realtimeEnabled === true)}
-        ${generationId !== undefined ? `<span data-generation-chip="${generationId}">
-          ${renderStatusBadge('ok', `Gen #${generationId}`)}
-        </span>` : ''}
-        <a href="?surface=xpanel&amp;lang=${switchLangCode}&amp;theme=${theme}" class="xp-btn" lang="${switchLangCode}" data-lang-switch="${switchLangCode}">
-          ${escapeHtml(switchLangLabel)}
-        </a>
-        <a href="?surface=xpanel&amp;lang=${locale}&amp;theme=${nextTheme}" class="xp-btn" data-theme-toggle="${nextTheme}">
-          ${escapeHtml(theme === 'dark' ? t(locale, 'common.theme.light') : t(locale, 'common.theme.dark'))}
-        </a>
-        <a href="/mail?lang=${locale}&amp;theme=${theme}" class="xp-btn xp-btn--ghost">xMail</a>
-        <div class="xp-account-actions">
-          <span class="xp-account-pill"><span class="xp-account-pill__avatar" aria-hidden="true">${escapeHtml(account.username.slice(0, 1).toLowerCase())}</span><span class="xp-mono xp-account-actions__name">${escapeHtml(account.username)}</span></span>
-          <button type="button" class="xp-btn xp-btn--ghost" data-action="logout">${escapeHtml(isAr ? 'تسجيل الخروج' : 'Sign out')}</button>
-        </div>
-      </div>`,
-    content: extensionHtml !== undefined ? actionBannerHtml + extensionHtml : composedHtml !== undefined ? actionBannerHtml + composedHtml : `      ${actionBannerHtml}
+  const nativeContent = extensionHtml !== undefined ? actionBannerHtml + extensionHtml : composedHtml !== undefined ? actionBannerHtml + composedHtml : `      ${actionBannerHtml}
 ${section === 'resources' ? `<div style="display:grid;gap:32px;min-inline-size:0">${renderAccountResources(locale, account.uid, resourceRowsFromPlan(plan?.resources ?? null))}${renderResourcesBoard({ context: { locale, route: activeRoute, ...(composedPrincipal ? { principal: composedPrincipal } : {}), account, ...(plan ? { plan } : {}) }, ...(props.usage ? { reading: { accountId: account.id, available: true, snapshot: props.usage, observedAt: null } } : {}) })}</div>` : ''}
       ${section === 'domains' ? `      <!-- 2. Domains & Multi-IP Binding Table -->
       <section class="xp-card" id="xpanel-domains" data-section="domains-multi-ip" aria-labelledby="xpanel-domains-heading">
@@ -779,7 +730,49 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
       </section>` : ''}
             ${section === 'security' ? `<section class="xp-card" data-section="account-security"><h1 id="xpanel-security-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1></section>` : ''}
             ${section === 'design' ? renderDesignMain(activeRoute, locale) : ''}
-            ${section === undefined || (section === 'config' && !customConfig) || (section === 'analytics' && !websiteAnalytics) ? renderSurfaceUnavailable(locale, '/home') : ''}`,
+            ${section === undefined || (section === 'config' && !customConfig) || (section === 'analytics' && !websiteAnalytics) ? renderSurfaceUnavailable(locale, '/home') : ''}`
+
+  const rawHtml = renderSurfaceShell({
+    surface: 'xpanel', locale,
+    attributes: `data-account="${escapeHtml(account.username)}" data-uid="${account.uid}"`,
+    sidebar: `    <div class="xp-sidebar__brand">
+      <span class="xp-brand__mark" aria-hidden="true">x</span>
+      <div>
+        <strong>xPanel</strong>
+        <div><bdi dir="ltr" class="xp-mono">${escapeHtml(account.primaryDomain)}</bdi></div>
+      </div>
+    </div>
+
+    <!-- Account summary -->
+    <div class="xp-card" style="padding: 12px; margin-block-end: 12px;" data-account-summary-card="true">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <strong class="xp-mono"><bdi dir="ltr">${escapeHtml(account.username)}</bdi></strong>
+        ${plan ? renderStatusBadge('ok', formatDisplayName(plan.name)) : ''}
+      </div>
+    </div>
+
+    ${renderDesignNav('xpanel', locale, activeRoute, qualifiedRoutes, visibility)}`,
+    topbar: `      <div class="xp-topbar__start">
+        ${renderPageSearchButton(locale)}
+
+        <label class="xp-sr-only" for="xpanel-domain-switcher">${isAr ? 'اختر النطاق' : 'Active domain'}</label>
+        <select id="xpanel-domain-switcher" class="xp-select xp-mono" style="width: auto;" data-domain-switcher="true">
+          ${domains
+            .map(
+              (d) => `<option value="${escapeHtml(d.name)}" ${d.name === activeDomain ? 'selected' : ''}>${escapeHtml(d.name)} (${escapeHtml(isAr ? (d.kind === 'addon' ? 'إضافي' : d.kind === 'subdomain' ? 'فرعي' : d.kind === 'alias' ? 'اسم بديل' : 'أساسي') : d.kind)})</option>`,
+            )
+            .join('')}
+        </select>
+      </div>
+
+      ${renderSurfaceToolbarEnd({
+        surface: 'xpanel', locale, theme, density: props.density ?? 'comfortable',
+        path: activeRoute, username: account.username, role: isAr ? 'مالك الحساب' : 'Account owner',
+        signedIn: true, realtimeEnabled: props.realtimeEnabled === true,
+        ...(generationId !== undefined ? { generationId } : {}),
+        ...(props.panels ? { links: props.panels } : { menuLinks: [{ label: 'xMail', href: `/mail?lang=${locale}&theme=${theme}` }] }),
+      })}`,
+    content: renderApprovedXpanelWorkspace({ ...props, route: activeRoute, locale, readOnly: false, nativeHtml: nativeContent }) ?? nativeContent,
   })
   return ensureAccessibleSurfaceHtml(rawHtml.trim(), locale)
 }

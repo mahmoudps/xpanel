@@ -13,6 +13,13 @@ import { escapeHtml, renderLtrValue, renderStatusBadge } from './tokens.ts'
 import { SHELL_MOTION_CLIENT_SCRIPT } from './shell-motion.ts'
 import { PLAN_EDITOR_CLIENT_SCRIPT } from './plan-editor.ts'
 import { ACCOUNT_LIST_CLIENT_SCRIPT } from './account-list.ts'
+import { APPROVED_WORKSPACE_FORMS_CLIENT } from './approved-workspace-forms.ts'
+import { MAIL_SEND_CLIENT_BINDING } from './mail-send-client.ts'
+import { PASSWORD_GENERATOR_CLIENT_BINDING } from './password-generate-client.ts'
+import { APPROVED_HOST_SERVICES_CLIENT } from './approved-host-services-client.ts'
+import { APPROVED_WHM_OPERATIONS_TABS_CLIENT } from './board-port/approved-whm-operations-components.ts'
+import { APPROVED_WHM_TABLE_FILTERS_CLIENT } from './board-port/approved-xwhm-table-filters.ts'
+import { COMMAND_PALETTE_CLIENT_FUNCTIONS } from './command-palette-client.ts'
 import { xwhmPageAdapters } from './pages/xwhm-adapters.ts'
 
 export type WsConnectionState = 'connected' | 'reconnecting' | 'offline'
@@ -904,6 +911,9 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       openOverlay(modal, 'cmdk', trigger);
       if (!alreadyOpen && commandPalette && commandPalette.modal === modal) {
         commandPalette.input.value = '';
+        commandPalette.scope = 'all';
+        loadCommandHistory(commandPalette);
+        renderCommandHistory(commandPalette);
         commandPalette.input.setAttribute('aria-expanded', 'true');
         filterCommandPalette();
         commandPalette.results.scrollTop = 0;
@@ -912,111 +922,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     else if (activeOverlay && activeOverlay.element === modal) closeActiveOverlay(true);
   }
 
-  function normalizeCommandSearch(value) {
-    return value.normalize('NFKD').replace(/[\u0300-\u036f\u064b-\u065f\u0670\u0640]/g, '').toLowerCase();
-  }
-
-  function selectCommandResult(index, scroll) {
-    var palette = commandPalette;
-    if (!palette) return;
-    var items = palette.matches;
-    palette.activeIndex = items.length ? (index + items.length) % items.length : -1;
-    for (var i = 0; i < palette.items.length; i++) palette.items[i].link.setAttribute('aria-selected', 'false');
-    var selected = items[palette.activeIndex];
-    if (!selected) {
-      palette.input.removeAttribute('aria-activedescendant');
-      return;
-    }
-    selected.link.setAttribute('aria-selected', 'true');
-    palette.input.setAttribute('aria-activedescendant', selected.link.id);
-    if (scroll) revealCommandResult(palette, selected);
-  }
-
-  function revealCommandResult(palette, selected) {
-    var list = palette.results;
-    var row = selected.row;
-    var last = palette.activeIndex === palette.matches.length - 1;
-    var maximum = list.scrollHeight - list.clientHeight;
-    if (last && maximum > 0) {
-      list.scrollTop = maximum;
-      if (list.scrollTop > 0) return;
-    }
-    var rowRect = row.getBoundingClientRect();
-    var listRect = list.getBoundingClientRect();
-    if (rowRect.height > 0 && listRect.height > 0) {
-      if (rowRect.top < listRect.top) list.scrollTop += rowRect.top - listRect.top;
-      else if (rowRect.bottom > listRect.bottom) list.scrollTop += rowRect.bottom - listRect.bottom;
-      return;
-    }
-    if (row.offsetParent === list && row.offsetHeight > 0) {
-      var top = row.offsetTop;
-      var bottom = top + row.offsetHeight;
-      if (top < list.scrollTop) list.scrollTop = top;
-      else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = Math.max(0, bottom - list.clientHeight);
-    }
-  }
-
-  function filterCommandPalette() {
-    var palette = commandPalette;
-    if (!palette) return;
-    var terms = normalizeCommandSearch(palette.input.value.trim()).split(/\\s+/).filter(Boolean);
-    palette.matches = [];
-    for (var i = 0; i < palette.items.length; i++) {
-      var item = palette.items[i];
-      item.row.hidden = !terms.every(function (term) { return item.search.indexOf(term) !== -1; });
-      if (!item.row.hidden) palette.matches.push(item);
-    }
-    palette.empty.hidden = palette.matches.length !== 0;
-    palette.status.textContent = palette.matches.length ? palette.status.getAttribute('data-count-label') + ': ' + String(palette.matches.length) : '';
-    for (var j = 0; j < palette.matches.length; j++) {
-      palette.matches[j].link.setAttribute('aria-posinset', String(j + 1));
-      palette.matches[j].link.setAttribute('aria-setsize', String(palette.matches.length));
-    }
-    selectCommandResult(0, false);
-    palette.results.scrollTop = 0;
-  }
-
-  function bindCommandPalette() {
-    var modal = document.getElementById('xp-cmdk-modal') || document.querySelector('[data-xp-cmdk]');
-    if (!modal) return;
-    var input = modal.querySelector('[data-cmdk-search]');
-    var results = modal.querySelector('[data-cmdk-results]');
-    var empty = modal.querySelector('[data-cmdk-empty]');
-    var status = modal.querySelector('[data-cmdk-status]');
-    if (!input || !results || !empty || !status) return;
-    var items = Array.prototype.map.call(results.querySelectorAll('a[data-cmdk-item]'), function (link) {
-      return { link: link, row: link.closest('[data-cmdk-row]'), search: normalizeCommandSearch(link.getAttribute('data-cmdk-search-text') || link.textContent) };
-    }).filter(function (item) { return item.row; });
-    commandPalette = { modal: modal, input: input, results: results, empty: empty, status: status, items: items, matches: [], activeIndex: -1 };
-    input.addEventListener('input', filterCommandPalette);
-    results.addEventListener('pointermove', function (event) {
-      var link = event.target.closest ? event.target.closest('a[data-cmdk-item]') : null;
-      var index = commandPalette.matches.findIndex(function (item) { return item.link === link; });
-      if (index >= 0 && index !== commandPalette.activeIndex) selectCommandResult(index, false);
-    });
-    results.addEventListener('click', function (event) {
-      var link = event.target.closest ? event.target.closest('a[data-cmdk-item]') : null;
-      if (link && results.contains(link) && activeOverlay && activeOverlay.element === modal) closeActiveOverlay(true, false, true);
-    });
-    filterCommandPalette();
-  }
-
-  function handleCommandPaletteKey(event) {
-    var palette = commandPalette;
-    if (!palette || activeOverlay.element !== palette.modal || event.target !== palette.input || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return false;
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      selectCommandResult(palette.activeIndex + (event.key === 'ArrowDown' ? 1 : -1), true);
-      return true;
-    }
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      var selected = palette.matches[palette.activeIndex];
-      if (selected) selected.link.click();
-      return true;
-    }
-    return false;
-  }
+  ${COMMAND_PALETTE_CLIENT_FUNCTIONS}
 
   function toggleMobileNavigation(trigger) {
     if (window.innerWidth >= 960) return;
@@ -1138,10 +1044,13 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     var ipFeedback = form.querySelector('[data-account-ip-status]');
     var ipAddress = form.querySelector('[data-account-ip-address]');
     var ipRefresh = form.querySelector('[data-account-ip-refresh]');
+    var creationWorkspace = form.closest('[data-accounts-workspace]');
+    var createAnother = creationWorkspace && creationWorkspace.querySelector('[data-approved-account-create-status] [data-account-create-another]') || form.querySelector('[data-account-create-another]');
     if (!button || !feedback || !password || !plan || !assignment || !ipFeedback || !ipAddress || !ipRefresh) return;
     var busy = false, accepted = false, dirty = false, reviewRequired = false;
     var canCreate = !button.disabled, wantedAssignment = 'shared', availability = null;
-    var previewController = null, previewTimer = null, previewSequence = 0, previewPlan = null;
+    var previewController = null, previewTimer = null, previewSequence = 0, previewPlan = null, previewOwner;
+    var localActions = Array.prototype.map.call(form.querySelectorAll('[data-account-generate-password],[data-account-toggle-password],button[type="reset"]'), function (element) { return { element: element, disabled: element.disabled }; });
     var controls = Array.prototype.map.call(form.querySelectorAll('input,select'), function (control) {
       return { element: control, disabled: control.disabled, readOnly: Boolean(control.readOnly) };
     });
@@ -1151,6 +1060,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       feedback.textContent = message; feedback.hidden = false;
       feedback.setAttribute('data-state', state);
       feedback.setAttribute('role', state === 'failed' ? 'alert' : 'status');
+      var observation = creationWorkspace && creationWorkspace.querySelector('[data-account-creation-observation]');
+      if (observation) observation.textContent = message + copy(' Individual host task completion has not been observed.', ' لم يُرصد اكتمال مهام المضيف منفردة.');
     }
     function ipStatus(message, state) {
       ipFeedback.textContent = message;
@@ -1158,6 +1069,17 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       ipFeedback.setAttribute('role', state === 'failed' ? 'alert' : 'status');
     }
     function uuid(value) { return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value); }
+    function creationSelection(name) {
+      var fields = Array.prototype.slice.call(form.querySelectorAll('[name="' + name + '"]'));
+      if (!fields.length || fields.every(function (entry) { return entry.disabled || entry.closest('fieldset:disabled'); })) return undefined;
+      var field = fields.find(function (entry) { return entry.type !== 'radio' || entry.checked; });
+      if (!field || field.disabled || field.closest('fieldset:disabled,[aria-disabled="true"]')) throw new Error(name);
+      var selected = field.value;
+      if (name === 'ownerId') { if (selected !== '' && !uuid(selected)) throw new Error('ownerId'); return selected || null; }
+      if (name === 'shell' && selected !== 'none' && selected !== 'jailed') throw new Error('shell');
+      return selected;
+    }
+    function ownerContext() { try { return creationSelection('ownerId'); } catch (_error) { return 'invalid'; } }
     function ipv4(value) {
       if (typeof value !== 'string') return false;
       var parts = value.split('.');
@@ -1182,7 +1104,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       return element;
     }
     function updateIpSelection() {
-      var current = availability && previewPlan === plan.value ? availability : null;
+      var current = availability && previewPlan === plan.value && previewOwner === ownerContext() ? availability : null;
       var shared = wantedAssignment === 'shared';
       var selected = current && current.available.find(function (entry) { return wantedAssignment === 'dedicated:' + entry.poolId; });
       var available = shared ? !current || Boolean(current.shared) : Boolean(current && current.entitled && (wantedAssignment === 'dedicated:auto' ? current.available.length : selected));
@@ -1193,7 +1115,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       return available;
     }
     function renderIpOptions() {
-      var current = availability && previewPlan === plan.value ? availability : null;
+      var current = availability && previewPlan === plan.value && previewOwner === ownerContext() ? availability : null;
       var nodes = [option('shared', copy('Default shared', 'المشترك الافتراضي'), Boolean(current && !current.shared)), option('dedicated:auto', copy('Dedicated · Automatic', 'مخصص تلقائي'), !current || !current.entitled || !current.available.length)];
       if (current) current.available.forEach(function (entry) { nodes.push(option('dedicated:' + entry.poolId, String.fromCharCode(0x2066) + entry.address + String.fromCharCode(0x2069), false)); });
       if (!nodes.some(function (entry) { return entry.value === wantedAssignment; })) nodes.push(option(wantedAssignment, copy('Dedicated selection unavailable', 'التعيين المخصص غير متاح'), true));
@@ -1211,19 +1133,19 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     }
     function refreshIpAvailability() {
       cancelPreview();
-      availability = null; previewPlan = plan.value;
+      availability = null; previewPlan = plan.value; previewOwner = ownerContext();
       renderIpOptions();
-      if (!canCreate || !plan.value || !form.isConnected || busy || accepted || reviewRequired) {
+      if (!canCreate || !plan.value || previewOwner === 'invalid' || !form.isConnected || busy || accepted || reviewRequired) {
         ipStatus(copy('IP availability unavailable.', 'توفر عناوين IP غير متاح.'), 'unavailable'); return;
       }
       ipStatus(copy('Loading IP availability…', 'جارٍ تحميل العناوين…'), 'loading');
       if (typeof window.fetch !== 'function' || typeof AbortController !== 'function') {
         ipStatus(copy('Could not load IP availability.', 'تعذر تحميل توفر العناوين.'), 'failed'); return;
       }
-      var sequence = previewSequence, context = plan.value, controller = new AbortController();
+      var sequence = previewSequence, context = plan.value, owner = previewOwner, controller = new AbortController();
       previewController = controller;
       previewTimer = setTimeout(function () { controller.abort(); }, 20000);
-      function current() { return sequence === previewSequence && context === plan.value && form.isConnected && !busy && !accepted && !reviewRequired; }
+      function current() { return sequence === previewSequence && context === plan.value && owner === ownerContext() && form.isConnected && !busy && !accepted && !reviewRequired; }
       async function readPreviewJson(response) {
         if (!response.body || typeof response.body.getReader !== 'function') { controller.abort(); throw new Error('IP availability stream unavailable'); }
         var reader = response.body.getReader(), bytes = new Uint8Array(1048576), length = 0;
@@ -1244,7 +1166,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
           throw error;
         } finally { reader.releaseLock(); }
       }
-      window.fetch('/api/ips?view=allocation&planId=' + encodeURIComponent(context), { method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error', headers: { accept: 'application/json' }, signal: controller.signal }).then(function (response) {
+      window.fetch('/api/ips?view=allocation&planId=' + encodeURIComponent(context) + (owner ? '&ownerId=' + encodeURIComponent(owner) : ''), { method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error', headers: { accept: 'application/json' }, signal: controller.signal }).then(function (response) {
         if (!current()) { controller.abort(); return null; }
         if (!response.ok) { var error = new Error('IP availability unavailable'); error.status = response.status; controller.abort(); throw error; }
         return readPreviewJson(response);
@@ -1267,7 +1189,24 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     plan.addEventListener('change', function () {
       dirty = true; refreshIpAvailability();
     });
+    form.querySelectorAll('[name="ownerId"]').forEach(function (field) {
+      field.addEventListener('change', function () { if (!busy && !accepted && !reviewRequired) { dirty = true; refreshIpAvailability(); } });
+    });
+    form.addEventListener('reset', function (event) {
+      if (busy || accepted || reviewRequired) { event.preventDefault(); return; }
+      cancelPreview();
+      setTimeout(function () { if (!form.isConnected || busy || accepted || reviewRequired) return; dirty = false; wantedAssignment = 'shared'; refreshIpAvailability(); }, 0);
+    });
     ipRefresh.addEventListener('click', function () { if (!busy && !accepted && !reviewRequired) refreshIpAvailability(); });
+    if (createAnother) createAnother.addEventListener('click', function () {
+      if (!accepted || busy || reviewRequired || createAnother.disabled) return;
+      try {
+        var destination = new URL(createAnother.getAttribute('data-create-route') || '', window.location.origin);
+        var choices = { lang: ['en', 'ar'], theme: ['light', 'dark'], density: ['compact', 'comfortable'] };
+        if (destination.origin !== window.location.origin || destination.pathname !== '/whm/accounts/new' || destination.hash || Array.from(destination.searchParams.keys()).some(function (key) { return !choices[key] || destination.searchParams.getAll(key).length !== 1 || !choices[key].includes(destination.searchParams.get(key)); })) return;
+        window.location.assign(destination.pathname + destination.search);
+      } catch (_error) { return; }
+    });
     window.addEventListener('pagehide', cancelPreview);
     form.addEventListener('input', function () { dirty = true; });
     window.addEventListener('beforeunload', function (event) {
@@ -1277,7 +1216,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     refreshIpAvailability();
     form.addEventListener('submit', function (event) {
       event.preventDefault();
-      if (busy || accepted || button.disabled || !updateIpSelection() || !form.reportValidity()) return;
+      if (busy || accepted || reviewRequired || button.disabled || form.closest('[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled') || !updateIpSelection() || !form.reportValidity()) return;
       if (typeof window.xpanelSessionRequest !== 'function') {
         status(copy('Account creation is unavailable. No changes were made.', 'إنشاء الحساب غير متاح. لم تُجرَ تغييرات.'), 'failed'); return;
       }
@@ -1285,6 +1224,11 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       var ipAssignment = wantedAssignment === 'shared' ? { mode: 'shared' } : { mode: 'dedicated' };
       if (wantedAssignment !== 'shared' && wantedAssignment !== 'dedicated:auto') ipAssignment.poolId = wantedAssignment.slice('dedicated:'.length);
       var body = { username: value('username'), primaryDomain: value('primaryDomain'), planId: value('planId'), password: password.value, ipAssignment: ipAssignment };
+      try {
+        var selectedOwner = creationSelection('ownerId'), selectedShell = creationSelection('shell');
+        if (selectedOwner !== undefined) body.ownerId = selectedOwner;
+        if (selectedShell !== undefined) body.shell = selectedShell;
+      } catch (_error) { status(copy('Choose an available owner and shell option. No changes were sent.', 'اختر مالكًا وخيار صدفة متاحين. لم تُرسل تغييرات.'), 'failed'); return; }
       var contactField = form.querySelector('[name="contactEmail"]');
       var contactEmail = contactField && contactField.value ? contactField.value.trim() : '';
       if (contactEmail) body.contactEmail = contactEmail;
@@ -1293,9 +1237,11 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       var submittedValues = controls.map(function (state) {
         return state.element.name === 'password' ? '' : state.element.value;
       });
+      var submittedChecks = controls.map(function (state) { return Boolean(state.element.checked); });
       cancelPreview();
       busy = true; button.disabled = true; form.setAttribute('aria-busy', 'true');
       ipRefresh.disabled = true;
+      localActions.forEach(function (state) { state.element.disabled = true; });
       controls.forEach(function (state) { state.element.disabled = true; });
       password.value = '';
       status(copy('Submitting…', 'جارٍ الإرسال…'), 'loading');
@@ -1304,7 +1250,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         var execution = result && result.execution;
         var pendingHost = execution && execution.targetVerified === false && execution.verificationRequired === true;
         var observedHost = execution && execution.targetVerified === true && execution.verificationRequired === false && execution.hostBinding === 'observed' && execution.observedAddress === result.account.ipv4;
-        if (!result || !result.account || result.account.username !== body.username || !ipv4(result.account.ipv4) || !result.reconcile || result.reconcile.status !== 'applied' || !execution || execution.status !== 'configuration_applied' || execution.scope !== 'global_configuration' || (!pendingHost && !observedHost)) {
+        if (!result || !result.account || result.account.username !== body.username || (Object.hasOwn(body, 'ownerId') && result.account.ownerId !== body.ownerId) || (Object.hasOwn(body, 'shell') && result.account.shell !== body.shell) || !ipv4(result.account.ipv4) || !result.reconcile || result.reconcile.status !== 'applied' || !execution || execution.status !== 'configuration_applied' || execution.scope !== 'global_configuration' || (!pendingHost && !observedHost)) {
           reviewRequired = true;
           status(copy('The result could not be verified. Review accounts before retrying.', 'تعذر التحقق من النتيجة. راجع الحسابات قبل إعادة المحاولة.'), 'failed'); return;
         }
@@ -1320,9 +1266,9 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       }).catch(function (error) {
         var details = error && error.details || {};
         var serverFailed = error && (error.status === 500 || error.code === 'INTERNAL_ERROR');
-        reviewRequired = serverFailed ? details.stateChanged === true : details.stateChanged !== false;
+        reviewRequired = Boolean(error && (error.stateChanged === true || error.verificationRequired === true || error.unknownOutcome === true || error.needsAttention === true)) || details.verificationRequired === true || details.unknownOutcome === true || details.needsAttention === true || (serverFailed || details.stateChanged !== false);
         var message = serverFailed
-          ? copy('The server could not complete this request.', 'تعذر على الخادم إكمال هذا الطلب.')
+          ? copy('The server returned an error. The creation outcome is unverified. Review accounts before retrying.', 'أرجع الخادم خطأ. نتيجة الإنشاء غير متحققة. راجع الحسابات قبل إعادة المحاولة.')
           : reviewRequired
           ? copy('The request could not be verified. Review accounts before retrying.', 'تعذر التحقق من الطلب. راجع الحسابات قبل إعادة المحاولة.')
           : copy('Account creation is unavailable. No changes were made.', 'إنشاء الحساب غير متاح. لم تُجرَ تغييرات.');
@@ -1341,11 +1287,14 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         controls.forEach(function (state, index) {
           var control = state.element;
           control.value = submittedValues[index];
-          control.disabled = reviewRequired || (accepted && control.tagName === 'SELECT') || state.disabled;
+          if (control.type === 'radio' || control.type === 'checkbox') control.checked = submittedChecks[index];
+          control.disabled = reviewRequired || (accepted && (control.tagName === 'SELECT' || control.type === 'radio' || control.type === 'checkbox')) || state.disabled;
           if (control.tagName === 'INPUT') control.readOnly = accepted || state.readOnly;
         });
         busy = false; form.setAttribute('aria-busy', 'false'); button.disabled = accepted || reviewRequired || !canCreate;
         ipRefresh.disabled = accepted || reviewRequired || !canCreate;
+        if (createAnother) createAnother.disabled = !accepted || busy || reviewRequired;
+        localActions.forEach(function (state) { state.element.disabled = state.disabled || accepted || reviewRequired; });
         if (refreshAfterRefusal) refreshIpAvailability();
         feedback.focus();
       });
@@ -1780,7 +1729,11 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
   }
 
   function bindPhaseOneTools() {
+    ${PASSWORD_GENERATOR_CLIENT_BINDING}
+    (${APPROVED_WHM_OPERATIONS_TABS_CLIENT})();
+    (${APPROVED_WHM_TABLE_FILTERS_CLIENT})();
     if (typeof window.xpanelSessionRequest !== 'function') return;
+    (${APPROVED_WORKSPACE_FORMS_CLIENT})(askDialog);
     var ar = document.documentElement.lang === 'ar';
     function note(el, message) { if (!el) return; el.hidden = false; el.textContent = message; }
     function dialogInput(selector, name) {
@@ -2213,49 +2166,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       });
       refresh();
     }
-    var sendButton = document.querySelector('[data-mail-send="true"]');
-    if (sendButton) sendButton.addEventListener('click', function () {
-      var status = document.getElementById('mail-send-status');
-      var to = document.getElementById('compose-to');
-      var subject = document.getElementById('compose-subject');
-      var body = document.getElementById('compose-body');
-      var addresses = [];
-      var copies = [];
-      document.querySelectorAll('[data-mail-chip="to"]').forEach(function (chip) {
-        var addr = chip.getAttribute('data-addr');
-        if (addr) addresses.push(addr);
-      });
-      document.querySelectorAll('[data-mail-chip="cc"]').forEach(function (chip) {
-        var addr = chip.getAttribute('data-addr');
-        if (addr) copies.push(addr);
-      });
-      if (to && to.value && to.value.trim()) addresses.push(to.value.trim());
-      var text = '';
-      if (body) text = body.tagName === 'TEXTAREA' || body.tagName === 'INPUT' ? body.value : (body.innerText || '');
-      sendButton.disabled = true;
-      note(status, ar ? 'جار الإرسال.' : 'Sending.');
-      window.xpanelSessionRequest('POST', '/api/webmail/send', {
-        to: addresses.join(', '),
-        cc: copies.join(', '),
-        subject: subject ? subject.value.trim() : '',
-        text: text.trim(),
-      }).then(function (data) {
-        var sent = ar ? 'أُرسلت الرسالة.' : 'The message was sent.';
-        if (data && data.savedToSent === true) sent += ar ? ' توجد نسخة في المرسل.' : ' A copy is in Sent.';
-        note(status, sent);
-        if (body) {
-          if (body.tagName === 'TEXTAREA' || body.tagName === 'INPUT') body.value = '';
-          else body.textContent = '';
-        }
-        document.querySelectorAll('[data-mail-chip="to"], [data-mail-chip="cc"]').forEach(function (chip) { chip.remove(); });
-        if (to) to.value = '';
-        if (subject) subject.value = '';
-        sendButton.disabled = false;
-      }).catch(function (error) {
-        sendButton.disabled = false;
-        note(status, failText(error));
-      });
-    });
+    ${MAIL_SEND_CLIENT_BINDING}
     document.querySelectorAll('[data-reseller-create-form]').forEach(function (form) {
       form.addEventListener('submit', function (event) {
         event.preventDefault();
@@ -2278,11 +2189,29 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       });
     });
     var dnsEditor = document.querySelector('[data-dns-editor]');
-    if (dnsEditor) {
+    if (dnsEditor && !dnsEditor.closest('[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')) {
       var zoneSelect = dnsEditor.querySelector('[data-dns-zone]');
       var recordBody = dnsEditor.querySelector('[data-dns-records]');
       var dnsStatus = dnsEditor.querySelector('[data-dns-status]');
       var zones = [];
+      var dnsWorkspace = dnsEditor.closest('[data-whm-dns-workspace]');
+      var zoneRows = dnsWorkspace && dnsWorkspace.querySelector('[data-whm-dns-zone-rows]');
+      var zoneCount = dnsWorkspace && dnsWorkspace.querySelector('[data-whm-dns-zone-count]');
+      var zoneSerial = dnsWorkspace && dnsWorkspace.querySelector('[data-whm-dns-soa-serial]');
+      function paintZoneSummaries() {
+        if (zoneCount) zoneCount.textContent = String(zones.length);
+        if (!zoneRows) return;
+        zoneRows.textContent = '';
+        var accountSelect = dnsEditor.querySelector('[data-dns-account]');
+        zones.forEach(function (zone) {
+          var accountOption = accountSelect && Array.prototype.find.call(accountSelect.options, function (option) { return option.value === (zone.accountId || ''); });
+          var accountLabel = accountOption && accountOption.textContent.trim() || (ar ? 'غير مقروء' : 'Not read');
+          var row = document.createElement('tr');
+          [zone.name, accountLabel, String(zone.records.length), String(zone.serial), ar ? 'غير مقروء' : 'Not read'].forEach(function (value) { var cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell); });
+          zoneRows.appendChild(row);
+        });
+        if (!zones.length) { var row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 5; cell.textContent = ar ? 'لم تُرجع القراءة أي مناطق DNS.' : 'The read returned no DNS zones.'; row.appendChild(cell); zoneRows.appendChild(row); }
+      }
       var dnsTypes = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA'];
       function recordRow(record) {
         var row = document.createElement('tr');
@@ -2307,10 +2236,13 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         var zone = zones.find(function (item) { return item.name === zoneSelect.value; });
         recordBody.textContent = '';
         (zone && zone.records || []).forEach(recordRow);
+        if (zoneSerial) zoneSerial.textContent = zone ? String(zone.serial) : (ar ? 'غير مقروء' : 'Not read');
       }
       function loadZones() {
         return window.xpanelSessionRequest('${xwhmPageAdapters.dns.list.method}', '${xwhmPageAdapters.dns.list.path}').then(function (data) {
-          zones = data.zones || [];
+          if (!data || !Array.isArray(data.zones) || data.zones.some(function (zone) { return !zone || typeof zone.name !== 'string' || !zone.name || !Array.isArray(zone.records) || !Number.isSafeInteger(zone.serial) || zone.serial < 0; })) throw new Error('Invalid DNS zone response');
+          zones = data.zones;
+          paintZoneSummaries();
           zoneSelect.textContent = '';
           zones.forEach(function (zone) { var option = document.createElement('option'); option.value = zone.name; option.textContent = zone.name; zoneSelect.appendChild(option); });
           paintZone();
@@ -2340,35 +2272,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       });
       loadZones();
     }
-    var serviceRoot = document.querySelector('[data-host-services]');
-    if (serviceRoot) {
-      var serviceRows = serviceRoot.querySelector('[data-host-service-rows]');
-      var serviceStatus = serviceRoot.querySelector('[data-host-service-status]');
-      function paintServices(services) {
-        serviceRows.textContent = '';
-        (services || []).forEach(function (service) {
-          var row = document.createElement('tr');
-          [service.label, service.unit || (ar ? 'غير مثبتة' : 'Not installed'), service.state].forEach(function (value) { var cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell); });
-          var action = document.createElement('td');
-          if (service.unit) {
-            var button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'xp-btn';
-            button.textContent = ar ? 'إعادة تشغيل' : 'Restart';
-            button.addEventListener('click', function () {
-              button.disabled = true;
-              note(serviceStatus, ar ? 'جار إعادة التشغيل.' : 'Restarting.');
-              window.xpanelSessionRequest('POST', '${xwhmPageAdapters.services.restartPrefix}' + service.id + '${xwhmPageAdapters.services.restartSuffix}', {}).then(function () { note(serviceStatus, ar ? 'أُعيد تشغيل الخدمة.' : 'The service restarted.'); return loadServices(); }).catch(function (error) { button.disabled = false; note(serviceStatus, failText(error)); });
-            });
-            action.appendChild(button);
-          }
-          row.appendChild(action);
-          serviceRows.appendChild(row);
-        });
-      }
-      function loadServices() { return window.xpanelSessionRequest('${xwhmPageAdapters.services.list.method}', '${xwhmPageAdapters.services.list.path}').then(function (data) { paintServices(data.services); }).catch(function (error) { note(serviceStatus, failText(error)); }); }
-      loadServices();
-    }
+    (${APPROVED_HOST_SERVICES_CLIENT})(askDialog);
     var infoRoot = document.querySelector('[data-host-info]');
     if (infoRoot) {
       function mb(bytes) { return Number.isFinite(bytes) ? String(Math.round(bytes / 1048576)) + ' MB' : ''; }
