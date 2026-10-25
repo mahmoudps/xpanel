@@ -774,13 +774,60 @@ export interface AuditQuery {
   actor?: string
   target?: string
   action?: string
-  /** Actor match, or the username appearing in the target. */
+  outcome?: AuditEntry['outcome']
+  /** Inclusive UTC instant; timezone-free datetime-local values are interpreted as UTC. */
+  from?: string
+  /** Inclusive UTC instant; timezone-free datetime-local values are interpreted as UTC. */
+  to?: string
+  /** Exact actor username, or canonical account:<username>[:subresource] target. */
   mentions?: string
+}
+
+/** Strict millisecond-precision date-time normalization, independent of host timezone. */
+const auditFilterInstant = (value: string, name: 'from' | 'to'): string => {
+  if (typeof value !== 'string') return fail('VALIDATION', `${name} must be a date-time`)
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|[+-]\d{2}:\d{2})?$/.exec(value)
+  if (!match || Number(match[1]) < 1) return fail('VALIDATION', `${name} must be a valid UTC date-time`)
+  const wallTime = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6] ?? '00'}.${(match[7] ?? '').padEnd(3, '0')}Z`
+  const wallMillis = Date.parse(wallTime)
+  if (!Number.isFinite(wallMillis) || new Date(wallMillis).toISOString() !== wallTime) {
+    return fail('VALIDATION', `${name} must be a real calendar date-time`)
+  }
+  const zone = match[8] ?? 'Z'
+  const hours = zone === 'Z' ? 0 : Number(zone.slice(1, 3))
+  const minutes = zone === 'Z' ? 0 : Number(zone.slice(4, 6))
+  if (hours > 23 || minutes > 59) return fail('VALIDATION', `${name} has an invalid timezone offset`)
+  const offset = (hours * 60 + minutes) * 60_000 * (zone.startsWith('-') ? -1 : 1)
+  const normalized = new Date(wallMillis - offset).toISOString()
+  if (!/^\d{4}-/.test(normalized) || normalized.startsWith('0000-')) {
+    return fail('VALIDATION', `${name} is outside the supported calendar range`)
+  }
+  return normalized
+}
+
+/** Shared validation for API and repository callers. Bounds are inclusive instants. */
+export const normalizeAuditFilters = (
+  q: Pick<AuditQuery, 'outcome' | 'from' | 'to'>,
+): Pick<AuditQuery, 'outcome' | 'from' | 'to'> => {
+  if (q.outcome !== undefined && !OUTCOMES.includes(q.outcome)) {
+    return fail('VALIDATION', 'outcome must be ok, denied or failed')
+  }
+  const from = q.from === undefined ? undefined : auditFilterInstant(q.from, 'from')
+  const to = q.to === undefined ? undefined : auditFilterInstant(q.to, 'to')
+  if (from !== undefined && to !== undefined && from > to) {
+    return fail('VALIDATION', 'from must not be later than to')
+  }
+  return {
+    ...(q.outcome !== undefined ? { outcome: q.outcome } : {}),
+    ...(from !== undefined ? { from } : {}),
+    ...(to !== undefined ? { to } : {}),
+  }
 }
 
 /** Newest first. */
 export const listAudit = async (db: Db, q: AuditQuery = {}): Promise<AuditEntry[]> => {
   const limit = clampLimit(q.limit, 100, 1000)
+  const filters = normalizeAuditFilters(q)
   const before =
     q.beforeId === undefined
       ? undefined
@@ -806,9 +853,22 @@ export const listAudit = async (db: Db, q: AuditQuery = {}): Promise<AuditEntry[
     clauses.push(`action = $${params.length + 1}`)
     params.push(q.action)
   }
+  if (filters.outcome !== undefined) {
+    clauses.push(`outcome = $${params.length + 1}`)
+    params.push(filters.outcome)
+  }
+  // Compare instants, including historical ISO rows without a millisecond fraction.
+  if (filters.from !== undefined) {
+    clauses.push(`julianday(at) >= julianday($${params.length + 1})`)
+    params.push(filters.from)
+  }
+  if (filters.to !== undefined) {
+    clauses.push(`julianday(at) <= julianday($${params.length + 1})`)
+    params.push(filters.to)
+  }
   if (q.mentions !== undefined && q.mentions.length > 0 && q.mentions.length <= 64) {
-    clauses.push(`(actor = $${params.length + 1} OR instr(target, $${params.length + 2}) > 0)`)
-    params.push(q.mentions, q.mentions)
+    clauses.push(`(actor = $${params.length + 1} OR target = $${params.length + 2} OR instr(target, $${params.length + 3}) = 1)`)
+    params.push(q.mentions, `account:${q.mentions}`, `account:${q.mentions}:`)
   }
   params.push(limit)
   const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''

@@ -12,7 +12,7 @@ const audiences = { xpanel: 'xPanel', xwhm: 'xWHM', xmail: 'xMail' }
 const headings = { xpanel: { en: 'Account sign in', ar: 'دخول الحساب' }, xwhm: { en: 'Server sign in', ar: 'دخول إدارة الخادم' }, xmail: { en: 'Mail sign in', ar: 'دخول البريد' } }
 const widths = [320, 360, 390, 768, 1440]
 const matrix = Object.keys(audiences).flatMap(audience => ['en', 'ar'].flatMap(locale => ['light', 'dark'].flatMap(theme => widths.map(width => ({ audience, locale, theme, width, id: `${audience}-${locale}-${theme}-${width}` })))))
-const inputs = ['apps/web/src/app.ts', 'apps/web/src/tokens.ts', 'apps/web/src/surfaces/login.ts', 'apps/web/src/login-client.ts', 'apps/web/src/document-routes.ts', 'tests/browser/login-surface-acceptance.mjs', 'tests/browser/applied-font-contract.mjs']
+const inputs = ['apps/web/src/app.ts', 'apps/web/src/tokens.ts', 'apps/web/src/surfaces/login.ts', 'apps/web/src/surfaces/login-layout.ts', 'apps/web/src/login-client.ts', 'apps/web/src/document-routes.ts', 'tests/browser/login-surface-acceptance.mjs', 'tests/browser/applied-font-contract.mjs']
 const fingerprint = () => inputs.map(path => ({ path, sha256: createHash('sha256').update(readFileSync(join(root, path))).digest('hex') }))
 
 async function createLoginFixture(audience) {
@@ -137,7 +137,26 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
         await expect(page.getByRole('main')).toHaveAccessibleName(headings[state.audience][state.locale])
         await expect(page.getByRole('form')).toHaveAccessibleName(headings[state.audience][state.locale])
         await expect(page.locator('.xp-brand__name')).toHaveText(audiences[state.audience])
-        assert.equal(await page.locator('.xp-login-aside,.xp-login-context,.xp-login-footer').count(), 0, 'Dedicated sign-in must stay a functional form without marketing panels or footer prose')
+        const approved = page.locator('.xp-login-shell[data-login-design="approved"]')
+        await expect(approved).toHaveCount(1)
+        await expect(approved.locator(':scope > header.xp-login-topbar')).toBeVisible()
+        await expect(approved.locator(':scope > main.xp-login-main > .xp-login-entry > section.xp-login-card')).toBeVisible()
+        const profiles = approved.locator('.xp-login-profile-tabs [data-login-profile]')
+        await expect(profiles).toHaveCount(3)
+        await expect(approved.locator('.xp-login-profile-tabs [aria-current="page"]')).toHaveAttribute('data-login-profile', state.audience)
+        await expect(approved.locator('.xp-login-profile-tabs [aria-disabled="true"]')).toHaveCount(2)
+        const context = approved.locator(':scope > main.xp-login-main > aside.xp-login-aside')
+        await expect(context).toBeVisible()
+        await expect(context.locator(':scope > .xp-login-context-card')).toHaveCount(2)
+        await expect(context.locator('[aria-labelledby="login-context-heading"]')).toBeVisible()
+        await expect(context.locator('.xp-login-context-brand')).toHaveText(audiences[state.audience])
+        await expect(context.locator('#login-context-heading')).toHaveText(state.locale === 'ar' ? 'استخدم الحساب المناسب' : 'Use the right account')
+        await expect(context.locator('[data-login-lockout-details]')).toBeHidden()
+        const footer = approved.locator(':scope > footer.xp-login-footer')
+        await expect(footer).toBeVisible()
+        await expect(footer.locator(':scope > span')).toHaveCount(2)
+        await expect(footer.locator(':scope > span').first()).toHaveText('xPanel · xWHM · xMail')
+        await expect(footer.locator(':scope > span').last()).toHaveText(state.locale === 'ar' ? 'العربية والإنجليزية · دخول آمن' : 'English & Arabic · Secure sign in')
         await expect(page.locator('[data-auth-submit]')).toBeEnabled()
         outcome.metrics = await inspect(page)
         outcome.screenshot = `screenshots/${state.id}.png`

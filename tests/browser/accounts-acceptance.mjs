@@ -20,6 +20,14 @@ const creationFieldContract = [
   { id: 'new-acc-ipv4', name: 'ipAssignment', tag: 'SELECT', type: 'select-one', required: true },
   { id: 'new-acc-ipv6', name: 'ipv6', tag: 'INPUT', type: 'text', required: false },
 ]
+const nativeAccountHeaderContract = {
+  en: ['Account', 'Primary domain', 'Plan', 'Status', 'Actions'],
+  ar: ['الحساب', 'النطاق الأساسي', 'الخطة', 'الحالة', 'الإجراءات'],
+}
+const accountHeaderContract = {
+  en: ['Select', ...nativeAccountHeaderContract.en.slice(0, 3), 'Owner', 'IP', 'Disk', 'Bandwidth', ...nativeAccountHeaderContract.en.slice(3)],
+  ar: ['اختيار', ...nativeAccountHeaderContract.ar.slice(0, 3), 'المالك', 'IP', 'القرص', 'نقل البيانات', ...nativeAccountHeaderContract.ar.slice(3)],
+}
 const states = ['en', 'ar'].flatMap(locale => ['light', 'dark'].flatMap(theme => [360, 768, 1440].flatMap(width => ['accounts', 'create'].map(screen => ({ id: screen + '-' + locale + '-' + theme + '-' + width, locale, theme, width, screen })))))
 const plan = defaultPlan({ id: 'fixture-plan', name: 'Standard', featureListId: 'fixture-features' })
 const alpha = { id: 'internal-alpha', username: 'alpha', uid: 20001, gid: 20001, home: '/home/alpha', primaryDomain: 'alpha.example.test', planId: plan.id, ownerId: null, status: 'active', suspendReason: null, contactEmail: 'owner@example.test', ipv4: '192.0.2.10', ipv6: '2001:db8::10', extraIps: ['192.0.2.11'], shell: 'jailed', createdAt: '2026-10-23T00:00:00Z' }
@@ -61,12 +69,15 @@ async function fixture() {
       if (url.pathname === '/api/accounts' && body.username === 'stateconflict') {
         res.statusCode = 409
         res.end(JSON.stringify({ code: 'CONFLICT', detail: 'untrusted-host-output', details: { reason: 'state_changed_during_apply', stateChanged: true, verificationRequired: true } }))
+      } else if (url.pathname === '/api/accounts' && req.method === 'POST' && body.username === 'verifywait') {
+        res.statusCode = 412
+        res.end(JSON.stringify({ code: 'PRECONDITION_FAILED', detail: 'untrusted-private-host-message', details: { verificationRequired: true, stateChanged: false } }))
       } else if (url.pathname === '/api/accounts' && req.method === 'POST' && body.username !== 'newblocked') {
         res.statusCode = 201
         res.end(JSON.stringify({ account: { ...alpha, username: body.username }, reconcile: { status: 'applied' }, execution: { status: 'configuration_applied', scope: 'global_configuration', targetVerified: false, verificationRequired: true } }))
       } else if (req.method === 'DELETE' || url.pathname === '/api/accounts') {
         res.statusCode = 412
-        res.end(JSON.stringify({ code: 'PRECONDITION_FAILED', detail: 'untrusted-private-host-message', details: { verificationRequired: true, stateChanged: false } }))
+        res.end(JSON.stringify({ code: 'PRECONDITION_FAILED', detail: 'untrusted-private-host-message', details: { verificationRequired: false, stateChanged: false } }))
       } else if (url.pathname.endsWith('/unsuspend')) {
         res.statusCode = 503
         res.end(JSON.stringify({ code: 'PRECONDITION_FAILED', detail: 'untrusted-private-host-message', details: { verificationRequired: true, stateChanged: true, hostOutcome: 'failed' } }))
@@ -161,7 +172,12 @@ async function createAccountGate(page, host, state, result, destination, expect)
   const refused = page.waitForResponse(response => new URL(response.url()).pathname === '/api/accounts' && response.request().method() === 'POST')
   await submit.click()
   await form.evaluate(form => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
-  await refused
+  const refusalResponse = await refused
+  assert.equal(refusalResponse.status(), 412)
+  const refusalReceipt = await refusalResponse.json()
+  assert.equal(refusalReceipt.details.stateChanged, false)
+  assert.equal(refusalReceipt.details.verificationRequired, false)
+  result.definite_refusal_without_state_change = true
   await expect(form.locator('[data-account-create-status]')).toContainText(state.locale === 'ar' ? 'غير متاح' : 'unavailable')
   await expect(password).toHaveValue('')
   await expect(password).toBeEnabled()
@@ -211,6 +227,33 @@ async function createAccountGate(page, host, state, result, destination, expect)
   result.delayed_response_identity_preserved = true
   result.unknown_outcome_requires_review = true
 
+  // A 412 is not a definite refusal when verificationRequired overrides stateChanged:false.
+  await page.reload()
+  const pendingForm = page.locator('[data-create-account-form]')
+  await pendingForm.locator('[name="username"]').fill('verifywait')
+  await pendingForm.locator('[name="primaryDomain"]').fill('verifywait.example.test')
+  await pendingForm.locator('[name="password"]').fill('synthetic-' + 'v'.repeat(16))
+  assert.equal(await pendingForm.locator('[name="username"]').evaluate(control => control.checkValidity()), true, 'The uncertainty fixture username must satisfy the unchanged native authority pattern')
+  assert.equal(await pendingForm.evaluate(form => form.checkValidity()), true, 'The uncertainty fixture must be valid before waiting for a POST response')
+  const beforePending = host.requests.length
+  const pendingResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/accounts' && response.request().method() === 'POST')
+  await pendingForm.locator('button[type="submit"]').click()
+  const pendingReceipt = await pendingResponse
+  assert.equal(pendingReceipt.status(), 412)
+  const pendingBody = await pendingReceipt.json()
+  assert.equal(pendingBody.details.stateChanged, false)
+  assert.equal(pendingBody.details.verificationRequired, true)
+  await expect(pendingForm.locator('[data-account-create-status]')).toContainText(state.locale === 'ar' ? 'راجع الحسابات' : 'Review accounts before retrying')
+  await expect(pendingForm.locator('button[type="submit"]')).toBeDisabled()
+  for (const control of await pendingForm.locator('input,select').all()) await expect(control).toBeDisabled()
+  assert.equal(await pendingForm.innerText().then(text => text.includes('untrusted-private-host-message')), false)
+  assert.equal(host.requests.length, beforePending + 1)
+  await pendingForm.evaluate(form => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+  assert.equal(host.requests.length, beforePending + 1, 'An unverified 412 must not trigger another create request')
+  result.requests = host.requests.slice(initial)
+  assert.equal(result.requests.length, 4)
+  result.unverified_precondition_requires_review = true
+
 }
 export async function runAccountsAcceptance({ output, filter } = {}) {
   assert.equal(process.versions.node, readFileSync(join(root, '.node-version'), 'utf8').trim())
@@ -241,7 +284,10 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
         if (state.screen === 'create') {
           await createAccountGate(page, host, state, result, destination, expect)
         } else {
-        assert.equal(await page.locator('.xp-accounts__table thead th').count(), 5)
+        const headers = await page.locator('.xp-accounts__table thead th').allTextContents()
+        const names = headers.map(text => text.trim())
+        assert.deepEqual(names, accountHeaderContract[state.locale])
+        assert.deepEqual([names[1], names[2], names[3], names[8], names[9]], nativeAccountHeaderContract[state.locale])
         assert.equal(await page.locator('[data-account-row]').count(), 2)
         await expect(page.locator('[data-account-dialog]')).not.toBeVisible()
         result.fonts = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')

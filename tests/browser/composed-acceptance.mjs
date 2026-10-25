@@ -204,31 +204,52 @@ export async function runComposedAcceptance({ output, filter } = {}) {
           await page.evaluate(() => document.fonts.ready)
           result.geometry = await page.evaluate(() => {
             const parent = document.querySelector('[data-composed-route]')
-            const card = parent.querySelector('.xp-composed-card')
             const rectangle = element => { const r = element.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height } }
             const rtl = document.documentElement.dir === 'rtl'
-            const field = (label, value) => {
-              const l = rectangle(label), v = rectangle(value)
-              const range = document.createRange(); range.selectNodeContents(value)
-              const glyph = range.getBoundingClientRect()
-              return { label: l, value: v, gap: v.top - l.bottom, edge_delta: Math.abs((rtl ? l.right : l.left) - (rtl ? v.right : v.left)), value_glyph_edge_delta: glyph.width ? Math.abs((rtl ? v.right : v.left) - (rtl ? glyph.right : glyph.left)) : 0 }
-            }
-            const mobileLabels = [...parent.querySelectorAll('.xp-composed-cell-label')].filter(label => label.checkVisibility())
-            const facts = [...parent.querySelectorAll('.xp-composed-field')].map(row => field(row.querySelector('dt'), row.querySelector('dd')))
-            const mobileCells = mobileLabels.map(label => field(label, label.nextElementSibling))
             const glyphEdge = element => {
               const range = document.createRange(); range.selectNodeContents(element)
-              const rectangle = range.getBoundingClientRect()
-              return rtl ? rectangle.right : rectangle.left
+              const bounds = range.getBoundingClientRect()
+              return rtl ? bounds.right : bounds.left
             }
+            const field = (label, value) => {
+              if (!label || !value) throw new Error('Composed field lacks its semantic label/value pair')
+              const l = rectangle(label), v = rectangle(value)
+              const control = ['INPUT', 'SELECT', 'TEXTAREA'].includes(value.tagName)
+              const text = control ? value.value : value.textContent.trim()
+              const style = getComputedStyle(value)
+              const contentEdge = rtl ? v.right - parseFloat(style.borderRightWidth || 0) - parseFloat(style.paddingRight || 0) : v.left + parseFloat(style.borderLeftWidth || 0) + parseFloat(style.paddingLeft || 0)
+              return { kind: control ? 'control' : 'fact', tag: value.tagName, id: value.id, text, label: l, value: v, gap: v.top - l.bottom, edge_delta: Math.abs((rtl ? l.right : l.left) - (rtl ? v.right : v.left)), label_glyph_edge_delta: Math.abs(glyphEdge(label) - (rtl ? l.right : l.left)), value_glyph_edge_delta: control ? null : text.length ? Math.abs((rtl ? v.right : v.left) - glyphEdge(value)) : null, control_content_edge: control ? contentEdge : null, disabled: control ? value.matches(':disabled') : null, readonly: control ? value.readOnly === true : null, associated: control ? value.labels?.length === 1 && value.labels[0] === label : null }
+            }
+            const mobileLabels = [...parent.querySelectorAll('.xp-composed-cell-label')].filter(label => label.checkVisibility())
+            const fields = [...parent.querySelectorAll('.xp-composed-field')].map(row => field(row.querySelector(':scope > dt, :scope > label'), row.querySelector(':scope > dd, :scope > input, :scope > select, :scope > textarea')))
+            const facts = fields.filter(observation => observation.kind === 'fact')
+            const mobileCells = mobileLabels.map(label => field(label, label.nextElementSibling))
             const tables = [...parent.querySelectorAll('table')].map(table => {
               const headers = [...table.querySelectorAll('th[scope="col"]')]
-              return { columns: headers.length, row_widths: [...table.querySelectorAll('tbody tr')].map(row => row.children.length), header_value_edge_deltas: innerWidth > 600 ? [...table.querySelectorAll('tbody tr:first-child td')].map((td, index) => Math.abs(glyphEdge(headers[index]) - glyphEdge(td.querySelector('.xp-composed-cell-value')))) : [], cells: [...table.querySelectorAll('tbody td')].map(td => ({ label: td.querySelector('.xp-composed-cell-label')?.textContent, value: td.querySelector('.xp-composed-cell-value')?.textContent })) }
+              const rows = [...table.querySelectorAll('tbody tr')].map(row => {
+                const cells = [...row.children]
+                const status = cells.length === 1 && cells[0].classList.contains('xp-composed-empty-cell') && cells[0].colSpan === headers.length
+                return { kind: status ? 'read-status' : 'data', widths: cells.length, column_span: cells.reduce((count, cell) => count + cell.colSpan, 0), cells: cells.map(td => ({ label: td.querySelector('.xp-composed-cell-label')?.textContent, value: td.querySelector('.xp-composed-cell-value')?.textContent, text: td.textContent.trim(), ...rectangle(td) })), header_value_edge_deltas: innerWidth > 600 && !status ? cells.map((td, index) => {
+                  const value = td.querySelector('.xp-composed-cell-value')
+                  if (!headers[index] || !value) throw new Error('Data table cell lacks its header/value pair')
+                  return Math.abs(glyphEdge(headers[index]) - glyphEdge(value))
+                }) : [], status_header_edge_delta: innerWidth > 600 && status ? Math.abs(glyphEdge(headers[0]) - glyphEdge(cells[0])) : null }
+              })
+              return { columns: headers.length, rows }
             })
             const interactive = [...parent.querySelectorAll('button,a,input,select,textarea')].filter(element => element.checkVisibility()).map(rectangle)
-            const header = parent.querySelector('.xp-composed-heading')
-            const cardChildren = [...card.children]
-            return { route: parent.dataset.composedRoute, state: parent.dataset.readState, document_width: document.documentElement.clientWidth, document_scroll: document.documentElement.scrollWidth, page: rectangle(parent), page_gap: getComputedStyle(parent).rowGap, actual_section_gap: rectangle(card).top - rectangle(header).bottom, card: rectangle(card), card_padding: getComputedStyle(card).paddingInlineStart, card_gap: getComputedStyle(card).rowGap, actual_group_gaps: cardChildren.slice(1).map((child, index) => rectangle(child).top - rectangle(cardChildren[index]).bottom), facts_gap: parent.querySelector('.xp-composed-facts') ? getComputedStyle(parent.querySelector('.xp-composed-facts')).gap : null, facts, mobileCells, tables, interactive, ascii_digits: !/[\u0660-\u0669\u06f0-\u06f9]/.test(parent.textContent), mutations: parent.querySelectorAll('form,[data-terminal-form],[data-custom-config-form]').length }
+            const majorChildren = [...parent.children]
+            const actualSectionGaps = majorChildren.slice(1).map((child, index) => rectangle(child).top - rectangle(majorChildren[index]).bottom)
+            const cards = [...parent.querySelectorAll('.xp-composed-card')].map(card => {
+              const children = [...card.children]
+              return { ...rectangle(card), padding: getComputedStyle(card).paddingInlineStart, gap: getComputedStyle(card).rowGap, actual_group_gaps: children.slice(1).map((child, index) => rectangle(child).top - rectangle(children[index]).bottom) }
+            })
+            const stateGroups = [...parent.querySelectorAll('.xp-composed-state-group')].map(group => {
+              const children = [...group.children]
+              return children.slice(1).map((child, index) => rectangle(child).top - rectangle(children[index]).bottom)
+            })
+            const fieldGroups = [...parent.querySelectorAll('.xp-composed-fields, .xp-composed-facts')].map(group => getComputedStyle(group).gap)
+            return { route: parent.dataset.composedRoute, state: parent.dataset.readState, document_width: document.documentElement.clientWidth, document_scroll: document.documentElement.scrollWidth, page: rectangle(parent), page_gap: getComputedStyle(parent).rowGap, actual_section_gap: actualSectionGaps[0], actual_section_gaps: actualSectionGaps, cards, state_groups: stateGroups, field_groups: fieldGroups, fields, facts, mobileCells, tables, interactive, ascii_digits: !/[\u0660-\u0669\u06f0-\u06f9]/.test(parent.textContent), mutations: parent.querySelectorAll('form,[data-terminal-form],[data-custom-config-form]').length }
           })
           const geometry = result.geometry
           assert.equal(geometry.route, spec.route)
@@ -236,18 +257,46 @@ export async function runComposedAcceptance({ output, filter } = {}) {
           assert.ok(geometry.page.left >= -0.5 && geometry.page.right <= width + 0.5, 'Page stays within viewport')
           assert.equal(geometry.page_gap, '32px')
           assert.ok(Math.abs(geometry.actual_section_gap - 32) < 0.6, 'Actual major section gap is 32px')
-          assert.equal(geometry.card_gap, '24px')
-          for (const gap of geometry.actual_group_gaps) assert.ok(Math.abs(gap - 24) < 0.6, 'Actual content group gap is 24px')
-          assert.equal(geometry.card_padding, width > 800 ? '24px' : '16px')
-          if (geometry.facts_gap) assert.equal(geometry.facts_gap, '16px')
-          for (const observation of [...geometry.facts, ...geometry.mobileCells]) {
-            assert.ok(Math.abs(observation.gap - 8) < 0.6, 'Label/value gap is 8px')
-            assert.ok(observation.edge_delta < 0.6, 'Label and value share the same alignment edge')
-            assert.ok(observation.value_glyph_edge_delta < 1, 'LTR glyphs remain at the field alignment edge')
+          assert.ok(geometry.actual_section_gaps.length > 0)
+          for (const gap of geometry.actual_section_gaps) assert.ok(Math.abs(gap - 32) < 0.6, 'Every direct major section gap is 32px')
+          assert.ok(geometry.cards.length > 0)
+          for (const card of geometry.cards) {
+            assert.equal(card.gap, '24px')
+            for (const gap of card.actual_group_gaps) assert.ok(Math.abs(gap - 24) < 0.6, 'Actual content group gap is 24px')
+            assert.equal(card.padding, width > 800 ? '24px' : '16px')
+          }
+          for (const gaps of geometry.state_groups) for (const gap of gaps) assert.ok(Math.abs(gap - 8) < 0.6, 'Status and explanation retain their 8px child gap')
+          for (const gap of geometry.field_groups) assert.equal(gap, '16px')
+          for (const observation of [...geometry.fields, ...geometry.mobileCells]) {
+            assert.ok(Math.abs(observation.gap - 8) < 0.6, 'Label/value or label/control gap is 8px')
+            assert.ok(observation.edge_delta < 0.6, 'Label and value/control share the same alignment edge')
+            assert.ok(observation.label_glyph_edge_delta < 1, 'Actual label glyphs remain at the field alignment edge')
+            if (observation.kind === 'control') {
+              assert.equal(observation.associated, true, 'The control is associated with its own visible label')
+              assert.equal(observation.disabled, true, 'Unavailable layout controls remain disabled')
+              assert.equal(observation.text, '', 'Unread controls do not contain invented file content or commands')
+              if (observation.tag === 'TEXTAREA') assert.equal(observation.readonly, true, 'The unread editor also remains readonly')
+              // An empty native control has no value glyph to measure. Its actual
+              // label, control box/content edge and empty/disabled state are retained above.
+              assert.equal(observation.value_glyph_edge_delta, null)
+              assert.ok(Number.isFinite(observation.control_content_edge))
+            } else {
+              assert.ok(observation.value_glyph_edge_delta !== null && observation.value_glyph_edge_delta < 1, 'LTR glyphs remain at the field alignment edge')
+            }
           }
           for (const table of geometry.tables) {
-            assert.ok(table.columns > 0 && table.row_widths.every(count => count === table.columns), 'Actual table headers match every row')
-            for (const delta of table.header_value_edge_deltas) assert.ok(delta < 1, 'Desktop table header and value glyphs share the same alignment edge')
+            assert.ok(table.columns > 0 && table.rows.length > 0, 'Every table retains headers and actual body rows')
+            for (const row of table.rows) {
+              assert.equal(row.column_span, table.columns, 'Actual table headers match every logical row span')
+              if (row.kind === 'data') {
+                assert.equal(row.widths, table.columns, 'Every data row retains one cell per header')
+                for (const delta of row.header_value_edge_deltas) assert.ok(delta < 1, 'Desktop table header and value glyphs share the same alignment edge')
+              } else {
+                assert.equal(row.widths, 1, 'An explicit full-width read status is not a fabricated data row')
+                assert.ok(row.cells[0].text.length > 0, 'Read-status rows remain visible and descriptive')
+                if (row.status_header_edge_delta !== null) assert.ok(row.status_header_edge_delta < 1, 'Read-status text shares the first header alignment edge')
+              }
+            }
           }
           for (const target of geometry.interactive) assert.ok(target.width >= 44 && target.height >= 44, 'Interactive targets are at least 44px')
           assert.equal(geometry.ascii_digits, true)
@@ -257,7 +306,7 @@ export async function runComposedAcceptance({ output, filter } = {}) {
           result.accessibility = await page.evaluate(async () => (await axe.run('[data-composed-route]', { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } })).violations.map(violation => ({ id: violation.id, impact: violation.impact, targets: violation.nodes.map(node => node.target) })))
           assert.deepEqual(result.accessibility, [])
           const region = page.locator('.xp-composed-scroll')
-          if (await region.count()) { await region.focus(); assert.equal(await region.evaluate(element => document.activeElement === element), true); result.table_keyboard_focus = true }
+          if (await region.count()) { for (const table of await region.all()) { await table.focus(); assert.equal(await table.evaluate(element => document.activeElement === element), true) }; result.table_keyboard_focus = true }
           }
           if (screenshots < 8 && (spec.bind !== 'soon' || screenshots < 2)) {
             const name = `representative-${screenshots}-${locale}-${width}.png`

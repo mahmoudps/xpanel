@@ -209,10 +209,29 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
           assert.match(html, /data-theme="light"/)
           assert.ok(html.includes(`data-surface="${path === '/mail' ? 'xmail' : 'xpanel'}"`))
           assert.match(html, /data-tool-availability="unverified"/)
-          assert.match(html, /disabled data-wiring="soon"/)
+          const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+          const workspaceStart = markup.search(/<section\b[^>]*\bdata-tool-availability="unverified"[^>]*>/i)
+          assert.ok(workspaceStart >= 0, 'The unqualified workspace remains explicit')
+          const workspace = markup.slice(workspaceStart)
+          const controls = [...workspace.matchAll(/<(?:button|input|select|textarea)\b[^>]*>/gi)].map(match => match[0])
+          assert.ok(controls.length > 0, 'The read-only document retains its actual controls')
+          // A marker string is not evidence of disabled interaction; inspect every native control.
+          for (const control of controls) assert.match(control, /\sdisabled(?:\s|=|\/?>)/i)
+          assert.doesNotMatch(workspace, /<form\b/i)
+          assert.doesNotMatch(workspace, /<a\b[^>]*\s(?:data-action|onclick|onsubmit)\s*=/i)
           assert.match(html, /<html\b[^>]*data-realtime-enabled="false"/)
           assert.doesNotMatch(html, /data-status-page="404"|data-board-port="xpanel-home"/)
-          assert.doesNotMatch(html, /<(?:div|section|main)\b[^>]*data-mail-layout=/)
+          if (path === '/mail') {
+            // An unavailable mailbox retains its approved layout, never provider data or actions.
+            assert.match(markup, /data-mail-read-only="true"/)
+            assert.match(markup, /data-mail-unavailable="inbox"/)
+            assert.match(markup, /data-mail-list-state="unread"/)
+            assert.match(markup, /data-quota-ratio="unknown"/)
+            assert.doesNotMatch(markup, /\sdata-(?:mailbox|mail-uid|mail-open|mail-action|mail-send|compose-form)\s*=/)
+            assert.doesNotMatch(markup, /<(?:button|input|textarea|div)\b[^>]*\scontenteditable="true"/i)
+          } else {
+            assert.doesNotMatch(markup, /<(?:div|section|main)\b[^>]*data-mail-layout=/)
+          }
           for (const value of [account.id, plan.id, featureList.id, user.id, account.home, account.ipv4, account.contactEmail, password, passwordHash]) assert.ok(!html.includes(value), 'Unqualified documents must not expose full account or authentication data')
           if (path === '/panel/domains') {
             assert.ok(html.includes(account.primaryDomain))

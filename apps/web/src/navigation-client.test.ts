@@ -870,15 +870,38 @@ describe('local command palette behavior', () => {
     expect(element('#xp-cmdk-modal').hidden).toBe(true)
   })
 
-  it('preserves IME composition and modified input keys', () => {
+  it('preserves IME composition, Alt input and modified arrow keys', () => {
     bootClient()
     element('#search-toggle').click()
-    for (const options of [{ isComposing: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true }]) {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    for (const options of [{ isComposing: true }, { altKey: true }]) {
       expect(press('ArrowDown', options).defaultPrevented).toBe(false)
+      expect(press('ArrowUp', options).defaultPrevented).toBe(false)
       expect(press('Enter', options).defaultPrevented).toBe(false)
       expect(selectedCommand()?.id).toBe('command-files')
       expect(element('#xp-cmdk-modal').hidden).toBe(false)
     }
+    for (const options of [{ ctrlKey: true }, { metaKey: true }]) {
+      expect(press('ArrowDown', options).defaultPrevented).toBe(false)
+      expect(press('ArrowUp', options).defaultPrevented).toBe(false)
+      expect(selectedCommand()?.id).toBe('command-files')
+      expect(element('#xp-cmdk-modal').hidden).toBe(false)
+    }
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it.each([{ ctrlKey: true }, { metaKey: true }])('opens the selected allowed result in a new tab for modified Enter: %j', options => {
+    bootClient()
+    element('#search-toggle').click()
+    searchCommands('mail')
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const click = vi.spyOn(element('#command-mail'), 'click')
+    expect(press('Enter', options).defaultPrevented).toBe(true)
+    expect(open).toHaveBeenCalledOnce()
+    expect(open).toHaveBeenCalledWith('/panel/email/accounts?lang=ar&theme=light&density=compact&accountId=account-test', '_blank', 'noopener')
+    expect(click).not.toHaveBeenCalled()
+    expect(element('#xp-cmdk-modal').hidden).toBe(true)
+    expect(document.activeElement).toBe(element('#search-toggle'))
   })
 })
 
@@ -1002,7 +1025,7 @@ describe('authorized command palette rendering', () => {
       expect(option.getAttribute('role')).toBe('option')
       expect(option.tabIndex).toBe(-1)
     }
-    expect(parsed.querySelector('[data-cmdk-search]')?.getAttribute('placeholder')).toBe('ابحث عن صفحة')
+    expect(parsed.querySelector('[data-cmdk-search]')?.getAttribute('placeholder')).toBe('ابحث عن أداة أو @حساب أو #نطاق أو >إجراء')
     expect(parsed.querySelector('[data-cmdk-search]')?.getAttribute('aria-controls')).toBe('xp-cmdk-results')
   })
 

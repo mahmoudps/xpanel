@@ -1,6 +1,7 @@
-import { panelLabel, safePanelLinks, type PanelId, type PanelLink } from '../chrome.ts'
+import { safePanelLinks, type PanelLink } from '../chrome.ts'
 import { publicContactEmail } from '../display-name.ts'
 import { escapeHtml } from '../tokens.ts'
+import { LOGIN_LAYOUT_CSS, renderLoginContext, renderLoginFooter, renderLoginProfileTabs } from './login-layout.ts'
 
 export interface LoginSurfaceProps {
   mfaMode?: MfaRuntimeMode
@@ -39,19 +40,21 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
     : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M20.7 14.7A9 9 0 0 1 9.3 3.3 9 9 0 1 0 20.7 14.7Z"/></svg>'
   const themeLabel = theme === 'dark' ? text('Light theme', 'الوضع الفاتح') : text('Dark theme', 'الوضع الداكن')
   const contact = publicContactEmail(props.supportEmail)
-  const siblingPanels = safePanelLinks(props.panels).filter(panel => panel.surface !== (audience ?? targetSurface))
+  const activeOrigin = safePanelLinks(props.panels).find(panel => panel.surface === (audience ?? 'xpanel'))
+  const layout = { audience, targetSurface, locale: locale as 'en' | 'ar', theme: theme as 'light' | 'dark', panels: props.panels, username: props.username, lockedUntil: props.lockout?.lockedUntil, mfaDisabled: props.mfaMode === 'disabled' }
   const locked = props.lockout?.locked === true
   const mfaDisabled = props.mfaMode === 'disabled'
   const retry = props.lockout?.retryAfterSec
   const observedRetry = typeof retry === 'number' && Number.isFinite(retry) && retry > 0 ? Math.ceil(retry) : ''
   return `
-<div class="xp-login-shell" data-surface="login" ${audience ? `data-login-audience="${audience}"` : ''} data-auth-state="${locked ? 'locked' : 'credentials'}" data-locked-until="${escapeHtml(props.lockout?.lockedUntil ?? '')}" data-retry-after="${observedRetry}">
+<style>${LOGIN_LAYOUT_CSS}</style>
+<div class="xp-login-shell" data-login-design="approved" data-surface="login" ${audience ? `data-login-audience="${audience}"` : ''} data-auth-state="${locked ? 'locked' : 'credentials'}" data-locked-until="${escapeHtml(props.lockout?.lockedUntil ?? '')}" data-retry-after="${observedRetry}">
   <header class="xp-login-topbar" role="banner">
     <div class="xp-brand">
       <span class="xp-brand__mark" aria-hidden="true">${profileMark}</span>
       <div class="xp-brand__text">
         <span class="xp-brand__name" dir="ltr">${brand}</span>
-        ${audience ? '' : '<span class="xp-brand__sub">xWHM · xPanel · xMail</span>'}
+        <span class="xp-brand__sub" dir="ltr">${activeOrigin ? escapeHtml(new URL(activeOrigin.origin).host) : 'xWHM · xPanel · xMail'}</span>
       </div>
     </div>
     <div class="xp-topbar-actions">
@@ -60,16 +63,20 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
     </div>
   </header>
   <main class="xp-login-main" aria-labelledby="login-heading">
+    <div class="xp-login-entry">
+      <p class="xp-login-step">${mfaDisabled ? text('Credentials', 'بيانات الدخول') : text('Credentials, then verification when required', 'بيانات الدخول، ثم التحقق عند طلبه')}</p>
     <section class="xp-card xp-login-card">
-      ${audience ? '' : `<div class="xp-login-step">${mfaDisabled ? text('Credentials', 'بيانات الدخول') : text('Step 1 of 2 — Credentials', 'الخطوة 1 من 2 — بيانات الدخول')}</div>`}
+      ${renderLoginProfileTabs(layout)}
+      <div class="xp-login-heading-block">
       <p class="xp-login-identity__product" dir="ltr" data-login-product="${audience ?? 'xpanel'}">${brand}</p>
       <h1 id="login-heading" class="xp-page-title">${audience ? profileHeading : text(`Sign in to ${brand}`, `تسجيل الدخول إلى ${brand}`)}</h1>
+      <p class="xp-subtitle" id="login-description">${audience === 'xwhm' ? text('Manage the server and reseller accounts.', 'إدارة الخادم وحسابات الموزّعين.') : audience === 'xmail' ? text('Read and manage your mailbox.', 'قراءة صندوق بريدك وإدارته.') : text('Manage your hosting account and domains.', 'إدارة حساب الاستضافة والنطاقات.')}</p>
+      </div>
       ${mfaDisabled ? `<p class="xp-help" role="status" data-mfa-disabled>${text('Two-factor verification is disabled in development. Saved factors stay unchanged.', 'التحقق الثنائي معطّل في بيئة التطوير. تبقى عوامل التحقق المحفوظة دون تغيير.')}</p>` : ''}
-      ${audience ? '' : `<p class="xp-subtitle" id="login-description">${mfaDisabled ? text('Enter your account username and password.', 'أدخل اسم المستخدم وكلمة المرور لحسابك.') : text('Enter your account credentials. Additional verification appears when required.', 'أدخل بيانات حسابك. تظهر خطوات التحقق الإضافية عند طلبها.')}</p>`}
       <div class="xp-alert xp-alert--critical" role="alert" data-auth-error data-lockout-state="${locked ? 'locked' : 'unknown'}" ${props.errorMessage || locked ? '' : 'hidden'}>${escapeHtml(props.errorMessage ?? (locked ? (isAr ? 'تسجيل الدخول مقفل مؤقتًا.' : 'Sign-in is temporarily locked.') : ''))}</div>
       <p class="xp-help" role="status" aria-live="polite" data-auth-status></p>
       <noscript><p>${text('JavaScript is required to submit this sign-in form.', 'يلزم تشغيل البرمجة في المتصفح لإرسال نموذج تسجيل الدخول.')}</p></noscript>
-      <form class="xp-form" method="post" action="/api/auth/login" ${audience ? 'aria-labelledby="login-heading"' : 'aria-describedby="login-description"'} data-login-form>
+      <form class="xp-form" method="post" action="/api/auth/login" aria-labelledby="login-heading" aria-describedby="login-description" data-login-form>
         <div class="xp-field">
           <label class="xp-label" for="login-username">${audience === 'xmail' ? text('Mailbox address', 'عنوان صندوق البريد') : text('Username', 'اسم المستخدم')}</label>
           <input id="login-username" name="username" type="text" class="xp-input" dir="ltr" autocomplete="username" autocapitalize="none" spellcheck="false" required value="${escapeHtml(props.username ?? '')}" />
@@ -87,18 +94,26 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
         </div>
         ${mfaDisabled ? '' : `<fieldset class="xp-fieldset" data-auth-mfa-fields data-2fa-step="unknown" hidden>
           <legend class="xp-label">${text('Two-factor verification', 'التحقق الثنائي')}</legend>
+          <div class="xp-login-challenge-summary"><span dir="ltr">${brand}</span>${props.username ? `<bdi dir="ltr">${escapeHtml(props.username)}</bdi>` : ''}<button type="button" class="xp-btn xp-btn--ghost" data-action="change-login-credentials">${text('Change', 'تغيير')}</button></div>
           <p class="xp-help">${text('Enter a fresh authenticator code or one recovery code, not both.', 'أدخل رمزًا جديدًا من تطبيق المصادقة أو رمز استرداد واحدًا.')}</p>
-          <div class="xp-field">
+          <div class="xp-field" id="login-factor-totp" data-login-factor="totp">
             <label class="xp-label" for="login-otp">${text('Authenticator code', 'رمز تطبيق المصادقة')}</label>
-            <input id="login-otp" name="totpCode" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" class="xp-input xp-mono" dir="ltr" autocomplete="one-time-code" />
+            <input id="login-otp" name="totpCode" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" class="xp-input xp-mono xp-login-otp" dir="ltr" autocomplete="one-time-code" aria-describedby="login-otp-help" />
+            <p id="login-otp-help" class="xp-help">${text('Use the 6-digit code from the authenticator linked to this account.', 'استخدم الرمز المكوّن من 6 أرقام من تطبيق المصادقة المرتبط بهذا الحساب.')}</p>
           </div>
-          <div class="xp-field">
+          <div class="xp-field" id="login-factor-recovery" data-login-factor="recovery" hidden>
             <label class="xp-label" for="login-recovery-code">${text('Recovery code', 'رمز الاسترداد')}</label>
-            <input id="login-recovery-code" name="recoveryCode" type="text" class="xp-input xp-mono" dir="ltr" autocomplete="off" />
+            <input id="login-recovery-code" name="recoveryCode" type="text" class="xp-input xp-mono" dir="ltr" autocomplete="off" aria-describedby="login-recovery-help" />
+            <p id="login-recovery-help" class="xp-help">${text('Each recovery code works once. Enter a recovery code instead of an authenticator code.', 'يُستخدم كل رمز استرداد مرة واحدة. أدخل رمز استرداد بدل رمز تطبيق المصادقة.')}</p>
           </div>
+          <button type="button" class="xp-btn xp-btn--ghost xp-login-factor-toggle" data-action="toggle-login-factor" data-login-factor-toggle aria-controls="login-factor-totp login-factor-recovery" aria-pressed="false">${text('Use a recovery code', 'استخدم رمز استرداد')}</button>
         </fieldset>`}
         <button type="submit" class="xp-btn xp-btn--primary" data-auth-submit disabled>${text('Sign in', 'تسجيل الدخول')}</button>
       </form>
+      <section class="xp-login-success" data-login-success data-required-auth-state="authenticated" aria-labelledby="login-success-heading" role="status">
+        <h2 id="login-success-heading">${text('You are signed in', 'تم تسجيل الدخول')}</h2>
+        <p>${text('Your sign-in was accepted. Opening your workspace…', 'قُبل تسجيل دخولك. جارٍ فتح مساحة العمل…')}</p>
+      </section>
       <section data-auth-password-change hidden aria-labelledby="password-change-heading">
         <h2 id="password-change-heading">${text('Change your password', 'تغيير كلمة المرور')}</h2>
         <p>${text('Your account requires a new password. You will sign in again after changing it.', 'يتطلب الحساب كلمة مرور جديدة. ستسجل الدخول مجددًا بعد تغييرها.')}</p>
@@ -114,44 +129,11 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
         <summary>${text('Server administrator', 'مدير الخادم')}</summary>
         <p class="xp-help">${text('Password and two-factor recovery are done on the server by someone with root access. The steps are in the operations runbook, not on this page.', 'استعادة كلمة المرور والتحقق الثنائي تتم على الخادم بيد من يملك صلاحية الجذر. الخطوات في دليل التشغيل، وليست في هذه الصفحة.')}</p>
       </details>`}
-      ${siblingPanels.length ? `<nav class="xp-login-siblings" aria-label="${text('Other panels', 'اللوحات الأخرى')}"><span class="xp-help">${text('Other panels on this server', 'لوحات أخرى على هذا الخادم')}</span>${siblingPanels.map(panel => `<a class="xp-login-sibling" data-panel-link="${panel.surface}" href="${escapeHtml(panel.origin)}/login?lang=${locale}&amp;theme=${theme}">${panelLabel(panel.surface as PanelId)}</a>`).join('')}</nav>` : ''}
     </section>
-
-    ${audience ? '' : `<aside class="xp-login-aside" aria-label="${text('Sign-in information and surfaces', 'معلومات الدخول والواجهات')}">
-      <div class="xp-login-aside-card">
-        <h2 class="xp-login-aside-title">${text('Before you sign in', 'قبل تسجيل الدخول')}</h2>
-        <dl class="xp-login-dl">
-          <dt>${text('Session cookie', 'جلسة المتصفح')}</dt>
-          <dd class="xp-mono"><bdi dir="ltr">HttpOnly · SameSite=Strict</bdi></dd>
-          <dt>${text('Password & 2FA', 'كلمة المرور والتحقق')}</dt>
-          <dd class="xp-mono"><bdi dir="ltr">Argon2id + TOTP</bdi></dd>
-          <dt>${text('Brute-force guard', 'الحماية من التخمين')}</dt>
-          <dd>${text('Automatic lockout after 5 failures', 'قفل تلقائي بعد 5 محاولات فاشلة')}</dd>
-        </dl>
-      </div>
-      <div class="xp-login-aside-card">
-        <h2 class="xp-login-aside-title">${text('Sign-in pages on this server', 'صفحات الدخول على هذا الخادم')}</h2>
-        <div class="xp-login-surface-list">
-          <a href="/login?target=xpanel&amp;lang=${locale}&amp;theme=${theme}" class="xp-login-surface-link" ${targetSurface === 'xpanel' ? 'aria-current="page"' : ''}>
-            <span><strong>xPanel</strong> · ${text('Account & domains', 'الحساب والنطاقات')}</span>
-            <code class="xp-mono"><bdi dir="ltr">/panel</bdi></code>
-          </a>
-          <a href="/login?target=xwhm&amp;lang=${locale}&amp;theme=${theme}" class="xp-login-surface-link" ${targetSurface === 'xwhm' ? 'aria-current="page"' : ''}>
-            <span><strong>xWHM</strong> · ${text('Server & resellers', 'الخادم والموزعون')}</span>
-            <code class="xp-mono"><bdi dir="ltr">/whm</bdi></code>
-          </a>
-          <a href="/login?target=xmail&amp;lang=${locale}&amp;theme=${theme}" class="xp-login-surface-link" ${targetSurface === 'xmail' ? 'aria-current="page"' : ''}>
-            <span><strong>xMail</strong> · ${text('Webmail & Sieve', 'البريد وقواعد الفرز')}</span>
-            <code class="xp-mono"><bdi dir="ltr">/mail</bdi></code>
-          </a>
-        </div>
-      </div>
-    </aside>`}
+    </div>
+    ${renderLoginContext(layout)}
   </main>
-  ${audience ? '' : `  <footer class="xp-login-footer" role="contentinfo">
-    <span>${text('xPanel Hosting Control Plane', 'منصة استضافة xPanel')}</span>
-    <span>${text('Keyboard accessible · English (LTR) & Arabic (RTL)', 'دعم كامل للوحة المفاتيح · العربية والإنجليزية')}</span>
-  </footer>`}
+  ${renderLoginFooter(layout)}
 </div>`.trim()
 }
 import type { MfaRuntimeMode } from '@xpanel/core'

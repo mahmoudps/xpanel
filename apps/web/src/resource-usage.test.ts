@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { qualifyHostTools, tools } from '@xpanel/catalog'
 import { renderThresholdMeter } from './tokens.ts'
 import { renderServerIoMonitorChart } from './charts.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
@@ -108,7 +109,8 @@ describe('truthful resource usage rendering', () => {
 
   it('uses real configured reseller caps without inventing usage from row order or incomplete account lists', () => {
     const resellers = [1, 2].map(id => ({ id: `reseller-${id}`, username: `reseller${id}`, acl: [], maxAccounts: 5, totalDiskMb: 10240, totalBandwidthMb: 102400, oversell: false, nameservers: [], delegatedIps: [] }))
-    const render = (rows: typeof resellers) => renderWhmSurface({ principal: { kind: 'root', id: 'root', username: 'root' }, activeRoute: '/whm/resellers', resellers: rows })
+    const catalog = qualifyHostTools(tools, { executor: 'linux', probes: { 'control-plane': 'passed' } })
+    const render = (rows: typeof resellers) => renderWhmSurface({ principal: { kind: 'root', id: 'root', username: 'root' }, activeRoute: '/whm/resellers', catalog, resellers: rows })
     const forward = render(resellers), reversed = render([...resellers].reverse())
     const row = (html: string, username: string) => html.match(new RegExp(`<tr data-reseller-row="${username}">[\\s\\S]*?<\\/tr>`))![0]
     expect(row(forward, 'reseller1')).toBe(row(reversed, 'reseller1'))

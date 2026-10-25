@@ -1,3 +1,4 @@
+import { qualifyHostTools, tools } from '@xpanel/catalog'
 import { SYNTHETIC_WEBSITE_ANALYTICS, SYNTHETIC_WHM_IO_SNAPSHOT } from '../../../tests/fixtures/analytics-snapshots.ts'
 import { LOGIN_CLIENT_SCRIPT } from './login-client.ts'
 import assert from 'node:assert/strict'
@@ -47,6 +48,7 @@ const panelFixture: PanelSurfaceProps = {
   dnsRecords: [{ id: 'fixture-dns', zone: fixtureAccount.primaryDomain, name: '@', type: 'A', ttl: 3600, content: fixtureAccount.ipv4, priority: null }],
 }
 const whmFixture: WhmSurfaceProps = {
+  catalog: qualifyHostTools(tools, { executor: 'linux', probes: { 'control-plane': 'passed' } }),
   principal: { kind: 'root', id: 'fixture-root', username: 'synthetic-root' }, hostname: 'srv1.xpanel.test', adminSessionIp: '203.0.113.7',
   ioSnapshot: SYNTHETIC_WHM_IO_SNAPSHOT, accounts: [fixtureAccount, { ...fixtureAccount, id: 'fixture-other', username: 'omar', uid: 20016, gid: 20016 }], plans: [fixturePlan],
   featureLists: [fixtureFeatureList],

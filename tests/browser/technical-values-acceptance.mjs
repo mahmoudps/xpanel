@@ -11,7 +11,7 @@ if (existsSync(output)) throw new Error('Preserve prior evidence; choose a fresh
 mkdirSync(join(output, 'screenshots'), { recursive: true })
 process.env.PLAYWRIGHT_BROWSERS_PATH ??= join(process.cwd(), '.tools/playwright-browsers')
 const { chromium } = await import('@playwright/test')
-const inputs = ['apps/web/src/charts.ts', 'apps/web/src/surfaces/xwhm.ts', 'apps/web/src/plan-editor.ts', 'packages/core/src/rules/plans.ts', 'apps/web/src/tokens.ts', 'apps/web/src/ws-client.ts', 'tests/browser/visual-fixture.mjs', 'tests/browser/technical-values-acceptance.mjs']
+const inputs = ['apps/web/src/charts.ts', 'apps/web/src/surfaces/xpanel.ts', 'apps/web/src/board-port/approved-xpanel-workspaces.ts', 'apps/web/src/board-port/approved-xpanel-pages.ts', 'apps/web/src/surfaces/xwhm.ts', 'apps/web/src/plan-editor.ts', 'packages/core/src/rules/plans.ts', 'apps/web/src/tokens.ts', 'apps/web/src/ws-client.ts', 'tests/browser/visual-fixture.mjs', 'tests/browser/technical-values-acceptance.mjs']
 const fingerprint = () => inputs.map(path => ({ path, sha256: createHash('sha256').update(readFileSync(path)).digest('hex') }))
 const before = fingerprint()
 const pages = [['traffic', '/metrics/traffic'], ['io', '/whm/monitoring/io'], ['plans', '/whm/plans'], ['outbound', '/whm/email/outbound']]
@@ -36,7 +36,7 @@ async function nativeInputObservation(page, id, expected) {
       for (const child of [...node.children ?? [], ...node.shadowRoots ?? []]) { const found = find(child, predicate); if (found) return found }
     }
     const input = find(root, node => { const i = node.attributes?.indexOf('id'); return node.nodeName === 'INPUT' && i >= 0 && node.attributes[i + 1] === id })
-    assert.ok(input, 'Current plan IO native input must exist: ' + id)
+    assert.ok(input, 'Expected populated native input must exist: ' + id)
     const text = find(input, node => node.nodeType === 3 && node.nodeValue === expected)
     assert.ok(text, 'Chromium must expose the actual nonempty native input glyph node')
     const { object } = await session.send('DOM.resolveNode', { backendNodeId: text.backendNodeId })
@@ -90,22 +90,52 @@ try {
             pairs.push({ raw, first: range(firstAt, firstAt + match[1].length), second: range(secondAt, secondAt + match[2].length), label: value.previousElementSibling?.textContent.trim(), direction: getComputedStyle(value).direction })
         }
         const kpis = [...document.querySelectorAll('.xp-kpi__value')].map(e => ({ text: e.textContent.trim(), value_glyph: glyph(e), label_glyph: glyph(e.previousElementSibling), logical_edge_delta: edgeDelta(glyph(e), glyph(e.previousElementSibling)), direction: getComputedStyle(e).direction, unicode_bidi: getComputedStyle(e).unicodeBidi, font_size: getComputedStyle(e).fontSize, line_height: getComputedStyle(e).lineHeight }))
-        const wrappers = [...document.querySelectorAll('#main-content .xp-table-wrap')].map((e, index) => ({ index, ...rect(e), client_width: e.clientWidth, scroll_width: e.scrollWidth, overflow_x: getComputedStyle(e).overflowX, role: e.getAttribute('role'), tabindex: e.tabIndex, card: rect(e.closest('.xp-card')) }))
-        const technicalSelectors = kind === 'traffic'
-          ? '#main-content .xp-table tbody td:nth-child(1), #main-content .xp-table tbody td:nth-child(3)'
-          : '.xp-io-monitor .xp-table tbody td:first-child .xp-mono, .xp-io-monitor .xp-table tbody td:nth-child(2) .xp-mono, .xp-io-monitor .xp-table tbody td:nth-child(3)'
-        const technical_tokens = kind === 'traffic' || kind === 'io' ? [...document.querySelectorAll(technicalSelectors)].map(e => {
+        const wrappers = [...document.querySelectorAll('#main-content .xp-table-wrap')].map((e, index) => {
+          const card = e.closest('.xp-card, .xp-panel-detail__card'), table = e.querySelector('table')
+          if (!card || !table) throw new Error('Table region lacks its semantic card/table: ' + index)
+          const native = Boolean(e.closest('[data-surface-widget="website-analytics"]'))
+          const key = table.dataset.workspaceTable ?? (native ? 'native-top-entries' : 'native-table')
+          const columns = table.querySelectorAll('thead th').length
+          const rows = [...table.querySelectorAll('tbody tr')].map(row => ({ cells: [...row.children].map(cell => ({ colspan: cell.colSpan, text: cell.textContent.trim(), ...rect(cell) })), column_span: [...row.children].reduce((count, cell) => count + cell.colSpan, 0) }))
+          return { index, key, native, columns, rows, ...rect(e), table: rect(table), client_width: e.clientWidth, scroll_width: e.scrollWidth, overflow_x: getComputedStyle(e).overflowX, role: e.getAttribute('role'), tabindex: e.tabIndex, card: rect(card) }
+        })
+        const tokenObservation = (e, source, tableKey, column) => {
           const walker = document.createTreeWalker(e, NodeFilter.SHOW_TEXT); let node, longest
           while (node = walker.nextNode()) if (!longest || node.textContent.length > longest.textContent.length) longest = node
-          if (!longest) return { raw: '', characters: [] }
+          if (!longest) return { source, tableKey, column, raw: '', characters: [] }
           const raw = longest.textContent, characters = []
           for (let i = 0; i < raw.length; i++) {
             if (/\s/.test(raw[i])) continue
             const range = document.createRange(); range.setStart(longest, i); range.setEnd(longest, i + 1)
             const r = range.getBoundingClientRect(); characters.push({ character: raw[i], left: r.left, right: r.right, top: r.top, bottom: r.bottom })
           }
-          return { raw, characters }
-        }) : []
+          return { source, tableKey, column, raw, characters }
+        }
+        const technical_tokens = []
+        if (kind === 'traffic') for (const table of document.querySelectorAll('#main-content .xp-table-wrap table')) {
+          const native = Boolean(table.closest('[data-surface-widget="website-analytics"]'))
+          const key = table.dataset.workspaceTable ?? 'native-top-entries'
+          const columns = native ? [0, 2] : key === 'top-pages' ? [0, 1, 2] : key === 'error-paths' ? [0, 1] : null
+          if (!columns) throw new Error('Unclassified traffic table: ' + key)
+          for (const row of table.querySelectorAll('tbody tr')) {
+            // A full-width read-status cell is measured as status, never as a path or byte value.
+            if (row.children.length === 1 && row.children[0].colSpan === table.querySelectorAll('thead th').length) continue
+            for (const column of columns) {
+              const cell = row.children[column]
+              if (!cell) throw new Error('Missing technical traffic cell: ' + key + ':' + column)
+              technical_tokens.push(tokenObservation(cell, native ? 'native' : 'approved', key, column))
+            }
+          }
+        }
+        if (kind === 'io') for (const e of document.querySelectorAll('.xp-io-monitor .xp-table tbody td:first-child .xp-mono, .xp-io-monitor .xp-table tbody td:nth-child(2) .xp-mono, .xp-io-monitor .xp-table tbody td:nth-child(3)')) technical_tokens.push(tokenObservation(e, 'native', 'io', null))
+        const approved_fields = [...document.querySelectorAll('[data-approved-xpanel-workspace] .xp-field, [data-approved-xpanel-workspace] .xp-panel-detail__facts > div')].map(e => {
+          const label = e.querySelector(':scope > label, :scope > dt'), value = e.querySelector(':scope > input, :scope > select, :scope > textarea, :scope > dd')
+          if (!label || !value) throw new Error('Approved field lacks its label/value pair')
+          const control = ['INPUT', 'SELECT', 'TEXTAREA'].includes(value.tagName)
+          const component = e.closest('[data-workspace-section]')?.dataset.workspaceSection, index = [...e.parentElement.children].indexOf(e)
+          if (!component || index < 0) throw new Error('Approved field lacks its component identity')
+          return { identity: component + ':' + index, component, index, label: label.textContent.trim(), id: value.id, tag: value.tagName, text: control ? value.value : value.textContent.trim(), gap: rect(value).top - rect(label).bottom, logical_edge_delta: edgeDelta(rect(value), rect(label)), glyph_edge_delta: control ? null : edgeDelta(glyph(value), glyph(label)), label_glyph: glyph(label), control: rect(value) }
+        })
         const fields = ['mail-outbound-mode', 'mail-default-ipv4', 'mail-default-ipv6', 'mail-default-helo'].map(id => { const c = document.getElementById(id), l = document.querySelector('label[for="' + id + '"]'); return c && l ? { id, gap: rect(c).top - rect(l).bottom, logical_edge_delta: edgeDelta(rect(c), rect(l)), control: rect(c) } : null }).filter(Boolean)
         const label = document.querySelector('#whm-plans label[for="plan-addonDomains-unlimited"]')
         const planInputs = ['plan-ioReadBps', 'plan-ioWriteBps'].map(id => {
@@ -116,14 +146,14 @@ try {
         const planEditorState = planEditor ? { editable: planEditor.dataset.planEditable, savedId: planEditor.getAttribute('data-plan-id'), saveDisabled: planEditor.querySelector('[data-native-plan-save]').disabled, featureId: feature.value, featureOptions: [...feature.options].map(option => ({ value: option.value, text: option.text })) } : null
         const io = document.querySelector('.xp-io-monitor'), ioHeader = io?.querySelector(':scope > .xp-card__header'), ioStatus = io?.querySelector(':scope > [data-resource-observation-state]'), nestedHeader = io?.querySelector(':scope > .xp-card > .xp-card__header')
         const ioContract = kind === 'io' ? { incomplete: ioStatus?.dataset.resourceObservationState, legacyLive: document.querySelectorAll('.xp-io-monitor [data-live-kpi]').length, supplied: document.querySelectorAll('[data-resource-observation]').length, hostRatio: /RAM\s+\d+\s*\/|Load\s+\d/.test(io.textContent), headerStatusGap: rect(ioStatus).top - rect(ioHeader).bottom, nestedHeaderMargin: parseFloat(getComputedStyle(nestedHeader).marginBlockEnd) } : null
-        return { viewport: innerWidth, document_scroll_width: document.documentElement.scrollWidth, body_overflow_x: getComputedStyle(document.body).overflowX, root_overflow_x: getComputedStyle(document.documentElement).overflowX, pairs, kpis, wrappers, fields, technical_tokens, ioContract, unlimited_label: label ? rect(label) : null, plan_inputs: planInputs, plan_editor: planEditorState }
+        return { viewport: innerWidth, document_scroll_width: document.documentElement.scrollWidth, body_overflow_x: getComputedStyle(document.body).overflowX, root_overflow_x: getComputedStyle(document.documentElement).overflowX, pairs, kpis, wrappers, fields, approved_fields, technical_tokens, ioContract, unlimited_label: label ? rect(label) : null, plan_inputs: planInputs, plan_editor: planEditorState }
       }, sample.kind)
       const g = outcome.geometry
       check('document-fits-viewport', g.document_scroll_width <= sample.width + 1, g.document_scroll_width)
       check('no-root-overflow-concealment', !['hidden', 'clip'].includes(g.body_overflow_x) && !['hidden', 'clip'].includes(g.root_overflow_x), [g.body_overflow_x, g.root_overflow_x])
       if (sample.kind === 'traffic' || sample.kind === 'io') {
         check('all-metric-values-share-label-edge', g.kpis.length === 6 && g.kpis.every(value => value.logical_edge_delta <= 1), g.kpis.map(value => value.logical_edge_delta))
-        check('whole-technical-table-phrase-glyph-order', g.technical_tokens.length === (sample.kind === 'traffic' ? 6 : 3) && g.technical_tokens.every(token => token.characters.length > 1 && token.characters.every((character, i, all) => i === 0 || (Math.abs(character.top - all[0].top) <= 1 && character.left >= all[i - 1].left - 0.5))), g.technical_tokens)
+        check('whole-technical-table-phrase-glyph-order', g.technical_tokens.filter(token => token.source === 'native').length === (sample.kind === 'traffic' ? 6 : 3) && g.technical_tokens.every(token => token.characters.length >= (token.source === 'native' ? 2 : 1) && token.characters.every((character, i, all) => i === 0 || (Math.abs(character.top - all[0].top) <= 1 && character.left >= all[i - 1].left - 0.5))), g.technical_tokens)
         check('compound-metric-glyph-order', g.pairs.length >= 1 && g.pairs.every(pair => pair.first.left < pair.second.left), g.pairs)
         check('technical-values-retain-direction-after-text-replacement', g.kpis.every(value => value.direction === 'ltr' && ['isolate', 'isolate-override'].includes(value.unicode_bidi)), g.kpis.map(value => [value.direction, value.unicode_bidi]))
         if (sample.kind === 'io') {
@@ -142,31 +172,64 @@ try {
         check('text-replacement-number-before-unit', outcome.live_text_replacement.number.left < outcome.live_text_replacement.unit.left, outcome.live_text_replacement)
       }
       if (sample.kind === 'traffic') {
-        check('all-three-top-entry-tables-preserved', g.wrappers.length === 3, g.wrappers.length)
-        check('table-scroll-regions-contained', g.wrappers.every(w => w.left >= -1 && w.right <= sample.width + 1 && w.overflow_x === 'auto' && w.role === 'region' && w.tabindex === 0), g.wrappers)
+        check('all-three-top-entry-tables-preserved', g.wrappers.filter(w => w.native).length === 3, g.wrappers)
+        check('all-approved-traffic-tables-preserved', g.wrappers.length === 5 && ['top-pages', 'error-paths'].every(key => g.wrappers.filter(w => w.key === key && !w.native).length === 1), g.wrappers)
+        check('all-traffic-table-rows-match-header-spans', g.wrappers.every(w => w.columns > 0 && w.rows.length > 0 && w.rows.every(row => row.column_span === w.columns && row.cells.every(cell => cell.text.length > 0))), g.wrappers)
+        check('approved-traffic-technical-cells-covered', g.technical_tokens.filter(token => token.source === 'approved').length === 3 && g.technical_tokens.filter(token => token.source === 'approved').every(token => token.tableKey === 'top-pages'), g.technical_tokens)
+        check('table-scroll-regions-contained', g.wrappers.every(w => w.left >= -1 && w.right <= sample.width + 1 && w.left >= w.card.left - 1 && w.right <= w.card.right + 1 && w.overflow_x === 'auto' && w.role === 'region' && w.tabindex === 0), g.wrappers)
+        const expectedApprovedFields = [
+          ['metrics-scope:0', 'SELECT', ['Domain', 'النطاق']], ['metrics-scope:1', 'SELECT', ['Range', 'الفترة']],
+          ['visitors:0', 'INPUT', ['Unique visitors', 'الزوار الفريدون']], ['visitors:1', 'INPUT', ['Requests', 'الطلبات']],
+          ['response-status:0', 'INPUT', ['2xx', '2xx']], ['response-status:1', 'INPUT', ['3xx', '3xx']],
+          ['response-status:2', 'INPUT', ['4xx', '4xx']], ['response-status:3', 'INPUT', ['5xx', '5xx']],
+          ['account-context:0', 'DD', ['Account', 'الحساب']], ['account-context:1', 'DD', ['Domain', 'النطاق']], ['account-context:2', 'DD', ['Plan', 'الخطة']],
+          ['bandwidth:0', 'DD', ['Domain', 'النطاق']], ['bandwidth:1', 'DD', ['Transferred', 'البيانات المنقولة']],
+        ]
+        check('approved-traffic-field-identities-preserved', g.approved_fields.length === expectedApprovedFields.length && new Set(g.approved_fields.map(field => field.identity)).size === expectedApprovedFields.length && expectedApprovedFields.every(([identity, tag, labels]) => g.approved_fields.some(field => field.identity === identity && field.tag === tag && field.label === labels[sample.locale === 'ar' ? 1 : 0])), g.approved_fields)
+        const fieldComponents = {
+          main: g.approved_fields.filter(field => ['metrics-scope', 'visitors', 'response-status'].includes(field.component)).length,
+          identity: g.approved_fields.filter(field => field.component === 'account-context').length,
+          bandwidth: g.approved_fields.filter(field => field.component === 'bandwidth').length,
+        }
+        check('approved-traffic-field-component-counts', fieldComponents.main === 8 && fieldComponents.identity === 3 && fieldComponents.bandwidth === 2, fieldComponents)
+        check('approved-traffic-field-label-gaps-and-edges', g.approved_fields.length === expectedApprovedFields.length && g.approved_fields.every(field => Math.abs(field.gap - 8) <= 0.5 && field.logical_edge_delta <= 1 && (field.glyph_edge_delta === null || field.glyph_edge_delta <= 1)), g.approved_fields)
+        outcome.approved_native_inputs = []
+        for (const field of g.approved_fields.filter(field => field.tag === 'INPUT' && field.text.length > 0)) outcome.approved_native_inputs.push({ ...await nativeInputObservation(page, field.id, field.text), label_glyph: field.label_glyph })
+        check('approved-traffic-input-glyph-order-and-label-edge', outcome.approved_native_inputs.length === 6 && outcome.approved_native_inputs.every(input => input.raw === input.expected && input.characters.length > 0 && input.characters.every((character, i, all) => i === 0 || (Math.abs(character.top - all[0].top) <= 1 && character.left >= all[i - 1].left - 0.5)) && Math.abs(sample.locale === 'ar' ? input.whole.right - input.label_glyph.right : input.whole.left - input.label_glyph.left) <= 1), outcome.approved_native_inputs)
       }
       if (sample.kind === 'traffic' && sample.width === 360) {
-        check('narrow-tables-scroll-instead-of-clipping', g.wrappers.every(w => w.scroll_width > w.client_width + 1), g.wrappers.map(w => [w.scroll_width, w.client_width]))
-        const scrollRegion = page.locator('#main-content .xp-table-wrap').first()
-        await scrollRegion.focus()
-        const scrollBefore = await scrollRegion.evaluate(e => e.scrollLeft)
-        await page.keyboard.press(sample.locale === 'ar' ? 'ArrowLeft' : 'ArrowRight')
-        await page.waitForFunction(before => Math.abs(document.activeElement.scrollLeft - before) > 1, scrollBefore, { timeout: 2000 }).catch(() => {})
-        outcome.scroll_observation = await scrollRegion.evaluate((e, before) => ({ focused: document.activeElement === e, before, after: e.scrollLeft, document_scroll_x: scrollX }), scrollBefore)
-        check('real-keyboard-horizontal-scroll', outcome.scroll_observation.focused && Math.abs(outcome.scroll_observation.after - scrollBefore) > 1 && outcome.scroll_observation.document_scroll_x === 0, outcome.scroll_observation)
-        outcome.scroll_restoration = await scrollRegion.evaluate(async (e, before) => {
-          let last = e.scrollLeft, stable = 0
-          // Native keyboard scrolling can still be animating at its first
-          // measurable movement. Wait for it to settle before restoring images.
-          for (let frame = 0; frame < 40 && stable < 4; frame++) {
-            await new Promise(resolve => requestAnimationFrame(resolve))
-            stable = Math.abs(e.scrollLeft - last) < 0.1 ? stable + 1 : 0; last = e.scrollLeft
+        check('narrow-tables-scroll-instead-of-clipping', g.wrappers.filter(w => w.native).every(w => w.scroll_width > w.client_width + 1), g.wrappers)
+        check('additional-tables-fit-or-provide-real-overflow', g.wrappers.every(w => w.table.width <= w.client_width + 1 || w.scroll_width > w.client_width + 1), g.wrappers)
+        outcome.table_scroll_observations = []; outcome.table_scroll_restorations = []
+        // Every table is focused and audited. Fitting additions need no fictitious scroll;
+        // all overflowing tables, including additions, must scroll by actual keyboard input.
+        for (const wrapper of g.wrappers) {
+          const scrollRegion = page.locator('#main-content .xp-table-wrap').nth(wrapper.index)
+          await scrollRegion.focus()
+          const scrollBefore = await scrollRegion.evaluate(e => e.scrollLeft)
+          const overflow = wrapper.scroll_width > wrapper.client_width + 1
+          if (overflow) {
+            await page.keyboard.press(sample.locale === 'ar' ? 'ArrowLeft' : 'ArrowRight')
+            await page.waitForFunction(before => Math.abs(document.activeElement.scrollLeft - before) > 1, scrollBefore, { timeout: 2000 }).catch(() => {})
           }
-          e.scrollLeft = before; e.blur()
-          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-          return { before, restored: e.scrollLeft, settled_frames: stable }
-        }, scrollBefore)
-        check('keyboard-scroll-restored-before-review-image', outcome.scroll_restoration.settled_frames >= 4 && Math.abs(outcome.scroll_restoration.restored - scrollBefore) < 0.5, outcome.scroll_restoration)
+          const observation = await scrollRegion.evaluate((e, before) => ({ focused: document.activeElement === e, before, after: e.scrollLeft, document_scroll_x: scrollX }), scrollBefore)
+          outcome.table_scroll_observations.push({ index: wrapper.index, key: wrapper.key, overflow, ...observation })
+          const restoration = await scrollRegion.evaluate(async (e, before) => {
+            let last = e.scrollLeft, stable = 0
+            for (let frame = 0; frame < 40 && stable < 4; frame++) {
+              await new Promise(resolve => requestAnimationFrame(resolve))
+              stable = Math.abs(e.scrollLeft - last) < 0.1 ? stable + 1 : 0; last = e.scrollLeft
+            }
+            e.scrollLeft = before; e.blur()
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+            return { before, restored: e.scrollLeft, settled_frames: stable }
+          }, scrollBefore)
+          outcome.table_scroll_restorations.push({ index: wrapper.index, ...restoration })
+        }
+        outcome.scroll_observation = outcome.table_scroll_observations[0]
+        outcome.scroll_restoration = outcome.table_scroll_restorations[0]
+        check('real-keyboard-horizontal-scroll', outcome.table_scroll_observations.length === g.wrappers.length && outcome.table_scroll_observations.every(observation => observation.focused && (!observation.overflow || Math.abs(observation.after - observation.before) > 1) && observation.document_scroll_x === 0), outcome.table_scroll_observations)
+        check('keyboard-scroll-restored-before-review-image', outcome.table_scroll_restorations.length === g.wrappers.length && outcome.table_scroll_restorations.every(restoration => restoration.settled_frames >= 4 && Math.abs(restoration.restored - restoration.before) < 0.5), outcome.table_scroll_restorations)
       }
       if (sample.kind === 'outbound') {
         check('all-four-label-gaps-are-8px', g.fields.length === 4 && g.fields.every(field => Math.abs(field.gap - 8) <= 0.5), g.fields)

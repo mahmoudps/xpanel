@@ -1003,5 +1003,13 @@
  "nav.section.xwhm.security.name": "مركز الأمان",
  "nav.section.xwhm.server.name": "الخادم",
  "nav.section.xwhm.services.name": "الخدمات",
- "nav.section.xwhm.software.name": "البرمجيات"
+ "nav.section.xwhm.software.name": "البرمجيات",
+ "catalog.tool.feature-list-crud.name": "سجلات قوائم الميزات",
+ "catalog.tool.feature-list-crud.summary": "إنشاء قوائم الميزات وتعديلها وحذف غير المستخدم منها ضمن صلاحيات المالك.",
+ "catalog.tool.server-settings-edit.name": "إعدادات الخادم المحفوظة",
+ "catalog.tool.server-settings-edit.summary": "قراءة قيم إعدادات الخادم المدعومة وحفظها؛ تفعيلها على الخادم يحتاج تحققًا مستقلًا.",
+ "catalog.tool.domain-php-settings.name": "إعدادات PHP للنطاق",
+ "catalog.tool.domain-php-settings.summary": "قراءة إعدادات PHP المطلوبة للنطاق وحفظها مع الحفاظ على القيم غير المعدلة.",
+ "catalog.tool.dns-zone-records.name": "سجلات منطقة DNS",
+ "catalog.tool.dns-zone-records.summary": "قراءة سجلات منطقة DNS المتاحة وتعديلها دون إدارة DNSSEC."
 }

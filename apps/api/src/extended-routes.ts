@@ -6,6 +6,9 @@ import {
   fail,
   suggestServerSettings,
   validateDomainName,
+  validateServerIpEntry,
+  validateServerIpPool,
+  canonicalIp,
 } from '@xpanel/core'
 import type {
   Account,
@@ -1008,6 +1011,16 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
 
         const suggested = suggestServerSettings({ cores: 4, memoryMb: 8192 })
         const existingSettings = await helpers.store.getServerSettings()
+        const existingIps = await helpers.store.listServerIps()
+        const configuredIpv4 = existingIps.find(ip => ip.version === 4 && ip.isPrimary)
+        const primaryIpv4 = body.primaryIpv4 === undefined
+          ? configuredIpv4?.address
+          : typeof body.primaryIpv4 === 'string' ? body.primaryIpv4.trim() : undefined
+        if (!primaryIpv4 || isIP(primaryIpv4) !== 4) return fail('VALIDATION', 'a valid primary IPv4 address is required')
+        const primaryIpv6 = body.primaryIpv6 == null || body.primaryIpv6 === '' ? undefined
+          : typeof body.primaryIpv6 === 'string' && isIP(body.primaryIpv6.trim()) === 6
+            ? canonicalIp(body.primaryIpv6.trim()).address
+            : fail('VALIDATION', 'primary IPv6 address is invalid')
         const hostname = validateDomainName(body.hostname ?? existingSettings?.hostname ?? 'panel.xpanel.internal')
         const nameservers = (body.nameservers ?? existingSettings?.nameservers ?? [`ns1.${hostname}`, `ns2.${hostname}`]).map(
           (ns) => validateDomainName(ns),
@@ -1030,33 +1043,30 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           backendTlsPort: existingSettings?.backendTlsPort ?? 8443,
         }
 
-        const settings = await helpers.store.saveServerSettings(settingsInput)
-        const primaryIpv4 = body.primaryIpv4 ?? '203.0.113.10'
-        const primaryIp = await helpers.store.saveServerIp({
-          address: primaryIpv4,
-          version: 4,
-          prefixLength: 24,
-          interfaceName: 'eth0',
-          role: 'shared',
-          ownerKind: 'root',
-          ownerId: null,
-          ptrHostname: hostname,
-          isPrimary: true,
-          notes: 'Primary shared IPv4 configured by First-Run Setup Wizard',
-        })
-        if (body.primaryIpv6) {
-          await helpers.store.saveServerIp({
-            address: body.primaryIpv6,
-            version: 6,
-            prefixLength: 64,
-            interfaceName: 'eth0',
-            role: 'shared',
-            ownerKind: 'root',
-            ownerId: null,
-            ptrHostname: hostname,
-            isPrimary: true,
-            notes: 'Primary shared IPv6 configured by First-Run Setup Wizard',
+        // Validate both IP candidates and their combined inventory before any setup writes.
+        // Reusing a registered address keeps its interface, prefix, ownership, PTR and notes.
+        const preparePrimaryIp = (address: string, version: 4 | 6) => {
+          const existing = existingIps.find(ip => ip.address === address && ip.version === version)
+          return validateServerIpEntry(existing ? { ...existing, isPrimary: true } : {
+            id: randomUUID(), address, version,
+            prefixLength: version === 4 ? 24 : 64,
+            interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null,
+            ptrHostname: hostname, isPrimary: true,
+            notes: `Primary shared IPv${version} configured by First-Run Setup Wizard`,
           })
+        }
+        const ipv4Input = preparePrimaryIp(primaryIpv4, 4)
+        const ipv6Input = primaryIpv6 ? preparePrimaryIp(primaryIpv6, 6) : undefined
+        const selectedIds = new Set([ipv4Input.id, ...(ipv6Input ? [ipv6Input.id] : [])])
+        validateServerIpPool([
+          ...existingIps.filter(ip => !selectedIds.has(ip.id)), ipv4Input,
+          ...(ipv6Input ? [ipv6Input] : []),
+        ])
+        const settings = await helpers.store.saveServerSettings(settingsInput)
+        const primaryIp = existingIps.find(ip => ip.id === ipv4Input.id && ip.isPrimary)
+          ?? await helpers.store.saveServerIp(ipv4Input)
+        if (ipv6Input && !existingIps.some(ip => ip.id === ipv6Input.id && ip.isPrimary)) {
+          await helpers.store.saveServerIp(ipv6Input)
         }
 
         await helpers.store.markSetupComplete()

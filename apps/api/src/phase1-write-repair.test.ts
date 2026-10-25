@@ -34,7 +34,7 @@ describe('phase-1 write repair', () => {
     await chmod(plans, 0o750)
   })
 
-  it('logs unexpected 500s with method and path and tells the client nothing was saved', async () => {
+  it('logs unexpected read failures without disclosing secrets or making write-state claims', async () => {
     const database = await createTestDb()
     const state = await createTestStateStore()
     const secret = 'SENSITIVE_SQL_CONNECTION_STRING_SECRET_12345'
@@ -49,8 +49,9 @@ describe('phase-1 write repair', () => {
       })
       const response = await app.fetch(new Request('http://panel.local/whm/accounts', { method: 'GET' }))
       expect(response.status).toBe(500)
-      const body = await response.json() as { code: string; detail: string; details: { stateChanged: boolean } }
-      expect(body).toMatchObject({ code: 'INTERNAL_ERROR', detail: 'Internal server error', details: { stateChanged: false } })
+      const body = await response.json() as { code: string; detail: string; details?: { stateChanged?: boolean } }
+      expect(body).toMatchObject({ code: 'INTERNAL_ERROR', detail: 'Internal server error' })
+      expect(body.details).toBeUndefined()
       expect(JSON.stringify(body)).not.toContain(secret)
       expect(errors.some(line => String(line[0]).includes('GET /whm/accounts') && String(line[0]).includes(secret))).toBe(true)
     } finally {

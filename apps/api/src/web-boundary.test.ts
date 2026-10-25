@@ -34,6 +34,19 @@ const observations: Record<string, unknown>[] = []
 const future = () => new Date(Date.now() + 60_000).toISOString()
 const protectedPaths = ['/', '/whm', '/panel', '/mail', '/home', '/resources', '/files/manager', '/panel/files/manager', '/whm/accounts', '/whm/security/sign-in', '/mail/inbox']
 
+const expectReadOnlyUnqualifiedWorkspace = (html: string): void => {
+  const document = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+  const start = document.search(/<section\b[^>]*\bdata-tool-availability="unverified"[^>]*>/i)
+  expect(start).toBeGreaterThanOrEqual(0)
+  const workspace = document.slice(start)
+  const controls = [...workspace.matchAll(/<(?:button|input|select|textarea)\b[^>]*>/gi)].map(match => match[0])
+  expect(controls.length).toBeGreaterThan(0)
+  // Enforce the native interaction boundary, regardless of marker names or attribute order.
+  for (const control of controls) expect(control).toMatch(/\sdisabled(?:\s|=|\/?>)/i)
+  expect(workspace).not.toMatch(/<form\b/i)
+  expect(workspace).not.toMatch(/<a\b[^>]*\s(?:data-action|onclick|onsubmit)\s*=/i)
+}
+
 afterAll(async () => {
   const path = process.env.XPANEL_WEB_BOUNDARY_EVIDENCE
   if (!path) return
@@ -256,7 +269,7 @@ describe('production web renderer boundary regressions', () => {
     expect(home).not.toMatch(/Multi-factor enrollment is required|must complete enrollment/)
     const accounts = await observe('root-mfa-unenrolled:/whm/accounts', await render(request('/whm/accounts', cookie)), 200)
     expect(accounts).toContain('data-tool-availability="unverified"')
-    expect(accounts).toContain('disabled data-wiring="soon"')
+    expectReadOnlyUnqualifiedWorkspace(accounts)
     expect(accounts).not.toContain('data-status-page="404"')
     expect(accounts).not.toMatch(/Multi-factor enrollment is required|must complete enrollment/)
     const security = await observe('root-mfa-unenrolled:security', await render(request('/whm/security/sign-in', cookie)), 200)
@@ -277,7 +290,7 @@ describe('production web renderer boundary regressions', () => {
     const accounts = await observe('unverified-catalog:/whm/accounts', await render(request('/whm/accounts', cookie)), 200)
     expect.soft(accounts.includes('data-status-page="404"')).toBe(false)
     expect.soft(accounts.includes('data-tool-availability="unverified"')).toBe(true)
-    expect(accounts).toContain('disabled data-wiring="soon"')
+    expectReadOnlyUnqualifiedWorkspace(accounts)
     expect(hydration.at(-1)?.workspaceSummary).toEqual({})
     for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(hydration.at(-1)).not.toHaveProperty(key)
     expect.soft(/alice-shop\.com|srv1\.xpanel\.test/.test(accounts)).toBe(false)
@@ -298,7 +311,7 @@ describe('production web renderer boundary regressions', () => {
     for (const path of ['/whm/accounts', '/whm/accounts/health', ...registeredDocumentAliases.filter(row => row.parentRoute === '/whm/software/site-software').map(row => row.route)]) {
       const html = await observe(`empty-state:${path}`, await render(request(path, cookie)), 200)
       expect(html).toContain('data-tool-availability="unverified"')
-      expect(html).toContain('disabled data-wiring="soon"')
+      expectReadOnlyUnqualifiedWorkspace(html)
       const supplied = hydration.at(-1)
       expect(supplied).toBeDefined()
       const visibility = supplied!.visibility as { principal: { kind: string } }
@@ -412,7 +425,7 @@ describe('production web renderer boundary regressions', () => {
       ] as const) {
         const html = await observe(`registered-unqualified-owner:${path}`, await fetch(`${origin}${path}`, { headers: { cookie }, redirect: 'manual' }), 200)
         expect(html).toContain('data-tool-availability="unverified"')
-        expect(html).toContain('disabled data-wiring="soon"')
+        expectReadOnlyUnqualifiedWorkspace(html)
         expect(html).not.toContain('data-status-page="404"')
         const supplied = hydration.at(-1)
         expect(supplied).toMatchObject({ surface: 'xpanel', activeRoute: canonicalRoute })
