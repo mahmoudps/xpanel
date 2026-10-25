@@ -170,6 +170,23 @@ describe('account component output boundaries', () => {
     expect(renderApprovedWhmAccountSelection(props, username)).not.toMatch(/value=|autofocus/)
   })
 
+  it.each(['en', 'ar'] as const)('preserves the %s label/content inset and isolated physical alignment contract for native preview controls', locale => {
+    const html = renderApprovedWhmAccountCreateFields({ ...base(), locale }) + renderApprovedWhmAccountCreateStatus({ ...base(), locale })
+    expect(html).toContain('.xp-whm-account-field>label[for]{padding-inline-start:var(--xp-control-content-inset)}')
+    expect(html).toContain('.xp-whm-account-field :is(input,textarea)[dir=ltr]{direction:ltr;unicode-bidi:isolate;text-align:left}')
+    expect(html).toContain('html[dir=rtl] .xp-whm-account-field :is(input,textarea)[dir=ltr]{text-align:right}')
+    expect(html).not.toContain('.xp-whm-account-field :is(input,textarea)[dir=ltr]{text-align:start}')
+    expect(html).not.toContain('html[dir=rtl] .xp-whm-account-field :is(input,textarea)[dir=ltr]{text-align:end}')
+    for (const key of ['slice', 'apache', 'nginx']) {
+      const id = `whm-create-config-${key}`
+      expect(html).toMatch(new RegExp(`<div class="xp-whm-account-field"><label class="xp-label" for="${id}">[^<]+</label><textarea id="${id}" class="xp-input xp-mono" dir="ltr" rows="4" readonly disabled aria-describedby="whm-create-config-help"></textarea></div>`))
+    }
+    expect(html).toContain('gap:var(--xp-space-label,8px)')
+    expect(html).toContain('gap:var(--xp-space-field,16px)')
+    expect(html).toContain('gap:var(--xp-space-group,24px)')
+    expect(html).toContain('gap:var(--xp-space-section,32px)')
+  })
+
   it('keeps fragment IDs unique and escapes supplied public names', () => {
     const html = fragments(base())
     const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]!)

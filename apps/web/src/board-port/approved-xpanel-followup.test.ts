@@ -201,6 +201,75 @@ describe('approved follow-up component and native validation boundaries', () => 
         })!;
         expect(document.querySelector('[data-workspace-table="database-list-details"]')?.textContent).not.toContain('foreign_private');
     });
+    it('binds detail cards to the canonical surface token and gives radio labels a 44px semantic target', () => {
+        document.body.innerHTML = renderApprovedXpanelWorkspace({
+            route: '/domains', locale: 'ar', readOnly: true
+        })!;
+        const css = [
+            ...document.querySelectorAll('style')
+        ].map(node => node.textContent).join('');
+        expect(css).toMatch(/\.xp-panel-detail__card\{[^}]*background:var\(--xp-bg-surface\)/);
+        expect(css).not.toContain('var(--xp-surface,#fff)');
+        expect(css).toMatch(/\.xp-panel-detail__radio \.xp-check\{[^}]*min-block-size:44px/);
+        const label = document.querySelector('.xp-panel-detail__radio label')!;
+        expect(label.getAttribute('for')).toBe(label.querySelector('input')?.id);
+    });
+    it('isolates every populated technical metrics cell without wrapping paths or losing rows', () => {
+        const analytics = {
+            domain: domain.name, accountId: account.id, at: account.createdAt, totals: {
+                requests: 7, bytes: 1048576, uniqueVisitors: 3, cacheHitRatioPercent: 0, errorRatePercent: 0, avgRequestTimeMs: 1, p95RequestTimeMs: 1, avgUpstreamTimeMs: 1, status2xx: 5, status3xx: 0, status4xx: 0, status5xx: 2
+            }, series: [], topPaths: [
+                {
+                    key: '/folder/long-technical-file.php', requests: 4, bytes: 1048576, errors5xx: 1
+                }, {
+                    key: '/another/path', requests: 3, bytes: 2048, errors5xx: 1
+                }
+            ], topReferrers: [], topClientIps: []
+        };
+        document.body.innerHTML = renderApprovedXpanelWorkspace({
+            route: '/metrics/traffic', locale: 'ar', readOnly: false, account, domains: [
+                domain
+            ], websiteAnalytics: analytics
+        })!;
+        const top = document.querySelector('[data-workspace-table="top-pages"]')!;
+        expect(top.querySelectorAll('tbody tr')).toHaveLength(2);
+        expect(top.querySelectorAll('tbody td[data-technical-value="true"]')).toHaveLength(6);
+        const paths = [
+            ...top.querySelectorAll('tbody tr')
+        ].map(row => row.querySelector('td bdi')?.textContent);
+        expect(paths).toEqual(analytics.topPaths.map(row => row.key));
+        for (const node of document.querySelectorAll('td[data-technical-value="true"] bdi')) {
+            expect(node.getAttribute('dir')).toBe('ltr');
+            expect(node.classList.contains('xp-mono')).toBe(true);
+            expect(node.classList.contains('xp-chart-technical-value')).toBe(true);
+        }
+        expect(document.querySelectorAll('[data-workspace-table="error-paths"] tbody tr')).toHaveLength(2);
+        const css = [
+            ...document.querySelectorAll('style')
+        ].map(node => node.textContent).join('');
+        expect(css).toMatch(/\.xp-approved-panel \.xp-panel-detail__technical-cell\{[^}]*white-space:nowrap;overflow-wrap:normal;word-break:normal/);
+    });
+    it('keeps Arabic unread table states human and scopes resource fact containment to the measured native definition list', () => {
+        document.body.innerHTML = renderApprovedXpanelWorkspace({
+            route: '/metrics/traffic', locale: 'ar', readOnly: true
+        })!;
+        const cell = document.querySelector('[data-workspace-table="top-pages"] tbody td')!;
+        expect(cell.textContent).toBe('لم تُقرأ هذه السجلات.');
+        expect(cell.querySelector('bdi')).toBeNull();
+        expect(cell.querySelector('.xp-chart-technical-value')).toBeNull();
+        document.body.innerHTML = renderPanelSurface({
+            locale: 'ar', theme: 'dark', account, domains: [
+                domain
+            ], activeRoute: '/resources'
+        });
+        const css = [
+            ...document.querySelectorAll('style')
+        ].map(node => node.textContent).join('');
+        expect(css).toMatch(/\[data-approved-xpanel-workspace="\/resources"\] \[data-section="slice-resources"\] \.xp-board-dl\{display:grid;gap:16px;min-inline-size:0/);
+        expect(css).toMatch(/\[data-section="slice-resources"\] \.xp-fact\{flex-direction:column;align-items:stretch;gap:8px;padding:0;border:0/);
+        expect(css).toMatch(/\[data-section="slice-resources"\] \.xp-fact dd\{[^}]*min-inline-size:0;[^}]*text-align:start;overflow-x:auto/);
+        expect(document.querySelectorAll('[data-section="slice-resources"] .xp-board-dl .xp-fact')).toHaveLength(2);
+    });
     it('retains resource limit rows, applied-state columns and complete process headers without guessed values', () => {
         document.body.innerHTML = renderApprovedXpanelWorkspace({
             route: '/resources', locale: 'en', readOnly: true

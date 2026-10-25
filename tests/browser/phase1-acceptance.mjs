@@ -71,12 +71,20 @@ async function geometry(page) {
     }
     const targets = [...document.querySelectorAll('button,a.xp-btn,a.xp-nav-item,a[data-nav-route],a[data-theme-toggle],a[data-lang-switch],[data-tool] a[href],a[data-usage-link],summary,input:not([type="hidden"]),select,textarea')]
       .filter(visible).map(element => {
-        const rect = element.getBoundingClientRect()
-        return { tag: element.tagName, id: element.id || null, action: element.getAttribute('data-action'), width: rect.width, height: rect.height }
+        const compact = element instanceof HTMLInputElement && ['checkbox', 'radio'].includes(element.type)
+        const labels = compact ? [...element.labels ?? []].filter(candidate => candidate.control === element && visible(candidate) && getComputedStyle(candidate).pointerEvents !== 'none') : []
+        const meetsTarget = bounds => bounds.width >= 43.5 && bounds.height >= 43.5
+        const native = element.getBoundingClientRect()
+        const label = labels.find(candidate => meetsTarget(candidate.getBoundingClientRect())) ?? labels[0] ?? null
+        const targetElement = meetsTarget(native) ? element : label ?? element
+        const target = targetElement.getBoundingClientRect()
+        return { tag: element.tagName, id: element.id || null, action: element.getAttribute('data-action'), width: target.width, height: target.height,
+          type: element.getAttribute('type'), target_basis: targetElement === element ? 'native_control' : 'associated_label', associated_label: label ? label.control === element : null,
+          native_width: native.width, native_height: native.height, disabled: element.matches(':disabled'), read_only: Boolean(element.readOnly), aria_disabled: element.getAttribute('aria-disabled') === 'true' }
       })
     const fields = [...document.querySelectorAll('label[for],.xp-form-group > .xp-label')].filter(label => !label.classList.contains('xp-sr-only') && !/^rect\(\s*0px(?:,\s*0px){3}\s*\)$/.test(getComputedStyle(label).clip) && visible(label)).flatMap(label => {
       const value = label.htmlFor ? document.getElementById(label.htmlFor) : label.nextElementSibling
-      if (!value || !visible(value)) return []
+      if (!value || !visible(value) || (value instanceof HTMLInputElement && ['checkbox', 'radio'].includes(value.type))) return []
       const range = document.createRange(); range.selectNodeContents(label)
       const labelRect = range.getBoundingClientRect(), box = value.getBoundingClientRect(), style = getComputedStyle(value)
       const isControl = /^(INPUT|SELECT|TEXTAREA)$/.test(value.tagName)
@@ -130,6 +138,11 @@ function assertContext(href, state, base, { locale = state.locale, theme = state
   assert.equal(url.searchParams.get('density'), 'compact', 'Navigation density must be preserved')
   assert.equal(url.searchParams.get('accountId'), 'visual-account', 'Navigation account context must be preserved')
   return url
+}
+
+async function openUserMenu(page) {
+  const menu = page.locator('details[data-user-menu]').filter({ visible: true }).first()
+  if (await menu.count() && !await menu.evaluate(element => element.open)) await menu.locator(':scope > summary').click()
 }
 
 async function interactions(page, state, base, expect, observations, breadcrumb) {
@@ -235,6 +248,7 @@ async function interactions(page, state, base, expect, observations, breadcrumb)
   breadcrumb('language_theme_link_context')
   const language = page.locator('[data-lang-switch]:visible').first(), nextLocale = state.locale === 'ar' ? 'en' : 'ar'
   assert.equal(assertContext(await language.getAttribute('href'), state, base, { locale: nextLocale }).pathname, state.path)
+  await openUserMenu(page)
   const theme = page.locator('[data-theme-toggle]:visible').first()
   assert.equal(assertContext(await theme.getAttribute('href'), state, base, { theme: state.theme === 'dark' ? 'light' : 'dark' }).pathname, state.path)
   breadcrumb('language_reload_back')
@@ -306,7 +320,8 @@ export async function runPhase1Acceptance({ output } = {}) {
         const metrics = outcome.geometry
         assert.ok(metrics.scroll_width <= metrics.viewport + 1, 'Document must have no horizontal overflow')
         assert.equal(metrics.eastern_digits, false, 'Visible digits must be ASCII')
-        assert.equal(metrics.target_violations.length, 0, 'Primary controls/navigation/summaries must be at least 44px in each dimension')
+        assert.equal(metrics.target_violations.length, 0, 'Primary controls/navigation/summaries and compact associated-label targets must be at least 44px in each dimension')
+        assert.ok(metrics.targets.filter(target => target.target_basis === 'associated_label').every(target => target.associated_label === true), 'Compact hit-target measurements must use an actual HTML-associated label; disabled/read-only state is recorded separately')
         assert.ok(metrics.bdi_count + metrics.fields.filter(field => field.explicit_ltr).length > 0, 'Isolation must observe actual technical bdi tokens or explicit LTR form controls')
         assert.equal(metrics.bdi_all_ltr_isolated, true)
         assert.equal(await page.getByRole('heading', { level: 1 }).count(), 1, 'Each document must expose one accessible task heading')

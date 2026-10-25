@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest'
-import { renderUserMenu, surfaceContextHref } from './chrome.ts'
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it } from 'vitest'
+import axe from 'axe-core'
+import { renderUserMenu, roleLabel, surfaceContextHref } from './chrome.ts'
 import { renderSurfaceToolbar, renderSurfaceToolbarEnd } from './shell.ts'
 import { DESIGN_TOKENS_CSS } from './tokens.ts'
 
@@ -75,5 +77,45 @@ describe('shared workspace toolbar', () => {
     expect(DESIGN_TOKENS_CSS).toContain('.xp-board-section__body { padding: 0;')
     expect(DESIGN_TOKENS_CSS).not.toContain('.xp-page-search > :is(.xp-page-search__label, kbd)')
     expect(DESIGN_TOKENS_CSS).not.toContain('.xp-board-section__head { padding: 16px 20px;')
+  })
+})
+
+describe('user menu visible identity and accessible name', () => {
+  const textEngine = axe as typeof axe & { setup(root: Document): void; teardown(): void }
+  const visibleTextOf = axe.commons.text as typeof axe.commons.text & { visible(element: Element): string }
+  afterEach(() => { textEngine.teardown(); document.body.replaceChildren() })
+  const principals = [
+    { kind: 'root', id: 'private-root-principal', username: 'root' },
+    { kind: 'user', id: 'private-owner-principal', username: 'browserowner', accountId: 'private-owner-account' },
+  ] as const
+  const contexts = principals.flatMap(principal => (['en', 'ar'] as const).map(locale => ({ principal, locale })))
+
+  it.each(contexts)('includes the complete visible name and role for $principal.kind in $locale without changing scoped controls', ({ principal, locale }) => {
+    const root = principal.kind === 'root'
+    const role = roleLabel(principal.kind, locale)
+    const path = root ? '/whm/security/sign-in' : '/mail'
+    const html = renderUserMenu({
+      surface: root ? 'xwhm' : 'xmail', locale, theme: 'light', density: 'compact', path,
+      username: principal.username, role, signedIn: true,
+      ...(!root ? { accountId: principal.accountId } : {}),
+    })
+    document.body.innerHTML = html
+    textEngine.setup(document)
+    const summary = document.querySelector<HTMLElement>('[data-user-menu] > summary')!
+    const visibleText = visibleTextOf.visible(summary)
+    const accessibleName = axe.commons.text.accessibleText(summary)
+    const initial = principal.username.charAt(0).toLowerCase()
+    expect(visibleText).toBe(`${initial} ${principal.username} ${role}`)
+    expect(accessibleName).toContain(visibleText)
+    expect(accessibleName).toBe(`${locale === 'ar' ? 'قائمة المستخدم' : 'User menu for'} ${visibleText}`)
+    expect(summary.textContent).not.toContain(principal.id)
+    expect(document.querySelector('[data-action="logout"]')).not.toBeNull()
+    expect(document.querySelector('[data-theme-toggle="dark"]')).not.toBeNull()
+    const security = new URL(document.querySelector<HTMLAnchorElement>('[data-security-link]')!.getAttribute('href')!, 'https://panel.example.test')
+    expect(security.pathname).toBe(root ? '/whm/security/sign-in' : '/mail/settings/security')
+    expect(security.searchParams.get('lang')).toBe(locale)
+    expect(security.searchParams.get('theme')).toBe('light')
+    expect(security.searchParams.get('density')).toBe('compact')
+    expect(security.searchParams.get('accountId')).toBe(root ? null : principal.accountId)
   })
 })

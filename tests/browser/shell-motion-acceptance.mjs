@@ -64,6 +64,7 @@ try {
       assert.equal((await page.goto(fixture.baseUrl+'/whm/accounts/new?lang='+state.locale+'&theme='+state.theme+'&density=compact&accountId=visual-account',{waitUntil:'networkidle'})).status(),200)
       await page.evaluate(()=>document.fonts.ready)
       const original = await page.evaluate(()=>{document.querySelector('#new-acc-username').focus({preventScroll:true});scrollTo(0,Math.min(120,document.documentElement.scrollHeight-innerHeight));return {scroll:scrollY,body:document.body.style.overflow,root:document.documentElement.style.overflow,inert:document.querySelectorAll('[inert]').length}})
+      result.observations.original = original
       await page.screenshot({path:join(output,'screenshots',state.id+'-initial.png'),fullPage:true})
       for (const kind of state.width < 960 ? ['drawer','palette'] : ['palette']) {
         const first = await observe(page,kind,kind), normal = state.motion === 'no-preference'
@@ -74,9 +75,11 @@ try {
         const open = await observe(page,kind);result.observations[kind].open=open
         check(kind+'-open-geometry',open.document_width<=state.width+1&&open.x>=-1&&open.x+open.width<=state.width+1&&open.y>=-1&&open.y+open.height<=open.viewport_height+1&&Math.abs(open.scroll_y-original.scroll)<1,open)
         await page.screenshot({path:join(output,'screenshots',state.id+'-'+kind+'-open.png'),fullPage:true})
-        await page.mouse.move(open.x+open.width/2,Math.min(open.y+open.height/2,open.viewport_height-20));await page.mouse.wheel(0,160)
+        const wheelPoint = { x: open.x + open.width / 2, y: Math.min(open.y + open.height / 2, open.viewport_height - 20) }
+        await page.mouse.move(wheelPoint.x,wheelPoint.y);await page.mouse.wheel(0,160)
         await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
-        check(kind+'-real-wheel-keeps-document-locked',Math.abs((await observe(page,kind)).scroll_y-original.scroll)<1)
+        const afterWheel = await observe(page,kind)
+        check(kind+'-real-wheel-keeps-document-locked',Math.abs(afterWheel.scroll_y-original.scroll)<1,{ baseline_scroll:original.scroll,wheel_point:wheelPoint,delta:afterWheel.scroll_y-original.scroll,opened:open,after:afterWheel })
         const area = page.locator(kind==='drawer'?'[data-xp-sidebar]':'[data-xp-cmdk]')
         const focusable = area.locator('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex="0"]').filter({visible:true})
         await focusable.last().focus();await page.keyboard.press('Tab');check(kind+'-keyboard-trap',await area.evaluate(e=>e.contains(document.activeElement)))

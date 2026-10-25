@@ -201,7 +201,40 @@ async function keyboardGate(page) {
 }
 
 async function composerGate(page, state) {
-  assert.equal(await page.locator('form').count(), 0, 'The composer has no native implicit submission path')
+  const nativeBoundary = await page.evaluate(() => {
+    const composer = document.querySelector('[data-compose-form]'), send = composer?.querySelector('[data-mail-send="true"]')
+    return {
+      forms: [...document.forms].map(form => ({
+        role: form.getAttribute('role'), action: form.getAttribute('action'), method: form.getAttribute('method'),
+        fields: [...form.elements].map(control => ({ tag: control.tagName, name: control.getAttribute('name'), type: control.type })),
+        locale: form.querySelector('[name="lang"]')?.value, theme: form.querySelector('[name="theme"]')?.value,
+        contains_compose: Boolean(form.querySelector('[data-compose-form], [data-mail-send], [id^="compose-"]')),
+      })),
+      action_owners: [...document.querySelectorAll('[action]')].map(element => element.tagName),
+      form_overrides: document.querySelectorAll('[form], [formaction], [formmethod], [formenctype], [formtarget], [onsubmit]').length,
+      composer_tag: composer?.tagName, composer_role: composer?.getAttribute('role'),
+      composer_form: Boolean(composer?.closest('form')), nested_composer_form: Boolean(composer?.querySelector('form')),
+      send_form: Boolean(send?.form),
+      submit_controls: [...document.querySelectorAll('button, input')].filter(control => ['submit', 'image'].includes(control.type)).length,
+    }
+  })
+  assert.deepEqual(nativeBoundary.forms, [{
+    role: 'search', action: '/mail/inbox', method: 'get',
+    fields: [
+      { tag: 'INPUT', name: 'lang', type: 'hidden' },
+      { tag: 'INPUT', name: 'theme', type: 'hidden' },
+      { tag: 'INPUT', name: 'q', type: 'search' },
+    ],
+    locale: state.locale, theme: state.theme, contains_compose: false,
+  }], 'The sole native form is the exact local read-only GET inbox search')
+  assert.deepEqual(nativeBoundary.action_owners, ['FORM'], 'Only that search form owns a native action')
+  assert.equal(nativeBoundary.form_overrides, 0, 'Controls cannot override or associate with a native form')
+  assert.equal(nativeBoundary.composer_tag, 'DIV')
+  assert.equal(nativeBoundary.composer_role, 'group')
+  assert.equal(nativeBoundary.composer_form, false, 'Compose fields have no native submission ancestor')
+  assert.equal(nativeBoundary.nested_composer_form, false, 'Compose contains no nested native form')
+  assert.equal(nativeBoundary.send_form, false, 'Send has no native form owner')
+  assert.equal(nativeBoundary.submit_controls, 0, 'There is no native submit control')
   const composer = page.locator('[data-compose-form]'), send = composer.locator('[data-mail-send="true"]')
   assert.equal(await composer.getAttribute('data-mail-send-availability'), 'available')
   assert.equal(await send.count(), 1)
@@ -231,7 +264,7 @@ async function composerGate(page, state) {
   assert.equal(await page.locator('#compose-subject').inputValue(), 'Synthetic unsent input')
   assert.equal(await page.locator('#compose-body').innerText(), 'Synthetic preview. This must never send.')
   assert.equal(new URL(page.url()).pathname, '/mail/compose')
-  return { explicit_send_available: true, send_clicked: false, native_form: false, configured_sender_option: mailbox, arabic, english, input_preserved_after_enter: true }
+  return { explicit_send_available: true, send_clicked: false, native_form: false, search_form: nativeBoundary.forms[0], configured_sender_option: mailbox, arabic, english, input_preserved_after_enter: true }
 }
 
 async function mobileGate(page, state) {
@@ -372,7 +405,7 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
     fixture: { synthetic: true, loopback_only: true, read_only: true, authentication: false, smtp_imap: false, service_qualification: false },
     tests: { total: outcomes.length, passed: outcomes.filter(outcome => outcome.status === 'passed').length, failed: outcomes.filter(outcome => outcome.status === 'failed').length },
     source: { before_sha256: before.sha256, after_sha256: after.sha256, files: before.files.length, drift },
-    limits: ['Synthetic catalog and mailbox data validate the rendered layout only; they do not authenticate a mailbox or prove SMTP/IMAP, message selection, drafts, attachments or delivery.', 'The current composer uses an explicit send button and no native form. This suite never clicks Send; Enter must not submit, and no mailbox authority or delivery qualification is implied.', 'Font, keyboard, target and selected geometry checks are scoped accessibility evidence, not complete WCAG certification.', 'Viewport emulation and screenshots do not certify physical devices, every message shape, external design parity or production performance.'],
+    limits: ['Synthetic catalog and mailbox data validate the rendered layout only; they do not authenticate a mailbox or prove SMTP/IMAP, message selection, drafts, attachments or delivery.', 'The current composer uses an explicit send button and no native sending form; its sole native form is the exact read-only GET inbox search. This suite never clicks Send; Enter in compose must not submit, and no mailbox authority or delivery qualification is implied.', 'Font, keyboard, target and selected geometry checks are scoped accessibility evidence, not complete WCAG certification.', 'Viewport emulation and screenshots do not certify physical devices, every message shape, external design parity or production performance.'],
     probe_controls: probeControls ?? null,
     outcomes,
   }

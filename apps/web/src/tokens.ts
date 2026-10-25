@@ -711,6 +711,8 @@ export const DESIGN_TOKENS_CSS = /* css */ `
   --xp-space-card: 24px;
   --xp-space-group: 24px;
   --xp-space-section: 32px;
+  --xp-control-content-inset: calc(var(--xp-space-md) + 1px);
+  --xp-login-control-size: 48px;
 
   /* Layout dimensions */
   --xp-sidebar-width: 248px;
@@ -1883,9 +1885,9 @@ html[data-theme="dark"] .xp-board-note { border-color: #3a4d6b; background: #1d2
   overflow-wrap: anywhere;
 }
 .xp-login-shell[data-login-audience] .xp-form { gap: var(--xp-space-field); }
-.xp-login-shell .xp-field > label.xp-label { padding-inline-start: calc(var(--xp-space-md) + 1px); }
-.xp-login-shell[data-login-audience] .xp-input,
-.xp-login-shell[data-login-audience] button[type="submit"] {
+.xp-login-shell .xp-field > label.xp-label { padding-inline-start: var(--xp-control-content-inset); }
+.xp-login-shell .xp-input,
+.xp-login-shell button[type="submit"] {
   min-block-size: var(--xp-login-control-size);
 }
 .xp-login-shell[data-login-audience] .xp-input { font-size: 16px; }
@@ -2876,13 +2878,35 @@ html[dir="rtl"] .xp-meter__fill {
   overflow-anchor: none;
   scroll-behavior: auto;
 }
+.xp-modal-backdrop[data-xp-cmdk] {
+  --xp-cmdk-viewport-inset: 10dvh;
+  padding-block-start: var(--xp-cmdk-viewport-inset);
+  padding-block-end: var(--xp-space-field);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+}
 .xp-cmdk-dialog {
   inline-size: min(640px, 92vw);
+  max-block-size: calc(100dvh - var(--xp-cmdk-viewport-inset, 10dvh) - var(--xp-space-field));
+  min-block-size: 0;
   background-color: var(--xp-bg-surface);
   border: 1px solid var(--xp-border-strong);
   border-radius: var(--xp-radius-lg);
   box-shadow: var(--xp-shadow-lg);
-  overflow: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+}
+.xp-cmdk-dialog > * { flex-shrink: 0; }
+.xp-cmdk-dialog > .xp-cmdk-results {
+  flex: 1 1 auto;
+  min-block-size: var(--xp-hit-target);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+@media (max-width: 959px), (max-height: 700px) {
+  .xp-modal-backdrop[data-xp-cmdk] { --xp-cmdk-viewport-inset: var(--xp-space-field); }
 }
 
 .xp-drawer {

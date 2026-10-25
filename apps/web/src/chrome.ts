@@ -150,7 +150,7 @@ export function renderUserMenu(model: UserMenuModel): string {
     ? `<button type="button" class="xp-btn xp-menu-signout" data-action="logout">${escapeHtml(isAr ? 'تسجيل الخروج' : 'Sign out')}</button>`
     : `<a class="xp-btn xp-btn--primary" href="${escapeHtml(surfaceContextHref({ ...model, path: '/login' }, {}))}">${escapeHtml(isAr ? 'تسجيل الدخول' : 'Sign in')}</a>`
   return `<details class="xp-user-menu" data-user-menu>
-    <summary class="xp-user-menu__summary" aria-label="${escapeHtml(isAr ? `قائمة المستخدم ${summaryName}` : `User menu for ${summaryName}`)}">
+    <summary class="xp-user-menu__summary" aria-label="${escapeHtml(`${isAr ? 'قائمة المستخدم' : 'User menu for'} ${initial} ${summaryName}${role ? ` ${role}` : ''}`)}">
       <span class="xp-user-menu__avatar" aria-hidden="true">${escapeHtml(initial)}</span>
       <span class="xp-user-menu__identity">
         <span class="xp-user-menu__name"${model.username ? ' dir="ltr"' : ''}>${model.username ? `<bdi dir="ltr">${escapeHtml(summaryName)}</bdi>` : escapeHtml(summaryName)}</span>

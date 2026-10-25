@@ -72,6 +72,19 @@ describe('detailed reseller administration', () => {
     expect(html).not.toContain('aria-valuenow="0"')
   })
 
+  it.each(['en', 'ar'] as const)('labels stored reseller capacity in MiB without changing values or inventing use in %s', locale => {
+    const html = renderApprovedWhmResellers({ ...base(), locale, accounts: undefined, plans: undefined, resellers: [reseller, { ...other, totalDiskMb: 'unlimited', totalBandwidthMb: 'unlimited' }] })
+    const visible = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+    expect(visible).toContain(locale === 'ar' ? 'إجمالي القرص (MiB)' : 'Total disk (MiB)')
+    expect(visible).toContain(locale === 'ar' ? 'إجمالي النقل الشهري (MiB)' : 'Total bandwidth per month (MiB)')
+    expect(html).toMatch(/name="totalDiskMb"[^>]*value="8192"/)
+    expect(html).toMatch(/name="totalBandwidthMb"[^>]*value="32768"/)
+    expect(visible).toContain(locale === 'ar' ? 'غير متاح / 8,192 MiB' : 'Unavailable / 8,192 MiB')
+    expect(visible).toContain(locale === 'ar' ? 'غير متاح / 32,768 MiB' : 'Unavailable / 32,768 MiB')
+    expect(visible).toContain(locale === 'ar' ? 'غير متاح / غير محدود MiB' : 'Unavailable / Unlimited MiB')
+    expect(html).not.toMatch(/role="meter"|xp-meter__fill|Total disk \(MB\)|Total bandwidth per month \(MB\)/)
+  })
+
   it('retains the full read-only layout without forwarding supplied data or native actions', () => {
     const html = renderApprovedWhmResellers({ ...base(), capabilityUnavailable: true }, '<form data-private-native="true"></form>')
     expect(html).toContain('data-workspace-mode="read-only"')

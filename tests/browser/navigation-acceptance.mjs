@@ -393,6 +393,11 @@ async function usableFocus(page) {
   })
 }
 
+async function openUserMenu(page) {
+  const menu = page.locator('details[data-user-menu]').filter({ visible: true }).first()
+  if (await menu.count() && !await menu.evaluate(element => element.open)) await menu.locator(':scope > summary').click()
+}
+
 async function openToolbar(page) {
   const toolbar = page.locator('[data-xp-toolbar-options]')
   if (!await toolbar.count()) return
@@ -512,6 +517,7 @@ async function navigate(page, state, expect, observations) {
   await expect(page.locator(state.target)).toBeVisible()
   assertContext(page.url(), state, { path: state.to })
   await openToolbar(page)
+  await openUserMenu(page)
   const theme = page.locator('[data-theme-toggle="dark"]:visible').first()
   await theme.click()
   await page.waitForURL(url => url.searchParams.get('theme') === 'dark')
@@ -864,7 +870,7 @@ async function paletteScroll(page, state, expect, observations, capture) {
     const title = option.querySelector('strong'), route = option.querySelector('code bdi')
     const ink = element => { const range = document.createRange(); range.selectNodeContents(element); const rect = range.getBoundingClientRect(); return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height } }
     const titleInk = ink(title), routeInk = ink(route), rtl = document.documentElement.dir === 'rtl'
-    return { title: title.textContent.trim(), route: route.textContent.trim(), title_ink: titleInk, route_ink: routeInk, logical_edge_delta: rtl ? Math.abs(titleInk.right - routeInk.right) : Math.abs(titleInk.left - routeInk.left), route_below_title: routeInk.top >= titleInk.bottom, same_line: routeInk.top < titleInk.bottom && titleInk.top < routeInk.bottom, route_direction: route.getAttribute('dir'), wrapper_direction: getComputedStyle(route.parentElement).direction }
+    return { kind: option.dataset.cmdkKind, key: option.dataset.cmdkKey, destination: option.dataset.cmdkItem, href: option.getAttribute('href'), persistable: option.dataset.cmdkPersistable, active_scopes: [...document.querySelectorAll('[data-cmdk-scope][aria-pressed="true"]')].map(button => button.dataset.cmdkScope), title: title.textContent.trim(), route: route.textContent.trim(), title_ink: titleInk, route_ink: routeInk, logical_edge_delta: rtl ? Math.abs(titleInk.right - routeInk.right) : Math.abs(titleInk.left - routeInk.left), route_below_title: routeInk.top >= titleInk.bottom, same_line: routeInk.top < titleInk.bottom && titleInk.top < routeInk.bottom, route_direction: route.getAttribute('dir'), wrapper_direction: getComputedStyle(route.parentElement).direction }
   })
   const screenshot = await capture('open-palette')
   await page.keyboard.press('Escape')
@@ -874,7 +880,24 @@ async function paletteScroll(page, state, expect, observations, capture) {
   observations.push({ check: 'palette-internal-scroll-and-focus-return', result_count: count, scroll_before: before, initial, final, screenshot, escape_return: 'main-content', route_alignment: routeAlignment, before_diagnostics: beforeDiagnostics, after_diagnostics: afterDiagnostics })
   assert.ok(Math.abs(afterDiagnostics.scroll_y - before) <= 1, `Closing the palette must preserve the background document position; ${JSON.stringify({ before: beforeDiagnostics, open: final, after: afterDiagnostics, delta: afterDiagnostics.scroll_y - before })}`)
 
-  assert.equal(routeAlignment.route, '/whm/preferences', 'The measured metadata belongs to the actual selected navigation destination')
+  assert.ok(['account', 'domain'].includes(routeAlignment.kind), 'ArrowUp must select the final visible authorized record, not assume the final static page')
+  assert.deepEqual(routeAlignment.active_scopes, ['all'], 'The final visible record belongs to the current All search scope')
+  assert.equal(routeAlignment.persistable, 'false', 'Record destinations must not enter static-route history or favorites')
+  const recordDestination = new URL(routeAlignment.href, page.url())
+  assert.equal(recordDestination.pathname, routeAlignment.destination)
+  assertContext(recordDestination.href, state, { path: routeAlignment.destination })
+  if (routeAlignment.kind === 'account') {
+    assert.equal(routeAlignment.key, 'account:preview')
+    assert.equal(routeAlignment.title, 'preview')
+    assert.equal(routeAlignment.route, 'preview.example.test', 'The account result shows its actual public primary domain')
+    assert.equal(recordDestination.pathname, '/whm/accounts')
+  } else {
+    assert.equal(routeAlignment.key, 'domain:preview.example.test:preview')
+    assert.equal(routeAlignment.title, 'preview.example.test')
+    assert.equal(routeAlignment.route, 'preview', 'The domain result shows its actual public owner username')
+    assert.ok(['/whm/domains', '/whm/dns'].includes(recordDestination.pathname), 'The domain result must use an authorized domain destination')
+    assert.equal(recordDestination.searchParams.get('domain'), 'preview.example.test')
+  }
   assert.equal(routeAlignment.route_direction, 'ltr', 'Technical route content stays isolated LTR')
   assert.ok(routeAlignment.title_ink.width > 0 && routeAlignment.route_ink.width > 0, 'Measure actual nonempty title and route ink')
   if (state.width < 960) {
@@ -912,21 +935,27 @@ async function paletteAlias(page, state, expect, observations) {
     const input = document.querySelector('[data-cmdk-search]')
     const list = document.querySelector('[data-cmdk-results]')
     const option = list.querySelector('[aria-selected="true"]')
+    const footer = dialog.querySelector(':scope > .xp-cmdk-footer')
     const bounds = element => element.getBoundingClientRect()
-    const card = bounds(dialog), h = bounds(title), c = bounds(close), q = bounds(input), result = bounds(option), l = bounds(list)
+    const card = bounds(dialog), h = bounds(title), c = bounds(close), q = bounds(input), result = bounds(option), footerBounds = bounds(footer)
+    const groups = [...dialog.children].filter(element => element.checkVisibility({ checkVisibilityCSS: true }) && !element.hidden && bounds(element).width > 0 && bounds(element).height > 0)
+    const groupName = element => element.classList.contains('xp-cmdk-header') ? 'header' : element.classList.contains('xp-cmdk-search') ? 'query' : element.classList.contains('xp-cmdk-scopes') ? 'scopes' : element.hasAttribute('data-cmdk-history') ? 'history' : element.hasAttribute('data-cmdk-results') ? 'results' : element.hasAttribute('data-cmdk-empty') ? 'empty' : element.classList.contains('xp-cmdk-footer') ? 'footer' : 'unexpected'
+    const utilityControls = [input, close, option, ...dialog.querySelectorAll('[data-cmdk-scope]')]
     const border = getComputedStyle(dialog)
     const inner = { top: card.top + parseFloat(border.borderTopWidth), right: card.right - parseFloat(border.borderRightWidth), bottom: card.bottom - parseFloat(border.borderBottomWidth), left: card.left + parseFloat(border.borderLeftWidth) }
     const ink = document.createRange(); ink.selectNodeContents(title)
     const heading = ink.getBoundingClientRect()
     const rtl = document.documentElement.dir === 'rtl'
     return {
-      panel_padding: { top: Math.min(h.top, c.top) - inner.top, right: inner.right - q.right, bottom: inner.bottom - result.bottom, left: q.left - inner.left },
+      panel_padding: { top: Math.min(h.top, c.top) - inner.top, right: inner.right - q.right, bottom: inner.bottom - footerBounds.bottom, left: q.left - inner.left },
       heading_query_group_gap: q.top - Math.max(h.bottom, c.bottom),
-      query_results_group_gap: l.top - q.bottom,
+      semantic_groups: groups.map(groupName),
+      sibling_group_gaps: groups.slice(1).map((element, index) => ({ from: groupName(groups[index]), to: groupName(element), gap: bounds(element).top - bounds(groups[index]).bottom })),
+      footer_is_last_content: groups.at(-1) === footer,
       heading_control_edge_delta: rtl ? Math.abs(heading.right - q.right) : Math.abs(heading.left - q.left),
-      controls: [q, c, result].map((rect, index) => {
-        const element = [input, close, option][index], style = getComputedStyle(element)
-        return { role: ['input', 'close', 'option'][index], width: rect.width, height: rect.height, rect: { x: rect.x, y: rect.y, top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left }, computed: { height: style.height, min_height: style.minHeight, box_sizing: style.boxSizing, transform: style.transform } }
+      controls: utilityControls.map((element, index) => {
+        const rect = bounds(element), style = getComputedStyle(element)
+        return { role: ['input', 'close', 'option'][index] ?? 'scope:' + element.dataset.cmdkScope, width: rect.width, height: rect.height, rect: { x: rect.x, y: rect.y, top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left }, computed: { height: style.height, min_height: style.minHeight, box_sizing: style.boxSizing, transform: style.transform } }
       }),
       dialog_transform: border.transform,
       animations: document.querySelector('[data-xp-cmdk]').getAnimations({ subtree: true }).map(animation => {
@@ -951,7 +980,12 @@ async function paletteAlias(page, state, expect, observations) {
   const expectedPadding = state.width < 960 ? 16 : 24
   for (const [edge, value] of Object.entries(geometry.panel_padding)) assert.ok(Math.abs(value - expectedPadding) <= 1, `Actual palette content ${edge} padding must be ${expectedPadding}px; got ${value}`)
   assert.ok(Math.abs(geometry.heading_query_group_gap - 24) <= 1, 'The header and query are sibling groups with 24px spacing')
-  assert.ok(Math.abs(geometry.query_results_group_gap - 24) <= 1, 'The query and result list are sibling groups with 24px spacing')
+  assert.equal(geometry.footer_is_last_content, true, 'Actual card padding must end after the retained footer')
+  assert.deepEqual(geometry.semantic_groups.filter(group => ['header', 'query', 'scopes', 'results', 'footer'].includes(group)), ['header', 'query', 'scopes', 'results', 'footer'], 'The current header, query, scope tabs, results and footer remain present in semantic order')
+  assert.ok(geometry.semantic_groups.every(group => ['header', 'query', 'scopes', 'history', 'results', 'footer'].includes(group)), 'Visible history is measured as its own group and no current group is hidden to pass spacing')
+  assert.ok(geometry.sibling_group_gaps.length >= 4)
+  for (const gap of geometry.sibling_group_gaps) assert.ok(Math.abs(gap.gap - 24) <= 1, 'Actual palette sibling groups ' + gap.from + ' to ' + gap.to + ' must be 24px apart; got ' + gap.gap)
+  assert.deepEqual(geometry.controls.filter(control => control.role.startsWith('scope:')).map(control => control.role), ['scope:all', 'scope:action', 'scope:account', 'scope:domain'], 'All four current search scopes retain measured controls')
   assert.ok(geometry.heading_control_edge_delta <= 1, 'The visible heading and query control share the logical content edge')
   for (const control of geometry.controls) assert.ok(control.width >= 44 && control.height >= 44, `Actual palette controls retain 44px targets; ${JSON.stringify({ control, all_controls: geometry.controls, dialog_transform: geometry.dialog_transform, animations: geometry.animations })}`)
   assert.equal(geometry.technical_route_direction, 'ltr')
@@ -1037,9 +1071,10 @@ async function contextualShortcuts(page, state, expect, observations) {
 }
 
 export async function measureAuditGeometry(page) {
-  return page.evaluate(() => {
+  const metrics = await page.evaluate(() => {
     const section = document.querySelector('[data-section="audit-log"]')
-    const rect = element => element.getBoundingClientRect()
+    const rect = element => { if (!element) throw new Error('A required audit geometry element is missing'); return element.getBoundingClientRect() }
+    const visible = element => { const r = rect(element); return r.width > 0 && r.height > 0 && getComputedStyle(element).visibility !== 'hidden' && !element.closest('[hidden]') }
     const glyph = element => {
       if (!element) return null
       const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), boxes = []
@@ -1051,22 +1086,55 @@ export async function measureAuditGeometry(page) {
       }
       return boxes.length ? { left: Math.min(...boxes.map(box => box.left)), right: Math.max(...boxes.map(box => box.right)), top: Math.min(...boxes.map(box => box.top)), bottom: Math.max(...boxes.map(box => box.bottom)) } : null
     }
+    const between = (first, second) => {
+      const a = rect(first), b = rect(second)
+      return Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top) + 1 ? Math.max(b.left - a.right, a.left - b.right) : b.top - a.bottom
+    }
+    const siblingGaps = nodes => {
+      const rows = []
+      for (const node of nodes) {
+        const top = rect(node).top, row = rows.find(row => Math.abs(row.top - top) <= 1)
+        if (row) row.nodes.push(node)
+        else rows.push({ top, nodes: [node] })
+      }
+      return rows.flatMap((row, index) => [
+        ...row.nodes.slice(1).map((node, previous) => between(row.nodes[previous], node)),
+        ...(index ? [Math.min(...row.nodes.map(node => rect(node).top)) - Math.max(...rows[index - 1].nodes.map(node => rect(node).bottom))] : []),
+      ])
+    }
     const rtl = document.dir === 'rtl', card = rect(section), style = getComputedStyle(section)
-    const header = rect(section.querySelector('.xp-card__header')), formElement = section.querySelector('[data-audit-filters]')
-    const form = rect(formElement), table = rect(section.querySelector('.xp-table-wrap'))
+    const header = rect(section.querySelector(':scope > .xp-card__header')), formElement = section.querySelector('[data-audit-filters]')
+    const form = rect(formElement), tableElement = section.querySelector(':scope > .xp-table-wrap'), table = rect(tableElement)
+    const supplement = section.querySelector(':scope > [data-audit-supplement]')
+    const content = [...section.children].filter(visible), lastContent = rect(content.at(-1))
     const fields = [...formElement.querySelectorAll('.xp-field')]
+    const controlFor = field => {
+      const controls = field.querySelectorAll('input:not([type="hidden"]),select,textarea')
+      if (controls.length !== 1) throw new Error('Each audit field must expose exactly one real input or select')
+      return controls[0]
+    }
     const submit = rect(formElement.querySelector('button[type="submit"]'))
+    const fieldParents = [...new Set(fields.map(field => field.parentElement))]
+    const fieldGaps = fieldParents.flatMap(parent => siblingGaps(fields.filter(field => field.parentElement === parent)))
+    for (const parent of fieldParents.filter(parent => parent !== formElement)) {
+      const previous = [...formElement.children].filter(visible).filter(child => child.compareDocumentPosition(parent) & Node.DOCUMENT_POSITION_FOLLOWING).at(-1)
+      if (previous) fieldGaps.push(between(previous, parent))
+    }
+    const actions = [...formElement.querySelectorAll('a[data-audit-clear],button[type="submit"]')]
+    const majorSupplementGaps = supplement ? [
+      ...siblingGaps([...supplement.children].filter(visible)),
+      ...[...supplement.querySelectorAll(':scope > .xp-whm-detail-column')].flatMap(column => siblingGaps([...column.children].filter(visible))),
+    ] : []
     const border = { top: parseFloat(style.borderTopWidth), right: parseFloat(style.borderRightWidth), bottom: parseFloat(style.borderBottomWidth), left: parseFloat(style.borderLeftWidth) }
     const pagerGroups = [...section.querySelectorAll(':scope > [data-audit-pager],:scope > .xp-btn-group')]
     const pagerLinks = pagerGroups.flatMap(group => [...group.querySelectorAll('a[href]')])
-    const values = [...section.querySelectorAll('tbody .xp-audit-value')]
+    const values = [...tableElement.querySelectorAll('tbody .xp-audit-value')]
     const mobileFields = values.map(value => {
       const label = value.parentElement.querySelector('.xp-audit-mobile-label'), badge = value.querySelector('.xp-badge')
       const labelGlyph = glyph(label), valueGlyph = badge ? rect(badge) : glyph(value)
       return { label_visible: getComputedStyle(label).display !== 'none', value_nonempty: !!value.textContent.trim(), value_kind: badge ? 'painted_badge_box' : 'actual_text_node_range', gap: rect(value).top - rect(label).bottom, edge_delta: labelGlyph && valueGlyph ? Math.abs(rtl ? labelGlyph.right - valueGlyph.right : labelGlyph.left - valueGlyph.left) : null, value_below_label: !labelGlyph || !valueGlyph || valueGlyph.top >= labelGlyph.bottom + 7 }
     })
-    const headers = [...section.querySelectorAll('thead th')]
-    const rows = [...section.querySelectorAll('tbody tr')]
+    const headers = [...tableElement.querySelectorAll('thead th')], rows = [...tableElement.querySelectorAll('tbody tr')]
     const desktopColumns = headers.map((th, index) => {
       const value = rows.map(row => row.cells[index]?.querySelector('.xp-audit-value')).find(element => element?.textContent.trim())
       const badge = value?.querySelector('.xp-badge'), labelGlyph = glyph(th), content = badge ? rect(badge) : glyph(value)
@@ -1080,13 +1148,24 @@ export async function measureAuditGeometry(page) {
     })
     return {
       viewport: innerWidth, direction: document.dir, document_width: document.documentElement.scrollWidth,
-      padding: { top: header.top - card.top - border.top, bottom_from_table: card.bottom - table.bottom - border.bottom, inline_start: rtl ? card.right - border.right - form.right : form.left - card.left - border.left, inline_end: rtl ? form.left - card.left - border.left : card.right - border.right - form.right },
+      padding: { top: header.top - card.top - border.top, bottom: card.bottom - lastContent.bottom - border.bottom, inline_start: rtl ? card.right - border.right - form.right : form.left - card.left - border.left, inline_end: rtl ? form.left - card.left - border.left : card.right - border.right - form.right },
+      content_last_kind: content.at(-1).hasAttribute('data-audit-supplement') ? 'audit-supplement' : content.at(-1).tagName,
       title_to_form: form.top - header.bottom, form_to_table: table.top - form.bottom,
-      label_to_input: fields.map(field => rect(field.querySelector('input')).top - rect(field.querySelector('label')).bottom),
-      field_siblings: fields.slice(1).map((field, index) => rect(field).top - rect(fields[index]).bottom),
-      label_input_edges: fields.map(field => { const label = glyph(field.querySelector('label')), input = rect(field.querySelector('input')); return label ? Math.abs(rtl ? label.right - input.right : label.left - input.left) : null }),
-      last_field_to_submit: fields.length ? submit.top - rect(fields.at(-1)).bottom : null,
-      controls: [...formElement.querySelectorAll('input,button[type="submit"]')].map(control => ({ id: control.id || 'filter-submit', width: rect(control).width, height: rect(control).height })),
+      table_to_supplement: supplement ? rect(supplement).top - table.bottom : null, supplement_major_gaps: majorSupplementGaps,
+      field_ids: fields.map(field => controlFor(field).id),
+      label_to_input: fields.map(field => rect(controlFor(field)).top - rect(field.querySelector('label')).bottom),
+      field_siblings: fieldGaps,
+      label_control_outer_edges: fields.map(field => { const label = rect(field.querySelector('label')), control = rect(controlFor(field)); return Math.abs(rtl ? label.right - control.right : label.left - control.left) }),
+      select_alignment: fields.flatMap(field => {
+        const control = controlFor(field)
+        if (control.tagName !== 'SELECT') return []
+        const label = glyph(field.querySelector('label')), box = rect(control)
+        if (!label) throw new Error('The actual select label text must be visible')
+        return [{ id: control.id, label_edge: rtl ? label.right : label.left, selected_text: control.selectedOptions[0]?.textContent.trim() ?? '', control_visible: visible(control), control_rect: { left: box.left, right: box.right, top: box.top, bottom: box.bottom }, edge_basis: 'pending-native-select-text-range' }]
+      }),
+      label_input_edges: fields.map(field => { const label = glyph(field.querySelector('label')), control = rect(controlFor(field)); return label ? Math.abs(rtl ? label.right - control.right : label.left - control.left) : null }),
+      last_field_to_submit: fields.length ? submit.top - rect(fields.at(-1)).bottom : null, action_siblings: siblingGaps(actions),
+      controls: [...formElement.querySelectorAll('input:not([type="hidden"]),select,button[type="submit"],a[data-audit-clear]')].map(control => ({ id: control.id || (control.hasAttribute('data-audit-clear') ? 'filter-clear' : 'filter-submit'), tag: control.tagName, width: rect(control).width, height: rect(control).height })),
       pager_groups: pagerGroups.length, pager_links: pagerLinks.length, empty_pager_groups: pagerGroups.filter(group => !group.querySelector('a[href]')).length,
       record_sibling_gaps: rows.flatMap(row => [...row.cells].slice(1).map((cell, index) => rect(cell).top - rect(row.cells[index]).bottom)),
       record_padding: rows.filter(row => row.querySelector('.xp-audit-value')).map(row => {
@@ -1096,6 +1175,33 @@ export async function measureAuditGeometry(page) {
       mobile_fields: mobileFields, desktop_columns: desktopColumns, technical_columns: technicalColumns,
     }
   })
+  if (metrics.select_alignment.length) {
+    const cdp = await page.context().newCDPSession(page)
+    try {
+      const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true })
+      const find = (node, id) => node.nodeName === 'SELECT' && node.attributes?.some((value, index, attrs) => value === 'id' && attrs[index + 1] === id) ? node : [...(node.children ?? []), ...(node.shadowRoots ?? [])].map(child => find(child, id)).find(Boolean)
+      for (const value of metrics.select_alignment) {
+        assert.equal(value.control_visible, true, 'The actual audit select must be visible')
+        assert.ok(value.selected_text.length > 0, 'The actual selected audit option must have visible text')
+        const select = find(root, value.id)
+        const inner = select?.shadowRoots?.flatMap(node => node.children ?? []).find(node => node.attributes?.includes('-internal-select-inner-element'))
+        assert.ok(inner, 'The actual native audit SELECT value element must be observable')
+        const { object } = await cdp.send('DOM.resolveNode', { backendNodeId: inner.backendNodeId })
+        const measured = await cdp.send('Runtime.callFunctionOn', { objectId: object.objectId, functionDeclaration: 'function () { const range = document.createRange(); range.selectNodeContents(this); const box = range.getBoundingClientRect(); return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height, text: this.textContent } }', returnByValue: true })
+        assert.ok(!measured.exceptionDetails && measured.result.value?.width > 0 && measured.result.value.height > 0, 'Measure the actual nonempty native selected text Range, never a mirrored field')
+        value.rendered_value = measured.result.value
+        assert.equal(value.rendered_value.text.trim(), value.selected_text, 'The measured native text must match the actual selected option')
+        assert.ok(value.rendered_value.left >= value.control_rect.left - 1 && value.rendered_value.right <= value.control_rect.right + 1 && value.rendered_value.top >= value.control_rect.top - 1 && value.rendered_value.bottom <= value.control_rect.bottom + 1, 'The selected value must be painted inside its visible select control')
+        value.value_edge = metrics.direction === 'rtl' ? value.rendered_value.right : value.rendered_value.left
+        value.edge_basis = 'actual-native-select-text-range'
+        value.edge_delta = Math.abs(value.label_edge - value.value_edge)
+        const index = metrics.field_ids.indexOf(value.id)
+        assert.ok(index >= 0)
+        metrics.label_input_edges[index] = value.edge_delta
+      }
+    } finally { await cdp.detach() }
+  }
+  return metrics
 }
 
 export function assertAuditGeometry(metrics, state) {
@@ -1104,17 +1210,32 @@ export function assertAuditGeometry(metrics, state) {
   assert.ok(metrics.document_width <= metrics.viewport + 1, 'Audit geometry must fit without horizontal overflow')
   assert.equal(metrics.title_to_form, 24, 'Audit heading and filter form must have a 24px group gap')
   assert.equal(metrics.form_to_table, 24, 'Audit filters and table must have a 24px group gap')
-  assert.equal(metrics.label_to_input.length, 3)
-  assert.deepEqual(metrics.label_to_input, [8, 8, 8], 'Each real filter input must sit 8px below its label')
-  assert.deepEqual(metrics.field_siblings, [16, 16], 'Adjacent filter fields must have 16px gaps')
-  assert.equal(metrics.last_field_to_submit, 16, 'The submit action must remain 16px after the last field')
-  assert.deepEqual(metrics.label_input_edges, [0, 0, 0], 'Filter controls must share their labels logical alignment edge')
-  assert.equal(metrics.controls.length, 4)
-  for (const control of metrics.controls) assert.ok(control.width >= 44 && control.height >= 44, `Audit control ${control.id} must retain a 44px target`)
+  assert.deepEqual(metrics.field_ids, ['audit-actor', 'audit-action', 'audit-target', 'audit-outcome', 'audit-from', 'audit-to'], 'All six current audit inputs/selects must be measured')
+  assert.deepEqual(metrics.label_to_input, [8, 8, 8, 8, 8, 8], 'Each real filter input/select must sit 8px below its label')
+  assert.deepEqual(metrics.field_siblings, [16, 16, 16, 16, 16], 'All adjacent filter fields retain 16px gaps across their actual parent/grid hierarchy')
+  assert.equal(metrics.last_field_to_submit, 16, 'The action group must remain 16px after the last field')
+  assert.deepEqual(metrics.action_siblings, [16], 'Clear and Apply retain the 16px sibling-control gap')
+  assert.deepEqual(metrics.label_control_outer_edges, [0, 0, 0, 0, 0, 0], 'All filter labels and control borders retain the separate outer grid invariant')
+  assert.equal(metrics.label_input_edges.length, 6)
+  assert.equal(metrics.select_alignment.length, 1)
+  assert.deepEqual(metrics.label_input_edges.filter((_delta, index) => !metrics.select_alignment.some(value => value.id === metrics.field_ids[index])), [0, 0, 0, 0, 0], 'Unchanged bare input fields retain their existing label/control alignment')
+  for (const value of metrics.select_alignment) {
+    assert.equal(value.control_visible, true)
+    assert.equal(value.edge_basis, 'actual-native-select-text-range')
+    assert.ok(value.selected_text.length > 0 && value.rendered_value.width > 0 && value.rendered_value.height > 0, 'The actual selected value remains nonempty and painted')
+    assert.equal(value.rendered_value.text.trim(), value.selected_text)
+    assert.ok(value.edge_delta <= 1, 'The select label glyphs and actual selected value text share the logical content edge')
+  }
+  assert.equal(metrics.controls.length, 8)
+  assert.equal(metrics.controls.filter(control => control.tag === 'SELECT').length, 1, 'Outcome is a real select, not an absent input')
+  for (const control of metrics.controls) assert.ok(control.width >= 44 && control.height >= 44, 'Audit control ' + control.id + ' must retain a 44px target')
   assert.equal(metrics.pager_links, 0, 'This fixture has no earlier or older audit-page links')
   assert.equal(metrics.empty_pager_groups, 0, 'A no-links audit page must not render an empty pagination group')
-  assert.equal(metrics.pager_groups, 0, 'The no-links fixture must end with the actual table')
-  for (const [edge, gap] of Object.entries(metrics.padding)) assert.equal(gap, expectedPadding, `The actual audit card ${edge} padding must be ${expectedPadding}px`)
+  assert.equal(metrics.pager_groups, 0, 'The no-links fixture must not invent a pagination group')
+  assert.equal(metrics.content_last_kind, 'audit-supplement', 'The current card includes the authorized detail/generation supplement after its table')
+  assert.equal(metrics.table_to_supplement, 24, 'The table and its detail supplement retain the 24px sibling-group gap')
+  assert.ok(metrics.supplement_major_gaps.length > 0 && metrics.supplement_major_gaps.every(gap => gap === 32), 'Actual supplementary major sections retain 32px spacing')
+  for (const [edge, gap] of Object.entries(metrics.padding)) assert.equal(gap, expectedPadding, 'The actual audit card ' + edge + ' padding must be ' + expectedPadding + 'px')
   assert.equal(metrics.desktop_columns.length, 5)
   assert.equal(metrics.technical_columns.length, 3)
   assert.ok(metrics.technical_columns.every(column => column.isolated), 'Actual date, actor and target values must retain LTR isolation')
@@ -1134,7 +1255,7 @@ export function assertAuditGeometry(metrics, state) {
     for (const column of metrics.desktop_columns) {
       assert.equal(column.header_visible, true)
       assert.equal(column.value_nonempty, true)
-      assert.ok(column.edge_delta <= 1, `Audit column ${column.column} header glyphs and actual painted cell content must share their logical edge`)
+      assert.ok(column.edge_delta <= 1, 'Audit column ' + column.column + ' header glyphs and actual painted cell content must share their logical edge')
     }
   }
 }
@@ -1142,7 +1263,7 @@ export function assertAuditGeometry(metrics, state) {
 async function auditSpacing(page, state, expect, observations) {
   await expect(page.locator('[data-section="audit-log"]')).toBeVisible()
   const metrics = await measureAuditGeometry(page)
-  observations.push({ check: 'actual-audit-filter-table-spacing', metrics, pagination_scope: 'No-links fixture; real older/newest links remain covered by renderer tests.' })
+  observations.push({ check: 'actual-audit-filter-table-spacing', metrics, pagination_scope: 'No-links fixture with six filters, Clear/Apply and the current detail supplement; real older/newest links remain covered by renderer tests.' })
   assertAuditGeometry(metrics, state)
 }
 

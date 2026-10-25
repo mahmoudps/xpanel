@@ -20,6 +20,11 @@ const creationFieldContract = [
   { id: 'new-acc-ipv4', name: 'ipAssignment', tag: 'SELECT', type: 'select-one', required: true },
   { id: 'new-acc-ipv6', name: 'ipv6', tag: 'INPUT', type: 'text', required: false },
 ]
+const approvedOwnerShellFieldContract = [
+  { id: 'whm-create-owner-0', name: 'ownerId', tag: 'INPUT', type: 'radio', required: false, value: '' },
+  { id: 'whm-create-shell-none', name: 'shell', tag: 'INPUT', type: 'radio', required: false, value: 'none' },
+  { id: 'whm-create-shell-jailed', name: 'shell', tag: 'INPUT', type: 'radio', required: false, value: 'jailed' },
+]
 const output = resolve(process.argv.find(value => value.startsWith('--output='))?.slice(9) ?? 'test-results/ip-allocation-' + new Date().toISOString().replaceAll(':', '-'))
 assert.equal(process.versions.node, readFileSync(join(root, '.node-version'), 'utf8').trim())
 assert.equal(existsSync(output), false, 'Use a new evidence directory; preserve previous attempts.')
@@ -86,7 +91,7 @@ async function fixture() {
         if (scenario === 'malformed-ack') { res.statusCode = 201; res.end(JSON.stringify({ account: { username: body.username, ipv4: sharedAddress }, reconcile: { status: 'applied' } })); return }
         const ipv4 = body.ipAssignment.mode === 'shared' ? sharedAddress : body.ipAssignment.poolId === ids.second ? '192.0.2.22' : '192.0.2.21'
         res.statusCode = 201
-        res.end(JSON.stringify({ account: { id: '50000000-0000-4000-8000-000000000001', username: body.username, ipv4 }, reconcile: { status: 'applied' }, execution: { status: 'configuration_applied', scope: 'global_configuration', targetVerified: false, verificationRequired: true } }))
+        res.end(JSON.stringify({ account: { id: '50000000-0000-4000-8000-000000000001', username: body.username, ipv4, ownerId: body.ownerId ?? null, shell: body.shell ?? plans.find(plan => plan.id === body.planId)?.shell }, reconcile: { status: 'applied' }, execution: { status: 'configuration_applied', scope: 'global_configuration', targetVerified: false, verificationRequired: true } }))
         return
       }
       const locale = url.searchParams.get('lang') === 'ar' ? 'ar' : 'en', theme = url.searchParams.get('theme') === 'dark' ? 'dark' : 'light'
@@ -141,11 +146,18 @@ try {
       assert.equal(await selector.getAttribute('aria-describedby'), 'new-acc-ipv4-address new-acc-ipv4-status')
       await expect(page.getByRole('combobox', { name: state.locale === 'ar' ? 'تعيين IPv4' : 'IPv4 assignment', exact: true })).toHaveCount(1)
       const creationFields = await page.locator('[data-create-account-form] input,[data-create-account-form] select').evaluateAll(controls => controls.map(control => ({
-        id: control.id, name: control.name, tag: control.tagName, type: control.type, required: control.required,
+        id: control.id, name: control.name, tag: control.tagName, type: control.type, required: control.required, value: control.type === 'radio' ? control.value : undefined, disabled: control.disabled,
         labelFor: control.labels[0]?.htmlFor, associatedLabels: control.labels.length,
         labelAssociated: control.labels[0]?.control === control && control.labels[0].textContent.trim().length > 0,
       })))
-      assert.deepEqual(creationFields.map(({ id, name, tag, type, required }) => ({ id, name, tag, type, required })), creationFieldContract)
+      const nativeIds = new Set(creationFieldContract.map(field => field.id))
+      assert.deepEqual(creationFields.filter(field => nativeIds.has(field.id)).map(({ id, name, tag, type, required }) => ({ id, name, tag, type, required })), creationFieldContract)
+      const approvedFields = creationFields.filter(field => !nativeIds.has(field.id))
+      assert.deepEqual(approvedFields.map(({ id, name, tag, type, required, value }) => ({ id, name, tag, type, required, value })), approvedOwnerShellFieldContract)
+      const newFieldsAuthorized = catalog.some(tool => tool.id === 'create-account' && tool.status === 'verified' && tool.delivery.status === 'verified')
+      assert.equal(newFieldsAuthorized, true, 'This synthetic functional fixture explicitly qualifies account creation; product capabilities are unchanged')
+      await expect(page.locator('[data-approved-account-create-fields]')).toHaveAttribute('data-capability-state', newFieldsAuthorized ? 'authorized' : 'unavailable')
+      assert.ok(approvedFields.every(field => field.disabled === !newFieldsAuthorized), 'Owner and shell controls follow explicit fixture qualification')
       for (const field of creationFields) {
         assert.equal(field.labelFor, field.id)
         assert.equal(field.associatedLabels, 1)

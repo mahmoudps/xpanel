@@ -55,6 +55,22 @@ export async function runBrowserAcceptance({ chromium, expect }) {
   async function login(page, username, password, record, code = {}) {
     await page.locator('#login-username').fill(username)
     await page.locator('#login-password').fill(password)
+    if (code.totp || code.recovery) {
+      const recovery = Boolean(code.recovery)
+      const mode = recovery ? 'recovery' : 'totp'
+      const active = page.locator(recovery ? '#login-recovery-code' : '#login-otp')
+      const inactive = page.locator(recovery ? '#login-otp' : '#login-recovery-code')
+      const toggle = page.locator('[data-action="toggle-login-factor"]')
+      if (!await active.isVisible()) {
+        await expect(toggle).toBeVisible()
+        await toggle.click()
+      }
+      await expect(page.locator('[data-auth-mfa-fields]')).toHaveAttribute('data-factor-mode', mode)
+      await expect(toggle).toHaveAttribute('aria-pressed', String(recovery))
+      await expect(active).toBeVisible()
+      await expect(inactive).toBeHidden()
+      await expect(inactive).toHaveValue('')
+    }
     if (code.totp) await page.locator('#login-otp').fill(code.totp)
     if (code.recovery) await page.locator('#login-recovery-code').fill(code.recovery)
     return submit(page, loginForm, '/api/auth/login', record)

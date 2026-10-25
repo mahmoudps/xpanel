@@ -129,10 +129,44 @@ try {
       assert.equal(response.status(), 200)
       await page.evaluate(() => document.fonts.ready)
       outcome.font = await assertAppliedFont(page, 'h1', locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
-      outcome.geometry = await page.evaluate(() => ({ documentWidth: document.documentElement.scrollWidth, bodyOverflow: getComputedStyle(document.body).overflowX, rootOverflow: getComputedStyle(document.documentElement).overflowX, meters: [...document.querySelectorAll('.xp-meter')].map(group => ({ kind: group.dataset.resourceState, used: group.querySelector('[data-resource-part="used"]').textContent, limit: group.querySelector('[data-resource-part="limit"]').textContent, hasBar: Boolean(group.querySelector('[role="meter"], .xp-meter__fill')), value: group.querySelector('.xp-meter__values').textContent, text: group.textContent })) }))
+      outcome.geometry = await page.evaluate(() => {
+        const readMeter = group => group ? ({ kind: group.dataset.resourceState, used: group.querySelector('[data-resource-part="used"]').textContent, limit: group.querySelector('[data-resource-part="limit"]').textContent, hasBar: Boolean(group.querySelector('[role="meter"], .xp-meter__fill')), value: group.querySelector('.xp-meter__values').textContent, text: group.textContent }) : null
+        return {
+          documentWidth: document.documentElement.scrollWidth, bodyOverflow: getComputedStyle(document.body).overflowX, rootOverflow: getComputedStyle(document.documentElement).overflowX,
+          meters: [...document.querySelectorAll('.xp-meter')].map(readMeter),
+          nativeResellers: [...document.querySelectorAll('[data-reseller-row]')].map(row => ({ username: row.dataset.resellerRow, meters: [...row.querySelectorAll('.xp-meter')].map(readMeter) })),
+          resellerDetails: [...document.querySelectorAll('[data-reseller-detail]')].map(detail => ({
+            username: detail.querySelector('summary').textContent.trim(),
+            capacities: ['maxAccounts', 'totalDiskMb', 'totalBandwidthMb'].map(name => {
+              const input = detail.querySelector(`input[name="${name}"]`), group = input?.closest('.xp-reseller-groups')
+              return { name, value: input?.value, label: input?.labels[0]?.textContent.trim(), unlimited: detail.querySelector(`input[name="${name}Unlimited"]`)?.checked, meter: readMeter(group?.querySelector('.xp-meter')) }
+            }),
+          })),
+        }
+      })
       check('actual-surface-document-contained-without-concealment', outcome.geometry.documentWidth <= width + 1 && !['hidden', 'clip'].includes(outcome.geometry.bodyOverflow) && !['hidden', 'clip'].includes(outcome.geometry.rootOverflow), outcome.geometry)
       check('unknown-values-have-no-meter-or-healthy-state', outcome.geometry.meters.length > 0 && outcome.geometry.meters.every(meter => meter.kind === 'unavailable' && !meter.hasBar && !/Healthy|Within limit|ضمن الحد/.test(meter.text)), outcome.geometry.meters)
-      if (surface === 'resellers') check('reseller-usage-unknown-configured-caps-preserved', outcome.geometry.meters.length === 4 && outcome.geometry.meters[0].limit === '5' && outcome.geometry.meters[1].limit === '10' && outcome.geometry.meters.every(meter => meter.used === (locale === 'ar' ? 'غير متاح' : 'Unavailable')), outcome.geometry.meters)
+      if (surface === 'resellers') {
+        const unknown = locale === 'ar' ? 'غير متاح' : 'Unavailable', unlimited = locale === 'ar' ? 'غير محدود' : 'Unlimited'
+        const honestUnknown = meter => meter?.kind === 'unavailable' && meter.used === unknown && !meter.hasBar && !/Healthy|Within limit|ضمن الحد/.test(meter.text)
+        const nativeContracts = [{ username: 'fixture-one', limits: ['5', '10'], units: [locale === 'ar' ? 'حسابات' : 'accounts', 'GiB'] }, { username: 'fixture-two', limits: [unlimited, unlimited], units: [locale === 'ar' ? 'حسابات' : 'accounts', 'GiB'] }]
+        check('reseller-native-configured-caps-preserved', outcome.geometry.nativeResellers.length === nativeContracts.length && nativeContracts.every(expected => {
+          const rows = outcome.geometry.nativeResellers.filter(row => row.username === expected.username), row = rows[0]
+          return rows.length === 1 && row.meters.length === 2 && row.meters.every((meter, index) => honestUnknown(meter) && meter.limit === expected.limits[index] && meter.value.includes(expected.units[index]))
+        }), outcome.geometry.nativeResellers)
+        const capacityContracts = [
+          { username: 'fixture-one', unlimited: false, values: ['5', '10240', '102400'], display: ['5', '10,240', '102,400'] },
+          { username: 'fixture-two', unlimited: true, values: ['', '', ''], display: [unlimited, unlimited, unlimited] },
+        ]
+        check('reseller-capacity-detail-identities-preserved', outcome.geometry.resellerDetails.length === capacityContracts.length && capacityContracts.every(expected => outcome.geometry.resellerDetails.filter(detail => detail.username === expected.username).length === 1), outcome.geometry.resellerDetails)
+        for (const expected of capacityContracts) {
+          const detail = outcome.geometry.resellerDetails.find(item => item.username === expected.username)
+          check('reseller-capacity-limits-' + expected.username, detail?.capacities.length === 3 && ['maxAccounts', 'totalDiskMb', 'totalBandwidthMb'].every((name, index) => {
+            const capacity = detail.capacities[index]
+            return capacity.name === name && capacity.value === expected.values[index] && capacity.unlimited === expected.unlimited && honestUnknown(capacity.meter) && capacity.meter.limit === expected.display[index] && (index === 0 || capacity.label.includes('(MiB)') && capacity.meter.value.includes(' MiB'))
+          }), detail)
+        }
+      }
       else check('mail-known-usage-survives-unknown-cap', outcome.geometry.meters.length > 0 && outcome.geometry.meters.every(meter => meter.used === '7' && meter.limit === (locale === 'ar' ? 'غير متاح' : 'Unavailable')), outcome.geometry.meters)
       check('actual-surface-no-page-errors', outcome.errors.length === 0, outcome.errors)
       outcome.status = outcome.checks.every(check => check.passed) ? 'passed' : 'failed'
