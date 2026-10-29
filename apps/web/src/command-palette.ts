@@ -66,7 +66,11 @@ export function commandPaletteEntries(surface: CommandPaletteSurface, locale: Lo
 const star = '<svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3l-5.5 2.9 1-6.2L3 9.6l6.2-.9z"/></svg>'
 
 export function renderCommandPaletteModal(surface: CommandPaletteSurface, locale: Locale, visibility?: VisibilityContext, catalog?: readonly CatalogTool[], records: CommandPaletteRecords = {}): string {
-  const entries = commandPaletteEntries(surface, locale, visibility, catalog, records)
+  return renderCommandPaletteEntries(surface, locale, commandPaletteEntries(surface, locale, visibility, catalog, records))
+}
+
+/** Render entries that core has already filtered for this session. */
+export function renderCommandPaletteEntries(surface: CommandPaletteSurface, locale: Locale, entries: readonly CommandPaletteEntry[]): string {
   const label = translator(locale)
   const groups: readonly [CommandPaletteKind, string][] = [['page', label('Tools')], ['action', label('Actions')], ['account', label('Accounts')], ['domain', label('Domains')]]
   const scopeButtons = [['all', label('All')], ['action', label('> Actions')], ['account', label('@ Accounts')], ['domain', label('# Domains')]].map(([kind, name]) => `<button type="button" class="xp-cmdk-scope" data-cmdk-scope="${kind}" aria-pressed="${kind === 'all'}">${escapeHtml(name!)}</button>`).join('')

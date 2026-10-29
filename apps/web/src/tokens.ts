@@ -1,3 +1,5 @@
+import { escapeHtml } from './html.ts'
+export { escapeHtml } from './html.ts'
 import { SOURCE_LOCALE, localeDirection, translator, type Locale, type MessageValues } from './i18n.ts'
 // xPanel Design System tokens, CSS stylesheet, and accessible status/meter primitives.
 // Follows docs/STANDARDS.md: OKLCH light & dark themes (no pure #000), logical RTL/LTR properties,
@@ -31,14 +33,6 @@ export interface AsyncActionBannerProps {
   preserveDraft?: boolean
   httpStatus?: number
   errorCode?: string
-}
-
-const HTML_ESCAPE_MAP: Record<string, string> = {
-  '&': '&amp;',
-  '<': '&lt;',
-  '>': '&gt;',
-  '"': '&quot;',
-  "'": '&#39;',
 }
 
 const EASTERN_ARABIC_ZERO = 0x0660
@@ -153,13 +147,6 @@ export function formatUtcDay(isoOrDate: string | Date): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(day) ? `${day} UTC` : day
 }
 
-/**
- * Escapes arbitrary strings for safe interpolation into HTML text and attributes.
- */
-export function escapeHtml(str: string): string {
-  if (str.length === 0) return ''
-  return str.replace(/[&<>"']/g, (ch) => HTML_ESCAPE_MAP[ch] ?? ch)
-}
 
 /**
  * Wraps a technical LTR identifier (domain, path, IP, email, port, unit, digest, job ID)
