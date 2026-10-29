@@ -39,17 +39,20 @@ try {
     await page.route('**/api/mail/forwarders**', async route => {
       const req = route.request(), method = req.method()
       calls.push({ method, path: new URL(req.url()).pathname })
-      const application = { status: 'configuration_only', nativeApplied: false }
-      if (method === 'GET') return route.fulfill({ json: { forwarders: rows, application } })
+      const application = { state: 'pending', reason: null }
+      if (method === 'GET') return route.fulfill({ json: { generationId: null, forwarders: rows } })
       if (failure) return route.fulfill({ status: failure, json: failure === 500 ? { error: 'write_outcome_unknown', unknownOutcome: true, verificationRequired: true } : { error: 'forbidden' } })
       if (method === 'POST') {
         const body = req.postDataJSON()
-        rows = [{ id: 'synthetic-forwarder', accountId: 'visual-account', sourceAddress: body.sourceAddress, destinations: body.destinations, createdAt:'2026-10-25T00:00:00Z' }]
+        rows = [{ id: 'synthetic-forwarder', accountId: 'visual-account', sourceAddress: body.sourceAddress, action: 'forward', destinations: body.destinations, createdAt:'2026-10-25T00:00:00Z', application }]
         return route.fulfill({ status: 201, json: { forwarder: rows[0], application } })
       }
       if (method === 'DELETE') { rows = []; return route.fulfill({ json: { ok: true, application } }) }
       return route.fulfill({ status: 405, json: { error: 'method_not_allowed' } })
     })
+    // The same page reads the account's autoresponders and per-domain default addresses.
+    await page.route('**/api/mail/autoresponders**', route => route.fulfill({ json: { context: { accountId: 'visual-account' }, mailboxes: ['info@preview.example.test'], autoresponders: [] } }))
+    await page.route('**/api/mail/default-addresses**', route => route.fulfill({ json: { context: { accountId: 'visual-account' }, defaultAddresses: [{ domain: 'preview.example.test', kind: 'reject', destination: null, updatedAt: null, application: { state: 'applied', reason: null } }] } }))
     await page.goto(`${fixture.baseUrl}/email/forwarders?lang=${lang}&theme=light`, { waitUntil: 'load' })
     const workspace = page.locator('[data-forwarder-workspace]')
     await workspace.waitFor()
@@ -70,18 +73,20 @@ try {
       const rect = node => { const r = node.getBoundingClientRect(); return { x:r.x, y:r.y, width:r.width, height:r.height, right:r.right, bottom:r.bottom } }
       const fields = [...element.querySelectorAll('label[for]')].map(label => {
         const control = document.getElementById(label.htmlFor)
-        if (!control) return null
+        // A conditional field (the reject message of a forward-mode form) is not rendered and has no geometry.
+        if (!control || !control.getClientRects().length) return null
         const range = document.createRange(); range.selectNodeContents(label)
         const text = range.getBoundingClientRect(), bounds = control.getBoundingClientRect(), style=getComputedStyle(control)
         const rtl = getComputedStyle(element).direction === 'rtl'
         return { label: label.textContent.trim(), gap: rect(control).y - rect(label).bottom, labelBoxHeight:rect(label).height, labelTextHeight:text.height, textGap:bounds.top-text.bottom, textAlignment:rtl ? Math.abs(text.right-(bounds.right-parseFloat(style.paddingRight)-parseFloat(style.borderRightWidth))) : Math.abs(text.left-(bounds.left+parseFloat(style.paddingLeft)+parseFloat(style.borderLeftWidth))), alignment: Math.abs(rect(control).x - rect(label).x), control:rect(control) }
       }).filter(Boolean)
-      const form = element.querySelector('[data-forwarder-create]'), fieldNodes=[...form.querySelectorAll('.xp-field')]
-      const siblings = fieldNodes.slice(1).map((node,index)=>rect(node).y-rect(fieldNodes[index]).bottom)
-      const children=[...form.children], groups=children.slice(1).map((node,index)=>rect(node).y-rect(children[index]).bottom)
+      const shown = node => node.getClientRects().length > 0, form = element.querySelector('[data-forwarder-create]'), fieldNodes=[...form.querySelectorAll('.xp-field')].filter(shown)
+      // Sibling spacing applies to adjacent fields of one group; fields split by the mode fieldset are separate groups.
+      const siblings = fieldNodes.slice(1).flatMap((node,index)=>node.parentElement === fieldNodes[index].parentElement ? [rect(node).y-rect(fieldNodes[index]).bottom] : [])
+      const children=[...form.children].filter(shown), groups=children.slice(1).map((node,index)=>rect(node).y-rect(children[index]).bottom)
       const extension=element.closest('.xp-extension'), sections=[...extension.children].filter(node=>node.tagName !== 'STYLE'), sectionGaps=sections.slice(1).map((node,index)=>rect(node).y-rect(sections[index]).bottom)
       const cards=[...extension.querySelectorAll('.xp-extension__card')].map(card=>{ const content=[...card.children].filter(node=>node.tagName!=='STYLE'), style=getComputedStyle(card), first=content[0], last=content.at(-1), bounds=rect(card);return { paddingLeft:rect(first).x-bounds.x-parseFloat(style.borderLeftWidth), paddingRight:bounds.right-rect(first).right-parseFloat(style.borderRightWidth), paddingTop:rect(first).y-bounds.y-parseFloat(style.borderTopWidth), paddingBottom:bounds.bottom-rect(last).bottom-parseFloat(style.borderBottomWidth) } })
-      const targets=[...element.querySelectorAll('button,input[type=radio]')].map(node=>{ const native=rect(node), label=node.closest('label'), actual=label ? rect(label):native;return {type:node.type,native,associated:label ? actual:null,passes:(native.width>=43.5&&native.height>=43.5)||(actual.width>=43.5&&actual.height>=43.5)} })
+      const targets=[...element.querySelectorAll('button,input[type=radio]')].filter(shown).map(node=>{ const native=rect(node), label=node.closest('label'), actual=label ? rect(label):native;return {type:node.type,native,associated:label ? actual:null,passes:(native.width>=43.5&&native.height>=43.5)||(actual.width>=43.5&&actual.height>=43.5)} })
       const table=element.querySelector('table'), wrap=element.querySelector('.xp-forwarder-table')
       const technical=[...table.querySelectorAll('bdi')].map(node=>{const range=document.createRange();range.selectNodeContents(node);return {lines:new Set([...range.getClientRects()].map(r=>Math.round(r.y))).size,whiteSpace:getComputedStyle(node).whiteSpace}})
       return { direction:getComputedStyle(element).direction, viewport:innerWidth, scrollWidth:document.documentElement.scrollWidth, fonts:{status:document.fonts.status,faces:[...document.fonts].map(face=>({family:face.family,status:face.status}))}, workspace:rect(element), fields, siblings, groups, sectionGaps, cards, targets, table:{width:rect(table).width,minimum:getComputedStyle(table).minInlineSize,wrapper:rect(wrap).width,scrollWidth:wrap.scrollWidth,technical} }

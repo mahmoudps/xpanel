@@ -57,7 +57,7 @@ function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) =>
     values.forEach((value, index) => {
       if (index) td.appendChild(document.createElement('br'))
       if (!technical) { td.appendChild(document.createTextNode(value)); return }
-      const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.className = 'xp-mono'; bdi.textContent = value; td.appendChild(bdi)
+      const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.className = 'xp-mono xp-technical-token'; bdi.textContent = value; td.appendChild(bdi)
     })
     row.appendChild(td)
     return td

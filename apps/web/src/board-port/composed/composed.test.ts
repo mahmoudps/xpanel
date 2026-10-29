@@ -17,15 +17,14 @@ describe('additive composed route presentation', () => {
     expect(composedRouteSpecs).toHaveLength(135)
     expect(new Set(composedRouteSpecs.map(spec => spec.route)).size).toBe(135)
     expect(new Set(composedRouteSpecs.map(spec => `${spec.surface}/${spec.section}`)).size).toBe(22)
-    expect(composedXpanelRoutes.length + composedXwhmRoutes.length).toBe(6)
+    expect(composedXpanelRoutes.length + composedXwhmRoutes.length).toBe(5)
     // An approved xPanel workspace renders its route, so its composed spec must not stay a composed route.
-    // Only the owner's unqualified reverse-proxy document keeps its composed metadata; it renders the read-only approved workspace.
-    expect(composedXpanelRoutes.filter(spec => approvedXpanelWorkspaceRoutes.has(spec.route)).map(spec => spec.route)).toEqual(['/domains/reverse-proxy'])
+    expect(composedXpanelRoutes.filter(spec => approvedXpanelWorkspaceRoutes.has(spec.route)).map(spec => spec.route)).toEqual([])
     // Workspace routes: specs stay as metadata while their native workspaces render them.
     for (const route of ['/whm/server/terminal', '/whm/server/file-sharing', '/whm/server/nodes', '/software/apps', '/software/optimize', '/whm/software/addon-services', '/whm/software/containers',
       '/whm/software/containers/engine', '/whm/software/deployments', '/whm/software/application-projects', '/whm/email/spam', '/whm/email/relay', '/whm/email/bcc', '/whm/email/marketing',
       '/whm/accounts/templates', '/whm/plans/enhancements', '/whm/backups/restore-more', '/whm/transfers/convert-addon', '/whm/transfers/server', '/domains/staging',
-      '/software/containers', '/software/cache', '/whm/panel/settings', '/whm/panel/branding', '/whm/panel/languages', '/whm/panel/whmcs']) {
+      '/software/containers', '/software/cache', '/whm/panel/settings', '/whm/panel/branding', '/whm/panel/languages', '/whm/panel/whmcs', '/domains/reverse-proxy']) {
       expect(composedRouteSpecs.some(spec => spec.route === route), route).toBe(true)
       expect(nativeComposedRoutePaths.has(route), route).toBe(true)
     }

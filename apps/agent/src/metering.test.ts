@@ -112,6 +112,20 @@ describe('bandwidth meter', () => {
     // Counting began mid-month and mail/FTP journals are not read here, so the month is truthfully partial.
     expect(report).toMatchObject({ state: 'partial', sources: { web: { state: 'partial' }, mail: { state: 'unavailable' }, ftp: { state: 'unavailable' } } })
   })
+  it('rotates the read budget so busy early sites cannot starve the later ones', async () => {
+    const accounts = Array.from({ length: 10 }, (_, index) => ({ ...account, id: 'account-' + index, username: 'user' + index, uid: 2000 + index, gid: 2000 + index, home: '/home/user' + index, primaryDomain: 'site' + index + '.test' }))
+    const domains = accounts.map(owner => ({ ...domain, id: 'domain-' + owner.id, accountId: owner.id, name: owner.primaryDomain, docRoot: owner.home + '/public_html' }))
+    const busy = Buffer.from(line('2026-10-28T01:00:00Z', 10).repeat(Math.ceil(4 * 1024 * 1024 / Buffer.byteLength(line('2026-10-28T01:00:00Z', 10)))))
+    let ledger: unknown = null
+    const instance = createBandwidthMeter({ onError: error => { throw error }, readState: async () => ({ accounts, domains, plans: [plan] }), readMail: null, readFtp: null, now: () => NOW,
+      readFrom: async (path, offset, maxBytes) => { const start = Math.min(offset, busy.length); return { exists: true, identity: '1:' + path, sizeBytes: busy.length, start, bytes: busy.subarray(start, start + maxBytes) } },
+      readLedger: async () => ledger, writeLedger: async value => { ledger = structuredClone(value) } })
+    await instance.collect(true)
+    // the 8 MiB budget reaches eight 1 MiB reads; the next collection starts at the first site it did not reach
+    expect(Object.values((ledger as BandwidthLedger).cursors).filter(cursor => cursor.offset > 0)).toHaveLength(8)
+    await instance.collect(true)
+    expect(Object.values((ledger as BandwidthLedger).cursors).map(cursor => cursor.offset > 0)).toEqual(Array(10).fill(true))
+  })
   it('reads journals in consecutive whole-second windows and flags an account over its plan limit', async () => {
     const big = { [path]: { identity: '1:1', text: line('2026-10-28T01:00:00Z', 2 * 1024 * 1024) } }
     const ftpEvents = (window: Window) => ({ state: 'read', lineLimitReached: false, events: [{ at: window.until.replace('Z', '.000Z'), kind: 'upload', account: 'alice', bytes: 10 }] }) as unknown as FtpLogObservation

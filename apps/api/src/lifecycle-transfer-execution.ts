@@ -16,7 +16,7 @@ import type { TransferAccountResult, TransferProgressEvent, TransferWorkspacePor
 export type TransferAgentCall = (caller: AuthenticatedCaller, path: string, init?: { method?: string; body?: unknown }) => Promise<Response>
 
 export interface TransferExecutionDeps {
-  store: Pick<StateStore, 'listAccounts' | 'listDomains' | 'listPlans' | 'listFeatureLists' | 'getAccountByUsername' | 'getServerSettings' | 'getDnsZone' | 'createPlan' | 'createDomain' | 'updateDomain'
+  store: Pick<StateStore, 'listAccounts' | 'listDomains' | 'listPlans' | 'listFeatureLists' | 'getAccount' | 'getAccountByUsername' |'getServerSettings' | 'getDnsZone' | 'createPlan' | 'createDomain' | 'updateDomain'
     | 'createDatabase' | 'createDatabaseUser' | 'setGrant' | 'createServiceUser' | 'saveDnsZone' | 'saveCronJobs' | 'saveCertificateBinding'>
   readToken: (id: string) => Promise<string | null>
   transport?: TransferSourceTransport
@@ -180,8 +180,9 @@ export function createTransferExecution(deps: TransferExecutionDeps): NonNullabl
   }
   const audit = (caller: AuthenticatedCaller, action: string, target: string, detail: Record<string, unknown>, outcome: 'ok' | 'failed' = 'ok') => deps.audit?.(caller, action, target, detail, outcome).catch(() => undefined)
 
-  const removeLeftover = async (caller: AuthenticatedCaller, target: string): Promise<boolean> => {
-    const leftover = await deps.store.getAccountByUsername(target)
+  /** Removes only the account this run created (by id); an account that merely shares the target username is never touched. */
+  const removeCreated = async (caller: AuthenticatedCaller, accountId: string | null | undefined): Promise<boolean> => {
+    const leftover = accountId ? await deps.store.getAccount(accountId) : null
     if (!leftover) return false
     await deps.removeAccount(caller, leftover)
     return true
@@ -194,8 +195,8 @@ export function createTransferExecution(deps: TransferExecutionDeps): NonNullabl
       const local = new Set((await deps.store.listPlans()).map(plan => plan.name))
       for (const account of review.accounts) if (!local.has(account.plan) && !review.plans.some(plan => plan.target === account.plan && plan.action !== 'map')) precondition('plan ' + account.plan + ' of ' + account.source + ' does not exist here')
     },
-    /** Rollback of an account that was in flight when the API stopped: the partial account is removed. */
-    recover: async (caller, account) => removeLeftover(caller, account.targetUsername),
+    /** Rollback of an account that was in flight when the API stopped: the partial account this run created is removed. */
+    recover: async (caller, _account, result) => removeCreated(caller, result?.createdAccountId),
     run: async (caller, session, review, emit, shouldStop) => {
       const hostname = session.source?.hostname ?? precondition('the transfer source is not connected')
       for (const account of review.accounts) {
@@ -204,7 +205,7 @@ export function createTransferExecution(deps: TransferExecutionDeps): NonNullabl
         if (await shouldStop()) return
         const target = 'account:' + account.target
         const progress = (phase: TransferProgressEvent['phase'], extra: Pick<TransferProgressEvent, 'bytes' | 'error'> = {}, result?: TransferAccountResult): Promise<void> => emit({ type: 'progress', account: account.source, phase, ...extra }, result)
-        let packageId: string | null = null, fetchId: string | null = null, source: Awaited<ReturnType<typeof channel>> | null = null
+        let packageId: string | null = null, fetchId: string | null = null, source: Awaited<ReturnType<typeof channel>> | null = null, createdId: string | null = null
         try {
           if (await deps.store.getAccountByUsername(account.target)) precondition('this server already has an account named ' + account.target + '; nothing was changed')
           source = await channel(session)
@@ -225,10 +226,12 @@ export function createTransferExecution(deps: TransferExecutionDeps): NonNullabl
           const fetched = await runHostTask(deps.agent, caller, { kind: 'fetch', username: account.target, url: source.url + transferSourcePackagePath(account.source, packageId), token: source.token, tlsFingerprint: source.tlsFingerprint, artifacts: manifest.artifacts }, pollMs)
           fetchId = fetched.id
           await audit(caller, 'transfer.account.copied', target, { source: account.source, bytes })
-          await progress('importing', { bytes })
           const bundle = manifest.bundle
           const primaryDomain = account.domains.includes(bundle.account.primaryDomain) ? bundle.account.primaryDomain : precondition('the primary domain of ' + account.source + ' is dropped; it cannot be transferred')
           const local = await deps.createAccount(caller, { username: account.target, primaryDomain, planId: await planFor(deps, review, account, bundle) })
+          createdId = local.id
+          // the created identity is persisted with the phase, so a restart rolls back this account and no other
+          await progress('importing', { bytes }, { createdAccountId: local.id } as TransferAccountResult)
           const applied = await applyBundle(deps, local, bundle, account)
           await deps.applyAccount(caller, (await deps.store.getAccountByUsername(account.target)) ?? local)
           await audit(caller, 'transfer.account.state_applied', target, { source: account.source, domains: applied.domains.length, databases: applied.databases.length, mailboxes: applied.mailboxes, zones: applied.zones.length, cronJobs: applied.cronJobs })
@@ -248,7 +251,7 @@ export function createTransferExecution(deps: TransferExecutionDeps): NonNullabl
           await progress('done', { bytes }, result)
         } catch (error) {
           let rolledBack = false, rollbackFailed = false
-          try { rolledBack = await removeLeftover(caller, account.target) } catch { rollbackFailed = true }
+          try { rolledBack = await removeCreated(caller, createdId) } catch { rollbackFailed = true }
           const why = transferReason(error, 'the account could not be transferred')
           const message = rollbackFailed ? why + '. The partial account could not be removed; review ' + account.target + ' before retrying.'
             : rolledBack ? why + '. The partial account was removed; nothing of it remains here.' : why + '. Nothing was changed here.'

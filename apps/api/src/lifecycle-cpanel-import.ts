@@ -44,12 +44,13 @@ const parentsFirst = (domains: Record<string, unknown>[], placed: Set<string>): 
  * (new passwords required), mailboxes (new passwords required), zones with this server's name servers, cron jobs paused.
  * The host then restores the home with its mail, loads each dump and installs the certificates.
  */
-async function applyPlan(deps: CpanelImportDeps, caller: AuthenticatedCaller, record: CpanelImportRecord, planId: string): Promise<Record<string, unknown>> {
+async function applyPlan(deps: CpanelImportDeps, caller: AuthenticatedCaller, record: CpanelImportRecord, planId: string, created: (accountId: string) => Promise<void>): Promise<Record<string, unknown>> {
   const plan = record.plan ?? precondition('the archive has not been reviewed')
   const source = object(plan.account) ? plan.account : precondition('the reviewed plan has no account')
   const username = String(source.username), primaryDomain = String(source.primaryDomain)
   if (await deps.store.getAccountByUsername(username)) precondition('an account named ' + username + ' exists here')
   const account = await deps.createAccount(caller, { username, primaryDomain, planId })
+  await created(account.id)
   const fallback = await deps.defaultPhp()
   const php = (version: unknown): PhpSettings => typeof version === 'string' && isPhpVersion(version) ? { ...fallback, version } : fallback
   const domains = new Map<string, Domain>((await deps.store.listDomains()).filter(domain => domain.accountId === account.id).map(domain => [domain.name, domain]))
@@ -104,9 +105,9 @@ async function applyPlan(deps: CpanelImportDeps, caller: AuthenticatedCaller, re
     cronJobsPaused: cron.length, certificates: bound, home: restored.result.home ?? null, passwordResetRequired: true }
 }
 
-const removeLeftover = async (deps: CpanelImportDeps, caller: AuthenticatedCaller, record: CpanelImportRecord): Promise<boolean> => {
-  const username = object(record.plan?.account) ? String(record.plan.account.username) : null
-  const leftover = username ? await deps.store.getAccountByUsername(username) : null
+/** Removes only the account this import created (by id); an account that merely shares the username is never touched. */
+const removeCreated = async (deps: CpanelImportDeps, caller: AuthenticatedCaller, accountId: string | null | undefined): Promise<boolean> => {
+  const leftover = accountId ? await deps.store.getAccount(accountId) : null
   if (!leftover) return false
   await deps.removeAccount(caller, leftover)
   return true
@@ -131,15 +132,16 @@ export function createCpanelImportPorts(deps: CpanelImportDeps): CpanelImportPor
       return { state: String(task.state), result: object(task.result) ? task.result : null, error: typeof task.error === 'string' ? task.error : null }
     },
     apply: async (caller, record, input) => {
-      try { return await applyPlan(deps, caller, record, input.planId) }
+      let createdId: string | null = null
+      try { return await applyPlan(deps, caller, record, input.planId, async id => { createdId = id; await input.onCreated?.(id) }) }
       catch (error) {
         let removed = false
-        try { removed = await removeLeftover(deps, caller, record) } catch { fail('PRECONDITION_FAILED', (error instanceof Error ? error.message : 'the import failed') + '; the partial account could not be removed, review it before retrying', { stateChanged: true, verificationRequired: true }) }
+        try { removed = await removeCreated(deps, caller, createdId) } catch { fail('PRECONDITION_FAILED', (error instanceof Error ? error.message : 'the import failed') + '; the partial account could not be removed, review it before retrying', { stateChanged: true, verificationRequired: true }) }
         await deps.audit?.(caller, removed ? 'transfer.cpanel.rolled_back' : 'transfer.cpanel.failed', 'transfer-import:' + record.id, { removed }, 'failed').catch(() => undefined)
         return fail('PRECONDITION_FAILED', (error instanceof Error ? error.message.slice(0, 300) : 'the import failed') + (removed ? '; the partial account was removed' : '; nothing was created here'), { stateChanged: false })
       }
     },
-    recover: (caller, record) => removeLeftover(deps, caller, record),
+    recover: (caller, record) => removeCreated(deps, caller, record.createdAccountId),
     discard: async (caller, record) => {
       if (record.origin === 'upload') for (const suffix of ['.tar.gz', '.part']) await rm(join(deps.uploadDir, record.id + suffix), { force: true })
       else { const response = await deps.agent(caller, '/transfers/tasks/' + record.id, { method: 'DELETE' }); await response.body?.cancel().catch(() => undefined) }

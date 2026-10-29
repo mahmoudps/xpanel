@@ -44,6 +44,8 @@ describe('account forwarder configuration view', () => {
     const html = renderAccountForwarders({ lang: 'ar', domains: [{ name: 'tenant.test' }], canManage: true, forwarders: [{ id: 'record', source: 'info@tenant.test', destinations: ['outside@recipient.test'] }] })
     expect(html).toContain('رفضه برسالة خطأ إلى المرسل')
     expect(html).toContain('<bdi dir="ltr"')
+    // technical values stay on one line; the table scrolls instead of wrapping them in a narrow Arabic layout
+    expect(html).toContain('<bdi dir="ltr" class="xp-mono xp-technical-token">info@tenant.test</bdi>')
     expect(html).toContain('العنوان الافتراضي')
     expect(html).toContain('aria-live="polite"')
   })

@@ -5,7 +5,7 @@ import { createServer } from 'node:http'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { canOpenRegisteredRoute, navigation, tools, visibleNavigation, visibleTools } from '../../packages/catalog/src/index.ts'
+import { tools } from '../../packages/catalog/src/index.ts'
 import { defaultPlan } from '../../packages/core/src/index.ts'
 import { renderWebApp, serveStaticAsset } from '../../apps/web/src/app.ts'
 import { composedXpanelRoutes, composedXwhmRoutes } from '../../apps/web/src/board-port/composed/all.ts'
@@ -60,128 +60,6 @@ async function fixture() {
   return { baseUrl: `http://127.0.0.1:${server.address().port}`, requests, close: () => new Promise(resolve => { server.closeIdleConnections(); server.close(resolve) }) }
 }
 
-async function verifyReverseProxyFallback(page, result, locale, width, host, requestStart, axeSource) {
-  const route = '/domains/reverse-proxy'
-  const visibility = { principal: owner, disabledFeatures: new Set() }
-  const pageSpec = navigation.flatMap(surface => surface.sections.flatMap(section => section.pages)).find(page => page.route === route)
-  const requiredIds = ['aapanel-site-reverse-proxy', 'aapanel-proxy-project']
-  assert.deepEqual([...pageSpec.tools].sort(), [...requiredIds].sort())
-  const required = requiredIds.map(id => catalog.find(tool => tool.id === id))
-  assert.ok(required.every(tool => tool && tool.surface === 'aapanel' && tool.rootOnly === true && tool.status === 'verified' && tool.delivery.status === 'verified'))
-  assert.equal(canOpenRegisteredRoute(route, visibility), true, 'The owner may open the registered document')
-  const visible = new Set(visibleTools(catalog, visibility).map(tool => tool.id))
-  assert.ok(requiredIds.every(id => !visible.has(id)), 'Verified flags do not grant an owner root-only aaPanel capabilities')
-  assert.equal(visibleNavigation(visibility, catalog).some(surface => surface.sections.some(section => section.pages.some(page => page.route === route))), false)
-  result.catalog_boundary = { registered_owner_admission: true, qualified_route: false, required_tools: required.map(tool => ({ id: tool.id, surface: tool.surface, rootOnly: tool.rootOnly, status: tool.status, delivery: tool.delivery.status })), capability_grant_override: false }
-
-  const scopeSelector = '[data-tool-availability="unverified"]'
-  const scope = page.locator(scopeSelector)
-  await scope.waitFor({ state: 'visible' })
-  await page.evaluate(() => document.fonts.ready)
-  assert.equal(await page.locator('h1:visible').count(), 1, 'There is one visible page heading')
-  assert.equal((await scope.locator('h1:visible').innerText()).trim(), locale === 'ar' ? 'الوكيل العكسي' : 'Reverse proxy')
-  assert.equal(await page.locator('html').getAttribute('lang'), locale)
-  assert.equal(await page.locator('html').getAttribute('dir'), locale === 'ar' ? 'rtl' : 'ltr')
-  assert.equal(await page.locator('html').getAttribute('data-realtime-enabled'), 'false')
-  // The approved reverse-proxy workspace replaced the former placeholder. Under the owner's root-only
-  // catalog boundary it is an unbound, read-only, unavailable workspace: every control stays disabled.
-  const disabledPage = scope.locator('[data-approved-xpanel-workspace="/domains/reverse-proxy"][data-workspace-mode="read-only"][data-wiring="unavailable"][data-capability-unavailable="true"]')
-  assert.equal(await disabledPage.isVisible(), true)
-  const unavailable = locale === 'ar' ? 'تغييرات الوكيل العكسي غير متاحة هنا. لم يُقرأ أو يُغيّر شيء.' : 'Reverse proxy changes are unavailable here. Nothing has been read or changed.'
-  assert.equal((await disabledPage.locator(':scope > .xp-panel-detail__heading > [role="status"]').innerText()).trim(), unavailable)
-  const tool = disabledPage.locator('[data-reverse-proxy]')
-  assert.deepEqual(await tool.evaluate(element => ({ account: element.dataset.rpAccount, home: element.dataset.rpHome, manage: element.dataset.rpManage })), { account: '', home: '', manage: 'false' }, 'The unavailable workspace is bound to no account and cannot manage')
-  assert.equal((await tool.locator('[data-rp-current]').innerText()).trim(), locale === 'ar' ? 'لم تُقرأ' : 'Not read')
-  const actions = disabledPage.locator('button:visible, input:visible, select:visible, textarea:visible')
-  assert.ok(await actions.count() > 0, 'The unavailable operation retains its visible disabled controls')
-  for (const action of await actions.all()) assert.equal(await action.isDisabled(), true)
-
-  result.geometry = await page.evaluate(() => {
-    const parent = document.querySelector('[data-tool-availability="unverified"]')
-    const design = parent.querySelector('[data-approved-xpanel-workspace="/domains/reverse-proxy"]')
-    const header = design.querySelector(':scope > .xp-panel-detail__heading')
-    const body = design.querySelector(':scope > [data-reverse-proxy]')
-    const cards = [...body.querySelectorAll(':scope > .xp-acct-tool__card')]
-    const identity = parent.querySelector('[data-workspace-identity]')
-    const grid = identity.querySelector('.xp-kpi-grid')
-    const rtl = document.documentElement.dir === 'rtl'
-    const rectangle = element => { const r = element.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height } }
-    const edge = rect => rtl ? rect.right : rect.left
-    const textRects = node => {
-      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT), rects = []
-      let text
-      while ((text = walker.nextNode())) {
-        if (!text.textContent.trim()) continue
-        const range = document.createRange(); range.selectNodeContents(text)
-        for (const rect of range.getClientRects()) if (rect.width > 0 && rect.height > 0) rects.push({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom })
-      }
-      return rects
-    }
-    const facts = [...identity.querySelectorAll('[data-workspace-field]')].map(field => {
-      const label = field.querySelector('.xp-label'), value = field.querySelector('.xp-field-value')
-      const l = rectangle(label), v = rectangle(value), labels = textRects(label), values = textRects(value)
-      const labelEdge = labels.length ? (rtl ? Math.max(...labels.map(rect => rect.right)) : Math.min(...labels.map(rect => rect.left))) : null
-      return { field: field.dataset.workspaceField, text: value.textContent.trim(), visible: field.checkVisibility() && label.checkVisibility() && value.checkVisibility(), gap: v.top - l.bottom, edge_delta: Math.abs(edge(l) - edge(v)), glyph_edge_delta: labels.length && values.length ? Math.max(...values.map(rect => Math.abs(labelEdge - edge(rect)))) : null, label_text_rects: labels, value_text_rects: values, isolation: [...value.querySelectorAll('bdi')].map(node => ({ direction: getComputedStyle(node).direction, isolate: getComputedStyle(node).unicodeBidi.includes('isolate') })) }
-    })
-    const h1 = header.querySelector('h1'), lede = header.querySelector('[role="status"]')
-    const shown = element => element.checkVisibility() && element.getBoundingClientRect().height > 0
-    return { state: 'unqualified-unread', page: rectangle(parent), document_width: document.documentElement.clientWidth, document_scroll: document.documentElement.scrollWidth,
-      actual_heading_lede_gap: rectangle(lede).top - rectangle(h1).bottom,
-      design_major_gap: rectangle(body).top - rectangle(header).bottom,
-      workspace_major_gap: rectangle(identity).top - rectangle(design).bottom,
-      card_count: cards.length,
-      card_gaps: cards.slice(1).map((card, index) => rectangle(card).top - rectangle(cards[index]).bottom),
-      empty_group_gaps: cards.flatMap(card => { const children = [...card.children].filter(shown); return children.slice(1).map((child, index) => rectangle(child).top - rectangle(children[index]).bottom) }),
-      empty_card_paddings: cards.map(card => getComputedStyle(card).paddingInlineStart), identity_card_padding: getComputedStyle(identity).paddingInlineStart,
-      identity_group_gap: rectangle(grid).top - rectangle(identity.querySelector('h2')).bottom,
-      fields_gap: getComputedStyle(grid).gap, facts,
-      interactive: [...parent.querySelectorAll('button,a,input,select,textarea')].filter(element => element.checkVisibility()).map(rectangle),
-      ascii_digits: !/[\u0660-\u0669\u06f0-\u06f9]/.test(parent.innerText), text: parent.innerText,
-      mutations: parent.querySelectorAll('form,[data-terminal-form],[data-file-manager],[data-custom-config-form],[data-certificate-form]').length,
-      fabricated_result_markers: parent.querySelectorAll('[data-read-state="loaded"],[data-read-state="empty"],[data-collection-state="empty"],[data-composed-route],[role="progressbar"]').length }
-  })
-  const geometry = result.geometry
-  assert.deepEqual(Object.fromEntries(geometry.facts.map(fact => [fact.field, fact.text])), {
-    username: owner.username, role: locale === 'ar' ? 'مالك الحساب' : 'Account owner',
-    'primary-domain': account.primaryDomain, plan: plan.name, status: locale === 'ar' ? 'قيد الإنهاء' : 'Terminating',
-  }, 'The disabled workspace renders exactly the 5 persisted identity facts')
-  assert.equal(geometry.facts.length, 5)
-  assert.ok(geometry.document_scroll <= geometry.document_width, 'No document overflow')
-  assert.ok(geometry.page.left >= -0.5 && geometry.page.right <= width + 0.5, 'The fallback stays within the viewport')
-  assert.ok(Math.abs(geometry.actual_heading_lede_gap - 8) < 0.6, 'Actual heading/lede gap stays 8px')
-  assert.ok(Math.abs(geometry.design_major_gap - 32) < 0.6, 'Actual disabled header/body section gap stays 32px')
-  assert.ok(Math.abs(geometry.workspace_major_gap - 32) < 0.6, 'Actual workspace major sections stay 32px apart')
-  assert.equal(geometry.card_count, 4, 'Sites, serving mode, steps and limits cards remain')
-  for (const gap of geometry.card_gaps) assert.ok(Math.abs(gap - 32) < 0.6, 'Actual disabled workspace cards stay 32px apart')
-  assert.ok(geometry.empty_group_gaps.length > 0)
-  for (const gap of geometry.empty_group_gaps) assert.ok(Math.abs(gap - 24) < 0.6, 'Actual disabled card content groups stay 24px apart')
-  assert.ok(Math.abs(geometry.identity_group_gap - 24) < 0.6, 'Actual identity heading/field group gap stays 24px')
-  for (const padding of geometry.empty_card_paddings) assert.equal(padding, width > 600 ? '24px' : '16px')
-  assert.equal(geometry.identity_card_padding, width > 800 ? '24px' : '16px')
-  assert.equal(geometry.fields_gap, '16px')
-  for (const fact of geometry.facts) {
-    assert.equal(fact.visible, true)
-    assert.ok(Math.abs(fact.gap - 8) < 0.6, 'Actual identity label/value gap stays 8px')
-    assert.ok(fact.edge_delta < 0.6, 'Identity field label/value boxes share an alignment edge')
-    assert.ok(fact.glyph_edge_delta !== null && fact.glyph_edge_delta < 1, 'Actual identity glyphs share their label edge on every line')
-    for (const bdi of fact.isolation) { assert.equal(bdi.direction, 'ltr'); assert.equal(bdi.isolate, true) }
-  }
-  assert.equal(geometry.facts.flatMap(fact => fact.isolation).length, 2, 'Username and domain retain actual inline LTR isolation')
-  for (const target of geometry.interactive) assert.ok(target.width >= 44 && target.height >= 44, 'Actual fallback control targets stay at least 44px')
-  assert.equal(geometry.ascii_digits, true)
-  assert.equal(geometry.mutations, 0)
-  assert.equal(geometry.fabricated_result_markers, 0)
-  for (const value of [account.id, account.home, account.ipv4, plan.id, plan.featureListId, domain.id, domain.docRoot, 'disk@alpha.example.test', '999999']) assert.ok(!geometry.text.includes(value), 'The disabled summary does not expose full hosting data')
-  result.applied_font = await assertAppliedFont(page, scopeSelector + ' h1', locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
-  result.applied_label_fonts = []
-  for (const fact of geometry.facts) result.applied_label_fonts.push(await assertAppliedFont(page, `[data-workspace-field="${fact.field}"] .xp-label`, locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans'))
-  await page.addScriptTag({ content: axeSource })
-  result.accessibility = await page.evaluate(async selector => (await axe.run(selector, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } })).violations.map(violation => ({ id: violation.id, impact: violation.impact, targets: violation.nodes.map(node => node.target) })), scopeSelector)
-  assert.deepEqual(result.accessibility, [])
-  assert.deepEqual(host.requests.slice(requestStart), [], 'The disabled fallback performs no API/provider reads or mutations')
-  result.expected_disabled_fallback = true
-}
-
 export async function runComposedAcceptance({ output, filter } = {}) {
   assert.equal(process.versions.node, readFileSync(join(root, '.node-version'), 'utf8').trim())
   requireBrowserDiskHeadroom(root, 384)
@@ -206,12 +84,8 @@ export async function runComposedAcceptance({ output, filter } = {}) {
         requireBrowserDiskHeadroom(root, 256, destination)
         const result = { route: spec.route, surface: spec.surface, locale, width, theme, synthetic_presentation_only: true }
         try {
-          const requestStart = host.requests.length
           const response = await page.goto(host.baseUrl + spec.route + '?lang=' + locale + '&theme=' + theme, { waitUntil: 'networkidle' })
           assert.equal(response.status(), 200)
-          if (spec.route === '/domains/reverse-proxy') {
-            await verifyReverseProxyFallback(page, result, locale, width, host, requestStart, axeSource)
-          } else {
           await page.locator('[data-composed-route]').waitFor({ state: 'visible' })
           await page.evaluate(() => document.fonts.ready)
           result.geometry = await page.evaluate(() => {
@@ -319,7 +193,6 @@ export async function runComposedAcceptance({ output, filter } = {}) {
           assert.deepEqual(result.accessibility, [])
           const region = page.locator('.xp-composed-scroll')
           if (await region.count()) { for (const table of await region.all()) { await table.focus(); assert.equal(await table.evaluate(element => document.activeElement === element), true) }; result.table_keyboard_focus = true }
-          }
           if (screenshots < 8 && (spec.bind !== 'soon' || screenshots < 2)) {
             const name = `representative-${screenshots}-${locale}-${width}.png`
             await page.screenshot({ path: join(destination, 'screenshots', name), fullPage: false }); result.screenshot = name; screenshots++

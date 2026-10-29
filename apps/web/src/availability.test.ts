@@ -9,7 +9,6 @@ import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
 import type { Account, Plan, Principal } from '@xpanel/core'
 import { composedRouteSpecs, nativeComposedRoutePaths } from './board-port/composed/all.ts'
 import { renderComposedRoutes } from './board-port/composed/render.ts'
-import { approvedXpanelWorkspaceRoutes } from './board-port/approved-xpanel-workspaces.ts'
 
 const unavailableProviderRead = (): never => { throw new Error('unqualified_provider_read') }
 
@@ -35,13 +34,8 @@ describe('verified production availability', () => {
         visibility: { principal: spec.surface === 'xwhm' ? { kind: 'root', id: 'root', username: 'administrator7' } : summaryOwner },
         panel: { account: summaryAccount, get domains() { return unavailableProviderRead() }, get serviceUsers() { return unavailableProviderRead() } },
       })
-      if (spec.surface === 'xpanel' && approvedXpanelWorkspaceRoutes.has(spec.route)) {
-        expect(html).toContain(`data-approved-xpanel-workspace="${spec.route}"`)
-        expect(html).toContain('data-workspace-mode="read-only"')
-      } else {
-        expect(html).toContain(`data-composed-route="${spec.route}"`)
-        expect(html).toContain('data-read-state="unavailable"')
-      }
+      expect(html).toContain(`data-composed-route="${spec.route}"`)
+      expect(html).toContain('data-read-state="unavailable"')
       expect(html).toContain('data-tool-availability="unverified"')
       expect(html).not.toMatch(/<form\b|data-read-state="(?:loaded|empty)"/)
       const staticOnly = renderComposedRoutes([spec], {

@@ -13,22 +13,43 @@ const sourcePaths = ['apps/web/src/board-port/extensions/account-filters.ts', 'a
 const snapshot = () => sourcePaths.map(path => ({ path, sha256:createHash('sha256').update(readFileSync(path)).digest('hex') }))
 const clone = value => JSON.parse(JSON.stringify(value))
 const mailbox = 'info@preview.example.test'
-const application = { status:'configuration_only', nativeApplied:false }
+// Host routing receipts as apps/api/src/mail/filter-routes.ts decorate() and routing-application.ts record() return them.
+const generationId = 7
+const applied = { state:'applied', reason:null }
+const pending = { state:'pending', reason:'Saved. The host agent has not applied this change yet.' }
 const previewMarker = '<img src=x onerror="window.__filterPreviewExecuted=true">'
-const seed = (scope, id, name) => ({ id, accountId:'visual-account', scope, mailbox:scope==='global'?null:mailbox, name, enabled:true, matchAll:true, priority:1, conditions:[{field:'subject',comparator:'contains',value:'Invoice'}], action:{type:'fileinto',target:'Invoices'}, compiledSieve:'', createdAt:'2026-10-25T00:00:00Z' })
+const conditionFields = ['from','to','subject','header','body','size']
+// Mirrors assertFolder in packages/render/src/services/mail.ts: the server refuses any other folder name.
+const folderSegment = /^[\p{L}\p{N}_&-](?:[\p{L}\p{N} _&-]{0,62}[\p{L}\p{N}_&-])?$/u
+const folderTarget = 'Invoices.تقارير 2026'
+const seed = (scope, id, name) => ({ id, accountId:'visual-account', scope, mailbox:scope==='global'?null:mailbox, name, enabled:true, matchAll:true, priority:1, conditions:[{field:'subject',comparator:'contains',value:'Invoice'}], actions:[{type:'fileinto',target:'Invoices'},{type:'stop'}], compiledSieve:'', createdAt:'2026-10-25T00:00:00Z', application:{...applied} })
+const legacyRow = row => row.conditions.some(item => !conditionFields.includes(item.field))
+// Allowed request fields per write, from validateFilterDraft/validateFilterPatch and the removal and reorder handlers.
+const writeKeys = { create:['name','priority','enabled','matchAll','conditions','actions','scope','mailbox','expectedRevision'], patch:['name','enabled','matchAll','conditions','actions','expectedRevision'], delete:['id','expectedRevision'], reorder:['scope','mailbox','orderedIds','expectedRevision'] }
+function assertActions(actions) {
+  assert.ok(Array.isArray(actions)&&actions.length>=1&&actions.length<=10,'A rule carries 1 to 10 actions')
+  actions.forEach((item,index)=>{
+    assert.deepEqual(Object.keys(item).filter(key=>!['type','target'].includes(key)),[],'An action carries only type and target')
+    assert.ok(['fileinto','redirect','discard','reject','keep','mark-read','stop'].includes(item.type),`Known action ${item.type}`)
+    if(['keep','discard','mark-read','stop'].includes(item.type))assert.equal(item.target,undefined,`${item.type} has no target`);else assert.equal(typeof item.target,'string')
+    if(item.type==='fileinto')assert.ok(item.target.split('.').every(segment=>folderSegment.test(segment)),`Renderable folder ${item.target}`)
+    if(item.type==='stop')assert.equal(index,actions.length-1,'stop is the last action')
+  })
+}
 
 class MockConfiguration {
   constructor() {
     this.scopes = new Map([['global',[seed('global','seed-global','Saved global rule')]], [mailbox,[seed('mailbox','seed-mailbox','Saved mailbox rule')]]])
-    this.calls=[]; this.errors=[]; this.serial=0; this.failure=null; this.wrongContext=false; this.wrongAccount=false; this.blocked=false; this.gate=null
+    this.calls=[]; this.errors=[]; this.serial=0; this.failure=null; this.wrongContext=false; this.wrongAccount=false; this.gate=null
   }
   key(url, body={}) { return (url.searchParams.get('scope') || body.scope) === 'mailbox' ? (url.searchParams.get('mailbox') || body.mailbox) : 'global' }
   context(key) { return {accountId:'visual-account',scope:key==='global'?'global':'mailbox',mailbox:key==='global'?null:key} }
   revision(key) { return createHash('sha256').update(JSON.stringify([this.context(key),this.scopes.get(key)])).digest('hex') }
   response(key) {
-    const context=this.context(key), filters=clone(this.scopes.get(key) || [])
-    const blocked=this.blocked
-    return { filters:blocked?[...filters,{...seed(context.scope,'legacy-invalid','Recoverable legacy rule'),conditions:[{field:'unknown_legacy',operator:'raw',value:'unsafe'}]}]:filters, context, revision:this.revision(key), application, compilation:{status:blocked?'blocked':'ready',...(blocked?{reason:'invalid_legacy_rule'}:{})}, compiledSieve:blocked?null:`# selected ${key}\n# ${previewMarker}\n${filters.map(row=>`# ${row.name}`).join('\n')}\nkeep;\n` }
+    const context=this.context(key), filters=clone(this.scopes.get(key) || []), blocked=filters.some(legacyRow)
+    // an invalid stored rule is projected like filter-routes.ts project(): metadata only, no raw content
+    const projected=filters.map(row=>legacyRow(row)?{...row,conditions:[],actions:[],compiledSieve:null,validation:{status:'invalid',reasonCode:'invalid_saved_filter'}}:row)
+    return { filters:projected, context, revision:this.revision(key), application:{generationId}, compilation:blocked?{status:'blocked',reason:'invalid_saved_filter_or_preview_limit'}:{status:'ready'}, compiledSieve:blocked?null:`# selected ${key}\n# ${previewMarker}\n${filters.map(row=>`# ${row.name}`).join('\n')}\nkeep;\n` }
   }
   holdNextRead() { let release; const promise=new Promise(resolve=>{release=resolve}); this.gate={promise,release}; return release }
   async route(route) {
@@ -44,6 +65,10 @@ class MockConfiguration {
       if(this.wrongAccount) { result.context.accountId='another-synthetic-account';result.filters=result.filters.map(row=>({...row,accountId:'another-synthetic-account',name:'AccountLeak'}));result.compiledSieve='AccountLeak' }
       return route.fulfill({json:result})
     }
+    const kind=method==='POST'?(url.pathname.endsWith('/reorder')?'reorder':'create'):method.toLowerCase()
+    assert.ok(Object.hasOwn(writeKeys,kind),'Unexpected mock method')
+    assert.deepEqual(Object.keys(body).filter(field=>!writeKeys[kind].includes(field)),[],`${kind} body carries only current contract fields`)
+    if(kind==='create'||Object.hasOwn(body,'actions'))assertActions(body.actions)
     if(this.failure) {
       if(this.failure===409&&this.scopes.get(key)?.[0])this.scopes.get(key)[0].name+=' (concurrent edit)'
       return route.fulfill({status:this.failure,json:this.failure===500?{error:'unknown_write',unknownOutcome:true,verificationRequired:true}:{error:this.failure===409?'stale_revision':'forbidden',stateChanged:false}})
@@ -60,17 +85,18 @@ class MockConfiguration {
       assert.equal(method,'POST');assert.deepEqual([...body.orderedIds].sort(),rows.map(row=>row.id).sort())
       this.scopes.set(key,body.orderedIds.map((id,index)=>({...rows.find(row=>row.id===id),priority:index+1})))
     } else if(method==='POST') {
-      assert.equal(typeof body.name,'string');assert.ok(Array.isArray(body.conditions));assert.ok(body.action)
-      changed={...seed(key==='global'?'global':'mailbox',`created-${++this.serial}`,body.name),conditions:clone(body.conditions),action:clone(body.action),matchAll:body.matchAll??true,enabled:body.enabled??true,priority:rows.length+1}
+      assert.equal(typeof body.name,'string');assert.ok(Array.isArray(body.conditions))
+      changed={...seed(key==='global'?'global':'mailbox',`created-${++this.serial}`,body.name),conditions:clone(body.conditions),actions:clone(body.actions),matchAll:body.matchAll??true,enabled:body.enabled??true,priority:rows.length+1,application:{...pending}}
       changed.conditions=changed.conditions.map(condition=>{if(condition.field!=='size')return condition;const match=/^(\d+)([KMG])?$/i.exec(condition.value.trim());assert.ok(match);return {...condition,value:String(Number(match[1])*({K:1024,M:1048576,G:1073741824}[match[2]?.toUpperCase()]??1))}})
       rows.push(changed)
     } else if(method==='PATCH') {
       changed=rows.find(row=>row.id===id);assert.ok(changed)
-      for(const field of ['name','enabled','matchAll','conditions','action']) if(Object.hasOwn(body,field)) changed[field]=clone(body[field])
+      for(const field of ['name','enabled','matchAll','conditions','actions']) if(Object.hasOwn(body,field)) changed[field]=clone(body[field])
+      changed.application={...pending}
     } else if(method==='DELETE') {
       assert.ok(rows.some(row=>row.id===id));this.scopes.set(key,rows.filter(row=>row.id!==id))
     } else throw new Error('Unexpected mock method')
-    return route.fulfill({status:method==='POST'&&!url.pathname.endsWith('/reorder')?201:200,json:{...this.response(key),ok:true,...(changed?{filter:clone(changed)}:{})}})
+    return route.fulfill({status:kind==='create'?201:200,json:{...this.response(key),...(kind==='create'?{}:{ok:true}),...(changed?{filter:clone(changed)}:{})}})
   }
 }
 
@@ -102,14 +128,14 @@ async function geometry(page) {
     const gaps=(nodes)=>nodes.slice(1).map((node,index)=>rect(node).top-rect(nodes[index]).bottom)
     const form=root.querySelector('[data-filter-editor]')
     const siblings=[...form.querySelectorAll('.xp-form-group')].flatMap(group=>gaps([...group.children].filter(visible)))
-    const conditionFields=[...form.querySelectorAll('[data-filter-condition]')].flatMap(group=>gaps([...group.children].filter(visible)))
+    const conditionFields=[...form.querySelectorAll('[data-filter-condition],[data-filter-action-row]')].flatMap(group=>gaps([...group.children].filter(visible)))
     const groups=gaps([...form.children].filter(visible))
     const extension=root.closest('.xp-extension'),sections=gaps([...extension.children].filter(node=>node.tagName!=='STYLE'&&visible(node)))
     const cards=[...extension.querySelectorAll('.xp-extension__card')].filter(visible).map(card=>{
       const content=[...card.children].filter(node=>node.tagName!=='STYLE'&&visible(node)),first=rect(content[0]),last=rect(content.at(-1)),bounds=rect(card),style=getComputedStyle(card)
       return {left:first.left-bounds.left-parseFloat(style.borderLeftWidth),right:bounds.right-first.right-parseFloat(style.borderRightWidth),top:first.top-bounds.top-parseFloat(style.borderTopWidth),bottom:bounds.bottom-last.bottom-parseFloat(style.borderBottomWidth)}
     })
-    const conditionPadding=[...root.querySelectorAll('[data-filter-condition]')].filter(visible).map(card=>{const content=[...card.children].filter(visible),first=rect(content[0]),last=rect(content.at(-1)),bounds=rect(card),style=getComputedStyle(card);return {left:first.left-bounds.left-parseFloat(style.borderLeftWidth),right:bounds.right-first.right-parseFloat(style.borderRightWidth),top:first.top-bounds.top-parseFloat(style.borderTopWidth),bottom:bounds.bottom-last.bottom-parseFloat(style.borderBottomWidth)}})
+    const conditionPadding=[...root.querySelectorAll('[data-filter-condition],[data-filter-action-row]')].filter(visible).map(card=>{const content=[...card.children].filter(visible),first=rect(content[0]),last=rect(content.at(-1)),bounds=rect(card),style=getComputedStyle(card);return {left:first.left-bounds.left-parseFloat(style.borderLeftWidth),right:bounds.right-first.right-parseFloat(style.borderRightWidth),top:first.top-bounds.top-parseFloat(style.borderTopWidth),bottom:bounds.bottom-last.bottom-parseFloat(style.borderBottomWidth)}})
     const listPadding=[...root.querySelectorAll('[data-filter-list]>li')].filter(visible).map(card=>{const content=[...card.children].filter(visible),first=rect(content[0]),last=rect(content.at(-1)),bounds=rect(card),style=getComputedStyle(card);return {left:first.left-bounds.left-parseFloat(style.borderLeftWidth),right:bounds.right-first.right-parseFloat(style.borderRightWidth),top:first.top-bounds.top-parseFloat(style.borderTopWidth),bottom:bounds.bottom-last.bottom-parseFloat(style.borderBottomWidth)}})
     const targets=[...root.querySelectorAll('button,input[type=checkbox],input[type=radio]')].filter(visible).map(node=>{
       const native=rect(node),label=node.closest('label'),associated=label?rect(label):null
@@ -140,7 +166,9 @@ const idle=page=>page.waitForFunction(()=>document.querySelector('[data-filter-w
 const status=async(page,wanted)=>{await idle(page);await page.waitForFunction(wanted=>document.querySelector('[data-filter-status]')?.getAttribute('data-state')===wanted,wanted)}
 const action=(page,kind,id)=>page.locator(`[data-filter-action="${kind}"][data-filter-id="${id}"]`)
 const form=page=>page.locator('[data-filter-editor]')
-const fill=async(page,name)=>{await form(page).locator('[name=name]').fill(name);await form(page).locator('[name=action]').selectOption('fileinto');await form(page).locator('[name=target]').fill('  Invoices / تقارير  ')}
+const fill=async(page,name)=>{await form(page).locator('[name=name]').fill(name);const row=form(page).locator('[data-filter-action-row]').first();await row.locator('[data-action-field=type]').selectOption('fileinto');await row.locator('[data-action-field=target]').fill(folderTarget)}
+const draftActions=[{type:'fileinto',target:folderTarget},{type:'mark-read'},{type:'stop'}]
+const routingStates=page=>page.locator('[data-filter-list] [data-routing-state]').evaluateAll(nodes=>nodes.map(node=>node.dataset.routingState))
 try {
   for(const lang of ['en','ar'])for(const width of [1440,390]){
     const context=await browser.newContext({viewport:{width,height:1000}}),page=await context.newPage(),model=new MockConfiguration(),pageErrors=[]
@@ -155,12 +183,15 @@ try {
     assert.equal(await page.locator('[data-filter-new]').isDisabled(),true)
     model.wrongAccount=false;await page.locator('[data-filter-refresh]').click();await status(page,'read')
     assert.ok((await page.locator('[data-filter-preview]').textContent()).includes(previewMarker))
+    assert.deepEqual(await routingStates(page),['applied'],'Each saved rule shows its host application state')
     assert.equal(await page.locator('[data-filter-workspace] img').count(),0);assert.equal(await page.evaluate(()=>window.__filterPreviewExecuted===true),false)
     assert.equal(await page.locator('[data-filter-workspace] [name=accountId]').count(),0)
     checkpoint=`${lang}-${width}:draft`
     await page.locator('[data-filter-new]').click();await form(page).waitFor({state:'visible'})
     assert.equal(await page.locator('[data-filter-unconditional]').isVisible(),true)
     await fill(page,'Invoice <b>literal</b>')
+    assert.equal(await form(page).locator('[data-filter-action-row]').count(),1);assert.equal(await form(page).locator('[name=stop]').isChecked(),true)
+    await page.locator('[data-filter-add-action]').click();await form(page).locator('[data-filter-action-row]').nth(1).locator('[data-action-field=type]').selectOption('mark-read')
     await page.locator('[data-filter-add-condition]').click()
     const condition=page.locator('[data-filter-condition]').first()
     await condition.locator('[data-condition-field=field]').selectOption('subject');await condition.locator('[data-condition-field=comparator]').selectOption('contains');await condition.locator('[data-condition-field=value]').fill('  فاتورة "Invoice" \\ <b>literal</b>  ')
@@ -183,11 +214,12 @@ try {
     await page.evaluate(()=>scrollTo(0,0));await page.screenshot({path:`${output}/${lang}-${width}.png`,fullPage:true});assertGeometry(activeGeometry,lang,width)
     checkpoint=`${lang}-${width}:create`
     await form(page).locator('button[type=submit]').click();await status(page,'saved')
-    const created=model.scopes.get('global').find(row=>row.id.startsWith('created-'));assert.ok(created);assert.equal(created.conditions.length,3);assert.equal(created.conditions[2].value,'1024');assert.equal(created.conditions[0].value,'  فاتورة "Invoice" \\ <b>literal</b>  ');assert.equal(created.action.target,'  Invoices / تقارير  ')
+    const created=model.scopes.get('global').find(row=>row.id.startsWith('created-'));assert.ok(created);assert.equal(created.conditions.length,3);assert.equal(created.conditions[2].value,'1024');assert.equal(created.conditions[0].value,'  فاتورة "Invoice" \\ <b>literal</b>  ');assert.deepEqual(created.actions,draftActions)
+    assert.deepEqual(await routingStates(page),['applied','pending'],'A new rule reads back as saved, not yet applied')
     const originalDate=created.createdAt
     checkpoint=`${lang}-${width}:edit`
     await action(page,'edit',created.id).click();await form(page).locator('[name=name]').fill('Edited <b>literal</b>');await form(page).locator('button[type=submit]').click();await status(page,'saved')
-    assert.equal(created.name,'Edited <b>literal</b>');assert.equal(created.createdAt,originalDate)
+    assert.equal(created.name,'Edited <b>literal</b>');assert.equal(created.createdAt,originalDate);assert.deepEqual(created.actions,draftActions,'Editing round-trips every action')
     await action(page,'toggle',created.id).click();await status(page,'saved');assert.equal(created.enabled,false)
     checkpoint=`${lang}-${width}:order`
     await action(page,'up',created.id).click();await status(page,'saved');assert.equal(model.scopes.get('global')[0].id,created.id)
@@ -222,11 +254,15 @@ try {
     await page.locator('[data-filter-scope]').evaluate((select,mailbox)=>{select.value='mailbox:'+mailbox;select.dispatchEvent(new Event('change',{bubbles:true}))},mailbox)
     release();await status(page,'read');assert.equal(await page.locator('[data-filter-scope]').inputValue(),'global');assert.equal((await page.locator('[data-filter-list]').textContent()).includes('Saved mailbox rule'),false)
     checkpoint=`${lang}-${width}:legacy-blocked`
-    model.blocked=true;await page.locator('[data-filter-refresh]').click();await status(page,'blocked');assert.equal(await page.locator('[data-filter-preview]').textContent(),'');assert.ok((await page.locator('[data-filter-list]').textContent()).includes('Recoverable legacy rule'));assert.equal(await page.locator('[data-filter-new]').isDisabled(),true)
-    model.blocked=false;model.scopes.set('global',[]);await page.locator('[data-filter-refresh]').click();await status(page,'read');assert.equal(await page.locator('[data-filter-list]>li').count(),0);assert.equal(await page.locator('[data-filter-empty]').isVisible(),true)
+    model.scopes.get('global').push({...seed('global','legacy-invalid','Recoverable legacy rule'),conditions:[{field:'unknown_legacy',operator:'raw',value:'unsafe'}]})
+    await page.locator('[data-filter-refresh]').click();await status(page,'blocked');assert.equal(await page.locator('[data-filter-preview]').textContent(),'');assert.ok((await page.locator('[data-filter-list]').textContent()).includes('Recoverable legacy rule'));assert.equal((await page.locator('[data-filter-list]').textContent()).includes('unsafe'),false);assert.equal(await page.locator('[data-filter-new]').isDisabled(),true);assert.equal(await page.locator('[data-filter-action="edit"]').count(),0)
+    checkpoint=`${lang}-${width}:legacy-recovery`
+    await action(page,'delete','legacy-invalid').click();await page.locator('[data-xp-prompt-confirm]').waitFor({state:'visible'});await page.locator('[data-xp-prompt-confirm]').click();await status(page,'saved')
+    assert.deepEqual(model.scopes.get('global').map(row=>row.id),['seed-global']);assert.equal(await page.locator('[data-filter-new]').isDisabled(),false);assert.ok((await page.locator('[data-filter-preview]').textContent()).includes('# Saved global rule'))
+    model.scopes.set('global',[]);await page.locator('[data-filter-refresh]').click();await status(page,'read');assert.equal(await page.locator('[data-filter-list]>li').count(),0);assert.equal(await page.locator('[data-filter-empty]').isVisible(),true)
     assert.deepEqual(model.errors,[])
     assert.deepEqual(pageErrors,[],'No uncaught browser exceptions')
-    cases.push({lang,width,status:'passed',geometry:activeGeometry,calls:model.calls,pageErrors,checks:['first and later trusted-account pin','escaped preview','create/edit/toggle/order/delete exact readback','409 and uncertain draft preservation','scope mismatch and busy selection serialization','blocked legacy metadata','empty observed scope']})
+    cases.push({lang,width,status:'passed',geometry:activeGeometry,calls:model.calls,pageErrors,checks:['first and later trusted-account pin','escaped preview','per-rule host application state','multi-action create/edit/toggle/order/delete exact readback','current write contract fields only','409 and uncertain draft preservation','scope mismatch and busy selection serialization','blocked legacy metadata and delete recovery','empty observed scope']})
     await context.close()
   }
   checkpoint='unqualified'

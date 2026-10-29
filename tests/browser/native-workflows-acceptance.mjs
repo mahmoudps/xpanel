@@ -305,7 +305,8 @@ async function plansFlow(page, host, state, result, expect, visit) {
   await firstResponse; await expect(status).toHaveAttribute('data-state', 'pending'); await expect(save).toBeDisabled()
   const first = host.requests.slice(start).filter(request => request.method === 'PATCH')
   assert.equal(first.length, 1); assert.equal(first[0].path, '/api/plans/' + planId)
-  assert.deepEqual(first[0].body, (({ id, ownerId, ...body }) => ({ ...body, name: 'Renamed' }))(plan))
+  // the editor always sends the per-plan bandwidth enforcement switch; a plan without it saves it off
+  assert.deepEqual(first[0].body, (({ id, ownerId, ...body }) => ({ ...body, name: 'Renamed', enforceBandwidth: plan.enforceBandwidth ?? false }))(plan))
   assert.equal(Object.hasOwn(first[0].body, 'ownerId'), false)
   await form.locator('[name=ioReadBps]').fill('8'); await form.locator('[name=ioWriteBps]').fill('4')
   const secondResponse = page.waitForResponse(response => response.request().method() === 'PATCH')

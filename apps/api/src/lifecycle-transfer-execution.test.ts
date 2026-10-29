@@ -128,6 +128,19 @@ describe('server-to-server transfer execution', () => {
     expect(await f.store.getAccountByUsername('alice')).toBeNull()
     expect(f.results.alice).toEqual({ rolledBack: true, rollbackFailed: false })
   })
+  it('never removes an existing account that only shares the target username', async () => {
+    const f = await fixture({ existing: ['alice'] })
+    const kept = (await f.store.getAccountByUsername('alice'))!
+    // the account appeared after the review, so the review saw no conflict
+    await f.run(sessionFor(['alice'], { usernames: [], plans: ['gold'] }))
+    expect(f.events.at(-1)).toMatchObject({ phase: 'failed', error: expect.stringMatching(/already has an account named alice/) })
+    expect(f.calls.some(call => call.startsWith('remove'))).toBe(false)
+    expect((await f.store.getAccountByUsername('alice'))?.id).toBe(kept.id)
+    // restart recovery removes only the identity this run recorded, never an account found by name
+    expect(await f.execution.recover(caller, { targetUsername: 'alice' } as never, undefined)).toBe(false)
+    expect((await f.store.getAccountByUsername('alice'))?.id).toBe(kept.id)
+    expect(await f.execution.recover(caller, { targetUsername: 'alice' } as never, { createdAccountId: kept.id })).toBe(true)
+  })
   it('changes nothing for an account whose package manifest is not signed with the stored token', async () => {
     const f = await fixture({ badSignature: 'alice' })
     await f.run(sessionFor(['alice'], { usernames: [], plans: ['gold'] }))

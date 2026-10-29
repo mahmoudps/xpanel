@@ -44,7 +44,8 @@ const fixture = async (failRestore = false) => {
       return Response.json({ task: failRestore ? { state: 'failed', error: 'synthetic restore failure' } : { state: 'succeeded', result: { home: { compared: true }, databases: (body.databases as { target: string }[]).map(db => ({ name: db.target, tables: 1 })), certificates: [] } } })
     },
   })
-  return { store, ports, tasks, removed, planId: plan.id }
+  const existing = (username: string) => store.createAccount({ username, passwordHash: HASH, primaryDomain: username + '.other.test', planId: plan.id, ownerId: null, contactEmail: 'owner@example.test', ipv4: '192.0.2.10', shell: 'jailed', php: PHP as never })
+  return { store, ports, tasks, removed, existing, planId: plan.id }
 }
 
 describe('cPanel import apply', () => {
@@ -68,5 +69,21 @@ describe('cPanel import apply', () => {
     await expect(f.ports.apply(caller, record, { planId: f.planId })).rejects.toThrow(/synthetic restore failure; the partial account was removed/)
     expect(f.removed).toEqual(['bob'])
     expect(await f.store.getAccountByUsername('bob')).toBeNull()
+  })
+  it('never removes an existing account that only shares the imported username', async () => {
+    const f = await fixture(), record = await reviewed(), other = await f.existing('bob')
+    await expect(f.ports.apply(caller, record, { planId: f.planId })).rejects.toThrow(/an account named bob exists here; nothing was created here/)
+    expect(f.removed).toEqual([])
+    expect((await f.store.getAccountByUsername('bob'))?.id).toBe(other.id)
+    // restart recovery removes only the recorded identity, never the account by name
+    expect(await f.ports.recover(caller, record)).toBe(false)
+    expect(await f.ports.recover(caller, { ...record, createdAccountId: randomUUID() })).toBe(false)
+    expect((await f.store.getAccountByUsername('bob'))?.id).toBe(other.id)
+  })
+  it('records the created account and recovers exactly that identity', async () => {
+    const f = await fixture(true), record = await reviewed(), created: string[] = []
+    await expect(f.ports.apply(caller, record, { planId: f.planId, onCreated: async id => { created.push(id) } })).rejects.toThrow(/the partial account was removed/)
+    expect(created).toHaveLength(1)
+    expect(f.removed).toEqual(['bob'])
   })
 })

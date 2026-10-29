@@ -28,6 +28,8 @@ export interface TransferAccountResult {
   certificates: number
   rolledBack: boolean
   rollbackFailed?: boolean
+  /** Set once this run created the account here; restart recovery removes only this identity. */
+  createdAccountId?: string
 }
 export interface StoredTransferWorkspace {
   id: string
@@ -63,6 +65,8 @@ export interface CpanelImportRecord {
   unmapped: CpanelUnmappedItem[]
   result: Record<string, unknown> | null
   error: string | null
+  /** The account this import created; a rollback removes only this identity, never an account that merely shares the username. */
+  createdAccountId?: string | null
 }
 interface WorkspaceDocument { version: 1; sessions: StoredTransferWorkspace[]; cpanelImports: CpanelImportRecord[] }
 export interface CpanelImportPorts {
@@ -72,8 +76,8 @@ export interface CpanelImportPorts {
   startTask: (caller: AuthenticatedCaller, body: Record<string, unknown>) => Promise<string>
   readTask: (caller: AuthenticatedCaller, id: string) => Promise<{ state: string; result: Record<string, unknown> | null; error: string | null }>
   /** Builds the account from the reviewed plan and restores its data; a failure removes the partial account and rethrows. */
-  apply: (caller: AuthenticatedCaller, record: CpanelImportRecord, input: { planId: string }) => Promise<Record<string, unknown>>
-  /** Removes a partial account left by an import the API stopped during. */
+  apply: (caller: AuthenticatedCaller, record: CpanelImportRecord, input: { planId: string; onCreated?: (accountId: string) => Promise<void> }) => Promise<Record<string, unknown>>
+  /** Removes the partial account (its recorded createdAccountId) left by an import the API stopped during. */
   recover: (caller: AuthenticatedCaller, record: CpanelImportRecord) => Promise<boolean>
   discard: (caller: AuthenticatedCaller, record: CpanelImportRecord) => Promise<void>
   sshKey: (caller: AuthenticatedCaller) => Promise<{ publicKey: string; fingerprint: string }>
@@ -89,8 +93,8 @@ export interface TransferWorkspacePorts {
   execution?: {
     admit: (caller: AuthenticatedCaller, session: TransferSession, review: TransferReview) => Promise<void>
     run: (caller: AuthenticatedCaller, session: TransferSession, review: TransferReview, emit: (event: TransferProgressEvent, result?: Partial<TransferAccountResult>) => Promise<void>, shouldStop: () => Promise<boolean>) => Promise<void>
-    /** Rolls back an account that was in flight when the API stopped; true when a partial account was removed. */
-    recover: (caller: AuthenticatedCaller, progress: AccountProgress) => Promise<boolean>
+    /** Rolls back the account this run created (result.createdAccountId) when the API stopped mid-account; true when it was removed. */
+    recover: (caller: AuthenticatedCaller, progress: AccountProgress, result: Partial<TransferAccountResult> | undefined) => Promise<boolean>
   }
   /** Root principal by id, for background work after the request that started it has ended. */
   callerFor?: (principalId: string) => Promise<AuthenticatedCaller | null>
@@ -274,7 +278,7 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
         for (const [source, progress] of Object.entries(session.progress)) {
           if (!IN_FLIGHT.has(progress.phase)) continue
           let removed = false, failed = false
-          try { removed = await ports.execution.recover(caller, progress) } catch { failed = true }
+          try { removed = await ports.execution.recover(caller, progress, record.results?.[source]) } catch { failed = true }
           const error = failed ? 'Interrupted by a restart; the partial account could not be removed. Review ' + progress.targetUsername + ' before retrying.' : removed ? 'Interrupted by a restart; the partial account was removed.' : 'Interrupted by a restart before anything was created here.'
           await updateSession(record.id, null, async current => ({ ...append(current, { type: 'progress', account: source, phase: 'failed', error }), results: { ...current.results, [source]: { rolledBack: removed, rollbackFailed: failed } } }))
           await audit(caller, removed ? 'transfer.account.rolled_back' : 'transfer.account.failed', 'account:' + progress.targetUsername, { interrupted: true }, 'failed')
@@ -320,7 +324,7 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
     void (async () => {
       const record = (await readDocument(path)).cpanelImports.find(item => item.id === id)!
       try {
-        const result = await ports.cpanel!.apply(caller, record, { planId })
+        const result = await ports.cpanel!.apply(caller, record, { planId, onCreated: async accountId => { await updateImport(id, null, current => ({ ...current, createdAccountId: accountId })) } })
         await updateImport(id, null, current => ({ ...current, state: 'imported', result, error: null }))
         await audit(caller, 'transfer.cpanel.imported', 'account:' + String(result.username ?? ''), { archive: id, sha256: record.sha256 })
       } catch (error) {

@@ -39,6 +39,8 @@ export interface BandwidthLedger {
   unavailableSites: number
   skippedLines: number
   cursors: Record<string, { accountId: string; identity: string; offset: number }>
+  /** Path of the first site the last collection's read budget did not reach; the next collection starts there. */
+  resumeAt?: string | null
   journals: Record<'mail' | 'ftp', JournalCursor>
   mailQueue: Record<string, { size: number; sender: string | null; at: string }>
   /** 'YYYY-MM' (UTC) to account id to per-source totals. */
@@ -88,12 +90,13 @@ const zero = (): BandwidthTotals => ({ count: 0, receivedBytes: 0, sentBytes: 0 
 const emptyMonth = (): BandwidthMonth => ({ web: zero(), mail: zero(), ftp: zero() })
 const notRead = (): JournalCursor => ({ state: 'not-read', since: null, next: null, truncatedWindows: 0 })
 
-export const emptyBandwidthLedger = (now: Date): BandwidthLedger => ({ since: now.toISOString(), updatedAt: null, pendingBytes: 0, unavailableSites: 0, skippedLines: 0, cursors: {}, journals: { mail: notRead(), ftp: notRead() }, mailQueue: {}, months: {} })
+export const emptyBandwidthLedger = (now: Date): BandwidthLedger => ({ since: now.toISOString(), updatedAt: null, pendingBytes: 0, unavailableSites: 0, skippedLines: 0, cursors: {}, resumeAt: null, journals: { mail: notRead(), ftp: notRead() }, mailQueue: {}, months: {} })
 
 /** Accepts only a well-formed ledger; anything else is not trusted and counting restarts. */
 export function parseBandwidthLedger(raw: unknown): BandwidthLedger | null {
   if (!object(raw) || !instant(raw.since) || raw.updatedAt !== null && !instant(raw.updatedAt) || !count(raw.pendingBytes) || !count(raw.unavailableSites) || !count(raw.skippedLines) || !object(raw.cursors) || !object(raw.months) || !object(raw.journals) || !object(raw.mailQueue)) return null
   for (const cursor of Object.values(raw.cursors)) if (!object(cursor) || typeof cursor.accountId !== 'string' || typeof cursor.identity !== 'string' || !count(cursor.offset)) return null
+  if (raw.resumeAt !== undefined && raw.resumeAt !== null && typeof raw.resumeAt !== 'string') return null
   for (const key of ['mail', 'ftp']) {
     const cursor = raw.journals[key]
     if (!object(cursor) || !['not-read', 'read', 'unavailable'].includes(String(cursor.state)) || cursor.since !== null && !instant(cursor.since) || cursor.next !== null && !instant(cursor.next) || !count(cursor.truncatedWindows)) return null
@@ -208,7 +211,12 @@ export function createBandwidthMeter(options: BandwidthMeterOptions) {
     let budget = BANDWIDTH_TICK_READ_BYTES
     // Coverage fields describe the latest collection only; totals and cursors carry over.
     ledger.pendingBytes = 0; ledger.skippedLines = 0; ledger.unavailableSites = sites.length - listed.length + failed.size
-    for (const site of listed) {
+    // Round robin: start where the last collection's budget ran out, so busy early sites cannot starve the later ones.
+    const resume = ledger.resumeAt ? listed.findIndex(site => site.path >= ledger.resumeAt!) : -1
+    const order = resume > 0 ? [...listed.slice(resume), ...listed.slice(0, resume)] : listed
+    let starvedFrom: string | null = null
+    for (const site of order) {
+      if (budget <= 0) starvedFrom ??= site.path
       const previous = ledger.cursors[site.path]
       const known = previous?.accountId === site.accountId ? previous : undefined
       try {
@@ -224,6 +232,7 @@ export function createBandwidthMeter(options: BandwidthMeterOptions) {
       } catch { ledger.unavailableSites++; if (known) cursors[site.path] = known }
     }
     ledger.cursors = cursors
+    ledger.resumeAt = starvedFrom
     const owners = new Map(saved.domains.map(domain => [domain.name.toLowerCase(), domain.accountId]))
     const usernames = new Map(saved.accounts.map(account => [account.username, account.id]))
     await readJournal(ledger.journals.mail, at, options.readMail, observation => addMailObservation(ledger, observation, owners, keep, at))

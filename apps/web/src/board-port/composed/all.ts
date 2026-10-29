@@ -24,6 +24,7 @@ import { xwhm_services } from './sections/xwhm-services.ts'
 /** Existing controllers always retain priority over additive route metadata. */
 export const nativeComposedRoutePaths: ReadonlySet<string> = new Set([
   '/whm/preferences',
+  '/domains/reverse-proxy',
   '/whm/panel/settings', '/whm/panel/branding', '/whm/panel/languages', '/whm/panel/whmcs',
   '/whm/server/terminal',
   '/whm/server/file-sharing',
