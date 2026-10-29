@@ -17,13 +17,15 @@ const rootSelector = '[data-mail-folder-workspace="true"]'
 const row = (page, uid) => page.locator(rootSelector + ' [data-mail-open][data-mail-uid="' + uid + '"]')
 const action = (page, name) => page.locator(rootSelector + ' [data-mail-action="' + name + '"]')
 const moves = model => model.calls.filter(call => call.method === 'POST')
-const message = (uid, folder, suffix = '') => ({ uid, from: 'sender@example.test', fromName: 'Synthetic sender', to: mailbox, subject: folder + ' synthetic ' + suffix, receivedAt: '2026-01-01T12:00:00Z', unread: true, sizeBytes: 128, preview: folder + ' preview', attachments: [], body: folder + ' plaintext body ' + suffix + ' <img src="https://invalid.example.test/pixel" onerror="window.mailBodyExecuted=true">' })
+// Each folder has one observed UIDVALIDITY; moves are bound to the source folder's value.
+const UIDVALIDITY = { INBOX: 1001, Sent: 1002, Drafts: 1003, Trash: 1004, Archive: 1005 }
+const message = (uid, folder, suffix = '') => ({ uid, uidValidityObserved: true, uidValidity: UIDVALIDITY[folder], from: 'sender@example.test', fromName: 'Synthetic sender', to: mailbox, subject: folder + ' synthetic ' + suffix, receivedAt: '2026-01-01T12:00:00Z', unread: true, sizeBytes: 128, preview: folder + ' preview', attachments: [], body: folder + ' plaintext body ' + suffix + ' <img src="https://invalid.example.test/pixel" onerror="window.mailBodyExecuted=true">' })
 
 class MockFolders {
   constructor() {
     // Identical UIDs in different folders deliberately exercise exact folder binding.
     this.folders = new Map(['INBOX', 'Sent', 'Drafts', 'Trash', 'Archive'].map(folder => [folder, new Map([[101, message(101, folder, 'first')], [102, message(102, folder, 'second')]])]))
-    this.nextUid = 1000; this.calls = []; this.errors = []; this.mode = null; this.gates = []; this.canMove = true; this.remoteRequests = []
+    this.nextUid = 1000; this.calls = []; this.errors = []; this.mode = null; this.gates = []; this.canMove = true; this.remoteRequests = []; this.attachmentReads = []
   }
   hold(kind) {
     let entered, release
@@ -32,8 +34,15 @@ class MockFolders {
   }
   async route(route) {
     const request = route.request(), url = new URL(request.url()), method = request.method()
+    if (url.pathname === '/api/webmail/attachment-workspace') {
+      // The reading pane reads the selected message's attachment manifest; the synthetic messages have none.
+      const folder = url.searchParams.get('folder'), uid = Number(url.searchParams.get('uid')), uidValidity = Number(url.searchParams.get('uidValidity'))
+      assert.equal(method, 'GET'); assert.ok(this.folders.get(folder)?.has(uid), 'Attachment reads target an existing message'); assert.equal(uidValidity, UIDVALIDITY[folder])
+      this.attachmentReads.push({ folder, uid, uidValidity })
+      await route.fulfill({ status: 200, json: { context: { mailbox, folder, uid, uidValidity }, attachments: [] } }); return
+    }
     const match = /^\/api\/webmail\/inbox(?:\/([0-9]+)(\/move)?)?$/.exec(url.pathname)
-    assert.ok(match, 'Only existing scoped folder/list/read/move endpoints are mocked')
+    assert.ok(match, 'Only existing scoped folder/list/read/move endpoints are mocked: ' + method + ' ' + url.pathname)
     const uid = match[1] ? Number(match[1]) : null, move = Boolean(match[2]), body = method === 'POST' ? request.postDataJSON() : undefined
     assert.ok(['GET', 'POST'].includes(method), 'Permanent delete/send are outside this harness')
     const folder = move ? body.from : url.searchParams.get('folder')
@@ -56,15 +65,15 @@ class MockFolders {
       if (this.mode === 'foreign-read') result.mailbox = 'other@example.test'
       if (this.mode === 'wrong-read-uid') result.message.uid = uid + 1
     } else {
-      assert.deepEqual(Object.keys(body).sort(), ['folder', 'from']); assert.ok(this.folders.has(body.folder)); assert.ok(this.canMove)
+      assert.deepEqual(Object.keys(body).sort(), ['folder', 'from', 'uidValidity']); assert.equal(body.uidValidity, UIDVALIDITY[folder]); assert.ok(this.folders.has(body.folder)); assert.ok(this.canMove)
       const original = this.folders.get(folder).get(uid); assert.ok(original)
       if (this.mode === 'explicit-refusal') { status = 412; result = { code: 'synthetic_move_refused', details: { stateChanged: false } } }
-      else if (folder === body.folder) result = { ok: true, mailbox, from: folder, sourceUid: uid, folder: body.folder, uid, destinationUidKnown: true, stateChanged: false }
+      else if (folder === body.folder) result = { ok: true, mailbox, from: folder, sourceUid: uid, sourceUidValidity: body.uidValidity, folder: body.folder, uid, destinationUidKnown: false, stateChanged: false, uidValidityObserved: false }
       else {
         const destinationUid = ++this.nextUid
-        this.folders.get(folder).delete(uid); this.folders.get(body.folder).set(destinationUid, { ...original, uid: destinationUid })
-        result = { ok: true, mailbox, from: folder, sourceUid: uid, folder: body.folder, uid: destinationUid, destinationUidKnown: true, stateChanged: true }
-        if (this.mode === 'unknown-mapping') { result.uid = null; result.destinationUidKnown = false }
+        this.folders.get(folder).delete(uid); this.folders.get(body.folder).set(destinationUid, { ...original, uid: destinationUid, uidValidity: UIDVALIDITY[body.folder] })
+        result = { ok: true, mailbox, from: folder, sourceUid: uid, sourceUidValidity: body.uidValidity, folder: body.folder, uid: destinationUid, destinationUidKnown: true, stateChanged: true, uidValidityObserved: true, uidValidity: UIDVALIDITY[body.folder] }
+        if (this.mode === 'unknown-mapping') { result.uid = null; result.destinationUidKnown = false; result.uidValidityObserved = false; delete result.uidValidity }
         if (this.mode === 'wrong-source') result.sourceUid = uid + 1
         if (this.mode === 'wrong-destination') result.folder = 'Archive'
         if (this.mode === 'unknown-write') { status = 503; result = { code: 'synthetic_move_unknown', details: { stateChanged: true, unknownOutcome: true, verificationRequired: true } } }
@@ -154,17 +163,17 @@ try {
     assertGeometry(measured, lang, width)
     await page.locator(rootSelector + ' [data-mail-action="move"][data-folder="Trash"]').click(); await confirmation(page); await state(page, 'saved')
     const moved = moves(model).at(-1), destinationUid = model.nextUid
-    assert.equal(moved.path, api + '/101/move'); assert.deepEqual(moved.body, { from: 'Sent', folder: 'Trash' }); assert.notEqual(destinationUid, 101)
+    assert.equal(moved.path, api + '/101/move'); assert.deepEqual(moved.body, { from: 'Sent', folder: 'Trash', uidValidity: UIDVALIDITY.Sent }); assert.notEqual(destinationUid, 101)
     checkpoint = lang + '-' + width + ':known-uid-undo'
     await action(page, 'undo').click(); await confirmation(page); await state(page, 'saved')
-    const undone = moves(model).at(-1); assert.equal(undone.path, api + '/' + destinationUid + '/move'); assert.deepEqual(undone.body, { from: 'Trash', folder: 'Sent' })
+    const undone = moves(model).at(-1); assert.equal(undone.path, api + '/' + destinationUid + '/move'); assert.deepEqual(undone.body, { from: 'Trash', folder: 'Sent', uidValidity: UIDVALIDITY.Trash })
     assert.equal(await search.inputValue(), 'synthetic', 'Move/readback keeps the current search draft')
     checkpoint = lang + '-' + width + ':drafts-read-reversible-move'
     await visit(page, fixture, lang, 'Drafts'); await open(page, 101, model.folders.get('Drafts').get(101).body); await moveTo(page, 'Sent'); await state(page, 'saved'); await action(page, 'undo').click(); await confirmation(page); await state(page, 'saved')
-    assert.deepEqual(moves(model).at(-1).body, { from: 'Sent', folder: 'Drafts' })
+    assert.deepEqual(moves(model).at(-1).body, { from: 'Sent', folder: 'Drafts', uidValidity: UIDVALIDITY.Sent })
     checkpoint = lang + '-' + width + ':trash-restore'
     await visit(page, fixture, lang, 'Trash'); await open(page, 101, model.folders.get('Trash').get(101).body); await action(page, 'restore').click(); await confirmation(page); await state(page, 'saved')
-    assert.deepEqual(moves(model).at(-1).body, { from: 'Trash', folder: 'INBOX' }); assert.equal(model.calls.some(call => call.method === 'DELETE'), false)
+    assert.deepEqual(moves(model).at(-1).body, { from: 'Trash', folder: 'INBOX', uidValidity: UIDVALIDITY.Trash }); assert.equal(model.calls.some(call => call.method === 'DELETE'), false)
     if (lang === 'en' && width === 1440) {
       checkpoint = 'late-body-selection'
       const first = message(3001, 'Sent', 'delayed body'), second = message(3002, 'Sent', 'newest body'); model.folders.get('Sent').set(first.uid, first); model.folders.get('Sent').set(second.uid, second)
@@ -196,7 +205,7 @@ try {
       }
       checkpoint = 'unsupported-move'; model.canMove = false; await visit(page, fixture, lang, 'Drafts'); await open(page, 102, model.folders.get('Drafts').get(102).body); assert.equal(await action(page, 'toggle-move').isDisabled(), true)
     }
-    assert.deepEqual(model.errors, []); assert.deepEqual(pageErrors, []); assert.deepEqual(model.remoteRequests, [], 'Plain message body must not fetch embedded remote resources')
+    assert.deepEqual(model.errors, []); assert.ok(model.attachmentReads.length > 0, 'An opened message reads its attachment manifest'); assert.deepEqual(pageErrors, []); assert.deepEqual(model.remoteRequests, [], 'Plain message body must not fetch embedded remote resources')
     cases.push({ lang, width, status: 'passed', geometry: measured, calls: model.calls, pageErrors, remoteRequests: model.remoteRequests, checks: ['Sent/Drafts/Trash actual folder lists and scoped reads', 'plain text body with no remote-resource fetch', 'known destination UID move/readback and reversible undo', 'Trash restore without permanent delete/send', 'visible expanded move/search/detail geometry in same flow', ...(lang === 'en' && width === 1440 ? ['latest body selection wins over late reply', 'cancelled move locks/pins selection without dispatch', 'foreign/wrong-UID read preserves prior body', 'unknown UID/result locks and explicit review without retry', 'foreign/incomplete/duplicate scoped list rejection', 'unsupported move unavailable'] : [])] })
     await context.close()
   }

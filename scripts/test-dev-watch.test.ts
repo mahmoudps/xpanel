@@ -38,24 +38,23 @@ describe('development launcher arguments', () => {
 interface FixtureRecord { value: number; pid: number; startedAt: string; observedAt: number }
 interface FixtureProcess { child: ChildProcessWithoutNullStreams; records: FixtureRecord[]; waitFor: (value: number) => Promise<FixtureRecord> }
 
+// The fixture reports over IPC, not stdout. Node watch mode registers an imported module when the child's
+// `watch:import` IPC message reaches the supervisor, and the supervisor forwards later child messages in the
+// same order. A forwarded record therefore proves the imported module is watched before the test edits it;
+// a stdout line can arrive before that registration, and an edit made then is never observed.
 const launchFixture = (entry: string, watch: boolean): FixtureProcess => {
   const spec = developmentSpawnSpec(watch ? ['--watch'] : [], { entry })
-  const child = spawn(spec.command, spec.args, { ...spec.options, stdio: 'pipe' }) as ChildProcessWithoutNullStreams
+  const child = spawn(spec.command, spec.args, { ...spec.options, stdio: ['pipe', 'pipe', 'pipe', 'ipc'] }) as ChildProcessWithoutNullStreams
   const records: FixtureRecord[] = []
   const listeners = new Set<() => void>()
-  let buffer = ''
   let spawnError: Error | undefined
   child.on('error', error => { spawnError = error; for (const listener of listeners) listener() })
+  child.stdout.resume()
   child.stderr.resume()
-  child.stdout.on('data', chunk => {
-    buffer += String(chunk)
-    let newline: number
-    while ((newline = buffer.indexOf('\n')) >= 0) {
-      const line = buffer.slice(0, newline).trim()
-      buffer = buffer.slice(newline + 1)
-      if (!line.startsWith('DEV_FIXTURE ')) continue
-      records.push({ ...JSON.parse(line.slice('DEV_FIXTURE '.length)), observedAt: performance.now() })
-    }
+  child.on('message', message => {
+    const record = (message as { devFixture?: Omit<FixtureRecord, 'observedAt'> }).devFixture
+    if (!record) return
+    records.push({ ...record, observedAt: performance.now() })
     for (const listener of listeners) listener()
   })
   return { child, records, waitFor: value => new Promise((resolveRecord, reject) => {
@@ -98,7 +97,7 @@ it('restarts after an imported synthetic file changes and records a scripted man
   let restarted: FixtureProcess | undefined
   let watched: FixtureProcess | undefined
   try {
-    await writeFile(entry, "import { value } from './value.mjs'; console.log('DEV_FIXTURE ' + JSON.stringify({ value, pid: process.pid, startedAt: new Date().toISOString() })); setInterval(() => {}, 1000);\n")
+    await writeFile(entry, "import { value } from './value.mjs'; process.send({ devFixture: { value, pid: process.pid, startedAt: new Date().toISOString() } }); setInterval(() => {}, 1000);\n")
     await writeFile(dependency, 'export const value = 1;\n')
     manual = launchFixture(entry, false)
     await manual.waitFor(1)

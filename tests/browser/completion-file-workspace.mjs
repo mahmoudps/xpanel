@@ -136,7 +136,7 @@ async function geometry(page){
 function assertGeometry(value,lang,width){
   assert.equal(value.direction,lang==='ar'?'rtl':'ltr');assert.ok(value.scrollWidth<=width+1,'No page overflow')
   assert.ok(value.fields.length>=2,'Editor and permission labels measured')
-  for(const field of value.fields){assert.ok(Math.abs(field.gap-8)<=1,`Actual label gap ${field.label}: ${field.gap}`);if(field.code){assert.equal(field.direction,'ltr','Code direction');assert.equal(field.resolvedAnchor,'left','Code starts at the left to preserve indentation')}else assert.ok(field.alignment<=1,`Actual content alignment ${field.label}: ${field.alignment}`);assert.ok(field.height>=43.5)}
+  for(const field of value.fields){assert.ok(Math.abs(field.gap-8)<=1,`Actual label gap ${field.label}: ${field.gap}`);if(field.code){assert.equal(field.direction,'ltr','Code direction');assert.equal(field.resolvedAnchor,lang==='ar'?'right':'left','Code text follows the locale value edge');assert.ok(field.alignment<=1,`Code text shares its label edge ${field.label}: ${field.alignment}`)}else assert.ok(field.alignment<=1,`Actual content alignment ${field.label}: ${field.alignment}`);assert.ok(field.height>=43.5)}
   for(const card of value.cards)for(const padding of Object.values(card))assert.ok(Math.abs(padding-(width<600?16:24))<=1,`Card padding ${padding}`)
   for(const distance of value.editorGroups)assert.ok(Math.abs(distance-24)<=1,`Editor group gap ${distance}`)
   for(const distance of value.fieldSiblings)assert.ok(Math.abs(distance-16)<=1,`Sibling field gap ${distance}`)

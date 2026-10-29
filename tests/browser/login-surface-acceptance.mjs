@@ -153,7 +153,9 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
         const footer = approved.locator(':scope > footer.xp-login-footer')
         await expect(footer).toBeVisible()
         await expect(footer.locator(':scope > span')).toHaveCount(2)
-        await expect(footer.locator(':scope > span').first()).toHaveText('xPanel · xWHM · xMail')
+        // The footer names only this panel; the other two panels are not mentioned anywhere on the page.
+        await expect(footer.locator(':scope > span').first()).toHaveText(audiences[state.audience])
+        for (const [other, name] of Object.entries(audiences)) if (other !== state.audience) await expect(page.locator('body')).not.toContainText(name)
         await expect(footer.locator(':scope > span').last()).toHaveText(state.locale === 'ar' ? 'العربية والإنجليزية · دخول آمن' : 'English & Arabic · Secure sign in')
         await expect(page.locator('[data-auth-submit]')).toBeEnabled()
         outcome.metrics = await inspect(page)

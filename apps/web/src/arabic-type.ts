@@ -135,6 +135,11 @@ ${ar('bdi[dir="ltr"]')} {
   overflow: visible !important;
   text-overflow: clip !important;
 }
+/* Technical table tokens stay whole; their table region scrolls instead. */
+${ar('bdi[dir="ltr"]:is(.xp-chart-technical-value, .xp-plan-resource-value, .xp-technical-token)')} {
+  white-space: nowrap !important;
+  overflow-wrap: normal !important;
+}
 ${ar('bdi[dir="ltr"][style*="overflow-wrap: anywhere"]')},
 ${ar('[aria-labelledby="host-title"] dd bdi[dir="ltr"]')} {
   white-space: normal !important;
@@ -178,8 +183,12 @@ ${ar('table')} {
   width: 100% !important;
   table-layout: auto;
 }
-${ar('table :is(th, td)')} {
-  line-height: 1.4 !important;
+/* Table text follows the typography roles: headers use the label role, cells the body role. */
+${ar('table th')} {
+  line-height: var(--xp-leading-label) !important;
+}
+${ar('table td')} {
+  line-height: var(--xp-leading-body) !important;
 }
 ${ar('th')} {
   white-space: nowrap !important;

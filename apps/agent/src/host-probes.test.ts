@@ -8,6 +8,7 @@ import { createAgentApp } from './server.ts'
 import { HostReconciler } from './reconciler.ts'
 import { createProductionHostTargetMatcher, LinuxHostExecutor, MAILDIR_BOX_RE } from './executor.ts'
 import { parseLoadavg, parseMeminfo } from './host-info.ts'
+import { parseServiceManagerBootTime } from './service-manager.ts'
 import { classifyHostBinaries, probeAuditLog, readHostMeasurements } from './host-probes.ts'
 
 describe('host capability probes', () => {
@@ -213,6 +214,8 @@ describe('host capability probes', () => {
     expect(match('/proc/1/mountinfo', 'read')).toBe(false)
     expect(match('/proc/stat', 'read')).toBe(true)
     expect(match('/proc/stat', 'write')).toBe(false)
+    expect(match('/proc/self/environ', 'read')).toBe(false)
+    expect(match('/proc/sys/kernel/hostname', 'read')).toBe(false)
     expect(match('/proc/net/dev', 'read')).toBe(true)
     expect(match('/proc/net/dev', 'write')).toBe(false)
     expect(match('/proc/net/dev', 'remove')).toBe(false)
@@ -239,6 +242,9 @@ describe('host capability probes', () => {
     expect(parseMeminfo(memory!).totalBytes).toBeGreaterThan(0)
     const cpu = await executor.readFile('/proc/cpuinfo')
     expect(cpu).toContain('processor')
-    await expect(executor.readFile('/proc/stat')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+    // /proc/stat is an exact reviewed read: the service manager reads its btime line for boot time.
+    expect(parseServiceManagerBootTime(await executor.readFile('/proc/stat'))).toBeGreaterThan(0)
+    await expect(executor.readFile('/proc/self/environ')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+    await expect(executor.readFile('/proc/1/mountinfo')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
   })
 })

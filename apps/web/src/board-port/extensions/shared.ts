@@ -21,6 +21,8 @@ export const extensionNotChecked: ExtensionCopy = msgid('Not checked')
 export const EXTENSION_CSS = `
 .xp-extension{display:grid;gap:32px;min-inline-size:0;color:var(--xp-text-primary);font-family:var(--xp-font-sans-ltr);font-size:var(--xp-type-body);line-height:var(--xp-leading-body);text-align:start}
 .xp-extension[lang="ar"]{font-family:var(--xp-font-sans-rtl)}
+.xp-extension .xp-check{display:flex;align-items:center;gap:var(--xp-space-label);min-block-size:var(--xp-hit-target)}
+.xp-extension .xp-table th{line-height:var(--xp-leading-label)}
 .xp-extension :is(h1,h2,h3,p,dl,dd){margin:0}
 .xp-extension :is(h1,h2,h3){overflow-wrap:anywhere}
 .xp-extension h1{font-size:var(--xp-type-page);line-height:var(--xp-leading-page)}
@@ -38,7 +40,7 @@ export const EXTENSION_CSS = `
 .xp-extension :is(input:not([type="checkbox"]),select,button,a.xp-btn){min-block-size:44px;min-inline-size:44px;font-size:var(--xp-type-body);line-height:var(--xp-leading-body);max-inline-size:100%}
 .xp-extension select.xp-select:not([multiple]):not([size]){line-height:var(--xp-leading-body)}
 .xp-extension .xp-field{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;min-inline-size:0}
-.xp-extension .xp-field>label{padding-inline:13px;font-size:var(--xp-type-label);line-height:var(--xp-leading-label);text-align:start}
+.xp-extension .xp-field>label:not(.xp-check){padding-inline:13px;font-size:var(--xp-type-label);line-height:var(--xp-leading-label);text-align:start}
 .xp-extension .xp-field>:is(input,select){inline-size:100%;min-inline-size:0}
 .xp-extension .xp-form-group{display:grid;gap:16px;min-inline-size:0}
 .xp-extension :focus-visible{outline:var(--xp-focus-width) solid var(--xp-border-focus);outline-offset:var(--xp-focus-offset)}

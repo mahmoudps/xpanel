@@ -7,7 +7,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tools } from '../../packages/catalog/src/index.ts'
 import { defaultPlan } from '../../packages/core/src/index.ts'
-import { renderWebApp } from '../../apps/web/src/app.ts'
+import { renderWebApp, serveStaticAsset } from '../../apps/web/src/app.ts'
 import { BROWSER_REALTIME_SCRIPT } from '../../apps/web/src/ws-client.ts'
 import { collectSnapshotFiles, computeSourceDigest } from '../../scripts/vm/source-snapshot.mjs'
 import { assertAppliedFont } from './applied-font-contract.mjs'
@@ -49,6 +49,8 @@ async function fixture() {
   const server = createServer(async (incoming, outgoing) => {
     try {
     const url = new URL(incoming.url, 'http://127.0.0.1')
+    const asset = serveStaticAsset(url.pathname)
+    if (asset) { outgoing.writeHead(asset.status, Object.fromEntries(asset.headers)); outgoing.end(Buffer.from(await asset.arrayBuffer())); return }
     const respond = (status, body) => { outgoing.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); outgoing.end(JSON.stringify(body)) }
     if (url.pathname === '/api/auth/me') { respond(200, { csrfToken: 'synthetic-native-csrf' }); return }
     if (url.pathname.startsWith('/api/')) {
@@ -83,7 +85,10 @@ async function fixture() {
       visibility: { principal: actor, ...(asReseller ? { reseller } : {}), disabledFeatures: new Set() }, security: { totpEnabled: true }, realtimeEnabled: false,
       whm: { principal: actor, ...(asReseller ? { activeReseller: reseller } : {}), plans: [plan, secondPlan], accounts, resellers: [reseller, { ...reseller, id: neighborId, username: 'neighborreseller' }], featureLists: [{ id: featureId, name: 'Standard features' }, { id: otherFeatureId, name: 'Alternate features' }], planEditorState: editor, mailIpConfig: baseMail, ipPool: [] },
     })
-    assert.ok(html.includes(BROWSER_REALTIME_SCRIPT), 'The actual current render must include the actual runtime client')
+    // The page loads the runtime client from its versioned asset; that asset must be the actual current client.
+    const client = /<script id="xpanel-realtime-client" src="(\/assets\/ws-client\.js)\?v=[0-9a-f]+"><\/script>/.exec(html)
+    assert.ok(client, 'The actual current render must load the runtime client')
+    assert.equal(await serveStaticAsset(client[1]).text(), BROWSER_REALTIME_SCRIPT, 'The served runtime client is the actual current client')
     outgoing.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); outgoing.end(html.replace('<html ', '<html data-native-workflow-fixture="synthetic-qualified-presentation" '))
     } catch {
       if (!outgoing.headersSent) outgoing.writeHead(500, { 'content-type': 'application/json' })
@@ -260,7 +265,8 @@ async function plansFlow(page, host, state, result, expect, visit) {
   assert.equal(result.plan_layout.parentStyle.gap, '24px')
   assert.equal(result.plan_layout.toolbar_children, 1, 'The plan toolbar has one real create action and no phantom item')
   assert.ok(result.plan_layout.create.width >= 43.9 && result.plan_layout.create.height >= 43.9, 'The actual plan create target stays at least 44px')
-  for (const boundary of ['table_to_wrapper', 'table_to_form', 'table_to_heading']) assert.ok(Math.abs(result.plan_layout[boundary] - 32) < 0.6, 'The real table-to-editor section boundary stays 32px without additive offsets: ' + boundary)
+  // The plan table and the editor are sibling groups in the plans card: the card's 24px group gap separates them.
+  for (const boundary of ['table_to_wrapper', 'table_to_form', 'table_to_heading']) assert.ok(Math.abs(result.plan_layout[boundary] - 24) < 0.6, 'The real table-to-editor group boundary stays 24px without additive offsets: ' + boundary)
   result.plan_name_lines = await page.locator('#whm-plans [data-plan-name]').evaluateAll(nodes => nodes.map(node => {
     const range = document.createRange(); range.selectNodeContents(node)
     const lines = [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0).reduce((tops, rect) => tops.some(top => Math.abs(top - rect.top) < 0.6) ? tops : [...tops, rect.top], [])

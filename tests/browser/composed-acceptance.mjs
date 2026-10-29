@@ -7,7 +7,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { canOpenRegisteredRoute, navigation, tools, visibleNavigation, visibleTools } from '../../packages/catalog/src/index.ts'
 import { defaultPlan } from '../../packages/core/src/index.ts'
-import { renderWebApp } from '../../apps/web/src/app.ts'
+import { renderWebApp, serveStaticAsset } from '../../apps/web/src/app.ts'
 import { composedXpanelRoutes, composedXwhmRoutes } from '../../apps/web/src/board-port/composed/all.ts'
 import { collectSnapshotFiles, computeSourceDigest } from '../../scripts/vm/source-snapshot.mjs'
 import { assertAppliedFont } from './applied-font-contract.mjs'
@@ -36,6 +36,9 @@ async function fixture() {
   const requests = []
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1')
+    // Pages load their client runtime from /assets; serve the product's own immutable assets.
+    const asset = serveStaticAsset(url.pathname)
+    if (asset) { response.writeHead(asset.status, Object.fromEntries(asset.headers)); response.end(Buffer.from(await asset.arrayBuffer())); return }
     if (url.pathname.startsWith('/api/')) {
       requests.push({ method: request.method, path: url.pathname })
       response.writeHead(404, { 'content-type': 'application/json' }); response.end('{"code":"SYNTHETIC_READ_ONLY"}'); return
@@ -80,21 +83,25 @@ async function verifyReverseProxyFallback(page, result, locale, width, host, req
   assert.equal(await page.locator('html').getAttribute('lang'), locale)
   assert.equal(await page.locator('html').getAttribute('dir'), locale === 'ar' ? 'rtl' : 'ltr')
   assert.equal(await page.locator('html').getAttribute('data-realtime-enabled'), 'false')
-  const disabledPage = scope.locator('[data-catalog-screen="true"][data-wiring="soon"]')
+  // The approved reverse-proxy workspace replaced the former placeholder. Under the owner's root-only
+  // catalog boundary it is an unbound, read-only, unavailable workspace: every control stays disabled.
+  const disabledPage = scope.locator('[data-approved-xpanel-workspace="/domains/reverse-proxy"][data-workspace-mode="read-only"][data-wiring="unavailable"][data-capability-unavailable="true"]')
   assert.equal(await disabledPage.isVisible(), true)
-  const unread = locale === 'ar' ? 'هذه الشاشة على الخادم. تبقى فارغة إلى أن تُوصل أداتها.' : 'This screen is on the server. It stays empty until its tool is connected.'
-  assert.equal((await disabledPage.locator('.xp-design-page__lede').innerText()).trim(), unread)
-  assert.equal((await disabledPage.locator('.xp-design-empty h2').innerText()).trim(), locale === 'ar' ? 'قيد التفعيل' : 'Coming soon')
-  assert.ok((await disabledPage.locator('.xp-design-empty').innerText()).includes(unread))
-  const actions = disabledPage.locator('button:visible')
-  assert.ok(await actions.count() > 0, 'The unavailable operation retains a visible disabled action')
+  const unavailable = locale === 'ar' ? 'تغييرات الوكيل العكسي غير متاحة هنا. لم يُقرأ أو يُغيّر شيء.' : 'Reverse proxy changes are unavailable here. Nothing has been read or changed.'
+  assert.equal((await disabledPage.locator(':scope > .xp-panel-detail__heading > [role="status"]').innerText()).trim(), unavailable)
+  const tool = disabledPage.locator('[data-reverse-proxy]')
+  assert.deepEqual(await tool.evaluate(element => ({ account: element.dataset.rpAccount, home: element.dataset.rpHome, manage: element.dataset.rpManage })), { account: '', home: '', manage: 'false' }, 'The unavailable workspace is bound to no account and cannot manage')
+  assert.equal((await tool.locator('[data-rp-current]').innerText()).trim(), locale === 'ar' ? 'لم تُقرأ' : 'Not read')
+  const actions = disabledPage.locator('button:visible, input:visible, select:visible, textarea:visible')
+  assert.ok(await actions.count() > 0, 'The unavailable operation retains its visible disabled controls')
   for (const action of await actions.all()) assert.equal(await action.isDisabled(), true)
 
   result.geometry = await page.evaluate(() => {
     const parent = document.querySelector('[data-tool-availability="unverified"]')
-    const design = parent.querySelector('[data-catalog-screen="true"]')
-    const header = design.querySelector('.xp-board-head')
-    const empty = design.querySelector('.xp-design-empty')
+    const design = parent.querySelector('[data-approved-xpanel-workspace="/domains/reverse-proxy"]')
+    const header = design.querySelector(':scope > .xp-panel-detail__heading')
+    const body = design.querySelector(':scope > [data-reverse-proxy]')
+    const cards = [...body.querySelectorAll(':scope > .xp-acct-tool__card')]
     const identity = parent.querySelector('[data-workspace-identity]')
     const grid = identity.querySelector('.xp-kpi-grid')
     const rtl = document.documentElement.dir === 'rtl'
@@ -116,14 +123,16 @@ async function verifyReverseProxyFallback(page, result, locale, width, host, req
       const labelEdge = labels.length ? (rtl ? Math.max(...labels.map(rect => rect.right)) : Math.min(...labels.map(rect => rect.left))) : null
       return { field: field.dataset.workspaceField, text: value.textContent.trim(), visible: field.checkVisibility() && label.checkVisibility() && value.checkVisibility(), gap: v.top - l.bottom, edge_delta: Math.abs(edge(l) - edge(v)), glyph_edge_delta: labels.length && values.length ? Math.max(...values.map(rect => Math.abs(labelEdge - edge(rect)))) : null, label_text_rects: labels, value_text_rects: values, isolation: [...value.querySelectorAll('bdi')].map(node => ({ direction: getComputedStyle(node).direction, isolate: getComputedStyle(node).unicodeBidi.includes('isolate') })) }
     })
-    const h1 = header.querySelector('h1'), lede = header.querySelector('.xp-design-page__lede')
-    const emptyChildren = [...empty.children]
+    const h1 = header.querySelector('h1'), lede = header.querySelector('[role="status"]')
+    const shown = element => element.checkVisibility() && element.getBoundingClientRect().height > 0
     return { state: 'unqualified-unread', page: rectangle(parent), document_width: document.documentElement.clientWidth, document_scroll: document.documentElement.scrollWidth,
       actual_heading_lede_gap: rectangle(lede).top - rectangle(h1).bottom,
-      design_major_gap: rectangle(empty).top - rectangle(header).bottom,
+      design_major_gap: rectangle(body).top - rectangle(header).bottom,
       workspace_major_gap: rectangle(identity).top - rectangle(design).bottom,
-      empty_group_gaps: emptyChildren.slice(1).map((child, index) => rectangle(child).top - rectangle(emptyChildren[index]).bottom),
-      empty_card_padding: getComputedStyle(empty).paddingInlineStart, identity_card_padding: getComputedStyle(identity).paddingInlineStart,
+      card_count: cards.length,
+      card_gaps: cards.slice(1).map((card, index) => rectangle(card).top - rectangle(cards[index]).bottom),
+      empty_group_gaps: cards.flatMap(card => { const children = [...card.children].filter(shown); return children.slice(1).map((child, index) => rectangle(child).top - rectangle(children[index]).bottom) }),
+      empty_card_paddings: cards.map(card => getComputedStyle(card).paddingInlineStart), identity_card_padding: getComputedStyle(identity).paddingInlineStart,
       identity_group_gap: rectangle(grid).top - rectangle(identity.querySelector('h2')).bottom,
       fields_gap: getComputedStyle(grid).gap, facts,
       interactive: [...parent.querySelectorAll('button,a,input,select,textarea')].filter(element => element.checkVisibility()).map(rectangle),
@@ -142,9 +151,12 @@ async function verifyReverseProxyFallback(page, result, locale, width, host, req
   assert.ok(Math.abs(geometry.actual_heading_lede_gap - 8) < 0.6, 'Actual heading/lede gap stays 8px')
   assert.ok(Math.abs(geometry.design_major_gap - 32) < 0.6, 'Actual disabled header/body section gap stays 32px')
   assert.ok(Math.abs(geometry.workspace_major_gap - 32) < 0.6, 'Actual workspace major sections stay 32px apart')
+  assert.equal(geometry.card_count, 4, 'Sites, serving mode, steps and limits cards remain')
+  for (const gap of geometry.card_gaps) assert.ok(Math.abs(gap - 32) < 0.6, 'Actual disabled workspace cards stay 32px apart')
+  assert.ok(geometry.empty_group_gaps.length > 0)
   for (const gap of geometry.empty_group_gaps) assert.ok(Math.abs(gap - 24) < 0.6, 'Actual disabled card content groups stay 24px apart')
   assert.ok(Math.abs(geometry.identity_group_gap - 24) < 0.6, 'Actual identity heading/field group gap stays 24px')
-  assert.equal(geometry.empty_card_padding, width > 800 ? '24px' : '16px')
+  for (const padding of geometry.empty_card_paddings) assert.equal(padding, width > 600 ? '24px' : '16px')
   assert.equal(geometry.identity_card_padding, width > 800 ? '24px' : '16px')
   assert.equal(geometry.fields_gap, '16px')
   for (const fact of geometry.facts) {

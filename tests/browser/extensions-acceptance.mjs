@@ -7,7 +7,8 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tools, navigation, canonicalNavigationRoute } from '../../packages/catalog/src/index.ts'
 import { defaultPlan } from '../../packages/core/src/index.ts'
-import { renderWebApp } from '../../apps/web/src/app.ts'
+import { renderWebApp, serveStaticAsset } from '../../apps/web/src/app.ts'
+import { approvedXpanelWorkspaceRoutes } from '../../apps/web/src/board-port/approved-xpanel-workspaces.ts'
 import { resolveWebDocumentRoute } from '../../apps/web/src/document-routes.ts'
 import { emailAccountsRouteSpec } from '../../apps/web/src/board-port/extensions/email-accounts.ts'
 import { accountPageRouteSpecs } from '../../apps/web/src/board-port/extensions/account-pages.ts'
@@ -29,6 +30,10 @@ assert.equal(new Set(routes.map(spec => spec.route)).size, 28)
 
 // These routes have an unread collection, not a fabricated row of facts.
 const unreadCollectionOnlyRoutes = new Set(['/email/filters', '/email/spam-filters', '/email/spam-quarantine', '/email/archive', '/email/encryption', '/email/calendars-contacts', '/preferences/team'])
+// Approved workspaces replaced these extension placeholders; the workspace renders the route instead.
+const workspaceRoutes = new Set(['/email/archive', '/email/encryption', '/email/calendars-contacts', '/preferences/team', '/health'])
+// These extension views now host a real workspace body (its own cards, forms and read states) inside the extension frame.
+const workspaceBodyRoutes = new Set(['/email/forwarders', '/email/filters', '/email/spam-filters', '/email/spam-quarantine', '/email/mailing-lists', '/preferences'])
 const typographyRoles = {
   caption: { size: 13, en: 20, ar: 22 }, label: { size: 14, en: 22, ar: 24 },
   body: { size: 16, en: 24, ar: 26 }, card: { size: 18, en: 28, ar: 30 },
@@ -106,6 +111,9 @@ async function fixture() {
   const requests = []
   const server = createServer((request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1')
+    // Pages load their client runtime from /assets; serve the product's own immutable assets.
+    const asset = serveStaticAsset(url.pathname)
+    if (asset) { response.writeHead(asset.status, Object.fromEntries(asset.headers)); asset.arrayBuffer().then(body => response.end(Buffer.from(body))); return }
     if (url.pathname.startsWith('/api/')) {
       requests.push({ method: request.method, path: url.pathname })
       response.writeHead(404, { 'content-type': 'application/json' }); response.end('{"code":"SYNTHETIC_PRESENTATION_ONLY"}'); return
@@ -157,7 +165,8 @@ async function measure(page, selector) {
     })
     const fields = [...parent.querySelectorAll('.xp-field')].filter(visible).flatMap(row => {
       const label = row.querySelector('label[for]'), control = label && document.getElementById(label.htmlFor)
-      if (!control || !visible(control)) return []
+      // Checkboxes and radios are hit through their 44px labels (checked as targets), as in the phase 1 field rule.
+      if (!control || !visible(control) || (control instanceof HTMLInputElement && ['checkbox', 'radio'].includes(control.type))) return []
       const l = rect(label), c = rect(control), style = getComputedStyle(control), lg = glyph(label)
       const paintedEdge = rtl ? c.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight) : c.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft)
       return [{ id: control.id, tag: control.tagName, type: control.getAttribute('type'), multiple: control.multiple === true, size: control.getAttribute('size'), gap: c.top - l.bottom, label_bounds: l, control_bounds: c, label_glyph_edge: edge(lg), painted_edge: paintedEdge, painted_edge_delta: Math.abs(edge(lg) - paintedEdge), direction: style.direction, text_align: style.textAlign, font_family: style.fontFamily, font_size: style.fontSize, font_weight: style.fontWeight, line_height: style.lineHeight, appearance: style.appearance, color: style.color, background_color: style.backgroundColor, box_sizing: style.boxSizing, min_block_size: style.minBlockSize, padding: { inline_start: style.paddingInlineStart, inline_end: style.paddingInlineEnd, block_start: style.paddingBlockStart, block_end: style.paddingBlockEnd }, borders: { inline_start: style.borderInlineStartWidth, inline_end: style.borderInlineEndWidth, block_start: style.borderBlockStartWidth, block_end: style.borderBlockEndWidth } }]
@@ -166,8 +175,15 @@ async function measure(page, selector) {
       const style = getComputedStyle(card), box = rect(card), first = rect(children(card)[0])
       return { bounds: box, padding: { inline_start: style.paddingInlineStart, inline_end: style.paddingInlineEnd, block_start: style.paddingBlockStart, block_end: style.paddingBlockEnd }, actual_content_start: first.left - box.left - parseFloat(style.borderLeftWidth), actual_content_end: box.right - first.right - parseFloat(style.borderRightWidth), actual_content_top: first.top - box.top - parseFloat(style.borderTopWidth), group_gaps: verticalGaps(card) }
     })
-    const targets = roots.flatMap(region => [...region.querySelectorAll('a[href],button,input:not([type="hidden"]),select,textarea,summary')]).filter(visible).map(element => ({ tag: element.tagName, text: element.textContent.trim(), disabled: element.disabled === true, bounds: rect(element) }))
-    const human = roots.flatMap(region => [...region.querySelectorAll('h1,h2,h3,dt,label,button,a,p,dd,th,td')]).filter(element => visible(element) && element.textContent.trim() && !element.closest('bdi,.xp-mono,code') && !element.querySelector('bdi,.xp-mono,code')).map((element, index) => {
+    const targets = roots.flatMap(region => [...region.querySelectorAll('a[href],button,input:not([type="hidden"]),select,textarea,summary')]).filter(visible).map(element => {
+      // A compact checkbox or radio is hit through its associated label, as in the phase 1 target rule.
+      const labels = element instanceof HTMLInputElement && ['checkbox', 'radio'].includes(element.type) ? [...element.labels ?? []].filter(visible) : []
+      const label = labels.find(candidate => { const box = candidate.getBoundingClientRect(); return box.width >= 44 && box.height >= 44 }) ?? labels[0]
+      return { tag: element.tagName, text: element.textContent.trim(), disabled: element.disabled === true, bounds: rect(element), ...(label ? { label_bounds: rect(label) } : {}) }
+    })
+    const human = roots.flatMap(region => [...region.querySelectorAll('h1,h2,h3,dt,label,button,a,p,dd,th,td')]).filter(element => visible(element) && element.textContent.trim() && !element.closest('bdi,.xp-mono,code') && !element.querySelector('bdi,.xp-mono,code')
+      // A table cell whose text sits only in its controls is measured through those controls.
+      && !(element.matches('th,td') && ![...element.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim()))).map((element, index) => {
       const key = `font-${index}`; element.setAttribute('data-extension-font-probe', key)
       const style = getComputedStyle(element)
       const captionSelector = '[data-section="slice-resources"] > .xp-board-head > p.xp-help[data-wiring-hint="soon"]'
@@ -176,9 +192,13 @@ async function measure(page, selector) {
       if (element.matches(captionSelector)) role = 'caption'
       else if (newComponent) {
         if (element.tagName === 'H1') role = 'page'
-        else if (element.tagName === 'H2') role = 'card'
+        else if (element.tagName === 'H2' || element.tagName === 'H3') role = 'card'
+        else if (element.tagName === 'LABEL' && element.querySelector(':scope > input:is([type="checkbox"], [type="radio"])')) role = 'body'
         else if (element.tagName === 'DT' || element.matches('.xp-field > label[for]')) role = 'label'
-        else if (['P', 'DD', 'BUTTON', 'A'].includes(element.tagName)) role = 'body'
+        else if (element.tagName === 'LABEL' && ['checkbox', 'radio'].includes(element.control?.type)) role = 'body'
+        else if (element.tagName === 'LABEL' && element.control) role = 'label'
+        else if (element.tagName === 'TH') role = 'label'
+        else if (['P', 'DD', 'BUTTON', 'A', 'TD'].includes(element.tagName)) role = 'body'
       } else if (canvas?.contains(element)) {
         if (element.id === 'xpanel-resources-heading') role = 'page'
         else if (element.tagName === 'P') role = 'body'
@@ -205,6 +225,22 @@ async function measure(page, selector) {
   }, selector)
 }
 
+// The approved workspace now owns the route: the extension placeholder must not render beside it.
+async function verifyWorkspaceRoute(page, spec, axeSource) {
+  assert.ok(approvedXpanelWorkspaceRoutes.has(spec.route), 'Approved workspace route: ' + spec.route)
+  assert.equal(await page.locator('[data-extension-view]').count(), 0, 'The replaced extension body is not rendered')
+  const workspace = page.locator('[data-approved-xpanel-workspace="' + spec.route + '"]')
+  assert.equal(await workspace.count(), 1, 'The approved workspace renders the route once')
+  await workspace.waitFor({ state: 'visible' })
+  assert.equal(await page.locator('h1:visible').count(), 1, 'There is one visible page heading')
+  const overflow = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, width: document.documentElement.clientWidth }))
+  assert.ok(overflow.scroll <= overflow.width, 'No document overflow')
+  await page.addScriptTag({ content: axeSource })
+  const accessibility = await page.evaluate(async () => (await axe.run('main.xp-main', { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } })).violations.map(violation => ({ id: violation.id, targets: violation.nodes.map(node => node.target) })))
+  assert.deepEqual(accessibility, [])
+  return { workspace: spec.route, ...overflow, accessibility }
+}
+
 const near = (value, expected, message) => assert.ok(Number.isFinite(value) && Math.abs(value - expected) < 0.6, `${message}: expected ${expected}, observed ${value}`)
 
 function validateGeometry(observation, spec, width, locale, theme) {
@@ -212,14 +248,16 @@ function validateGeometry(observation, spec, width, locale, theme) {
   assert.ok(observation.region_scroll <= observation.region_width, 'No clipped extension overflow')
   assert.ok(observation.page.left >= -0.5 && observation.page.right <= width + 0.5, 'Extension remains within viewport')
   assert.equal(observation.ascii_digits, true, 'Displayed digits remain ASCII')
-  assert.ok(observation.cards.length > 0)
+  const placeholder = !workspaceBodyRoutes.has(spec.route)
+  if (placeholder) assert.ok(observation.cards.length > 0)
   for (const gap of observation.major_gaps) near(gap, 32, 'Actual major section gap')
   for (const card of observation.cards) {
     for (const padding of Object.values(card.padding)) assert.equal(padding, width <= 800 ? '16px' : '24px')
     for (const value of [card.actual_content_start, card.actual_content_end, card.actual_content_top]) near(value, width <= 800 ? 16 : 24, 'Actual card content padding')
     for (const gap of card.group_gaps) near(gap, 24, 'Actual card content-group gap')
   }
-  if (unreadCollectionOnlyRoutes.has(spec.route)) {
+  if (!placeholder) assert.ok(observation.cards.length + observation.fields.length + observation.facts.length > 0, 'The hosted workspace renders actual content')
+  else if (unreadCollectionOnlyRoutes.has(spec.route)) {
     assert.equal(observation.facts.length, 0, 'An unread collection must not manufacture fact rows')
     assert.deepEqual(observation.collection_states, ['unread'], 'The collection-only view must explicitly report its unread state')
     assert.equal(observation.collection_rows, 0, 'An unread collection must not fabricate records')
@@ -235,11 +273,15 @@ function validateGeometry(observation, spec, width, locale, theme) {
     assert.equal(parseFloat(field.line_height), width <= 959 ? 24 : typographyRoles.body[locale], 'Exact mobile native-input line height or desktop body role')
   }
   for (const layout of observation.sibling_layouts) {
-    const expected = /__groups|__list/.test(layout.class_name) ? 24 : 16
+    // Groups, lists and the mailbox form (fields block, then actions) separate content groups by 24px.
+    const expected = /__groups|__list|xp-email-accounts__form/.test(layout.class_name) ? 24 : 16
     for (const gap of [...layout.gaps.inline, ...layout.gaps.block]) near(gap, expected, 'Actual sibling/group gap')
   }
-  for (const target of observation.targets) assert.ok(target.bounds.width >= 44 && target.bounds.height >= 44, 'Interactive targets are at least44px')
-  if (spec.family !== 'email') assert.equal(observation.mutation_forms, 0, 'Read-only views contain no mutation form')
+  for (const target of observation.targets) {
+    const hit = target.label_bounds && (target.bounds.width < 44 || target.bounds.height < 44) ? target.label_bounds : target.bounds
+    assert.ok(hit.width >= 44 && hit.height >= 44, 'Interactive targets are at least44px')
+  }
+  if (spec.family !== 'email' && placeholder) assert.equal(observation.mutation_forms, 0, 'Read-only views contain no mutation form')
   if (spec.family === 'store') {
     assert.deepEqual(observation.installer_states, ['unavailable'])
     assert.ok(observation.installer_progress.every(state => state === 'unread'))
@@ -256,7 +298,7 @@ function validateGeometry(observation, spec, width, locale, theme) {
     }
   }
   if (spec.route === '/email/deliverability' || spec.route === '/health') assert.deepEqual(observation.check_states, ['unread'])
-  if (['/email/forwarders', '/email/filters', '/email/spam-filters', '/email/spam-quarantine', '/email/mailing-lists', '/email/archive', '/email/encryption', '/email/calendars-contacts', '/preferences/team'].includes(spec.route)) assert.deepEqual(observation.collection_states, ['unread'])
+  if (placeholder && ['/email/forwarders', '/email/filters', '/email/spam-filters', '/email/spam-quarantine', '/email/mailing-lists', '/email/archive', '/email/encryption', '/email/calendars-contacts', '/preferences/team'].includes(spec.route)) assert.deepEqual(observation.collection_states, ['unread'])
   if (spec.family === 'resources') {
     assert.ok(observation.native_canvas?.slice_identity && observation.native_canvas.rows > 0, 'Existing native resource canvas remains present')
     near(observation.native_canvas.addon_gap, 32, 'Native canvas/additive detail gap')
@@ -299,6 +341,12 @@ export async function runExtensionsAcceptance({ output, filter } = {}) {
         try {
           const response = await page.goto(host.baseUrl + spec.route + '?lang=' + locale + '&theme=' + theme, { waitUntil: 'networkidle' })
           assert.equal(response.status(), 200)
+          if (workspaceRoutes.has(spec.route)) {
+            result.replaced_by_workspace = await verifyWorkspaceRoute(page, spec, axeSource)
+            result.passed = true; results.push(result)
+            writeFileSync(join(destination, 'results.json'), JSON.stringify({ complete: false, synthetic_presentation_only: true, results }, null, 2) + '\n')
+            continue
+          }
           const selector = spec.family === 'resources' ? '.xp-resource-board' : '[data-extension-view]'
           assert.equal(await page.locator(selector).count(), 1, 'Actual integrated extension body occurs once')
           await page.locator(selector).waitFor({ state: 'visible' })

@@ -37,6 +37,10 @@ async function fontGate(page, locale) {
   return result
 }
 
+// The visual fixture's mailbox and its one synthetic inbox message, served through the synthetic read-only session.
+const syntheticMailbox = 'info@preview.example.test'
+const syntheticMessage = { uid: 1, uidValidityObserved: true, uidValidity: 1001, from: 'preview-sender@example.test', fromName: 'Synthetic sender', to: syntheticMailbox, subject: 'Synthetic welcome message', receivedAt: '2026-10-22T12:00:00Z', unread: true, sizeBytes: 128, preview: 'This message is visual test data.', attachments: [] }
+
 async function geometry(page) {
   return page.evaluate(() => {
     const visible = element => element?.checkVisibility({ checkVisibilityCSS: true }) && !element.closest('[hidden],[inert]')
@@ -243,9 +247,11 @@ async function composerGate(page, state) {
   assert.equal(await send.getAttribute('type'), 'button')
   const from = page.locator('#compose-from'), mailbox = await page.locator('[data-mail-layout="reference"]').getAttribute('data-mailbox')
   assert.equal(await from.evaluate(element => element.tagName), 'SELECT')
-  assert.deepEqual(await from.locator('option').evaluateAll(options => options.map(option => ({ value: option.value, selected: option.selected }))), [{ value: mailbox, selected: true }])
-  await from.selectOption(mailbox)
-  assert.equal(await from.inputValue(), mailbox, 'The configured sender remains the sole native option')
+  // The synthetic session reads an empty saved-identity collection, so the authenticated mailbox address is the sole sender.
+  await page.waitForFunction(() => document.querySelector('[data-compose-identities]')?.dataset.composeIdentitiesState === 'ready')
+  assert.deepEqual(await from.locator('option').evaluateAll(options => options.map(option => ({ value: option.value, selected: option.selected, addr: option.dataset.addr }))), [{ value: '', selected: true, addr: mailbox }])
+  await from.selectOption({ index: 0 })
+  assert.equal(await from.evaluate(element => element.selectedOptions[0]?.dataset.addr), mailbox, 'The authenticated mailbox address remains the sole native sender option')
   assert.equal(await composer.locator('[data-mail-action="save-draft"][disabled]').count(), 1)
   await page.locator('#compose-to').fill('recipient@example.test')
   const directions = async () => composer.evaluate(element => ['compose-subject', 'compose-body'].map(id => {
@@ -329,6 +335,15 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
       await context.route('**/*', async route => {
         const method = route.request().method()
         if (!['GET', 'HEAD'].includes(method)) { outcome.mutations.push({ method }); await route.abort(); return }
+        // A synthetic read-only session. Compose reads its saved sender identities (none) and vacation state (none) before
+        // Send becomes available; the inbox reads its synthetic folder list and the opened message (no attachments).
+        const requested = new URL(route.request().url()), path = requested.pathname
+        if (path === '/api/auth/me') { await route.fulfill({ json: { csrfToken: 'synthetic-mail-layout-csrf' } }); return }
+        if (state.screen === 'inbox' && path === '/api/webmail/inbox' && requested.searchParams.get('folder') === 'INBOX') { await route.fulfill({ json: { mailbox: syntheticMailbox, folder: 'INBOX', complete: true, messages: [syntheticMessage], capabilities: { move: false } } }); return }
+        if (state.screen === 'inbox' && path === '/api/webmail/inbox/' + syntheticMessage.uid && requested.searchParams.get('folder') === 'INBOX') { await route.fulfill({ json: { mailbox: syntheticMailbox, folder: 'INBOX', message: { ...syntheticMessage, body: 'This is synthetic visual test data.' } } }); return }
+        if (state.screen === 'inbox' && path === '/api/webmail/attachment-workspace') { await route.fulfill({ json: { context: { mailbox: syntheticMailbox, folder: 'INBOX', uid: syntheticMessage.uid, uidValidity: syntheticMessage.uidValidity }, attachments: [] } }); return }
+        if (state.screen === 'compose' && path === '/api/webmail/identities') { await route.fulfill({ json: { identities: [] } }); return }
+        if (state.screen === 'compose' && path === '/api/webmail/vacation') { await route.fulfill({ json: { context: { mailbox: syntheticMailbox }, revision: '0'.repeat(64), vacation: null, application: { status: 'configuration_only', nativeApplied: false } } }); return }
         await route.continue()
       })
       page.on('pageerror', error => outcome.page_errors.push(String(error.message).slice(0, 200)))
@@ -348,9 +363,14 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
         outcome.fonts = await fontGate(page, state.locale)
         if (!probeControls) probeControls = await quotaProbeControls(page)
         outcome.applied_fonts = {}
-        for (const [role, selector, family, typographyRole] of [['brand', '[data-mail-layout="reference"] > header > a:first-child > span:last-child', 'IBM Plex Mono', 'mail-wordmark'], ['heading', state.screen === 'inbox' ? '#list-title' : '#compose-title', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans', 'ordinary']]) {
+        for (const [role, selector, family, typographyRole] of [['brand', '[data-mail-layout="reference"] > header > a:first-of-type > span:last-child', 'IBM Plex Mono', 'mail-wordmark'], ['heading', state.screen === 'inbox' ? '#list-title' : '#compose-title', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans', 'ordinary']]) {
           try { outcome.applied_fonts[role] = await assertAppliedFont(page, selector, family, { role: typographyRole }) }
           catch (error) { if (error.appliedFontObservation) outcome.applied_fonts[role] = error.appliedFontObservation; throw error }
+        }
+        if (state.screen === 'inbox') {
+          // The inbox opens no message by itself; open the synthetic message so its reading-pane fields are measured.
+          await page.locator('[data-mail-open][data-mail-uid="' + syntheticMessage.uid + '"]').click()
+          await page.waitForFunction(() => document.querySelector('[data-mail-detail-body]')?.textContent.includes('synthetic visual test data'))
         }
         outcome.geometry = await geometry(page)
         const observed = outcome.geometry
@@ -365,7 +385,12 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
         }
         if (state.screen === 'inbox') {
           if (state.width >= 960) { assert.equal(observed.folder.visible, true); assert.ok(Math.abs(observed.folder.width - 200) < 1); assert.ok(observed.list.height >= 700, 'The continuous inbox fills the desktop workspace') }
-          else { assert.equal(observed.folder.visible, true); assert.ok(observed.folder.width <= state.width + 1, 'Inline folder navigation fits the narrow viewport') }
+          else {
+            // Below 960px the folder navigation is a drawer behind the visible Menu toggle (checked as a modal by mobileGate); otherwise it is inline.
+            const drawer = await page.locator('[data-action="toggle-mobile-nav"]:visible').count() > 0
+            assert.equal(observed.folder.visible, !drawer, 'Narrow folder navigation is inline or behind the visible Menu drawer')
+            if (!drawer) assert.ok(observed.folder.width <= state.width + 1, 'Inline folder navigation fits the narrow viewport')
+          }
           if (state.width >= 640) assert.ok(Math.abs(observed.list.y - observed.reader.y) < 1, 'Tablet and desktop keep list and reader side by side')
           else assert.ok(observed.reader.y >= observed.list.y + observed.list.height - 1, 'Phone panes stack in reading order')
         }
@@ -382,7 +407,7 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
         outcome.status = 'passed'
       } catch (error) {
         outcome.status = 'failed'
-        outcome.failure = { name: error.name, message: String(error.message).slice(0, 1200) }
+        outcome.failure = { name: error.name, message: String(error.message).slice(0, 1200), stack: String(error.stack).split('\n').slice(0, 6) }
       } finally {
         if (outcome.status === 'passed') {
           // Capture the complete layout after keyboard checks, rather than a scrolled sticky-header state.

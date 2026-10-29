@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 const proportionalFamilies = new Set(['IBM Plex Sans', 'sans-serif'])
 const wordmarkSelectors = {
   'login-wordmark': '.xp-brand__name',
-  'mail-wordmark': '[data-mail-layout="reference"] > header > a:first-child > span:last-child',
+  'mail-wordmark': '[data-mail-layout="reference"] > header > a:first-of-type > span:last-child',
 }
 const reportedFamily = name => {
   const normalized = name.trim().replace(/\s+/g, ' ')

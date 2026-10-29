@@ -157,6 +157,7 @@ export const nativeComposedRoutePaths: ReadonlySet<string> = new Set([
   "/domains/redirects",
   "/security/ssh",
   "/metrics/logs",
+  "/security/virus-scanner",
   "/advanced/network-tools",
   "/databases/insights",
   "/databases/phpmyadmin", "/databases/postgresql", "/databases/phppgadmin", "/whm/databases/phpmyadmin", "/whm/databases/upgrade", "/whm/databases/redis", "/whm/databases/mongodb",

@@ -14,7 +14,7 @@ import { assertAppliedFont } from './applied-font-contract.mjs'
 const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
 const focusable = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]'
 const routes = [
-  { path: '/home', to: '/domains', marker: '[data-board-port="xpanel-home"]', target: '[data-domains-table]' },
+  { path: '/home', to: '/domains', marker: '[data-board-port="xpanel-home"]', target: '[data-approved-xpanel-workspace="/domains"] [data-domain-workspace] [data-domain-table]' },
   { path: '/whm', to: '/whm/accounts', marker: '[data-section="overview-attention"]', target: '[data-section="accounts-isolation"]' },
   { path: '/mail/inbox', to: '/mail/compose', marker: '[data-mail-pane="message-list"]', target: '[data-compose-form]' },
   { path: '/files/manager', to: '/home', marker: '[data-file-manager-table]', target: '[data-board-port="xpanel-home"]' },
@@ -277,7 +277,8 @@ async function prepareNavigationFontTransport(browser, fixture, unqualifiedFixtu
       for (const value of input.css) { cssUrls.add(value); addProvenance(value, { kind: 'rendered-stylesheet-link', path, locale, document_sha256: documentHash }) }
       for (const value of input.fonts) { fontUrls.add(value); inlineFontUrls.add(value); addProvenance(value, { kind: 'rendered-inline-font-face', path, locale, document_sha256: documentHash }) }
     }
-    if (cssUrls.size !== NAV_FONT_LIMITS.cssUrls || fontUrls.size !== 4) throw fontFailure('font-inventory-source-changed')
+    // Arabic uses the generic sans-serif family, so no rendered document declares an inline web font face.
+    if (cssUrls.size !== NAV_FONT_LIMITS.cssUrls || fontUrls.size !== 0) throw fontFailure('font-inventory-source-changed')
     for (const target of [fixture, unqualifiedFixture]) await probe(target.baseUrl, 'en', false)
     if (!profiles.css.length) throw fontFailure('font-css-header-profile-missing')
     phase = 'css-fetch'
@@ -385,7 +386,8 @@ async function fontGate(page, locale) {
   if (locale === 'ar') assert.equal(result.body_family, 'sans-serif', 'Arabic UI must select the literal generic sans-serif family')
   else assert.ok(result.body_family.includes(result.family), 'The locale body must select its intended family')
   assert.deepEqual(result.faces.filter(face => face.status === 'error'), [])
-  result.applied_ui = await assertAppliedFont(page, 'h1', result.family)
+  // Home on a phone shows its level-1 heading as role=heading; the desktop h1 is then hidden.
+  result.applied_ui = await assertAppliedFont(page, await page.locator('h1').first().isVisible() ? 'h1' : '[role="heading"][aria-level="1"]', result.family)
   return result
 }
 
@@ -449,6 +451,13 @@ async function mobileOverlay(page, expect, observations, { requireLongScroll = f
   }
   const sidebar = page.locator(phone ? '#m-drawer' : '[data-xp-sidebar]')
   const background = page.locator(phone ? '[data-home-phone] > main' : '[data-xp-shell-content]')
+  // The shell content is the inert background; in xMail the folder sidebar sits inside it, so every other child must be inert.
+  const backgroundInert = () => background.evaluate(element => {
+    const sidebar = element.querySelector(':scope > [data-xp-sidebar]')
+    if (!sidebar) return element.inert
+    const others = [...element.children].filter(child => child !== sidebar && !child.hasAttribute('data-xp-nav-backdrop') && !['STYLE', 'SCRIPT'].includes(child.tagName))
+    return others.length > 0 && others.every(child => child.inert)
+  })
   await page.evaluate(long => window.scrollTo(0, long ? Math.min(180, document.documentElement.scrollHeight - innerHeight) : 0), requireLongScroll)
   await frames(page)
   const before = await page.evaluate(() => ({ y: scrollY, maximum: document.documentElement.scrollHeight - innerHeight, scroll_height: document.documentElement.scrollHeight, client_height: document.documentElement.clientHeight, body_height: document.body.getBoundingClientRect().height }))
@@ -456,7 +465,7 @@ async function mobileOverlay(page, expect, observations, { requireLongScroll = f
   const opening = await observeAction(page, () => toggle.click())
   await expect(sidebar).toHaveAttribute('role', 'dialog')
   await expect(sidebar).toHaveAttribute('aria-modal', 'true')
-  assert.equal(await background.evaluate(element => element.inert), true)
+  assert.equal(await backgroundInert(), true)
   if (phone) assert.equal(await page.locator('[data-home-phone] > header').evaluate(element => element.inert), true)
   assert.equal(await sidebar.evaluate(element => element.contains(document.activeElement)), true)
   const trace = []
@@ -481,7 +490,7 @@ async function mobileOverlay(page, expect, observations, { requireLongScroll = f
   const closing = await observeAction(page, () => page.keyboard.press('Escape'), 'keydown')
   await expect(toggle).toHaveAttribute('aria-expanded', 'false')
   await expect(toggle).toBeFocused()
-  assert.equal(await background.evaluate(element => element.inert), false)
+  assert.equal(await backgroundInert(), false)
   if (phone) assert.equal(await page.locator('[data-home-phone] > header').evaluate(element => element.inert), false)
   const after = await page.evaluate(() => scrollY)
   observations.push({ check: 'mobile-overlay', surface: phone ? 'home' : 'shared', focus_destinations: endpoints.count, long_form_scroll: requireLongScroll, scroll_maximum: before.maximum, scroll_before: before.y, scroll_before_escape: beforeClosing, scroll_after: after, opening, closing })
@@ -976,7 +985,7 @@ async function paletteAlias(page, state, expect, observations) {
   assertContext(new URL(href, page.url()).href, state, { path: '/domains' })
   await page.keyboard.press('Enter')
   await page.waitForURL(url => url.pathname === '/domains')
-  await expect(page.locator('[data-domains-table]')).toBeVisible()
+  await expect(page.locator('[data-approved-xpanel-workspace="/domains"] [data-domain-workspace] [data-domain-table]')).toBeVisible()
   await currentPage(page, '/domains', expect)
   assertContext(page.url(), state, { path: '/domains' })
   observations.push({ check: 'authorized-alias-search-and-keyboard-navigation', alias: 'Addon Domains', destination: '/domains', visible_label_unchanged: true, actual_enter_navigation: true, opening_motion: openingMotion, ...geometry })
@@ -1166,7 +1175,8 @@ export async function measureAuditGeometry(page) {
         if (!label) throw new Error('The actual select label text must be visible')
         return [{ id: control.id, label_edge: rtl ? label.right : label.left, selected_text: control.selectedOptions[0]?.textContent.trim() ?? '', control_visible: visible(control), control_rect: { left: box.left, right: box.right, top: box.top, bottom: box.bottom }, edge_basis: 'pending-native-select-text-range' }]
       }),
-      label_input_edges: fields.map(field => { const label = glyph(field.querySelector('label')), control = rect(controlFor(field)); return label ? Math.abs(rtl ? label.right - control.right : label.left - control.left) : null }),
+      // Label text aligns with the control's text edge (outer edge plus border and padding), as select text is measured below.
+      label_input_edges: fields.map(field => { const label = glyph(field.querySelector('label')), element = controlFor(field), control = rect(element), style = getComputedStyle(element); const content = rtl ? control.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight) : control.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft); return label ? Math.abs((rtl ? label.right : label.left) - content) : null }),
       last_field_to_submit: fields.length ? submit.top - rect(fields.at(-1)).bottom : null, action_siblings: siblingGaps(actions),
       controls: [...formElement.querySelectorAll('input:not([type="hidden"]),select,button[type="submit"],a[data-audit-clear]')].map(control => ({ id: control.id || (control.hasAttribute('data-audit-clear') ? 'filter-clear' : 'filter-submit'), tag: control.tagName, width: rect(control).width, height: rect(control).height })),
       pager_groups: pagerGroups.length, pager_links: pagerLinks.length, empty_pager_groups: pagerGroups.filter(group => !group.querySelector('a[href]')).length,
@@ -1215,13 +1225,14 @@ export function assertAuditGeometry(metrics, state) {
   assert.equal(metrics.form_to_table, 24, 'Audit filters and table must have a 24px group gap')
   assert.deepEqual(metrics.field_ids, ['audit-actor', 'audit-action', 'audit-target', 'audit-outcome', 'audit-from', 'audit-to'], 'All six current audit inputs/selects must be measured')
   assert.deepEqual(metrics.label_to_input, [8, 8, 8, 8, 8, 8], 'Each real filter input/select must sit 8px below its label')
-  assert.deepEqual(metrics.field_siblings, [16, 16, 16, 16, 16], 'All adjacent filter fields retain 16px gaps across their actual parent/grid hierarchy')
-  assert.equal(metrics.last_field_to_submit, 16, 'The action group must remain 16px after the last field')
+  // Sibling fields keep 16px; the nested outcome/date group and the action group start a new group 24px below the previous one.
+  assert.deepEqual(metrics.field_siblings, [16, 16, 16, 16, 24], 'Sibling filter fields keep 16px gaps and the nested field group starts 24px below them')
+  assert.equal(metrics.last_field_to_submit, 24, 'The action group starts 24px after the last field')
   assert.deepEqual(metrics.action_siblings, [16], 'Clear and Apply retain the 16px sibling-control gap')
   assert.deepEqual(metrics.label_control_outer_edges, [0, 0, 0, 0, 0, 0], 'All filter labels and control borders retain the separate outer grid invariant')
   assert.equal(metrics.label_input_edges.length, 6)
   assert.equal(metrics.select_alignment.length, 1)
-  assert.deepEqual(metrics.label_input_edges.filter((_delta, index) => !metrics.select_alignment.some(value => value.id === metrics.field_ids[index])), [0, 0, 0, 0, 0], 'Unchanged bare input fields retain their existing label/control alignment')
+  assert.deepEqual(metrics.label_input_edges.filter((_delta, index) => !metrics.select_alignment.some(value => value.id === metrics.field_ids[index])), [0, 0, 0, 0, 0], 'Bare input labels align with their control text edge')
   for (const value of metrics.select_alignment) {
     assert.equal(value.control_visible, true)
     assert.equal(value.edge_basis, 'actual-native-select-text-range')
