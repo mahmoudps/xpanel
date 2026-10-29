@@ -1,0 +1,156 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: xPanel v2 theme\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Message-Format: ICU MessageFormat\n"
+
+msgctxt "theme:v2"
+msgid "Added line:"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "All in group"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Applies as generation {next}; generation {current} stays as the rollback target"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Apply changes"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Back to editing"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Before the switch"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Bulk actions"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Copy {name}"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Follow"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Following"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Generation {generation} stays on disk as the rollback target. If a test fails, generation {generation} stays live and nothing is reloaded."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Jobs, configuration generations and audit entries appear here as they happen."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Legend"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Measured value"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Not following. The entries below are from one read."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Nothing to show yet."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Pagination"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Problem tick"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Reconcile pipeline"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Removed line:"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Review and apply"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Review and save"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Rows"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Save is available after the draft passes its test."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Saved with a revision check: if the stored settings changed after this page read them, nothing is overwritten."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Search accounts and settings"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Step {current} of {total}"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Test before the switch"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Tests run before the switch"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "The draft passed its test. Saving writes exactly the tested draft."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "This list could not be read."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "This page could not be read."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Undo the change to {field}"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Warning tick"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "gen {generation}"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "{count, plural, =0 {Notifications, none unread} one {Notifications, # unread} other {Notifications, # unread}}"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "{count, plural, one {# pending change} other {# pending changes}}"
+msgstr ""
