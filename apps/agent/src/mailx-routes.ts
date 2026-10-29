@@ -6,14 +6,15 @@ import { readJsonIfExists } from '@xpanel/state'
 import type { HostJobPlan, HostJobView } from './host-job-contract.ts'
 import { parsePostconfMain } from './mail-server-observation.ts'
 import {
+  MAILX_DOVECONF_CHECK_ARGV, MAILX_DOVECOT_DIALECT_ARGV, MAILX_DOVECOT_RELOAD_ARGV, MAILX_MASTER_KEYS, MAILX_MASTER_UNSET_ARGV, MAILX_POSTCONF_MASTER_PARAMS_ARGV, mailxCertPaths, mailxMasterSetArgv,
   MAILX_ENGINE_UNITS, MAILX_MAPS, MAILX_POSTCONF_MAIN_ARGV, MAILX_POSTFIX_CHECK_ARGV, MAILX_POSTFIX_RELOAD_ARGV, MAILX_RSPAMD_TEST_ARGV,
   MAILX_SIEVE_DIR, MAILX_SPAMASSASSIN_TEST_ARGV, MAILX_VIRTUAL_ALIASES, isMailxLearnJobCommand, isMailxRetentionJobCommand, mailxArchiveExpungeArgv, mailxLearnArgv, mailxLearnFolder, mailxEngineReloadArgv, mailxPostconfSetArgv, mailxPostconfUnsetArgv,
 } from '../../../packages/os/src/mailx-command.ts'
 import type { MailxEngineUnit } from '../../../packages/os/src/mailx-command.ts'
 import {
-  MAILX_RSPAMD_SETTINGS, MAILX_SECTIONS, MAILX_SPAMASSASSIN_DIRS, isMailxInvalid, mailxMailboxEffects, renderMailxMailboxSettings, isMailxManagedText, mailxCompositeRevision, mailxStatePath, readMailxArchiveStored, readMailxStored, renderMailxPostfix, renderMailxSpam,
+  MAILX_RSPAMD_SETTINGS, MAILX_SECTIONS, MAILX_SPAMASSASSIN_DIRS, isMailxInvalid, mailxMailboxEffects, renderMailxMailboxSettings, isMailxManagedText, mailxCompositeRevision, mailxStatePath, readMailxArchiveStored, readMailxStored, renderMailxDovecot, renderMailxPostfix, renderMailxSpam,
 } from './mailx-policy.ts'
-import type { MailxArchiveStored, MailxEngine, MailxFile, MailxMailboxSpam, MailxSaved, MailxSection } from './mailx-policy.ts'
+import type { MailxArchiveStored, MailxDovecotDialect, MailxEngine, MailxFile, MailxMailboxSpam, MailxSaved, MailxSection } from './mailx-policy.ts'
 import {
   MAILFX_MILTERS, admitMailxMailboxRows, mailfxListAliasLine, mailfxMilterListed, mailfxSieveInputs, mailxStdout, mailxUnitState, readMailForwardingConfiguration, readMailfxLists, readMailxMailboxRows,
 } from './mailfx-render.ts'
@@ -93,6 +94,43 @@ async function postconf(run: MailxRun): Promise<Map<string, string> | null> {
   if (text === null || Buffer.byteLength(text) > 1024 * 1024) return null
   try { return parsePostconfMain(text) } catch { return null }
 }
+/** The port 25 certificate override from postconf -P: none, one this applier rendered, or an administrator's own. */
+type MasterTls = { state: 'read'; id: string | null } | { state: 'unmanaged' }
+async function masterTls(run: MailxRun): Promise<MasterTls | null> {
+  const text = await mailxStdout(run, MAILX_POSTCONF_MASTER_PARAMS_ARGV)
+  if (text === null || Buffer.byteLength(text) > 1024 * 1024) return null
+  const values = new Map<string, string>()
+  for (const line of text.split('\n')) {
+    const at = line.indexOf(' ='), key = at > 0 ? line.slice(0, at) : ''
+    if ((MAILX_MASTER_KEYS as readonly string[]).includes(key)) values.set(key, line.slice(at + 2).trim())
+  }
+  const cert = values.get(MAILX_MASTER_KEYS[0]), key = values.get(MAILX_MASTER_KEYS[1])
+  if (cert === undefined && key === undefined) return { state: 'read', id: null }
+  const id = /^\/etc\/xpanel\/ssl\/([A-Za-z0-9_-]{1,64})\/fullchain\.pem$/.exec(cert ?? '')?.[1]
+  return id && id !== 'default' && key === mailxCertPaths(id).keyFile ? { state: 'read', id } : { state: 'unmanaged' }
+}
+/** One section's Postfix plan alone, so a section's state names only the keys and tables it renders. */
+const sectionPlan = (saved: MailxSaved, section: MailxSection, recipients: ReadonlyMap<string, readonly string[]>): ReturnType<typeof renderMailxPostfix> =>
+  renderMailxPostfix({ sections: { ...Object.fromEntries(MAILX_SECTIONS.map(name => [name, null])), [section]: saved.sections[section] } as MailxSaved['sections'], archives: [] }, recipients)
+const dovecotDialect = async (run: MailxRun): Promise<MailxDovecotDialect> => await succeeded(run, MAILX_DOVECOT_DIALECT_ARGV) ? '2.4' : '2.3'
+
+/**
+ * Known recipients of each backup MX domain, from the same saved state local delivery used: its mailboxes, forwarders
+ * and admitted mailing lists. A domain forwarder accepts every address of the domain, so it becomes `@domain`.
+ */
+export async function mailxRoutingRecipients(stateRoot: string, saved: MailxSaved, snapshot: MailxSnapshot): Promise<Map<string, string[]>> {
+  const backup = (saved.sections.routing?.policy.domains ?? []).filter(row => row.mode === 'backup').map(row => row.domain), recipients = new Map<string, string[]>()
+  if (!backup.length) return recipients
+  const forwarding = await readMailForwardingConfiguration(stateRoot, snapshot)
+  for (const domain of backup) {
+    const at = '@' + domain, names = new Set<string>()
+    for (const user of snapshot.serviceUsers) if (user.services.email && user.login.toLowerCase().endsWith(at)) names.add(user.login.toLowerCase())
+    for (const item of forwarding.forwarders) if (item.sourceAddress.toLowerCase().endsWith(at)) names.add(item.sourceAddress.toLowerCase())
+    for (const list of forwarding.lists) if (list.address.toLowerCase().endsWith(at)) names.add(list.address.toLowerCase())
+    recipients.set(domain, forwarding.domainForwarders.some(item => item.sourceDomain === domain) ? [at] : [...names].sort())
+  }
+  return recipients
+}
 export interface MailxEngineObservation { units: Record<MailxEngineUnit, MailxEngineState>; engine: MailxEngine | null; unit: MailxEngineUnit | null; spamAssassinDir: string | null; wiring: 'wired' | 'not-wired' | 'unknown' }
 async function observeEngine(run: MailxRun, files: MailxHostFiles, main: Map<string, string> | null): Promise<MailxEngineObservation> {
   const units = {} as Record<MailxEngineUnit, MailxEngineState>
@@ -132,71 +170,122 @@ const filesMatch = async (files: MailxHostFiles, wanted: readonly MailxFile[]): 
   return true
 }
 /** Observed host effect per section: applied only when every rendered parameter and file reads back exactly. */
-export async function observeMailx(run: MailxRun, files: MailxHostFiles, saved: MailxSaved, snapshot: MailxSnapshot, now: Date): Promise<MailxStatus> {
+export async function observeMailx(run: MailxRun, files: MailxHostFiles, saved: MailxSaved, snapshot: MailxSnapshot, now: Date, recipients: ReadonlyMap<string, readonly string[]> = new Map()): Promise<MailxStatus> {
   const main = await postconf(run), engine = await observeEngine(run, files, main)
   const admitted = { ...saved, archives: admitMailxArchives(saved.archives, snapshot).archives }
-  const plan = renderMailxPostfix(admitted), spam = await spamFiles(saved, engine)
+  const plan = renderMailxPostfix(admitted, recipients), spam = await spamFiles(saved, engine)
   const keysFor: Record<string, string[]> = { relay: ['relayhost', 'smtp_sasl_auth_enable', 'smtp_sasl_password_maps', 'smtp_sasl_security_options', 'smtp_sasl_tls_security_options', 'smtp_tls_policy_maps'],
     bcc: ['always_bcc', 'recipient_bcc_maps', 'sender_bcc_maps'], marketing: ['smtpd_client_message_rate_limit', 'smtpd_client_recipient_rate_limit', 'smtpd_recipient_limit', 'default_destination_rate_delay', 'default_destination_concurrency_limit', 'anvil_rate_time_unit'] }
   const filesFor: Record<string, string[]> = { relay: [MAILX_MAPS.relaySasl, MAILX_MAPS.relayTls], bcc: [MAILX_MAPS.recipientBcc, MAILX_MAPS.senderBcc] }
   const state = async (keys: string[], paths: string[]): Promise<MailxSectionState> => main === null ? 'unavailable'
     : keys.every(key => !Object.hasOwn(plan.settings, key) || main.get(key) === plan.settings[key]) && await filesMatch(files, plan.files.filter(file => paths.includes(file.path))) ? 'applied' : 'pending'
+  for (const section of ['server', 'routing'] as const) {
+    const own = sectionPlan(saved, section, recipients)
+    keysFor[section] = Object.keys(own.settings)
+    filesFor[section] = own.files.map(file => file.path)
+  }
+  // The server section also owns the port 25 certificate override and its Dovecot file.
+  const serverState = async (): Promise<MailxSectionState> => {
+    const postfix = await state(keysFor.server!, [])
+    if (postfix !== 'applied') return postfix
+    const dovecot = renderMailxDovecot(saved, await dovecotDialect(run)), master = plan.master === undefined ? null : await masterTls(run)
+    return (plan.master === undefined || master?.state === 'read' && master.id === plan.master) && (!dovecot || await filesMatch(files, [dovecot])) ? 'applied' : 'pending'
+  }
   const sections = {} as Record<MailxSection, MailxSectionState>
   for (const section of MAILX_SECTIONS) sections[section] = !saved.sections[section] ? 'not-saved'
     : section === 'spam' ? spam === null ? 'unavailable' : await filesMatch(files, spam) ? 'applied' : 'pending'
-      : await state(keysFor[section]!, filesFor[section] ?? [])
+      : section === 'server' ? await serverState() : await state(keysFor[section]!, filesFor[section] ?? [])
   const archiveRows = admitted.archives.some(item => item.policy.domains.some(row => row.incoming || row.outgoing))
   return { observedAt: now.toISOString(), revision: mailxCompositeRevision(saved), postfix: main === null ? 'unavailable' : 'read', engine,
     sections, archive: { accounts: saved.archives.length, state: !archiveRows ? 'not-saved' : await state(['recipient_bcc_maps', 'sender_bcc_maps'], filesFor.bcc!), conflicts: plan.conflicts } }
 }
 
 export type MailxReconcileOutcome = 'applied' | 'unchanged' | 'failed' | 'unknown' | 'unavailable'
-export interface MailxApplyResult { outcome: 'applied' | 'unknown' | 'rolled-back' | 'nothing'; revision: string; verificationRequired: boolean; spam: 'applied' | 'unavailable' | 'not-saved' | 'rolled-back'; mailboxes: 'applied' | 'unavailable' | 'not-saved' | 'rolled-back'; reloads: string[]; reconcile?: MailxReconcileOutcome }
+/** `failedCheck` names the configuration test that refused a rolled-back apply. */
+export interface MailxApplyResult { outcome: 'applied' | 'unknown' | 'rolled-back' | 'nothing'; revision: string; verificationRequired: boolean; spam: 'applied' | 'unavailable' | 'not-saved' | 'rolled-back'; mailboxes: 'applied' | 'unavailable' | 'not-saved' | 'rolled-back'; reloads: string[]; reconcile?: MailxReconcileOutcome; failedCheck?: 'postfix' | 'dovecot' }
 let queue: Promise<unknown> = Promise.resolve()
 const serial = <T>(task: () => Promise<T>): Promise<T> => { const next = queue.then(task, task); queue = next.catch(() => undefined); return next }
 
+/** Certificates the server section names must be saved, unexpired and present on the host before anything changes. */
+async function admitCertificates(files: MailxHostFiles, saved: MailxSaved, snapshot: MailxSnapshot, now: Date): Promise<void> {
+  const server = saved.sections.server?.policy
+  for (const id of server ? [server.certificates.smtp, server.certificates.imap] : []) {
+    if (id === null) continue
+    const cert = snapshot.certificates?.find(item => item.id === id)
+    if (!cert || Date.parse(cert.notAfter) <= now.getTime() || await files.read(mailxCertPaths(id).certFile).catch(() => null) === null) {
+      return fail('PRECONDITION_FAILED', 'a chosen mail certificate is missing or expired, so nothing was changed', { ...unchanged, reason: 'certificate_missing', certificate: id })
+    }
+  }
+}
+
 /**
- * Writes the owned tables, sets the reviewed parameters and reloads Postfix. `postfix check` must pass before and after;
- * a failed check restores the previous parameters and files. The result is `applied` only when a re-read proves it.
+ * Writes the owned tables and the Dovecot file, sets the reviewed parameters and the port 25 certificate, then reloads.
+ * `postfix check` and `doveconf -n` must pass before and after; a failed test restores every previous parameter, override
+ * and file before anything is reloaded. The result is `applied` only when a re-read proves it.
  */
-export async function applyMailx(run: MailxRun, files: MailxHostFiles, saved: MailxSaved, snapshot: MailxSnapshot, confirm: () => Promise<void>, mailboxRows: readonly MailxMailboxSpam[] = []): Promise<MailxApplyResult> {
+export async function applyMailx(run: MailxRun, files: MailxHostFiles, saved: MailxSaved, snapshot: MailxSnapshot, confirm: () => Promise<void>, mailboxRows: readonly MailxMailboxSpam[] = [], now = new Date(),
+  recipients: ReadonlyMap<string, readonly string[]> = new Map()): Promise<MailxApplyResult> {
   const revision = mailxCompositeRevision(saved)
-  const plan = renderMailxPostfix({ ...saved, archives: admitMailxArchives(saved.archives, snapshot).archives })
+  const plan = renderMailxPostfix({ ...saved, archives: admitMailxArchives(saved.archives, snapshot).archives }, recipients), dovecot = renderMailxDovecot(saved, await dovecotDialect(run))
   const before = await postconf(run)
   if (before === null) return fail('PRECONDITION_FAILED', 'Postfix parameters could not be read, so nothing was changed', { ...unchanged, reason: 'postconf_unavailable' })
   const engine = await observeEngine(run, files, before), section = await spamFiles(saved, engine) ?? [], ownRows = admitMailxMailboxRows(mailboxRows, snapshot), box = await mailboxFile(engine, files, ownRows)
   const spam = [...section, ...(box ? [box] : [])]
   const spamState: MailxApplyResult['spam'] = !saved.sections.spam ? 'not-saved' : section.length ? 'applied' : 'unavailable'
   const mailboxes: MailxApplyResult['mailboxes'] = box ? 'applied' : ownRows.length ? 'unavailable' : 'not-saved'
-  if (!Object.keys(plan.settings).length && !plan.files.length && !spam.length) return { outcome: 'nothing', revision, verificationRequired: false, spam: spamState, mailboxes, reloads: [] }
+  if (!Object.keys(plan.settings).length && !plan.files.length && !spam.length && !dovecot && plan.master === undefined) return { outcome: 'nothing', revision, verificationRequired: false, spam: spamState, mailboxes, reloads: [] }
+  let masterBefore: string | null = null
+  if (plan.master !== undefined) {
+    const master = await masterTls(run)
+    if (master === null) return fail('PRECONDITION_FAILED', 'master.cf overrides could not be read, so nothing was changed', { ...unchanged, reason: 'postconf_unavailable' })
+    if (master.state === 'unmanaged') return fail('CONFLICT', 'a port 25 certificate override not managed by xPanel is in master.cf; remove it or merge it by hand', { ...unchanged, reason: 'unmanaged_override' })
+    masterBefore = master.id
+  }
+  await admitCertificates(files, saved, snapshot, now)
   const previous = new Map<string, string | null>()
-  for (const file of [...plan.files, ...spam]) {
+  for (const file of [...plan.files, ...spam, ...(dovecot ? [dovecot] : [])]) {
     const current = await files.read(file.path)
     if (!isMailxManagedText(current)) return fail('CONFLICT', 'a configuration file not managed by xPanel is in the way; move it aside or merge it by hand', { ...unchanged, reason: 'unmanaged_file', path: file.path })
     previous.set(file.path, current)
   }
+  const dovecotChanged = !!dovecot && previous.get(dovecot.path) !== dovecot.content, masterChanged = plan.master !== undefined && plan.master !== masterBefore
   if (!await succeeded(run, MAILX_POSTFIX_CHECK_ARGV)) return fail('PRECONDITION_FAILED', 'postfix check already fails on this host, so nothing was changed', { ...unchanged, reason: 'postfix_check_failed' })
+  if (dovecotChanged && !await succeeded(run, MAILX_DOVECONF_CHECK_ARGV)) return fail('PRECONDITION_FAILED', 'doveconf already fails on this host, so nothing was changed', { ...unchanged, reason: 'dovecot_check_failed' })
   await confirm()
   const keys = Object.keys(plan.settings), absent = keys.filter(key => !before.has(key)), reloads: string[] = []
   const restore = async (paths: readonly MailxFile[]): Promise<void> => {
     for (const file of paths) { const old = previous.get(file.path) ?? null; if (old === null) await files.remove(file.path); else await files.write({ ...file, content: old }) }
   }
-  const rollbackPostfix = async (): Promise<boolean> => {
+  const setMaster = async (id: string | null): Promise<boolean> => succeeded(run, id === null ? MAILX_MASTER_UNSET_ARGV : mailxMasterSetArgv(id))
+  const rollback = async (): Promise<boolean> => {
     try {
       await restore(plan.files)
       const kept = Object.fromEntries(keys.filter(key => before.has(key)).map(key => [key, before.get(key)!]))
       if (Object.keys(kept).length && !await succeeded(run, mailxPostconfSetArgv(kept))) return false
       if (absent.length && !await succeeded(run, mailxPostconfUnsetArgv(absent))) return false
+      if (masterChanged && !await setMaster(masterBefore)) return false
+      if (dovecotChanged) { await restore([dovecot!]); if (!await succeeded(run, MAILX_DOVECONF_CHECK_ARGV) || !await succeeded(run, MAILX_DOVECOT_RELOAD_ARGV)) return false }
       return await succeeded(run, MAILX_POSTFIX_CHECK_ARGV) && await succeeded(run, MAILX_POSTFIX_RELOAD_ARGV)
     } catch { return false }
   }
+  const rolledBack = async (failedCheck: 'postfix' | 'dovecot', message: string): Promise<MailxApplyResult> =>
+    await rollback() ? { outcome: 'rolled-back', revision, verificationRequired: false, spam: spamState, mailboxes, reloads, failedCheck } : fail('SERVICE_UNAVAILABLE', message, unknown)
   try {
     if (plan.files.length) await files.ensureMapDir()
     for (const file of plan.files) await files.write(file)
-    if (keys.length && !await succeeded(run, mailxPostconfSetArgv(plan.settings))) return await rollbackPostfix() ? { outcome: 'rolled-back', revision, verificationRequired: false, spam: spamState, mailboxes, reloads } : fail('SERVICE_UNAVAILABLE', 'Postfix parameters were not set and the rollback could not be verified', unknown)
-    if (!await succeeded(run, MAILX_POSTFIX_CHECK_ARGV)) return await rollbackPostfix() ? { outcome: 'rolled-back', revision, verificationRequired: false, spam: spamState, mailboxes, reloads } : fail('SERVICE_UNAVAILABLE', 'postfix check failed and the rollback could not be verified', unknown)
+    if (keys.length && !await succeeded(run, mailxPostconfSetArgv(plan.settings))) return await rolledBack('postfix', 'Postfix parameters were not set and the rollback could not be verified')
+    if (masterChanged && !await setMaster(plan.master!)) return await rolledBack('postfix', 'the port 25 certificate was not set and the rollback could not be verified')
+    if (!await succeeded(run, MAILX_POSTFIX_CHECK_ARGV)) return await rolledBack('postfix', 'postfix check failed and the rollback could not be verified')
+    if (dovecotChanged) {
+      await files.write(dovecot!)
+      if (!await succeeded(run, MAILX_DOVECONF_CHECK_ARGV)) return await rolledBack('dovecot', 'doveconf failed and the rollback could not be verified')
+    }
     if (!await succeeded(run, MAILX_POSTFIX_RELOAD_ARGV)) return fail('SERVICE_UNAVAILABLE', 'Postfix did not confirm the reload; inspect the mail service', unknown)
     reloads.push('postfix')
+    if (dovecotChanged) {
+      if (!await succeeded(run, MAILX_DOVECOT_RELOAD_ARGV)) return fail('SERVICE_UNAVAILABLE', 'Dovecot did not confirm the reload; inspect the mail service', unknown)
+      reloads.push('dovecot')
+    }
     let spamResult: MailxApplyResult['spam'] = spamState, mailboxResult: MailxApplyResult['mailboxes'] = mailboxes, rolledSpam = false
     if (spam.length && engine.unit) {
       for (const file of spam) await files.write(file)
@@ -204,8 +293,9 @@ export async function applyMailx(run: MailxRun, files: MailxHostFiles, saved: Ma
       else if (await succeeded(run, mailxEngineReloadArgv(engine.unit))) reloads.push(engine.engine!)
       else return fail('SERVICE_UNAVAILABLE', 'the spam filter did not confirm the reload; inspect the service', unknown)
     }
-    const after = await postconf(run)
+    const after = await postconf(run), master = plan.master === undefined ? null : await masterTls(run)
     const verified = after !== null && keys.every(key => after.get(key) === plan.settings[key]) && await filesMatch(files, plan.files) && (rolledSpam || await filesMatch(files, spam))
+      && (plan.master === undefined || master?.state === 'read' && master.id === plan.master) && (!dovecot || await filesMatch(files, [dovecot]))
     return { outcome: verified ? 'applied' : 'unknown', revision, verificationRequired: !verified, spam: spamResult, mailboxes: mailboxResult, reloads }
   } catch (error) {
     if (isXpanelError(error) && error.detail?.stateChanged !== false) throw error
@@ -291,7 +381,7 @@ export async function handleMailxRoute(req: Request, url: URL, method: string, c
   }
   if (reading) {
     const saved = await readMailxSaved(ctx.stateRoot), snapshot = await ctx.readSnapshot()
-    const status = await observeMailx(run, files, saved, snapshot, now())
+    const status = await observeMailx(run, files, saved, snapshot, now(), await mailxRoutingRecipients(ctx.stateRoot, saved, snapshot))
     await confirm()
     if (!username) return json(status)
     const own = saved.archives.find(item => item.accountId === first.accountId), rows = admitMailxArchives(saved.archives, snapshot).rows
@@ -344,11 +434,11 @@ export async function handleMailxRoute(req: Request, url: URL, method: string, c
       return json({ job: { id: job.id, kind: job.kind, status: job.status } }, 202)
     }
     let actor = first.actor
-    const applied = await applyMailx(run, files, saved, snapshot, async () => { actor = await confirm() }, (await readMailxMailboxRows(ctx.stateRoot)).rows)
+    const applied = await applyMailx(run, files, saved, snapshot, async () => { actor = await confirm() }, (await readMailxMailboxRows(ctx.stateRoot)).rows, now(), await mailxRoutingRecipients(ctx.stateRoot, saved, snapshot))
     // The milter, mailbox Sieve scripts and lists live in reconciler-owned renders, so they apply through a generation.
     const reconcile = await reconcileMail(ctx, await confirm())
     const result: MailxApplyResult = reconcile === 'unknown' ? { ...applied, outcome: 'unknown', verificationRequired: true, reconcile } : { ...applied, reconcile }
-    await ctx.audit?.({ actor, action: 'mail.policy.applied', target: username ? 'account:' + username : 'server:mail-policy', outcome: result.outcome === 'applied' || result.outcome === 'nothing' ? reconcile === 'failed' ? 'failed' : 'ok' : 'failed', detail: { outcome: result.outcome, spam: result.spam, mailboxes: result.mailboxes, reloads: result.reloads, reconcile } }).catch(() => {})
+    await ctx.audit?.({ actor, action: 'mail.policy.applied', target: username ? 'account:' + username : 'server:mail-policy', outcome: result.outcome === 'applied' || result.outcome === 'nothing' ? reconcile === 'failed' ? 'failed' : 'ok' : 'failed', detail: { outcome: result.outcome, spam: result.spam, mailboxes: result.mailboxes, reloads: result.reloads, reconcile, ...(result.failedCheck ? { failedCheck: result.failedCheck } : {}) } }).catch(() => {})
     return json(result)
   })
 }

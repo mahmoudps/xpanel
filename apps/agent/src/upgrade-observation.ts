@@ -6,8 +6,8 @@ import { basename, dirname, join } from 'node:path'
 import { fail } from '@xpanel/core'
 import { currentSchemaVersion, latestUpgrade } from '@xpanel/db'
 import type { Db, UpgradeRecord } from '@xpanel/db'
-import { DEFAULT_LAYOUT, compareSemver, parseSemver, readLock } from '@xpanel/lifecycle'
-import type { LockState, UpgradeLayout } from '@xpanel/lifecycle'
+import { DEFAULT_LAYOUT, compareSemver, parseRewindJournal, parseSemver, readLock, rewindJournalPath } from '@xpanel/lifecycle'
+import type { LockState, RewindState, RewindStep, UpgradeLayout } from '@xpanel/lifecycle'
 import { parseOsRelease } from '@xpanel/os'
 import type { OsRelease } from '@xpanel/os'
 import { RELEASE_VERIFICATION_LIMITS } from '../../../scripts/release-verifier.mjs'
@@ -230,6 +230,8 @@ export const projectUpgradeRecord = (row: UpgradeRecord): UpgradeHistoryView => 
 })
 
 export interface UpgradeLockView { present: boolean | null; state: LockState | 'unreadable' | null; to: string | null; at: string | null }
+/** The latest upgrade's rewind journal; null when that upgrade never rewound. */
+export interface UpgradeRewindView { state: RewindState | 'unreadable'; done: RewindStep[]; problems: string[]; updatedAt: string | null }
 
 export interface UpgradeObservation {
   observedAt: string
@@ -244,6 +246,7 @@ export interface UpgradeObservation {
   retirementPending: boolean | null
   maintenance: boolean | null
   lastUpgrade: UpgradeHistoryView | null
+  rewind: UpgradeRewindView | null
   trust: { state: ReleaseTrust['state']; keysConfigured: number; keyIds: string[]; source: string; reason: ReleaseTrustReason | null }
   staged: { directory: string; state: 'read' | 'missing' | 'unavailable'; truncated: boolean; releases: StagedRelease[] }
   coordinator: { available: boolean; reason: 'upgrade-coordinator-unavailable' | null }
@@ -289,6 +292,20 @@ export const upgradeRevision = (observation: Omit<UpgradeObservation, 'revision'
   return createHash('sha256').update(JSON.stringify(stable)).digest('hex')
 }
 
+const UNREADABLE_REWIND: UpgradeRewindView = { state: 'unreadable', done: [], problems: [], updatedAt: null }
+const readRewind = async (fs: UpgradeHostFs, layout: UpgradeLayout, recordId: string | null): Promise<UpgradeRewindView | null> => {
+  if (recordId === null) return null
+  try {
+    const path = rewindJournalPath(layout, recordId)
+    if ((await fs.lstat(path)) === null) return null
+    const j = parseRewindJournal((await fs.read(path, 64 * 1024)).bytes.toString('utf8'))
+    return j ? { state: j.state, done: j.done, problems: j.problems.slice(0, 8).map(p => p.slice(0, 500)), updatedAt: j.updatedAt } : UNREADABLE_REWIND
+  } catch {
+    // A journal that exists but cannot be read is never shown as "no rewind".
+    return UNREADABLE_REWIND
+  }
+}
+
 export const observeUpgradeInputs = async (deps: UpgradeObservationDeps): Promise<ObservedUpgradeInputs> => {
   const fs = deps.fs ?? nodeUpgradeFs
   const ownerUid = deps.ownerUid ?? 0
@@ -312,6 +329,7 @@ export const observeUpgradeInputs = async (deps: UpgradeObservationDeps): Promis
     attempt(() => readStagedReleases(fs, layout.downloadsDir, trust, ownerUid)),
   ])
   const verified = staged?.verified ?? new Map<string, VerifiedStagedRelease>()
+  const rewind = await readRewind(fs, layout, last?.id ?? null)
   const candidates = currentVersion ? [...verified.keys()].filter(version => compareSemver(version, currentVersion) > 0).sort((a, b) => compareSemver(b, a)) : []
   const lastView = last ? projectUpgradeRecord(last) : null
   const coordinatorAvailable = deps.coordinatorAvailable === true
@@ -344,6 +362,7 @@ export const observeUpgradeInputs = async (deps: UpgradeObservationDeps): Promis
     retirementPending: retirement,
     maintenance,
     lastUpgrade: lastView,
+    rewind,
     trust: { state: trust.state, keysConfigured: trust.keys.length, keyIds: trust.keyIds, source: trust.source, reason: trust.reason },
     staged: { directory: layout.downloadsDir, state: staged?.state ?? 'unavailable', truncated: staged?.truncated ?? false, releases: staged?.releases ?? [] },
     coordinator: { available: coordinatorAvailable, reason: coordinatorAvailable ? null : 'upgrade-coordinator-unavailable' },

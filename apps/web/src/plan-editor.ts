@@ -60,12 +60,12 @@ export function planEditorPayload(values: PlanEditorValues, ownerId: string | nu
   const caps = Object.fromEntries(PLAN_CAP_FIELDS.map(field => [field.key, limit(field)])) as unknown as Plan['caps']
   const defaultMailboxQuotaMb = limit(PLAN_QUOTA_FIELD)
   if (defaultMailboxQuotaMb !== 'unlimited' && resources.diskMb !== 'unlimited' && defaultMailboxQuotaMb > resources.diskMb) throw new Error('defaultMailboxQuotaMb')
-  return { name, ownerId, featureListId, resources, caps, shell, dedicatedIp: values.dedicatedIp === true, defaultMailboxQuotaMb }
+  return { name, ownerId, featureListId, resources, caps, shell, dedicatedIp: values.dedicatedIp === true, defaultMailboxQuotaMb, enforceBandwidth: values.enforceBandwidth === true }
 }
 
 export function planEditorReceiptMatches(plan: Plan | undefined, payload: PlanEditorPayload, id?: string): plan is Plan {
   if (!plan || typeof plan.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(plan.id) || (id !== undefined && plan.id !== id)) return false
-  return (['name', 'ownerId', 'featureListId', 'shell', 'dedicatedIp', 'defaultMailboxQuotaMb'] as const).every(key => plan[key] === payload[key])
+  return (['name', 'ownerId', 'featureListId', 'shell', 'dedicatedIp', 'defaultMailboxQuotaMb'] as const).every(key => plan[key] === payload[key]) && (plan.enforceBandwidth ?? false) === (payload.enforceBandwidth ?? false)
     && PLAN_RESOURCE_FIELDS.every(field => plan.resources?.[field.key as keyof Plan['resources']] === payload.resources[field.key as keyof Plan['resources']])
     && PLAN_CAP_FIELDS.every(field => plan.caps?.[field.key as keyof Plan['caps']] === payload.caps[field.key as keyof Plan['caps']])
 }
@@ -110,6 +110,7 @@ export function renderPlanEditor(input: PlanEditorInput): string {
       <fieldset class="xp-card xp-form-group" aria-labelledby="plan-group-access">${heading('plan-group-access', translator(input.locale)('Access and mailbox defaults'))}
         <div class="xp-field"><label class="xp-label" for="plan-shell-toggle">${text('Jailed shell access')}</label><select id="plan-shell-toggle" name="shell" class="xp-select"><option value="none"${seed.shell === 'none' ? ' selected' : ''}>${text(msgctxt('plan-editor', 'Disabled'))}</option><option value="jailed"${seed.shell === 'jailed' ? ' selected' : ''}>${text('Jailed shell')}</option></select></div>
         <label class="xp-plan-cap-option" for="plan-dedicated-ip"><input id="plan-dedicated-ip" name="dedicatedIp" type="checkbox"${seed.dedicatedIp ? ' checked' : ''} /><span>${text('Dedicated IPv4 required')}</span></label>
+        <label class="xp-plan-cap-option" for="plan-enforce-bandwidth"><input id="plan-enforce-bandwidth" name="enforceBandwidth" type="checkbox"${seed.enforceBandwidth ? ' checked' : ''} /><span>${text('Serve the bandwidth-exceeded page once the monthly bandwidth is used')}</span></label>
         ${number(PLAN_QUOTA_FIELD, seed.defaultMailboxQuotaMb)}
       </fieldset>
     </fieldset>

@@ -6,7 +6,7 @@ import { single } from '../archive/sink.ts'
 import type { FileRef, ImportSink, SinkItem } from '../archive/sink.ts'
 import type { GuardOptions, SafeEntry } from '../archive/guard.ts'
 import { assertUsername, isDomain, isHostedAddress, isIpv4 } from '../validate.ts'
-import { buildAccount, buildDatabases, buildDbUsers, buildDomains, buildMail, buildMailboxes, buildZones, primaryDomainOf, selectCertificates } from './build.ts'
+import { buildAccount, buildCron, buildDatabases, buildDbUsers, buildDomains, buildMail, buildMailboxes, buildZones, primaryDomainOf, selectCertificates } from './build.ts'
 import type { CertificateChoice } from './build.ts'
 import { parseCpUserFile, parseMailPasswd, parseMailQuota, parseUserdataDomain, parseUserdataMain } from './parsers.ts'
 import { newReadState, warn, warnOnce } from './state.ts'
@@ -37,7 +37,7 @@ const PEM_CAP = 256 * 1024
 
 /** Top-level pkgacct items that carry nothing an xPanel account uses. */
 const IGNORED_TOP = new Set([
-  'logs', 'bandwidth', 'bandwidth_db', 'counters', 'meta', 'version', 'pds', 'interchange', 'fp', 'mm', 'mma', 'mms', 'httpfiles',
+  'logs', 'bandwidth', 'bandwidth_db', 'counters', 'meta', 'version', 'pds', 'interchange', 'fp', 'httpfiles',
   'apache_tls', 'ips', 'locale', 'resellerconfig', 'resellerfeatures', 'resellerpackages', 'nobodyfiles', 'mysql-timestamps',
   'sds', 'sds2', 'shell', 'ssldomain', 'suspended', 'suspendinfo', 'vad', 'customizations', 'team', 'authnlinks',
   'homedir_paths', 'pkgacct.version', 'cpuser', 'dnslink', 'has_sitejet', 'mailman', 'webcalls', 'ftp_shell', 'cpbandwidth',
@@ -182,7 +182,10 @@ const onMetaFile = async (s: ReadState, e: SafeEntry, rel: string, body: Body, s
   }
   if (rel === 'quota') { s.quota = await textOf(body, 4096, s, e.path); return }
   if (rel === 'shadow') { await drain(body); warn(s, 'password-not-kept', 'the account password is not imported; a reset is required'); return }
-  if (dir === 'cron') { warnOnce(s, 'cron', 'cron-not-imported', 'cron jobs are not imported; review and recreate them', e.path); return }
+  if (dir === 'cron' && seg.length === 2 && name === s.sourceUser) { s.cron = await textOf(body, META_CAP, s, e.path); return }
+  if (dir === 'cron') { warnOnce(s, 'cron', 'cron-not-imported', `${rel.slice(0, 80)} does not belong to the account and was not imported`, e.path); return }
+  if (dir === 'mm' && seg.length >= 2) { warnOnce(s, `mm:${seg[1]}`, 'mailing-list-skipped', `mailing list ${(seg[1] ?? '').slice(0, 64)} is not imported; recreate it`, `mm/${seg[1]}`); return }
+  if (dir === 'mma' || dir === 'mms') return
   if (rel === 'homedir.tar') { warn(s, 'split-home-unsupported', 'homedir.tar archives are not supported; export with an inline homedir', e.path); return }
   if (rel === 'proftpdpasswd' || dir === 'ftp') { warnOnce(s, 'ftp', 'ftp-accounts-not-imported', 'FTP accounts are not imported; recreate them', e.path); return }
   if (dir === 'domainkeys') { warnOnce(s, 'dkim', 'dkim-keys-not-imported', 'DKIM keys are regenerated; publish the new DKIM TXT records'); return }
@@ -250,6 +253,7 @@ const finalize = async (s: ReadState, opts: CpanelImportOptions): Promise<Import
   if (mailboxes.length) warn(s, 'password-not-kept', 'mailbox passwords are not imported; set new ones')
   const mail = buildMail(s, own)
   const certificates = await storeCertificates(s, selectCertificates(s, domains, opts.now ?? new Date()), opts.sink)
+  const cronJobs = buildCron(s, sourceUser, target)
   if (s.warningCount > s.warnings.length) s.warnings.push({ code: 'warnings-truncated', message: `${s.warningCount - s.warnings.length} more warnings` })
   return {
     format: s.format,
@@ -264,6 +268,7 @@ const finalize = async (s: ReadState, opts: CpanelImportOptions): Promise<Import
     mailboxes,
     mail,
     certificates,
+    cronJobs,
     home: s.home,
     warnings: s.warnings,
   }

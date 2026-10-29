@@ -5,7 +5,7 @@
 import { fail, RESOURCE_RULES } from '@xpanel/core'
 import type { Account, HostAction, Limit, OsProfile, Plan } from '@xpanel/core'
 import { accountSliceName, sliceControlDirs } from './slice.ts'
-import { appEnvDir, fpmAccountLogDir, fpmPaths, loginSliceDropinPath } from './units.ts'
+import { runtimeConfigDir, fpmAccountLogDir, fpmPaths, loginSliceDropinPath } from './units.ts'
 import {
   assertAbsPath,
   assertAccountHome,
@@ -91,17 +91,19 @@ export const accountProvisionActions = (account: Account, plan: Plan, os: OsProf
   return actions
 }
 
-const ACCOUNT_UNIT_RE = /^xpanel-(php-fpm|app|cron)-([a-z][a-z0-9]{0,15})-([a-z0-9][a-z0-9.-]{0,40})\.(service|timer)$/
+const ACCOUNT_UNIT_RE = /^xpanel-(php-fpm|app|appproxy|ctr|cron)-([a-z][a-z0-9]{0,15})-([a-z0-9][a-z0-9.-]{0,40})\.(service|timer|socket)$/
+const CACHE_UNIT_RE = /^xpanel-(?:redis|memcached)-([a-z][a-z0-9]{0,15})\.service$/
 const SHORT_NAME_RE = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/
 
-/** True only for units xPanel renders for this account. Usernames have no dash, so the match is exact. */
 export const isAccountUnit = (username: string, unit: string): boolean => {
+  if (CACHE_UNIT_RE.exec(unit)?.[1] === username) return true
   const m = ACCOUNT_UNIT_RE.exec(unit)
   if (!m || m[2] !== username) return false
   const rest = m[3] ?? ''
   if (m[1] === 'php-fpm') return m[4] === 'service' && /^[5-9]\.[0-9]{1,2}$/.test(rest)
   if (!SHORT_NAME_RE.test(rest)) return false
-  return m[1] === 'cron' || m[4] === 'service'
+  if (m[1] === 'cron') return m[4] !== 'socket'
+  return m[4] === 'service' || (m[1] === 'appproxy' && m[4] === 'socket')
 }
 
 export interface TerminateOptions {
@@ -161,7 +163,7 @@ export const accountTerminateActions = (account: Account, os: OsProfile, opts: T
       return [p.config, p.pool, p.socketDir].map((path): HostAction => ({ kind: 'remove-path', path }))
     }),
     { kind: 'remove-path', path: fpmAccountLogDir(id.username) },
-    { kind: 'remove-path', path: appEnvDir(id.username) },
+    { kind: 'remove-path', path: runtimeConfigDir(id.username) },
     { kind: 'systemd-daemon-reload' },
   )
   if (opts.quotaFilesystem) {

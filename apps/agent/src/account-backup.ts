@@ -29,7 +29,7 @@ export interface BackupArchive {
 
 const stampOf = (date: Date): string => date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
 
-const assertTarget = (account: BackupAccountTarget): void => {
+export const assertBackupAccountTarget = (account: BackupAccountTarget): void => {
   if (!USERNAME_RE.test(account.username)) fail('VALIDATION', 'account username is invalid')
   if (account.home !== `/home/${account.username}`) fail('PRECONDITION_FAILED', 'the account home is not the expected directory')
   if (!Number.isInteger(account.uid) || account.uid < 20_000 || account.uid > 60_000) fail('PRECONDITION_FAILED', 'the account is not a panel-managed user')
@@ -52,7 +52,7 @@ const archivePath = (root: string, username: string, file: string): string => po
 
 /** Opens the exact regular archive through retained parent descriptors, never a symlink. */
 export const openAccountBackupArchive = async (root: string, account: BackupAccountTarget, file: string): Promise<{ handle: FileHandle; bytes: number }> => {
-  assertTarget(account)
+  assertBackupAccountTarget(account)
   return withPinnedHostTargetParent(archivePath(root, account.username, file), async pinned => {
     const before = await lstat(pinned)
     if (!before.isFile() || before.isSymbolicLink()) fail('PRECONDITION_FAILED', 'the backup archive must be a regular file without links')
@@ -78,7 +78,7 @@ const assertMembers = (listing: string): void => {
 }
 
 export const listAccountBackups = async (root: string, account: BackupAccountTarget): Promise<BackupArchive[]> => {
-  assertTarget(account)
+  assertBackupAccountTarget(account)
   let names: string[] = []
   try {
     names = await withPinnedHostTargetParent(posix.join(root, account.username, '.archive-list'), pinned => readdir(dirname(pinned)))
@@ -106,7 +106,7 @@ export const createAccountBackup = async (input: {
   excludeMail?: boolean
   readSize?: (path: string) => Promise<number>
 }): Promise<BackupArchive> => {
-  assertTarget(input.account)
+  assertBackupAccountTarget(input.account)
   const root = input.root ?? DEFAULT_BACKUP_DIR
   const stamp = stampOf(input.now ?? new Date())
   const file = backupFileName(input.account.username, stamp, input.nonce)
@@ -146,7 +146,7 @@ export const restoreAccountBackup = async (input: {
   /** Trusted fixture port; the dispatcher never accepts this from a request body. */
   inspectSource?: (path: string) => Promise<void>
 }): Promise<{ file: string }> => {
-  assertTarget(input.account)
+  assertBackupAccountTarget(input.account)
   const root = input.root ?? DEFAULT_BACKUP_DIR
   const file = assertBackupFileName(input.account.username, input.file)
   const source = archivePath(root, input.account.username, file)
@@ -166,7 +166,7 @@ export const restoreAccountBackup = async (input: {
     await input.executor.runAction({
       kind: 'exec',
       runAsUser: input.account.username,
-      argv: ['/usr/bin/tar', '--extract', '--gzip', `--file=${staging}`, `--directory=${input.account.home}`, '--no-overwrite-dir', '--no-same-owner', ...(input.preserveMail ? ['--anchored', '--exclude=./mail', '--exclude=./etc', '--exclude=mail', '--exclude=etc'] : []), '--'],
+      argv: ['/usr/bin/tar', '--extract', '--gzip', `--file=${staging}`, `--directory=${input.account.home}`, '--no-overwrite-dir', '--no-same-owner', '--anchored', '--exclude=./.xpanel-backup-data', '--exclude=.xpanel-backup-data', ...(input.preserveMail ? ['--anchored', '--exclude=./mail', '--exclude=./etc', '--exclude=mail', '--exclude=etc'] : []), '--'],
     })
   } finally {
     await input.executor.runAction({ kind: 'remove-path', path: staging }).catch(() => undefined)

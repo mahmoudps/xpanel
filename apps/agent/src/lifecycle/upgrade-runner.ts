@@ -281,7 +281,7 @@ export const createProductionUpgradePorts = (deps: ProductionUpgradeDependencies
     withExclusive: denied, assertOwnedExecution: denied, assertWritersQuiescent: denied,
     assertWriteBarrier: denied, verifyRelease: denied, unpackVerifiedRelease: denied,
     verifyStagedRelease: denied, assertCompatibility: denied, snapshotControlPlane: denied,
-    syncPath: denied,
+    restoreControlPlane: denied, syncPath: denied,
   }
 
   return {

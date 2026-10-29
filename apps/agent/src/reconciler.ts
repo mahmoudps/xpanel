@@ -1,7 +1,7 @@
 import { withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
 import { randomUUID } from 'node:crypto'
-import { chmod, mkdir, rm, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
 import { cronJobUnitId, fail, suspensionEffects } from '@xpanel/core'
 import type {
   ConfigTest,
@@ -42,6 +42,7 @@ import { databaseUserRemoteSqlHosts, databaseUserSqlHosts } from './db-remote-pr
 import { postgresqlAccountStatements, postgresqlSqlAction } from './pg-sql.ts'
 import { readSecEdgeConfiguration } from './sec-waf.ts'
 import { readMailForwardingConfiguration, readMailfxRenderInput, type MailForwardingConfiguration, type MailfxRenderInput } from './mailfx-render.ts'
+import { compileAccountRuntime, EMPTY_RUNTIME, readRuntimeGeneration, readRuntimeRegistries, removeRuntimeRegistry, restoreRuntimeRegistries, runtimeUnitNames, saveRuntimeGeneration, savedRuntimes, type RuntimeRegistry } from './account-runtime.ts'
 import type { SecEdgeConfiguration } from './sec-waf.ts'
 import { secIngressRenderAuthorityNative } from './sec-ingress-provider.ts'
 import type { TrustedProxyRenderAuthority } from '../../../packages/core/src/trusted-proxies.ts'
@@ -96,6 +97,8 @@ export interface CompileOptions {
   secEdge?: SecEdgeConfiguration
   /** sec: activated trusted-proxy policy, re-admitted against protected ingress evidence (sec-ingress-provider.ts). */
   trustedProxyAuthority?: TrustedProxyRenderAuthority
+  /** Saved runtime apps, caches and containers per account id (account-runtime.ts). Absent renders none. */
+  runtime?: ReadonlyMap<string, RuntimeRegistry>
 }
 
 const DEFAULT_ZONE_DIR = '/var/lib/powerdns/zones'
@@ -118,7 +121,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   const terminatingAccounts: { id: Id; username: string }[] = []
   let localMail = false
   const localMailOptions: services.PostfixMainOptions = {}
-  const mailForwarding = opts.mailForwarding ?? { forwarders: [], domainForwarders: [], lists: [] }
+  const mailForwarding = opts.mailForwarding ?? { forwarders: [], rejects: [], domainForwarders: [], lists: [] }
 
   const seenTests = new Set<string>()
   const addTest = (t: ConfigTest): void => {
@@ -198,6 +201,13 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   const olsAccountRenders: edge.OlsAccountRender[] = []
   const ftpUsers: services.FtpUserInput[] = []
   const mailDomains: services.MailDomainInput[] = []
+  const mailRouting = services.planMailRouting(
+    {
+      domains: snapshot.domains,
+      mailboxes: snapshot.serviceUsers.filter((u) => u.services.email).map((u) => ({ login: u.login, accountId: u.accountId, id: u.id })),
+    },
+    snapshot.mailRouting,
+  )
   const sqlStatements: string[] = []
   let needsDaemonReload = false
 
@@ -222,6 +232,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
           const names = system.cronUnitNames(account.username, c.id.slice(0, 16))
           return [names.timer, names.service]
         }),
+        ...runtimeUnitNames(account, opts.runtime?.get(account.id) ?? EMPTY_RUNTIME),
       ]
       postActions.push(
         ...system.accountTerminateActions(account, os, {
@@ -229,6 +240,8 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
           units,
           quotaFilesystem,
         }),
+        // Podman keeps its per-account runtime directory across container restarts; the units above are stopped.
+        ...((opts.runtime?.get(account.id)?.containers.length ?? 0) > 0 ? [{ kind: 'remove-path' as const, path: system.containerRuntimeDir(account.username) }] : []),
       )
       for (const db of accountDbs) {
         sqlStatements.push(...services.dropDatabase(db.name, account.username))
@@ -275,11 +288,23 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       : 'accept'
     const ftpSuspended = effects.some((e) => e.subsystem === 'ftp-login' && e.state === 'denied')
 
+    // Runtime apps, caches and containers as units in the slice; apps join the Nginx site below
+    const runtime = opts.runtime?.get(account.id)
+    const runtimeRender = runtime
+      ? compileAccountRuntime(account, plan, accountDomains, runtime, os, snapshot.featureLists.find((f) => f.id === plan.featureListId)?.disabled ?? [])
+      : null
+    if (runtimeRender) {
+      files.push(...runtimeRender.files)
+      preActions.push(...runtimeRender.preActions)
+      postActions.push(...runtimeRender.postActions)
+      if (runtimeRender.python && !files.some((f) => f.path === system.WSGI_LAUNCHER_PATH)) files.push(system.renderWsgiLauncher())
+    }
+
     // Edge & backend vhosts + PHP-FPM pools
     if (snapshot.server && accountDomains.length > 0) {
       const settings = snapshot.server.settings
       // sec: per-site WAF limits and ModSecurity switches
-      files.push(edge.nginxSiteFile(account, accountDomains, opts.secEdge ? { ...settings, edge: opts.secEdge.edge } as ServerSettings : settings, os, certs, { now, ...(opts.secEdge ? { waf: opts.secEdge.sites } : {}) }))
+      files.push(edge.nginxSiteFile(account, accountDomains, opts.secEdge ? { ...settings, edge: opts.secEdge.edge } as ServerSettings : settings, os, certs, { now, ...(opts.secEdge ? { waf: opts.secEdge.sites } : {}), ...(runtimeRender ? { appRoutes: runtimeRender.routes } : {}) }))
 
       // Per-domain custom configuration drop-in files (cPanel userdata style) + .user.ini
       if (snapshot.domainCustomConfigs && snapshot.domainCustomConfigs.length > 0) {
@@ -296,17 +321,20 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
         }
       }
 
+      // root-granted disable_functions exceptions follow the account on every handler and version
+      const allowedFunctions = settings.phpFunctionExceptions?.find(item => item.account === account.username)?.functions ?? []
       if (settings.engine === 'apache') {
         files.push(...edge.renderApacheVhosts(account, accountDomains, settings, os, { now }))
         for (const dom of accountDomains) {
           if (dom.siteType === 'php' && dom.php.handler !== 'fpm') {
             preActions.push(...edge.cgiWrapperDirs(account, settings, os))
-            files.push(edge.renderPhpCgiWrapper(account, dom, settings, os))
+            files.push(edge.renderPhpCgiWrapper(account, dom, settings, os, { allowedFunctions }))
           }
         }
       } else {
         const olsAcc = edge.renderOlsAccount(account, accountDomains, settings, os, {
           workerCap: plan.caps.phpWorkers,
+          allowedFunctions,
           now,
         })
         olsAccountRenders.push(olsAcc)
@@ -327,6 +355,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
             workerCap: plan.caps.phpWorkers,
             maxMemoryMb: plan.resources.memoryMb,
             apacheMpm: settings.apacheMpm,
+            allowedFunctions,
           }),
         )
         files.push(edge.renderFpmMaster(account, version, os))
@@ -368,7 +397,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       }
     }
 
-    // Mail (Dovecot per-domain passwd files)
+    // Mail (Dovecot per-domain passwd files, forwarders, default addresses, domain forwarders)
     for (const dom of accountDomains) {
       const mailUsers = accountUsers.filter((u) => u.domainId === dom.id && u.services.email)
       const forwarders = mailForwarding.forwarders.filter(item => item.accountId === account.id && item.sourceAddress.endsWith(`@${dom.name}`))
@@ -376,7 +405,18 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       const domainForward = mailForwarding.domainForwarders.find(item => item.accountId === account.id && item.sourceDomain === dom.name)?.targetDomain
       const lists = mailForwarding.lists.filter(item => item.accountId === account.id && item.address.endsWith(`@${dom.name}`))
         .map(item => ({ local: item.address.slice(0, item.address.lastIndexOf('@')), members: item.members }))
-      if (mailUsers.length > 0 || forwarders.length > 0 || lists.length > 0 || domainForward !== undefined) {
+      const rejects = mailForwarding.rejects.filter(item => item.accountId === account.id && item.sourceAddress.endsWith(`@${dom.name}`))
+        .map(item => ({ local: item.sourceAddress.slice(0, item.sourceAddress.lastIndexOf('@')), message: item.message }))
+      // an autoresponder address also delivers to its hidden user; a list or rejection keeps its address to itself
+      for (const item of mailRouting.autoreplies) {
+        if (item.accountId !== account.id || item.domain !== dom.name || lists.some(list => list.local === item.local) || rejects.some(reject => reject.local === item.local)) continue
+        const existing = forwarders.find(forwarder => forwarder.local === item.local)
+        if (!existing) forwarders.push({ local: item.local, to: [item.target] })
+        else if (existing.to.length < services.MAX_FORWARD_TARGETS) existing.to = [...existing.to, item.target]
+      }
+      // the default address comes from the routing plan, which checks it against the domain forwarder
+      const defaultAddress = mailRouting.domains.get(dom.name)?.defaultAddress
+      if (mailUsers.length > 0 || forwarders.length > 0 || rejects.length > 0 || lists.length > 0 || domainForward !== undefined || defaultAddress !== undefined) {
         const mailboxes = mailUsers.map((u) => ({
           local: u.localPart,
           passwordHash: u.passwordHash,
@@ -390,14 +430,38 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
           delivery: mailDelivery,
           mailboxes,
           forwarders,
+          rejects,
           lists,
           ...(domainForward ? { domainForward } : {}),
-          // No default-address writer exists in desired state; unknown recipients reject.
-          defaultAddress: { kind: 'reject' },
+          defaultAddress: defaultAddress ?? { kind: 'reject' },
         }
-        if (mailboxes.length > 0) files.push(services.dovecotPasswdFile(os, domainInput))
-        mailDomains.push(domainInput)
+        // A backup or remote routing mode leaves the domain out of local delivery (Postfix relays it by MX) and denies
+        // every mailbox login, so no local mailbox answers for a domain hosted elsewhere; the mail stays on disk.
+        const routed = opts.mailFx?.routing?.has(dom.name) ?? false
+        if (mailboxes.length > 0) files.push(services.dovecotPasswdFile(os, routed ? { ...domainInput, login: 'denied' } : domainInput))
+        if (!routed) mailDomains.push(domainInput)
       }
+    }
+    // hidden autoresponder users of this account, one per address that some alias now reaches
+    const hidden = mailRouting.autoreplies.filter(item => item.accountId === account.id
+      && mailDomains.some(input => input.domain === item.domain && input.forwarders?.some(forwarder => forwarder.local === item.local && forwarder.to.includes(item.target))))
+    if (hidden.length > 0) {
+      const internal: services.MailDomainInput = { domain: services.autoreplyDomain(account.id), account, internal: true,
+        mailboxes: hidden.map(item => ({ local: item.target.slice(0, item.target.indexOf('@')), passwordHash: services.LOCKED_MAILBOX_HASH, quotaMb: 1, suspendLogin: true })) }
+      files.push(services.dovecotPasswdFile(os, internal))
+      mailDomains.push(internal)
+    }
+
+    // Sieve filters and autoresponders: one active script per mailbox, owned by the account
+    for (const script of mailRouting.scripts) {
+      if (script.accountId !== account.id) continue
+      const file = services.sieveFile(account, script.address, script.script)
+      const box = dirname(file.path)
+      for (const path of [dirname(dirname(box)), dirname(box), box]) {
+        preActions.push({ kind: 'ensure-dir', path, mode: 0o700, owner: account.username, group: account.username })
+      }
+      files.push(file)
+      addTest(services.sieveConfigTest())
     }
 
     // FTP virtual users
@@ -461,7 +525,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     })
   }
 
-  if (mailDomains.length > 0 || snapshot.mailIpConfig) {
+  if (mailDomains.length > 0 || snapshot.mailIpConfig || opts.mailFx?.routing?.size) {
     const postmaster = services.mailboxPostmaster(snapshot.server?.settings.hostname)
     const domainsDir = services.dovecotDomainsDir(os)
     preActions.push(
@@ -521,7 +585,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   }
 
   if (localMail) {
-    const tls = opts.mailTls === undefined ? services.mailHostnameTls(snapshot.server?.settings.hostname, snapshot.certificates, now) : opts.mailTls
+    const tls = opts.mailTls === undefined ? opts.mailFx?.submissionTls ?? services.mailHostnameTls(snapshot.server?.settings.hostname, snapshot.certificates, now) : opts.mailTls
     if (tls) localMailOptions.tls = tls
     // mailfx: the spam filter milter follows OpenDKIM in the managed main.cf block.
     if (opts.mailFx?.spamMilter) localMailOptions.spamMilter = opts.mailFx.spamMilter
@@ -640,6 +704,8 @@ export interface ReconcileOptions {
   expectedRestoredState?: { revision: number; checksum: string }
   /** Trusted historical-restore binding; extended forwarding is outside StateSnapshot. */
   expectedRestoredMailForwarding?: MailForwardingConfiguration
+  /** Trusted historical-restore binding of the runtime registries (account-runtime.ts), also outside StateSnapshot. */
+  expectedRestoredRuntime?: ReadonlyMap<string, RuntimeRegistry>
 }
 export interface GenerationRollbackGuard {
   request: GenerationRollbackRequest
@@ -1246,6 +1312,11 @@ export class HostReconciler {
     let mailFx = await readMailfxRenderInput(this.deps.store.rootDir, snapshot, this.deps.os.family, null)
     // sec: saved WAF/flood edge input and the activated trusted-proxy authority
     const secEdge = await readSecEdgeConfiguration(this.deps.store.rootDir, { family: this.deps.os.family, domains: snapshot.domains })
+    const runtime = await readRuntimeRegistries(this.deps.store.rootDir, snapshot.accounts)
+    const runtimeText = JSON.stringify(savedRuntimes(runtime))
+    if (opts.expectedRestoredRuntime && runtimeText !== JSON.stringify(savedRuntimes(opts.expectedRestoredRuntime))) {
+      fail('CONFLICT', 'Saved runtime services changed after generation restore; review the restored state before reconciliation', { stateChanged: true, verificationRequired: true })
+    }
     const trustedProxyAuthority = await secIngressRenderAuthorityNative()
     if (opts.expectedRestoredMailForwarding && JSON.stringify(mailForwarding) !== JSON.stringify(opts.expectedRestoredMailForwarding)) {
       fail('CONFLICT', 'Saved mail forwarding changed after generation restore; review the restored state before reconciliation', { stateChanged: true, verificationRequired: true })
@@ -1286,6 +1357,7 @@ export class HostReconciler {
         ...(mailTls !== undefined ? { mailTls } : {}),
         secEdge,
         ...(trustedProxyAuthority ? { trustedProxyAuthority } : {}),
+        runtime,
         now: new Date(),
       })
       if (appliedSnapshot) {
@@ -1393,6 +1465,10 @@ export class HostReconciler {
       // Persist exactly the state that produced these files. The store rejects
       // a revision advanced during preflight before any live host activation.
       await this.deps.store.saveGenerationSnapshot(pendingGen.id, snapshot)
+      if (JSON.stringify(savedRuntimes(await readRuntimeRegistries(this.deps.store.rootDir, snapshot.accounts))) !== runtimeText) {
+        fail('CONFLICT', 'Saved runtime services changed during reconciliation; retry the current configuration')
+      }
+      await saveRuntimeGeneration(this.deps.store.rootDir, pendingGen.id, runtime)
     } catch (err) {
       const errorMsg = (err instanceof Error ? err.message : String(err)).slice(0, 2000)
       await markFailed(this.deps.db, pendingGen.id, errorMsg)
@@ -1495,6 +1571,19 @@ export class HostReconciler {
               }
             } else {
               res = await this.deps.executor.runTest(test)
+            }
+          } else if (isRealLinuxExecutor && test.name === services.SIEVE_CONFIG_TEST) {
+            // compile every staged script in a root-only copy: the live paths are account-writable
+            const checkDir = await mkdtemp('/tmp/xpanel-sieve-check-')
+            try {
+              for (const file of stagedFiles) {
+                if (!file.path.endsWith('/.dovecot.sieve')) continue
+                const box = dirname(file.path)
+                await writeFile(join(checkDir, `${basename(box)}@${basename(dirname(box))}.sieve`), file.content, { mode: 0o600 })
+              }
+              res = await this.deps.executor.runTest({ name: test.name, argv: [...test.argv.slice(0, -1), checkDir] })
+            } finally {
+              await rm(checkDir, { recursive: true, force: true })
             }
           } else {
             res = await this.deps.executor.runTest(test)
@@ -1673,6 +1762,7 @@ export class HostReconciler {
       // Remove terminated accounts from desired state now that their host resources are gone and verified
       for (const term of compiled.terminatingAccounts) {
         await this.deps.store.deleteAccount(term.id)
+        await removeRuntimeRegistry(this.deps.store.rootDir, term.id)
       }
 
       const appliedGen = await activate(this.deps.db, pendingGen.id)
@@ -1744,6 +1834,7 @@ export class HostReconciler {
     if (await this.journal.readActiveJournal()) return fail('PRECONDITION_FAILED', 'an existing reconciliation journal requires review before restoring desired state', { stateChanged: false })
     let restored = false
     let expectedRestoredMailForwarding: MailForwardingConfiguration | undefined
+    let expectedRestoredRuntime: Map<string, RuntimeRegistry> | undefined
     try {
       const snapshot = await this.deps.store.restoreGenerationSnapshot(genId, {
         expectedRevision: guard.request.expectedCurrentStateRevision,
@@ -1764,6 +1855,12 @@ export class HostReconciler {
             return fail('PRECONDITION_FAILED', 'Target generation mail forwarding cannot be restored from the current saved records; explicit review is required', { stateChanged: false })
           }
           expectedRestoredMailForwarding = forwarding
+          // Runtime registries sit outside the StateSnapshot too: restore the set the target generation was compiled from.
+          const runtimeTarget = await readRuntimeGeneration(this.deps.store.rootDir, genId)
+          if (!runtimeTarget && Object.keys(savedRuntimes(await readRuntimeRegistries(this.deps.store.rootDir, current.accounts))).length > 0) {
+            return fail('PRECONDITION_FAILED', 'Target generation predates saved runtime services; explicit review is required', { stateChanged: false })
+          }
+          expectedRestoredRuntime = new Map(Object.entries(savedRuntimes(runtimeTarget ?? new Map())).filter(([id]) => targetSource.accounts.some(account => account.id === id)))
           await guard.authorize()
           await appendAudit(this.deps.db, { actor, action: 'generation.restore_requested', target: 'generation:' + String(genId),
             detail: { expectedCurrentGenerationId: guard.request.expectedCurrentGenerationId, expectedCurrentStateRevision: guard.request.expectedCurrentStateRevision,
@@ -1771,8 +1868,9 @@ export class HostReconciler {
         },
       })
       restored = true
+      if (expectedRestoredRuntime) await restoreRuntimeRegistries(this.deps.store.rootDir, expectedRestoredRuntime)
       if (snapshot.revision === undefined) return fail('PRECONDITION_FAILED', 'the restored desired-state revision is unavailable', { stateChanged: true, verificationRequired: true })
-      const result = await this.reconcileAdmitted({ force: true, actor, expectedRestoredState: { revision: snapshot.revision, checksum: snapshot.checksum }, ...(expectedRestoredMailForwarding ? { expectedRestoredMailForwarding } : {}) })
+      const result = await this.reconcileAdmitted({ force: true, actor, expectedRestoredState: { revision: snapshot.revision, checksum: snapshot.checksum }, ...(expectedRestoredMailForwarding ? { expectedRestoredMailForwarding } : {}), ...(expectedRestoredRuntime ? { expectedRestoredRuntime } : {}) })
       const metadata = { rollbackTargetGenerationId: genId, rollbackTargetChecksum: guard.request.expectedTargetChecksum, stateChanged: true as const }
       if (result.status !== 'applied') return { ...result, ...metadata, verificationRequired: true, details: { stateChanged: true, verificationRequired: true } }
       const [active, source] = await Promise.all([latestActive(this.deps.db), this.deps.store.readValidatedGenerationSnapshot(result.generation.id)])

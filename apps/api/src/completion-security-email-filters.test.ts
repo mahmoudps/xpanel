@@ -11,14 +11,14 @@ import { createApiApp } from './server.ts'
 
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const route = '/api/mail/filters'
-const application = { status: 'configuration_only', nativeApplied: false }
+const application = { generationId: null }
 const cleanup: Array<() => Promise<unknown>> = []
 type Scope = 'global' | 'mailbox'
 interface FilterRecord {
   id: string; accountId: string | null; scope: Scope; mailbox: string | null; name: string
   priority: number; enabled: boolean; matchAll: boolean
   conditions: Array<{ field: string; comparator: string; value: string; headerName?: string }>
-  action: { type: string; target?: string }; compiledSieve: string; createdAt: string
+  actions: Array<{ type: string; target?: string }>; compiledSieve: string; createdAt: string
 }
 interface FilterView {
   filters: FilterRecord[]; context: { accountId: string; scope: Scope; mailbox: string | null }
@@ -29,7 +29,7 @@ interface FilterView {
 
 const draft = (patch: Record<string, unknown> = {}) => ({
   scope: 'global', name: 'Invoice routing', conditions: [{ field: 'subject', comparator: 'contains', value: 'invoice' }],
-  action: { type: 'fileinto', target: 'Billing' }, ...patch,
+  actions: [{ type: 'fileinto', target: 'Billing' }], ...patch,
 })
 
 const fixture = async () => {
@@ -70,7 +70,7 @@ const fixture = async () => {
   const bytes = async () => { try { return await readFile(path, 'utf8') } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error } }
   const record = (patch: Partial<FilterRecord> = {}): FilterRecord => ({ id: randomUUID(), accountId: owner.id, scope: 'global', mailbox: null,
     name: 'Seeded rule', priority: 1, enabled: true, matchAll: true, conditions: [{ field: 'subject', comparator: 'contains', value: 'invoice' }],
-    action: { type: 'keep' }, compiledSieve: '', createdAt: '2026-01-01T00:00:00.000Z', ...patch })
+    actions: [{ type: 'keep' }], compiledSieve: '', createdAt: '2026-01-01T00:00:00.000Z', ...patch })
   return { database, state, features, owner, other, inbox, sibling, foreignMailbox, principal, token, request, credential, mailboxToken, siblingToken, path, bytes, record }
 }
 
@@ -117,6 +117,40 @@ describe('mail-filter configuration HTTP security acceptance with disposable sta
     expect(removed.status).toBe(200)
     expect(await removed.json()).toMatchObject({ application, ok: true })
     expect((await view()).filters).toEqual([])
+  })
+
+  it('dry-runs a sample message through account-wide then mailbox rules without writing, hiding rules the caller may not read', async () => {
+    await create(draft({ name: 'Copy invoices to the bookkeeper', actions: [{ type: 'redirect', target: 'books@ledger.example.test' }] }))
+    const mailboxRule = draft({ scope: 'mailbox', mailbox: f.inbox.login, name: 'File invoices',
+      conditions: [{ field: 'subject', comparator: 'contains', value: 'invoice' }, { field: 'from', comparator: 'contains', value: '@supplier.example' }],
+      actions: [{ type: 'fileinto', target: 'Invoices' }, { type: 'mark-read' }, { type: 'stop' }] })
+    await create(mailboxRule)
+    await create(draft({ scope: 'mailbox', mailbox: f.inbox.login, name: 'Never reached', conditions: [], actions: [{ type: 'discard' }] }))
+    const before = await f.bytes()
+    const message = { from: 'Billing <ar@supplier.example>', to: f.inbox.login, subject: 'Invoice 42', body: 'Attached.' }
+    const test = (body: unknown, token = f.credential) => f.request(`${route}/test`, 'POST', body, token)
+
+    const owner = await test({ scope: 'mailbox', mailbox: f.inbox.login, message })
+    expect(owner.status).toBe(200)
+    const trace = await owner.json() as { rules: Array<Record<string, unknown>>; notRun: number; outcome: Record<string, unknown> }
+    expect(trace.rules.map(rule => [rule.name, rule.scope, rule.matched, rule.stopped])).toEqual([
+      ['Copy invoices to the bookkeeper', 'global', true, false], ['File invoices', 'mailbox', true, true]])
+    expect(trace.rules[1]!.tests).toEqual([
+      { field: 'subject', comparator: 'contains', value: 'invoice', actual: ['Invoice 42'], matched: true },
+      { field: 'from', comparator: 'contains', value: '@supplier.example', actual: ['Billing <ar@supplier.example>'], matched: true }])
+    expect(trace.notRun).toBe(1)
+    expect(trace.outcome).toEqual({ folders: ['Invoices'], redirects: ['books@ledger.example.test'], discarded: false, rejected: null, markedRead: true, stopped: true })
+
+    // the mailbox owner sees that an account-wide rule ran, never its name, values or address
+    const own = await (await test({ message }, f.mailboxToken)).json() as typeof trace
+    expect(own.rules[0]).toEqual({ id: null, name: null, scope: 'global', hidden: true, matched: true, stopped: false, tests: [], actions: [{ type: 'redirect' }] })
+    expect(own.outcome.redirects).toEqual([null])
+    expect(JSON.stringify(own)).not.toContain('ledger')
+
+    expect((await test({ scope: 'mailbox', mailbox: f.inbox.login, message }, f.siblingToken)).status).toBe(404)
+    expect((await test({ scope: 'mailbox', mailbox: f.inbox.login, message: { subject: 'a\nBcc: x' } })).status).toBe(422)
+    expect((await test({ scope: 'global', message, extra: true })).status).toBe(422)
+    expect(await f.bytes()).toBe(before)
   })
 
   it('reads deterministic revisions without allocating state and binds even empty revisions to their context', async () => {
@@ -241,9 +275,9 @@ describe('mail-filter configuration HTTP security acceptance with disposable sta
     draft({ conditions: [{ field: 'header', headerName: 'X-Test"; discard; #', comparator: 'is', value: 'yes' }] }),
     draft({ conditions: [{ field: 'header', headerName: 'X-Test\r\nInjected', comparator: 'is', value: 'yes' }] }),
     draft({ conditions: [{ field: 'unknown', comparator: 'is', value: 'yes' }] }),
-    draft({ action: { type: 'redirect', target: '|command' } }), draft({ action: { type: 'fileinto', target: 'Folder\u0085Injected' } }),
-    draft({ action: { type: 'discard', target: 'unexpected' } }), draft({ action: { type: 'unknown' } }),
-    draft({ action: undefined, actions: [{ type: 'keep' }, { type: 'discard' }] }),
+    draft({ actions: [{ type: 'redirect', target: '|command' }] }), draft({ actions: [{ type: 'fileinto', target: 'Folder\u0085Injected' }] }),
+    draft({ actions: [{ type: 'discard', target: 'unexpected' }] }), draft({ actions: [{ type: 'unknown' }] }),
+    draft({ actions: [{ type: 'keep' }, { type: 'discard' }] }), draft({ actions: [] }), draft({ actions: undefined, action: { type: 'keep' } }),
   ]
   it.each(invalidDrafts.map((body, index) => ({ index, body })))('rejects unsafe or malformed draft $index before persistence', async ({ body }) => {
     await atomicWriteJson(f.path, [f.record()])
@@ -253,16 +287,16 @@ describe('mail-filter configuration HTTP security acceptance with disposable sta
     expect(await f.bytes()).toBe(before)
   })
 
-  it('preserves quoted text, deliberate unconditional matching and supported legacy field/action aliases', async () => {
+  it('preserves quoted text, deliberate unconditional matching, several actions and the field alias', async () => {
     const text = 'Invoice "quoted" \\ archive'
-    const created = await create(draft({ conditions: [{ field: 'Subject', comparator: 'contains', value: text }], action: undefined,
-      actions: [{ type: 'fileinto', target: 'Orders/2026 "priority" \\ archive' }] }))
+    const created = await create(draft({ conditions: [{ field: 'Subject', comparator: 'contains', value: text }],
+      actions: [{ type: 'fileinto', target: 'Orders.2026 priority & archive' }, { type: 'mark-read' }, { type: 'stop' }] }))
     expect(created.filter.conditions[0]).toMatchObject({ field: 'subject', value: text })
-    expect(created.filter.action).toEqual({ type: 'fileinto', target: 'Orders/2026 "priority" \\ archive' })
+    expect(created.filter.actions).toEqual([{ type: 'fileinto', target: 'Orders.2026 priority & archive' }, { type: 'mark-read' }, { type: 'stop' }])
     expect(created.compilation.status).toBe('ready')
     expect(created.compiledSieve).toContain('\\"quoted\\"')
     expect(created.compiledSieve).toContain('\\\\ archive')
-    const unconditional = await create(draft({ name: 'Deliberate unconditional keep', conditions: [], action: { type: 'keep' } }))
+    const unconditional = await create(draft({ name: 'Deliberate unconditional keep', conditions: [], actions: [{ type: 'keep' }] }))
     expect(unconditional.filter.conditions).toEqual([])
     expect(unconditional.compiledSieve).toContain('if true')
   })
@@ -405,8 +439,8 @@ describe('mail-filter configuration HTTP security acceptance with disposable sta
   })
 
   it('preserves persisted execution order for equal priorities until an explicit reorder', async () => {
-    const first = f.record({ id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', name: 'First existing', action: { type: 'fileinto', target: 'FIRST_FOLDER' } })
-    const second = f.record({ id: '00000000-0000-4000-8000-000000000001', name: 'Second existing', action: { type: 'fileinto', target: 'SECOND_FOLDER' } })
+    const first = f.record({ id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', name: 'First existing', actions: [{ type: 'fileinto', target: 'FIRST_FOLDER' }] })
+    const second = f.record({ id: '00000000-0000-4000-8000-000000000001', name: 'Second existing', actions: [{ type: 'fileinto', target: 'SECOND_FOLDER' }] })
     await atomicWriteJson(f.path, [first, second])
     const selected = await view()
     expect(selected.filters.map(item => item.id)).toEqual([first.id, second.id])

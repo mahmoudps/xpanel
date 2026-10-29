@@ -70,13 +70,14 @@ describe('API mail server workspace', () => {
     const body = await response.json()
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(events).toEqual(['auth', 'root:server.mail-server.read', 'agent:read', 'auth', 'root:server.mail-server.read'])
-    expect(body).toMatchObject({ page: 'server', host: 'connected', observedAt: '2026-10-27T10:00:00.000Z', editable: false, sources: { postfix: 'read', master: 'read', dovecot: 'read', desired: 'rendered' }, domains: [] })
+    expect(body).toMatchObject({ page: 'server', host: 'connected', observedAt: '2026-10-27T10:00:00.000Z', editable: true, sources: { postfix: 'read', master: 'read', dovecot: 'read', desired: 'rendered' }, domains: [] })
     expect(row(body, 'smtpd_milters')).toEqual({ source: 'postfix', key: 'smtpd_milters', observed: 'local:opendkim/opendkim.sock', desired: 'local:opendkim/opendkim.sock', state: 'match' })
     expect(row(body, 'myhostname')).toMatchObject({ observed: 'host.example.test', desired: null, state: 'not-managed' })
     expect(row(body, 'smtpd_banner')).toMatchObject({ observed: null, desired: null, state: 'not-managed' })
     expect(body.settings.filter((item: { source: string }) => item.source === 'dovecot')).toEqual([
       { source: 'dovecot', key: 'protocols', observed: 'imap pop3 lmtp', desired: null, state: 'not-managed' }, { source: 'dovecot', key: 'listen', observed: '*, ::', desired: null, state: 'not-managed' },
       { source: 'dovecot', key: 'ssl', observed: 'required', desired: null, state: 'not-managed' }, { source: 'dovecot', key: 'ssl_min_protocol', observed: 'TLSv1.2', desired: null, state: 'not-managed' },
+      ...['ssl_cipher_list', 'ssl_prefer_server_ciphers', 'ssl_server_prefer_ciphers', 'ssl_cert', 'ssl_key', 'ssl_server_cert_file', 'ssl_server_key_file'].map(key => ({ source: 'dovecot', key, observed: null, desired: null, state: 'not-managed' })),
       { source: 'dovecot', key: 'mail_location', observed: null, desired: null, state: 'not-managed' }, { source: 'dovecot', key: 'auth_mechanisms', observed: 'plain login', desired: 'plain login', state: 'match' }])
     expect(body.services.map((item: { service: string; state: string }) => [item.service, item.state])).toEqual([['127.0.0.1:587', 'match'], ['smtp', 'not-managed'], ['465', 'not-managed']])
     expect(body.services[0].options.find((item: { key: string }) => item.key === 'smtpd_client_restrictions')).toEqual({ key: 'smtpd_client_restrictions', observed: 'permit_sasl_authenticated, reject', desired: 'permit_sasl_authenticated,reject', state: 'match' })
@@ -114,11 +115,11 @@ describe('API mail server workspace', () => {
     expect(row(body, 'virtual_mailbox_domains')).toMatchObject({ desired: 'texthash:/etc/postfix/xpanel/virtual_domains', state: 'match' })
     expect(row(body, 'relayhost')).toMatchObject({ observed: '', desired: null, state: 'not-managed' })
     expect(body.domains).toEqual([
-      { domain: 'example.test', account: 'alice', mailboxes: 2, zone: 'example.test', mx: [{ priority: 10, host: 'mail.example.test' }], state: 'mx-saved' },
-      { domain: 'nomail.test', account: 'alice', mailboxes: 0, zone: null, mx: [], state: 'no-mailboxes' },
-      { domain: 'nozone.test', account: 'alice', mailboxes: 1, zone: null, mx: [], state: 'zone-missing' },
-      { domain: 'old.test', account: 'gone', mailboxes: 0, zone: 'old.test', mx: [{ priority: 10, host: 'mail.old.test' }], state: 'no-mailboxes' },
-      { domain: 'shop.example.test', account: 'alice', mailboxes: 1, zone: 'example.test', mx: [], state: 'mx-missing' }])
+      { domain: 'example.test', account: 'alice', mailboxes: 2, zone: 'example.test', mx: [{ priority: 10, host: 'mail.example.test' }], state: 'mx-saved', mode: 'local' },
+      { domain: 'nomail.test', account: 'alice', mailboxes: 0, zone: null, mx: [], state: 'no-mailboxes', mode: 'local' },
+      { domain: 'nozone.test', account: 'alice', mailboxes: 1, zone: null, mx: [], state: 'zone-missing', mode: 'local' },
+      { domain: 'old.test', account: 'gone', mailboxes: 0, zone: 'old.test', mx: [{ priority: 10, host: 'mail.old.test' }], state: 'no-mailboxes', mode: 'local' },
+      { domain: 'shop.example.test', account: 'alice', mailboxes: 1, zone: 'example.test', mx: [], state: 'mx-missing', mode: 'local' }])
     const many = { ...saved, domains: Array.from({ length: 2001 }, (_, index) => ({ id: 'x' + index, accountId: 'a1', name: `d${String(index).padStart(4, '0')}.test` })) } as unknown as MailServerSaved
     const view = buildMailServerView('routing', null, 'not-connected', null, many)
     expect(view.domains).toHaveLength(2000); expect(view.truncated).toBe(true)
@@ -129,6 +130,34 @@ describe('API mail server workspace', () => {
     expect(row(body, 'message_size_limit')).toMatchObject({ observed: '52428800', desired: null, state: 'not-managed' })
     expect(body.services.map((item: { service: string }) => item.service)).toEqual(['127.0.0.1:587', '465'])
     expect(body.domains).toEqual([])
+  })
+  it('compares the saved server mail policy and shows each domain route, or no rendered column when the policy needs review', async () => {
+    const at = { updatedAt: '2026-10-28T09:00:00.000Z', updatedBy: 'root' }
+    const none = { spam: null, relay: null, bcc: null, marketing: null, server: null, routing: null }
+    const policy = { sections: { ...none, server: { section: 'server' as const, ...at, policy: { postfix: { myhostname: 'host.example.test', message_size_limit: '104857600' }, dovecot: { ssl_min_protocol: 'TLSv1.3' }, rbl: ['zen.spamhaus.org'], certificates: { smtp: 'c1', submission: null, imap: null } } },
+      routing: { section: 'routing' as const, ...at, policy: { domains: [{ domain: 'nozone.test', mode: 'remote' as const }] } } }, archives: [] }
+    const server = await (await call('/api/server/mail-server/server', helpers({ readMailPolicy: async () => policy }).value))!.json()
+    expect(row(server, 'myhostname')).toMatchObject({ observed: 'host.example.test', desired: 'host.example.test', state: 'match' })
+    expect(row(server, 'smtpd_client_restrictions')).toMatchObject({ observed: null, desired: 'permit_mynetworks, permit_sasl_authenticated, reject_rbl_client zen.spamhaus.org', state: 'drift' })
+    expect(row(server, 'ssl_min_protocol')).toMatchObject({ observed: 'TLSv1.2', desired: 'TLSv1.3', state: 'drift' })
+    expect(server.services.find((item: { service: string }) => item.service === 'smtp').options).toContainEqual({ key: 'smtpd_tls_cert_file', observed: null, desired: '/etc/xpanel/ssl/c1/fullchain.pem', state: 'drift' })
+    const outbound = await (await call('/api/server/mail-server/outbound', helpers({ readMailPolicy: async () => policy }).value))!.json()
+    expect(row(outbound, 'message_size_limit')).toMatchObject({ observed: '52428800', desired: '104857600', state: 'drift' })
+    const routing = await (await call('/api/server/mail-server/routing', helpers({ readMailPolicy: async () => policy }).value))!.json()
+    expect(routing.domains.find((item: { domain: string }) => item.domain === 'nozone.test').mode).toBe('remote')
+    const review = await (await call('/api/server/mail-server/server', helpers({ readMailPolicy: async () => { throw new Error('saved_policy_review') } }).value))!.json()
+    // The chosen mail-client certificate is compared on main.cf and, without an IMAP choice, on Dovecot in the host dialect.
+    const client = { ...policy, sections: { ...policy.sections, server: { ...policy.sections.server, policy: { ...policy.sections.server.policy, certificates: { smtp: null, submission: 'c2', imap: null } } } } }
+    const older = await (await call('/api/server/mail-server/server', helpers({ readMailPolicy: async () => client }).value))!.json()
+    expect(row(older, 'smtpd_tls_cert_file')).toMatchObject({ desired: '/etc/xpanel/ssl/c2/fullchain.pem', state: 'drift' })
+    expect(row(older, 'ssl_cert')).toMatchObject({ desired: '</etc/xpanel/ssl/c2/fullchain.pem', state: 'drift' })
+    expect(row(older, 'ssl_key')).toMatchObject({ desired: '</etc/xpanel/ssl/c2/privkey.pem' })
+    expect(row(older, 'ssl_server_cert_file')).toMatchObject({ desired: null, state: 'not-managed' })
+    const v24 = async () => { const view = JSON.parse(JSON.stringify(await observe())); view.dovecot.settings.ssl_server_cert_file = '/etc/xpanel/ssl/c2/fullchain.pem'; return view }
+    const newer = await (await call('/api/server/mail-server/server', helpers({ readMailPolicy: async () => client, readObservation: v24 }).value))!.json()
+    expect(row(newer, 'ssl_server_cert_file')).toMatchObject({ observed: '/etc/xpanel/ssl/c2/fullchain.pem', desired: '/etc/xpanel/ssl/c2/fullchain.pem', state: 'match' })
+    expect(row(newer, 'ssl_cert')).toMatchObject({ desired: null, state: 'not-managed' })
+    expect(review.sources.desired).toBe('unavailable')
   })
   it('refuses to return data when root authority changes during the read', async () => {
     let calls = 0
@@ -144,7 +173,7 @@ describe('mail server observation projection', () => {
     const variants: ((view: Record<string, any>) => void)[] = [
       view => { view.postfix.settings.smtp_sasl_password_maps = 'hash:/etc/postfix/sasl_passwd' }, view => { view.postfix.settings.relayhost = 'x'.repeat(4097) },
       view => { view.postfix.settings.relayhost = 'a\u0007b' }, view => { view.postfix.state = 'unavailable'; view.postfix.reason = 'command_failed' }, view => { view.postfix.reason = 'command_failed' },
-      view => { delete view.dovecot.settings.ssl }, view => { view.dovecot.settings.ssl_key = '/etc/ssl/key.pem' }, view => { view.master.services[0].fields = 'unix n - y - - smtpd' },
+      view => { delete view.dovecot.settings.ssl }, view => { view.dovecot.settings.ssl_key = '-----BEGIN PRIVATE KEY-----' }, view => { view.dovecot.settings.extra_key = '/etc/ssl/key.pem' }, view => { view.master.services[0].fields = 'unix n - y - - smtpd' },
       view => { view.master.services.push(view.master.services[0]) }, view => { view.master.services[0].options.smtp_sasl_password_maps = 'x' }, view => { view.observedAt = 'yesterday' },
       view => { view.master.services = Array.from({ length: 65 }, (_, index) => ({ ...view.master.services[0], service: String(1000 + index) })) },
     ]

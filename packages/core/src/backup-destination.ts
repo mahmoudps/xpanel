@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 
-export const BACKUP_REMOTE_KINDS = ['sftp', 's3', 'backblaze'] as const
+/** Kinds a credential profile can serve; `local` is the built-in separate-disk profile. */
+export const BACKUP_REMOTE_KINDS = ['sftp', 's3', 'backblaze', 'local'] as const
 export interface BackupDestinationTarget {
   id: string; name: string; kind: 's3' | 'sftp' | 'rsync' | 'backblaze' | 'ftp' | 'local'; endpoint: string
   bucket: string | null; region: string | null; pathPrefix: string; username: string | null; retentionDays: number; createdAt: string

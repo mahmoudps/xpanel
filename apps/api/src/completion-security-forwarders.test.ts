@@ -55,14 +55,15 @@ describe('forwarder configuration security acceptance with synthetic state', () 
     const created = await create({ sourceAddress: source(), destinations: ['out@example.test'] })
     expect(created.status).toBe(201)
     const receipt = await created.json() as { forwarder: { id: string; sourceAddress: string } }
-    expect(receipt).toMatchObject({ application: { status: 'configuration_only', nativeApplied: false } })
+    // no host agent in this fixture: the record is saved and truthfully pending
+    expect(receipt).toMatchObject({ forwarder: { action: 'forward', application: { state: 'pending', reason: expect.stringContaining('not applied') } }, revision: expect.any(Number) })
     const { forwarder } = receipt
     const raw = await f.token(['mail:read'])
     expect((await f.request(raw, `${route}/${forwarder.id}`, 'DELETE', {})).status).toBe(403)
     expect(await records()).toMatchObject([{ id: forwarder.id, sourceAddress: source() }])
     const removed = await f.request(credential, `${route}/${forwarder.id}`, 'DELETE', {})
     expect(removed.status).toBe(200)
-    expect(await removed.json()).toMatchObject({ application: { status: 'configuration_only', nativeApplied: false } })
+    expect(await removed.json()).toMatchObject({ ok: true, revision: expect.any(Number) })
     expect(await records()).toEqual([])
   })
 
@@ -84,11 +85,11 @@ describe('forwarder configuration security acceptance with synthetic state', () 
   it('canonicalizes addresses and rejects duplicate sources without overwriting the original', async () => {
     const created = await create({ sourceAddress: `  ${source().toUpperCase()}  `, destinations: ['OUT@example.test', 'out@EXAMPLE.test'] })
     expect(created.status).toBe(201)
-    expect(await created.json()).toMatchObject({ forwarder: { sourceAddress: source(), destinations: ['out@example.test'] }, application: { status: 'configuration_only', nativeApplied: false } })
+    expect(await created.json()).toMatchObject({ forwarder: { sourceAddress: source(), destinations: ['out@example.test'], application: { state: 'pending', reason: expect.stringContaining('not applied') } } })
     expect((await create({ sourceAddress: source().toUpperCase(), destinations: ['replacement@example.test'] })).status).toBe(409)
     expect(await records()).toMatchObject([{ sourceAddress: source(), destinations: ['out@example.test'] }])
     const listed = await f.request(credential, route)
-    expect(await listed.json()).toMatchObject({ application: { status: 'configuration_only', nativeApplied: false } })
+    expect(await listed.json()).toMatchObject({ forwarders: [{ application: { state: 'pending', reason: expect.stringContaining('not applied') } }], generationId: null })
   })
 
   it('rejects direct self-forwarding before changing saved configuration', async () => {
@@ -145,7 +146,7 @@ describe('forwarder configuration security acceptance with synthetic state', () 
     })
     expect(response.status).toBe(200)
     const body = await response.json()
-    expect(body).toMatchObject({ summary: { forwardersImported: 2, errorCount: 5 }, application: { status: 'configuration_only', nativeApplied: false } })
+    expect(body).toMatchObject({ summary: { forwardersImported: 2, errorCount: 5 }, application: { state: 'pending', revision: expect.any(Number) } })
     expect(await records()).toMatchObject([
       { sourceAddress: `team@${domain}`, destinations: ['out@example.test'] },
       { sourceAddress: `second@${domain}`, destinations: ['out@example.test'] },

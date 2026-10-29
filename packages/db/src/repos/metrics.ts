@@ -33,13 +33,19 @@ export interface HostMetricsObservation {
   diskTotalBytes: number | null
   diskUsedBytes: number | null
   diskAvailableBytes: number | null
+  /** Whole-host busy share of all CPUs since the previous sample (/proc/stat), 0 to 100. */
+  cpuPercent: number | null
+  /** Process count (numeric /proc entries). */
+  processes: number | null
 }
 
-const hostFields = ['load1', 'load5', 'load15', 'memoryTotalBytes', 'memoryAvailableBytes', 'swapTotalBytes', 'swapFreeBytes', 'diskTotalBytes', 'diskUsedBytes', 'diskAvailableBytes'] as const
-const validateHostObservation = (value: HostMetricsObservation): HostMetricsObservation => {
+const hostFields = ['load1', 'load5', 'load15', 'memoryTotalBytes', 'memoryAvailableBytes', 'swapTotalBytes', 'swapFreeBytes', 'diskTotalBytes', 'diskUsedBytes', 'diskAvailableBytes', 'cpuPercent', 'processes'] as const
+const validateHostObservation = (input: HostMetricsObservation): HostMetricsObservation => {
+  // Rows recorded before cpuPercent/processes existed read those fields as unavailable.
+  const value = Object.fromEntries(hostFields.map(key => [key, input[key] ?? null])) as unknown as HostMetricsObservation
   for (const key of hostFields) {
     const number = value[key]
-    if (number !== null && (typeof number !== 'number' || !Number.isFinite(number) || number < 0 || number > Number.MAX_SAFE_INTEGER || key.endsWith('Bytes') && !Number.isSafeInteger(number))) fail('VALIDATION', `invalid host ${key}`)
+    if (number !== null && (typeof number !== 'number' || !Number.isFinite(number) || number < 0 || number > Number.MAX_SAFE_INTEGER || (key.endsWith('Bytes') || key === 'processes') && !Number.isSafeInteger(number) || key === 'cpuPercent' && number > 100)) fail('VALIDATION', `invalid host ${key}`)
   }
   for (const [total, parts] of [
     [value.memoryTotalBytes, [value.memoryAvailableBytes]],
@@ -48,7 +54,7 @@ const validateHostObservation = (value: HostMetricsObservation): HostMetricsObse
   ] as const) {
     if (parts.some(part => part !== null && (total === null || part > total))) fail('VALIDATION', 'invalid host measurement bounds')
   }
-  return Object.fromEntries(hostFields.map(key => [key, value[key]])) as unknown as HostMetricsObservation
+  return value
 }
 
 export interface MetricsCursor {
@@ -215,12 +221,12 @@ export const listMetricsHistoryPage = async (
   }
 }
 
-export const pruneMetricsHistory = (db: Db, olderThanIso: string): Promise<number> =>
+export const pruneMetricsHistory = (db: Db, olderThanIso: string, scope?: 'host' | 'account'): Promise<number> =>
   withSqliteErrors(async () => {
     const cutoff = assertIsoDate(olderThanIso, 'olderThanIso').toISOString()
     const rows = await db.query<{ id: number }>(
-      `DELETE FROM metrics_history WHERE at < $1 RETURNING id`,
-      [cutoff],
+      `DELETE FROM metrics_history WHERE at < $1${scope ? ' AND scope = $2' : ''} RETURNING id`,
+      scope ? [cutoff, oneOf(scope, ['host', 'account'] as const, 'scope')] : [cutoff],
     )
     return rows.length
   })

@@ -72,6 +72,15 @@ describe('canonical cached numeric IO projection', () => {
     forged.observation.snapshot.deferred.aggregateAwaitMs.availability = 'known'
     expect(engine.readResourceObservation(forged as unknown as ResourceSamplerReading, state())).toMatchObject({ reason: 'invalid', snapshot: null })
   })
+  it('keeps measured host fields in the per-account view and marks the unmeasured latency as partial', async () => {
+    const engine = new IoAnalyticsEngine()
+    expect(engine.readResourceAccounts(reading(), state())).toEqual({ state: 'partial', reason: null, observedAt: '2026-10-23T05:30:00.123Z',
+      host: { cpuPercent: 12, memoryUsedBytes: 4_096, memoryTotalBytes: 8_192, loadAvg1m: 1, psiSomeAvg10: 0, psiFullAvg10: 0, awaitMs: null }, accounts: [], unmeasuredAccounts: 0 })
+    expect(engine.readResourceAccounts({ state: 'sampling', failure: null, observation: null }, state())).toMatchObject({ state: 'unavailable', reason: 'not-sampled', host: null, accounts: [] })
+    expect(engine.readResourceAccounts(reading(), { ...state(), checksum: 'b'.repeat(64) })).toMatchObject({ state: 'unavailable', reason: 'configuration-changed' })
+    const pipeline = new CanonicalIoResourcePipeline({ store: { readSnapshot: async () => state() } as unknown as StateStore, engine })
+    expect(await pipeline.readAccounts(state())).toMatchObject({ state: 'unavailable', reason: 'not-sampled' })
+  })
 })
 
 describe('single daemon resource pipeline lifetime diagnostics', () => {

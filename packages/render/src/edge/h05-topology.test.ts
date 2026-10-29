@@ -10,7 +10,7 @@ import {
   sliceUpdateActions,
 } from '../system/slice.ts'
 import {
-  renderAppUnit,
+  renderAppUnits,
   renderCronUnits,
   renderFpmUnit,
   renderLoginSliceDropin,
@@ -96,7 +96,7 @@ describe('H05: End-to-end hosting process topology & UID/GID isolation (A31, A35
       assignUserId: 'alice alice',
       maxClientsVHost: 25,
       documentRoot: '/home/alice/public_html',
-      fpmSocketPath: '/run/xpanel/fpm/alice-8.3/php-fpm.sock',
+      fpmSocketPath: '/run/xpanel-fpm/alice-8.3/php-fpm.sock',
     })
 
     const fpmContract = verifyFpmPoolIsolation(alice, aliceDomain.php, debianOs, {
@@ -111,9 +111,9 @@ describe('H05: End-to-end hosting process topology & UID/GID isolation (A31, A35
       version: '8.3',
       unit: 'xpanel-php-fpm-alice-8.3.service',
       slice: 'xpanel-1001.slice',
-      runtimeDir: '/run/xpanel/fpm/alice-8.3',
+      runtimeDir: '/run/xpanel-fpm/alice-8.3',
       runtimeDirMode: '0750',
-      socketPath: '/run/xpanel/fpm/alice-8.3/php-fpm.sock',
+      socketPath: '/run/xpanel-fpm/alice-8.3/php-fpm.sock',
       listenOwner: 'alice',
       listenGroup: 'alice',
       listenMode: '0660',
@@ -172,14 +172,14 @@ describe('H05: End-to-end hosting process topology & UID/GID isolation (A31, A35
   it('rejects cross-tenant FPM socket bindings, ProxyPass, RewriteRule [P], and identity directives in .htaccess', () => {
     const maliciousCases = [
       // Tenant B trying to point .htaccess at Tenant A's PHP-FPM socket
-      '<FilesMatch "\\.php$">\n  SetHandler "proxy:unix:/run/xpanel/fpm/alice-8.3/php-fpm.sock|fcgi://localhost"\n</FilesMatch>',
+      '<FilesMatch "\\.php$">\n  SetHandler "proxy:unix:/run/xpanel-fpm/alice-8.3/php-fpm.sock|fcgi://localhost"\n</FilesMatch>',
       // Backslash line-continuation smuggling of SetHandler
-      'SetHandler \\\n  "proxy:unix:/run/xpanel/fpm/alice-8.3/php-fpm.sock|fcgi://localhost"',
+      'SetHandler \\\n  "proxy:unix:/run/xpanel-fpm/alice-8.3/php-fpm.sock|fcgi://localhost"',
       // Attempting to proxy to a system or custom socket
       'AddHandler proxy:unix:/run/php/php8.3-fpm.sock|fcgi://localhost .php',
       // Attempting to proxy to loopback backend or another tenant's app port via RewriteRule [P]
       'RewriteEngine On\nRewriteRule ^api/(.*)$ http://127.0.0.1:3000/$1 [P,L]',
-      'RewriteRule ^(.*\\.php)$ unix:/run/xpanel/fpm/alice-8.3/php-fpm.sock|fcgi://localhost/home/alice/public_html/$1 [NC,P]',
+      'RewriteRule ^(.*\\.php)$ unix:/run/xpanel-fpm/alice-8.3/php-fpm.sock|fcgi://localhost/home/alice/public_html/$1 [NC,P]',
       // Attempting ProxyPass / ProxyPassMatch in .htaccess
       'ProxyPass /app http://127.0.0.1:8080/',
       'ProxyPassMatch ^/(.*\\.php)$ fcgi://127.0.0.1:9000/home/alice/public_html/$1',
@@ -377,18 +377,7 @@ describe('H05: Per-account cgroup v2 slice isolation & workload boundary contrac
 
   it('binds PHP-FPM, Node/Python app, cron timer, and SSH logind drop-in to the account UID/GID and slice', () => {
     const fpmUnit = renderFpmUnit(alice, '8.3', debianOs)
-    const appRendered = renderAppUnit(
-      alice,
-      {
-        name: 'web',
-        kind: 'node',
-        port: 3100,
-        execStart: ['/usr/bin/node', 'server.js'],
-        workingDir: '/home/alice/app',
-      },
-      debianOs,
-      { reservedPorts: [8080, 2087] },
-    )
+    const appRendered = renderAppUnits(alice, { name: 'web', kind: 'node', root: '/home/alice/app', startup: 'server.js' }, debianOs)
     const cronRendered = renderCronUnits(
       alice,
       { id: 'cleanup', schedule: '0 * * * *', command: 'php /home/alice/artisan schedule:run' },
@@ -396,7 +385,7 @@ describe('H05: Per-account cgroup v2 slice isolation & workload boundary contrac
     )
     const loginDropin = renderLoginSliceDropin(alice, planLimits, ['/dev/sda'])
 
-    for (const u of [fpmUnit.content, appRendered.unit.content, cronRendered.service.content]) {
+    for (const u of [fpmUnit.content, appRendered.service.content, appRendered.proxyService.content, cronRendered.service.content]) {
       expect(u).toContain('User=alice')
       expect(u).toContain('Group=alice')
       expect(u).toContain('Slice=xpanel-1001.slice')

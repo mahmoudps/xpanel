@@ -109,7 +109,7 @@ describe('live truth surfaces', () => {
     assert.match(html.bodyHtml, /&gt; See you/)
     assert.match(html.identitySize, /10 MB/)
     assert.match(html.identityDkim, /not signed/)
-    assert.match(html.vacationStatus, /Requested off; activation unverified/)
+    assert.equal(html.vacationStatus, 'Off')
     assert.equal(html.folders.find(folder => folder.label === 'Drafts')?.count?.text, '1')
   })
 

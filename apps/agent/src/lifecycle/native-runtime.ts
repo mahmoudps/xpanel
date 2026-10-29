@@ -4,7 +4,7 @@ import { lstat, mkdir, open, readFile, readlink, readdir, rename, rm, statfs, sy
 import type { FileHandle } from 'node:fs/promises'
 import { basename, dirname, posix } from 'node:path'
 import type { HostAction, Principal } from '@xpanel/core'
-import { createDb, getDurableJob, getPrincipal, getStrictOperationDatabaseOrigin, latestActive, loadMigrations } from '@xpanel/db'
+import { createDb, getDurableJob, getGeneration, getPrincipal, getStrictOperationDatabaseOrigin, latestActive, loadMigrations } from '@xpanel/db'
 import { recoverUpgrade, runUpgrade } from '@xpanel/lifecycle'
 import type { FsPort, HostPort, ReleaseInfo, UpgradePorts } from '@xpanel/lifecycle'
 import { detectOs, parseOsRelease } from '@xpanel/os'
@@ -66,14 +66,20 @@ export const releaseInfoFromAuthenticatedReport = (input: unknown, artifact: Non
 }
 
 type PathOperation = 'read' | 'write' | 'remove' | 'directory' | 'link'
+/** Rewind scratch and set-aside trees beside the live state directory, keyed by upgrade record id. */
+const REWIND_SCRATCH = /^\/var\/lib\/xpanel\/\.rewind-[A-Za-z0-9][A-Za-z0-9-]{0,63}$/
+const REWIND_PATH = /^\/var\/lib\/xpanel\/(?:state|\.pre-rewind-[A-Za-z0-9][A-Za-z0-9-]{0,63}|\.rewind-[A-Za-z0-9][A-Za-z0-9-]{0,63}\/state)$/
+/** Retention removes only sealed (root-owned) set-aside trees and empty scratch; the live state tree never. */
+const REWIND_REMOVABLE = /^\/var\/lib\/xpanel\/\.(?:pre-rewind|rewind)-[A-Za-z0-9][A-Za-z0-9-]{0,63}$/
 /** Exact native engine paths only; policy matching is not an admission grant. */
 export const nativeLifecyclePathAllowed = (path: string, operation: PathOperation): boolean => {
   if (!canonical(path)) return false
   if (operation === 'read') return nativeLifecyclePathAllowed(path, 'write') || nativeLifecyclePathAllowed(path, 'directory') || ['/opt/xpanel/releases/', '/opt/xpanel/staging/', '/opt/xpanel/downloads/', BACKUPS + '/'].some(root => path.startsWith(root))
-  if (operation === 'directory') return path === BACKUPS || /^\/opt\/xpanel\/staging\/[A-Za-z0-9._-]+$/.test(path)
+  if (operation === 'directory') return path === BACKUPS || REWIND_SCRATCH.test(path) || /^\/opt\/xpanel\/staging\/[A-Za-z0-9._-]+$/.test(path)
   if (operation === 'link') return /^\/opt\/xpanel\/\.current-[A-Za-z0-9._-]+$/.test(path)
-  if (operation === 'write') return path === '/opt/xpanel/current' || /^\/opt\/xpanel\/(?:\.current-[A-Za-z0-9._-]+|(?:staging|releases)\/[A-Za-z0-9._-]+)$/.test(path) || /^\/var\/lib\/xpanel\/(?:upgrade\.lock|maintenance\.json)(?:\.[A-Za-z0-9._-]+\.tmp)?$/.test(path) || path.startsWith(BACKUPS + '/')
+  if (operation === 'write') return path === '/opt/xpanel/current' || REWIND_PATH.test(path) || /^\/opt\/xpanel\/(?:\.current-[A-Za-z0-9._-]+|(?:staging|releases)\/[A-Za-z0-9._-]+)$/.test(path) || /^\/var\/lib\/xpanel\/(?:upgrade\.lock|maintenance\.json)(?:\.[A-Za-z0-9._-]+\.tmp)?$/.test(path) || path.startsWith(BACKUPS + '/')
   return /^\/opt\/xpanel\/(?:\.current-[A-Za-z0-9._-]+|(?:staging|releases)\/[A-Za-z0-9._-]+)$/.test(path) || /^\/var\/lib\/xpanel\/(?:upgrade\.lock|maintenance\.json)\.[A-Za-z0-9._-]+\.tmp$/.test(path)
+    || REWIND_REMOVABLE.test(path) || /^\/var\/lib\/xpanel-lifecycle\/backups\/[A-Za-z0-9][A-Za-z0-9._-]*\.tmp$/.test(path)
 }
 
 const missing = (error: unknown): boolean => (error as NodeJS.ErrnoException)?.code === 'ENOENT'
@@ -172,7 +178,17 @@ const composition = async (db: ReturnType<typeof createDb>['db'], actor: Princip
     reconciler: {
       currentGeneration: async () => { const active = await latestActive(db); if (!active) return deny('LIFECYCLE_ACTIVE_GENERATION_REQUIRED'); return active.id },
       reconcile: async () => { await assertCurrentLifecycleEffect('filesystem.write'); const result = await reconciler.reconcile({ force: true, actor: actor.username }); if (result.status === 'failed' || !result.generation) return deny('LIFECYCLE_RECONCILE_FAILED'); return { generationId: result.generation.id, units: [] } },
-      activate: async () => deny('LIFECYCLE_HISTORICAL_AUTHORITY_REPLAY_DENIED'),
+      // Rewind only: the restored state files must be the exact source of that generation; this coordinator
+      // (the pre-upgrade release) rebuilds and applies them. Any other historical replay stays denied.
+      activate: async generationId => {
+        await assertCurrentLifecycleEffect('filesystem.write')
+        const [target, snapshot] = await Promise.all([getGeneration(db, generationId), store.readSnapshot()])
+        const manifest = target ? await reconciler.journal.readManifest(generationId) : null
+        if (!manifest || manifest.stateChecksum !== snapshot.checksum) return deny('LIFECYCLE_HISTORICAL_AUTHORITY_REPLAY_DENIED')
+        const result = await reconciler.reconcile({ force: true, actor: actor.username })
+        if (result.status === 'failed' || !result.generation) return deny('LIFECYCLE_RECONCILE_FAILED')
+        return { generationId: result.generation.id, units: [] }
+      },
       status: async () => { const [drift, active, snapshot] = await Promise.all([reconciler.checkDrift(), latestActive(db), store.readSnapshot()]); const manifest = active ? await reconciler.journal.readManifest(active.id) : null; const problems = drift.items.map(item => item.path); if (!manifest || manifest.stateChecksum !== snapshot.checksum) problems.push('current desired state is not the active generation'); if (drift.manifestMissing) problems.push('active generation manifest is unavailable'); return { converged: !drift.hasDrift && problems.length === 0, drift: problems } },
       identities: async () => { const snapshot = await store.readSnapshot(); if (snapshot.accounts.length && (await observeHostLimits(executor, snapshot.accounts, snapshot.plans, '/home')).status !== 'verified') return deny('LIFECYCLE_ASSIGNED_LIMITS_UNVERIFIED'); return Promise.all(snapshot.accounts.map(async account => { const [uid, gid] = await Promise.all([executor.runCommand(['/usr/bin/id', '-u', '--', account.username]), executor.runCommand(['/usr/bin/id', '-g', '--', account.username])]); if (!uid.ok || !gid.ok || uid.stdout.trim() !== String(account.uid) || gid.stdout.trim() !== String(account.gid)) return deny('LIFECYCLE_ACCOUNT_IDENTITY_CHANGED'); const plan = snapshot.plans.find(plan => plan.id === account.planId); if (!plan) return deny('LIFECYCLE_ASSIGNED_PLAN_UNAVAILABLE'); return { username: account.username, uid: account.uid, gid: account.gid, slice: `xpanel-${account.uid}.slice`, quotas: { ...plan.resources } } })) },
     },

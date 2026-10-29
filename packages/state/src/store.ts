@@ -2,9 +2,9 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, randomUUID } from 'node:crypto'
 import { resolveServingDomain } from '@xpanel/core'
 import { constants } from 'node:fs'
-import { lstat, mkdtemp, open, readFile, rename, rm } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, open, readFile, rename, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join, relative } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import {
   assertAliasTarget,
   assertArgon2Hash,
@@ -101,7 +101,10 @@ import type {
   DomainWorkspaceRead,
   DatabaseMutationOptions,
   FirewallGuard,
+  FirewallMutationOptions,
+  FirewallPendingChange,
   FirewallState,
+  MailRoutingState,
   MutationOptions,
   ServerSettingsMutationOptions,
   RestoreGenerationMutationOptions,
@@ -195,6 +198,7 @@ const toPublicAccount = (a: StoredAccount): Account => ({
   ...(a.databaseRemoteAccess !== undefined && { databaseRemoteAccess: a.databaseRemoteAccess.map(entry => ({ ...entry })) }),
   shell: a.shell,
   createdAt: a.createdAt,
+  ...(a.bandwidthLimitedMonth !== undefined && { bandwidthLimitedMonth: a.bandwidthLimitedMonth }),
 })
 
 const pinnedAccountPreimage = async (path: string): Promise<{ bytes: Buffer; identity: string }> => {
@@ -228,7 +232,17 @@ const toPublicDatabaseUser = (u: StoredDatabaseUser): DatabaseUser => ({
   grants: u.grants.map((g) => ({ databaseId: g.databaseId, privileges: [...g.privileges] })),
 })
 
-const restoreEntries = ['feature-lists', 'plans', 'resellers', 'accounts', 'certificates', 'zones', 'server.json', 'firewall.json', 'uid-allocator.json', 'ip-pool.json', 'mail-ips.json'] as const
+/** Saved mail routing paths under `extended/`, shared with the API routes that write them. */
+export const MAIL_ROUTING_FILES = {
+  forwarders: ['mail', 'forwarders.json'],
+  domainForwarders: ['mail', 'domain-forwarders.json'],
+  defaultAddresses: ['mail', 'default-addresses.json'],
+  filters: ['mail', 'filters.json'],
+  autoresponders: ['mail', 'autoresponders.json'],
+} as const
+
+const restoreEntries = ['feature-lists', 'plans', 'resellers', 'accounts', 'certificates', 'zones', 'server.json', 'firewall.json', 'uid-allocator.json', 'ip-pool.json', 'mail-ips.json',
+  ...Object.values(MAIL_ROUTING_FILES).map((rel) => ['extended', ...rel].join('/')), 'extended/webmail/vacation'] as const
 
 const restoreIndex = <T>(values: readonly T[], key: (value: T) => string, kind: string): Map<string, T> => {
   const index = new Map<string, T>()
@@ -246,6 +260,10 @@ const restorePathExists = async (path: string): Promise<boolean> => {
     throw error
   }
 }
+
+/** Content identity of the rule set; firewall writes are bound to the revision the caller read. */
+export const firewallRevision = (state: FirewallState): string =>
+  createHash('sha256').update(JSON.stringify({ rules: state.rules, prefixLists: state.prefixLists })).digest('hex')
 
 export class StateStore {
   readonly rootDir: string
@@ -459,8 +477,32 @@ export class StateStore {
     return raw === null ? null : validateMailIpConfig(raw)
   }
 
+  /** Saved routing records, or null when none are saved. */
+  async readMailRouting(): Promise<MailRoutingState | null> {
+    const list = async (rel: string): Promise<unknown[]> => {
+      // unreadable or malformed files enter the snapshot as one marker row: the checksum changes and the
+      // agent's strict forwarding reader refuses the reconcile instead of the whole panel failing every read
+      let raw: unknown
+      try { raw = await readJsonIfExists<unknown>(this.path('extended', ...MAIL_ROUTING_FILES[rel as keyof typeof MAIL_ROUTING_FILES])) } catch { return [{ unreadable: rel }] }
+      if (raw === null) return []
+      return Array.isArray(raw) ? raw : [{ unreadable: rel }]
+    }
+    const vacationFiles = await listJsonFiles(this.path('extended', 'webmail', 'vacation'))
+    const vacations = (await Promise.all(vacationFiles.sort().map((f) => readJsonIfExists<unknown>(f).catch(() => ({ unreadable: 'vacation' }))))).filter((v) => v !== null)
+    const routing: MailRoutingState = {
+      forwarders: await list('forwarders'),
+      domainForwarders: await list('domainForwarders'),
+      defaultAddresses: await list('defaultAddresses'),
+      filters: await list('filters'),
+      vacations,
+    }
+    const autoresponders = await list('autoresponders')
+    if (autoresponders.length) routing.autoresponders = autoresponders
+    return Object.values(routing).some((records) => records.length > 0) ? routing : null
+  }
+
   private async readSnapshotUnlocked(overrideRevision?: number): Promise<StateSnapshot> {
-    const [authority, server, firewall, uidAllocator, featureLists, plans, resellers, certificates, zones, ipPool, mailIpConfig] =
+    const [authority, server, firewall, uidAllocator, featureLists, plans, resellers, certificates, zones, ipPool, mailIpConfig, mailRouting] =
       await Promise.all([
         overrideRevision === undefined ? this.writerLock.readAuthority() : Promise.resolve(null),
         this.readServerFile(),
@@ -473,6 +515,7 @@ export class StateStore {
         this.readZoneFiles(),
         this.readIpPoolFile(),
         this.readMailIpConfigFile(),
+        this.readMailRouting(),
       ])
     const revision = overrideRevision ?? authority?.revision ?? 0
     const plansById = new Map(plans.map((p) => [p.id, p]))
@@ -575,6 +618,7 @@ export class StateStore {
       ...(domainCustomConfigs.length > 0 ? { domainCustomConfigs } : {}),
       ...(ipPool.length > 0 ? { ipPool } : {}),
       ...(mailIpConfig !== null ? { mailIpConfig } : {}),
+      ...(mailRouting !== null ? { mailRouting } : {}),
       ...(postgresqlUsers.length > 0 ? { postgresqlDatabases, postgresqlUsers } : {}),
     }
     return { ...base, checksum: checksumStateTree(base) }
@@ -832,6 +876,7 @@ export class StateStore {
         ...(patch.resources !== undefined && { resources: { ...current.resources, ...patch.resources } }),
         ...(patch.caps !== undefined && { caps: { ...current.caps, ...patch.caps } }),
         ...(patch.dedicatedIp !== undefined && { dedicatedIp: patch.dedicatedIp }),
+        ...(patch.enforceBandwidth !== undefined && { enforceBandwidth: patch.enforceBandwidth }),
         ...(patch.shell !== undefined && { shell: patch.shell }),
         ...(patch.defaultMailboxQuotaMb !== undefined && { defaultMailboxQuotaMb: patch.defaultMailboxQuotaMb }),
       })
@@ -1362,6 +1407,26 @@ export class StateStore {
       const next: StoredAccount = { ...current, status: 'active', suspendReason: null, suspendedAt: null }
       await this.writeStateJson(lease, join(this.accountDir(current.username), 'account.json'), next)
       return toPublicAccount(next)
+    })
+  }
+
+  /** Records (month) or clears (null) enforced monthly bandwidth limits in one mutation; the edge serves the limit page while one is set. */
+  setBandwidthLimits(changes: readonly { accountId: Id; month: string | null }[], opts?: MutationOptions): Promise<Account[]> {
+    return this.withMutationLock(opts, async (lease) => {
+      if (!Array.isArray(changes) || changes.length === 0 || changes.length > 10_000) fail('VALIDATION', 'bandwidth limit changes must be a non-empty list')
+      const written: Account[] = [], seen = new Set<string>()
+      for (const change of changes) {
+        const aid = assertId(change.accountId, 'accountId')
+        if (seen.has(aid)) fail('VALIDATION', 'an account may change once per bandwidth limit write')
+        seen.add(aid)
+        if (change.month !== null && !/^\d{4}-(0[1-9]|1[0-2])$/.test(change.month)) fail('VALIDATION', 'bandwidthLimitedMonth must be YYYY-MM')
+        const current = mustExist(await this.findStoredAccountById(aid), 'account', aid)
+        const { bandwidthLimitedMonth: _previous, ...rest } = current
+        const next: StoredAccount = change.month === null ? rest : { ...rest, bandwidthLimitedMonth: change.month }
+        await this.writeStateJson(lease, join(this.accountDir(current.username), 'account.json'), next)
+        written.push(toPublicAccount(next))
+      }
+      return written
     })
   }
 
@@ -3159,20 +3224,70 @@ export class StateStore {
   private changeFirewall<T>(
     guard: FirewallGuard,
     fn: (state: FirewallState, g: FirewallGuard) => Promise<{ next: FirewallState; result: T }>,
-    opts?: MutationOptions,
+    opts?: FirewallMutationOptions,
   ): Promise<T> {
     return this.withMutationLock(opts, async (lease) => {
       const g = this.assertGuard(guard)
       const current = await this.readFirewallFile()
+      if (opts?.expectedFirewallRevision !== undefined && opts.expectedFirewallRevision !== firewallRevision(current)) {
+        fail('CONFLICT', 'the firewall rules changed since they were read; reload before saving', { stateChanged: false, currentRevision: firewallRevision(current) })
+      }
       const { next, result } = await fn(current, g)
       if (result !== false) {
-        await this.writeStateJson(lease, this.path('firewall.json'), { ...next, updatedAt: new Date().toISOString() })
+        const written: FirewallState = { rules: next.rules, prefixLists: next.prefixLists }
+        if (opts?.confirmation) {
+          // an unconfirmed earlier change keeps its baseline: a revert always lands on confirmed rules
+          const baseline = (await this.readFirewallPendingFile())?.previous ?? current
+          const pending: FirewallPendingChange = { ...opts.confirmation, appliedRevision: firewallRevision(written), previous: baseline }
+          await this.writeStateJson(lease, this.path('firewall-pending.json'), pending)
+        }
+        await this.writeStateJson(lease, this.path('firewall.json'), { ...written, updatedAt: new Date().toISOString() })
       }
       return result
     })
   }
 
-  createFirewallRule(input: NewFirewallRule, guard: FirewallGuard, opts?: MutationOptions): Promise<FirewallRule> {
+  private async readFirewallPendingFile(): Promise<FirewallPendingChange | null> {
+    const raw = await readJsonIfExists<Record<string, unknown>>(this.path('firewall-pending.json'))
+    if (raw === null) return null
+    if (typeof raw !== 'object' || typeof raw.id !== 'string' || typeof raw.deadline !== 'string' || !Number.isFinite(Date.parse(raw.deadline))
+      || typeof raw.actor !== 'string' || typeof raw.sessionIp !== 'string' || typeof raw.appliedRevision !== 'string') {
+      return fail('VALIDATION', 'pending firewall change is malformed')
+    }
+    return { id: raw.id, deadline: raw.deadline, actor: raw.actor, sessionIp: raw.sessionIp, appliedRevision: raw.appliedRevision, previous: validateFirewallState(raw.previous) }
+  }
+
+  getFirewallPending(): Promise<FirewallPendingChange | null> {
+    return this.readFirewallPendingFile()
+  }
+
+  /** Keeps the applied rules. False when no pending change has this id. */
+  confirmFirewallChange(id: string, opts?: MutationOptions): Promise<boolean> {
+    return this.withMutationLock(opts, async (lease) => {
+      const pending = await this.readFirewallPendingFile()
+      if (!pending || pending.id !== id) return false
+      await this.removeStatePath(lease, this.path('firewall-pending.json'))
+      return true
+    })
+  }
+
+  /**
+   * Restores the last confirmed rules of an unconfirmed change. A later write that did not keep
+   * the pending baseline supersedes it: the current rules stay and the pending record is dropped.
+   */
+  revertFirewallChange(id: string, opts?: MutationOptions): Promise<'reverted' | 'superseded' | 'missing'> {
+    return this.withMutationLock(opts, async (lease) => {
+      const pending = await this.readFirewallPendingFile()
+      if (!pending || pending.id !== id) return 'missing' as const
+      const current = await this.readFirewallFile()
+      await this.removeStatePath(lease, this.path('firewall-pending.json'))
+      if (firewallRevision(current) !== pending.appliedRevision) return 'superseded' as const
+      await this.writeStateJson(lease, this.path('firewall.json'), { ...pending.previous, updatedAt: new Date().toISOString() })
+      return 'reverted' as const
+    })
+  }
+
+  createFirewallRule(input: NewFirewallRule, guard: FirewallGuard, opts?: FirewallMutationOptions): Promise<FirewallRule> {
     return this.changeFirewall(
       guard,
       async (state, g) => {
@@ -3187,7 +3302,7 @@ export class StateStore {
     )
   }
 
-  updateFirewallRule(id: Id, patch: Partial<Omit<FirewallRule, 'id'>>, guard: FirewallGuard, opts?: MutationOptions): Promise<FirewallRule> {
+  updateFirewallRule(id: Id, patch: Partial<Omit<FirewallRule, 'id'>>, guard: FirewallGuard, opts?: FirewallMutationOptions): Promise<FirewallRule> {
     return this.changeFirewall(
       guard,
       async (state, g) => {
@@ -3202,7 +3317,7 @@ export class StateStore {
     )
   }
 
-  deleteFirewallRule(id: Id, guard: FirewallGuard, opts?: MutationOptions): Promise<boolean> {
+  deleteFirewallRule(id: Id, guard: FirewallGuard, opts?: FirewallMutationOptions): Promise<boolean> {
     return this.changeFirewall(
       guard,
       async (state, g) => {
@@ -3215,7 +3330,7 @@ export class StateStore {
     )
   }
 
-  moveFirewallRule(id: Id, position: number, guard: FirewallGuard, opts?: MutationOptions): Promise<FirewallRule[]> {
+  moveFirewallRule(id: Id, position: number, guard: FirewallGuard, opts?: FirewallMutationOptions): Promise<FirewallRule[]> {
     return this.changeFirewall(
       guard,
       async (state, g) => {
@@ -3233,7 +3348,7 @@ export class StateStore {
     )
   }
 
-  replaceFirewall(nextInput: { rules: unknown; prefixLists: unknown }, guard: FirewallGuard, opts?: MutationOptions): Promise<FirewallState> {
+  replaceFirewall(nextInput: { rules: unknown; prefixLists: unknown }, guard: FirewallGuard, opts?: FirewallMutationOptions): Promise<FirewallState> {
     return this.changeFirewall(
       guard,
       async (_state, g) => {
@@ -3434,6 +3549,20 @@ export class StateStore {
     restoreIndex(domainCustomConfigs, (value) => value.domainId, 'domain custom configuration')
     const ipPool = input.ipPool === undefined ? [] : validateIpPoolFile(input.ipPool)
     const mailIpConfig = input.mailIpConfig == null ? null : validateMailIpConfig(input.mailIpConfig)
+    // routing records stay raw; the renderer checks each one
+    const routing = input.mailRouting === undefined ? null : input.mailRouting as Record<string, unknown> | null
+    const mailRouting: MailRoutingState | null = routing === null ? null : {
+      forwarders: [], domainForwarders: [], defaultAddresses: [], filters: [], vacations: [],
+    }
+    if (routing !== null) {
+      if (typeof routing !== 'object' || Array.isArray(routing)) fail('VALIDATION', 'generation snapshot mailRouting must be an object')
+      for (const key of ['forwarders', 'domainForwarders', 'defaultAddresses', 'filters', 'vacations', 'autoresponders'] as const) {
+        const records = routing[key]
+        if (key === 'autoresponders' && records === undefined) continue
+        if (!Array.isArray(records)) fail('VALIDATION', `generation snapshot mailRouting.${key} must be an array`)
+        mailRouting![key] = records as unknown[]
+      }
+    }
     const checksum = assertSha256Hex(input.checksum, 'snapshot checksum')
     if (checksumStateTree(input as unknown as StateSnapshot) !== checksum) fail('VALIDATION', 'generation snapshot checksum does not match its contents')
     const revision =
@@ -3453,6 +3582,7 @@ export class StateStore {
       databaseUsers: databaseUsers.sort((a, b) => a.name.localeCompare(b.name)),
       cronJobs: cronJobs.sort((a, b) => a.id.localeCompare(b.id)),
       ...(domainCustomConfigs.length ? { domainCustomConfigs } : {}), ...(ipPool.length ? { ipPool } : {}), ...(mailIpConfig ? { mailIpConfig } : {}),
+      ...(mailRouting ? { mailRouting } : {}),
       ...(postgresqlUsers.length ? {
         postgresqlDatabases: postgresqlDatabases.sort((a, b) => a.name.localeCompare(b.name)),
         postgresqlUsers: postgresqlUsers.sort((a, b) => a.name.localeCompare(b.name)),
@@ -3488,6 +3618,19 @@ export class StateStore {
     for (const config of snap.domainCustomConfigs ?? []) await this.writeStateJson(lease, accountPath(config.accountId, 'userdata', `${config.domainId}.json`), config)
     if (snap.ipPool?.length) await this.writeStateJson(lease, path('ip-pool.json'), snap.ipPool)
     if (snap.mailIpConfig) await this.writeStateJson(lease, path('mail-ips.json'), snap.mailIpConfig)
+    const routing = snap.mailRouting
+    if (!routing) return
+    if (Object.values(routing).some((records) => records?.some((record: unknown) => !record || typeof record !== 'object' || 'unreadable' in record))) {
+      fail('VALIDATION', 'generation snapshot holds unreadable mail routing and cannot be restored')
+    }
+    for (const [key, rel] of Object.entries(MAIL_ROUTING_FILES)) {
+      const records = routing[key as keyof typeof MAIL_ROUTING_FILES] ?? []
+      if (records.length) await this.writeStateJson(lease, path('extended', ...rel), records)
+    }
+    for (const vacation of routing.vacations as { mailbox?: unknown }[]) {
+      if (typeof vacation.mailbox !== 'string' || !vacation.mailbox) return fail('VALIDATION', 'generation snapshot holds a vacation without a mailbox')
+      await this.writeStateJson(lease, path('extended', 'webmail', 'vacation', `${encodeURIComponent(vacation.mailbox)}.json`), vacation)
+    }
   }
 
   private async cleanupRestoreArtifacts(paths: readonly string[]): Promise<void> {
@@ -3505,8 +3648,9 @@ export class StateStore {
     await lease.recordRestoreIntent({ stageName: basename(stage), backupName: basename(backup), entries: restoreEntries })
     for (const name of restoreEntries) {
       await lease.assertFencingToken()
-      if (await restorePathExists(this.path(name))) await rename(this.path(name), join(backup, name))
-      if (await restorePathExists(join(stage, name))) await rename(join(stage, name), this.path(name))
+      // routing entries sit below extended/; their parents must exist on both sides of each rename
+      if (await restorePathExists(this.path(name))) { await mkdir(dirname(join(backup, name)), { recursive: true }); await rename(this.path(name), join(backup, name)) }
+      if (await restorePathExists(join(stage, name))) { await mkdir(dirname(this.path(name)), { recursive: true }); await rename(join(stage, name), this.path(name)) }
     }
     // The restore journal, stage and backup survive until the outer authority commit is proven.
     // WriterLease.release performs validated committed cleanup under the same writer guard.
@@ -3652,7 +3796,8 @@ export class StateStore {
         try {
           await this.writeRestoreTree(lease, stage, snap)
           const prepared = await new StateStore(stage).readSnapshot()
-          if (prepared.checksum !== snap.checksum || JSON.stringify(prepared.uidAllocator) !== JSON.stringify(snap.uidAllocator)) {
+          const { checksum: _checksum, ...restored } = snap
+          if (prepared.checksum !== checksumStateTree(restored) || JSON.stringify(prepared.uidAllocator) !== JSON.stringify(snap.uidAllocator)) {
             fail('VALIDATION', 'prepared generation tree does not match the validated snapshot')
           }
         } catch (error) {

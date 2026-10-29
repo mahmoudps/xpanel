@@ -6,7 +6,8 @@ import { cidrContains, formatCidr, parseCidr, parseIp } from './rules/firewall.t
 import { validateDomainName } from './rules/naming.ts'
 import { PHP_HANDLERS, sanitizePhpIni, validateFpm } from './rules/php.ts'
 import { validateApacheWorkers, validateNginxWorkers } from './rules/workers.ts'
-import type { ApacheMpm, DefaultSitePolicy, Engine, Limit, PhpSettings, ResellerAcl, ServerSettings } from './types.ts'
+import { PHP_EXCEPTION_FUNCTIONS } from './types.ts'
+import type { ApacheMpm, DefaultSitePolicy, Engine, Limit, PhpFunctionException, PhpSettings, ProxyOptions, ResellerAcl, ServerSettings } from './types.ts'
 
 const bad = (what: string, value: unknown, why: string): never =>
   fail('VALIDATION', `invalid ${what}: ${why}`, { what, value: typeof value === 'string' ? value.slice(0, 256) : value })
@@ -222,6 +223,37 @@ export const assertUpstream = (v: unknown): UpstreamTarget => {
   return { url: s, loopbackPort: loopback || host === 'localhost' ? port : null }
 }
 
+export const PROXY_HEADER_LIMIT = 8
+// Headers the edge sets itself (forwarding, hop-by-hop, framing); an owner may not replace them.
+const RESERVED_PROXY_HEADERS = new Set(['host', 'x-real-ip', 'x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host', 'x-forwarded-port', 'forwarded',
+  'upgrade', 'connection', 'proxy', 'keep-alive', 'te', 'trailer', 'transfer-encoding', 'content-length', 'expect', 'proxy-authorization', 'proxy-connection'])
+
+/** Exact-key proxy options; header values are printable ASCII without `$` so they stay literal in every engine. */
+export const assertProxyOptions = (v: unknown): ProxyOptions => {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return bad('proxy', v, 'must be { websocket, hostHeader, headers }')
+  const o = v as Record<string, unknown>
+  if (Object.keys(o).sort().join() !== 'headers,hostHeader,websocket') return bad('proxy', v, 'takes exactly websocket, hostHeader and headers')
+  if (typeof o.websocket !== 'boolean') return bad('proxy.websocket', o.websocket, 'must be a boolean')
+  if (o.hostHeader !== 'client' && o.hostHeader !== 'upstream') return bad('proxy.hostHeader', o.hostHeader, 'must be client or upstream')
+  if (!Array.isArray(o.headers) || o.headers.length > PROXY_HEADER_LIMIT) return bad('proxy.headers', o.headers, `must be a list of at most ${PROXY_HEADER_LIMIT} headers`)
+  const seen = new Set<string>()
+  const headers = o.headers.map((h: unknown) => {
+    const e = (typeof h === 'object' && h !== null && !Array.isArray(h) ? h : {}) as Record<string, unknown>
+    if (Object.keys(e).sort().join() !== 'name,value') return bad('proxy.headers', h, 'each header is { name, value }')
+    const name = typeof e.name === 'string' ? e.name : ''
+    if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/.test(name)) return bad('proxy.headers.name', e.name, 'letters, digits and "-", up to 64 characters')
+    if (RESERVED_PROXY_HEADERS.has(name.toLowerCase())) return bad('proxy.headers.name', name, 'is set by the server and cannot be replaced')
+    if (seen.has(name.toLowerCase())) return bad('proxy.headers.name', name, 'is listed twice')
+    seen.add(name.toLowerCase())
+    const value = typeof e.value === 'string' ? e.value : ''
+    if (!/^[ -~]{1,256}$/.test(value) || value.includes('$') || value.trim() !== value) {
+      return bad('proxy.headers.value', e.value, 'printable ASCII up to 256 characters, without "$" or surrounding spaces')
+    }
+    return { name, value }
+  })
+  return { websocket: o.websocket, hostHeader: o.hostHeader, headers }
+}
+
 // characters that would break out of a config directive or a header
 const REDIRECT_FORBIDDEN = /[\s\p{Cc}"'<>{}|^`;\\]/u
 
@@ -270,6 +302,23 @@ export const validateDefaultSitePolicy = (raw: unknown): DefaultSitePolicy => {
   return { response: 'redirect', redirectTo: url.href, refuseHttps: input.refuseHttps }
 }
 
+/** One entry per account, functions from the exception list only, a short audited reason. */
+export const validatePhpFunctionExceptions = (raw: unknown): PhpFunctionException[] => {
+  if (!Array.isArray(raw) || raw.length > 10000) return fail('VALIDATION', 'PHP function exceptions must be a list')
+  const seen = new Set<string>()
+  return raw.map((item: unknown) => {
+    const x = item as Record<string, unknown>
+    if (!x || typeof x !== 'object' || Object.keys(x).some(key => !['account', 'functions', 'reason', 'grantedAt', 'grantedBy'].includes(key))) return fail('VALIDATION', 'unsupported PHP function exception fields')
+    if (typeof x.account !== 'string' || !/^[a-z][a-z0-9]{0,15}$/.test(x.account) || seen.has(x.account)) return fail('VALIDATION', 'each PHP function exception names one distinct account')
+    seen.add(x.account)
+    const allowed: readonly string[] = PHP_EXCEPTION_FUNCTIONS
+    if (!Array.isArray(x.functions) || x.functions.length === 0 || x.functions.some(fn => !allowed.includes(fn as string)) || new Set(x.functions).size !== x.functions.length) return fail('VALIDATION', `functions must be distinct names from ${allowed.join(', ')}`)
+    if (typeof x.reason !== 'string' || x.reason.trim().length === 0 || x.reason.length > 200 || /[ -]/.test(x.reason)) return fail('VALIDATION', 'a reason of at most 200 characters is required')
+    if (typeof x.grantedBy !== 'string' || !/^[a-z][a-z0-9_.-]{0,63}$/.test(x.grantedBy)) return fail('VALIDATION', 'grantedBy must be a principal name')
+    return { account: x.account, functions: [...x.functions as PhpFunctionException['functions']].sort(), reason: x.reason.trim(), grantedAt: assertIsoDate(x.grantedAt, 'grantedAt').toISOString(), grantedBy: x.grantedBy }
+  }).sort((a, b) => a.account.localeCompare(b.account))
+}
+
 export const validateServerSettings = (s: ServerSettings): ServerSettings => {
   if (typeof s !== 'object' || s === null) return fail('VALIDATION', 'settings must be an object')
   if (!Array.isArray(s.nameservers) || s.nameservers.length > NAMESERVERS_MAX) fail('VALIDATION', `at most ${NAMESERVERS_MAX} nameservers`)
@@ -293,6 +342,8 @@ export const validateServerSettings = (s: ServerSettings): ServerSettings => {
     nginx: validateNginxWorkers(s.nginx),
     apache: validateApacheWorkers(s.apache),
     ...(s.defaultSite !== undefined ? { defaultSite: validateDefaultSitePolicy(s.defaultSite) } : {}),
+    ...(s.phpFunctionExceptions !== undefined ? { phpFunctionExceptions: validatePhpFunctionExceptions(s.phpFunctionExceptions) } : {}),
+    ...(s.defaultPhpVersion !== undefined ? { defaultPhpVersion: typeof s.defaultPhpVersion === 'string' && PHP_VERSION_RE.test(s.defaultPhpVersion) ? s.defaultPhpVersion : bad('defaultPhpVersion', s.defaultPhpVersion, 'like 8.3') } : {}),
   }
 }
 

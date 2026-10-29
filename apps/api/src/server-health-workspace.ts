@@ -15,7 +15,7 @@ export interface ServerHealthWorkspaceHelpers extends Pick<ExtendedRouteHelpers,
 export const SERVER_LIMITS_BATCH = 50
 const MAX_PENDING = 5000
 const ACTION = 'server.server-health.read'
-const CHECK_IDS: readonly ServerHealthCheckId[] = ['load', 'memory', 'swap', 'disk-space', 'disk-inodes', 'services', 'drift', 'certificates', 'reboot']
+const CHECK_IDS: readonly ServerHealthCheckId[] = ['load', 'memory', 'swap', 'disk-space', 'disk-inodes', 'services', 'drift', 'certificates', 'reboot', 'bandwidth']
 const STATES: readonly ServerHealthState[] = ['ok', 'warning', 'problem', 'unavailable']
 const RESOURCES: readonly LimitResource[] = ['cpu', 'memory', 'processes', 'io-read-bps', 'io-write-bps', 'io-read-iops', 'io-write-iops', 'disk']
 const USERNAME = /^[a-z][a-z0-9]{0,15}$/
@@ -37,7 +37,7 @@ export function projectServerHealth(value: unknown): ServerHealthReport {
   if (!object(value) || !object(value.thresholds) || !object(value.counts) || !Array.isArray(value.checks) || value.checks.length !== CHECK_IDS.length) return invalid()
   const pair = (raw: unknown) => object(raw) ? Object.freeze({ warning: amount(raw.warning), problem: amount(raw.problem) }) : invalid()
   const t = value.thresholds, counted = value.counts
-  const thresholds = Object.freeze({ loadPerCore: pair(t.loadPerCore), memoryAvailablePercent: pair(t.memoryAvailablePercent), swapUsedPercent: pair(t.swapUsedPercent), diskUsedPercent: pair(t.diskUsedPercent), inodeUsedPercent: pair(t.inodeUsedPercent), certificateExpiryDays: count(t.certificateExpiryDays, 3650) })
+  const thresholds = Object.freeze({ loadPerCore: pair(t.loadPerCore), memoryAvailablePercent: pair(t.memoryAvailablePercent), swapUsedPercent: pair(t.swapUsedPercent), diskUsedPercent: pair(t.diskUsedPercent), inodeUsedPercent: pair(t.inodeUsedPercent), certificateExpiryDays: count(t.certificateExpiryDays, 3650), bandwidthUsedPercent: pair(t.bandwidthUsedPercent) })
   const checks = value.checks.map((raw, index): ServerHealthCheck => {
     if (!object(raw) || raw.id !== CHECK_IDS[index] || typeof raw.reason !== 'string' || !REASON.test(raw.reason)) return invalid()
     const entry: ServerHealthCheck = { id: CHECK_IDS[index]!, state: oneOf(raw.state, STATES), reason: raw.reason, evidence: text(raw.evidence, 1024) }

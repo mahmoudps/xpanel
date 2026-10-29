@@ -192,9 +192,11 @@ describe('verified navigation policy', () => {
       .not.toContain(contract.adminRoute)
   })
 
-  it('keeps the three routes without a bounded owner contract unavailable even in a qualified synthetic catalog', () => {
+  it('keeps the two routes without a bounded owner contract unavailable even in a qualified synthetic catalog', () => {
     const fixtures = qualifiedToolFixtures(productionTools.filter(entry => entry.status !== 'out-of-scope').map(entry => entry.id))
-    for (const route of ['/domains/site-settings', '/domains/reverse-proxy', '/software/htaccess']) {
+    // The reverse-proxy switch is a domain workspace write, so the owner's domains tool opens that page.
+    expect(routesOf(visibleNavigation(ownerContext, fixtures))).toContain('/domains/reverse-proxy')
+    for (const route of ['/domains/site-settings', '/software/htaccess']) {
       const page = navigation.flatMap(surface => surface.sections.flatMap(section => section.pages)).find(entry => entry.route === route)!
       expect(page.tools.length).toBeGreaterThan(0)
       expect(page.tools.some(id => fixtures.find(entry => entry.id === id)?.rootOnly)).toBe(true)

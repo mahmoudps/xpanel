@@ -122,7 +122,7 @@ export function downsampleHostMetrics(samples: readonly MetricsSample[], window:
         : metric === 'load1' ? observed.load1
         : metric === 'memoryMb' ? observed.memoryTotalBytes !== null && observed.memoryAvailableBytes !== null ? (observed.memoryTotalBytes - observed.memoryAvailableBytes) / (1024 * 1024) : null
         : metric === 'diskMb' ? observed.diskUsedBytes !== null ? observed.diskUsedBytes / (1024 * 1024) : null
-        : null
+        : observed[metric]
       if (raw === null) continue
       if (!finite(raw, Number.MAX_SAFE_INTEGER)) throw new Error('invalid_history_sample')
       bucket.counts.set(metric, (bucket.counts.get(metric) ?? 0) + 1)

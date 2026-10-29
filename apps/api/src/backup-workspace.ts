@@ -83,8 +83,8 @@ export function validateBackupDestination(value: unknown, saved?: Pick<BackupDes
   return normalizeBackupDestinationMetadata(value, destination, saved as BackupLifecycleDestination | undefined)
 }
 
-const scheduleFields = ['enabled', 'frequency', 'cron', 'retentionCount', 'compress', 'includeDatabases', 'includeMail', 'selectedAccounts', 'destinationIds'] as const
-const defaults: BackupScheduleConfig = { enabled: false, frequency: 'daily', cron: '0 2 * * *', retentionCount: 7, compress: 'zstd', includeDatabases: true, includeMail: true, selectedAccounts: 'all', destinationIds: [], updatedAt: '' }
+const scheduleFields = ['enabled', 'frequency', 'cron', 'retentionCount', 'retentionWeekly', 'retentionMonthly', 'compress', 'includeDatabases', 'includeMail', 'includeDns', 'includeControl', 'selectedAccounts', 'destinationIds'] as const
+const defaults: BackupScheduleConfig = { enabled: false, frequency: 'daily', cron: '0 2 * * *', retentionCount: 7, retentionWeekly: 4, retentionMonthly: 0, compress: 'zstd', includeDatabases: true, includeMail: true, includeDns: true, includeControl: true, selectedAccounts: 'all', destinationIds: [], updatedAt: '' }
 export function validateBackupSchedule(value: unknown, current: BackupScheduleConfig | null = null): BackupScheduleConfig {
   if (!object(value)) return invalid('backup schedule must be an object')
   onlyKeys(value, scheduleFields)
@@ -93,8 +93,8 @@ export function validateBackupSchedule(value: unknown, current: BackupScheduleCo
   if (!['zstd', 'gzip'].includes(next.compress)) return invalid('invalid backup compression')
   return {
     enabled: boolean(next.enabled, 'enabled'), frequency: next.frequency, cron: validateBackupCron(next.cron),
-    retentionCount: integer(next.retentionCount, 1, 3650, 'retentionCount'), compress: next.compress,
-    includeDatabases: boolean(next.includeDatabases, 'includeDatabases'), includeMail: boolean(next.includeMail, 'includeMail'),
+    retentionCount: integer(next.retentionCount, 1, 3650, 'retentionCount'), retentionWeekly: integer(next.retentionWeekly, 0, 520, 'retentionWeekly'), retentionMonthly: integer(next.retentionMonthly, 0, 240, 'retentionMonthly'), compress: next.compress,
+    includeDatabases: boolean(next.includeDatabases, 'includeDatabases'), includeMail: boolean(next.includeMail, 'includeMail'), includeDns: boolean(next.includeDns, 'includeDns'), includeControl: boolean(next.includeControl, 'includeControl'),
     selectedAccounts: next.selectedAccounts === 'all' ? 'all' : uniqueStrings(next.selectedAccounts, 10000, 'selectedAccounts', value => {
       const username = text(value, 64, 'account selector')
       if (!/^[a-z][a-z0-9_]{0,31}$/.test(username) && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(username)) return invalid('invalid selected account')
@@ -217,8 +217,9 @@ export function createWhmBackupWorkspaceRoutes(ports: WhmBackupWorkspacePorts) {
         if (schedule.selectedAccounts !== 'all' && schedule.selectedAccounts.some(username => !names.has(username))) return invalid('selected account no longer exists')
         if (schedule.enabled && schedule.selectedAccounts !== 'all' && schedule.selectedAccounts.length === 0) return invalid('an enabled schedule requires selected accounts')
         if (schedule.destinationIds.some(identity => !destinationsById.has(identity))) return invalid('selected destination no longer exists')
-        if (schedule.enabled && (!schedule.destinationIds.length || schedule.destinationIds.some(identity => !destinationsById.get(identity)!.enabled))) return invalid('an enabled schedule requires enabled destinations')
-        if (schedule.enabled) await assertBackupDestinationsReady(schedule.destinationIds.map(identity => destinationsById.get(identity)!), ports, caller)
+        // No destinations keeps verified local archives only; every selected destination must be enabled and verified.
+        if (schedule.enabled && schedule.destinationIds.some(identity => !destinationsById.get(identity)!.enabled)) return invalid('an enabled schedule requires enabled destinations')
+        if (schedule.enabled && schedule.destinationIds.length) await assertBackupDestinationsReady(schedule.destinationIds.map(identity => destinationsById.get(identity)!), ports, caller)
         await assertCurrentCaller()
         await lease.assertFencingToken(); writeAttempted = true; await ports.publish('backups/schedule.json', schedule, lease)
         result = { schedule }; audit = { action: 'backup.schedule.updated', target: 'backup:schedule' }

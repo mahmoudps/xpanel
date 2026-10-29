@@ -8,7 +8,6 @@ import { FakeHostExecutor } from '../executor.ts'
 import type { AccountFileContext, AccountFileRequest, AccountFileRunner } from '../file-manager.ts'
 import {
   AccountProcessServiceAdapter,
-  redactAppSecrets,
   validateSshPublicKey,
 } from './account-process.ts'
 import {
@@ -1341,119 +1340,22 @@ describe('D05 — AccountProcessServiceAdapter (SSH, Cron Timers & Background Ap
     expect(await adapter.observeCronStatus(alice, 'real')).toMatchObject({ lastResult: 'exit-code', lastExitCode: 7, durationMs: 250, nextRunAt: 'Tue 2026-10-27 00:00:00 UTC', serviceRunning: false })
   })
 
-  it('allocates per-account loopback app ports, blocks cross-tenant port hijacking, writes 0600 env files with secret redaction, and stops all units on suspension/termination', async () => {
+  it('stops runtime units of the account on suspension and removes them with its runtime configuration on termination', async () => {
     const executor = new FakeHostExecutor()
-    const alice = makeAccount()
-    const bob = makeAccount({
-      id: '99999999-9999-4999-8999-999999999999',
-      username: 'bob',
-      uid: 1002,
-      gid: 1002,
-      home: '/home/bob',
-      primaryDomain: 'bob.example',
-    })
-    const plan = makePlan()
     const adapter = new AccountProcessServiceAdapter({ executor, os: UBUNTU_OS })
+    const units = ['xpanel-app-alice-api-web.service', 'xpanel-appproxy-alice-api-web.socket', 'xpanel-redis-alice.service']
+    await executor.writeFile({ path: '/etc/systemd/system/xpanel-app-alice-api-web.service', content: '[Service]\n', mode: 0o644, owner: 'root', group: 'root' })
+    await executor.writeFile({ path: '/etc/xpanel/runtime/alice/api-web.env', content: 'A=1\n', mode: 0o600, owner: 'root', group: 'root' })
 
-    const appRes = await adapter.reconcileAccountApps({
-      account: alice,
-      plan,
-      apps: [
-        {
-          name: 'api-web',
-          kind: 'node',
-          port: 4100,
-          execStart: ['/usr/bin/node', 'server.js'],
-          workingDir: '/home/alice/public_html',
-          env: {
-            DATABASE_URL: 'mysql://alice:SuperSecretDbPass99@localhost/alice_db',
-            JWT_SECRET: 'synthetic-' + 'jwt-fixture-value',
-          },
-        },
-      ],
-    })
-
-    expect(appRes.activeServices).toEqual([
-      {
-        appName: 'api-web',
-        unit: 'xpanel-app-alice-api-web.service',
-        port: 4100,
-        envFilePath: '/etc/xpanel/apps/alice/api-web.env',
-        redactedEnvKeys: ['DATABASE_URL', 'JWT_SECRET'],
-      },
-    ])
-
-    // Verify 0600 root:root envFile and unit file with SocketBindAllow=tcp:4100 & Slice=xpanel-1001.slice
-    const envFile = executor.files.get('/etc/xpanel/apps/alice/api-web.env')
-    expect(envFile?.mode).toBe(0o600)
-    expect(envFile?.owner).toBe('root')
-    const unitFile = executor.files.get('/etc/systemd/system/xpanel-app-alice-api-web.service')
-    expect(unitFile?.content).toContain('Slice=xpanel-1001.slice')
-    expect(unitFile?.content).toContain('SocketBindAllow=tcp:4100')
-    expect(unitFile?.content).toContain('SocketBindDeny=any')
-    // Secrets must NEVER appear in the systemd unit file itself
-    expect(unitFile?.content).not.toContain('SuperSecretDbPass99')
-    expect(redactAppSecrets('Failed with SuperSecretDbPass99', { DB: 'SuperSecretDbPass99' })).toBe(
-      'Failed with [REDACTED]',
-    )
-
-    // Cross-tenant port hijacking denial: bob cannot claim port 4100 allocated to alice!
-    await expect(
-      adapter.reconcileAccountApps({
-        account: bob,
-        plan,
-        apps: [
-          {
-            name: 'hijack',
-            kind: 'python',
-            port: 4100,
-            execStart: ['/usr/bin/python3', 'app.py'],
-            workingDir: '/home/bob/public_html',
-          },
-        ],
-      }),
-    ).rejects.toMatchObject({ code: 'CONFLICT', status: 409 })
-
-    // Reserved system port denial (e.g. MariaDB 3306 or panel 2087)
-    await expect(
-      adapter.reconcileAccountApps({
-        account: bob,
-        plan,
-        apps: [
-          {
-            name: 'bad-port',
-            kind: 'node',
-            port: 3306,
-            execStart: ['/usr/bin/node', 'app.js'],
-            workingDir: '/home/bob/public_html',
-          },
-        ],
-      }),
-    ).rejects.toMatchObject({ code: 'VALIDATION' })
-
-    // Account suspension immediately stops cron timers, app services, and user-1001.slice
-    const suspendedAlice = makeAccount({ status: 'suspended', suspendReason: 'abuse' })
-    const suspendLifecycle = await adapter.enforceAccountLifecycleState({
-      account: suspendedAlice,
-      cronJobIds: ['backup-db'],
-      appNames: ['api-web'],
-      terminate: false,
-    })
-    expect(suspendLifecycle.stoppedUnits).toContain('xpanel-app-alice-api-web.service')
-    expect(suspendLifecycle.stoppedUnits).toContain('xpanel-cron-alice-backup-db.timer')
-    expect(suspendLifecycle.stoppedUnits).toContain('user-1001.slice')
+    const suspendLifecycle = await adapter.enforceAccountLifecycleState({ account: makeAccount({ status: 'suspended', suspendReason: 'abuse' }), cronJobIds: ['backup-db'], runtimeUnits: units })
+    expect(suspendLifecycle.stoppedUnits).toEqual(expect.arrayContaining([...units, 'xpanel-cron-alice-backup-db.timer', 'user-1001.slice']))
     expect(executor.units.get('xpanel-app-alice-api-web.service')?.active).toBe(false)
 
-    // Account termination removes units, env files, and releases port 4100
-    const terminatingAlice = makeAccount({ status: 'terminating' })
-    const terminateLifecycle = await adapter.enforceAccountLifecycleState({
-      account: terminatingAlice,
-      cronJobIds: ['backup-db'],
-      appNames: ['api-web'],
-      terminate: true,
-    })
-    expect(terminateLifecycle.releasedPorts).toEqual([4100])
-    expect(await executor.readFile('/etc/xpanel/apps/alice/api-web.env')).toBeNull()
+    await expect(adapter.enforceAccountLifecycleState({ account: makeAccount({ status: 'suspended', suspendReason: 'abuse' }), cronJobIds: [], runtimeUnits: ['xpanel-redis-bob.service'] })).rejects.toMatchObject({ code: 'VALIDATION' })
+
+    const terminateLifecycle = await adapter.enforceAccountLifecycleState({ account: makeAccount({ status: 'terminating' }), cronJobIds: ['backup-db'], runtimeUnits: units, terminate: true })
+    expect(terminateLifecycle.removedPaths).toEqual(expect.arrayContaining(['/etc/systemd/system/xpanel-app-alice-api-web.service', '/etc/xpanel/runtime/alice']))
+    expect(await executor.readFile('/etc/xpanel/runtime/alice/api-web.env')).toBeNull()
     expect(await executor.readFile('/etc/systemd/system/xpanel-app-alice-api-web.service')).toBeNull()
   })
 })

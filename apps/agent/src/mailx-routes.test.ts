@@ -192,3 +192,76 @@ describe('mail policy agent routes', () => {
     expect(submitJob).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('mail server settings and routing apply', () => {
+  const CERT = 'cert_mail', certPath = `/etc/xpanel/ssl/${CERT}/fullchain.pem`, dovecotPath = '/etc/dovecot/conf.d/99-xpanel-server.conf'
+  const withCerts: MailxSnapshot = { ...snapshot, certificates: [{ id: CERT, source: 'acme', notAfter: '2027-01-01T00:00:00.000Z' }] }
+  const server = (policy: Record<string, unknown> = {}) => ({ section: 'server', updatedAt: '2026-10-28T09:00:00.000Z', updatedBy: 'root',
+    policy: { postfix: { myhostname: 'mx.shop.example', smtpd_tls_protocols: '!SSLv2, !SSLv3, !TLSv1, !TLSv1.1' }, dovecot: { ssl_min_protocol: 'TLSv1.2' }, rbl: ['zen.spamhaus.org'], certificates: { smtp: CERT, submission: null, imap: CERT }, ...policy } })
+  /** Adds master.cf overrides (postconf -P/-PX) and doveconf to the fake host; `failDovecot` fails doveconf -n once the file is written. */
+  function serverHost(options: { failDovecot?: boolean; master?: Record<string, string> } = {}) {
+    const h = host(), master = new Map(Object.entries(options.master ?? {})), base = h.run.getMockImplementation()!
+    h.disk.set(certPath, '-----BEGIN CERTIFICATE-----\n')
+    h.run.mockImplementation(async (argv: string[]) => {
+      if (argv.join(' ') === '/usr/sbin/postconf -P') { h.calls.push(argv); return ok([...master].map(([key, value]) => `${key} = ${value}`).join('\n') + '\n') }
+      if (argv[1] === '-P') { h.calls.push(argv); for (const pair of argv.slice(2)) master.set(pair.slice(0, pair.indexOf('=')), pair.slice(pair.indexOf('=') + 1)); return ok() }
+      if (argv[1] === '-PX') { h.calls.push(argv); for (const key of argv.slice(2)) master.delete(key); return ok() }
+      if (argv.join(' ') === '/usr/bin/doveconf -n') { h.calls.push(argv); return options.failDovecot && h.disk.has(dovecotPath) ? failed : ok('secret = hidden\n') }
+      return base(argv)
+    })
+    return { ...h, master }
+  }
+
+  it('applies Postfix, master.cf and Dovecot settings with both config tests, then reports the section applied', async () => {
+    await save('server.json', server())
+    const h = serverHost(), body = await (await call('/host/mailx/apply', context(h, { readSnapshot: async () => withCerts }), { revision: await revision() }))!.json()
+    expect(body).toMatchObject({ outcome: 'applied', verificationRequired: false, reloads: ['postfix', 'dovecot'] })
+    expect(h.main.get('myhostname')).toBe('mx.shop.example')
+    expect(h.main.get('smtpd_client_restrictions')).toBe('permit_mynetworks, permit_sasl_authenticated, reject_rbl_client zen.spamhaus.org')
+    expect(h.master.get('smtp/inet/smtpd_tls_cert_file')).toBe(certPath)
+    expect(h.disk.get(dovecotPath)).toContain(`ssl_min_protocol = TLSv1.2\nssl_cert = <${certPath}\nssl_key = </etc/xpanel/ssl/${CERT}/privkey.pem\n`)
+    expect(JSON.stringify(body)).not.toContain('hidden')
+    const order = h.calls.map(argv => argv.join(' '))
+    expect(order.indexOf('/usr/bin/doveconf -n', order.indexOf('/usr/sbin/postfix check'))).toBeLessThan(order.indexOf('/usr/sbin/postfix reload'))
+    const state = await (await call('/host/mailx/state', context(h, { readSnapshot: async () => withCerts })))!.json()
+    expect(state.sections).toMatchObject({ server: 'applied', routing: 'not-saved' })
+  })
+  it('restores every Postfix parameter, the master override and the Dovecot file when doveconf fails, before any reload', async () => {
+    await save('server.json', server())
+    const h = serverHost({ failDovecot: true }), body = await (await call('/host/mailx/apply', context(h, { readSnapshot: async () => withCerts }), { revision: await revision() }))!.json()
+    expect(body).toMatchObject({ outcome: 'rolled-back', failedCheck: 'dovecot', reloads: [] })
+    expect(h.main.get('myhostname')).toBe('mail.example')
+    expect(h.main.has('smtpd_client_restrictions')).toBe(false)
+    expect(h.master.size).toBe(0)
+    expect(h.disk.has(dovecotPath)).toBe(false)
+    expect(h.calls.some(argv => argv.join(' ') === '/usr/bin/systemctl reload -- dovecot.service')).toBe(true)
+  })
+  it('refuses an administrator port 25 override and a missing certificate without changing anything', async () => {
+    await save('server.json', server())
+    const own = serverHost({ master: { 'smtp/inet/smtpd_tls_cert_file': '/etc/ssl/admin.pem', 'smtp/inet/smtpd_tls_key_file': '/etc/ssl/admin.key' } })
+    await rejects(call('/host/mailx/apply', context(own, { readSnapshot: async () => withCerts }), { revision: await revision() }), 'CONFLICT', { reason: 'unmanaged_override', stateChanged: false })
+    const bare = serverHost()
+    await rejects(call('/host/mailx/apply', context(bare), { revision: await revision() }), 'PRECONDITION_FAILED', { reason: 'certificate_missing', stateChanged: false })
+    for (const h of [own, bare]) expect(h.main.get('myhostname')).toBe('mail.example')
+  })
+  it('renders Dovecot 2.4 setting names when the host runs Dovecot 2.4', async () => {
+    await save('server.json', server({ dovecot: { ssl_min_protocol: 'TLSv1.2', ssl_prefer_server_ciphers: 'yes' } }))
+    const h = serverHost(), base = h.run.getMockImplementation()!
+    h.run.mockImplementation(async (argv: string[]) => argv.join(' ') === '/usr/bin/doveconf -h ssl_server_cert_file' ? ok('\n') : base(argv))
+    const body = await (await call('/host/mailx/apply', context(h, { readSnapshot: async () => withCerts }), { revision: await revision() }))!.json()
+    expect(body.outcome).toBe('applied')
+    expect(h.disk.get(dovecotPath)).toContain(`ssl_server_prefer_ciphers = server\nssl_server_cert_file = ${certPath}\nssl_server_key_file = /etc/xpanel/ssl/${CERT}/privkey.pem\n`)
+    expect(h.disk.get(dovecotPath)).not.toContain('ssl_cert')
+  })
+  it('relays backup MX domains through an owned relay_domains table', async () => {
+    await save('routing.json', { section: 'routing', policy: { domains: [{ domain: 'shop.example', mode: 'backup' }, { domain: 'other.example', mode: 'remote' }] }, updatedAt: '2026-10-28T09:00:00.000Z', updatedBy: 'root' })
+    const h = serverHost(), body = await (await call('/host/mailx/apply', context(h), { revision: await revision() }))!.json()
+    expect(body).toMatchObject({ outcome: 'applied', reloads: ['postfix'] })
+    expect(h.main.get('relay_domains')).toBe('texthash:/etc/postfix/xpanel/mailx/relay_domains')
+    expect(h.disk.get('/etc/postfix/xpanel/mailx/relay_domains')).toMatch(/\nshop\.example OK\n$/)
+    // Only the known recipients of the backup domain are accepted (no backscatter from a catch-all backup MX).
+    expect(h.main.get('relay_recipient_maps')).toBe('texthash:/etc/postfix/xpanel/mailx/relay_recipients')
+    expect(h.disk.get('/etc/postfix/xpanel/mailx/relay_recipients')).toMatch(/\narchive@shop\.example OK\n$/)
+    expect((await (await call('/host/mailx/state', context(h)))!.json()).sections.routing).toBe('applied')
+  })
+})

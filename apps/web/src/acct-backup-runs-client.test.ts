@@ -6,8 +6,10 @@ import { renderWhmBackupDestinationsWorkspace } from './board-port/whm-backup-de
 
 const ID = '11111111-1111-4111-8111-111111111111', RUN = '33333333-3333-4333-8333-333333333333', FILE = 'xpanel-backup-alice-20261028T020000Z.tar.gz'
 const entry = { username: 'alice', destinationId: ID, file: FILE, bytes: 2048, sha256: 'a'.repeat(64), outcome: 'verified', reason: null }
-const run = { id: RUN, trigger: 'schedule', actor: 'scheduler', startedAt: '2026-10-28T02:00:30.000Z', finishedAt: '2026-10-28T02:05:00.000Z', state: 'succeeded', destinationIds: [ID], accounts: 1, mailIncluded: true, databasesIncluded: false, entries: [entry], retention: [{ destinationId: ID, deleted: 2, outcome: 'verified' }] }
-const view = (over: Record<string, unknown> = {}) => ({ available: true, reason: null, revision: 'b'.repeat(64), schedule: { enabled: true, cron: '0 2 * * *', nextRunAt: '2026-10-29T02:00:00.000Z', lastScheduledAt: '2026-10-28T02:00:30.000Z' }, activeId: null, runs: [run], recoveries: [], nativeQualified: false, ...over })
+const run = { id: RUN, trigger: 'schedule', actor: 'scheduler', startedAt: '2026-10-28T02:00:30.000Z', finishedAt: '2026-10-28T02:05:00.000Z', state: 'succeeded', destinationIds: [ID], accounts: 1, mailIncluded: true, databasesIncluded: true, dnsIncluded: true, control: null, localDeleted: 1,
+  archives: [{ username: 'alice', file: FILE, bytes: 2048, sha256: 'a'.repeat(64), databases: ['alice_wp'], zones: ['alice.example.test'], integrity: 'verified', reason: null, detail: null }], entries: [entry], retention: [{ destinationId: ID, deleted: 2, outcome: 'verified' }] }
+const restore = { id: '44444444-4444-4444-8444-444444444444', actor: 'root', username: 'alice', file: FILE, startedAt: '2026-10-28T03:00:00.000Z', finishedAt: '2026-10-28T03:01:00.000Z', state: 'finished', items: [{ part: 'database', name: 'alice_wp', bytes: 10, result: 'restored', reason: null }] }
+const view = (over: Record<string, unknown> = {}) => ({ available: true, reason: null, revision: 'b'.repeat(64), schedule: { enabled: true, cron: '0 2 * * *', nextRunAt: '2026-10-29T02:00:00.000Z', lastScheduledAt: '2026-10-28T02:00:30.000Z' }, storage: { freeBytes: 1000, totalBytes: 4000 }, activeId: null, runs: [run], recoveries: [], restores: [restore], nativeQualified: false, ...over })
 const lifecycle = { revision: 'c'.repeat(64), destinations: [{ id: ID, name: 'Offsite', effectiveActive: true }] }
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const boot = (send: unknown, canManage = true, ask?: unknown) => {
@@ -27,8 +29,14 @@ describe('backup runs client', () => {
   })
   it('rejects fake success, foreign archive names and inconsistent active state', () => {
     expect(readWhmBackupRunsView(view()).runs[0]!.entries[0]!.outcome).toBe('verified')
+    expect(readWhmBackupRunsView(view()).restores[0]!.items).toEqual([{ part: 'database', name: 'alice_wp', result: 'restored', reason: null }])
+    expect(readWhmBackupRunsView(view({ available: false, reason: 'invalid_ledger', runs: [], restores: [] })).reason).toBe('invalid_ledger')
+    expect(readWhmBackupRunsView(view({ runs: [{ ...run, destinationIds: [], entries: [], retention: [] }] })).runs[0]!.archives[0]!.integrity).toBe('verified')
     for (const raw of [view({ nativeQualified: true }), view({ available: true, reason: 'no_provider' }), view({ runs: [{ ...run, entries: [{ ...entry, outcome: 'failed', reason: 'readback_mismatch' }] }] }),
-      view({ runs: [{ ...run, entries: [{ ...entry, file: 'xpanel-backup-bob-20261028T020000Z.tar.gz' }] }] }), view({ runs: [{ ...run, state: 'running', finishedAt: null }] }), view({ runs: [{ ...run, databasesIncluded: true }] })])
+      view({ runs: [{ ...run, entries: [{ ...entry, file: 'xpanel-backup-bob-20261028T020000Z.tar.gz' }] }] }), view({ runs: [{ ...run, state: 'running', finishedAt: null }] }), view({ runs: [{ ...run, archives: [{ ...run.archives[0], integrity: 'failed', reason: 'integrity_failed' }] }] }),
+      view({ runs: [{ ...run, archives: [] }] }), view({ runs: [{ ...run, archives: [{ ...run.archives[0], databases: ['bob_wp'] }] }] }), view({ restores: [{ ...restore, items: [{ part: 'database', name: 'alice_wp', bytes: 10, result: 'restored', reason: 'restore-failed' }] }] }), view({ storage: { freeBytes: 5, totalBytes: 1 } }),
+      view({ runs: [{ ...run, archives: [{ ...run.archives[0], detail: 'tar failed' }] }] }),
+      view({ restores: [{ ...restore, state: 'running', finishedAt: null }] })])
       expect(() => readWhmBackupRunsView(raw)).toThrow()
     const row = { name: 'alice/' + FILE, username: 'alice', createdAt: '2026-10-28T02:00:00.000Z', bytes: 1, action: 'keep', reason: 'newest' }
     expect(readWhmBackupRetentionPlan({ destinationId: ID, planDigest: 'd'.repeat(64), rows: [row] }, ID).rows).toHaveLength(1)
@@ -49,7 +57,7 @@ describe('backup runs client', () => {
   it('shows each unavailable reason and keeps run now disabled', async () => {
     const send = vi.fn(async (_method: string, path: string) => path.endsWith('/runs') ? view({ available: false, reason: 'no_provider' }) : lifecycle)
     boot(send); await settle()
-    expect(document.querySelector('[data-backup-runs-status]')!.textContent).toContain('S3-compatible credential profile')
+    expect(document.querySelector('[data-backup-runs-status]')!.textContent).toContain('S3-compatible or SFTP credential profile')
     expect(document.querySelector<HTMLButtonElement>('[data-backup-runs-start]')!.disabled).toBe(true)
     const missing = vi.fn(async (_method: string, path: string) => { if (path.endsWith('/runs')) throw Object.assign(new Error('x'), { status: 412 }); return lifecycle })
     boot(missing); await settle()

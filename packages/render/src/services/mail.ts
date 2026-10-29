@@ -23,6 +23,8 @@ import {
   type AccountRef,
 } from './validate.ts'
 
+import { AUTOREPLY_ADDRESS_RE, AUTOREPLY_DOMAIN_RE } from './mail-autoreply.ts'
+
 // ---- inputs -----------------------------------------------------------------------------
 
 export interface MailboxInput {
@@ -41,6 +43,12 @@ export interface ForwarderInput {
   to: string[]
 }
 
+/** An address that answers RCPT with a permanent error instead of accepting mail. */
+export interface RejectInput {
+  local: string
+  message: string
+}
+
 /** What happens to mail for unknown local parts (cPanel's "default address"). */
 export type DefaultAddress = { kind: 'reject' } | { kind: 'forward'; to: string[] } | { kind: 'discard' }
 
@@ -49,6 +57,7 @@ export interface MailDomainInput {
   account: AccountRef
   mailboxes: MailboxInput[]
   forwarders?: ForwarderInput[]
+  rejects?: RejectInput[]
   defaultAddress?: DefaultAddress
   /** cPanel domain forwarder: unmatched local parts go to the same local part at this domain; wins over defaultAddress */
   domainForward?: string
@@ -58,6 +67,8 @@ export interface MailDomainInput {
   delivery?: 'accept' | 'defer'
   /** Plain distribution lists: the list address fans out to every member through virtual_alias_maps. */
   lists?: MailingListInput[]
+  /** hidden autoresponder users (mail-autoreply.ts): delivered to only through aliases, smtpd refuses them from outside */
+  internal?: boolean
 }
 
 export interface MailingListInput {
@@ -98,6 +109,9 @@ export const assertDovecotHash = (v: unknown): string => {
 
 // ---- Dovecot passwd-file ------------------------------------------------------------------
 
+/** A hosted mail domain, or a hidden autoresponder domain (mail-autoreply.ts). */
+const mailDomainOf = (domain: string): string => (AUTOREPLY_DOMAIN_RE.test(domain) ? domain : normalizeHostname(domain, 'mail domain'))
+
 /** Dovecot reads a 0 limit as unlimited, so 'unlimited' is written as 0 and a numeric quota starts at 1 MB. */
 export const quotaRuleValue = (quotaMb: Limit): string => {
   if (isUnlimited(quotaMb)) return '0'
@@ -110,7 +124,7 @@ export const quotaRuleValue = (quotaMb: Limit): string => {
  */
 export const dovecotPasswdLine = (account: AccountRef, domain: string, m: MailboxInput): string => {
   const a = assertAccount(account)
-  const d = normalizeHostname(domain, 'mail domain')
+  const d = mailDomainOf(domain)
   const local = normalizeMailboxLocal(m.local, 'mailbox')
   const hash = assertDovecotHash(m.passwordHash)
   const extra = [`userdb_mail=maildir:~/mail/${d}/${local}`, `userdb_quota_rule=*:storage=${quotaRuleValue(m.quotaMb)}`]
@@ -133,7 +147,7 @@ export const dovecotDomainsDir = (os: OsProfile): string => `${assertAbsPath('do
  * suffix means a hostile `%d` such as `..` can only ever name a non-existent file.
  */
 export const dovecotPasswdFile = (os: OsProfile, input: MailDomainInput, o: DovecotOptions = {}): RenderedFile => {
-  const domain = normalizeHostname(input.domain, 'mail domain')
+  const domain = mailDomainOf(input.domain)
   const login = input.login ?? 'allowed'
   if (login !== 'allowed' && login !== 'denied') return invalid('mail login state', login, 'must be allowed or denied')
   const seen = new Set<string>()
@@ -171,6 +185,8 @@ export interface PostfixOptions {
 
 export const DISCARD_DOMAIN = 'xpanel-discard.invalid'
 export const DISCARD_ADDRESS = `discard@${DISCARD_DOMAIN}`
+/** access(5) reply for an unknown address on a domain whose default address rejects */
+export const UNKNOWN_RECIPIENT_REPLY = '550 5.1.1 No such user here'
 /** Owner of `@domain` sender entries for domains without mailboxes, so nobody can claim them. */
 export const NO_SENDER = 'nobody@xpanel-sender.invalid'
 
@@ -196,7 +212,7 @@ const mapTypeOf = (o: PostfixOptions): PostfixMapType => {
 const targetsOf = (what: string, to: unknown): string[] => {
   if (!Array.isArray(to) || to.length === 0) return invalid(what, to, 'needs at least one destination')
   if (to.length > MAX_FORWARD_TARGETS) return invalid(what, to.length, `allows at most ${MAX_FORWARD_TARGETS} destinations`)
-  return [...new Set(to.map((t) => normalizeEmail(t, `${what} destination`).address))]
+  return [...new Set(to.map((t) => (typeof t === 'string' && AUTOREPLY_ADDRESS_RE.test(t) ? t : normalizeEmail(t, `${what} destination`).address)))]
 }
 
 /** Normalized, de-duplicated list members in saved order. */
@@ -223,7 +239,7 @@ interface DomainMaps {
 
 const domainMaps = (input: MailDomainInput): DomainMaps => {
   assertAccount(input.account)
-  const domain = normalizeHostname(input.domain, 'mail domain')
+  const domain = input.internal ? (AUTOREPLY_DOMAIN_RE.test(input.domain) ? input.domain : invalid('internal mail domain', input.domain, 'is not a hidden autoresponder domain')) : normalizeHostname(input.domain, 'mail domain')
   const delivery = input.delivery ?? 'accept'
   if (delivery !== 'accept' && delivery !== 'defer') return invalid('mail delivery state', delivery, 'must be accept or defer')
   const mailboxes = new Map<string, string>()
@@ -251,9 +267,14 @@ const domainMaps = (input: MailDomainInput): DomainMaps => {
     aliases.set(src, targets.join(','))
     if (!senders.has(src)) senders.set(src, owners.length ? owners.join(',') : NO_SENDER)
   }
+  for (const r of input.rejects ?? []) {
+    const addr = `${normalizeMailboxLocal(r.local, 'rejected address')}@${domain}`
+    if (mailboxes.has(addr) || aliases.has(addr)) invalid('rejected address', addr, 'is already a mailbox or forwarder')
+    if (delivery === 'accept') access.set(addr, `REJECT 5.1.1 ${assertRejectText(r.message)}`)
+  }
   for (const l of input.lists ?? []) {
     const src = `${normalizeMailboxLocal(l.local, 'mailing list')}@${domain}`
-    if (mailboxes.has(src) || aliases.has(src)) invalid('mailing list', src, 'uses an address that is already a mailbox or forwarder')
+    if (mailboxes.has(src) || aliases.has(src) || access.has(src)) invalid('mailing list', src, 'uses an address that is already a mailbox or forwarder')
     aliases.set(src, mailingListTargets(l.members).join(','))
     senders.set(src, owners.length ? owners.join(',') : NO_SENDER)
   }
@@ -275,9 +296,23 @@ const domainMaps = (input: MailDomainInput): DomainMaps => {
       aliases.set(`@${domain}`, DISCARD_ADDRESS)
       discards = true
     }
+  } else if (input.internal) {
+    // aliases reach these users after smtpd; a sender, even an authenticated one, never can
+    for (const a of [domain, ...mailboxes.keys()]) access.set(a, 'REJECT 5.7.1 internal address')
+  } else if (delivery === 'accept') {
+    // the domain key answers unknown addresses; DUNNO ends the lookup for a known one before it
+    for (const a of [...mailboxes.keys(), ...aliases.keys()]) if (!access.has(a)) access.set(a, 'DUNNO')
+    access.set(domain, UNKNOWN_RECIPIENT_REPLY)
   }
   senders.set(`@${domain}`, owners.length ? owners.join(',') : NO_SENDER)
   return { domain, mailboxes, aliases, senders, access, discards }
+}
+
+/** access(5) text after the status code: one line of printable ASCII. */
+export const assertRejectText = (v: unknown): string => {
+  const s = assertLine('reject message', v, 200).trim()
+  if (!/^[ -~]{1,200}$/.test(s)) return invalid('reject message', s, 'must be 1 to 200 printable ASCII characters')
+  return s
 }
 
 export interface PostfixMaps {
@@ -985,13 +1020,17 @@ export const assertFolder = (v: unknown): string => {
 export interface VacationInput {
   subject: string
   body: string
+  /** HTML alternative; the reply is sent as multipart/alternative with :mime */
+  htmlBody?: string
   /** must be one of the mailbox's own addresses */
   from?: string
   /** minimum days between replies to the same sender */
   days?: number
+  /** minimum hours between replies; replaces days (RFC 6131 vacation-seconds when not whole days) */
+  hours?: number
   /** other addresses (aliases) that count as "to me" */
   addresses?: string[]
-  /** inclusive YYYY-MM-DD bounds, server time */
+  /** YYYY-MM-DD bounds in server time (end inclusive), or YYYY-MM-DDTHH:MM:SSZ UTC instants (end exclusive) */
   start?: string
   end?: string
 }
@@ -1114,7 +1153,7 @@ const actionsOf = (name: string, actions: FilterAction[], req: Set<string>): { l
         return 'discard;'
       case 'reject':
         req.add('reject')
-        return `reject ${sieveLine('reject message', a.message, 512)};`
+        return `reject ${sieveLine('reject message', a.message, 1024)};`
       case 'keep':
         return 'keep;'
       case 'mark-read':
@@ -1140,10 +1179,11 @@ const filtersChunk = (filters: MailFilter[]): SieveChunk => {
   for (const f of filters) {
     if (f.enabled === false) continue
     const name = assertLine('filter name', f.name, 128)
-    if (!Array.isArray(f.tests) || f.tests.length === 0 || f.tests.length > 20) return invalid(`filter "${name}" tests`, f.tests, 'need 1 to 20 tests')
+    if (!Array.isArray(f.tests) || f.tests.length > 50) return invalid(`filter "${name}" tests`, f.tests, 'allow at most 50 tests')
     if (f.match !== 'all' && f.match !== 'any') return invalid(`filter "${name}" match`, f.match, 'must be all or any')
     const tests = f.tests.map((t) => testOf(t, req))
-    const cond = tests.length === 1 ? tests[0] : `${f.match === 'all' ? 'allof' : 'anyof'}(${tests.join(', ')})`
+    // a rule without tests matches every message
+    const cond = tests.length === 0 ? 'true' : tests.length === 1 ? tests[0] : `${f.match === 'all' ? 'allof' : 'anyof'}(${tests.join(', ')})`
     const acts = actionsOf(name, f.actions, req)
     redirects += acts.redirects
     blocks.push(`# rule: ${name}\nif ${cond} {\n${acts.lines.map((l) => `  ${l}`).join('\n')}\n}`)
@@ -1160,33 +1200,77 @@ const isoDate = (what: string, v: unknown): string => {
   return s
 }
 
+const UTC_INSTANT_RE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.000)?Z$/
+
+/** A date bound, or the whole-second prefix of a UTC instant. */
+const vacationBound = (what: string, v: unknown): { kind: 'date' | 'instant'; key: string } => {
+  const s = assertString(what, v, 24)
+  const m = UTC_INSTANT_RE.exec(s)
+  if (!m) return { kind: 'date', key: isoDate(what, s) }
+  const d = new Date(`${m[1]}Z`)
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 19) !== m[1]) return invalid(what, s, 'is not a real UTC time')
+  return { kind: 'instant', key: m[1] as string }
+}
+
+const base64Lines = (s: string): string =>
+  Buffer.from(s.replace(/\r\n?/g, '\n'), 'utf8').toString('base64').match(/.{1,76}/g)?.join('\n') ?? ''
+
+// RFC 2045 base64 never contains '-', so user text cannot forge the boundary
+const mimeAlternative = (text: string, html: string): string => {
+  const b = 'xpanel-vacation-alternative'
+  const part = (type: string, value: string) =>
+    `--${b}\nContent-Type: text/${type}; charset=UTF-8\nContent-Transfer-Encoding: base64\n\n${base64Lines(value)}\n`
+  return `MIME-Version: 1.0\nContent-Type: multipart/alternative; boundary="${b}"\n\n${part('plain', text)}${part('html', html)}--${b}--\n`
+}
+
 const vacationChunk = (v: VacationInput): SieveChunk => {
   const req = new Set(['vacation'])
-  const days = assertInt('vacation days', v.days ?? 1, 1, 365)
-  const parts = [`vacation :days ${days}`, `:subject ${sieveLine('vacation subject', v.subject, 255)}`]
+  let interval: string
+  if (v.hours !== undefined) {
+    const hours = assertInt('vacation hours', v.hours, 1, 8760)
+    if (hours % 24 === 0) interval = `:days ${hours / 24}`
+    else {
+      req.add('vacation-seconds')
+      interval = `:seconds ${hours * 3600}`
+    }
+  } else interval = `:days ${assertInt('vacation days', v.days ?? 1, 1, 365)}`
+  const parts = [`vacation ${interval}`, `:subject ${sieveLine('vacation subject', v.subject, 255)}`]
   if (v.from !== undefined) parts.push(`:from ${sieveQuote(normalizeHostedEmail(v.from, 'vacation from').address)}`)
   if (v.addresses?.length) {
     if (v.addresses.length > 50) return invalid('vacation addresses', v.addresses.length, 'allow at most 50')
     parts.push(`:addresses [${v.addresses.map((a) => sieveQuote(normalizeEmail(a, 'vacation address').address)).join(', ')}]`)
   }
-  parts.push(sieveText('vacation body', v.body, 65536))
+  if (v.htmlBody) {
+    sieveText('vacation body', v.body, 65536)
+    sieveText('vacation HTML body', v.htmlBody, 65536)
+    parts.push(':mime', sieveQuote(mimeAlternative(v.body, v.htmlBody)))
+  } else parts.push(sieveText('vacation body', v.body, 65536))
   const action = `${parts.join(' ')};`
   const conds: string[] = []
-  const start = v.start !== undefined ? isoDate('vacation start', v.start) : null
-  const end = v.end !== undefined ? isoDate('vacation end', v.end) : null
-  if (start && end && start > end) return invalid('vacation dates', `${start}..${end}`, 'start is after end')
-  if (start) conds.push(`currentdate :value "ge" "date" ${sieveQuote(start)}`)
-  if (end) conds.push(`currentdate :value "le" "date" ${sieveQuote(end)}`)
+  const start = v.start !== undefined ? vacationBound('vacation start', v.start) : null
+  const end = v.end !== undefined ? vacationBound('vacation end', v.end) : null
+  if (start && end) {
+    if (start.kind !== end.kind) return invalid('vacation dates', `${start.key}..${end.key}`, 'start and end must both be dates or both be UTC times')
+    if (start.kind === 'date' ? start.key > end.key : start.key >= end.key) return invalid('vacation dates', `${start.key}..${end.key}`, 'start is after end')
+  }
+  const cond = (b: { kind: 'date' | 'instant'; key: string }, op: 'ge' | 'le' | 'lt'): string =>
+    b.kind === 'date'
+      ? `currentdate :value ${sieveQuote(op)} "date" ${sieveQuote(b.key)}`
+      : `currentdate :zone "+0000" :comparator "i;octet" :value ${sieveQuote(op)} "iso8601" ${sieveQuote(b.key)}`
+  if (start) conds.push(cond(start, 'ge'))
+  if (end) conds.push(cond(end, end.kind === 'date' ? 'le' : 'lt'))
   if (conds.length) req.add('date').add('relational')
   const text = conds.length === 0 ? action : `if ${conds.length === 1 ? conds[0] : `allof(${conds.join(', ')})`} {\n  ${action}\n}`
   return { requires: req, text: `# autoresponder\n${text}`, redirects: 0 }
 }
 
 /** One active script per mailbox: filters first (discard, reject and stop end it before the autoresponder), then vacation. */
-export const renderSieveScript = (o: { filters?: MailFilter[]; vacation?: VacationInput | null }): string => {
+export const renderSieveScript = (o: { filters?: MailFilter[]; vacation?: VacationInput | null; discardAfter?: boolean }): string => {
   const chunks: SieveChunk[] = []
   if (o.filters?.length) chunks.push(filtersChunk(o.filters))
   if (o.vacation) chunks.push(vacationChunk(o.vacation))
+  // a hidden autoresponder user keeps nothing: vacation still answers, discard cancels the implicit keep
+  if (o.discardAfter) chunks.push({ requires: new Set(), text: 'discard;', redirects: 0 })
   const redirects = chunks.reduce((n, c) => n + c.redirects, 0)
   if (redirects > MAX_SIEVE_REDIRECTS) return invalid('filters', redirects, `use at most ${MAX_SIEVE_REDIRECTS} redirects`)
   const req = [...new Set(chunks.flatMap((c) => [...c.requires]))].sort()
@@ -1198,13 +1282,24 @@ export const renderSieveScript = (o: { filters?: MailFilter[]; vacation?: Vacati
 export const renderVacationSieve = (v: VacationInput): string => renderSieveScript({ vacation: v })
 export const renderFilterSieve = (filters: MailFilter[]): string => renderSieveScript({ filters })
 
+export const SIEVE_CONFIG_TEST = 'sieve'
+
+/**
+ * Compiles every staged mailbox script with Pigeonhole before activation. The reconciler
+ * replaces the last argument with a root-only directory holding copies of the scripts.
+ */
+export const sieveConfigTest = (): ConfigTest => ({
+  name: SIEVE_CONFIG_TEST,
+  argv: ['/usr/bin/sievec', '-x', '+vacation-seconds', '/tmp/xpanel-sieve-check'],
+})
+
 /**
  * Active script at ~/mail/<domain>/<local>/.dovecot.sieve, owned by the account. The
  * path is inside a user-writable tree: the writer must not follow symlinks (contractRequests).
  */
 export const sieveFile = (account: AccountRef, address: string, script: string): RenderedFile => {
   const a = assertAccount(account)
-  const { local, domain } = normalizeHostedEmail(address, 'mailbox')
+  const { local, domain } = AUTOREPLY_ADDRESS_RE.test(address) ? { local: address.slice(0, address.indexOf('@')), domain: address.slice(address.indexOf('@') + 1) } : normalizeHostedEmail(address, 'mailbox')
   return {
     path: `${a.home}/mail/${domain}/${local}/.dovecot.sieve`,
     content: assertString('sieve script', script, 1024 * 1024),
@@ -1233,6 +1328,11 @@ protocol lmtp {
 plugin {
   sieve = file:~/mail/%Ld/%Ln/sieve;active=~/mail/%Ld/%Ln/.dovecot.sieve
   sieve_before = ${mailboxPolicySieveDir(os)}/%Ld/%Ln.sieve
+  sieve_extensions = +vacation-seconds
+  sieve_max_script_size = 1M
+  sieve_max_actions = 32
+  sieve_max_redirects = ${MAX_SIEVE_REDIRECTS}
+  sieve_vacation_min_period = 1h
 }
 `,
   mode: 0o644,

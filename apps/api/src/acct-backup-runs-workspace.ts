@@ -1,38 +1,51 @@
 import { fail, isXpanelError } from '@xpanel/core'
-import { BACKUP_RUN_LIMITS, parseBackupArchiveName, readBackupRunsView } from '../../agent/src/acct-backup-plan.ts'
+import { BACKUP_RETENTION_REASONS, BACKUP_RUN_LIMITS, parseBackupArchiveName, readBackupRunsView } from '../../agent/src/acct-backup-plan.ts'
+import { readBackupRunUsernames } from '../../agent/src/acct-backup-runs.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 import type { BackupDestinationsWorkspacePorts } from './backup-destinations-workspace.ts'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const HEX = /^[0-9a-f]{64}$/
-const ROUTE = /^\/api\/backups\/workspace\/(?:runs|destinations\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(retention|recover))$/
+const ROUTE = /^\/api\/backups\/workspace\/(?:runs|destinations\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(retention|recover|space))$/
 const REFUSALS = new Set(['VALIDATION', 'CONFLICT', 'NOT_FOUND', 'PRECONDITION_FAILED', 'FORBIDDEN', 'LIMIT_EXCEEDED'])
 const object = (raw: unknown): raw is Record<string, unknown> => !!raw && typeof raw === 'object' && !Array.isArray(raw)
 const exact = (raw: unknown, keys: readonly string[]): raw is Record<string, unknown> => object(raw) && Object.keys(raw).length === keys.length && keys.every(key => Object.hasOwn(raw, key))
 const json = (value: unknown, status = 200): Response => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
 const invalid = (message: string): never => fail('VALIDATION', message, { stateChanged: false })
 const unreadable = (): never => fail('SERVICE_UNAVAILABLE', 'the host backup reply could not be verified', { stateChanged: false })
-const readBody = async (req: Request, keys: readonly string[]): Promise<Record<string, unknown>> => {
+const readBody = async (req: Request, ...shapes: readonly (readonly string[])[]): Promise<Record<string, unknown>> => {
   if (req.headers.get('content-type')?.split(';')[0]?.trim() !== 'application/json') return invalid('JSON is required')
   const text = await req.text()
-  if (Buffer.byteLength(text) > 1024) return invalid('the backup request is too large')
+  if (Buffer.byteLength(text) > 4096) return invalid('the backup request is too large')
   let body: unknown
   try { body = JSON.parse(text) } catch { return invalid('invalid backup request JSON') }
-  return exact(body, keys) ? body : invalid('the backup request takes only ' + keys.join(', '))
+  const found = shapes.find(keys => exact(body, keys))
+  return found ? body as Record<string, unknown> : invalid('the backup request takes only ' + shapes.map(keys => keys.join(', ')).join(' or '))
 }
 const hex = (raw: unknown, name: string): string => typeof raw === 'string' && HEX.test(raw) ? raw : invalid(name + ' must be a saved revision')
 
 /** Agent reply for GET /host/backups/destinations/<id>/retention. */
 export function readBackupRetentionPreview(raw: unknown, destinationId: string) {
-  if (!exact(raw, ['destinationId', 'retentionDays', 'retentionCount', 'planDigest', 'rows']) || raw.destinationId !== destinationId || typeof raw.planDigest !== 'string' || !HEX.test(raw.planDigest)
-    || ![raw.retentionDays, raw.retentionCount].every(value => typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= 3650) || !Array.isArray(raw.rows) || raw.rows.length > BACKUP_RUN_LIMITS.listed) return unreadable()
+  const keep = exact(raw, ['destinationId', 'retentionDays', 'keep', 'planDigest', 'rows']) && exact(raw.keep, ['daily', 'weekly', 'monthly']) ? raw.keep : null
+  if (!keep || !exact(raw, ['destinationId', 'retentionDays', 'keep', 'planDigest', 'rows']) || raw.destinationId !== destinationId || typeof raw.planDigest !== 'string' || !HEX.test(raw.planDigest)
+    || !(typeof raw.retentionDays === 'number' && Number.isSafeInteger(raw.retentionDays) && raw.retentionDays >= 1 && raw.retentionDays <= 3650)
+    || ![keep.daily, keep.weekly, keep.monthly].every(value => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 3650) || !Array.isArray(raw.rows) || raw.rows.length > BACKUP_RUN_LIMITS.listed) return unreadable()
   const rows = raw.rows.map(row => {
     const parsed = exact(row, ['name', 'username', 'createdAt', 'bytes', 'action', 'reason']) ? parseBackupArchiveName(row.name) : null
     if (!parsed || parsed.username !== row.username || parsed.createdAt !== row.createdAt || typeof row.bytes !== 'number' || !Number.isSafeInteger(row.bytes) || row.bytes < 0
-      || !['newest', 'protected', 'within_count', 'within_days', 'expired'].includes(row.reason as string) || row.action !== (row.reason === 'expired' ? 'delete' : 'keep')) return unreadable()
+      || !(BACKUP_RETENTION_REASONS as readonly string[]).includes(row.reason as string) || row.action !== (row.reason === 'expired' ? 'delete' : 'keep')) return unreadable()
     return { name: row.name as string, username: parsed.username, createdAt: parsed.createdAt, bytes: row.bytes as number, action: row.action as 'keep' | 'delete', reason: row.reason as string }
   })
-  return { destinationId, retentionDays: raw.retentionDays as number, retentionCount: raw.retentionCount as number, planDigest: raw.planDigest, rows }
+  return { destinationId, retentionDays: raw.retentionDays as number, keep: { daily: keep.daily as number, weekly: keep.weekly as number, monthly: keep.monthly as number }, planDigest: raw.planDigest, rows }
+}
+
+/** Agent reply for GET /host/backups/destinations/<id>/space: free and total bytes, or null when the transport cannot tell. */
+export function readBackupSpaceReply(raw: unknown, destinationId: string): { destinationId: string; space: { freeBytes: number; totalBytes: number } | null } {
+  const size = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+  if (!exact(raw, ['destinationId', 'space']) || raw.destinationId !== destinationId) return unreadable()
+  if (raw.space === null) return { destinationId, space: null }
+  if (!exact(raw.space, ['freeBytes', 'totalBytes']) || !size(raw.space.freeBytes) || !size(raw.space.totalBytes) || raw.space.freeBytes > raw.space.totalBytes) return unreadable()
+  return { destinationId, space: { freeBytes: raw.space.freeBytes, totalBytes: raw.space.totalBytes } }
 }
 
 /**
@@ -47,21 +60,23 @@ export function createBackupRunsWorkspaceRoutes(ports: BackupDestinationsWorkspa
     const initial = await ports.requireCaller(req)
     await ports.assertRoot(initial, 'backups.runs')
     if (url.search) return invalid('backup runs accept no selectors')
-    const allow = kind === 'recover' ? 'POST' : 'GET, POST'
+    const allow = kind === 'recover' ? 'POST' : kind === 'space' ? 'GET' : 'GET, POST'
     if (!allow.split(', ').includes(method)) return new Response(null, { status: 405, headers: { allow } })
     const host = ports.destinationHost
     if (!host) return fail('PRECONDITION_FAILED', 'scheduled backup execution is unavailable on this host', { stateChanged: false, nativeApplied: false })
     const read = async (path: string): Promise<unknown> => { try { return await host(initial, path) } catch (error) { if (isXpanelError(error) && REFUSALS.has(error.code)) throw error; return unreadable() } }
     if (method === 'GET') {
       if (kind === 'runs') { try { return json(readBackupRunsView(await read('/host/backups/runs'))) } catch (error) { if (isXpanelError(error)) throw error; return unreadable() } }
+      if (kind === 'space') return json(readBackupSpaceReply(await read('/host/backups/destinations/' + destinationId + '/space'), destinationId!))
       return json(readBackupRetentionPreview(await read('/host/backups/destinations/' + destinationId + '/retention'), destinationId!))
     }
-    const keys = kind === 'runs' ? ['expectedRevision', 'expectedRunsRevision'] : kind === 'retention' ? ['expectedRevision', 'expectedPlanDigest'] : ['expectedRevision', 'expectedRunsRevision', 'runId', 'username', 'file']
-    const body = await readBody(req, keys), expectedRevision = hex(body.expectedRevision, 'expectedRevision')
+    const body = kind === 'runs' ? await readBody(req, ['expectedRevision', 'expectedRunsRevision'], ['expectedRevision', 'expectedRunsRevision', 'accounts'])
+      : await readBody(req, kind === 'retention' ? ['expectedRevision', 'expectedPlanDigest'] : ['expectedRevision', 'expectedRunsRevision', 'runId', 'username', 'file'])
+    const expectedRevision = hex(body.expectedRevision, 'expectedRevision')
     let agentBody: Record<string, unknown>
     if (kind === 'retention') agentBody = { expectedPlanDigest: hex(body.expectedPlanDigest, 'expectedPlanDigest') }
     else {
-      agentBody = { expectedRevision: hex(body.expectedRunsRevision, 'expectedRunsRevision') }
+      agentBody = { expectedRevision: hex(body.expectedRunsRevision, 'expectedRunsRevision'), ...(body.accounts === undefined ? {} : { accounts: readBackupRunUsernames(body.accounts) }) }
       if (kind === 'recover') {
         if (typeof body.runId !== 'string' || !UUID.test(body.runId) || typeof body.username !== 'string' || typeof body.file !== 'string' || parseBackupArchiveName(body.username + '/' + body.file)?.file !== body.file) return invalid('a recorded run, account and archive are required')
         agentBody = { ...agentBody, runId: body.runId, username: body.username, file: body.file }

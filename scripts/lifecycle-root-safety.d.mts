@@ -9,6 +9,7 @@ export function verifyCurrentLifecycleWriterReadiness(): Promise<boolean>
 export function readNativeReleaseTrust(): Promise<Readonly<{signingKey:Buffer;keyId:string}>>
 export function parseCoordinatorCgroup(text: string): string
 export function parseLifecycleHead(value: unknown): Readonly<Record<string, unknown>>
+export function admitSchemaTransition(input: Parameters<UpgradeSafetyPort['assertCompatibility']>[0] | null | undefined, facts: { liveSchema: number; manifestSchema: number | null; snapshotVerified: boolean }): boolean
 
 export function executeNativeLifecycleCommand(request: unknown): Promise<unknown>
 

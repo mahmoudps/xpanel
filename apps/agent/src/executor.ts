@@ -9,6 +9,7 @@ import { assertSafeArgv, isPhpInventoryCommand, isSecurityObservationCommand, is
 import { removePinnedHostTree, withOwnedHostFileHandle, withPinnedHostTargetParent } from './host-target-parent.ts'
 import { isServiceManagerCommand, isBenchmarkCommand, isComposerCommand, isMailxCommand, isDatabaseEngineCommand, isDatabaseRemoteCommand } from '@xpanel/os'
 import { isAccountGitCommand } from './account-git-runner.ts'
+import { isAccountRuntimeCommand } from './account-runtime.ts'
 import { isSwContainerCommand } from '../../../packages/os/src/sw-container-command.ts'
 import { isSwAddonServiceCommand } from '../../../packages/os/src/sw-addon-command.ts'
 import { isRpmInstalledIdentityCommand } from '../../../packages/os/src/ops-package-recovery-command.ts'
@@ -65,7 +66,7 @@ export interface FakeQuotaEntry {
 }
 
 const isReviewedServiceCommand = (argv: readonly string[]): boolean =>
-  isServiceManagerCommand(argv) || isMailxCommand(argv) || isDatabaseEngineCommand(argv) || isDatabaseRemoteCommand(argv) || isSwContainerCommand(argv) || isSwAddonServiceCommand(argv) || isBenchmarkCommand(argv) || isAccountGitCommand(argv) || isComposerCommand(argv) || isRpmInstalledIdentityCommand(argv) ||
+  isServiceManagerCommand(argv) || isMailxCommand(argv) || isDatabaseEngineCommand(argv) || isDatabaseRemoteCommand(argv) || isSwContainerCommand(argv) || isSwAddonServiceCommand(argv) || isBenchmarkCommand(argv) || isAccountGitCommand(argv) || isAccountRuntimeCommand(argv) || isComposerCommand(argv) || isRpmInstalledIdentityCommand(argv) ||
   isPhpInventoryCommand(argv) || isSecurityObservationCommand(argv) || isMailQuarantineArgv(argv) || isMailQueueCommand(argv) || isPackageManagerCommand(argv) || isRepairCommand(argv) || isSoftwareCenterCommand(argv) || isMailLogCommand(argv) || isFtpLogCommand(argv) || isMonitoringCommand(argv) || isMailServerCommand(argv) || isServiceDetailCommand(argv) || isSecurityToolsCommand(argv) || isMailboxMaintenanceCommand(argv) || isNetworkToolsCommand(argv) || isSecHostCommand(argv)
 
 const assertValidCommandArgv = (argv: readonly string[]): void => {
@@ -283,7 +284,7 @@ const SYSTEM_CONFIG_PREFIXES: readonly string[] = [
   '/etc/xpanel/ssl/',
   '/etc/xpanel/modsecurity/',
   '/etc/xpanel/userdata/',
-  '/etc/xpanel/apps/',
+  '/etc/xpanel/runtime/',
   '/etc/systemd/system/',
   '/run/systemd/system/',
   '/etc/sysctl.d/',
@@ -306,7 +307,7 @@ const SYSTEM_CONFIG_PREFIXES: readonly string[] = [
   '/usr/share/xpanel/',
   '/var/run/php/',
   '/run/php/',
-  '/run/xpanel/fpm/',
+  '/run/xpanel-fpm/',
 ]
 
 const SYSTEM_EXACT_TARGETS = new Set<string>([
@@ -324,7 +325,7 @@ const SYSTEM_EXACT_TARGETS = new Set<string>([
   '/etc/xpanel/ssl',
   '/etc/xpanel/modsecurity',
   '/etc/xpanel/userdata',
-  '/etc/xpanel/apps',
+  '/etc/xpanel/runtime',
   '/var/lib/powerdns',
   '/var/lib/powerdns/zones',
   '/var/lib/xpanel/acme',
@@ -343,7 +344,7 @@ const SYSTEM_EXACT_TARGETS = new Set<string>([
   '/usr/share/xpanel/default',
   '/var/run/php',
   '/run/php',
-  '/run/xpanel/fpm',
+  '/run/xpanel-fpm',
 ])
 
 /** Read-only host facts. A path is granted only when it is listed here, and no other /proc path is readable. */
@@ -369,6 +370,10 @@ const isEnoent = (err: unknown): boolean => {
 const ACCOUNT_HOME_DIR_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}(?:\/(?:public_html|logs|tmp|mail|etc|ssl|\.ssh|cgi-bin))?$/
 /** One mailbox Maildir root. Removal is recursive; nested cur/new/tmp paths are not separate grants. */
 export const MAILDIR_BOX_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+/** The per-domain directory that holds an account's Maildirs. */
+const MAIL_DOMAIN_DIR_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
+/** A mailbox's active Sieve script; the writer walks the account-owned parents without following links. */
+export const MAILBOX_SIEVE_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/\.dovecot\.sieve$/
 const ACCOUNT_MANAGED_WRAPPER_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/(?:cgi-bin\/php\.cgi|(?:public_html\/)?\.user\.ini)$/
 
 /**
@@ -382,6 +387,8 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
       return operation === 'read' || operation === 'write'
     }
     if (path === '/etc/xpanel/api.env') return operation === 'read'
+    // Podman runtime state of a terminated account; its units are already stopped.
+    if (/^\/run\/xpanel-ctr\/[a-z][a-z0-9]{0,15}$/.test(path)) return operation === 'remove'
     if (path === '/etc/xpanel/cron') return operation === 'ensure-directory'
     if (/^\/etc\/xpanel\/cron\/[a-z][a-z0-9]{0,15}$/.test(path)) return operation === 'ensure-directory'
     if (/^\/etc\/xpanel\/cron\/[a-z][a-z0-9]{0,15}\/[A-Za-z0-9_-]{1,64}\.command$/.test(path)) return operation === 'read' || operation === 'write' || operation === 'remove'
@@ -412,7 +419,9 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
     if (ACCOUNT_HOME_DIR_RE.test(path)) {
       return operation === 'ensure-directory' || operation === 'remove'
     }
-    if (MAILDIR_BOX_RE.test(path)) return operation === 'remove'
+    if (MAIL_DOMAIN_DIR_RE.test(path)) return operation === 'ensure-directory'
+    if (MAILDIR_BOX_RE.test(path)) return operation === 'remove' || operation === 'ensure-directory'
+    if (MAILBOX_SIEVE_RE.test(path)) return operation === 'read' || operation === 'write' || operation === 'remove'
     if (ACCOUNT_MANAGED_WRAPPER_RE.test(path)) {
       return operation === 'read' || operation === 'write' || operation === 'remove'
     }

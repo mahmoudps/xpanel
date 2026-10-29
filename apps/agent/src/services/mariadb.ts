@@ -243,7 +243,7 @@ const computeFileSha256 = async (filePath: string): Promise<{ sizeBytes: number;
   return { sizeBytes, sha256: hash.digest('hex') }
 }
 
-const defaultCommandRunner: MariaDbCommandRunner = async (input: MariaDbCommandInput): Promise<MariaDbCommandResult> => {
+export const defaultCommandRunner: MariaDbCommandRunner = async (input: MariaDbCommandInput): Promise<MariaDbCommandResult> => {
   assertNoPasswordInArgv(input.argv)
   const [cmd, ...args] = input.argv
   if (!cmd) return fail('VALIDATION', 'MariaDB command binary is required')

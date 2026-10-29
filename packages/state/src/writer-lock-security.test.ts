@@ -301,7 +301,7 @@ describe('writer journal commit identity', () => {
 })
 
 
-const restoreEntries = ['feature-lists', 'plans', 'resellers', 'accounts', 'certificates', 'zones', 'server.json', 'firewall.json', 'uid-allocator.json', 'ip-pool.json', 'mail-ips.json']
+const restoreEntries = ['feature-lists', 'plans', 'resellers', 'accounts', 'certificates', 'zones', 'server.json', 'firewall.json', 'uid-allocator.json', 'ip-pool.json', 'mail-ips.json', 'extended/mail/forwarders.json', 'extended/mail/domain-forwarders.json', 'extended/mail/default-addresses.json', 'extended/mail/filters.json', 'extended/mail/autoresponders.json', 'extended/webmail/vacation']
 const uid = (uid: number, username: string) => ({ uid, username, allocatedAt: '2026-10-23T00:00:00.000Z' })
 describe('restore journal UID crash recovery', () => {
   it('unions surviving backup/stage UID burns when the live allocator was moved away before a crash', async () => {

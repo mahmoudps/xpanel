@@ -131,7 +131,7 @@ describe('native interactive mailbox REST authority', () => {
     expect.soft(identity.status).toBe(404)
     const calendar = await f.call(`/api/webmail/calendars/${f.calendarId}/share`, 'POST', { principal: f.own.login, permission: 'read-write', mailbox: f.sibling.login }, session)
     expect.soft(calendar.status).toBe(422)
-    expect.soft((await f.call('/api/mail/filters', 'POST', { mailbox: f.sibling.login, scope: 'mailbox', name: 'Unauthorized filter', conditions: [], action: { type: 'keep' } }, session)).status).toBe(404)
+    expect.soft((await f.call('/api/mail/filters', 'POST', { mailbox: f.sibling.login, scope: 'mailbox', name: 'Unauthorized filter', conditions: [], actions: [{ type: 'keep' }] }, session)).status).toBe(404)
     expect(await f.snapshot()).toEqual(before)
   })
 

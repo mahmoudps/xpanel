@@ -7,7 +7,7 @@ import type { AuthenticatedCaller } from './auth.ts'
 const ID = '11111111-1111-4111-8111-111111111111', RUN = '33333333-3333-4333-8333-333333333333', REV = 'a'.repeat(64), RUNS = 'b'.repeat(64)
 const FILE = 'xpanel-backup-alice-20261028T020000Z.tar.gz'
 const root = { principal: { id: 'root-id', kind: 'root', username: 'root' }, sessionId: 'session', apiTokenId: null } as AuthenticatedCaller
-const view = { available: false, reason: 'no_provider', revision: RUNS, schedule: null, activeId: null, runs: [], recoveries: [], nativeQualified: false }
+const view = { available: false, reason: 'no_provider', revision: RUNS, schedule: null, storage: null, activeId: null, runs: [], recoveries: [], restores: [], nativeQualified: false }
 const setup = (host?: BackupDestinationsWorkspacePorts['destinationHost']) => {
   let caller: AuthenticatedCaller = root
   const audit = vi.fn(async () => {}), assertRoot = vi.fn(async (c: AuthenticatedCaller) => { if (c.principal.kind !== 'root') fail('FORBIDDEN', 'root access is required') })
@@ -41,6 +41,17 @@ describe('backup runs workspace API', () => {
     expect(response!.status).toBe(202)
     expect(host).toHaveBeenLastCalledWith(root, '/host/backups/runs', { expectedRevision: RUNS })
     expect(t.audit).toHaveBeenCalledWith(expect.objectContaining({ action: 'backup.run.requested', outcome: 'ok' }))
+    expect((await t.call('/api/backups/workspace/runs', 'POST', { expectedRevision: REV, expectedRunsRevision: RUNS, accounts: ['alice'] }))!.status).toBe(202)
+    expect(host).toHaveBeenLastCalledWith(root, '/host/backups/runs', { expectedRevision: RUNS, accounts: ['alice'] })
+    await expect(t.call('/api/backups/workspace/runs', 'POST', { expectedRevision: REV, expectedRunsRevision: RUNS, accounts: ['../x'] })).rejects.toMatchObject({ code: 'VALIDATION' })
+  })
+  it('reads destination free space strictly', async () => {
+    const base = '/api/backups/workspace/destinations/' + ID + '/space'
+    const host = vi.fn(async () => ({ destinationId: ID, space: { freeBytes: 5, totalBytes: 10 } })), t = setup(host)
+    expect(await (await t.call(base))!.json()).toEqual({ destinationId: ID, space: { freeBytes: 5, totalBytes: 10 } })
+    expect((await t.call(base, 'POST', {}))!.status).toBe(405)
+    host.mockResolvedValueOnce({ destinationId: ID, space: { freeBytes: 11, totalBytes: 10 } })
+    await expect(t.call(base)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' })
   })
   it('passes definite agent refusals through and marks lost replies unknown', async () => {
     const refused = setup(async () => fail('CONFLICT', 'busy'))
@@ -61,7 +72,7 @@ describe('backup runs workspace API', () => {
   })
   it('checks retention preview rows against the archive grammar', () => {
     const row = { name: 'alice/' + FILE, username: 'alice', createdAt: '2026-10-28T02:00:00.000Z', bytes: 3, action: 'keep', reason: 'newest' }
-    const plan = { destinationId: ID, retentionDays: 30, retentionCount: 7, planDigest: 'c'.repeat(64), rows: [row] }
+    const plan = { destinationId: ID, retentionDays: 30, keep: { daily: 7, weekly: 4, monthly: 0 }, planDigest: 'c'.repeat(64), rows: [row] }
     expect(readBackupRetentionPreview(plan, ID).rows).toHaveLength(1)
     for (const rows of [[{ ...row, action: 'delete' }], [{ ...row, name: 'alice/notes.txt' }], [{ ...row, username: 'bob' }]]) expect(() => readBackupRetentionPreview({ ...plan, rows }, ID)).toThrow()
     expect(() => readBackupRetentionPreview(plan, '22222222-2222-4222-8222-222222222222')).toThrow()

@@ -21,6 +21,8 @@ export interface StatusPageModel {
   /** Same-listener page that will actually open. Omitted when it would fail again. */
   workspaceHref?: string
   retryHref?: string
+  /** Administrator text shown under the explanation, such as the offline-mode message. */
+  notice?: string
   supportEmail?: string
   /** Host or primary domain shown under the brand, the same subtitle as the live shell. */
   hostname?: string
@@ -81,7 +83,8 @@ export function renderStatusBody(model: StatusPageModel): string {
   const card = `<section class="xp-card xp-status-card" data-status-page="${model.status}" role="alert">
     <p class="xp-status-code" dir="ltr">${model.status}</p>
     <h1 class="xp-page-title">${escapeHtml(copy.title)}</h1>
-    <p class="xp-prose">${escapeHtml(copy.explanation)}</p>
+    <p class="xp-prose">${escapeHtml(copy.explanation)}</p>${model.notice ? `
+    <p class="xp-prose" data-status-notice>${escapeHtml(model.notice)}</p>` : ''}
     ${support}
     <div class="xp-status-actions">${actions.join('')}</div>
   </section>`

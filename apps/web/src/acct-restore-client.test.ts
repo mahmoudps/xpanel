@@ -8,7 +8,7 @@ const MESSAGE = 'mail/alice.example.test/info/new/1700000001.M2.host'
 const context = { accountId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', username: 'alice' }
 const archive = { file: FILE, bytes: 2048, sha256: SHA, createdAt: '2026-10-26T10:00:00Z', integrity: 'verified' }
 const components = (state = 'available') => ({ files: { state: 'available', files: 2, bytes: 30 }, mail: { state, truncated: false, mailboxes: [{ address: BOX, messages: 2, bytes: 22, current: 'exists' }, { address: 'gone@alice.example.test', messages: 1, bytes: 5, current: 'missing' }] },
-  mailSettings: { state: 'not-restorable', files: 1 }, databases: { state: 'not-in-archive' }, dns: { state: 'not-in-archive' } })
+  mailSettings: { state: 'not-restorable', files: 1 }, databases: { state: 'not-in-archive', databases: [], restores: [] }, dns: { state: 'not-in-archive', zones: [] } })
 const preview = (remaining = 0) => ({ context, archive, mailboxes: [BOX], rows: [{ path: MESSAGE, bytes: 11 }], counts: { messages: 2, present: 1, batch: 1, remaining, refused: 0 }, quota: { limitMb: 'unlimited', plannedBytes: 11, fits: true }, writer: 'available', limits: {}, revision: REVISION })
 const restored = { context, archive, mailboxes: [BOX], results: [{ path: MESSAGE, bytes: 11, result: 'restored', reason: null, verificationRequired: false }], counts: { restored: 1, 'skipped-exists': 0, failed: 0, 'not-attempted': 0 }, createdDirectories: 0, complete: true, remaining: 0, verificationRequired: false, revision: REVISION }
 type Transport = (method: string, path: string, body?: any) => Promise<unknown>
@@ -92,5 +92,21 @@ describe('restore-more client', () => {
       expect(q('[data-restore-more-results]').textContent).toContain(' يلزم التحقق.')
       expect(q('[data-restore-more-status]').textContent).toContain(' تتطلب بعض النتائج فحص صناديق البريد.')
     } finally { document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr' }
+  })
+})
+
+describe('database restore replies', () => {
+  it('reads archived dumps and binds an accepted restore to the reviewed archive and databases', () => {
+    const dumps = { state: 'available', databases: [{ name: 'alice_wp', bytes: 10, current: 'exists' }], restores: [] }
+    expect(readRestoreMoreReply('inventory', { context, archive, components: { ...components(), databases: dumps } }, { username: 'alice', file: FILE }).databases).toEqual({ state: 'available', databases: [{ name: 'alice_wp', bytes: 10, current: 'exists' }] })
+    const zones = { state: 'available', zones: [{ name: 'alice.example.test', bytes: 50, current: 'exists' }] }
+    expect(readRestoreMoreReply('inventory', { context, archive, components: { ...components(), dns: zones } }, { username: 'alice', file: FILE }).dns).toEqual(zones)
+    for (const databases of [{ ...dumps, databases: [{ name: 'bob_wp', bytes: 10, current: 'exists' }] }, { ...dumps, state: 'not-in-archive' }, { state: 'available' }])
+      expect(() => readRestoreMoreReply('inventory', { context, archive, components: { ...components(), databases } }, { username: 'alice', file: FILE })).toThrow()
+    const started = { context, archive: { file: FILE, sha256: SHA }, restoreId: '44444444-4444-4444-8444-444444444444', state: 'running', databases: ['alice_wp'], zones: ['alice.example.test'] }
+    const expected = { username: 'alice', file: FILE, sha256: SHA, databases: ['alice_wp'], zones: ['alice.example.test'] }
+    expect(readRestoreMoreReply('parts', started, expected)).toEqual({ restoreId: started.restoreId, databases: ['alice_wp'], zones: ['alice.example.test'] })
+    for (const reply of [{ ...started, state: 'finished' }, { ...started, archive: { file: FILE, sha256: 'c'.repeat(64) } }, { ...started, databases: ['alice_shop'] }, { ...started, zones: [] }])
+      expect(() => readRestoreMoreReply('parts', reply, expected)).toThrow()
   })
 })

@@ -4,10 +4,13 @@ import { services as render } from '@xpanel/render'
 import type { StateSnapshot } from '@xpanel/state'
 import type { AuthenticatedCaller } from './auth.ts'
 import type { ExtendedRouteHelpers } from './extended-routes.ts'
-import { DOVECOT_OBSERVED_SETTINGS, MAIL_SERVER_PAGE_KEYS, MASTER_OBSERVED_OPTIONS, POSTFIX_OBSERVED_KEYS } from '../../../packages/os/src/mail-server-command.ts'
+import { DOVECOT_OBSERVED_SETTINGS, DOVECOT_PATH_SETTINGS, MAIL_SERVER_PAGE_KEYS, isDovecotFileReference, MASTER_OBSERVED_OPTIONS, POSTFIX_OBSERVED_KEYS } from '../../../packages/os/src/mail-server-command.ts'
 import type { MailServerPage } from '../../../packages/os/src/mail-server-command.ts'
 import { MAIL_SERVER_MAX_SERVICES, isMailServerText, parsePostconfMain, parsePostconfMaster } from '../../agent/src/mail-server-observation.ts'
 import type { MailServerObservation, MasterService } from '../../agent/src/mail-server-observation.ts'
+import { mailxDovecotLines, mailxRoutingModes, renderMailxPostfix } from '../../agent/src/mailx-policy.ts'
+import type { MailxDovecotDialect, MailxRoutingMode, MailxSaved } from '../../agent/src/mailx-policy.ts'
+import { mailxCertPaths } from '../../../packages/os/src/mailx-command.ts'
 
 export type MailServerState = 'match' | 'drift' | 'not-managed' | 'unknown'
 export type MailServerHost = 'connected' | 'not-connected' | 'unverified'
@@ -15,7 +18,8 @@ export type MailDomainExpectation = 'mx-saved' | 'mx-missing' | 'zone-missing' |
 export interface MailServerComparison { key: string; observed: string | null; desired: string | null; state: MailServerState }
 export interface MailServerSettingRow extends MailServerComparison { source: 'postfix' | 'dovecot' }
 export interface MailServerServiceRow { service: string; observed: string | null; desired: string | null; state: MailServerState; options: MailServerComparison[]; otherOptions: number }
-export interface MailServerDomainRow { domain: string; account: string | null; mailboxes: number; zone: string | null; mx: { priority: number | null; host: string }[]; state: MailDomainExpectation }
+/** `mode` is the saved routing (local unless the routing policy names the domain). */
+export interface MailServerDomainRow { domain: string; account: string | null; mailboxes: number; zone: string | null; mx: { priority: number | null; host: string }[]; state: MailDomainExpectation; mode: MailxRoutingMode }
 export interface MailServerWorkspaceView {
   page: MailServerPage
   host: MailServerHost
@@ -25,15 +29,18 @@ export interface MailServerWorkspaceView {
   services: MailServerServiceRow[]
   domains: MailServerDomainRow[]
   truncated: boolean
-  /** No saved server-settings field models these values yet; edits stay with the reconcile workflow. */
-  editable: false
+  /** The settings are edited through the saved server mail policy (/api/server/mailx/server and /routing). */
+  editable: true
 }
 export type MailServerSaved = Pick<StateSnapshot, 'accounts' | 'domains' | 'serviceUsers' | 'zones'>
-export interface MailServerDesired { main: Map<string, string>; master: MasterService[]; dovecot: Map<string, string> }
+/** `masterOptions` holds overrides of services the reconciler does not render (the port 25 certificate). */
+export interface MailServerDesired { main: Map<string, string>; master: MasterService[]; dovecot: Map<string, string>; masterOptions?: Record<string, Record<string, string>> }
 export interface MailServerWorkspaceHelpers extends Pick<ExtendedRouteHelpers, 'requireCaller' | 'assertRoot'> {
   /** The authenticated agent runs only postconf -n, postconf -M and doveconf -h; absent when no host agent is connected. */
   readObservation?: (caller: AuthenticatedCaller) => Promise<unknown>
   readSaved: () => Promise<MailServerSaved>
+  /** The saved server mail policy; its rendered values join the reconciler's as "Rendered by xPanel". */
+  readMailPolicy?: () => Promise<MailxSaved>
   os?: OsProfile
 }
 
@@ -57,6 +64,8 @@ export function projectMailServerObservation(value: unknown): MailServerObservat
   const postfix = header(value.postfix), master = header(value.master), dovecot = header(value.dovecot)
   const settings = values(value.postfix.settings, POSTFIX_OBSERVED_KEYS, false) as Record<string, string>
   const dovecotSettings = values(value.dovecot.settings, DOVECOT_OBSERVED_SETTINGS, true, 1024)
+  // Certificate and key settings may only name a file (or be empty); anything else could be key material.
+  if (DOVECOT_PATH_SETTINGS.some(key => { const item = dovecotSettings[key]; return item != null && item !== '' && !isDovecotFileReference(item) })) return invalid()
   const raw = value.master.services
   if (!Array.isArray(raw) || raw.length > MAIL_SERVER_MAX_SERVICES || Object.keys(dovecotSettings).length !== DOVECOT_OBSERVED_SETTINGS.length) return invalid()
   const seen = new Set<string>()
@@ -86,6 +95,24 @@ export function renderedMailServerDesired(os: OsProfile | undefined): MailServer
   } catch { return null }
 }
 
+/**
+ * Adds what the saved mail policy renders: main.cf parameters, the port 25 certificate, the Dovecot server file in the
+ * host's dialect, and the chosen mail-client certificate (the generation renders it for submission and, unless IMAP has
+ * its own, for Dovecot).
+ */
+export function withMailPolicy(desired: MailServerDesired | null, saved: MailxSaved | null, dialect: MailxDovecotDialect = '2.3'): MailServerDesired | null {
+  if (!desired || !saved) return desired
+  const plan = renderMailxPostfix(saved), main = new Map(desired.main), dovecot = new Map(desired.dovecot)
+  for (const [key, value] of Object.entries(plan.settings)) main.set(key, value)
+  const server = saved.sections.server?.policy, submission = server?.certificates.submission ?? null
+  if (submission) main.set('smtpd_tls_cert_file', mailxCertPaths(submission).certFile)
+  // The policy lines are `name = value`, the same grammar as the observation.
+  if (server) for (const [key, value] of parsePostconfMain(mailxDovecotLines(server.dovecot, server.certificates.imap ?? submission, dialect).join('\n'))) dovecot.set(key, value)
+  const masterOptions: Record<string, Record<string, string>> = typeof plan.master === 'string'
+    ? { smtp: { smtpd_tls_cert_file: mailxCertPaths(plan.master).certFile } } : {}
+  return { ...desired, main, dovecot, masterOptions }
+}
+
 // postconf(5): list values are separated by commas and/or whitespace, so separators alone are not drift.
 const same = (left: string, right: string): boolean => left.split(/[\s,]+/).filter(Boolean).join(' ') === right.split(/[\s,]+/).filter(Boolean).join(' ')
 const compare = (rendered: boolean, observedRead: boolean, observed: string | null, desired: string | null): MailServerState =>
@@ -96,11 +123,12 @@ function serviceRows(page: MailServerPage, observation: MailServerObservation | 
   if (page === 'routing') return []
   const read = observation?.master.state === 'read'
   const observed = (observation?.master.services ?? []).filter(item => page === 'server' || SUBMISSION.test(item.service))
-  const names = [...new Set([...(desired?.master ?? []).map(item => item.service), ...observed.map(item => item.service)])]
+  const names = [...new Set([...(desired?.master ?? []).map(item => item.service), ...observed.map(item => item.service), ...Object.keys(desired?.masterOptions ?? {})])]
   return names.map(service => {
     const have = observed.find(item => item.service === service), want = desired?.master.find(item => item.service === service)
-    const options = MASTER_OBSERVED_OPTIONS.filter(key => (want && key in want.options) || (have && key in have.options)).map(key => {
-      const seen = have?.options[key] ?? null, rendered = want?.options[key] ?? null
+    const extra = desired?.masterOptions?.[service] ?? {}
+    const options = MASTER_OBSERVED_OPTIONS.filter(key => (want && key in want.options) || key in extra || (have && key in have.options)).map(key => {
+      const seen = have?.options[key] ?? null, rendered = want?.options[key] ?? extra[key] ?? null
       return { key, observed: seen, desired: rendered, state: compare(!!desired, read, seen, rendered) }
     })
     const fields = compare(!!desired, read, have?.fields ?? null, want?.fields ?? null)
@@ -109,7 +137,7 @@ function serviceRows(page: MailServerPage, observation: MailServerObservation | 
   })
 }
 
-function domainRows(saved: MailServerSaved): { rows: MailServerDomainRow[]; truncated: boolean } {
+function domainRows(saved: MailServerSaved, modes: ReadonlyMap<string, MailxRoutingMode>): { rows: MailServerDomainRow[]; truncated: boolean } {
   const accounts = new Map(saved.accounts.map(account => [account.id, account]))
   // compileDesiredGeneration lists a virtual mailbox domain for each domain with an email service user, skipping terminating accounts.
   const mailboxes = new Map<string, number>()
@@ -122,12 +150,12 @@ function domainRows(saved: MailServerSaved): { rows: MailServerDomainRow[]; trun
     const relative = zone && name !== zone.name.toLowerCase() ? name.slice(0, -(zone.name.length + 1)) : '@'
     const mx = (zone?.records ?? []).filter(record => record.type === 'MX' && record.name.toLowerCase() === relative).slice(0, 20).map(record => ({ priority: record.priority, host: record.content.slice(0, 255) }))
     const count = account && account.status !== 'terminating' ? mailboxes.get(domain.id) ?? 0 : 0
-    return { domain: domain.name, account: account?.username ?? null, mailboxes: count, zone: zone?.name ?? null, mx, state: count === 0 ? 'no-mailboxes' : !zone ? 'zone-missing' : mx.length ? 'mx-saved' : 'mx-missing' }
+    return { domain: domain.name, account: account?.username ?? null, mailboxes: count, zone: zone?.name ?? null, mx, state: count === 0 ? 'no-mailboxes' : !zone ? 'zone-missing' : mx.length ? 'mx-saved' : 'mx-missing', mode: modes.get(name) ?? 'local' }
   })
   return { rows, truncated: domains.length > rows.length }
 }
 
-export function buildMailServerView(page: MailServerPage, observation: MailServerObservation | null, host: MailServerHost, desired: MailServerDesired | null, saved: MailServerSaved | null): MailServerWorkspaceView {
+export function buildMailServerView(page: MailServerPage, observation: MailServerObservation | null, host: MailServerHost, desired: MailServerDesired | null, saved: MailServerSaved | null, policy: MailxSaved | null = null): MailServerWorkspaceView {
   const postfixRead = observation?.postfix.state === 'read', dovecotRead = observation?.dovecot.state === 'read'
   const settings: MailServerSettingRow[] = MAIL_SERVER_PAGE_KEYS[page].map(key => {
     const observed = observation?.postfix.settings[key] ?? null, rendered = desired?.main.get(key) ?? null
@@ -137,10 +165,10 @@ export function buildMailServerView(page: MailServerPage, observation: MailServe
     const observed = observation?.dovecot.settings[key] ?? null, rendered = desired?.dovecot.get(key) ?? null
     settings.push({ source: 'dovecot', key, observed, desired: rendered, state: compare(!!desired, dovecotRead, observed, rendered) })
   }
-  const domains = page === 'routing' && saved ? domainRows(saved) : { rows: [], truncated: false }
+  const domains = page === 'routing' && saved ? domainRows(saved, policy ? mailxRoutingModes(policy) : new Map()) : { rows: [], truncated: false }
   return { page, host, observedAt: observation?.observedAt ?? null,
     sources: { postfix: postfixRead ? 'read' : 'unavailable', master: observation?.master.state === 'read' ? 'read' : 'unavailable', dovecot: dovecotRead ? 'read' : 'unavailable', desired: desired ? 'rendered' : 'unavailable' },
-    settings, services: serviceRows(page, observation, desired), domains: domains.rows, truncated: domains.truncated, editable: false }
+    settings, services: serviceRows(page, observation, desired), domains: domains.rows, truncated: domains.truncated, editable: true }
 }
 
 const PAGE = /^\/api\/server\/mail-server\/(server|routing|outbound)$/
@@ -157,8 +185,11 @@ export async function handleMailServerWorkspaceRoute(request: Request, url: URL,
   let observation: MailServerObservation | null = null, host: MailServerHost = 'not-connected'
   if (helpers.readObservation) try { observation = projectMailServerObservation(await helpers.readObservation(caller)); host = 'connected' } catch { host = 'unverified' }
   const saved = page === 'routing' ? await helpers.readSaved() : null
+  // A saved policy that needs review leaves the rendered column unavailable rather than half-filled.
+  let policy: MailxSaved | null = null, policyRead = !helpers.readMailPolicy
+  if (helpers.readMailPolicy) try { policy = await helpers.readMailPolicy(); policyRead = true } catch { policyRead = false }
   const current = await helpers.requireCaller(request)
   await helpers.assertRoot(current, action)
   if (current.principal.id !== caller.principal.id) return fail('FORBIDDEN', 'mail server authority changed', { stateChanged: false })
-  return new Response(JSON.stringify(buildMailServerView(page, observation, host, renderedMailServerDesired(helpers.os), saved)), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
+  return new Response(JSON.stringify(buildMailServerView(page, observation, host, policyRead ? withMailPolicy(renderedMailServerDesired(helpers.os), policy, observation?.dovecot.settings.ssl_server_cert_file != null ? '2.4' : '2.3') : null, saved, policy)), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
 }

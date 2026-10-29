@@ -58,7 +58,9 @@ export const renderAccountPagesExtension = (input: AccountPagesExtensionInput): 
   if (route === '/email/forwarders') {
     const domains = input.domains?.state === 'read' ? input.domains.items.filter(domain => domain.accountId === account.id) : []
     const summary = extensionCard(locale, msgid('Account plan'), `<dl class="xp-extension__facts">${extensionFact(locale, msgid('Plan limit'), plan?.caps.forwarders === undefined ? undefined : String(plan.caps.forwarders), true)}</dl>`)
-    return extensionFrame(locale, spec.title, `${summary}${renderAccountForwarders({ lang: locale, domains, canManage: input.mutationsQualified === true && input.domains?.state === 'read' })}`)
+    const mailboxes = input.users?.state === 'read' ? input.users.items.filter(user => user.accountId === account.id && user.services.email).map(user => user.login) : undefined
+    return extensionFrame(locale, spec.title, `${summary}${renderAccountForwarders({ lang: locale, domains, canManage: input.mutationsQualified === true && input.domains?.state === 'read',
+      ...(mailboxes !== undefined ? { mailboxes } : {}) })}`)
   } else if (route === '/email/filters') {
     const mailboxes = input.users?.state === 'read' ? input.users.items.filter(user => user.accountId === account.id && user.services.email).map(user => ({ login: user.login })) : undefined
     return extensionFrame(locale, spec.title, renderAccountFilters({ lang: locale, expectedAccountId: account.id,

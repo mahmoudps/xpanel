@@ -46,6 +46,8 @@ describe('native plan values', () => {
     expect(body.resources.ioWriteBps).toBe(4 * 1024 * 1024)
     expect(body.caps.databases).toBe(17); expect(body.caps.phpWorkers).toBe(13)
     expect(body.defaultMailboxQuotaMb).toBe(2048)
+    expect(body.enforceBandwidth).toBe(false)
+    expect(planEditorPayload({ ...raw, enforceBandwidth: true }, null).enforceBandwidth).toBe(true)
     expect(planErrors({ id, ...body })).toEqual([])
     expect(validatePlan({ id, ...body }, { kind: 'root', id: 'root', username: 'operator' }).resources.ioReadBps).toBe(8.5 * 1024 * 1024)
     expect(body).not.toHaveProperty('id')

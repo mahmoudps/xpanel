@@ -415,21 +415,10 @@ describe('ExtendedFeaturesStore', () => {
   describe('6. Databases Beyond MariaDB', () => {
     const accId = 'acc-db-01'
 
-    it('manages remote DB access hosts and Redis/Memcached sockets', async () => {
+    it('manages remote DB access hosts', async () => {
       const hosts = await store.saveRemoteDbHosts(accId, ['192.0.2.50', '10.10.0.0/16'])
       expect(hosts).toEqual(['192.0.2.50', '10.10.0.0/16'])
       expect(await store.listRemoteDbHosts(accId)).toHaveLength(2)
-
-      const cache = await store.saveAccountCacheConfig(accId, {
-        redisEnabled: true,
-        redisSocketPath: '/run/xpanel-redis/alice.sock',
-        redisMemoryMb: 256,
-        memcachedEnabled: true,
-        memcachedSocketPath: '/run/xpanel-memcached/alice.sock',
-        memcachedMemoryMb: 128,
-      })
-      expect(cache.redisMemoryMb).toBe(256)
-      expect((await store.getAccountCacheConfig(accId)).redisEnabled).toBe(true)
     })
   })
 
@@ -508,32 +497,6 @@ describe('ExtendedFeaturesStore', () => {
       expect(traffic.monthly.length).toBeGreaterThan(0)
       expect(traffic.daily.length).toBeGreaterThan(0)
 
-      const branding = await store.savePanelBranding({
-        companyName: 'Nebula Cloud',
-        productName: 'NebulaPanel',
-        primaryColorOklch: 'oklch(0.65 0.21 260)',
-        logoUrl: 'https://cdn.example.com/logo.svg',
-        supportUrl: 'https://help.example.com',
-        footerText: '© 2026 Nebula Cloud Ltd.',
-      })
-      expect(branding.productName).toBe('NebulaPanel')
-      expect((await store.getPanelBranding()).companyName).toBe('Nebula Cloud')
-
-      await store.saveLanguageOverrides('ar', { 'nav.dashboard': 'لوحة التحكم المتقدمة' })
-      const i18n = await store.getLanguageOverrides()
-      expect(i18n.ar['nav.dashboard']).toBe('لوحة التحكم المتقدمة')
-
-      const whmcs = await store.saveWhmcsConfig({
-        enabled: true,
-        whmcsUrl: 'https://billing.nebulacloud.com',
-        apiIdentifier: 'whmcs_key_prod_01',
-        allowedServerIps: ['203.0.113.88'],
-        autoProvision: true,
-        ssoEnabled: true,
-        lastWebhookAt: '2026-10-22T06:30:00Z',
-      })
-      expect(whmcs.enabled).toBe(true)
-      expect((await store.getWhmcsConfig()).allowedServerIps).toEqual(['203.0.113.88'])
     })
   })
 })

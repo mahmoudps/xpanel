@@ -10,7 +10,7 @@ export const XP_PATHS = {
   nginxLogDir: '/var/log/xpanel/nginx',
   apacheLogDir: '/var/log/xpanel/apache',
   fpmLogDir: '/var/log/xpanel/php-fpm',
-  fpmRunDir: '/run/xpanel/fpm',
+  fpmRunDir: '/run/xpanel-fpm',
   fpmConfDir: '/etc/xpanel/php-fpm',
   sslDir: '/etc/xpanel/ssl',
   modsecDir: '/etc/xpanel/modsecurity',
@@ -35,7 +35,7 @@ export const nginxErrorLog = (domain: string): string => `${XP_PATHS.nginxLogDir
 /**
  * One FPM master per account and PHP version. The layout is the one the system module's unit
  * starts (fpmPaths): config under /etc/xpanel/php-fpm/<ver>/, socket and pid inside the unit's
- * RuntimeDirectory=xpanel/fpm/<user>-<ver> (owned by the account), so no shared writable
+ * RuntimeDirectory=xpanel-fpm/<user>-<ver> (owned by the account), so no shared writable
  * directory exists where one account could pre-create another account's socket.
  */
 const fpm = (user: string, version: string) => fpmPaths(assertUsername(user), assertPhpVersion(version))

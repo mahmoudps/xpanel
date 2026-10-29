@@ -56,6 +56,10 @@ export const PHASE1_TOOL_PROBES: Readonly<Record<string, readonly HostProbe[]>> 
   'restart-dns': ['control-plane', 'systemd'],
   'server-information': ['control-plane', 'host-info'],
   'audit-log': ['audit_log'],
+  'aapanel-panel-general': ['control-plane'],
+  'panel-branding': ['control-plane'],
+  'application-locales': ['control-plane'],
+  'whmcs-integration': ['control-plane'],
   'task-queue-monitor': ['control-plane', 'host-jobs'],
   'aapanel-task-messages': ['control-plane', 'host-jobs'],
   'os-update': ['control-plane', 'packages', 'host-jobs'],
@@ -125,6 +129,9 @@ export const PHASE1_TOOL_PROBES: Readonly<Record<string, readonly HostProbe[]>> 
   'mime-types': ['control-plane', 'files', 'apache'],
   'hotlink-protection': ['control-plane', 'files', 'apache'],
   redirects: ['control-plane', 'files', 'apache'],
+  'application-manager': ['control-plane', 'systemd'],
+  'account-cache-services': ['control-plane', 'systemd'],
+  'account-containers': ['control-plane', 'systemd'],
 }
 
 /**
@@ -174,7 +181,14 @@ export const QUALIFIED_SCOPE: Readonly<Record<string, string>> = {
   'notification-center': 'Recipients and events are stored only; no notification is delivered.',
   'intrusion-detection': 'Observed fail2ban jails and bans with a single-address unban only; the native detection engine is not implemented.',
   'aapanel-clamav': 'Account home scans and signature updates as host jobs; quarantine is not implemented.',
+  'aapanel-panel-general': 'Offline mode, developer timing headers, live updates and the remote reverse-proxy host allowlist; the panel PHP version and software tweak settings are not implemented.',
+  'panel-branding': 'Names, colours, footer, support contacts, default appearance and a validated PNG/JPEG logo and PNG/ICO favicon; theme packages and per-reseller branding are not implemented.',
+  'application-locales': 'Offered and default locales from the release registry and validated gettext PO catalog upload and download; adding new locales is not implemented.',
+  'whmcs-integration': 'Stored connection, a downloadable server module, token and address-bound create, suspend, unsuspend, terminate and change-package calls, plan mapping and an activity log; single sign-on is not implemented.',
   'account-isolation': 'Observed slice, PHP-FPM unit and home ownership checks only; changing isolation is not implemented.',
+  'application-manager': 'Node.js, Python (WSGI) and Ruby (Rack/Puma) apps on the distribution runtimes as account units behind root-owned front sockets, served on a domain path; signed-catalog installs stay unavailable without an admitted artifact provider. Each runtime reads unavailable until it is installed.',
+  'account-cache-services': 'Private Redis and Memcached on a socket in the home, without persistence, memory capped at a quarter of the plan memory; flush restarts the empty cache. Each reads unavailable until its server package is installed.',
+  'account-containers': 'Podman rootless containers from docker.io, quay.io and ghcr.io as the account in its slice with plan memory, CPU and process limits; no port is published and no domain exposure is offered. Unavailable until Podman, newuidmap and subordinate IDs exist.',
 }
 
 /** Copy the catalog and mark only the implemented tools whose probes passed. */

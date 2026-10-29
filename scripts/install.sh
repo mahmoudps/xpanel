@@ -159,6 +159,8 @@ if [[ "$OS_FAMILY" == "debian" ]]; then
     nftables
     quota
     certbot
+    gcc
+    libc6-dev
     "php${PHP_VERSION}-fpm"
     "php${PHP_VERSION}-cli"
     "php${PHP_VERSION}-common"
@@ -209,6 +211,8 @@ else
     nftables
     quota
     certbot
+    gcc
+    glibc-devel
   )
   [[ "$WITH_MARIADB" -eq 1 ]] && PACKAGES+=(mariadb-server)
   [[ "$WITH_MAIL" -eq 1 ]] && PACKAGES+=(postfix dovecot dovecot-pigeonhole)
@@ -234,6 +238,8 @@ XPANEL_DIRS=(
 SYSCTL_CONF="/etc/sysctl.d/99-xpanel-symlink-protection.conf"
 JAILSHELL_BIN="/opt/xpanel/bin/jailshell"
 JAILSHELL_LINK="/usr/local/bin/xpanel-jailshell"
+TERMINAL_PTY_BIN="/opt/xpanel/bin/xpanel-terminal-pty"
+ACCOUNT_FILES_BIN="/opt/xpanel/bin/xpanel-account-files"
 SLICE_UNIT="/etc/systemd/system/xpanel.slice"
 AGENT_UNIT="/etc/systemd/system/xpanel-agent.service"
 API_UNIT="/etc/systemd/system/xpanel-api.service"
@@ -559,6 +565,28 @@ kernel.kptr_restrict = 2
 EOF
 }
 
+# Build a native helper from the release source (helpers/<name>/build.mjs), install it root:root 0755 and record its
+# SHA-256 beside it as <target>.sha256 (root:root 0644). The agent uses a helper only while it still matches that digest.
+install_native_helper() {
+  local name="$1" target="$2" build digest
+  build="$(mktemp -d)"
+  if ! "$NODE_BIN" "$INSTALL_ROOT/helpers/$name/build.mjs" --output "$build/helper" > "$build/receipt.json"; then
+    rm -rf -- "$build"
+    die "The native helper $name could not be built."
+  fi
+  digest="$(sha256sum -- "$build/helper" | cut -d' ' -f1)"
+  install -o root -g root -m 0755 -- "$build/helper" "$target.new"
+  rm -rf -- "$build"
+  [[ "$(sha256sum -- "$target.new" | cut -d' ' -f1)" == "$digest" ]] || die "The installed native helper $name does not match its build."
+  printf '%s\n' "$digest" > "$target.sha256.new"
+  chown root:root -- "$target.sha256.new"
+  chmod 0644 -- "$target.sha256.new"
+  mv -fT -- "$target.new" "$target"
+  mv -fT -- "$target.sha256.new" "$target.sha256"
+  assert_root_file "$target"
+  assert_root_file "$target.sha256"
+}
+
 render_jailshell() {
   cat <<'EOF'
 #!/bin/sh
@@ -841,6 +869,10 @@ if ! grep -qxF "$JAILSHELL_BIN" /etc/shells 2>/dev/null; then
   backup_config /etc/shells
   echo "$JAILSHELL_BIN" >> /etc/shells
 fi
+
+echo "[3b/6] Building the native account-file and terminal PTY helpers in /opt/xpanel/bin..."
+install_native_helper account-files "$ACCOUNT_FILES_BIN"
+install_native_helper terminal-pty "$TERMINAL_PTY_BIN"
 
 echo "[4/6] Applying kernel symlink & hardlink protection (${SYSCTL_CONF})..."
 write_config "$SYSCTL_CONF" render_sysctl_conf

@@ -9,7 +9,7 @@ export type ServerHealthCheckView = { id: string; state: ServerHealthStateView; 
 type Pair = { warning: number; problem: number }
 export type ServerHealthReportView = {
   observedAt: string; host: 'read' | 'unavailable'; counts: Record<ServerHealthStateView, number>; checks: ServerHealthCheckView[]
-  thresholds: { loadPerCore: Pair; memoryAvailablePercent: Pair; swapUsedPercent: Pair; diskUsedPercent: Pair; inodeUsedPercent: Pair; certificateExpiryDays: number }
+  thresholds: { loadPerCore: Pair; memoryAvailablePercent: Pair; swapUsedPercent: Pair; diskUsedPercent: Pair; inodeUsedPercent: Pair; certificateExpiryDays: number; bandwidthUsedPercent: Pair }
 }
 export type LimitRowView = { id: string; limit: number | 'unlimited' | null; enforced: string | null; enforcement: 'match' | 'drift' | 'unavailable'; usage: number | null; percent: number | null; usageState: 'ok' | 'high' | 'unlimited' | 'unavailable' }
 export type AccountLimitsView = { username: string; status: 'active' | 'suspended' | 'terminating'; plan: string | null; slice: 'read' | 'not-active' | 'unavailable'; quota: 'read' | 'unavailable'; high: number; drift: number; unavailable: number; rows: LimitRowView[] }
@@ -36,11 +36,13 @@ export function readServerHealthReport(value: unknown): ServerHealthReportView {
     drift: { drift_none: 'ok', drift_found: 'problem', manifest_missing: 'problem', no_generation: 'unavailable', drift_unread: 'unavailable', host_unavailable: 'unavailable' },
     certificates: { certificates_ok: 'ok', certificates_none: 'ok', certificates_warning: 'warning', certificates_problem: 'problem', certificates_unread: 'unavailable' },
     reboot: { reboot_not_required: 'ok', reboot_required: 'warning', reboot_unread: 'unavailable', reboot_unsupported: 'unavailable', host_unavailable: 'unavailable' },
+    bandwidth: { bandwidth_ok: 'ok', bandwidth_warning: 'warning', bandwidth_problem: 'problem', bandwidth_unread: 'unavailable' },
   }
   const ITEMS: Record<string, Record<string, ServerHealthStateView>> = {
     'disk-space': { space_ok: 'ok', space_high: 'warning', space_full: 'problem' }, 'disk-inodes': { inodes_ok: 'ok', inodes_high: 'warning', inodes_full: 'problem' },
     services: { service_failed: 'problem', service_unchecked: 'unavailable' }, drift: { file_missing: 'problem', file_changed: 'problem', file_metadata: 'problem' },
     certificates: { cert_expired: 'problem', cert_expiring: 'warning', cert_unread: 'unavailable' },
+    bandwidth: { bandwidth_warning: 'warning', bandwidth_problem: 'problem', bandwidth_unread: 'unavailable' },
   }
   const rank: Record<string, number> = { problem: 0, warning: 1, unavailable: 2, ok: 3 }
   const ids = Object.keys(CHECKS)
@@ -63,7 +65,7 @@ export function readServerHealthReport(value: unknown): ServerHealthReportView {
   for (const entry of checks) counts[entry.state]++
   if ((['ok', 'warning', 'problem', 'unavailable'] as const).some(state => counted[state] !== counts[state])) return shFail()
   return { observedAt: shIso(value.observedAt), host: shOneOf(value.host, ['read', 'unavailable'] as const), counts, checks,
-    thresholds: { loadPerCore: pair(limits.loadPerCore), memoryAvailablePercent: pair(limits.memoryAvailablePercent), swapUsedPercent: pair(limits.swapUsedPercent), diskUsedPercent: pair(limits.diskUsedPercent), inodeUsedPercent: pair(limits.inodeUsedPercent), certificateExpiryDays: shCount(limits.certificateExpiryDays, 3650) } }
+    thresholds: { loadPerCore: pair(limits.loadPerCore), memoryAvailablePercent: pair(limits.memoryAvailablePercent), swapUsedPercent: pair(limits.swapUsedPercent), diskUsedPercent: pair(limits.diskUsedPercent), inodeUsedPercent: pair(limits.inodeUsedPercent), certificateExpiryDays: shCount(limits.certificateExpiryDays, 3650), bandwidthUsedPercent: pair(limits.bandwidthUsedPercent) } }
 }
 
 /** Strict reader for GET /api/server/server-limits: every resource row once, usage states implied by usage, limit and percent. */
@@ -134,6 +136,7 @@ function bindWhmServerHealth(): void {
         load: msgid('Load versus processors'), memory: msgid('Available memory'), swap: msgid('Swap use'),
         'disk-space': msgid('Disk space per filesystem'), 'disk-inodes': msgid('Inodes per filesystem'), services: msgid('Failed services'),
         drift: msgid('Configuration drift'), certificates: msgid('Certificates expiring soon'), reboot: msgid('Reboot required'),
+        bandwidth: msgid('Monthly bandwidth per account'),
       }
       const CAUSES: Record<string, string> = {
         host_unavailable: msgid('This server could not be observed, so this check was not run.'),
@@ -163,13 +166,15 @@ function bindWhmServerHealth(): void {
         cert_expired: msgid('Expired. Visitors get a security warning.'), cert_expiring: msgid('Expires soon.'), cert_unread: msgid('The expiry date could not be read.'),
         reboot_not_required: msgid('No installed update is waiting for a reboot.'), reboot_required: msgid('An installed update takes effect only after a reboot.'),
         reboot_unread: msgid('The reboot flag could not be read.'), reboot_unsupported: msgid('This host family does not record a reboot flag. Review it on the System updates page.'),
+        bandwidth_ok: msgid('No account is near its monthly bandwidth limit.'), bandwidth_warning: msgid('Near the monthly bandwidth limit.'),
+        bandwidth_problem: msgid('Over the monthly bandwidth limit. If the plan enforces it, the websites serve the bandwidth-exceeded page.'), bandwidth_unread: msgid('Bandwidth has not been measured.'),
       }
       const FIXES: Record<string, [string, string]> = {
         load: ['/whm/monitoring/processes', msgid('Review running processes')], memory: ['/whm/monitoring/processes', msgid('Review running processes')],
         swap: ['/whm/monitoring/processes', msgid('Review running processes')], 'disk-space': ['/whm/monitoring/disk', msgid('Review disk usage')],
         'disk-inodes': ['/whm/monitoring/disk', msgid('Review disk usage')], services: ['/whm/services', msgid('Open services')],
         drift: ['/whm/monitoring/repair', msgid('Review drift in the repair center')], certificates: ['/whm/ssl', msgid('Manage certificates')],
-        reboot: ['/whm/software/updates', msgid('Open system updates')],
+        reboot: ['/whm/software/updates', msgid('Open system updates')], bandwidth: ['/whm/accounts/bandwidth', msgid('Review bandwidth')],
       }
       const LABELS: Record<string, string> = { ok: msgid('No problem found'), warning: msgid('Warning'), problem: msgid('Problem found'), unavailable: msgid('Not verified') }
       const badge = (state: string): HTMLElement => element('span', t(LABELS[state]!), 'xp-badge' + (state === 'ok' ? ' xp-badge--ok' : state === 'problem' ? ' xp-badge--critical' : state === 'warning' ? ' xp-badge--warn' : ''))
@@ -205,6 +210,7 @@ function bindWhmServerHealth(): void {
           [t('Disk space used'), '>= ' + String(limits.diskUsedPercent.warning) + '%', '>= ' + String(limits.diskUsedPercent.problem) + '%'],
           [t('Inodes used'), '>= ' + String(limits.inodeUsedPercent.warning) + '%', '>= ' + String(limits.inodeUsedPercent.problem) + '%'],
           [t('Certificate validity left'), t('< {count} days', { count: limits.certificateExpiryDays }), t(msgctxt('whm-server-health-client', 'Expired'))],
+          [t('Monthly bandwidth used'), '>= ' + String(limits.bandwidthUsedPercent.warning) + '%', '>= ' + String(limits.bandwidthUsedPercent.problem) + '%'],
         ]
         thresholds.replaceChildren(...rows.map(([label, warning, problem]) => { const tr = element('tr'), first = element('td', label); const second = element('td'), third = element('td'); second.dataset.numeric = ''; third.dataset.numeric = ''; second.append(technical(warning)); third.append(technical(problem)); tr.append(first, second, third); return tr }))
         const host = report.host === 'unavailable' ? ' ' + t('This server could not be observed natively, so host checks were not run.') : ''

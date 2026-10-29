@@ -92,6 +92,8 @@ export interface Plan {
   dedicatedIp: boolean
   shell: ShellAccess
   defaultMailboxQuotaMb: Limit
+  /** Serve the bandwidth-exceeded page once an account passes resources.bandwidthMbMonth; absent means off. */
+  enforceBandwidth?: boolean
 }
 
 /** Feature list: the set of xPanel tool feature keys an account may see. */
@@ -125,6 +127,8 @@ export interface Account {
   databaseRemoteAccess?: DatabaseRemoteAccessEntry[]
   shell: ShellAccess
   createdAt: string
+  /** UTC month ('YYYY-MM') in which the agent found the account over its enforced monthly bandwidth; its sites serve the limit page. */
+  bandwidthLimitedMonth?: string
 }
 
 export type ResellerAcl =
@@ -154,6 +158,17 @@ export interface Reseller {
   oversell: boolean
   nameservers: string[]
   delegatedIps: string[]
+}
+
+/** Functions root may re-enable for one account; the rest of DANGEROUS_FUNCTIONS always stays disabled. */
+export const PHP_EXCEPTION_FUNCTIONS = ['exec', 'shell_exec', 'system', 'passthru', 'proc_open', 'popen'] as const
+
+export interface PhpFunctionException {
+  account: string
+  functions: (typeof PHP_EXCEPTION_FUNCTIONS)[number][]
+  reason: string
+  grantedAt: string
+  grantedBy: string
 }
 
 export interface PhpSettings {
@@ -198,6 +213,17 @@ export interface Domain {
   ipv4?: string | null
   /** Optional domain-specific IPv6 override (defaults to account.ipv6 when null/omitted) */
   ipv6?: string | null
+  /** Reverse-proxy request options of a `proxy` site; omission keeps the defaults (WebSocket on, client Host, no extra headers). */
+  proxy?: ProxyOptions
+}
+
+export interface ProxyOptions {
+  /** relay WebSocket upgrades to the upstream */
+  websocket: boolean
+  /** Host header sent upstream: the visitor's host name, or the upstream's own host */
+  hostHeader: 'client' | 'upstream'
+  /** extra request headers set on every proxied request */
+  headers: { name: string; value: string }[]
 }
 
 export interface ServiceUser {
@@ -307,6 +333,10 @@ export interface ServerSettings {
   backendTlsPort: number
   /** Explicit policy for unbound HTTP names; absent preserves the original 404 catch-all. */
   defaultSite?: DefaultSitePolicy
+  /** PHP version new domains start on; absent keeps the release default. Existing domains keep theirs. */
+  defaultPhpVersion?: string
+  /** Root-granted disable_functions exceptions per account, on every PHP version and handler. */
+  phpFunctionExceptions?: PhpFunctionException[]
 }
 
 export interface AuditEntry {
@@ -626,19 +656,6 @@ export type LiveEvent =
       kind: 'website.analytics'
       scope: LiveEventScope
       data: WebsiteAnalyticsSnapshot
-    }
-  | {
-      id: string
-      at: string
-      kind: 'terminal.output'
-      scope: LiveEventScope
-      data: {
-        sessionId: string
-        username: string
-        stream: 'stdout' | 'stderr' | 'exit'
-        chunk: string
-        exitCode?: number
-      }
     }
   | {
       id: string

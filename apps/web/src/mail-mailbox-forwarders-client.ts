@@ -1,6 +1,6 @@
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
-export interface MailboxForwardersSnapshot { mailbox: string; revision: string; limit: number; review: 'managed_elsewhere' | 'duplicate_records' | null; destinations: string[] }
+export interface MailboxForwardersSnapshot { mailbox: string; revision: string; limit: number; review: 'managed_elsewhere' | 'duplicate_records' | null; destinations: string[]; application: { state: 'applied' | 'pending' | 'failed'; reason: string | null } | null }
 
 /** The same conservative grammar as the API (apps/api/src/mail/forwarder-validation.ts); the server stays authoritative. */
 export function forwardAddress(value: unknown): string | null {
@@ -10,21 +10,22 @@ export function forwardAddress(value: unknown): string | null {
     && /^(?!-)[a-z0-9-]{1,63}(?<!-)(?:\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/.test(domain) ? address : null
 }
 
-/** Strict reader: only the sealed mailbox's own record, configuration-only application, no other source. */
+/** Strict reader: only the sealed mailbox's own record and its host state, no other source. */
 export function readMailboxForwarders(value: unknown, mailbox: string): MailboxForwardersSnapshot {
   const bad = (): never => { throw new Error('invalid_mailbox_forwarders') }
   const record = value as Record<string, unknown> | null
   if (!record || typeof record !== 'object' || Array.isArray(record)) return bad()
   const context = record.context as Record<string, unknown> | null, application = record.application as Record<string, unknown> | null, review = record.review
   if (!context || typeof context !== 'object' || context.mailbox !== mailbox || Object.keys(context).length !== 1 || typeof record.revision !== 'string' || !/^[0-9a-f]{64}$/.test(record.revision)
-    || record.limit !== 10 || !application || typeof application !== 'object' || application.status !== 'configuration_only' || application.nativeApplied !== false
+    || record.limit !== 10 || (record.forwarding === null ? application !== null : !application || typeof application !== 'object' || !['applied', 'pending', 'failed'].includes(String(application.state)) || !(application.reason === null || typeof application.reason === 'string'))
     || !(review === null || review === 'managed_elsewhere' || review === 'duplicate_records')) return bad()
   const forwarding = record.forwarding as Record<string, unknown> | null
   if (forwarding !== null && (review !== null || !forwarding || typeof forwarding !== 'object' || typeof forwarding.id !== 'string' || forwarding.keepCopy !== true
     || typeof forwarding.createdAt !== 'string' || !Array.isArray(forwarding.destinations) || forwarding.destinations.length < 1 || forwarding.destinations.length > 100)) return bad()
   const destinations = forwarding === null ? [] : (forwarding.destinations as unknown[]).map(item => typeof item === 'string' && forwardAddress(item) === item && item !== mailbox ? item : bad())
   if (new Set(destinations).size !== destinations.length) return bad()
-  return { mailbox, revision: record.revision, limit: 10, review: review as MailboxForwardersSnapshot['review'], destinations }
+  return { mailbox, revision: record.revision, limit: 10, review: review as MailboxForwardersSnapshot['review'], destinations,
+    application: application ? { state: application.state as 'applied' | 'pending' | 'failed', reason: application.reason as string | null } : null }
 }
 
 function bindMailForwarders(askDialog: (options: Record<string, unknown>) => Promise<unknown>): void {
@@ -80,6 +81,9 @@ function bindMailForwarders(askDialog: (options: Record<string, unknown>) => Pro
       account_forwarder_limit: t('The hosting account has reached its forwarder limit. Nothing changed.'),
       managed_elsewhere: t('Forwarding for this address is managed by the account owner. Nothing changed.'),
     }
+    const hostState = (view: MailboxForwardersSnapshot): string => !view.application || view.application.state === 'applied' ? t('Saved and applied on the mail server.')
+      : view.application.state === 'pending' ? t('Saved. The mail server has not applied it yet.')
+      : view.application.reason ? t('Saved, but the mail server did not apply it: {reason}', { reason: view.application.reason }) : t('Saved, but the mail server did not apply it.')
     const write = async (destinations: string[], success: string): Promise<void> => {
       if (!admitted() || !snapshot || busy || lock) return
       const captured = snapshot
@@ -89,7 +93,7 @@ function bindMailForwarders(askDialog: (options: Record<string, unknown>) => Pro
         if (!ack || ack.stateChanged !== true) throw new Error('invalid_forwarders_acknowledgement')
         const accepted = readMailboxForwarders(ack, mailbox), verified = await read()
         if (accepted.destinations.join('\n') !== destinations.join('\n') || verified.revision !== accepted.revision || verified.destinations.join('\n') !== destinations.join('\n')) throw new Error('forwarders_readback_mismatch')
-        snapshot = verified; paint(verified); input.value = ''; note('saved', success)
+        snapshot = verified; paint(verified); input.value = ''; note('saved', success + ' ' + hostState(verified))
       } catch (error) {
         const failure = error as { status?: unknown; details?: Record<string, unknown> } | null, details = failure && typeof failure.details === 'object' && failure.details ? failure.details : null
         if (!details || details.stateChanged !== false || details.verificationRequired === true || details.unknownOutcome === true) {
@@ -106,7 +110,7 @@ function bindMailForwarders(askDialog: (options: Record<string, unknown>) => Pro
         : address === mailbox ? reasons.FORWARD_LOOP! : snapshot.destinations.includes(address) ? t('That address is already a destination. Nothing changed.')
         : snapshot.destinations.length >= snapshot.limit ? reasons.forward_limit! : ''
       if (refusal) { note('failed', refusal); input.focus(); return }
-      void write([...snapshot.destinations, address!], t('Forwarder saved and read back. Applying it on the mail server is not verified.'))
+      void write([...snapshot.destinations, address!], t('Forwarder saved and read back.'))
     })
     input.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); add.click() } })
     rows.addEventListener('click', event => {

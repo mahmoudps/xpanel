@@ -113,7 +113,7 @@ describe('detailed administrator workspaces', () => {
   })
 
   it.each([
-    ['/whm/software/php', ['php-install', 'php-extensions', 'php-functions'], ['Set as default', 'Reinstall selected version', 'Grant exception', 'Revoke', 'Undo']],
+    ['/whm/software/php', ['php-install', 'php-extensions', 'php-functions'], ['Set as default', 'Reinstall selected version', 'Add exception', 'Grant exception']],
     ['/whm/transfers', ['transfer-source', 'transfer-identities', 'transfer-progress', 'transfer-import'], ['SSH key', 'API token', 'Copy public key', 'Test connection', 'Stop after the current account', 'Parsed plan', 'Not imported or changed', 'Discard upload']],
     ['/whm/server/upgrade', ['upgrade-version', 'upgrade-job', 'upgrade-history', 'upgrade-touches'], ['What changes', 'Confirm upgrade', 'Start upgrade', 'Run preflight again', 'Added', 'Cancel pending upgrade']],
   ] as const)('retains all final approved components without activating unsupported operations in %s', (activeRoute, sections, labels) => {

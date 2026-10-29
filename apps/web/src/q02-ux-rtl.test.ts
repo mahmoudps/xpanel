@@ -1,4 +1,4 @@
-import { SYNTHETIC_WEBSITE_ANALYTICS, SYNTHETIC_WHM_IO_SNAPSHOT } from '../../../tests/fixtures/analytics-snapshots.ts'
+import { SYNTHETIC_WEBSITE_ANALYTICS } from '../../../tests/fixtures/analytics-snapshots.ts'
 import assert from 'node:assert/strict'
 import { runInNewContext } from 'node:vm'
 import * as readableDateTimeTokens from './tokens.ts'
@@ -34,7 +34,7 @@ const syntheticAccount: Account = {
   ipv4: '10.0.0.12', shell: 'none', createdAt: '2026-10-22T14:05:00Z',
 }
 const syntheticWhm: WhmSurfaceProps = {
-  principal: { kind: 'root', id: 'rtl-root', username: 'synthetic-root' }, hostname: 'srv1.xpanel.test', accounts: [syntheticAccount], plans: [syntheticPlan], ioSnapshot: SYNTHETIC_WHM_IO_SNAPSHOT,
+  principal: { kind: 'root', id: 'rtl-root', username: 'synthetic-root' }, hostname: 'srv1.xpanel.test', accounts: [syntheticAccount], plans: [syntheticPlan],
   ipPool: [{ id: 'rtl-ip', address: '10.0.0.12', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: 'Synthetic RTL sample' }],
 }
 const syntheticPanel: PanelSurfaceProps = {
@@ -136,7 +136,7 @@ describe('H03 & Q02 — Bilingual UX/UI, RTL <bdi dir="ltr"> isolation, ASCII di
       for (const html of [
         renderWhmSurface({ ...syntheticWhm, activeRoute: '/whm/accounts', locale }),
         renderPanelSurface({ ...syntheticPanel, activeRoute: '/domains', locale }),
-        renderMailSurface({ ...syntheticMail, activeRoute: '/mail/settings/filters', locale }),
+        renderMailSurface({ ...syntheticMail, activeRoute: '/mail/tools/track-delivery', locale }),
       ]) {
         const tableWraps = [...html.matchAll(/<div(?=[^>]*\sclass="(?:[^"]*\s)?xp-table-wrap(?:\s[^"]*)?")([^>]*)>/g)]
         assert.ok(tableWraps.length >= 1, 'Expected at least one .xp-table-wrap in surface')

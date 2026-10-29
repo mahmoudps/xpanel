@@ -1,11 +1,14 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fail } from '@xpanel/core'
 import type { Account, FeatureList, Plan, Reseller, ServiceUser } from '@xpanel/core'
 import { buildTar } from '../../../packages/lifecycle/src/testing/tar.ts'
+import { createBackupRunController } from './acct-backup-runs.ts'
+import type { BackupRunDeps } from './acct-backup-runs.ts'
+import type { BackupCommand } from './backup-low-priority.ts'
 import { handleComponentRestoreRoute } from './acct-restore-components.ts'
 import type { ComponentRestoreRouteDeps } from './acct-restore-components.ts'
 import { archivedMessageMailbox, parseComponentRestoreRequest } from './acct-restore-request.ts'
@@ -101,7 +104,7 @@ describe('component inventory', () => {
     const f = await setup()
     const body = await read(await call(f.deps(), 'inventory', { file: FILE }))
     expect(body.archive).toMatchObject({ file: FILE, integrity: 'verified' })
-    expect(body.components).toEqual({ files: { state: 'available', files: 1, bytes: 17 }, mailSettings: { state: 'not-restorable', files: 1 }, databases: { state: 'not-in-archive' }, dns: { state: 'not-in-archive' },
+    expect(body.components).toEqual({ files: { state: 'available', files: 1, bytes: 17 }, mailSettings: { state: 'not-restorable', files: 1 }, databases: { state: 'not-in-archive', databases: [], restores: [] }, dns: { state: 'not-in-archive', zones: [] },
       mail: { state: 'available', truncated: false, mailboxes: [{ address: 'gone@alice.example.test', messages: 1, bytes: 12, current: 'missing' }, { address: 'info@alice.example.test', messages: 3, bytes: 34, current: 'exists' }] } })
     expect(f.home.ops).toEqual([])
   })
@@ -150,5 +153,92 @@ describe('mailbox restore', () => {
     const reviewed = await read(await call(limited.deps(resellerCaller), 'preview', { file: FILE, mailboxes: ['info@alice.example.test'] }))
     expect(await code(call(limited.deps(resellerCaller), 'restore', { file: FILE, mailboxes: ['info@alice.example.test'], expectedRevision: reviewed.revision }))).toBe('FORBIDDEN')
     expect([...f.home.ops, ...limited.home.ops].filter(op => /^(?:mkdir|put-bytes):/.test(op))).toEqual([])
+  })
+})
+
+describe('part restore', () => {
+  const DUMP = 'CREATE TABLE wp_options (id int);', ZONE_NAME = 'alice.example.test'
+  const ARCHIVED_ZONE = JSON.stringify({ id: 'old-id', accountId: 'old-account', name: ZONE_NAME, serial: 7, records: [{ id: 'r1', type: 'A', name: '@', value: '192.0.2.7', ttl: 300 }] })
+  const dbTree: Parameters<typeof buildTar>[0] = [{ name: './public_html/index.html', content: '<h1>archived</h1>' }, { name: '.xpanel-backup-data/databases/alice_wp.sql', content: DUMP, mode: 0o600 },
+    { name: '.xpanel-backup-data/dns/' + ZONE_NAME + '.json', content: ARCHIVED_ZONE, mode: 0o600 }, { name: '.xpanel-backup-data/manifest.json', content: '{}', mode: 0o600 }]
+  const dbSetup = async (options: { recorded?: boolean; restore?: boolean; databases?: string[]; zones?: boolean } = {}) => {
+    const f = await setup(), bytes = await buildTar(dbTree, { gzip: true }), archiveSha = createHash('sha256').update(bytes).digest('hex')
+    const root = (f.deps().root)!
+    await writeFile(join(root, account.username, FILE), bytes, { mode: 0o600 })
+    const run = { id: '44444444-4444-4444-8444-444444444444', trigger: 'schedule', actor: 'scheduler', startedAt: '2026-10-26T10:00:00.000Z', finishedAt: '2026-10-26T10:05:00.000Z', state: 'succeeded', destinationIds: [], accounts: 1,
+      mailIncluded: true, databasesIncluded: true, dnsIncluded: true, control: null, entries: [], retention: [], localDeleted: 0,
+      archives: [{ username: 'alice', file: FILE, bytes: bytes.length, sha256: archiveSha, databases: ['alice_wp'], zones: [ZONE_NAME], integrity: 'verified', reason: null, detail: null }] }
+    let ledger: unknown = { version: 1, lastScheduledAt: null, runs: options.recorded === false ? [] : [run], recoveries: [], restores: [] }
+    const controller = createBackupRunController({ readConfig: async () => ({ destinations: null, schedule: null }), provider: null, listAccounts: async () => [], createBackup: null,
+      verifyArchive: async () => { throw new Error('unused') }, readLocalArchive: async () => { throw new Error('unused') }, listLocalArchives: async () => [], deleteLocalArchive: async () => {},
+      storeRecovered: async () => 'exists', readLedger: async () => ledger, writeLedger: async value => { ledger = structuredClone(value) } } satisfies BackupRunDeps)
+    const restored: { database: string; content: string; sha256: string }[] = []
+    const restoreDatabase = vi.fn(async (_account: Account, database: string, inputPath: string, sha256: string) => { restored.push({ database, content: await readFile(inputPath, 'utf8'), sha256 }) })
+    const runner = vi.fn(async (command: BackupCommand) => {
+      const content = command.argv.at(-1)!.endsWith('.sql') ? DUMP : ARCHIVED_ZONE
+      await writeFile(command.stdoutPath!, content, { flag: 'wx' }); return { ok: true, code: 0, stdout: '', stderr: '', stdoutBytes: Buffer.byteLength(content), killed: null }
+    })
+    let zone = { id: 'zone-1', accountId: account.id, name: ZONE_NAME, serial: 40, records: [] as unknown[] }
+    const saveDnsZone = vi.fn(async (next: typeof zone) => { zone = next; return next }), reconcile = vi.fn(async () => {})
+    const deps = (caller: AgentCallerIdentity = rootCaller): ComponentRestoreRouteDeps => {
+      const base = f.deps(caller)
+      return { ...base, store: { ...base.store, listDatabases: async () => (options.databases ?? ['alice_wp']).map(name => ({ name, engine: 'mariadb', trashedAt: null })),
+        listDnsZones: async () => options.zones === false ? [] : [zone], getDnsZone: async name => options.zones === false || name !== ZONE_NAME ? null : zone, saveDnsZone },
+        backupRuns: controller, restoreDatabase: options.restore === false ? null : restoreDatabase, reconcile, run: runner }
+    }
+    return { ...f, root, deps, controller, restored, restoreDatabase, runner, archiveSha, saveDnsZone, reconcile, zone: () => zone, ledger: () => ledger }
+  }
+  const request = (t: { archiveSha: string }, over: Record<string, unknown> = {}) => ({ file: FILE, databases: ['alice_wp'], zones: [], expectedArchiveSha256: t.archiveSha, ...over })
+  it('lists the dumps and zones of a ledger-verified server archive apart from home files', async () => {
+    const t = await dbSetup()
+    const body = await read(await call(t.deps(), 'inventory', { file: FILE }))
+    expect(body.components.files).toEqual({ state: 'available', files: 1, bytes: 17 })
+    expect(body.components.databases).toEqual({ state: 'available', databases: [{ name: 'alice_wp', bytes: Buffer.byteLength(DUMP), current: 'exists' }], restores: [] })
+    expect(body.components.dns).toEqual({ state: 'available', zones: [{ name: ZONE_NAME, bytes: Buffer.byteLength(ARCHIVED_ZONE), current: 'exists' }] })
+    expect((await read(await call((await dbSetup({ restore: false })).deps(), 'inventory', { file: FILE }))).components.databases.state).toBe('unavailable')
+    expect((await read(await call((await dbSetup({ recorded: false })).deps(), 'inventory', { file: FILE }))).components.dns.state).toBe('unavailable')
+    expect((await read(await call((await dbSetup({ databases: [], zones: false })).deps(), 'inventory', { file: FILE }))).components.dns.zones[0].current).toBe('missing')
+  })
+  it('restores each selected part in the background, checks digests, applies zones once and audits per-item results', async () => {
+    const t = await dbSetup()
+    const started = await read(await call(t.deps(), 'parts', request(t, { zones: [ZONE_NAME] })))
+    expect(started).toMatchObject({ context: { username: 'alice' }, archive: { file: FILE, sha256: t.archiveSha }, state: 'running', databases: ['alice_wp'], zones: [ZONE_NAME] })
+    await t.controller.idle()
+    expect(t.restored).toEqual([{ database: 'alice_wp', content: DUMP, sha256: createHash('sha256').update(DUMP).digest('hex') }])
+    expect(t.runner.mock.calls.map(call => call[0].argv.at(-1))).toEqual(['.xpanel-backup-data/databases/alice_wp.sql', '.xpanel-backup-data/dns/' + ZONE_NAME + '.json'])
+    // The archived records return; the zone keeps its current identity and owner, and the serial moves forward.
+    expect(t.zone()).toMatchObject({ id: 'zone-1', accountId: account.id, name: ZONE_NAME, serial: 41, records: [{ id: 'r1', value: '192.0.2.7' }] })
+    expect(t.reconcile).toHaveBeenCalledTimes(1)
+    expect((await t.controller.view()).restores[0]).toMatchObject({ id: started.restoreId, state: 'finished', items: [{ part: 'database', name: 'alice_wp', result: 'restored' }, { part: 'dns', name: ZONE_NAME, result: 'restored' }] })
+    expect(t.audit).toHaveBeenCalledWith(expect.objectContaining({ action: 'backup.parts_restored', outcome: 'ok', target: 'account:alice', detail: expect.objectContaining({ dnsApplied: true }) }))
+    expect((await readdir(join(t.root, 'alice'))).filter(name => name.startsWith('.restore-'))).toEqual([])
+    expect((await read(await call(t.deps(), 'inventory', { file: FILE }))).components.databases.restores).toHaveLength(1)
+  })
+  it('refuses unverified archives, foreign digests, absent or missing parts and resellers without edit-account before any restore', async () => {
+    const t = await dbSetup()
+    expect(await code(call(t.deps(), 'parts', request(t, { expectedArchiveSha256: 'f'.repeat(64) })))).toBe('CONFLICT')
+    expect(await code(call(t.deps(), 'parts', request(t, { databases: ['alice_shop'] })))).toBe('NOT_FOUND')
+    expect(await code(call(t.deps(), 'parts', request(t, { databases: ['bob_wp'] })))).toBe('VALIDATION')
+    expect(await code(call(t.deps(), 'parts', request(t, { databases: [], zones: [] })))).toBe('VALIDATION')
+    const unrecorded = await dbSetup({ recorded: false })
+    expect(await code(call(unrecorded.deps(), 'parts', request(unrecorded)))).toBe('CONFLICT')
+    const dropped = await dbSetup({ databases: [], zones: false })
+    expect(await code(call(dropped.deps(), 'parts', request(dropped)))).toBe('PRECONDITION_FAILED')
+    expect(await code(call(dropped.deps(), 'parts', request(dropped, { databases: [], zones: [ZONE_NAME] })))).toBe('PRECONDITION_FAILED')
+    expect(await code(call((await dbSetup({ restore: false })).deps(), 'parts', request(t)))).toBe('PRECONDITION_FAILED')
+    expect(await code(call(t.deps(resellerCaller), 'parts', request(t)))).toBe('ok')
+    await t.controller.idle()
+    const limited = await setup({ acl: ['list-accounts'] })
+    expect(await code(call({ ...limited.deps(resellerCaller), backupRuns: t.controller, restoreDatabase: t.restoreDatabase }, 'parts', request(t)))).toBe('FORBIDDEN')
+    for (const d of [unrecorded, dropped]) { expect(d.restoreDatabase).not.toHaveBeenCalled(); expect(d.saveDnsZone).not.toHaveBeenCalled() }
+  })
+  it('records a not-attempted item when the archive no longer matches the verified digest', async () => {
+    const t = await dbSetup()
+    await writeFile(join(t.root, 'alice', FILE), await buildTar([...dbTree, { name: './late.txt', content: 'x' }], { gzip: true }))
+    await call(t.deps(), 'parts', request(t))
+    await t.controller.idle()
+    expect((await t.controller.view()).restores[0]).toMatchObject({ state: 'finished', items: [{ part: 'database', name: 'alice_wp', result: 'not-attempted', reason: 'archive-changed' }] })
+    expect(t.restoreDatabase).not.toHaveBeenCalled()
+    expect(t.audit).toHaveBeenCalledWith(expect.objectContaining({ action: 'backup.parts_restored', outcome: 'failed' }))
   })
 })

@@ -51,6 +51,7 @@ import { WHM_SSL_INSTALL_CLIENT_BINDING } from './whm-ssl-install-client.ts'
 import { WHM_SECURITY_CLIENT_BINDING } from './whm-security-client.ts'
 import { WHM_SSH_CLIENT_BINDING } from './whm-ssh-client.ts'
 import { WHM_PHP_CLIENT_BINDING } from './whm-php-client.ts'
+import { WHM_FIREWALL_CLIENT_BINDING } from './whm-firewall-client.ts'
 import { WHM_MAIL_QUEUE_CLIENT_BINDING } from './whm-mail-queue-client.ts'
 import { WHM_UPDATES_CLIENT_BINDING } from './whm-updates-client.ts'
 import { WHM_REPAIR_CLIENT_BINDING } from './whm-repair-client.ts'
@@ -73,6 +74,10 @@ import { WHM_SOFTWARE_CENTER_CLIENT_BINDING } from './whm-software-center-client
 import { WHM_DATABASES_CLIENT_BINDING } from './whm-databases-client.ts'
 import { WHM_DATABASE_TUNING_CLIENT_BINDING } from './whm-database-tuning-client.ts'
 import { WHM_PREFERENCES_CLIENT_BINDING } from './whm-preferences-client.ts'
+import { WHM_PANEL_SETTINGS_CLIENT_BINDING } from './whm-panel-settings-client.ts'
+import { WHM_PANEL_BRANDING_CLIENT_BINDING } from './whm-panel-branding-client.ts'
+import { WHM_LANGUAGES_CLIENT_BINDING } from './whm-languages-client.ts'
+import { WHM_WHMCS_CLIENT_BINDING } from './whm-whmcs-client.ts'
 import { WHM_SERVICE_MANAGER_CLIENT_BINDING } from './whm-service-manager-client.ts'
 import { WHM_CONFIGURATION_HEALTH_CLIENT_BINDING } from './whm-configuration-health-client.ts'
 import { ACCOUNT_PACKAGES_CLIENT_BINDING } from './account-packages-client.ts'
@@ -87,6 +92,7 @@ import { MAIL_SPAM_CLIENT_BINDING } from './mail-spam-client.ts'
 import { MAIL_MAILING_LISTS_CLIENT_BINDING } from './mail-mailing-lists-client.ts'
 import { WHM_BENCHMARK_CLIENT_BINDING } from './whm-benchmark-client.ts'
 import { WHM_TRAFFIC_CLIENT_BINDING } from './whm-traffic-client.ts'
+import { WHM_METERING_CLIENT_BINDING } from './whm-metering-client.ts'
 import { WHM_DEFAULT_INDEX_CLIENT_BINDING } from './whm-default-index-client.ts'
 import { WHM_COMPOSER_CLIENT_BINDING } from './whm-composer-client.ts'
 import { SW_CONTAINERS_CLIENT_BINDING } from './sw-containers-client.ts'
@@ -95,6 +101,7 @@ import { SW_DEPLOYMENTS_CLIENT_BINDING } from './sw-deployments-client.ts'
 import { SW_APP_PROJECTS_CLIENT_BINDING } from './sw-app-projects-client.ts'
 import { SW_OPTIMIZE_CLIENT_BINDING } from './sw-optimize-client.ts'
 import { SW_APPLICATIONS_CLIENT_BINDING } from './sw-applications-client.ts'
+import { ACCOUNT_RUNTIME_CLIENT_BINDING } from './account-runtime-client.ts'
 import { ACCOUNT_DYNAMIC_DNS_CLIENT_BINDING } from './account-dynamic-dns-client.ts'
 import { ACCOUNT_SITE_PUBLISHER_CLIENT_BINDING } from './account-site-publisher-client.ts'
 import { ACCOUNT_GIT_CLIENT_BINDING } from './account-git-client.ts'
@@ -181,15 +188,6 @@ export interface ReconcilePipelineState {
   updatedAt: string | null
 }
 
-export interface TerminalOutputLine {
-  at: string
-  sessionId: string
-  username: string
-  stream: 'stdout' | 'stderr' | 'exit'
-  chunk: string
-  exitCode?: number
-}
-
 export interface LiveJobStatus {
   jobId: string
   kind: string
@@ -205,7 +203,6 @@ export interface LiveEventState {
   reconcile: ReconcilePipelineState
   ioAnalytics: IoAnalyticsSnapshot | null
   websiteAnalyticsByDomain: Record<string, WebsiteAnalyticsSnapshot>
-  terminalLinesBySession: Record<string, TerminalOutputLine[]>
   recentAuditEntries: AuditEntry[]
   recentJobs: LiveJobStatus[]
   servicesHealth: { name: string; active: boolean; enabled: boolean }[]
@@ -216,11 +213,9 @@ export interface LiveEventStore {
   setConnectionState: (connectionState: WsConnectionState) => LiveEventState
   applyEvent: (event: LiveEvent) => LiveEventState
   dispatch: (event: LiveEvent) => LiveEventState
-  clearTerminal: (sessionId: string) => LiveEventState
   subscribe: (listener: (state: LiveEventState, event?: LiveEvent) => void) => () => void
 }
 
-const MAX_TERMINAL_LINES = 250
 const MAX_RECENT_NOTIFICATIONS = 50
 
 export function createInitialLiveEventState(
@@ -247,7 +242,6 @@ export function createInitialLiveEventState(
     },
     ioAnalytics: null,
     websiteAnalyticsByDomain: {},
-    terminalLinesBySession: {},
     recentAuditEntries: [],
     recentJobs: [],
     servicesHealth: [],
@@ -358,26 +352,6 @@ export function reduceLiveEvent(
       }
     }
 
-    case 'terminal.output': {
-      const existing = state.terminalLinesBySession[event.data.sessionId] ?? []
-      const nextLine: TerminalOutputLine = {
-        at: event.at,
-        sessionId: event.data.sessionId,
-        username: event.data.username,
-        stream: event.data.stream,
-        chunk: event.data.chunk,
-        exitCode: event.data.exitCode,
-      }
-      const updatedLines = [...existing, nextLine].slice(-MAX_TERMINAL_LINES)
-      return {
-        ...state,
-        terminalLinesBySession: {
-          ...state.terminalLinesBySession,
-          [event.data.sessionId]: updatedLines,
-        },
-      }
-    }
-
     case 'audit.entry': {
       const recentAuditEntries = [event.data, ...state.recentAuditEntries].slice(
         0,
@@ -452,17 +426,6 @@ export function createLiveEventStore(
     },
     applyEvent,
     dispatch: applyEvent,
-    clearTerminal: (sessionId: string): LiveEventState => {
-      state = {
-        ...state,
-        terminalLinesBySession: {
-          ...state.terminalLinesBySession,
-          [sessionId]: [],
-        },
-      }
-      notify()
-      return state
-    },
     subscribe: (listener) => {
       listeners.add(listener)
       return () => {
@@ -585,7 +548,7 @@ export function renderReconcileBanner(
 /**
  * Embedded client-side JavaScript that connects to `ws(s)://<host>/api/ws`,
  * automatically reconnects with exponential backoff, updates live KPIs, IO charts,
- * website analytics, reconcile stepper banner, and jailed terminal output in real time
+ * website analytics, and the reconcile stepper banner in real time
  * without page reload, and binds keyboard shortcuts (`Cmd/Ctrl+K`, `/`, `g d`, `g a`, `g f`, `Escape`).
  */
 export const BROWSER_REALTIME_SCRIPT = /* js */ `
@@ -706,18 +669,6 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     if (p95El) p95El.textContent = snapshot.totals.p95RequestTimeMs.toFixed(1) + ' ms';
   }
 
-  function appendTerminalOutputDom(data) {
-    var out = document.querySelector('[data-terminal-output="' + data.sessionId + '"]') ||
-              document.querySelector('[data-terminal-output]');
-    if (!out) return;
-    var line = document.createElement('div');
-    line.className = 'xp-terminal__line xp-mono';
-    line.setAttribute('data-stream', data.stream || 'stdout');
-    line.textContent = data.chunk || '';
-    out.appendChild(line);
-    out.scrollTop = out.scrollHeight;
-  }
-
   function handleLiveEvent(event) {
     if (!event || !event.kind) return;
     if (
@@ -730,8 +681,6 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       updateIoMetricsDom(event.data);
     } else if (event.kind === 'website.analytics') {
       updateWebsiteAnalyticsDom(event.data);
-    } else if (event.kind === 'terminal.output') {
-      appendTerminalOutputDom(event.data);
     } else if (event.kind === 'mail.changed' || event.kind === 'mail.flags' || event.kind === 'mail.received') {
       if (event.scope && typeof event.scope.mailboxLogin === 'string') {
         document.dispatchEvent(new CustomEvent('xpanel:mail-invalidated', { detail: { mailbox: event.scope.mailboxLogin } }));
@@ -2265,7 +2214,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${WHM_SSL_INSTALL_CLIENT_BINDING})(askDialog);
     (${WHM_SECURITY_CLIENT_BINDING})();
     (${WHM_SSH_CLIENT_BINDING})(askDialog);
-    (${WHM_PHP_CLIENT_BINDING})();
+    (${WHM_PHP_CLIENT_BINDING})(askDialog);
+    (${WHM_FIREWALL_CLIENT_BINDING})(askDialog);
     (${WHM_MAIL_QUEUE_CLIENT_BINDING})(askDialog);
     (${WHM_SERVICE_DETAIL_CLIENT_BINDING})(askDialog);
     (${WHM_DNS_TOOLS_CLIENT_BINDING})(askDialog);
@@ -2290,6 +2240,10 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${WHM_DATABASES_CLIENT_BINDING})(askDialog);
     (${WHM_DATABASE_TUNING_CLIENT_BINDING})();
     (${WHM_PREFERENCES_CLIENT_BINDING})();
+    (${WHM_PANEL_SETTINGS_CLIENT_BINDING})(askDialog);
+    (${WHM_PANEL_BRANDING_CLIENT_BINDING})(askDialog);
+    (${WHM_LANGUAGES_CLIENT_BINDING})(askDialog);
+    (${WHM_WHMCS_CLIENT_BINDING})(askDialog);
     (${WHM_SERVICE_MANAGER_CLIENT_BINDING})(askDialog);
     (${WHM_CONFIGURATION_HEALTH_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_PACKAGES_CLIENT_BINDING})(askDialog);
@@ -2304,6 +2258,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${MAIL_MAILING_LISTS_CLIENT_BINDING})(askDialog);
     (${WHM_BENCHMARK_CLIENT_BINDING})();
     (${WHM_TRAFFIC_CLIENT_BINDING})();
+    (${WHM_METERING_CLIENT_BINDING})();
     (${WHM_DEFAULT_INDEX_CLIENT_BINDING})(askDialog);
     (${WHM_COMPOSER_CLIENT_BINDING})(askDialog);
     (${SW_CONTAINERS_CLIENT_BINDING})(askDialog);
@@ -2312,6 +2267,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${SW_APP_PROJECTS_CLIENT_BINDING})();
     (${SW_OPTIMIZE_CLIENT_BINDING})();
     (${SW_APPLICATIONS_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_RUNTIME_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_DYNAMIC_DNS_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_SITE_PUBLISHER_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_GIT_CLIENT_BINDING})(askDialog);
@@ -2377,7 +2333,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       backupAccount.addEventListener('change', loadBackups);
       backupRoot.querySelector('[data-backup-create]').addEventListener('click', function () {
         note(backupStatus, xpT('Creating the backup. This can take a while.'));
-        window.xpanelSessionRequest('${xwhmPageAdapters.backups.create.method}', '${xwhmPageAdapters.backups.create.path}' + backupAccount.value, { op: 'create' }).then(function () { note(backupStatus, xpT('The backup was created.')); return loadBackups(); }).catch(function (error) { note(backupStatus, failText(error)); });
+        window.xpanelSessionRequest('${xwhmPageAdapters.backups.create.method}', '${xwhmPageAdapters.backups.create.path}' + backupAccount.value, { op: 'create' }).then(function () { note(backupStatus, xpT('The backup job started at low priority. Read the list again when it finishes.')); return loadBackups(); }).catch(function (error) { note(backupStatus, failText(error)); });
       });
       loadBackups();
     }

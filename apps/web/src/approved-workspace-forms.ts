@@ -298,14 +298,19 @@ function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
           if (source.length > 255 || /[\r\n\0]/.test(source) || comment.length > 4096 || /[\r\n\0]/.test(comment)) throw new Error('text')
           const payload = { kind: 'port', action, protocol, port: port.trim(), source: source || null, forwardTo: null, list: null, comment, enabled: true }
           mutationStarted = true
-          result = await send('POST', '/api/firewall/rules', payload)
+          result = await send('POST', '/api/firewall/rules', values.position === 'top' ? { ...payload, position: 0 } : payload)
           verificationPending = true
           if (!workspaceRecord(result) || !workspaceRecord(result.rule) || typeof result.rule.id !== 'string' || !workspaceValuesMatch(payload, result.rule)) throw new Error('unverified')
           const ruleId = result.rule.id
           const readback = await send('GET', '/api/firewall')
           const stored = workspaceRecord(readback) && Array.isArray(readback.rules) ? readback.rules.find(item => workspaceRecord(item) && item.id === ruleId) : undefined
           verified = workspaceValuesMatch(payload, stored)
-          savedMessage = copy('The firewall rule was stored and read back. Host activation and traffic enforcement are not verified.')
+          // The readback over this connection proves the session still reaches the panel; without this confirmation the server reverts the change.
+          const confirmation = workspaceRecord(result.confirmation) ? result.confirmation.id : undefined
+          if (verified && typeof confirmation === 'string') verified = workspaceRecord(await send('POST', '/api/firewall/confirm', { id: confirmation }))
+          savedMessage = typeof confirmation === 'string'
+            ? copy('The firewall rule was stored, read back and confirmed from this session. Traffic enforcement is not verified.')
+            : copy('The firewall rule was stored and read back. Host activation and traffic enforcement are not verified.')
         } else if (form.hasAttribute('data-reseller-update-form')) {
           const id = form.dataset.resellerId
           if (!uuid(id)) throw new Error('identity')

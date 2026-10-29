@@ -188,7 +188,8 @@ describe('account backups', () => {
     await expect(restoreAccountBackup({ executor, account, file: archiveName, inspectSource: async () => {} })).resolves.toEqual({ file: archiveName })
     const extract = executor.executedActions.find(action => action.kind === 'exec' && action.argv.includes('--extract'))
     expect(extract).toMatchObject({ kind: 'exec', runAsUser: 'alice' })
-    expect(extract?.kind === 'exec' && extract.argv.some(arg => arg.startsWith('--exclude='))).toBe(false)
+    // A full restore brings back every home member; only the root-written database dumps stay out of the home.
+    expect(extract?.kind === 'exec' && extract.argv.filter(arg => arg.startsWith('--exclude='))).toEqual(['--exclude=./.xpanel-backup-data', '--exclude=.xpanel-backup-data'])
     // The existing strict FakeHostExecutor argv validator also checks the home-only variant.
     const beforeHomeRestore = executor.executedActions.length
     await expect(restoreAccountBackup({ executor, account, file: archiveName, preserveMail: true, inspectSource: async () => {} })).resolves.toEqual({ file: archiveName })

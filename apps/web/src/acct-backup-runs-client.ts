@@ -5,11 +5,19 @@ import './i18n.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 
 export interface WhmBackupRunEntry { username: string; destinationId: string; file: string | null; bytes: number | null; sha256: string | null; outcome: 'verified' | 'failed' | 'unknown'; reason: string | null }
-export interface WhmBackupRun { id: string; trigger: 'schedule' | 'manual'; startedAt: string; finishedAt: string | null; state: 'running' | 'succeeded' | 'failed' | 'unknown'; accounts: number; mailIncluded: boolean; entries: WhmBackupRunEntry[]; retention: { destinationId: string; deleted: number; outcome: string }[] }
+/** The local archive of one account (or the `_control` snapshot) in a run: verified only after a complete integrity read on the server. */
+export interface WhmBackupRunArchive { username: string; file: string | null; bytes: number | null; sha256: string | null; databases: string[]; zones: string[]; integrity: 'verified' | 'failed'; reason: string | null; detail: string | null }
+export interface WhmBackupRun {
+  id: string; trigger: 'schedule' | 'manual' | 'account'; startedAt: string; finishedAt: string | null; state: 'running' | 'succeeded' | 'failed' | 'unknown'; accounts: number; destinationIds: string[]
+  mailIncluded: boolean; databasesIncluded: boolean; dnsIncluded: boolean; archives: WhmBackupRunArchive[]; control: WhmBackupRunArchive | null; entries: WhmBackupRunEntry[]
+  retention: { destinationId: string; deleted: number; outcome: string }[]; localDeleted: number | null
+}
+export interface WhmBackupPartRestore { id: string; username: string; file: string; startedAt: string; finishedAt: string | null; state: 'running' | 'finished' | 'unknown'; items: { part: 'database' | 'dns'; name: string; result: 'restored' | 'failed' | 'not-attempted'; reason: string | null }[] }
 export interface WhmBackupRecovery { id: string; destinationId: string; username: string; file: string; startedAt: string; state: 'running' | 'recovered' | 'failed' | 'unknown'; reason: string | null }
 export interface WhmBackupRunsView {
   available: boolean; reason: string | null; revision: string; schedule: { enabled: boolean; cron: string; nextRunAt: string | null; lastScheduledAt: string | null } | null
-  activeId: string | null; runs: WhmBackupRun[]; recoveries: WhmBackupRecovery[]
+  storage: { freeBytes: number; totalBytes: number } | null
+  activeId: string | null; runs: WhmBackupRun[]; recoveries: WhmBackupRecovery[]; restores: WhmBackupPartRestore[]
 }
 export interface WhmBackupRetentionPlan { destinationId: string; planDigest: string; rows: { name: string; username: string; createdAt: string; bytes: number; action: 'keep' | 'delete'; reason: string }[] }
 
@@ -19,35 +27,57 @@ export function readWhmBackupRunsView(raw: unknown): WhmBackupRunsView {
   const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
   const uuid = (value: unknown): string => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value) ? value : bad()
   const stamp = (value: unknown, nullable = false): string | null => nullable && value === null ? null : typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) ? value : bad()
-  const archive = (username: unknown, file: unknown): boolean => typeof username === 'string' && /^[a-z][a-z0-9]{0,15}$/.test(username) && typeof file === 'string' && file.startsWith('xpanel-backup-' + username + '-') && /^xpanel-backup-[a-z][a-z0-9]{0,15}-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\.tar\.gz$/.test(file)
+  const archive = (username: unknown, file: unknown): boolean => typeof username === 'string' && typeof file === 'string' && (username === '_control'
+    ? /^xpanel-control-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\.tar\.gz$/.test(file)
+    : /^[a-z][a-z0-9]{0,15}$/.test(username) && file.startsWith('xpanel-backup-' + username + '-') && /^xpanel-backup-[a-z][a-z0-9]{0,15}-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\.tar\.gz$/.test(file))
   const count = (value: unknown): number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : bad()
-  if (!object(raw) || typeof raw.available !== 'boolean' || raw.nativeQualified !== false || typeof raw.revision !== 'string' || !/^[0-9a-f]{64}$/.test(raw.revision) || !Array.isArray(raw.runs) || raw.runs.length > 30 || !Array.isArray(raw.recoveries) || raw.recoveries.length > 30
-    || !(raw.reason === null || ['no_executor', 'no_provider', 'no_schedule', 'no_destination', 'invalid_configuration'].includes(raw.reason as string)) || raw.available !== (raw.reason === null)) return bad()
+  const database = (username: string, value: unknown): string => typeof value === 'string' && /^[a-z][a-z0-9]{0,15}_[a-z0-9_]{1,47}$/.test(value) && value.startsWith(username + '_') ? value : bad()
+  const zone = (value: unknown): string => typeof value === 'string' && value.length <= 253 && /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$/.test(value) ? value : bad()
+  if (!object(raw) || typeof raw.available !== 'boolean' || raw.nativeQualified !== false || typeof raw.revision !== 'string' || !/^[0-9a-f]{64}$/.test(raw.revision) || !Array.isArray(raw.runs) || raw.runs.length > 30 || !Array.isArray(raw.recoveries) || raw.recoveries.length > 30 || !Array.isArray(raw.restores) || raw.restores.length > 30
+    || !(raw.reason === null || ['no_executor', 'no_provider', 'no_schedule', 'no_destination', 'invalid_configuration', 'invalid_ledger'].includes(raw.reason as string)) || raw.available !== (raw.reason === null)) return bad()
   let schedule: WhmBackupRunsView['schedule'] = null
   if (raw.schedule !== null) {
     if (!object(raw.schedule) || typeof raw.schedule.enabled !== 'boolean' || typeof raw.schedule.cron !== 'string' || !/^[0-9*,/ -]{1,100}$/.test(raw.schedule.cron)) return bad()
     schedule = { enabled: raw.schedule.enabled, cron: raw.schedule.cron, nextRunAt: stamp(raw.schedule.nextRunAt, true), lastScheduledAt: stamp(raw.schedule.lastScheduledAt, true) }
   }
+  const storage = raw.storage === null ? null : object(raw.storage) && count(raw.storage.freeBytes) <= count(raw.storage.totalBytes) ? { freeBytes: raw.storage.freeBytes as number, totalBytes: raw.storage.totalBytes as number } : bad()
+  const archiveOf = (entry: unknown): WhmBackupRunArchive => {
+    if (!object(entry) || typeof entry.username !== 'string' || !(entry.file === null || archive(entry.username, entry.file)) || !['verified', 'failed'].includes(entry.integrity as string) || !Array.isArray(entry.databases) || entry.databases.length > 1000 || !Array.isArray(entry.zones) || entry.zones.length > 1000
+      || !(entry.sha256 === null || typeof entry.sha256 === 'string' && /^[0-9a-f]{64}$/.test(entry.sha256)) || !(entry.bytes === null || count(entry.bytes) >= 0) || (entry.integrity === 'verified') !== (entry.reason === null) || !(entry.reason === null || ['backup_failed', 'integrity_failed'].includes(entry.reason as string))
+      || !(entry.detail === null || typeof entry.detail === 'string' && entry.detail.length <= 500 && entry.integrity === 'failed')) return bad()
+    return { username: entry.username, file: entry.file as string | null, bytes: entry.bytes as number | null, sha256: entry.sha256 as string | null, databases: entry.databases.map(name => database(entry.username as string, name)), zones: entry.zones.map(zone),
+      integrity: entry.integrity as WhmBackupRunArchive['integrity'], reason: entry.reason as string | null, detail: entry.detail as string | null }
+  }
   const runs = raw.runs.map((item): WhmBackupRun => {
-    if (!object(item) || !['schedule', 'manual'].includes(item.trigger as string) || !['running', 'succeeded', 'failed', 'unknown'].includes(item.state as string) || typeof item.mailIncluded !== 'boolean' || item.databasesIncluded !== false || !Array.isArray(item.entries) || item.entries.length > 2000 || !Array.isArray(item.retention)) return bad()
+    if (!object(item) || !['schedule', 'manual', 'account'].includes(item.trigger as string) || !['running', 'succeeded', 'failed', 'unknown'].includes(item.state as string) || typeof item.mailIncluded !== 'boolean' || typeof item.databasesIncluded !== 'boolean' || typeof item.dnsIncluded !== 'boolean'
+      || !Array.isArray(item.destinationIds) || item.destinationIds.length > 50 || !Array.isArray(item.archives) || item.archives.length > 2000 || !(item.localDeleted === null || count(item.localDeleted) >= 0) || !Array.isArray(item.entries) || item.entries.length > 2000 || !Array.isArray(item.retention)) return bad()
     const entries = item.entries.map((entry): WhmBackupRunEntry => {
       if (!object(entry) || !['verified', 'failed', 'unknown'].includes(entry.outcome as string) || !(entry.file === null || archive(entry.username, entry.file)) || typeof entry.username !== 'string' || !(entry.reason === null || typeof entry.reason === 'string' && /^[a-z_]{1,40}$/.test(entry.reason))
         || !(entry.sha256 === null || typeof entry.sha256 === 'string' && /^[0-9a-f]{64}$/.test(entry.sha256)) || !(entry.bytes === null || count(entry.bytes) >= 0) || entry.outcome === 'verified' && (!entry.file || !entry.sha256 || !entry.bytes || entry.reason !== null)) return bad()
       return { username: entry.username as string, destinationId: uuid(entry.destinationId), file: entry.file as string | null, bytes: entry.bytes as number | null, sha256: entry.sha256 as string | null, outcome: entry.outcome as WhmBackupRunEntry['outcome'], reason: entry.reason as string | null }
     })
+    const archives = item.archives.map(archiveOf), control = item.control === null ? null : archiveOf(item.control)
+    if (archives.some(entry => entry.username === '_control') || control && control.username !== '_control') return bad()
     const state = item.state as WhmBackupRun['state']
-    if (state === 'succeeded' && (!entries.length || entries.some(entry => entry.outcome !== 'verified'))) return bad()
-    return { id: uuid(item.id), trigger: item.trigger as WhmBackupRun['trigger'], startedAt: stamp(item.startedAt)!, finishedAt: stamp(item.finishedAt, true), state, accounts: count(item.accounts), mailIncluded: item.mailIncluded, entries,
+    if (state === 'succeeded' && (!archives.length || [...archives, ...control ? [control] : []].some(entry => entry.integrity !== 'verified') || entries.some(entry => entry.outcome !== 'verified'))) return bad()
+    return { id: uuid(item.id), trigger: item.trigger as WhmBackupRun['trigger'], startedAt: stamp(item.startedAt)!, finishedAt: stamp(item.finishedAt, true), state, accounts: count(item.accounts), destinationIds: item.destinationIds.map(uuid), mailIncluded: item.mailIncluded, databasesIncluded: item.databasesIncluded, dnsIncluded: item.dnsIncluded,
+      archives, control, entries, localDeleted: item.localDeleted as number | null,
       retention: item.retention.map(row => object(row) && ['verified', 'failed', 'unknown'].includes(row.outcome as string) ? { destinationId: uuid(row.destinationId), deleted: count(row.deleted), outcome: row.outcome as string } : bad()) }
   })
   const recoveries = raw.recoveries.map((item): WhmBackupRecovery => {
-    if (!object(item) || !archive(item.username, item.file) || !['running', 'recovered', 'failed', 'unknown'].includes(item.state as string) || !(item.reason === null || ['exists', 'missing', 'mismatch', 'transport', 'interrupted'].includes(item.reason as string))) return bad()
+    if (!object(item) || item.username === '_control' || !archive(item.username, item.file) || !['running', 'recovered', 'failed', 'unknown'].includes(item.state as string) || !(item.reason === null || ['exists', 'missing', 'mismatch', 'transport', 'interrupted'].includes(item.reason as string))) return bad()
     return { id: uuid(item.id), destinationId: uuid(item.destinationId), username: item.username as string, file: item.file as string, startedAt: stamp(item.startedAt)!, state: item.state as WhmBackupRecovery['state'], reason: item.reason as string | null }
   })
-  const running = [...runs, ...recoveries].filter(item => item.state === 'running')
+  const restores = raw.restores.map((item): WhmBackupPartRestore => {
+    if (!object(item) || item.username === '_control' || !archive(item.username, item.file) || !['running', 'finished', 'unknown'].includes(item.state as string) || !Array.isArray(item.items) || !item.items.length || item.items.length > 20) return bad()
+    const items = item.items.map(row => object(row) && ['database', 'dns'].includes(row.part as string) && ['restored', 'failed', 'not-attempted'].includes(row.result as string) && (row.result === 'restored') === (row.reason === null) && (row.reason === null || typeof row.reason === 'string' && /^[a-z-]{1,40}$/.test(row.reason))
+      ? { part: row.part as 'database' | 'dns', name: row.part === 'database' ? database(item.username as string, row.name) : zone(row.name), result: row.result as WhmBackupPartRestore['items'][number]['result'], reason: row.reason as string | null } : bad())
+    return { id: uuid(item.id), username: item.username as string, file: item.file as string, startedAt: stamp(item.startedAt)!, finishedAt: stamp(item.finishedAt, true), state: item.state as WhmBackupPartRestore['state'], items }
+  })
+  const running = [...runs, ...recoveries, ...restores].filter(item => item.state === 'running')
   const activeId = raw.activeId === null ? null : uuid(raw.activeId)
   if (running.length > 1 || (running[0]?.id ?? null) !== activeId) return bad()
-  return { available: raw.available, reason: raw.reason as string | null, revision: raw.revision, schedule, activeId, runs, recoveries }
+  return { available: raw.available, reason: raw.reason as string | null, revision: raw.revision, schedule, storage, activeId, runs, recoveries, restores }
 }
 /** Strict reader for GET /api/backups/workspace/destinations/<id>/retention. */
 export function readWhmBackupRetentionPlan(raw: unknown, destinationId: string): WhmBackupRetentionPlan {
@@ -55,8 +85,9 @@ export function readWhmBackupRetentionPlan(raw: unknown, destinationId: string):
   const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
   if (!object(raw) || raw.destinationId !== destinationId || typeof raw.planDigest !== 'string' || !/^[0-9a-f]{64}$/.test(raw.planDigest) || !Array.isArray(raw.rows) || raw.rows.length > 10000) return bad()
   const rows = raw.rows.map(row => {
-    if (!object(row) || typeof row.name !== 'string' || typeof row.username !== 'string' || !row.name.startsWith(row.username + '/xpanel-backup-' + row.username + '-') || typeof row.createdAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(row.createdAt)
-      || typeof row.bytes !== 'number' || !Number.isSafeInteger(row.bytes) || row.bytes < 0 || !['newest', 'protected', 'within_count', 'within_days', 'expired'].includes(row.reason as string) || row.action !== (row.reason === 'expired' ? 'delete' : 'keep')) return bad()
+    if (!object(row) || typeof row.name !== 'string' || typeof row.username !== 'string'
+      || !(row.username === '_control' ? row.name.startsWith('_control/xpanel-control-') : row.name.startsWith(row.username + '/xpanel-backup-' + row.username + '-')) || typeof row.createdAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(row.createdAt)
+      || typeof row.bytes !== 'number' || !Number.isSafeInteger(row.bytes) || row.bytes < 0 || !['newest', 'protected', 'within_count', 'weekly', 'monthly', 'within_days', 'expired'].includes(row.reason as string) || row.action !== (row.reason === 'expired' ? 'delete' : 'keep')) return bad()
     return { name: row.name, username: row.username, createdAt: row.createdAt, bytes: row.bytes, action: row.action as 'keep' | 'delete', reason: row.reason as string }
   })
   return { destinationId, planDigest: raw.planDigest, rows }
@@ -93,10 +124,11 @@ function bindWhmBackupRuns(ask: ((options: Record<string, unknown>) => Promise<u
     const stateLabel = (state: string): string => ({ running: t('Running'), succeeded: t('Succeeded'), failed: t('Failed'), unknown: t('Outcome unknown; review required'), recovered: t('Recovered'), verified: t('Verified') } as Record<string, string>)[state] ?? state
     const reasonText = (reason: string | null): string => ({
       no_executor: t('Scheduled backups cannot run here: this server has no Linux host executor for account archives.'),
-      no_provider: t('No trusted remote transport is configured. Add an S3-compatible credential profile on the server, then test and activate a destination.'),
-      no_schedule: t('No backup schedule is saved. Save a schedule that selects at least one active destination.'),
+      no_provider: t('No trusted remote transport is configured. Add an S3-compatible or SFTP credential profile on the server, then test and activate a destination.'),
+      no_schedule: t('No backup schedule is saved. Save a schedule; without destinations it keeps verified copies on this server only.'),
       no_destination: t('No selected destination is enabled with a current verification. Test and activate a destination first.'),
       invalid_configuration: t('The saved backup configuration could not be read. Review the schedule and destinations.'),
+      invalid_ledger: t('The run history file {path} is in an older or unreadable format. Move it aside (for example to {path}.old) to start a new history; nothing runs until then.', { path: '/var/lib/xpanel/backup-runs.json' }),
     } as Record<string, string>)[reason ?? ''] ?? t('Backup runs were read.')
     const paint = (next: WhmBackupRunsView): void => {
       view = next
@@ -106,11 +138,12 @@ function bindWhmBackupRuns(ask: ((options: Record<string, unknown>) => Promise<u
       facts('last', next.schedule?.lastScheduledAt ? formatDisplayDateTime(next.schedule.lastScheduledAt) : t('None'))
       const runs = fill('runs', next.runs.length)
       for (const run of next.runs) {
-        const verified = run.entries.filter(entry => entry.outcome === 'verified').length
-        row(runs, [formatDisplayDateTime(run.startedAt), run.trigger === 'schedule' ? t('Scheduled') : t('Run now'), stateLabel(run.state), t('{verified} of {total}', { verified, total: run.entries.length }), run.mailIncluded ? t(msgctxt('acct-backup-runs-client', 'Included')) : t('Not included'),
+        // A copy counts once its local archive passed the integrity read and every remote copy was re-read.
+        const verified = run.archives.filter(item => item.integrity === 'verified' && run.entries.every(entry => entry.username !== item.username || entry.outcome === 'verified')).length
+        row(runs, [formatDisplayDateTime(run.startedAt), run.trigger === 'schedule' ? t('Scheduled') : run.trigger === 'account' ? t('Selected accounts') : t('Run now'), stateLabel(run.state), t('{verified} of {total}', { verified, total: run.archives.length }), run.mailIncluded ? t(msgctxt('acct-backup-runs-client', 'Included')) : t('Not included'),
           run.retention.length ? run.retention.map(item => t('{deleted, plural, one {# archive deleted} other {# archives deleted}} ({state})', { deleted: item.deleted, state: stateLabel(item.outcome) })).join(', ') : t('Not applied')])
       }
-      const copies = next.runs.flatMap(run => run.entries.filter(entry => entry.outcome === 'verified').map(entry => ({ run, entry })))
+      const copies = next.runs.flatMap(run => run.entries.filter(entry => entry.outcome === 'verified' && entry.username !== '_control').map(entry => ({ run, entry })))
       const copyRows = fill('copies', copies.length)
       for (const { run, entry } of copies) {
         const button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.textContent = t('Recover to this server')

@@ -11,13 +11,14 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
   const display = (value: unknown): string => String(value ?? '').replace(/[\u0660-\u0669\u06f0-\u06f9]/g, digit => String(digit.charCodeAt(0) - (digit.charCodeAt(0) >= 0x06f0 ? 0x06f0 : 0x0660)))
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
   const states = ['created', 'connected', 'inventoried', 'selected', 'reviewed', 'applying', 'completed', 'failed', 'cancelled']
-  type Entry = { session: Record<string, unknown>; revision: string; review: Record<string, unknown> | null; digest: string | null }
+  type Entry = { session: Record<string, unknown>; revision: string; review: Record<string, unknown> | null; digest: string | null; results: Record<string, unknown>; running: boolean; stopRequested: boolean }
   const parseEntry = (value: unknown): Entry => {
     if (!object(value) || !object(value.session) || typeof value.session.id !== 'string' || !uuid.test(value.session.id) || !states.includes(String(value.session.state)) || typeof value.revision !== 'string' || !/^[0-9a-f]{64}$/.test(value.revision) || !object(value.session.auth) || !object(value.session.selection)) throw new Error('invalid_transfer_state')
-    return { session: value.session, revision: value.revision, review: object(value.review) ? value.review : null, digest: typeof value.digest === 'string' && /^[0-9a-f]{64}$/.test(value.digest) ? value.digest : null }
+    return { session: value.session, revision: value.revision, review: object(value.review) ? value.review : null, digest: typeof value.digest === 'string' && /^[0-9a-f]{64}$/.test(value.digest) ? value.digest : null,
+      results: object(value.results) ? value.results : {}, running: value.running === true, stopRequested: value.stopRequested === true }
   }
   const stateLabel = (state: string): string => {
-    const copy: Record<string, string> = { created: msgid('Source review saved'), connected: msgid('Source connection observed'), inventoried: msgid('Inventory read'), selected: msgid('Selection saved'), reviewed: msgid('Review ready'), applying: msgid('Execution pending observation'), completed: msgid('Executor reported completion'), failed: msgid('Failed'), cancelled: msgctxt('whm-transfer-client', 'Cancelled') }
+    const copy: Record<string, string> = { created: msgid('Source review saved'), connected: msgid('Source connection observed'), inventoried: msgid('Inventory read'), selected: msgid('Selection saved'), reviewed: msgid('Review ready'), applying: msgid('Transfer running'), completed: msgid('Transfer finished'), failed: msgid('Failed'), cancelled: msgctxt('whm-transfer-client', 'Cancelled') }
     return ((copy[state]) ? t(copy[state]!) : null) ?? t(msgctxt('whm-transfer-client', 'Not read'))
   }
   document.querySelectorAll<HTMLElement>('[data-transfer-workspace]').forEach(root => {
@@ -35,9 +36,13 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     const plans = root.querySelector<HTMLElement>('[data-transfer-plans]')!
     const reviewBox = root.querySelector<HTMLElement>('[data-transfer-review-results]')!
     const archiveBox = root.querySelector<HTMLElement>('[data-transfer-archive-review]')!
-    if (!sessionSelect || !credential || !conflict || !resolution || !status || !accounts || !plans || !reviewBox || !archiveBox) return
+    const importSelect = root.querySelector<HTMLSelectElement>('[data-transfer-import]')!
+    const importPlan = root.querySelector<HTMLSelectElement>('[data-transfer-import-plan]')!
+    const keyBox = root.querySelector<HTMLElement>('[data-transfer-ssh-key-value]')!
+    if (!sessionSelect || !credential || !conflict || !resolution || !status || !accounts || !plans || !reviewBox || !archiveBox || !importSelect || !importPlan || !keyBox) return
     let entries: Entry[] = [], selected: Entry | null = null, loaded = false, busy = false, dirty = false, reviewRequired = false
-    let capabilities = { discover: false, execute: false, archiveReview: false, archiveMaxBytes: 0 }
+    let capabilities = { discover: false, execute: false, cpanelImport: false, cpanelUploadMaxBytes: 0 }
+    let imports: Record<string, unknown>[] = [], poller: ReturnType<typeof setTimeout> | null = null
     // Whole-server migration: every source account and plan is selected and the choice is not editable.
     const wholeServer = root.dataset.transferScope === 'server'
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
@@ -60,8 +65,16 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       button('resolve').disabled = locked || selectionChanged() || !['selected', 'reviewed'].includes(state) || !conflict.options.length
       button('review').disabled = locked || selectionChanged() || state !== 'selected'
       button('run').disabled = locked || selectionChanged() || !capabilities.execute || state !== 'reviewed' || !selected?.digest
+      button('stop').disabled = busy || !loaded || !admitted() || state !== 'applying' || selected?.stopRequested === true
       button('cancel').disabled = locked || !['created', 'connected', 'inventoried', 'selected', 'reviewed'].includes(state)
-      button('inspect').disabled = locked || !capabilities.archiveReview
+      const chosen = imports.find(item => item.id === importSelect.value)
+      button('inspect').disabled = locked || !capabilities.cpanelImport
+      button('fetch').disabled = locked || !capabilities.cpanelImport
+      button('ssh-key').disabled = locked || !capabilities.cpanelImport
+      importSelect.disabled = busy || !imports.length || !admitted()
+      importPlan.disabled = locked || chosen?.state !== 'review'
+      button('import-run').disabled = locked || chosen?.state !== 'review' || !importPlan.value || (Array.isArray(chosen?.conflicts) && chosen.conflicts.length > 0)
+      button('import-discard').disabled = locked || !chosen || ['uploading', 'fetching', 'inspecting', 'importing'].includes(String(chosen.state))
       field('transfer-resolution-target').disabled = locked || !['rename', 'map-plan'].includes(resolution.value)
       if (wholeServer) [accounts, plans].forEach(container => container.querySelectorAll<HTMLInputElement>('input').forEach(input => { input.disabled = true }))
       root.setAttribute('aria-busy', String(busy))
@@ -126,22 +139,23 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       const absent = t('No parsed archive review was returned.')
       for (const body of detailBodies) fillBody(body, [], absent)
       fillBody(warningsBody, [], absent)
-      if (approvedNotice) approvedNotice.textContent = t('No parsed archive review was returned. Native archive import remains unavailable.')
+      if (approvedNotice) approvedNotice.textContent = t('No parsed archive review was returned.')
       if (!object(value) || !object(value.plan) || !object(value.plan.account)) return
-      if (approvedNotice) approvedNotice.textContent = t('The server parsed this archive review. Archive bytes are not retained; account import still requires archive custody and qualified execution.')
+      if (approvedNotice) approvedNotice.textContent = t('The server parsed this archive. Review what is not imported, choose a plan and import the account.')
       const plan = value.plan, account = plan.account as Record<string, unknown>
       const title = document.createElement('p'); title.textContent = display(account.username) + ' · ' + display(account.primaryDomain); archiveBox.append(title)
-      const notRead = t(msgctxt('whm-transfer-client', 'Not read')), reviewOnly = t('Parsed review only')
+      const notRead = t(msgctxt('whm-transfer-client', 'Not read')), reviewOnly = t('Imported')
       const returned = (items: unknown): Record<string, unknown>[] => Array.isArray(items) ? items.filter(object) : []
       const empty = t('No records were returned for this part of the parsed review.')
       fillBody(detailBodies[0] ?? null, returned(plan.domains).map(domain => [domain.name, domain.name, domain.docRoot, reviewOnly]), empty)
       const home = object(plan.home) ? plan.home : {}
       const metrics: Array<readonly [string, string]> = [['files', t('Files')], ['directories', t('Directories')], ['symlinks', t('Symbolic links')], ['bytes', t('Bytes')], ['skipped', t('Skipped entries')]]
-      fillBody(detailBodies[1] ?? null, metrics.filter(([key]) => typeof home[key] === 'number').map(([key, label]) => [label, home[key], t('Archive bytes not retained'), reviewOnly]), empty)
-      fillBody(detailBodies[2] ?? null, [...returned(plan.databases).map(database => [t(msgctxt('whm-transfer-client', 'Database')), database.sourceName, database.name, reviewOnly]), ...returned(plan.dbUsers).map(user => [t(msgctxt('whm-transfer-client', 'Database user')), user.sourceName, user.name, t('Password reset required; parsed review only')])], empty)
-      fillBody(detailBodies[3] ?? null, returned(plan.mailboxes).map(mailbox => [mailbox.address, mailbox.hasMaildir === true ? mailbox.maildir : t('No archived mail directory'), mailbox.maildir, t('Password reset required; parsed review only')]), empty)
+      fillBody(detailBodies[1] ?? null, metrics.filter(([key]) => typeof home[key] === 'number').map(([key, label]) => [label, home[key], t('Restored into the new home'), reviewOnly]), empty)
+      fillBody(detailBodies[2] ?? null, [...returned(plan.databases).map(database => [t(msgctxt('whm-transfer-client', 'Database')), database.sourceName, database.name, reviewOnly]), ...returned(plan.dbUsers).map(user => [t(msgctxt('whm-transfer-client', 'Database user')), user.sourceName, user.name, t('Password reset required')])], empty)
+      fillBody(detailBodies[3] ?? null, returned(plan.mailboxes).map(mailbox => [mailbox.address, mailbox.hasMaildir === true ? mailbox.maildir : t('No archived mail directory'), mailbox.maildir, t('Password reset required')]), empty)
       fillBody(detailBodies[4] ?? null, returned(plan.dnsZones).flatMap(zone => returned(zone.records).map(record => [display(record.name) + ' · ' + display(record.type), record.content ?? notRead, zone.zone, reviewOnly])), empty)
-      fillBody(warningsBody, returned(plan.warnings).map(warning => [t('Archive warning'), warning.message, warning.path ?? notRead]), empty)
+      const tags: Record<string, string> = { skipped: msgid('Skipped'), partial: msgid('Partial'), paused: msgid('Paused'), reset: msgid('Reset required') }
+      fillBody(warningsBody, returned(value.unmapped).map(item => [xpT(tags[String(item.tag)] ?? msgid('Skipped')), item.message, item.path ?? notRead]), empty)
       const rows = [
         [t('Domains'), Array.isArray(plan.domains) ? plan.domains.length : notRead],
         [t('Databases'), Array.isArray(plan.databases) ? plan.databases.length : notRead],
@@ -150,7 +164,29 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       ]
       const summary = document.createElement('div'); table(summary, [t(msgctxt('whm-transfer-client', 'Part')), t('Count')], rows); archiveBox.append(summary)
       if (Array.isArray(value.conflicts) && value.conflicts.length) { const details = document.createElement('div'); table(details, [t('Conflict'), t('Value')], value.conflicts.filter(object).map(item => [item.kind === 'username' ? t('Account name') : t('Domain'), item.value])); archiveBox.append(details) }
-      if (Array.isArray(plan.warnings)) { const list = document.createElement('ul'); for (const warning of plan.warnings) if (object(warning) && typeof warning.message === 'string') { const item = document.createElement('li'); item.textContent = display(warning.message); list.append(item) } archiveBox.append(list) }
+      const unmapped = returned(value.unmapped)
+      if (unmapped.length) { const details = document.createElement('div'); table(details, [t('Not imported or changed'), t('Detail'), t('Path')], unmapped.map(item => [xpT(tags[String(item.tag)] ?? msgid('Skipped')), item.message, item.path ?? ''])); archiveBox.append(details) }
+      const outcome = document.createElement('p')
+      outcome.textContent = value.state === 'imported' ? t('Imported as {username}. Owners must set new passwords.', { username: display(object(value.result) ? value.result.username : '') }) : value.state === 'failed' ? t('Import failed: {reason}', { reason: display(value.error) }) : value.state === 'importing' ? t('Importing. The page refreshes while it runs.') : ''
+      if (outcome.textContent) archiveBox.append(outcome)
+    }
+    const importLabel = (item: Record<string, unknown>): string => {
+      const states: Record<string, string> = { uploading: msgid('Uploading'), fetching: msgid('Fetching over SSH'), inspecting: msgid('Inspecting'), review: msgid('Ready to import'), importing: msgid('Importing'), imported: msgid('Imported'), failed: msgid('Failed') }
+      return display(item.filename) + ' · ' + xpT(states[String(item.state)] ?? msgid('Failed'))
+    }
+    const paintImports = (): void => {
+      const previous = importSelect.value
+      importSelect.textContent = ''
+      for (const item of imports) { const option = document.createElement('option'); option.value = String(item.id); option.textContent = importLabel(item); importSelect.append(option) }
+      if (imports.some(item => item.id === previous)) importSelect.value = previous
+      paintArchive(imports.find(item => item.id === importSelect.value) ?? imports.at(-1))
+    }
+    /** While a transfer or import runs on the server, read its state again every few seconds. */
+    const schedulePoll = (): void => {
+      if (poller) clearTimeout(poller)
+      poller = null
+      const active = entries.some(entry => entry.running || entry.session.state === 'applying') || imports.some(item => ['uploading', 'fetching', 'inspecting', 'importing'].includes(String(item.state)))
+      if (active && root.isConnected) poller = setTimeout(() => { if (!busy && !dirty && !reviewRequired) void read(String(selected?.session.id ?? '')).catch(() => undefined); else schedulePoll() }, 5000)
     }
     const paint = (target: string): void => {
       selected = entries.find(entry => entry.session.id === target) ?? entries[0] ?? null
@@ -201,12 +237,20 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       const progressRows = Object.entries(progress).filter(([, value]) => object(value))
       if (progressRows.length) {
         const phases: Record<string, string> = { pending: t(msgctxt('whm-transfer-client', 'Pending')), exporting: t('Exporting'), copying: t('Copying'), importing: t('Importing'), reconciling: t('Reconciling'), done: t(msgctxt('whm-transfer-client', 'Done')), failed: t('Failed'), skipped: t('Skipped') }
-        fillApproved('transfer-progress', progressRows.map(([name, value]) => [name, t(msgctxt('whm-transfer-client', 'Not read')), t(msgctxt('whm-transfer-client', 'Not read')), t(msgctxt('whm-transfer-client', 'Not read')), t(msgctxt('whm-transfer-client', 'Not read')), object(value) ? (phases[String(value.phase)] ?? t(msgctxt('whm-transfer-client', 'Not read'))) + ' · ' + String(value.bytes) + ' / ' + String(value.totalBytes) : '']))
+        const results = selected?.results ?? {}
+        const waiting = t(msgctxt('whm-transfer-client', 'Waiting'))
+        fillApproved('transfer-progress', progressRows.map(([name, value]) => {
+          const result = object(results[name]) ? results[name] as Record<string, unknown> : {}, done = object(value) && value.phase === 'done'
+          const count = (key: string): string => Array.isArray(result[key]) ? String((result[key] as unknown[]).length) : typeof result[key] === 'number' ? String(result[key]) : waiting
+          return [name + (object(value) && typeof value.targetUsername === 'string' && value.targetUsername !== name ? ' → ' + value.targetUsername : ''),
+            done && object(result.home) ? t('{bytes} bytes, compared', { bytes: Number(result.home.bytes) }) : waiting, done ? count('databases') : waiting, done ? count('mailboxes') : waiting, done ? count('zones') : waiting,
+            (object(value) ? (phases[String(value.phase)] ?? t(msgctxt('whm-transfer-client', 'Not read'))) + ' · ' + String(value.bytes) + ' / ' + String(value.totalBytes) : '') + (object(value) && typeof value.error === 'string' ? ' · ' + value.error : '')]
+        }))
         const note = document.querySelector<HTMLElement>('[data-transfer-progress-state]')
-        if (note) { note.dataset.transferProgressState = 'read'; note.textContent = t('Saved account progress was reported by the trusted transfer runner. Separate file, database, mail and DNS results have not been read.') }
+        if (note) { note.dataset.transferProgressState = 'read'; note.textContent = selected?.stopRequested && selected.session.state === 'applying' ? t('The transfer stops after the current account.') : t('Accounts are copied one at a time. The source is only read; a failed account is removed again.') }
       }
-      root.querySelector<HTMLElement>('[data-transfer-execution-note]')!.textContent = capabilities.execute ? t('Execution still requires fresh lifecycle admission and the current review digest. Reported progress comes from the trusted runner.') : t('Native transfer execution is unavailable until qualified lifecycle admission and a trusted runner are configured.')
-      root.querySelector<HTMLElement>('[data-transfer-archive-limit]')!.textContent = t('Maximum archive inspection upload: {bytes} bytes', { bytes: capabilities.archiveMaxBytes })
+      root.querySelector<HTMLElement>('[data-transfer-execution-note]')!.textContent = capabilities.execute ? t('Accounts are copied one at a time. The source is only read; a failed account is removed again.') : t('Transfers are unavailable here: they need the host agent on this server.')
+      root.querySelector<HTMLElement>('[data-transfer-archive-limit]')!.textContent = capabilities.cpanelImport ? t('Maximum archive size: {bytes} bytes', { bytes: capabilities.cpanelUploadMaxBytes }) : t('cPanel import is unavailable here: it needs the host agent on this server.')
       controls()
     }
     /** Stored source credentials by reference: label and token fingerprint only (apps/api/src/acct-transfer-credentials.ts). */
@@ -224,13 +268,15 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     }
     const read = async (target: string, preloaded?: unknown): Promise<Record<string, unknown>> => {
       const value = preloaded ?? await request('GET', '/api/transfers/sessions')
-      if (!object(value) || !Array.isArray(value.sessions) || !object(value.capabilities) || typeof value.capabilities.archiveMaxBytes !== 'number' || !Number.isSafeInteger(value.capabilities.archiveMaxBytes) || value.capabilities.archiveMaxBytes <= 0) throw new Error('invalid_transfer_workspace')
+      if (!object(value) || !Array.isArray(value.sessions) || !object(value.capabilities) || !Number.isSafeInteger(value.capabilities.cpanelUploadMaxBytes) || (value.capabilities.cpanelUploadMaxBytes as number) < 0) throw new Error('invalid_transfer_workspace')
       entries = value.sessions.map(parseEntry)
       if (new Set(entries.map(entry => entry.session.id)).size !== entries.length) throw new Error('duplicate_transfer_sessions')
-      capabilities = { discover: value.capabilities.discover === true, execute: value.capabilities.execute === true, archiveReview: value.capabilities.archiveReview === true, archiveMaxBytes: value.capabilities.archiveMaxBytes }
+      capabilities = { discover: value.capabilities.discover === true, execute: value.capabilities.execute === true, cpanelImport: value.capabilities.cpanelImport === true, cpanelUploadMaxBytes: value.capabilities.cpanelUploadMaxBytes as number }
+      imports = Array.isArray(value.cpanelImports) ? value.cpanelImports.filter(object).filter(item => typeof item.id === 'string' && uuid.test(item.id)) : []
       await fillCredentials()
       loaded = true; reviewRequired = false; dirty = false; paint(target)
-      if (Array.isArray(value.archiveReviews)) paintArchive(value.archiveReviews.at(-1))
+      if (capabilities.cpanelImport) await fillPlans()
+      paintImports(); schedulePoll(); controls()
       return value
     }
     const refresh = async (target = String(selected?.session.id ?? '')): Promise<void> => {
@@ -238,7 +284,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       busy = true; controls()
       try {
         if ((dirty || reviewRequired) && !await ask(t('Read saved transfer state?'), t('This discards unsaved selection changes and re-reads the saved outcome. No previous mutation is retried.'), true)) return
-        await read(target); announce('read', t('Saved sessions and archive reviews read. Native qualification remains unchanged.'))
+        await read(target); announce('read', t('Saved sessions and archive imports read.'))
       } catch { announce('failed', t('Saved transfer state could not be read. Existing edits are preserved.')) }
       finally { busy = false; controls() }
     }
@@ -248,16 +294,17 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       if (!create && !previous) return
       busy = true; controls(); let submitted = false
       try {
-        if (!await ask(t('Confirm transfer review action'), (previous ? sourceLabel(previous.session) + '\n' : '') + t('The server verifies the current saved revision and permissions. Native execution requires its own trusted admission.'), action === 'cancel' || action === 'run')) return
+        if (!await ask(action === 'run' ? t('Start transfer?') : t('Confirm transfer review action'), (previous ? sourceLabel(previous.session) + '\n' : '') + (action === 'run' ? t('Each reviewed account is rebuilt here one at a time. Shared services are only reloaded.') : t('The server verifies the current saved revision and permissions.')), action === 'cancel' || action === 'run' || action === 'stop')) return
         submitted = true
         const value = await request(create ? 'POST' : 'PATCH', create ? '/api/transfers/sessions' : '/api/transfers/sessions/' + encodeURIComponent(previousId), create ? body : { ...body, action, expectedRevision: previous!.revision })
         const acknowledged = parseEntry(value)
         const observed = await request('GET', '/api/transfers/sessions')
         if (!object(observed) || !Array.isArray(observed.sessions)) throw new Error('missing_transfer_readback')
         const found = observed.sessions.map(parseEntry).find(entry => entry.session.id === acknowledged.session.id)
-        if (!found || found.revision !== acknowledged.revision || JSON.stringify(found.session) !== JSON.stringify(acknowledged.session)) throw new Error('transfer_readback_mismatch')
+        // a started run keeps writing progress, so only its identity is read back
+        if (!found || action !== 'run' && (found.revision !== acknowledged.revision || JSON.stringify(found.session) !== JSON.stringify(acknowledged.session))) throw new Error('transfer_readback_mismatch')
         await read(String(acknowledged.session.id), observed)
-        announce('saved', t('Transfer review state was saved and read back. Native qualification remains unchanged.'))
+        announce('saved', action === 'run' ? t('The transfer started. Progress appears below as each account moves.') : action === 'stop' ? t('The transfer stops after the current account.') : t('Transfer review state was saved and read back.'))
       } catch (error) {
         const details = object(error) && object(error.details) ? error.details : {}
         const knownRefusal = object(error) && (error.stateChanged === false || details.stateChanged === false || typeof error.status === 'number' && error.status >= 400 && error.status < 500 && details.stateChanged !== true && details.unknownOutcome !== true)
@@ -267,30 +314,82 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
         announce(stale ? 'stale' : reviewRequired ? 'uncertain' : 'failed', stale ? t('The saved session changed. Your edits are kept. Read saved state before continuing.') : reviewRequired ? t('The outcome requires review. Your edits are kept; no retry was sent. Read saved state before continuing.') : t('The request was refused. Your edits are kept and no retry was sent.'))
       } finally { busy = false; controls() }
     }
+    /** Plans on this server for an imported account; read once, kept across refreshes. */
+    const fillPlans = async (): Promise<void> => {
+      if (importPlan.options.length) return
+      let value: unknown = null
+      try { value = await request('GET', '/api/plans') } catch { value = null }
+      if (!object(value) || !Array.isArray(value.plans)) return
+      for (const plan of value.plans) if (object(plan) && typeof plan.id === 'string' && uuid.test(plan.id) && typeof plan.name === 'string') { const option = document.createElement('option'); option.value = plan.id; option.textContent = plan.name; importPlan.append(option) }
+    }
+    const failure = (error: unknown, refused: string, uncertain: string, submitted: boolean): void => {
+      const details = object(error) && object(error.details) ? error.details : {}
+      reviewRequired = submitted && !(object(error) && typeof error.status === 'number' && error.status >= 400 && error.status < 500 && details.stateChanged !== true && details.unknownOutcome !== true)
+      announce(reviewRequired ? 'uncertain' : 'failed', reviewRequired ? uncertain : refused)
+    }
+    /** Sends the archive in 4 MiB pieces; the server checks each offset and digests the whole file at the end. */
     const inspect = async (): Promise<void> => {
-      if (busy || reviewRequired || !loaded || !admitted() || !capabilities.archiveReview) return
+      if (busy || reviewRequired || !loaded || !admitted() || !capabilities.cpanelImport) return
       const file = field('transfer-archive').files?.[0]
-      if (!file || file.size <= 0 || file.size > capabilities.archiveMaxBytes) { announce('failed', t('Choose a nonempty archive within the server inspection limit. Nothing was sent.')); return }
+      if (!file || file.size <= 0 || file.size > capabilities.cpanelUploadMaxBytes) { announce('failed', t('Choose a nonempty archive within the import limit. Nothing was sent.')); return }
       busy = true; controls(); let submitted = false
-      const pendingSelection = { accounts: [...accounts.querySelectorAll<HTMLInputElement>('input:checked')].map(input => input.value), plans: [...plans.querySelectorAll<HTMLInputElement>('input:checked')].map(input => input.value), dirty }
       try {
-        const bytes = new Uint8Array(await file.arrayBuffer()); let binary = ''
-        for (let offset = 0; offset < bytes.length; offset += 16384) binary += String.fromCharCode(...bytes.subarray(offset, offset + 16384))
-        const body = { filename: file.name, archiveBase64: btoa(binary), ...(field('transfer-archive-target').value.trim() ? { targetUsername: field('transfer-archive-target').value.trim() } : {}), ...(field('transfer-archive-source').value.trim() ? { expectedSourceUsername: field('transfer-archive-source').value.trim() } : {}) }
+        const target = field('transfer-archive-target').value.trim()
         submitted = true
-        const value = await request('POST', '/api/transfers/cpanel-review', body)
-        if (!object(value) || !object(value.archiveReview) || typeof value.archiveReview.id !== 'string' || !uuid.test(value.archiveReview.id) || value.archiveReview.archiveRetained !== false || value.archiveReview.nativeApplied !== false || value.archiveReview.filename !== file.name) throw new Error('invalid_archive_review')
-        const observed = await request('GET', '/api/transfers/sessions')
-        if (!object(observed) || !Array.isArray(observed.archiveReviews) || !observed.archiveReviews.some(review => object(review) && review.id === (value.archiveReview as Record<string, unknown>).id && review.archiveSha256 === (value.archiveReview as Record<string, unknown>).archiveSha256)) throw new Error('archive_review_readback_mismatch')
-        await read(String(selected?.session.id ?? ''), observed)
-        for (const [container, values] of [[accounts, pendingSelection.accounts], [plans, pendingSelection.plans]] as const) container.querySelectorAll<HTMLInputElement>('input').forEach(input => { input.checked = values.includes(input.value) })
-        dirty = pendingSelection.dirty
-        paintArchive(value.archiveReview); announce('saved', t('The archive was parsed and its review was saved and read back. No account was imported.'))
-      } catch (error) {
-        const details = object(error) && object(error.details) ? error.details : {}
-        reviewRequired = submitted && !(object(error) && typeof error.status === 'number' && error.status >= 400 && error.status < 500 && details.stateChanged !== true && details.unknownOutcome !== true)
-        announce(reviewRequired ? 'uncertain' : 'failed', reviewRequired ? t('The archive review outcome requires inspection. No retry was sent.') : t('Archive inspection was refused. No account was imported.'))
-      } finally { busy = false; controls() }
+        const created = await request('POST', '/api/transfers/cpanel-imports', { filename: file.name, bytes: file.size, ...(target ? { targetUsername: target } : {}) })
+        if (!object(created) || !object(created.cpanelImport) || typeof created.cpanelImport.id !== 'string' || !uuid.test(created.cpanelImport.id) || !Number.isSafeInteger(created.chunkBytes)) throw new Error('invalid_import')
+        const id = created.cpanelImport.id, size = created.chunkBytes as number
+        for (let offset = 0; offset < file.size; offset += size) {
+          const bytes = new Uint8Array(await file.slice(offset, offset + size).arrayBuffer()); let binary = ''
+          for (let index = 0; index < bytes.length; index += 16384) binary += String.fromCharCode(...bytes.subarray(index, index + 16384))
+          announce('saving', t('Uploading: {percent}%', { percent: Math.floor(offset / file.size * 100) }))
+          await request('PUT', '/api/transfers/cpanel-imports/' + id, { offset, data: btoa(binary) })
+        }
+        await read(String(selected?.session.id ?? '')); importSelect.value = id; paintArchive(imports.find(item => item.id === id)); controls()
+        announce('saved', t('The archive was uploaded and its SHA-256 recorded. The server is reading it now.'))
+      } catch (error) { failure(error, t('The upload was refused. No account was imported.'), t('The upload outcome requires inspection. No retry was sent.'), submitted) }
+      finally { busy = false; controls() }
+    }
+    /** pkgacct on the cPanel server over SSH with this server's transfer key and the pinned host key. */
+    const fetchArchive = async (): Promise<void> => {
+      if (busy || reviewRequired || !loaded || !admitted() || !capabilities.cpanelImport) return
+      const body = { host: field('transfer-cpanel-host').value.trim(), port: Number(field('transfer-cpanel-port').value), hostKeyFingerprint: field('transfer-cpanel-fingerprint').value.trim(), cpanelUser: field('transfer-cpanel-user').value.trim(),
+        ...(field('transfer-archive-target').value.trim() ? { targetUsername: field('transfer-archive-target').value.trim() } : {}) }
+      if (!body.host || !body.cpanelUser || !body.hostKeyFingerprint) { announce('failed', t('Enter the cPanel host, its pinned host key and the cPanel username. Nothing was sent.')); return }
+      busy = true; controls(); let submitted = false
+      try {
+        if (!await ask(t('Fetch the account over SSH?'), body.host + '\n' + t('The cPanel server packages the account with pkgacct; the archive is copied here and checked against its SHA-256.'))) return
+        submitted = true
+        await request('POST', '/api/transfers/cpanel-imports/ssh', body)
+        await read(String(selected?.session.id ?? ''))
+        announce('saved', t('The cPanel server is packaging the account. This page refreshes while it runs.'))
+      } catch (error) { failure(error, t('The fetch was refused. Nothing was copied.'), t('The fetch outcome requires inspection. No retry was sent.'), submitted) }
+      finally { busy = false; controls() }
+    }
+    const importAction = async (action: 'import' | 'discard'): Promise<void> => {
+      const chosen = imports.find(item => item.id === importSelect.value)
+      if (busy || reviewRequired || !loaded || !admitted() || !chosen || typeof chosen.revision !== 'string') return
+      const account = object(chosen.plan) && object(chosen.plan.account) ? display(chosen.plan.account.username) : display(chosen.filename)
+      busy = true; controls(); let submitted = false
+      try {
+        if (!await ask(action === 'import' ? t('Import {account}?', { account }) : t('Discard this archive?'), action === 'import' ? t('The account is built here with a new UID, slice and vhost, then its files, databases, zones and mail are restored. Owners must set new passwords.') : t('The archive file is removed from this server.'), action === 'discard')) return
+        submitted = true
+        await request('PATCH', '/api/transfers/cpanel-imports/' + String(chosen.id), { action, expectedRevision: chosen.revision, ...(action === 'import' ? { planId: importPlan.value } : {}) })
+        await read(String(selected?.session.id ?? ''))
+        announce('saved', action === 'import' ? t('The import started. This page refreshes while it runs.') : t('The archive was discarded.'))
+      } catch (error) { failure(error, t('The request was refused. Nothing was changed.'), t('The outcome requires review. No retry was sent.'), submitted) }
+      finally { busy = false; controls() }
+    }
+    const showKey = async (): Promise<void> => {
+      if (busy || !admitted()) return
+      busy = true; controls()
+      try {
+        const value = await request('GET', '/api/transfers/ssh-key')
+        if (!object(value) || typeof value.publicKey !== 'string' || typeof value.fingerprint !== 'string') throw new Error('invalid_key')
+        keyBox.textContent = value.publicKey + ' · ' + value.fingerprint
+        announce('read', t('Add this public key to root on the cPanel server before fetching.'))
+      } catch { announce('failed', t('The transfer key could not be read.')) }
+      finally { busy = false; controls() }
     }
     if (!send || !admitted()) { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); announce('unavailable', t('Transfer review is unavailable here. Nothing was read or changed.')); return }
     button('refresh').addEventListener('click', () => { void refresh() })
@@ -309,6 +408,13 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     button('review').addEventListener('click', () => { if (!button('review').disabled) void perform('review', {}) })
     button('run').addEventListener('click', () => { if (!button('run').disabled) void perform('run', { digest: selected?.digest }) })
     button('inspect').addEventListener('click', () => { void inspect() })
+    button('fetch').addEventListener('click', () => { void fetchArchive() })
+    button('import-run').addEventListener('click', () => { void importAction('import') })
+    button('import-discard').addEventListener('click', () => { void importAction('discard') })
+    button('ssh-key').addEventListener('click', () => { void showKey() })
+    button('stop').addEventListener('click', () => { if (!button('stop').disabled) void perform('stop', {}) })
+    importSelect.addEventListener('change', () => { paintArchive(imports.find(item => item.id === importSelect.value)); controls() })
+    importPlan.addEventListener('change', controls)
     root.addEventListener('input', () => { dirty = true; controls() })
     root.addEventListener('change', event => { if (event.target !== sessionSelect) { dirty = true; controls() } })
     document.addEventListener('xp-transfer-credentials-changed', () => { if (!busy) void fillCredentials().then(controls) })

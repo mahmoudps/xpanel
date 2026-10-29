@@ -29,13 +29,16 @@ export { preflight } from './upgrade/preflight.ts'
 export type { PreflightCheck, PreflightCheckId, PreflightInput, PreflightReport } from './upgrade/preflight.ts'
 export { assertHotPathMigrations } from './upgrade/migrations.ts'
 export type { PendingMigration } from './upgrade/migrations.ts'
-export { DEFAULT_LAYOUT, DEFAULT_PANEL_UNITS, UPGRADE_UNIT, isCustomerDataPath, normalizeUpgradePlan, readLock, recoverUpgrade, runUpgrade } from './upgrade/machine.ts'
+export { DEFAULT_LAYOUT, DEFAULT_PANEL_UNITS, REWIND_STEPS, UPGRADE_UNIT, isCustomerDataPath, normalizeUpgradePlan, parseRewindJournal, readLock, recoverUpgrade, rewindJournalPath, runUpgrade } from './upgrade/machine.ts'
 export type {
   LockInfo,
   LockState,
   RecoverInput,
   RecoverResult,
   ReleaseInfo,
+  RewindJournal,
+  RewindState,
+  RewindStep,
   UpgradeLayout,
   UpgradeOutcome,
   UpgradeHostOutcome,
@@ -119,6 +122,7 @@ export type { CpanelImportOptions } from './cpanel-import/import.ts'
 export type {
   ImportAccount,
   ImportCertificate,
+  ImportCronJob,
   ImportDatabase,
   ImportDbUser,
   ImportDomain,

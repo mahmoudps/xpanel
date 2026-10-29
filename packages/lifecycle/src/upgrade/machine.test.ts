@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { XpanelError, fail } from '@xpanel/core'
 import type { OsRelease } from '@xpanel/os'
 import { FakeClock, FakeFs, FakeHost, MemoryAudit, RESELLER, ROOT, gate, osRelease } from '../testing/fakes.ts'
-import { isCustomerDataPath, normalizeUpgradePlan, readLock, recoverUpgrade, runUpgrade } from './machine.ts'
-import type { UpgradePlan } from './machine.ts'
+import { REWIND_STEPS, isCustomerDataPath, normalizeUpgradePlan, parseRewindJournal, readLock, recoverUpgrade, runUpgrade } from './machine.ts'
+import type { RewindStep, UpgradePlan } from './machine.ts'
 import type { PendingMigration } from './migrations.ts'
 import type { AccountIdentity, UnitChange, UpgradePhase, UpgradePorts, UpgradeStatus } from './ports.ts'
 
@@ -14,6 +14,12 @@ const LOCK = '/var/lib/xpanel/upgrade.lock'
 const MAINTENANCE = '/var/lib/xpanel/maintenance.json'
 const RETIREMENT = '/var/lib/xpanel-lifecycle/backups/retirement-attention.json'
 const SNAPSHOT = '/var/lib/xpanel-lifecycle/backups/20261022T013500Z.tar.gz'
+const CONTROL_COPY = `${SNAPSHOT}.control.db`
+const RECEIPT = '/var/lib/xpanel-lifecycle/backups/upgrade-up-1.receipt.json'
+const JOURNAL = '/var/lib/xpanel-lifecycle/backups/upgrade-up-1.rewind.json'
+const STATE_FILE = '/var/lib/xpanel/state/accounts/alice.yaml'
+const STATE_ASIDE = '/var/lib/xpanel/.pre-rewind-up-1'
+const EXCLUDES = '/var/lib/xpanel-lifecycle/backups/upgrade-up-1.rewind-exclude'
 const sha = (s: string): string => createHash('sha256').update(s).digest('hex')
 
 const alice: AccountIdentity = { username: 'alice', uid: 1001, gid: 1001, slice: 'xpanel-1001.slice', quotas: { diskMb: 5000, ioWriteBps: 10_000_000, memoryMb: 'unlimited' } }
@@ -50,11 +56,12 @@ interface World {
   clock: FakeClock
   audit: MemoryAudit
   db: ControlState
-  dumps: Map<string, ControlState>
   gen: { current: number; activated: number[]; reconciled: number }
   identities: AccountIdentity[]
   served: Map<string, number | null>
   controlPlane: { ok: boolean }
+  /** health faults normally come with the new release; set when they must survive the rewind */
+  faultsPersist: boolean
   converged: { value: boolean }
   migrations: PendingMigration[]
   failMigration: number | null
@@ -69,10 +76,10 @@ const isStateSnapshotTar = (argv: string[]): boolean =>
   argv[0] === '/usr/bin/tar' && argv.includes('--create') && argv.includes('state')
 
 const isStateRestoreTar = (argv: string[]): boolean =>
-  argv[0] === '/usr/bin/tar' && argv.includes('--extract') && argv.includes('--directory=/var/lib/xpanel')
+  argv[0] === '/usr/bin/tar' && argv.includes('--extract') && argv.some(a => a.startsWith('--directory=/var/lib/xpanel/.rewind-'))
 
 const isReleaseUnpackTar = (argv: string[]): boolean =>
-  argv[0] === '/usr/bin/tar' && argv.includes('--extract') && !argv.includes('--directory=/var/lib/xpanel')
+  argv[0] === '/usr/bin/tar' && argv.includes('--extract') && !isStateRestoreTar(argv)
 
 const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {}): World => {
   const fs = new FakeFs({
@@ -82,6 +89,7 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
     '/opt/xpanel/staging': { type: 'dir', mode: 0o755 },
     '/var/lib/xpanel': { type: 'dir', mode: 0o755 },
     '/var/lib/xpanel/state': { type: 'dir', mode: 0o700 },
+    [STATE_FILE]: { type: 'file', content: 'uid: 1001\n', mode: 0o600 },
     [ARCHIVE]: { type: 'file', content: ARCHIVE_BYTES, mode: 0o600 },
     '/home/alice/public_html/index.php': { type: 'file', content: '<?php echo 1;', mode: 0o640 },
     '/home/alice/mail/alice.example/info/cur/1': { type: 'file', content: 'mail', mode: 0o600 },
@@ -94,11 +102,11 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
     clock: new FakeClock(),
     audit: new MemoryAudit(),
     db: { schema: 4, applied: ['0001', '0002', '0003', '0004'], data: 'desired-state-v4', rows: [] },
-    dumps: new Map(),
     gen: { current: 41, activated: [], reconciled: 0 },
     identities: [structuredClone(alice), structuredClone(bob)],
     served: new Map([['alice', 1001]]),
     controlPlane: { ok: true },
+    faultsPersist: false,
     converged: { value: true },
     migrations: [
       { version: 5, name: '0005_accounts_note.sql', contract: false },
@@ -120,13 +128,22 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
     if (isStateSnapshotTar(a.argv)) {
       const file = argValue(a.argv, '--file') as string
       w.maintenanceSeenAtDump = fs.nodes.has(MAINTENANCE)
-      fs.file(file, 'state-tarball')
-      w.dumps.set(file, structuredClone(w.db))
-    } else if (isStateRestoreTar(a.argv)) {
-      const file = argValue(a.argv, '--file') as string
-      const snap = w.dumps.get(file)
-      if (!snap) return { code: 1, stdout: '', stderr: 'no such snapshot archive' }
-      w.db = structuredClone(snap)
+      // Synthetic archive: the state tree's files as [path below /var/lib/xpanel, content] pairs.
+      fs.file(file, JSON.stringify(fs.children('/var/lib/xpanel/state').flatMap(path => {
+        const n = fs.nodes.get(path)
+        return n?.type === 'file' ? [[path.slice('/var/lib/xpanel/'.length), n.content]] : []
+      })))
+    } else if (isStateRestoreTar(a.argv) || a.argv[0] === '/usr/bin/tar' && a.argv.includes('--list')) {
+      const archive = fs.nodes.get(argValue(a.argv, '--file') as string)
+      let entries: [string, string][]
+      try { entries = JSON.parse(archive?.type === 'file' ? archive.content : '') } catch { return { code: 2, stdout: '', stderr: 'gzip: stdin: not in gzip format' } }
+      if (a.argv.includes('--list')) return { code: 0, stdout: entries.map(([rel]) => `${rel}\n`).join(''), stderr: '' }
+      // GNU tar default for --exclude-from: unanchored wildcard patterns matched against each path component.
+      const excludes = (fs.nodes.get(argValue(a.argv, '--exclude-from') as string) as { content: string } | undefined)?.content.split('\n').filter(Boolean) ?? []
+      const excluded = (rel: string): boolean => rel.split('/').some(part => excludes.some(p => new RegExp(`^${p.replace(/[.]/g, '\\.').replace(/\*/g, '.*')}$`).test(part)))
+      const dir = argValue(a.argv, '--directory') as string
+      fs.nodes.set(`${dir}/state`, { type: 'dir', mode: 0o700 })
+      for (const [rel, content] of entries) if (!excluded(rel)) fs.file(`${dir}/${rel}`, content, 0o600)
     } else if (isReleaseUnpackTar(a.argv)) {
       const dir = argValue(a.argv, '--directory') as string
       fs.file(`${dir}/VERSION`, '1.1.0\n')
@@ -138,6 +155,7 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
   }
   const row = (id: string): Row => w.db.rows.find((r) => r.id === id) ?? fail('NOT_FOUND', `no upgrade ${id}`)
   const inFlight = (r: Row): boolean => r.status === 'pending' || r.status === 'running'
+  const faulty = (): boolean => w.faultsPersist || (fs.nodes.get('/opt/xpanel/current') as { target?: string } | undefined)?.target === '/opt/xpanel/releases/1.1.0'
   w.ports = {
     // Deliberately synthetic sequencing seam. This does not qualify a native guard or writer barrier.
     safety: {
@@ -152,7 +170,14 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
       },
       verifyStagedRelease: async () => {},
       assertCompatibility: async () => {},
-      snapshotControlPlane: async () => {},
+      snapshotControlPlane: async path => { fs.file(`${path}.control.db`, JSON.stringify({ schema: w.db.schema, applied: w.db.applied, data: w.db.data }), 0o600) },
+      restoreControlPlane: async path => {
+        const copy = await fs.readFile(`${path}.control.db`)
+        if (copy === null) throw new Error('control-plane copy missing')
+        w.events.push('restore index')
+        // Derived index rows come back; the expand-only schema and the journal rows stay.
+        w.db.data = (JSON.parse(copy) as ControlState).data
+      },
       syncPath: async () => {},
     },
     host,
@@ -173,7 +198,7 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
         w.gen.activated.push(id)
         w.gen.current = id
         w.identities = [structuredClone(alice), structuredClone(bob)]
-        return { units: [{ unit: 'nginx.service', needs: 'reload' }, { unit: 'apache2.service', needs: 'reload' }] }
+        return { generationId: id, units: [{ unit: 'nginx.service', needs: 'reload' }, { unit: 'apache2.service', needs: 'reload' }] }
       },
       status: async () => ({ converged: w.converged.value, drift: w.converged.value ? [] : ['vhost alice.example'] }),
       identities: async () => structuredClone(w.identities),
@@ -194,8 +219,8 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
       },
     },
     health: {
-      servedUid: async (u) => w.served.get(u) ?? null,
-      qualifiedControlPlane: async () => w.controlPlane.ok,
+      servedUid: async (u) => (faulty() ? w.served.get(u) ?? null : w.identities.find(i => i.username === u)?.uid ?? null),
+      qualifiedControlPlane: async () => (faulty() ? w.controlPlane.ok : true),
     },
     system: {
       freeBytes: async () => over.free ?? 10_000_000,
@@ -396,15 +421,164 @@ describe('lifecycle safety regression oracles (portable ports, not native qualif
     expect(await w.fs.exists(LOCK)).toBe(true)
   })
 
-  it('binary rollback keeps current authority and migration data instead of restoring old DB/state', async () => {
+  it('rewinds release link, state files, index and units together from the receipt-verified snapshot', async () => {
     const w = world()
-    w.afterReconcile = () => { w.db.data += '+revoked-session+burned-uid+issued-reference' }
+    w.afterReconcile = () => {
+      w.db.data += '+written-by-1.1.0'
+      w.fs.file(STATE_FILE, 'uid: 1001\nnote: 1.1.0\n')
+      w.fs.file('/var/lib/xpanel/state/accounts/carol.yaml', 'uid: 1003\n')
+    }
     w.controlPlane.ok = false
     const r = await runUpgrade(w.ports, plan())
     expect(r).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'rolled_back' })
-    expect(w.db.schema).toBe(6)
-    expect(w.db.data).toContain('+revoked-session+burned-uid+issued-reference')
+    expect(r.rewind).toMatchObject({ state: 'rewind-verified', done: ['release', 'state-extract', 'state-swap', 'index', 'units', 'start-panel'], problems: [] })
+    expect(JSON.parse(await w.fs.readFile(JOURNAL) as string)).toEqual(r.rewind)
+    expect(await w.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
+    expect(await w.fs.readFile(STATE_FILE)).toBe('uid: 1001\n')
+    expect(await w.fs.exists('/var/lib/xpanel/state/accounts/carol.yaml')).toBe(false)
+    // The replaced tree is kept beside the live one as evidence, never deleted.
+    expect(await w.fs.readFile(`${STATE_ASIDE}/accounts/carol.yaml`)).toBe('uid: 1003\n')
+    // Derived index data rewinds; the expand-only schema stays, as the old release reads it.
+    expect(w.db).toMatchObject({ schema: 6, data: 'desired-state-v4', applied: ['0001', '0002', '0003', '0004', '0005_accounts_note.sql', '0006_backfill_note.sql'] })
+    expect(w.gen.activated).toEqual([41])
+    expect(w.gen.current).toBe(41)
+    expect(r.newGeneration).toBe(41)
+    const restore = w.host.actions.find(a => a.kind === 'exec' && isStateRestoreTar(a.argv))
+    expect(restore).toMatchObject({ kind: 'exec', runAsUser: 'root', argv: ['/usr/bin/tar', '--extract', '--gzip', '--overwrite', `--file=${SNAPSHOT}`, '--directory=/var/lib/xpanel/.rewind-up-1', `--exclude-from=${EXCLUDES}`, 'state'] })
+    expect(w.db.rows[0]).toMatchObject({ status: 'running', phase: 'rollback' })
+    expect(w.audit.entries.at(-1)).toMatchObject({ action: 'upgrade.retirement_pending', detail: { rewind: 'rewind-verified' } })
+    // Rewind never clears an incident or barrier itself.
+    for (const marker of [MAINTENANCE, LOCK, RETIREMENT]) expect(await w.fs.exists(marker)).toBe(true)
+    await untouchedCustomerData(w)
+  })
+
+  it('admits the older schema only through this upgrade\'s own snapshot', async () => {
+    const w = world()
+    const seen: Parameters<UpgradePorts['safety']['assertCompatibility']>[0][] = []
+    w.ports.safety.assertCompatibility = async input => { seen.push(input) }
+    w.controlPlane.ok = false
+    expect((await runUpgrade(w.ports, plan())).rewind?.state).toBe('rewind-verified')
+    expect(seen).toEqual([
+      { direction: 'forward', fromVersion: '1.0.0', toVersion: '1.1.0', currentSchema: 4, targetSchema: 6 },
+      // Precheck admits the fallback only as a rewind to the snapshot this upgrade is about to take.
+      { direction: 'rollback', fromVersion: '1.1.0', toVersion: '1.0.0', currentSchema: 6, targetSchema: 4, snapshot: 'planned' },
+      // After migrating 4 -> 6 the rewind presents the receipt-verified snapshot itself.
+      { direction: 'rollback', fromVersion: '1.1.0', toVersion: '1.0.0', currentSchema: 6, targetSchema: 4, snapshot: { recordId: 'up-1', path: SNAPSHOT } },
+    ])
+
+    const v = world()
+    v.failMigration = 6
+    const compat: Parameters<UpgradePorts['safety']['assertCompatibility']>[0][] = []
+    v.ports.safety.assertCompatibility = async input => { compat.push(input) }
+    expect((await runUpgrade(v.ports, plan())).hostOutcome).toBe('failed')
+    // A failed migration restarts the old release on the partly expanded schema only through the same snapshot.
+    expect(compat.at(-1)).toMatchObject({ direction: 'rollback', currentSchema: 5, targetSchema: 4, snapshot: { recordId: 'up-1', path: SNAPSHOT } })
+  })
+
+  it('never restores StateStore leases, locks or hot mutex journals from the snapshot', async () => {
+    const w = world()
+    for (const [path, content] of [
+      ['/var/lib/xpanel/state/.lock/owner.json', '{"pid":4242,"fencingToken":9}'],
+      ['/var/lib/xpanel/state/.lock-prepared-4242-a', '{}'],
+      ['/var/lib/xpanel/state/.writer-mutex.sqlite', 'mutex'],
+      ['/var/lib/xpanel/state/.writer-mutex.sqlite-wal', 'hot'],
+      ['/var/lib/xpanel/state/generations/.writer-mutex.sqlite-shm', 'hot'],
+      ['/var/lib/xpanel/state/accounts/.rollback-4242-x.tmp', 'partial'],
+    ] as const) w.fs.file(path, content)
+    w.controlPlane.ok = false
+    expect((await runUpgrade(w.ports, plan())).rewind?.state).toBe('rewind-verified')
+    expect(await w.fs.readFile(STATE_FILE)).toBe('uid: 1001\n')
+    expect(await w.fs.readFile('/var/lib/xpanel/state/.writer-mutex.sqlite')).toBe('mutex')
+    for (const gone of ['.lock', '.lock/owner.json', '.lock-prepared-4242-a', '.writer-mutex.sqlite-wal', 'generations/.writer-mutex.sqlite-shm', 'accounts/.rollback-4242-x.tmp']) {
+      expect(await w.fs.exists(`/var/lib/xpanel/state/${gone}`), gone).toBe(false)
+    }
+    expect(await w.fs.readFile(EXCLUDES)).toBe('.lock\n.lock-prepared-*\n.rollback-*.tmp\n.writer-mutex.sqlite-wal\n.writer-mutex.sqlite-shm\n.writer-mutex.sqlite-journal\n')
+  })
+
+  it('refuses a snapshot that caught an uncommitted StateStore write', async () => {
+    const w = world()
+    w.fs.file('/var/lib/xpanel/state/.lock/intent.json', '{"op":"createAccount"}')
+    w.controlPlane.ok = false
+    const r = await runUpgrade(w.ports, plan())
+    expect(r.outcome).toBe('rollback_failed')
+    expect(r.rewind).toMatchObject({ state: 'rewind-failed', done: [] })
+    expect(r.rollbackErrors.join()).toMatch(/holds an uncommitted state write \(state\/\.lock\/intent\.json\)/)
+    expect(await w.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.1.0')
     expect(w.host.actions.some(a => a.kind === 'exec' && isStateRestoreTar(a.argv))).toBe(false)
+  })
+
+  it('seals the set-aside tree and keeps only the newest two after a verified rewind', async () => {
+    const w = world()
+    w.fs.file('/var/lib/xpanel-lifecycle/backups/rewind-retention.json', '["up-a","up-b"]\n')
+    w.fs.file('/var/lib/xpanel/.pre-rewind-up-a/accounts/old.yaml', 'a')
+    w.fs.file('/var/lib/xpanel/.pre-rewind-up-b/accounts/old.yaml', 'b')
+    w.controlPlane.ok = false
+    expect((await runUpgrade(w.ports, plan())).rewind?.state).toBe('rewind-verified')
+    expect(await w.fs.exists('/var/lib/xpanel/.pre-rewind-up-a')).toBe(false)
+    expect(await w.fs.readFile('/var/lib/xpanel/.pre-rewind-up-b/accounts/old.yaml')).toBe('b')
+    expect(await w.fs.exists(STATE_ASIDE)).toBe(true)
+    expect(await w.fs.exists('/var/lib/xpanel/.rewind-up-1')).toBe(false)
+    expect(await w.fs.readFile('/var/lib/xpanel-lifecycle/backups/rewind-retention.json')).toBe('["up-b","up-1"]\n')
+    const execs = w.host.actions.flatMap(a => (a.kind === 'exec' ? [a.argv] : []))
+    expect(execs).toContainEqual(['/usr/bin/chown', '-R', '--no-dereference', 'root:root', STATE_ASIDE])
+    expect(execs).toContainEqual(['/usr/bin/chmod', '-R', 'go-w', STATE_ASIDE])
+
+    // An unverified rewind prunes nothing.
+    const v = world()
+    v.fs.file('/var/lib/xpanel-lifecycle/backups/rewind-retention.json', '["up-a","up-b"]\n')
+    v.fs.file('/var/lib/xpanel/.pre-rewind-up-a/accounts/old.yaml', 'a')
+    v.served.set('alice', 33)
+    v.faultsPersist = true
+    expect((await runUpgrade(v.ports, plan())).rewind?.state).toBe('rewind-unknown')
+    expect(await v.fs.exists('/var/lib/xpanel/.pre-rewind-up-a')).toBe(true)
+    expect(await v.fs.readFile('/var/lib/xpanel-lifecycle/backups/rewind-retention.json')).toBe('["up-a","up-b"]\n')
+  })
+
+  it('refuses a corrupted or foreign snapshot and restores nothing', async () => {
+    const tamper: [string, (w: World) => void, RegExp][] = [
+      ['state archive', w => w.fs.file(SNAPSHOT, '[["state/accounts/alice.yaml","uid: 0\\n"]]'), /20261022T013500Z\.tar\.gz does not match its receipt checksum/],
+      ['index copy', w => w.fs.file(CONTROL_COPY, '{"schema":1}'), /control\.db does not match its receipt checksum/],
+      ['receipt identity', w => w.fs.file(RECEIPT, (w.fs.nodes.get(RECEIPT) as { content: string }).content.replace('"recordId":"up-1"', '"recordId":"up-9"')), /receipt does not belong to this upgrade/],
+      ['missing receipt', w => w.fs.nodes.delete(RECEIPT), /receipt is missing or malformed/],
+      ['safety without index restore', w => { Reflect.deleteProperty(w.ports.safety, 'restoreControlPlane') }, /index restore is not available/],
+    ]
+    for (const [what, corrupt, reason] of tamper) {
+      const w = world()
+      w.afterReconcile = () => corrupt(w)
+      w.controlPlane.ok = false
+      const r = await runUpgrade(w.ports, plan())
+      expect(r.outcome, what).toBe('rollback_failed')
+      expect(r.rewind, what).toMatchObject({ state: 'rewind-failed', done: [] })
+      expect(r.rollbackErrors.join(), what).toMatch(reason)
+      expect(await w.fs.readlink('/opt/xpanel/current'), what).toBe('/opt/xpanel/releases/1.1.0')
+      expect(w.host.actions.some(a => a.kind === 'exec' && isStateRestoreTar(a.argv)), what).toBe(false)
+      expect(w.events, what).not.toContain('restore index')
+      expect(w.gen.activated, what).toEqual([])
+      expect(w.db.schema, what).toBe(6)
+      expect((await readLock(w.fs, LOCK))?.state, what).toBe('rollback-failed')
+      expect(await w.fs.exists(MAINTENANCE), what).toBe(true)
+    }
+  })
+
+  it('reports rewind unverified when the health checks still fail after restoring', async () => {
+    const w = world()
+    w.served.set('alice', 33)
+    w.faultsPersist = true
+    const r = await runUpgrade(w.ports, plan())
+    expect(r.outcome).toBe('rollback_failed')
+    expect(r.rewind).toMatchObject({ state: 'rewind-unknown', done: ['release', 'state-extract', 'state-swap', 'index', 'units', 'start-panel'] })
+    expect(r.rewind?.problems.join()).toMatch(/canary alice served by uid 33 instead of 1001/)
+    expect(r.rollbackErrors).toContain('rewind unverified: operator action required')
+    // The restore happened and is reported as such; only its proof is missing.
+    expect(await w.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
+    expect(w.db.data).toBe('desired-state-v4')
+    expect(JSON.parse(await w.fs.readFile(JOURNAL) as string)).toMatchObject({ state: 'rewind-unknown' })
+    expect(await w.fs.exists('/opt/xpanel/releases/1.1.0')).toBe(true)
+    expect(w.audit.actions().at(-1)).toBe('upgrade.rollback_failed')
+    expect((await runUpgrade(w.ports, plan())).outcome).toBe('refused')
+    // Recovery does not re-run a terminal rewind and refuses while the server is unhealthy.
+    await expect(recoverUpgrade(w.ports, { actor: ROOT, os: { family: 'debian' }, note: 'checked', canary: 'alice' })).rejects.toThrow(/canary alice served by uid 33/)
+    expect(w.gen.activated).toEqual([41])
   })
 
   it('requires the explicit control-plane backup before extraction or switching', async () => {
@@ -543,25 +717,24 @@ describe('runUpgrade: success', () => {
 })
 
 describe('runUpgrade: rollback after the switch', () => {
-  it('rolls back binaries and reconciles current authority when the canary is not served by its own uid', async () => {
+  it('rewinds to the snapshot when the canary is not served by its own uid', async () => {
     const w = world()
     w.served.set('alice', 33)
     const r = await runUpgrade(w.ports, plan())
     expect(r).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'rolled_back' })
     expect(r.reason).toMatch(/canary alice served by uid 33 instead of 1001/)
     expect(await w.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
-    expect(w.db).toMatchObject({ schema: 6, data: 'desired-state-v4+0005_accounts_note.sql+0006_backfill_note.sql', applied: ['0001', '0002', '0003', '0004', '0005_accounts_note.sql', '0006_backfill_note.sql'] })
-    expect(w.gen.activated).toEqual([])
-    expect(w.gen.current).toBe(43)
+    expect(w.db).toMatchObject({ schema: 6, data: 'desired-state-v4' })
+    expect(w.gen.activated).toEqual([41])
+    expect(w.gen.current).toBe(41)
     expect(await w.fs.exists('/opt/xpanel/releases/1.1.0')).toBe(false)
     expect(w.clock.sleeps).toEqual([1000, 1000])
+    expect(r.rewind?.state).toBe('rewind-verified')
 
-    const restore = w.host.actions.find((a) => a.kind === 'exec' && isStateRestoreTar(a.argv))
-    expect(restore).toBeUndefined()
     expect(shared(w).every((s) => s.verb === 'reload')).toBe(true)
     expect(w.events.slice(7)).toEqual([
-      'stop xpanel-api.service', 'stop xpanel-agent.service', 'start xpanel-api.service', 'start xpanel-agent.service',
-      'reconcile', 'reload nginx.service', 'reload apache2.service',
+      'stop xpanel-api.service', 'stop xpanel-agent.service', 'restore index',
+      'activate 41', 'reload nginx.service', 'reload apache2.service', 'start xpanel-api.service', 'start xpanel-agent.service',
     ])
 
     expect(w.db.rows).toHaveLength(1)
@@ -579,7 +752,7 @@ describe('runUpgrade: rollback after the switch', () => {
     expect(w.host.actions).toEqual([])
   })
 
-  it('retains attention when current-authority reconciliation cannot recover UID or quota drift', async () => {
+  it('restores UID and quota drift through the snapshot generation, and reports drift that survives it', async () => {
     const w = world()
     w.afterReconcile = () => {
       const a = w.identities[0] as AccountIdentity
@@ -588,17 +761,26 @@ describe('runUpgrade: rollback after the switch', () => {
       b.quotas = { ...b.quotas, diskMb: 'unlimited' }
     }
     const r = await runUpgrade(w.ports, plan())
-    expect(r.outcome).toBe('rollback_failed')
+    expect(r).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'rolled_back' })
     expect(r.reason).toMatch(/alice uid\/gid 1001\/1001 became 2001\/1001/)
     expect(r.reason).toMatch(/bob quota diskMb 1000 became unlimited/)
-    expect(w.identities).not.toEqual([alice, bob])
-    expect(w.gen.activated).toEqual([])
-    expect(await w.fs.exists(MAINTENANCE)).toBe(true)
+    expect(w.identities).toEqual([alice, bob])
+    expect(w.gen.activated).toEqual([41])
+
+    const v = world()
+    v.afterReconcile = () => { (v.identities[0] as AccountIdentity).uid = 2001 }
+    v.ports.reconciler.activate = async () => ({ generationId: 41, units: [] })
+    const unverified = await runUpgrade(v.ports, plan())
+    expect(unverified.outcome).toBe('rollback_failed')
+    expect(unverified.rewind?.state).toBe('rewind-unknown')
+    expect(unverified.rewind?.problems.join()).toMatch(/generation 42 is active, expected the rewound 41/)
+    expect(unverified.rewind?.problems.join()).toMatch(/alice uid\/gid 1001\/1001 became 2001\/1001/)
+    expect(await v.fs.exists(MAINTENANCE)).toBe(true)
   })
 
   it('rolls back when the qualified control-plane readiness fails or a probe throws', async () => {
     const w = world()
-    w.ports.health.qualifiedControlPlane = async () => { throw new Error('connection refused') }
+    w.ports.health.qualifiedControlPlane = async () => { if (await w.fs.readlink('/opt/xpanel/current') === '/opt/xpanel/releases/1.1.0') throw new Error('connection refused'); return true }
     const r = await runUpgrade(w.ports, plan())
     expect(r).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'rolled_back' })
     expect(r.reason).toMatch(/qualified control-plane readiness probe failed: connection refused/)
@@ -606,7 +788,7 @@ describe('runUpgrade: rollback after the switch', () => {
 
   it('does not accept a missing qualified control-plane observation as healthy', async () => {
     const w = world()
-    w.ports.health.qualifiedControlPlane = async () => undefined as unknown as boolean
+    w.ports.health.qualifiedControlPlane = async () => (await w.fs.readlink('/opt/xpanel/current') === '/opt/xpanel/releases/1.1.0' ? undefined as unknown as boolean : true)
     const r = await runUpgrade(w.ports, plan())
     expect(r).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'rolled_back' })
     expect(r.reason).toMatch(/qualified control-plane readiness failed/)
@@ -616,7 +798,7 @@ describe('runUpgrade: rollback after the switch', () => {
   it('rolls back when the reconcile or a panel restart fails', async () => {
     const w = world()
     w.ports.reconciler.reconcile = async () => { throw new Error('nginx -t failed') }
-    expect((await runUpgrade(w.ports, plan())).outcome).toBe('rollback_failed')
+    expect(await runUpgrade(w.ports, plan())).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'rolled_back', rewind: { state: 'rewind-verified' } })
     expect(await w.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
 
     const v = world()
@@ -625,7 +807,7 @@ describe('runUpgrade: rollback after the switch', () => {
     const r = await runUpgrade(v.ports, plan())
     expect(r).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'rolled_back' })
     expect(r.reason).toMatch(/restart xpanel-agent.service exited 1/)
-    expect(v.db.schema).toBe(6)
+    expect(v.db.data).toBe('desired-state-v4')
   })
 
   it('reports rollback_failed, keeps the lock and maintenance, and blocks until recovery', async () => {
@@ -675,6 +857,98 @@ describe('runUpgrade: rollback after the switch', () => {
     w.host.actions.length = 0
     expect((await runUpgrade(w.ports, plan())).outcome).toBe('refused')
     expect(w.host.actions).toEqual([])
+  })
+})
+
+describe('automatic rewind: crash inside every step, then resume', () => {
+  type Event = { op: string; path: string } | { argv: string[] }
+  const save = (n: number) => (e: Event, saves: number): boolean => 'op' in e && e.op === 'write' && e.path === `${JOURNAL}.tmp` && saves === n
+  // Each image is taken before the named mutation, so the journal never covers the effect before it.
+  const points: [string, (e: Event, saves: number, w: World) => boolean][] = [
+    ['release: temporary link made, not renamed', (e, _, w) => 'op' in e && e.op === 'rename' && e.path === '/opt/xpanel/current' && w.fs.nodes.has(JOURNAL)],
+    ['release: switched back, not journaled', save(2)],
+    ['state-extract: files written, not synced', e => 'argv' in e && e.argv[0] === '/usr/bin/sync'],
+    ['state-extract: synced, not journaled', save(3)],
+    ['state-swap: live tree set aside only', (e, _, w) => 'op' in e && e.op === 'rename' && e.path === '/var/lib/xpanel/state' && w.fs.nodes.has(STATE_ASIDE)],
+    ['state-swap: swapped, not journaled', save(4)],
+    ['index: restored, not journaled', save(5)],
+    ['units: activated, not journaled', save(6)],
+    ['start-panel: started, not journaled', save(7)],
+    ['verify: proven, not journaled', save(8)],
+  ]
+
+  it.each(points)('resumes after a crash at %s', async (_, when) => {
+    const w = world()
+    w.afterReconcile = () => {
+      w.fs.file(STATE_FILE, 'uid: 1001\nnote: 1.1.0\n')
+      w.fs.file('/var/lib/xpanel/state/accounts/carol.yaml', 'uid: 1003\n')
+    }
+    w.controlPlane.ok = false
+    let saves = 0
+    const crash: { image: Pick<World, 'db' | 'gen' | 'identities'> & { nodes: FakeFs['nodes'] } | null } = { image: null }
+    const capture = (e: Event): void => {
+      if (crash.image === null && when(e, saves, w)) crash.image = structuredClone({ nodes: w.fs.nodes, db: w.db, gen: w.gen, identities: w.identities })
+    }
+    w.fs.failWhen = (op, path) => {
+      if (op === 'write' && path === `${JOURNAL}.tmp`) saves++
+      capture({ op, path })
+      return false
+    }
+    const handler = w.host.handler
+    w.host.handler = a => { if (a.kind === 'exec') capture({ argv: a.argv }); return handler?.(a) }
+    expect((await runUpgrade(w.ports, plan())).rewind?.state).toBe('rewind-verified')
+    const crashed = crash.image
+    if (crashed === null) throw new Error('crash point never reached')
+
+    // Power loss: a new process sees only what was on disk and in the index at that instant.
+    const v = world()
+    Object.assign(v, { db: crashed.db, gen: crashed.gen, identities: crashed.identities })
+    v.fs.nodes = crashed.nodes
+    v.controlPlane.ok = false
+    const before = parseRewindJournal(await v.fs.readFile(JOURNAL))
+    expect(before?.state).toBe('rewind-started')
+    const done = new Set<RewindStep>(before?.done)
+
+    const rec = await recoverUpgrade(v.ports, { actor: ROOT, os: { family: 'debian' }, note: 'resumed after power loss', canary: 'alice' })
+    expect(rec).toMatchObject({ status: 'retirement_pending', version: '1.0.0' })
+    expect(parseRewindJournal(await v.fs.readFile(JOURNAL))).toMatchObject({ state: 'rewind-verified', done: REWIND_STEPS, problems: [] })
+    expect(await v.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
+    expect(await v.fs.readFile(STATE_FILE)).toBe('uid: 1001\n')
+    expect(await v.fs.exists('/var/lib/xpanel/state/accounts/carol.yaml')).toBe(false)
+    expect(await v.fs.readFile(`${STATE_ASIDE}/accounts/carol.yaml`)).toBe('uid: 1003\n')
+    expect(v.db).toMatchObject({ schema: 6, data: 'desired-state-v4' })
+    expect(v.gen.current).toBe(41)
+    // Journaled steps are not repeated; the unjournaled one is re-run idempotently.
+    expect(v.host.actions.filter(a => a.kind === 'exec' && isStateRestoreTar(a.argv)).length).toBe(done.has('state-extract') ? 0 : 1)
+    expect(v.events.filter(e => e === 'restore index').length).toBe(done.has('index') ? 0 : 1)
+    expect(v.events.slice(0, 2)).toEqual(['stop xpanel-api.service', 'stop xpanel-agent.service'])
+    expect(v.events).toContain('start xpanel-agent.service')
+    expect(v.audit.entries.at(-1)).toMatchObject({ action: 'upgrade.recovery_observed', detail: { rewind: 'rewind-verified' } })
+    for (const marker of [MAINTENANCE, LOCK, RETIREMENT]) expect(await v.fs.exists(marker)).toBe(true)
+
+    // A finished rewind is never run again.
+    v.events.length = 0
+    await recoverUpgrade(v.ports, { actor: ROOT, os: { family: 'debian' }, note: 'checked again', canary: 'alice' })
+    expect(v.events).toEqual([])
+  })
+
+  it('a resumed rewind that cannot be proven stays unverified and is refused by recovery', async () => {
+    const w = world()
+    w.controlPlane.ok = false
+    const images: FakeFs['nodes'][] = []
+    let saves = 0
+    w.fs.failWhen = (op, path) => {
+      if (op === 'write' && path === `${JOURNAL}.tmp` && ++saves === 4) images.push(structuredClone(w.fs.nodes))
+      return false
+    }
+    await runUpgrade(w.ports, plan())
+    const v = world()
+    v.fs.nodes = images[0] as FakeFs['nodes']
+    v.served.set('alice', 33)
+    v.faultsPersist = true
+    await expect(recoverUpgrade(v.ports, { actor: ROOT, os: { family: 'debian' }, note: 'resumed', canary: 'alice' })).rejects.toThrow(/rewind unverified; operator action required: .*canary alice served by uid 33/)
+    expect(parseRewindJournal(await v.fs.readFile(JOURNAL))?.state).toBe('rewind-unknown')
+    expect(await v.fs.exists(RETIREMENT)).toBe(false)
   })
 })
 

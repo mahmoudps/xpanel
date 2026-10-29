@@ -139,7 +139,8 @@ describe('renderApacheVhost', () => {
   it('wires PHP-FPM through proxy_fcgi to the account socket', () => {
     const c = renderApacheVhost(a, domain(), settings(), debianOs).content
     expect(c).toContain(String.raw`<FilesMatch "\.php$">`)
-    expect(c).toContain('SetHandler "proxy:unix:/run/xpanel/fpm/alice-8.3/php-fpm.sock|fcgi://localhost"')
+    expect(c).toContain('SetHandler "proxy:unix:/run/xpanel-fpm/alice-8.3/php-fpm.sock|fcgi://localhost"')
+    expect(c).not.toMatch(/\/run\/xpanel\//)
     expect(c).not.toContain('SuexecUserGroup')
   })
 

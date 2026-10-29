@@ -49,6 +49,10 @@ export const REQUIRED_ROOT_FILES = Object.freeze([
   'scripts/release-verifier.d.mts',
   'helpers/account-files/build.mjs',
   'helpers/account-files/xpanel-account-files.c',
+  'helpers/terminal-pty/build.mjs',
+  'helpers/terminal-pty/xpanel-terminal-pty.c',
+  'apps/web/src/vendor/xterm/LICENSE',
+  'apps/web/src/vendor/xterm/LICENSE-addon-fit',
 ])
 
 // These files are visual references, never production modules or served assets.

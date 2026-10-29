@@ -3310,6 +3310,13 @@ html[dir="rtl"] .xp-accounts__technical bdi, html[dir="rtl"] .xp-account-dialog_
 .xp-totp-qr { display: inline-block; inline-size: max-content; max-inline-size: 100%; padding: 8px; background: #ffffff; border: 1px solid var(--xp-border); border-radius: var(--xp-radius-sm, 6px); line-height: 0; }
 .xp-totp-qr > svg { display: block; inline-size: 168px; block-size: 168px; max-inline-size: 100%; }
 
+/* Server branding arrives from core as --xp-brand-* properties and data-brand-* flags on <html>; classic maps it onto its own tokens. */
+html[data-brand-colors] { --xp-accent: var(--xp-brand-primary, #1d5bd6); --xp-accent-hover: color-mix(in srgb, var(--xp-accent) 82%, #000000); --xp-border-focus: var(--xp-accent); --xp-accent-soft: color-mix(in srgb, var(--xp-brand-accent, var(--xp-accent)) 12%, #ffffff); --xp-accent-border: color-mix(in srgb, var(--xp-brand-accent, var(--xp-accent)) 35%, #ffffff); }
+html[data-brand-colors][data-theme="dark"] { --xp-accent: var(--xp-brand-primary, #6ea0ff); --xp-accent-hover: color-mix(in srgb, var(--xp-accent) 82%, #ffffff); --xp-accent-soft: color-mix(in srgb, var(--xp-brand-accent, var(--xp-accent)) 22%, #0b1220); --xp-accent-border: color-mix(in srgb, var(--xp-brand-accent, var(--xp-accent)) 45%, #0b1220); }
+html[data-brand-logo] .xp-brand__mark, html[data-brand-logo][data-surface] .xp-sidebar .xp-brand__mark { background: var(--xp-brand-logo) center / contain no-repeat; color: transparent; }
+html[data-brand-logo] .xp-brand__mark svg { visibility: hidden; }
+[data-brand-footer] { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; padding: 16px var(--xp-space-card); color: var(--xp-text-muted); font-size: var(--xp-type-small, 13px); }
+
 ${MAIL_LAYOUT_CSS}
 ${ARABIC_TYPE_CSS}
 `

@@ -118,6 +118,11 @@ protocol lmtp {
 plugin {
   sieve = file:~/mail/%Ld/%Ln/sieve;active=~/mail/%Ld/%Ln/.dovecot.sieve
   sieve_before = /etc/dovecot/xpanel/sieve/%Ld/%Ln.sieve
+  sieve_extensions = +vacation-seconds
+  sieve_max_script_size = 1M
+  sieve_max_actions = 32
+  sieve_max_redirects = 4
+  sieve_vacation_min_period = 1h
 }
 ` })
   })

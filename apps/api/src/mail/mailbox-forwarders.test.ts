@@ -14,6 +14,7 @@ const path = (name = 'forwarders.json') => join(root, 'extended', 'mail', name)
 const seed = async (list: unknown, name = 'forwarders.json') => { await mkdir(join(root, 'extended', 'mail'), { recursive: true }); await writeFile(path(name), JSON.stringify(list)) }
 const saved = async () => JSON.parse(await readFile(path(), 'utf8')) as Array<Record<string, unknown>>
 
+const applied = { generationId: 1, record: () => ({ state: 'applied' as const, reason: null }) }
 function harness(options: { sessions?: SealedMailboxSession[]; cap?: number | 'unlimited'; audit?: MailboxForwardersPorts['audit']; status?: string } = {}) {
   let call = 0
   const audit = vi.fn(options.audit ?? (async () => undefined))
@@ -24,6 +25,8 @@ function harness(options: { sessions?: SealedMailboxSession[]; cap?: number | 'u
       getAccount: async (id: string) => id === ACCOUNT ? { id, status: options.status ?? 'active', planId: 'p1' } : null,
       getPlan: async () => ({ caps: { forwarders: options.cap ?? 'unlimited' } }) } as unknown as MailboxForwardersPorts['store'],
     audit, now: () => new Date('2026-10-27T12:00:00.000Z'),
+    // the host apply is covered by completion-mail-routing-apply.test.ts; this unit sees a host that applied
+    routing: { status: async () => applied, commit: vi.fn(async () => 7), apply: vi.fn(async () => applied) },
   }
   const send = (method = 'GET', body?: unknown, query = '') => handleMailboxForwardersRoute(new Request('http://api.test/api/webmail/forwarders' + query, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }),
     new URL('http://api.test/api/webmail/forwarders' + query), method, ports)
@@ -39,7 +42,7 @@ describe('mailbox forwarders view', () => {
     await seed([record('r1', 'bob@example.test', ['x@remote.test']), record('r2', 'ALICE@example.test', ['a@remote.test', 'b@remote.test'])])
     const view = await harness().read()
     expect(view).toMatchObject({ context: { mailbox: MAILBOX }, forwarding: { id: 'r2', destinations: ['a@remote.test', 'b@remote.test'], keepCopy: true }, limit: MAILBOX_FORWARD_LIMIT, review: null,
-      application: { status: 'configuration_only', nativeApplied: false } })
+      application: { state: 'applied', reason: null } })
     expect(view.revision).toMatch(/^[0-9a-f]{64}$/)
     expect(JSON.stringify(view)).not.toContain('bob@example.test')
   })
@@ -65,7 +68,7 @@ describe('mailbox forwarder writes', () => {
     await seed([neighbor])
     const h = harness()
     const created = await (await h.send('PUT', { destinations: ['Ext@Remote.test'], keepCopy: true, expectedRevision: (await h.read()).revision }))!.json()
-    expect(created).toMatchObject({ stateChanged: true, operation: 'created', forwarding: { destinations: ['ext@remote.test'], keepCopy: true }, application: { nativeApplied: false } })
+    expect(created).toMatchObject({ stateChanged: true, operation: 'created', forwarding: { destinations: ['ext@remote.test'], keepCopy: true }, application: { state: 'applied' } })
     let list = await saved()
     expect(list[0]).toEqual(neighbor)
     expect(list[1]).toMatchObject({ accountId: ACCOUNT, sourceAddress: MAILBOX, destinations: ['ext@remote.test'], createdAt: '2026-10-27T12:00:00.000Z' })

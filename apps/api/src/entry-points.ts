@@ -30,7 +30,7 @@ export const sessionCookieName = (entryPoint?: EntryPoint, secure = false): stri
 
 const authRoutes = new Set(['login', 'logout', 'me', 'change-password', '2fa/setup', '2fa/enable', '2fa/disable', 'team/password'])
 const ownerFamilies = /^\/api\/(?:domains|databases|service-users|dns|backups|web-features|git|cache|containers|apps|analytics)(?:\/|$)/
-const administratorFamilies = /^\/api\/(?:server|setup|jobs|feature-lists|plans|resellers|accounts|ips|domains|databases|service-users|dns|mail|backups|transfers|lifecycle|web-features|git|cache|containers|apps|analytics|firewall|generations|reconcile|cluster|whmcs|audit|branding|languages)(?:\/|$)/
+const administratorFamilies = /^\/api\/(?:server|setup|jobs|feature-lists|plans|resellers|accounts|ips|domains|databases|service-users|dns|mail|backups|transfers|lifecycle|web-features|git|cache|containers|apps|analytics|firewall|generations|reconcile|cluster|audit)(?:\/|$)/
 
 /** Listener confinement is additional to, and never a replacement for, route RBAC and ownership checks. */
 export const entryPointAllowsApiRoute = (entryPoint: EntryPoint, pathname: string, method: string): boolean => {
@@ -39,6 +39,7 @@ export const entryPointAllowsApiRoute = (entryPoint: EntryPoint, pathname: strin
   // Each listener issues handoffs only toward the one panel it may open.
   if (pathname === '/api/handoff/xpanel') return entryPoint === 'xwhm' && method === 'POST'
   if (pathname === '/api/handoff/xmail') return entryPoint === 'xpanel' && method === 'POST'
+  if (pathname === '/api/integrations/whmcs/provision') return entryPoint === 'xwhm' && method === 'POST'
   if (entryPoint === 'xmail') {
     if (method === 'GET' && pathname === '/api/ws') return true
     return /^\/api\/webmail(?:\/|$)/.test(pathname)
@@ -67,6 +68,7 @@ export const entryPointAllowsApiRoute = (entryPoint: EntryPoint, pathname: strin
   if (/^\/api\/account\/cron\/[0-9a-f-]{36}\/status$/.test(pathname)) return method === 'GET'
   if (/^\/api\/account\/cron\/[0-9a-f-]{36}\/run$/.test(pathname)) return method === 'POST'
   if (pathname === '/api/account/ssh/keys') return method === 'GET' || method === 'POST' || method === 'DELETE'
+  if (pathname === '/api/account/terminal') return method === 'GET' || method === 'POST' || method === 'DELETE'
   if (/^\/api\/account\/dynamic-dns(?:\/ddns_[A-Za-z0-9_-]{22}(?:\/rotate)?)?$/.test(pathname)) return method === 'GET' || method === 'POST' || method === 'DELETE'
   if (pathname === '/api/account/git') return method === 'GET' || method === 'POST'
   if (pathname === '/api/account/packages' || pathname === '/api/account/database-remote-access' || pathname === '/api/account/developer') return method === 'GET' || method === 'POST'
@@ -86,6 +88,8 @@ export const entryPointAllowsApiRoute = (entryPoint: EntryPoint, pathname: strin
   if (pathname === '/api/account/database-insights') return method === 'GET'
   if (pathname === '/api/account/optimize' || pathname === '/api/account/applications') return method === 'GET'
   if (pathname === '/api/account/applications/jobs') return method === 'POST'
+  if (pathname === '/api/account/runtime') return method === 'GET' || method === 'POST'
+  if (pathname === '/api/account/runtime/log') return method === 'GET'
   if (/^\/api\/account\/database-engines\/(?:postgresql|phpmyadmin|phppgadmin)$/.test(pathname)) return method === 'GET'
   if (/^\/api\/account\/database-engines\/postgresql\/(?:users|databases)$/.test(pathname)) return method === 'POST'
   if (/^\/api\/account\/database-engines\/postgresql\/(?:users|databases)\/[0-9a-f-]{36}$/.test(pathname)) return method === 'DELETE'
@@ -94,11 +98,11 @@ export const entryPointAllowsApiRoute = (entryPoint: EntryPoint, pathname: strin
   if (pathname === '/api/account/virus-scan') return method === 'GET' || method === 'POST'
   if (/^\/api\/account\/network-tools\/(?:dns|ping|traceroute|port)$/.test(pathname)) return method === 'POST'
   if (/^\/api\/accounts(?:\/[^/]+)?$/.test(pathname)) return method === 'GET'
-  if (/^\/api\/accounts\/[^/]+\/(?:files|shell)$/.test(pathname)) return true
+  if (/^\/api\/accounts\/[^/]+\/files$/.test(pathname)) return true
   if (/^\/api\/accounts\/[^/]+\/certificates$/.test(pathname)) return method === 'GET' || method === 'POST'
   if (/^\/api\/accounts\/[^/]+\/certificates\/install$/.test(pathname)) return method === 'POST'
   if (/^\/api\/accounts\/[^/]+\/certificates\/[0-9a-f-]{36}$/.test(pathname)) return method === 'DELETE'
   if (ownerFamilies.test(pathname)) return !['/api/analytics/io', '/api/analytics/websites/ingest'].includes(pathname)
   if (/^\/api\/mail(?:\/|$)/.test(pathname)) return pathname !== '/api/mail/ips' && pathname !== '/api/mail/caldav-carddav'
-  return method === 'GET' && ['/api/branding', '/api/languages'].includes(pathname)
+  return false
 }

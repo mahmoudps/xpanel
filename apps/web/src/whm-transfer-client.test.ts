@@ -21,22 +21,26 @@ beforeEach(() => {
   delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
 })
 afterEach(() => { for (const listener of listeners) window.removeEventListener('beforeunload', listener); document.body.replaceChildren(); vi.restoreAllMocks(); document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr' })
-const model = (initial = entry()) => {
+const model = (initial = entry(), execute = false) => {
   let current = clone(initial), mode = 'normal'
-  const archiveReviews: Record<string, unknown>[] = []
+  const imports: Record<string, unknown>[] = []
   const send = vi.fn(async (method: string, path: string, body?: unknown) => {
-    if (method === 'GET') return { sessions: [clone(current)], archiveReviews: clone(archiveReviews), capabilities: { discover: false, execute: false, archiveReview: true, archiveMaxBytes: 524288 } }
+    if (method === 'GET' && path === '/api/plans') return { plans: [{ id: id(9), name: 'gold' }] }
+    if (method === 'GET' && path === '/api/transfers/ssh-key') return { publicKey: 'ssh-ed25519 AAAA xpanel-transfer', fingerprint: 'SHA256:key' }
+    if (method === 'GET') return { sessions: [clone(current)], cpanelImports: clone(imports), capabilities: { discover: false, execute, cpanelImport: true, cpanelUploadMaxBytes: 524288 } }
     if (mode === 'unknown') throw { status: 503, details: { unknownOutcome: true } }
     if (mode === 'stale') throw { status: 409, details: { stateChanged: false } }
     const input = body as Record<string, unknown>
-    if (path === '/api/transfers/cpanel-review') { const review = { id: id(4), filename: input.filename, archiveSha256: 'a'.repeat(64), archiveRetained: false, nativeApplied: false, plan: { account: { username: 'bob', primaryDomain: 'bob.example.test' }, domains: [], databases: [], mailboxes: [], warnings: [] }, conflicts: [] }; archiveReviews.push(review); return { archiveReview: clone(review) } }
+    if (path === '/api/transfers/cpanel-imports') { const record = { id: id(4), filename: input.filename, origin: 'upload', state: 'uploading', bytes: input.bytes, revision: '4'.repeat(64), conflicts: [], unmapped: [] }; imports.push(record); return { cpanelImport: clone(record), chunkBytes: 2 } }
+    if (path === '/api/transfers/cpanel-imports/' + id(4) && method === 'PUT') { const record = imports[0]!; if ((input.offset as number) + 2 >= (record.bytes as number)) record.state = 'inspecting'; return { received: (input.offset as number) + 2 } }
+    if (path.startsWith('/api/transfers/cpanel-imports/') && method === 'PATCH') { imports[0]!.state = input.action === 'import' ? 'importing' : 'failed'; return { cpanelImport: clone(imports[0]) } }
     if (method === 'POST') current = { ...entry(), session: { ...entry().session, id: id(3), auth: input.auth as ReturnType<typeof entry>['session']['auth'] }, revision: '3'.repeat(64) }
-    else current = { ...current, session: { ...current.session, state: input.action === 'cancel' ? 'cancelled' : current.session.state }, revision: '2'.repeat(64) }
+    else current = { ...current, session: { ...current.session, state: input.action === 'cancel' ? 'cancelled' : input.action === 'run' ? 'applying' : current.session.state }, revision: '2'.repeat(64) }
     return clone(current)
   })
   const ask = vi.fn(async () => true)
   const boot = () => { (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send; new Function('return ' + WHM_TRANSFER_CLIENT_BINDING)()(ask) }
-  return { send, ask, boot, setMode: (value: string) => { mode = value }, setCurrent: (value: ReturnType<typeof entry>) => { current = clone(value) }, setArchiveReviews: (value: Record<string, unknown>[]) => { archiveReviews.splice(0, archiveReviews.length, ...clone(value)) }, writes: () => send.mock.calls.filter(call => call[0] !== 'GET') }
+  return { send, ask, boot, setMode: (value: string) => { mode = value }, setCurrent: (value: ReturnType<typeof entry>) => { current = clone(value) }, setImports: (value: Record<string, unknown>[]) => { imports.splice(0, imports.length, ...clone(value)) }, writes: () => send.mock.calls.filter(call => call[0] !== 'GET') }
 }
 
 describe('persisted transfer review browser contract', () => {
@@ -44,7 +48,7 @@ describe('persisted transfer review browser contract', () => {
     expect(() => new Function('return ' + WHM_TRANSFER_CLIENT_BINDING)()).not.toThrow()
     expect(WHM_TRANSFER_CLIENT_BINDING).not.toContain('innerHTML')
     expect(WHM_TRANSFER_CLIENT_BINDING).not.toContain('fetch(')
-    for (const name of ['refresh', 'create', 'discover', 'select', 'resolve', 'review', 'run', 'cancel', 'inspect']) expect(button(name)).not.toBeNull()
+    for (const name of ['refresh', 'create', 'discover', 'select', 'resolve', 'review', 'run', 'stop', 'cancel', 'inspect', 'fetch', 'ssh-key', 'import-run', 'import-discard']) expect(button(name)).not.toBeNull()
   })
   it('locks all controls without an admitted transport', async () => {
     new Function('return ' + WHM_TRANSFER_CLIENT_BINDING)()(undefined)
@@ -123,27 +127,46 @@ describe('persisted transfer review browser contract', () => {
     expect(document.querySelector('[data-whm-detail-section="transfer-progress"] tbody')!.textContent).not.toContain('32 / 64')
     expect(document.querySelector('[data-transfer-progress-state]')!.getAttribute('data-transfer-progress-state')).toBe('not-read')
   })
-  it('inspects bytes through the archive route without discarding an unsaved source selection', async () => {
+  it('uploads the archive in checked pieces without discarding an unsaved source selection', async () => {
     const f = model(entry('inventoried', { accounts: [{ username: 'alice' }], plans: [{ name: 'gold' }] })); f.boot(); await tick()
     const checkbox = document.querySelector<HTMLInputElement>('[data-transfer-accounts] input')!; checkbox.checked = true; checkbox.dispatchEvent(new Event('change', { bubbles: true }))
-    Object.defineProperty(field('transfer-archive'), 'files', { configurable: true, value: [{ name: 'cpmove-bob.tar.gz', size: 3, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer }] })
-    button('inspect').click(); await tick(); await tick()
-    expect(f.writes()[0]?.[1]).toBe('/api/transfers/cpanel-review')
-    expect(f.writes()[0]?.[2]).toEqual({ filename: 'cpmove-bob.tar.gz', archiveBase64: 'AQID' })
+    const bytes = new Uint8Array([1, 2, 3])
+    Object.defineProperty(field('transfer-archive'), 'files', { configurable: true, value: [{ name: 'cpmove-bob.tar.gz', size: 3, slice: (start: number, end: number) => ({ arrayBuffer: async () => bytes.slice(start, end).buffer }) }] })
+    button('inspect').click(); for (let i = 0; i < 6; i++) await tick()
+    expect(f.writes().map(call => [call[0], call[1], call[2]])).toEqual([
+      ['POST', '/api/transfers/cpanel-imports', { filename: 'cpmove-bob.tar.gz', bytes: 3 }],
+      ['PUT', '/api/transfers/cpanel-imports/' + id(4), { offset: 0, data: 'AQI=' }],
+      ['PUT', '/api/transfers/cpanel-imports/' + id(4), { offset: 2, data: 'Aw==' }]])
     expect(status().dataset.state).toBe('saved')
-    expect(document.querySelector<HTMLInputElement>('[data-transfer-accounts] input')!.checked).toBe(true)
+    expect(document.querySelector('[data-transfer-import]')!.textContent).toContain('cpmove-bob.tar.gz · Inspecting')
   })
-  it('fills actual parsed archive details and clears stale rows without implying import execution', async () => {
+  it('imports a reviewed archive onto the chosen plan and starts and stops a reviewed transfer', async () => {
+    const reviewed = { ...entry('reviewed', { accounts: [{ username: 'alice' }], plans: [] }), review: { accounts: [] }, digest: 'd'.repeat(64) }
+    const f = model(reviewed, true)
+    f.setImports([{ id: id(4), filename: 'cpmove-bob.tar.gz', state: 'review', revision: '4'.repeat(64), plan: { account: { username: 'bob' } }, conflicts: [], unmapped: [] }])
+    f.boot(); await tick(); await tick()
+    expect(button('import-run').disabled).toBe(false)
+    button('import-run').click(); for (let i = 0; i < 4; i++) await tick()
+    expect(f.writes()[0]!.slice(0, 3)).toEqual(['PATCH', '/api/transfers/cpanel-imports/' + id(4), { action: 'import', expectedRevision: '4'.repeat(64), planId: id(9) }])
+    expect(button('run').disabled).toBe(false)
+    button('run').click(); for (let i = 0; i < 4; i++) await tick()
+    expect(f.writes()[1]!.slice(0, 3)).toEqual(['PATCH', '/api/transfers/sessions/' + id(1), { digest: 'd'.repeat(64), action: 'run', expectedRevision: '1'.repeat(64) }])
+    expect(status().dataset.state).toBe('saved')
+    expect(button('stop').disabled).toBe(false)
+    button('ssh-key').click(); for (let i = 0; i < 3; i++) await tick()
+    expect(document.querySelector('[data-transfer-ssh-key-value]')!.textContent).toBe('ssh-ed25519 AAAA xpanel-transfer · SHA256:key')
+  })
+  it('fills actual parsed archive details, lists what is not imported and clears stale rows', async () => {
     const grid = '<table><thead><tr><th>Item</th><th>Source</th><th>Destination</th><th>Action</th></tr></thead><tbody></tbody></table>'
     document.body.insertAdjacentHTML('beforeend', '<section data-whm-detail-section="transfer-import"><p class="xp-whm-detail-status">Not read</p>' + Array.from({ length: 5 }, () => '<details>' + grid + '</details>').join('') + grid + '</section>')
     const f = model()
-    f.setArchiveReviews([{ plan: { account: { username: 'bob', primaryDomain: 'bob.example.test' }, domains: [{ name: 'bob.example.test', docRoot: 'public_html' }], home: { files: 2, bytes: 32 }, databases: [{ sourceName: 'bob_blog', name: 'target_blog' }], dbUsers: [{ sourceName: 'bob_writer', name: 'target_writer' }], mailboxes: [{ address: 'support@bob.example.test', maildir: 'mail/bob.example.test/support', hasMaildir: true }], dnsZones: [{ zone: 'bob.example.test', records: [{ name: 'www', type: 'A', content: '192.0.2.10' }] }], warnings: [{ message: 'Review \u0662 source entries', path: 'homedir/example' }] }, conflicts: [{ kind: 'username', value: 'bob' }] }])
+    f.setImports([{ id: id(4), filename: 'cpmove-bob.tar.gz', state: 'review', revision: '4'.repeat(64), unmapped: [{ tag: 'paused', message: 'Review \u0662 source entries', path: 'homedir/example' }], plan: { account: { username: 'bob', primaryDomain: 'bob.example.test' }, domains: [{ name: 'bob.example.test', docRoot: 'public_html' }], home: { files: 2, bytes: 32 }, databases: [{ sourceName: 'bob_blog', name: 'target_blog' }], dbUsers: [{ sourceName: 'bob_writer', name: 'target_writer' }], mailboxes: [{ address: 'support@bob.example.test', maildir: 'mail/bob.example.test/support', hasMaildir: true }], dnsZones: [{ zone: 'bob.example.test', records: [{ name: 'www', type: 'A', content: '192.0.2.10' }] }], warnings: [] }, conflicts: [{ kind: 'username', value: 'bob' }] }])
     f.boot(); await tick()
     const section = document.querySelector('[data-whm-detail-section="transfer-import"]')!
     expect(section.textContent).toContain('public_html'); expect(section.textContent).toContain('target_blog'); expect(section.textContent).toContain('target_writer')
     expect(section.textContent).toContain('support@bob.example.test'); expect(section.textContent).toContain('192.0.2.10'); expect(section.textContent).toContain('Review 2 source entries')
-    expect(section.textContent).toContain('Parsed review only'); expect(button('run').disabled).toBe(true); expect(f.writes()).toHaveLength(0)
-    f.setArchiveReviews([]); button('refresh').click(); await tick(); await tick()
+    expect(section.textContent).toContain('Paused'); expect(button('import-run').disabled).toBe(true); expect(f.writes()).toHaveLength(0)
+    f.setImports([]); button('refresh').click(); await tick(); await tick()
     expect(section.textContent).not.toContain('target_blog'); expect(section.textContent).not.toContain('192.0.2.10')
     expect(section.textContent).toContain('No parsed archive review was returned')
   })
@@ -168,13 +191,13 @@ describe('transfer human session dates preserve persisted option identity', () =
     document.documentElement.lang = lang; document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr'
     new Function('return ' + WHM_TRANSFER_CLIENT_BINDING)()(f.ask)
     await tick()
-    expect(document.querySelector('[data-transfer-archive-limit]')!.textContent).toBe(lang === 'ar' ? 'الحد الأقصى لرفع أرشيف للفحص: 524288 بايت' : 'Maximum archive inspection upload: 524288 bytes')
+    expect(document.querySelector('[data-transfer-archive-limit]')!.textContent).toBe(lang === 'ar' ? 'الحد الأقصى لحجم الأرشيف: 524288 بايت' : 'Maximum archive size: 524288 bytes')
     const picker = document.querySelector<HTMLSelectElement>('[data-transfer-session]')!, option = picker.options[0]!
     expect(option.textContent).toContain('2026-10-27 12:00 UTC')
     expect(option.textContent).toMatch(lang === 'ar' ? /^جلسة غير مرقمة · .+ · 2026-10-27 12:00 UTC · .+$/ : /^Unnumbered session · .+ · 2026-10-27 12:00 UTC · .+$/)
     expect(option.textContent).not.toContain(rawAt); expect(option.textContent).not.toContain(id(1))
     expect(option.value).toBe(id(1)); expect(picker.value).toBe(id(1))
-    expect(f.send.mock.calls.map(call => call.slice(0, 2))).toEqual([['GET', '/api/transfers/sessions']])
+    expect(f.send.mock.calls.map(call => call.slice(0, 2))).toEqual([['GET', '/api/transfers/sessions'], ['GET', '/api/plans']])
     expect(f.writes()).toHaveLength(0); expect(button('discover').disabled).toBe(true); expect(button('run').disabled).toBe(true)
     expect(JSON.stringify(initial)).toBe(original)
   })

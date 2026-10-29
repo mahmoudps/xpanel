@@ -12,7 +12,7 @@ export function renderMailForwarders(input: { locale: Locale; mailbox: string; c
     <div class="xp-mail-forwarders__intro">
       <p class="xp-help">${escapeHtml(introBefore)}${mailbox}${escapeHtml(introAfter)}</p>
       <p class="xp-help" data-forwarders-status data-state="unread" role="status">${input.canManage ? t('Forwarders have not been read.') : t('Forwarders are unavailable for this mailbox session. Nothing was read.')}</p>
-      <p class="xp-help" data-forwarders-application role="note">${t('Forwarders are saved as configuration. Applying them on the mail server is not verified, so mail may not be forwarded yet.')}</p>
+      <p class="xp-help" data-forwarders-application role="note">${t('Forwarders take effect when the mail server applies them; each save reports whether it did.')}</p>
     </div>
     <div class="xp-table-wrap" role="region" tabindex="0" aria-label="${t('Forwarding destinations')}"><table class="xp-table"><caption class="sr-only">${t('Forwarding destinations of this mailbox')}</caption><thead><tr><th scope="col">${t(msgctxt('xmail-mailbox-forwarders', 'Destination'))}</th><th scope="col">${t('Action')}</th></tr></thead><tbody data-forwarders-rows><tr><td colspan="2">${t('Forwarders have not been read.')}</td></tr></tbody></table></div>
     <div class="xp-mail-forwarders__add" role="group" aria-labelledby="mail-forwarders-add-heading">

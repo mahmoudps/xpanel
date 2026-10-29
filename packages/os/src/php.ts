@@ -2,7 +2,7 @@ import { fail } from '@xpanel/core'
 import { preview } from './validate.ts'
 
 /** Runtime root of xPanel's own per-account FPM masters (<dir>/<user>-<version>/php-fpm.sock), not a distro master's. */
-export const XPANEL_FPM_SOCKET_DIR = '/run/xpanel/fpm'
+export const XPANEL_FPM_SOCKET_DIR = '/run/xpanel-fpm'
 
 export const SUPPORTED_PHP_VERSIONS = ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4'] as const
 

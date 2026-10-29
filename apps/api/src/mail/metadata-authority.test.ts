@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { assessMailboxMetadataAuthority } from '@xpanel/core'
+import { createTestDb } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
 import { createExtendedApiRouter, type ExtendedRouteHelpers, type WebmailIdentity, type WebmailVacationConfig } from '../extended-routes.ts'
 import { vacationWorkspaceRevision } from './vacation-workspace.ts'
@@ -47,7 +48,9 @@ const routeFixture = async () => {
   const f = await stateFixture()
   const caller = { principal: { kind: 'root', id: '99999999-9999-4999-8999-999999999999', username: 'root' }, sessionId: 'synthetic-session', apiTokenId: null, scopes: ['*'], csrfValid: true, mfaVerified: true }
   const audits: unknown[] = []
-  const helpers = { store: f.state.store, requireCaller: async () => caller, assertRoot: async () => {}, assertCanAccessAccount: async () => {},
+  const database = await createTestDb()
+  cleanup.push(() => database.close())
+  const helpers = { store: f.state.store, db: database.db, requireCaller: async () => caller, assertRoot: async () => {}, assertCanAccessAccount: async () => {},
     emitAudit: async (...args: unknown[]) => { await f.state.store.readSnapshot(); audits.push(args) }, resolveResellerId: async () => null, triggerReconcile: async () => null,
   } as unknown as ExtendedRouteHelpers
   const router = createExtendedApiRouter(helpers)

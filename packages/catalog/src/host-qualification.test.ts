@@ -26,7 +26,8 @@ describe('host qualification', () => {
     const qualified = new Set(qualifyHostTools(tools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
     expect(qualified).toEqual(new Set(['list-accounts', 'modify-account', 'password-modification', 'manage-account-suspension', 'terminate-accounts', 'add-package', 'edit-package', 'delete-package', 'feature-list-crud', 'server-settings-edit', 'mysql-databases', 'mysql-users', 'ssl-tls-status', 'reseller-center',
       'panel-upgrade', 'aapanel-language-theme', 'service-ssl-certificates', 'xwhm-api-tokens', 'notification-center', 'mail-quality', 'panel-news',
-      'service-config-health', 'api-shell', 'api-explorer', 'integrations-hub', 'trusted-proxies', 'backup-destinations']))
+      'service-config-health', 'api-shell', 'api-explorer', 'integrations-hub', 'trusted-proxies', 'backup-destinations',
+      'aapanel-panel-general', 'panel-branding', 'application-locales', 'whmcs-integration']))
     expect(qualified.has('create-account')).toBe(false)
     expect(qualified.has('file-manager')).toBe(false)
     expect(qualified.has('email-accounts')).toBe(false)

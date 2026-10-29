@@ -1,5 +1,6 @@
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
+import { renderRuntimeAppsSection } from './account-runtime-workspace.ts'
 
 /** /software/apps: signed-catalog applications per owned domain through the verified installer, plus runtime apps. */
 export function renderSwApplicationsWorkspace(input: { lang: Locale; canManage: boolean }): string {
@@ -20,9 +21,6 @@ export function renderSwApplicationsWorkspace(input: { lang: Locale; canManage: 
     <div class="xp-acct-tool__actions">${action('install', t('Install'), true)}${action('update', t('Update'))}${action('rollback', t('Roll back'))}${action('remove', t('Remove'))}</div>
     <p class="xp-help" data-sw-apps-capability>${t('Writes need an admitted descriptor-confined artifact provider for account files. Until one is connected, nothing can be installed and nothing is reported as installed.')}</p>
   </section>
-  <section class="xp-acct-tool__card" aria-labelledby="sw-apps-runtime"><h2 id="sw-apps-runtime">${t('Node.js, Python and Ruby applications')}</h2>
-    <p>${t('Runtime applications are unavailable: they need a confined per-account application service runner with plan limits and a domain binding, which is not connected. No application is created or started here.')}</p>
-    <div class="xp-acct-tool__actions"><button type="button" class="xp-btn" disabled>${t('Create application')}</button></div>
-  </section>
+  ${renderRuntimeAppsSection({ lang: input.lang, canManage: input.canManage })}
 </div>`
 }

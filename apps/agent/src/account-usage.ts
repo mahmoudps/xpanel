@@ -15,7 +15,11 @@ export interface AccountUsageSample {
   bandwidth: 'unmeasured'
   /** True only for matching assigned IO caps on the home device; null for missing evidence. */
   ioEnforced: boolean | null
+  /** This UTC month's metered traffic (web, mail, FTP) from the bandwidth meter; absent when the meter has no report. */
+  bandwidthMonth?: AccountBandwidthMonth
 }
+export interface AccountBandwidthMonth { month: string; totalBytes: number | null; limitBytes: number | null; usedPercent: number | null; enforced: boolean; limited: boolean }
+
 
 const activeUnit = async (executor: AgentExecutor, unit: string): Promise<boolean> => {
   try {

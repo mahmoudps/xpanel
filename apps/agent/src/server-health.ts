@@ -1,6 +1,7 @@
 import { fail } from '@xpanel/core'
 import type { Account, Certificate, Plan } from '@xpanel/core'
 import type { CanonicalIoAnalyticsRead } from './analytics.ts'
+import type { BandwidthReport } from './metering.ts'
 import { parseCpuinfo, parseLoadavg, parseMeminfo } from './host-info.ts'
 import { readDisk } from './host-monitoring.ts'
 import type { FilesystemView } from './host-monitoring.ts'
@@ -11,7 +12,7 @@ import { MAX_LIMITS_BATCH, readServerLimits } from './server-health-limits.ts'
 import type { ServerLimitsExecutor } from './server-health-limits.ts'
 
 type Levels = Readonly<{ warning: number; problem: number }>
-export interface ServerHealthThresholds { loadPerCore: Levels; memoryAvailablePercent: Levels; swapUsedPercent: Levels; diskUsedPercent: Levels; inodeUsedPercent: Levels; certificateExpiryDays: number }
+export interface ServerHealthThresholds { loadPerCore: Levels; memoryAvailablePercent: Levels; swapUsedPercent: Levels; diskUsedPercent: Levels; inodeUsedPercent: Levels; certificateExpiryDays: number; bandwidthUsedPercent: Levels }
 /** Fixed, documented thresholds. Each check is graded on its own; there is no combined score. */
 export const SERVER_HEALTH_THRESHOLDS: Readonly<ServerHealthThresholds> = Object.freeze({
   /** 5-minute load average divided by the online processors in /proc/cpuinfo. */
@@ -25,13 +26,15 @@ export const SERVER_HEALTH_THRESHOLDS: Readonly<ServerHealthThresholds> = Object
   inodeUsedPercent: Object.freeze({ warning: 85, problem: 95 }),
   /** A saved certificate whose notAfter is closer than this is expiring. */
   certificateExpiryDays: 14,
+  /** This UTC month's measured traffic as a percentage of the plan's monthly bandwidth. */
+  bandwidthUsedPercent: Object.freeze({ warning: 80, problem: 100 }),
 })
 const MAX_ITEMS = 25
 /** Pseudo and read-only image filesystems are full by design or hold no persistent data; they are counted in evidence, not graded. */
 const UNGRADED_FILESYSTEMS: ReadonlySet<string> = new Set(['tmpfs', 'devtmpfs', 'ramfs', 'squashfs', 'overlay', 'efivarfs', 'iso9660'])
 
 export type ServerHealthState = 'ok' | 'warning' | 'problem' | 'unavailable'
-export type ServerHealthCheckId = 'load' | 'memory' | 'swap' | 'disk-space' | 'disk-inodes' | 'services' | 'drift' | 'certificates' | 'reboot'
+export type ServerHealthCheckId = 'load' | 'memory' | 'swap' | 'disk-space' | 'disk-inodes' | 'services' | 'drift' | 'certificates' | 'reboot' | 'bandwidth'
 export interface ServerHealthItem { name: string; state: ServerHealthState; reason: string; evidence: string }
 export interface ServerHealthCheck { id: ServerHealthCheckId; state: ServerHealthState; reason: string; evidence: string; items?: ServerHealthItem[]; omitted?: number }
 export interface ServerHealthReport {
@@ -55,6 +58,8 @@ export interface ServerHealthRouteContext {
   readSaved: () => Promise<ServerHealthSaved>
   /** The daemon-owned cached resource sample (CPU and IO rates). */
   readResources: (() => Promise<CanonicalIoAnalyticsRead>) | null
+  /** The bandwidth meter's monthly report; null when no meter runs on this host. */
+  readBandwidth?: (() => Promise<BandwidthReport>) | null
   now?: () => Date
 }
 
@@ -175,8 +180,25 @@ async function rebootCheck(executor: ServerLimitsExecutor, family: ServerHealthR
   return text === null ? check('reboot', 'ok', 'reboot_not_required', REBOOT_REQUIRED_PATH + ' is absent') : check('reboot', 'warning', 'reboot_required', REBOOT_REQUIRED_PATH + ' is present')
 }
 
+/** Accounts graded against their plan's monthly bandwidth. An unmeasured account with a limit is listed unavailable, never ok. Nothing is enforced. */
+export async function bandwidthCheck(read: (() => Promise<BandwidthReport>) | null | undefined): Promise<ServerHealthCheck> {
+  let report: BandwidthReport | null = null
+  try { report = read ? await read() : null } catch { report = null }
+  if (!report || report.state === 'unavailable') return check('bandwidth', 'unavailable', 'bandwidth_unread', 'bandwidth has not been measured on this host')
+  const items: ServerHealthItem[] = []
+  for (const row of report.accounts) {
+    if (row.limitBytes === null) continue
+    if (row.usedPercent === null) { items.push(item(row.username, 'unavailable', 'bandwidth_unread', `limit ${row.limitBytes} bytes; traffic not measured`)); continue }
+    const state = above(row.usedPercent, SERVER_HEALTH_THRESHOLDS.bandwidthUsedPercent)
+    if (state !== 'ok') items.push(item(row.username, state, 'bandwidth_' + state, `${row.totalBytes} of ${row.limitBytes} bytes in ${report.month}; ${row.limited ? 'limit page served' : row.enforced ? 'enforced' : 'not enforced'} (${row.usedPercent}% used)`))
+  }
+  const limited = report.accounts.filter(row => row.limitBytes !== null).length
+  const evidence = `${limited} accounts with a monthly limit in ${report.month}; ${report.accounts.length - limited} unlimited; counted ${report.state}; ${report.accounts.filter(row => row.limited).length} serving the limit page`
+  return items.length ? aggregate('bandwidth', 'bandwidth', items, evidence) : { ...check('bandwidth', 'ok', 'bandwidth_ok', evidence), items: [], omitted: 0 }
+}
+
 /** One read-only summary of fixed checks. Every host read is independent; a failed read is unavailable, never ok. */
-export async function evaluateServerHealth(input: { executor: ServerLimitsExecutor | null; family: ServerHealthRouteContext['family']; readDrift: ServerHealthRouteContext['readDrift']; saved: ServerHealthSaved; now?: () => Date }): Promise<ServerHealthReport> {
+export async function evaluateServerHealth(input: { executor: ServerLimitsExecutor | null; family: ServerHealthRouteContext['family']; readDrift: ServerHealthRouteContext['readDrift']; saved: ServerHealthSaved; readBandwidth?: ServerHealthRouteContext['readBandwidth']; now?: () => Date }): Promise<ServerHealthReport> {
   const observed = (input.now ?? (() => new Date()))()
   const { executor } = input
   const none = (id: ServerHealthCheckId): ServerHealthCheck => check(id, 'unavailable', 'host_unavailable', 'native host observation is unavailable')
@@ -184,7 +206,7 @@ export async function evaluateServerHealth(input: { executor: ServerLimitsExecut
   const [load, memory, disk, services, drift, reboot]: Checks = executor ? await Promise.all([loadCheck(executor), memoryChecks(executor), diskChecks(executor), servicesCheck(executor),
     input.readDrift ? driftCheck(input.readDrift) : Promise.resolve(none('drift')), rebootCheck(executor, input.family)])
     : [none('load'), [none('memory'), none('swap')], [none('disk-space'), none('disk-inodes')], none('services'), none('drift'), none('reboot')]
-  const checks = [load, ...memory, ...disk, services, drift, certificatesCheck(input.saved, observed.getTime()), reboot]
+  const checks = [load, ...memory, ...disk, services, drift, certificatesCheck(input.saved, observed.getTime()), reboot, await bandwidthCheck(input.readBandwidth)]
   const counts: Record<ServerHealthState, number> = { ok: 0, warning: 0, problem: 0, unavailable: 0 }
   for (const entry of checks) counts[entry.state]++
   return { observedAt: observed.toISOString(), host: executor ? 'read' : 'unavailable', thresholds: SERVER_HEALTH_THRESHOLDS, counts, checks }
@@ -213,7 +235,7 @@ export async function handleServerHealthRoute(req: Request, url: URL, method: st
   let body: unknown
   if (url.pathname === '/host/server-health') {
     if (url.search) return fail('VALIDATION', 'server health does not accept selectors', unchanged)
-    body = await evaluateServerHealth({ executor: ctx.executor, family: ctx.family, readDrift: ctx.readDrift, saved: await ctx.readSaved(), ...(ctx.now ? { now: ctx.now } : {}) })
+    body = await evaluateServerHealth({ executor: ctx.executor, family: ctx.family, readDrift: ctx.readDrift, saved: await ctx.readSaved(), readBandwidth: ctx.readBandwidth ?? null, ...(ctx.now ? { now: ctx.now } : {}) })
   } else {
     const usernames = readLimitUsernames(url), saved = await ctx.readSaved()
     const accounts = usernames.map(name => saved.accounts.find(account => account.username === name) ?? fail('NOT_FOUND', 'account not found', unchanged))

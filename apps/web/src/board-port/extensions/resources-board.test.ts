@@ -23,6 +23,13 @@ describe('account resources presentation', () => {
     assert.match(metric(html, 'io-await'), /Not measured/)
     assert.doesNotMatch(metric(html, 'io-read'), /data-resource-state="measured"/)
   })
+  it('shows the metered month and a served limit page instead of not measured', () => {
+    const metered = reading()
+    if (metered.available !== true) throw new Error('fixture')
+    const html = renderResourcesBoard({ context, reading: { ...metered, snapshot: { ...metered.snapshot, bandwidthMonth: { month: '2026-10', totalBytes: 3 * 1024 * 1024, limitBytes: 1024 * 1024, usedPercent: 300, enforced: true, limited: true } } } })
+    assert.match(metric(html, 'bandwidth'), /data-resource-state="measured"/)
+    assert.match(metric(html, 'bandwidth'), /3 MiB · Limit page served/)
+  })
   it('does not convert unread, null, negative or nonfinite observations to zero', () => {
     const unread = renderResourcesBoard({ context })
     assert.match(unread, /data-resource-reading="unread"/)

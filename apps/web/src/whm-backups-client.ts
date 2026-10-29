@@ -2,6 +2,13 @@ import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
+import { readWhmBackupRunsView } from './acct-backup-runs-client.ts'
+import type { WhmBackupRun, WhmBackupRunArchive, WhmBackupRunsView } from './acct-backup-runs-client.ts'
+import { readRestoreMoreReply } from './acct-restore-client.ts'
+import type { RestoreMoreInventory } from './acct-restore-client.ts'
+// Module-local aliases: the binding source refers to them by these names, defined again in WHM_BACKUPS_CLIENT_BINDING.
+const backupRunsView = readWhmBackupRunsView
+const backupRestoreReply = readRestoreMoreReply
 
 export interface WhmBackupDestination {
   id: string; name: string; kind: 'local' | 'sftp' | 's3' | 'backblaze' | 'rsync' | 'ftp'; endpoint: string
@@ -10,7 +17,8 @@ export interface WhmBackupDestination {
 }
 export interface WhmBackupSchedule {
   enabled: boolean; frequency: 'daily' | 'weekly' | 'monthly'; cron: string; retentionCount: number
-  compress: 'zstd' | 'gzip'; includeDatabases: boolean; includeMail: boolean
+  retentionWeekly: number; retentionMonthly: number
+  compress: 'zstd' | 'gzip'; includeDatabases: boolean; includeMail: boolean; includeDns: boolean; includeControl: boolean
   selectedAccounts: string[] | 'all'; destinationIds: string[]; updatedAt: string
 }
 export interface WhmBackupSnapshot {
@@ -56,7 +64,7 @@ export function readWhmBackupDestination(value: unknown): WhmBackupDestination {
 }
 export function readWhmBackupSchedule(value: unknown): WhmBackupSchedule {
   if (!backupObject(value) || !['daily', 'weekly', 'monthly'].includes(String(value.frequency)) || !['zstd', 'gzip'].includes(String(value.compress))) throw new Error('invalid_backup_schedule')
-  return { enabled: backupBoolean(value.enabled), frequency: value.frequency as WhmBackupSchedule['frequency'], cron: backupText(value.cron, 100), retentionCount: backupInteger(value.retentionCount, 1, 3650), compress: value.compress as WhmBackupSchedule['compress'], includeDatabases: backupBoolean(value.includeDatabases), includeMail: backupBoolean(value.includeMail), selectedAccounts: value.selectedAccounts === 'all' ? 'all' : backupArray(value.selectedAccounts, 10000, item => backupText(item, 64)), destinationIds: backupArray(value.destinationIds, 50, backupIdentity), updatedAt: backupText(value.updatedAt, 64) }
+  return { enabled: backupBoolean(value.enabled), frequency: value.frequency as WhmBackupSchedule['frequency'], cron: backupText(value.cron, 100), retentionCount: backupInteger(value.retentionCount, 1, 3650), retentionWeekly: backupInteger(value.retentionWeekly, 0, 520), retentionMonthly: backupInteger(value.retentionMonthly, 0, 240), compress: value.compress as WhmBackupSchedule['compress'], includeDatabases: backupBoolean(value.includeDatabases), includeMail: backupBoolean(value.includeMail), includeDns: backupBoolean(value.includeDns), includeControl: backupBoolean(value.includeControl), selectedAccounts: value.selectedAccounts === 'all' ? 'all' : backupArray(value.selectedAccounts, 10000, item => backupText(item, 64)), destinationIds: backupArray(value.destinationIds, 50, backupIdentity), updatedAt: backupText(value.updatedAt, 64) }
 }
 export function readWhmBackupWorkspace(value: unknown): WhmBackupWorkspaceView {
   if (!backupObject(value)) throw new Error('invalid_backup_workspace')
@@ -98,7 +106,7 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
     const action = (key: string): HTMLButtonElement => root.querySelector<HTMLButtonElement>('[data-backup-action="' + key + '"]')!
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => root.isConnected && root.dataset.backupManage === 'true' && !root.closest(denied)
-    const scheduleInputs = ['policy-enabled', 'policy-cron', 'daily-copies', 'include-databases', 'include-mail', 'start-time']
+    const scheduleInputs = ['policy-enabled', 'policy-cron', 'daily-copies', 'weekly-copies', 'include-databases', 'include-mail', 'include-dns', 'include-control', 'start-time']
     const destinationInputs = ['destination-name', 'destination-endpoint', 'destination-prefix', 'destination-bucket', 'destination-region', 'destination-user', 'destination-retention']
     const activationHelp = document.createElement('span'), activationLink = document.createElement('a')
     activationHelp.className = 'xp-help'; activationHelp.id = 'backup-destination-activation-help'
@@ -119,6 +127,7 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
     const lock = (): void => {
       const ready = !!current && admitted() && !busy && !review && !confirming
       for (const key of [...scheduleInputs, ...destinationInputs]) setEnabled(input(key), ready)
+      const monthly = root.querySelector<HTMLInputElement>('#backup-layout-monthly-copies'); if (monthly) setEnabled(monthly, ready)
       input('destination-enabled').disabled = true
       for (const key of ['frequency', 'policy-compress', 'destination-kind']) setEnabled(select(key), ready)
       for (const key of ['all-accounts', 'selected-accounts', 'new-destination']) setEnabled(action(key), ready)
@@ -216,6 +225,8 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       const schedule = view.schedule
       input('policy-enabled').checked = schedule?.enabled ?? false; input('policy-cron').value = schedule?.cron ?? '0 2 * * *'; input('daily-copies').value = String(schedule?.retentionCount ?? 7)
       input('include-databases').checked = schedule?.includeDatabases ?? true; input('include-mail').checked = schedule?.includeMail ?? true
+      input('weekly-copies').value = String(schedule?.retentionWeekly ?? 4); input('include-dns').checked = schedule?.includeDns ?? true; input('include-control').checked = schedule?.includeControl ?? true
+      const monthly = root.querySelector<HTMLInputElement>('#backup-layout-monthly-copies'); if (monthly) monthly.value = String(schedule?.retentionMonthly ?? 0)
       select('frequency').value = schedule?.frequency === 'weekly' ? '3' : schedule?.frequency === 'monthly' ? '4' : '1'; select('policy-compress').value = schedule?.compress === 'gzip' ? '2' : '1'
       const cron = input('policy-cron').value.split(/\s+/)
       const pairedHours = (cron[1] ?? '').split(',').map(Number)
@@ -249,7 +260,8 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       finally { busy = false; lock() }
     }
     const number = (value: string): number => { if (!/^\d+$/.test(value)) throw new Error('invalid_integer'); return backupInteger(Number(value), 1, 3650) }
-    const scheduleDraft = (): Omit<WhmBackupSchedule, 'updatedAt'> => ({ enabled: input('policy-enabled').checked, frequency: select('frequency').value === '3' ? 'weekly' : select('frequency').value === '4' ? 'monthly' : 'daily', cron: input('policy-cron').value.trim().replace(/\s+/g, ' '), retentionCount: number(input('daily-copies').value), compress: select('policy-compress').value === '2' ? 'gzip' : 'zstd', includeDatabases: input('include-databases').checked, includeMail: input('include-mail').checked, selectedAccounts: allAccounts ? 'all' : [...selectedAccounts], destinationIds: [...selectedDestinations] })
+    const copies = (value: string, max: number): number => { if (!/^\d+$/.test(value)) throw new Error('invalid_integer'); return backupInteger(Number(value), 0, max) }
+    const scheduleDraft = (): Omit<WhmBackupSchedule, 'updatedAt'> => ({ enabled: input('policy-enabled').checked, frequency: select('frequency').value === '3' ? 'weekly' : select('frequency').value === '4' ? 'monthly' : 'daily', cron: input('policy-cron').value.trim().replace(/\s+/g, ' '), retentionCount: number(input('daily-copies').value), retentionWeekly: copies(input('weekly-copies').value, 520), retentionMonthly: root.querySelector<HTMLInputElement>('#backup-layout-monthly-copies') ? copies(root.querySelector<HTMLInputElement>('#backup-layout-monthly-copies')!.value, 240) : current?.schedule?.retentionMonthly ?? 0, compress: select('policy-compress').value === '2' ? 'gzip' : 'zstd', includeDatabases: input('include-databases').checked, includeMail: input('include-mail').checked, includeDns: input('include-dns').checked, includeControl: input('include-control').checked, selectedAccounts: allAccounts ? 'all' : [...selectedAccounts], destinationIds: [...selectedDestinations] })
     const destinationDraft = (): Omit<WhmBackupDestination, 'id' | 'createdAt'> => {
       const kind = backupKinds[Number(select('destination-kind').value) - 1]
       if (!kind) throw new Error('invalid_kind')
@@ -309,7 +321,7 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       const control = event.target
       if (!(control instanceof HTMLInputElement) || control.disabled) return
       if (control.id.startsWith('backup-layout-destination-')) destinationDirty = true
-      else if ([...scheduleInputs.map(key => 'backup-layout-' + key)].includes(control.id)) scheduleDirty = true
+      else if ([...scheduleInputs.map(key => 'backup-layout-' + key), 'backup-layout-monthly-copies'].includes(control.id)) scheduleDirty = true
       lock()
     })
     root.addEventListener('change', event => {
@@ -341,4 +353,245 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
   })
 }
 
-export const WHM_BACKUPS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const backupKinds=${JSON.stringify(backupKinds)};const backupObject=${backupObject.toString()};const backupText=${backupText.toString()};const backupIdentity=${backupIdentity.toString()};const backupInteger=${backupInteger.toString()};const backupBoolean=${backupBoolean.toString()};const backupArray=${backupArray.toString()};const backupRevision=${backupRevision.toString()};const backupApplication=${backupApplication.toString()};const readWhmBackupDestination=${readWhmBackupDestination.toString()};const readWhmBackupSchedule=${readWhmBackupSchedule.toString()};const readWhmBackupWorkspace=${readWhmBackupWorkspace.toString()};const backupStable=${backupStable.toString()};const backupUnknown=${backupUnknown.toString()};return ${bindWhmBackups.toString()};})()`
+/**
+ * Server backups page operations from authorized reads: summary, run history and log, run now and "back up again",
+ * the run → account → parts → difference → restore wizard, and the SFTP connection check. Hooks are the
+ * `data-backup-*` attributes of the approved page; a missing hook leaves that part as rendered.
+ */
+function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) => Promise<unknown>) | undefined): void {
+  const t = (message: string, values?: MessageValues): string => xpT(message, values)
+  document.querySelectorAll<HTMLElement>('[data-approved-whm-backups]').forEach(root => {
+    if (root.dataset.backupOperationsBound === 'true') return
+    root.dataset.backupOperationsBound = 'true'
+    const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"]'
+    const admitted = (): boolean => root.isConnected && root.dataset.backupManage === 'true' && !root.closest(denied)
+    if (!send || !admitted()) return
+    const one = <T extends Element>(selector: string): T | null => root.querySelector<T>(selector)
+    const buttons = (key: string): HTMLButtonElement[] => [...root.querySelectorAll<HTMLButtonElement>('[data-backup-action="' + key + '"]')]
+    const field = (key: string): HTMLInputElement | null => one<HTMLInputElement>('#backup-layout-' + key)
+    const size = (bytes: number | null): string => { if (bytes === null) return '-'; const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']; let value = bytes, unit = 0; while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++ } return (unit ? value.toFixed(1) : String(value)) + ' ' + units[unit] }
+    const technical = (value: string): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = value; return node }
+    const stateLabel = (state: string): string => ({ running: t('Running'), succeeded: t('Succeeded'), failed: t('Failed'), unknown: t('Outcome unknown; review required'), finished: t('Finished'), verified: t('Verified') } as Record<string, string>)[state] ?? state
+    let view: WhmBackupRunsView | null = null, configRevision = '', destinations: { id: string; name: string; kind: string; endpoint: string; username: string | null; pathPrefix: string; state: string; credentialRef: string | null }[] = []
+    let busy = false, logRun: string | null = null, runId: string | null = null, account: string | null = null, inventory: RestoreMoreInventory | null = null, step = 1
+    let mailReview: { revision: string; mailboxes: string[] } | null = null, reviewed = false
+    const confirm = async (title: string, body: string, danger = false): Promise<boolean> => { if (!askDialog) return false; try { return await askDialog({ title, body, danger, confirm: t('Confirm') }) === true } catch { return false } }
+    const say = (node: HTMLElement | null, message: string, state = 'read'): void => { if (!node) return; node.textContent = message; node.dataset.state = state; node.setAttribute('role', state === 'failed' || state === 'review' ? 'alert' : 'status') }
+    const restoreStatus = one<HTMLElement>('[data-backup-restore-status]'), sftpStatus = one<HTMLElement>('[data-backup-sftp-status]')
+    const run = (): WhmBackupRun | null => view?.runs.find(item => item.id === runId) ?? null
+    const archive = (): WhmBackupRunArchive | null => run()?.archives.find(item => item.username === account && item.integrity === 'verified') ?? null
+    const parts = (): { databases: string[]; zones: string[]; mail: boolean } => ({
+      databases: field('restore-databases')?.checked ? (inventory?.databases.databases ?? []).filter(item => item.current === 'exists').map(item => item.name) : [],
+      zones: field('restore-dns')?.checked ? (inventory?.dns.zones ?? []).filter(item => item.current === 'exists').map(item => item.name) : [],
+      mail: field('restore-mail')?.checked === true,
+    })
+    const lock = (): void => {
+      const idle = !busy && !!view && !view.activeId
+      for (const button of buttons('run-now')) button.disabled = !idle || !view!.available
+      for (const button of buttons('rerun-account')) button.disabled = !idle || !failedAccounts().length
+      for (const button of buttons('run-log')) button.disabled = !view?.runs.length
+      for (const button of buttons('restore-run')) button.disabled = !runId
+      for (const button of buttons('restore-back')) button.disabled = busy || step === 1
+      for (const button of buttons('restore-continue')) button.disabled = busy || step === 1 && !runId || step === 2 && !inventory || step === 3
+      const chosen = parts()
+      for (const button of buttons('restore-review')) button.disabled = busy || step !== 3 || !chosen.databases.length && !chosen.zones.length && !chosen.mail
+      for (const button of buttons('restore-apply')) button.disabled = busy || !reviewed || field('restore-acknowledge')?.checked !== true
+      for (const button of buttons('test-sftp')) { button.disabled = busy || !destinations.some(item => item.kind === 'sftp' && ['verified', 'active', 'unverified'].includes(item.state)); if (!button.disabled) button.closest('fieldset')?.removeAttribute('disabled') }
+      const acknowledge = field('restore-acknowledge'); if (acknowledge) acknowledge.disabled = busy || !reviewed
+      for (const key of ['restore-databases', 'restore-dns', 'restore-mail']) { const input = field(key); if (input) { const state = key === 'restore-databases' ? inventory?.databases.state : key === 'restore-dns' ? inventory?.dns.state : inventory?.mail.state; const usable = step === 3 && state === 'available'; input.disabled = busy || !usable; if (!usable) input.checked = false; input.closest('fieldset')?.removeAttribute('disabled') } }
+      const home = field('restore-home'); if (home) { home.disabled = true; home.checked = false }
+      root.querySelectorAll<HTMLElement>('[data-backup-restore-step]').forEach(item => { if (Number(item.dataset.backupRestoreStep) === step) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current') })
+      root.setAttribute('aria-busy', String(busy))
+    }
+    function failedAccounts(): string[] { const latest = view?.runs[0]; return latest ? latest.archives.filter(item => item.integrity === 'failed').map(item => item.username) : [] }
+
+    const paintSummary = (): void => {
+      const put = (key: string, text: string): void => { const node = one<HTMLElement>('[data-backup-summary="' + key + '"]'); if (node) node.textContent = text }
+      const done = view?.runs.find(item => item.state !== 'running')
+      put('last', done ? formatDisplayDateTime(done.finishedAt ?? done.startedAt) + ' · ' + stateLabel(done.state) : t('None'))
+      put('next', view?.schedule?.nextRunAt ? formatDisplayDateTime(view.schedule.nextRunAt) : t('None'))
+      put('local', view?.storage ? t('{used} used · {free} free', { used: size(view.storage.totalBytes - view.storage.freeBytes), free: size(view.storage.freeBytes) }) : t('Not read'))
+      const remote = destinations.find(item => item.kind === 'sftp' && item.state === 'active') ?? destinations.find(item => item.state === 'active')
+      const uploaded = remote ? view?.runs.flatMap(item => item.entries.filter(entry => entry.destinationId === remote.id && entry.outcome === 'verified').map(() => item.finishedAt ?? item.startedAt))[0] : undefined
+      put('remote', remote ? remote.name + (uploaded ? ' · ' + t('Uploaded {at}', { at: formatDisplayDateTime(uploaded) }) : '') : t('No active remote destination'))
+    }
+    const paintRuns = (): void => {
+      const body = one<HTMLElement>('[data-backup-snapshot-rows]')
+      if (!body || !view) return
+      body.replaceChildren()
+      for (const item of view.runs) {
+        const row = document.createElement('tr'), cell = (value: string | Node): void => { const td = document.createElement('td'); td.append(value); row.append(td) }
+        const bytes = item.archives.reduce((sum, entry) => sum + (entry.bytes ?? 0), 0), seconds = item.finishedAt ? Math.round((Date.parse(item.finishedAt) - Date.parse(item.startedAt)) / 1000) : null
+        const copies = item.destinationIds.length ? t('{verified} of {total}', { verified: item.entries.filter(entry => entry.outcome === 'verified').length, total: item.entries.length }) : t('This server only')
+        cell(formatDisplayDateTime(item.startedAt)); cell(item.trigger === 'schedule' ? t('Scheduled') : item.trigger === 'account' ? t('Selected accounts') : t('Run now'))
+        cell(t('{verified} of {total}', { verified: item.archives.filter(entry => entry.integrity === 'verified').length, total: item.archives.length })); cell(technical(size(bytes)))
+        cell(seconds === null ? '-' : technical(seconds >= 60 ? Math.floor(seconds / 60) + ' min ' + (seconds % 60) + ' s' : seconds + ' s')); cell(copies); cell(stateLabel(item.state))
+        const actions = document.createElement('td'), restore = document.createElement('button'), log = document.createElement('button')
+        restore.type = log.type = 'button'; restore.className = log.className = 'xp-btn'; restore.textContent = t('Restore'); log.textContent = t('Log')
+        restore.disabled = !item.archives.some(entry => entry.integrity === 'verified')
+        restore.addEventListener('click', () => { if (!restore.disabled && !busy) { selectRun(item.id); one<HTMLElement>('[data-backup-section="restore"]')?.scrollIntoView?.({ block: 'start' }) } })
+        log.addEventListener('click', () => { logRun = item.id; paintLog() })
+        actions.append(restore, log); row.append(actions); body.append(row)
+      }
+      if (!view.runs.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 8; td.textContent = t('No backup run has been recorded yet.'); row.append(td); body.append(row) }
+    }
+    const paintFailure = (): void => {
+      const notice = one<HTMLElement>('[data-backup-run-failure]'), text = notice?.querySelector<HTMLElement>('p')
+      const latest = view?.runs[0], failed = latest?.archives.filter(item => item.integrity === 'failed') ?? []
+      if (!notice || !text) return
+      if (!latest || !failed.length && !(latest.control?.integrity === 'failed')) { text.textContent = t('The latest run has no failed parts.'); return }
+      const verified = latest.archives.filter(item => item.integrity === 'verified').length
+      text.textContent = t('{failed, plural, one {# account failed} other {# accounts failed}}: {names}. {verified, plural, one {# account is complete} other {# accounts are complete}}.', { failed: failed.length, names: failed.map(item => item.username).join(', '), verified })
+        + (latest.control?.integrity === 'failed' ? ' ' + t('The control snapshot failed.') : '')
+    }
+    const paintLog = (): void => {
+      const log = one<HTMLElement>('[data-backup-run-log]'), item = view?.runs.find(entry => entry.id === logRun) ?? view?.runs[0]
+      if (!log || !item) return
+      // Localized prose follows the page direction and font; only names, sizes, dates and diagnostics are isolated LTR values.
+      const named = (value: string): HTMLElement => { const node = document.createElement('bdi'); node.textContent = value; return node }
+      const line = (entry: WhmBackupRunArchive): (string | Node)[] => [technical(entry.username), ': ', ...entry.integrity === 'verified'
+        ? [t('verified') + ' ', technical(size(entry.bytes)), ...entry.databases.length ? [' · ' + t('{count, plural, one {# database} other {# databases}}', { count: entry.databases.length })] : [], ...entry.zones.length ? [' · ' + t('{count, plural, one {# DNS zone} other {# DNS zones}}', { count: entry.zones.length })] : []]
+        : [entry.reason === 'integrity_failed' ? t('failed its integrity read') : t('was not built'), ...entry.detail ? [' - ', technical(entry.detail)] : []]]
+      const uploads = item.entries.filter(entry => entry.outcome !== 'verified').map(entry => [technical(entry.username), ' · ', named(destinations.find(target => target.id === entry.destinationId)?.name ?? entry.destinationId), ': ' + stateLabel(entry.outcome), ...entry.reason ? [' (', technical(entry.reason), ')'] : []])
+      const lines: (string | Node)[][] = [[technical(formatDisplayDateTime(item.startedAt)), ' · ' + stateLabel(item.state)], ...item.control ? [line(item.control)] : [], ...item.archives.map(line), ...uploads,
+        ...item.localDeleted !== null ? [[t('{count, plural, one {# older local copy removed} other {# older local copies removed}}', { count: item.localDeleted })]] : []]
+      log.replaceChildren(...lines.map(parts => { const row = document.createElement('li'); row.append(...parts); return row }))
+      log.hidden = false
+    }
+    const radio = (container: HTMLElement | null, items: { key: string; title: string; note: string; checked: boolean }[], pick: (key: string) => void): void => {
+      if (!container) return
+      container.replaceChildren()
+      for (const item of items) {
+        const button = document.createElement('button'), ring = document.createElement('span'), text = document.createElement('span'), title = document.createElement('strong'), note = document.createElement('span')
+        button.type = 'button'; button.className = 'xp-whm-backup-radio'; button.setAttribute('role', 'radio'); button.setAttribute('aria-checked', String(item.checked)); button.dataset.backupChoice = item.key
+        ring.className = 'xp-whm-backup-radio-ring'; ring.setAttribute('aria-hidden', 'true'); note.className = 'xp-help'; title.textContent = item.title; note.textContent = item.note
+        text.append(title, note); button.append(ring, text); button.addEventListener('click', () => { if (!busy) pick(item.key) }); container.append(button)
+      }
+      if (!items.length) { const empty = document.createElement('p'); empty.textContent = t('Nothing to choose yet.'); container.append(empty) }
+    }
+    const paintWizard = (): void => {
+      const usable = view?.runs.filter(item => item.archives.some(entry => entry.integrity === 'verified')) ?? []
+      radio(one('[data-backup-restore-runs]'), usable.map(item => ({ key: item.id, title: formatDisplayDateTime(item.startedAt), note: stateLabel(item.state) + ' · ' + size(item.archives.reduce((sum, entry) => sum + (entry.bytes ?? 0), 0)), checked: item.id === runId })), selectRun)
+      const search = (field('restore-search')?.value ?? '').trim().toLowerCase()
+      radio(one('[data-backup-restore-accounts]'), (run()?.archives ?? []).filter(item => item.integrity === 'verified' && item.username.includes(search)).map(item => ({ key: item.username, title: item.username, note: size(item.bytes), checked: item.username === account })), pick => { void selectAccount(pick) })
+      const availability = one<HTMLElement>('[data-backup-part-availability]')
+      if (availability) availability.textContent = !inventory ? t('Pick a run and an account to read which parts its backup holds.')
+        : t('This backup holds {databases, plural, =0 {no databases} one {# database} other {# databases}}, {zones, plural, =0 {no DNS zones} one {# DNS zone} other {# DNS zones}} and {mailboxes, plural, =0 {no mailboxes} one {# mailbox} other {# mailboxes}}. Home files are restored file by file on the Restore files page.', { databases: inventory.databases.databases.length, zones: inventory.dns.zones.length, mailboxes: inventory.mail.mailboxes.length })
+      lock()
+    }
+    function selectRun(id: string): void { runId = id; account = null; inventory = null; reviewed = false; mailReview = null; step = 2; paintWizard() }
+    async function selectAccount(username: string): Promise<void> {
+      const chosen = run()?.archives.find(item => item.username === username && item.integrity === 'verified')
+      if (!chosen?.file || busy) return
+      account = username; inventory = null; reviewed = false; busy = true; paintWizard()
+      try { inventory = backupRestoreReply('inventory', await send!('POST', '/api/backups/components/' + username + '/inventory', { file: chosen.file }), { username, file: chosen.file }); step = 3; say(restoreStatus, t('The backup of {account} was read and checked.', { account: username })) }
+      catch { say(restoreStatus, t('The backup of {account} could not be read. Nothing was changed.', { account: username }), 'failed') }
+      finally { busy = false; paintWizard() }
+    }
+    const review = async (): Promise<void> => {
+      const chosen = archive(), selected = parts()
+      if (!chosen?.file || !inventory || busy) return
+      busy = true; reviewed = false; lock()
+      const rows = one<HTMLElement>('[data-backup-difference-rows]'), facts = (key: string, text: string): void => { const node = one<HTMLElement>('[data-backup-difference="' + key + '"]'); if (node) node.textContent = text }
+      try {
+        let add = 0, keep = 0
+        mailReview = null
+        if (selected.mail) {
+          const mailboxes = inventory.mail.mailboxes.filter(item => item.current === 'exists').map(item => item.address)
+          if (mailboxes.length) {
+            const preview = backupRestoreReply('preview', await send!('POST', '/api/backups/components/' + account + '/preview', { file: chosen.file, mailboxes }), { username: account!, file: chosen.file, mailboxes })
+            add = preview.counts.batch; keep = preview.counts.present; mailReview = { revision: preview.revision, mailboxes }
+          }
+        }
+        if (rows) {
+          rows.replaceChildren()
+          const row = (part: string, name: string, current: string, backup: string, action: string): void => { const tr = document.createElement('tr'); for (const value of [part, technical(name), current, backup, action]) { const td = document.createElement('td'); td.append(value); tr.append(td) } rows.append(tr) }
+          for (const item of inventory.databases.databases.filter(entry => selected.databases.includes(entry.name))) row(t('Databases'), item.name, t('Exists'), size(item.bytes), t('Replace with the backup copy'))
+          for (const item of inventory.dns.zones.filter(entry => selected.zones.includes(entry.name))) row(t('DNS zone'), item.name, t('Exists'), size(item.bytes), t('Replace records with the backup copy'))
+          if (mailReview) row(t('Mail'), mailReview.mailboxes.join(', '), t('{count, plural, one {# message present} other {# messages present}}', { count: keep }), t('{count, plural, one {# message} other {# messages}}', { count: add + keep }), t('{count, plural, one {Add # missing message} other {Add # missing messages}}', { count: add }))
+        }
+        facts('differ', t('{count, plural, one {# part replaced} other {# parts replaced}}', { count: selected.databases.length + selected.zones.length }))
+        facts('add', t('{count, plural, one {# message added} other {# messages added}}', { count: add }))
+        facts('keep', t('{count, plural, one {# message kept, never deleted} other {# messages kept, never deleted}}', { count: keep }))
+        facts('databases', selected.databases.length ? selected.databases.join(', ') : t('None selected'))
+        reviewed = true
+        say(restoreStatus, t('Review the difference, confirm it, then restore.'))
+      } catch { say(restoreStatus, t('The difference could not be read. Nothing was changed.'), 'failed') }
+      finally { busy = false; lock() }
+    }
+    const apply = async (): Promise<void> => {
+      const chosen = archive(), selected = parts(), current = run()
+      if (!chosen?.file || !chosen.sha256 || !current || !reviewed || busy) return
+      if (!await confirm(t('Restore {account}', { account: account! }), t('Restore the selected parts of {account} from the run of {run}? Databases and zones are replaced with their backup copies; files missing from the backup are never deleted.', { account: account!, run: formatDisplayDateTime(current.startedAt) }), true)) return
+      busy = true; lock()
+      const messages: string[] = []
+      try {
+        if (selected.databases.length || selected.zones.length) {
+          backupRestoreReply('parts', await send!('POST', '/api/backups/components/' + account + '/parts', { file: chosen.file, databases: selected.databases, zones: selected.zones, expectedArchiveSha256: chosen.sha256 }), { username: account!, file: chosen.file, sha256: chosen.sha256, databases: selected.databases, zones: selected.zones })
+          messages.push(t('Reconciling: restoring {account} from {run}. The account stays online; you can follow it in the audit log.', { account: account!, run: formatDisplayDateTime(current.startedAt) }))
+        }
+        if (mailReview) {
+          const result = backupRestoreReply('restore', await send!('POST', '/api/backups/components/' + account + '/restore', { file: chosen.file, mailboxes: mailReview.mailboxes, expectedRevision: mailReview.revision }), { username: account!, file: chosen.file, mailboxes: mailReview.mailboxes, revision: mailReview.revision })
+          messages.push(t('{count, plural, one {# message restored} other {# messages restored}}.', { count: result.counts.restored }))
+        }
+        reviewed = false
+        say(restoreStatus, messages.join(' '), 'saved')
+      } catch { say(restoreStatus, t('The restore outcome requires review. Read the backups again before retrying.'), 'review') }
+      finally { busy = false; lock(); void load() }
+    }
+    const startRun = async (accounts?: string[]): Promise<void> => {
+      if (!view || busy || !configRevision) return
+      if (!await confirm(accounts ? t('Back up again') : t('Run backup now'), accounts ? t('Back up {names} again now, at low priority?', { names: accounts.join(', ') }) : t('Start a backup of every selected account now, at low priority?'))) return
+      busy = true; lock()
+      try { await send!('POST', '/api/backups/workspace/runs', { expectedRevision: configRevision, expectedRunsRevision: view.revision, ...accounts ? { accounts } : {} }); say(restoreStatus, t('The backup started. Read again to follow it.'), 'saved') }
+      catch (error) { say(restoreStatus, (error as { status?: unknown })?.status === 409 ? t('Backups changed meanwhile. Read again before starting.') : t('The backup could not be started.'), 'failed') }
+      finally { busy = false; await load() }
+    }
+    const testSftp = async (): Promise<void> => {
+      const target = destinations.find(item => item.kind === 'sftp')
+      if (!target || busy) return
+      if (!await confirm(t('Test connection'), t('Write, read and delete one small test file on {host}?', { host: target.endpoint }))) return
+      busy = true; lock()
+      try {
+        await send!('POST', '/api/backups/workspace/destinations/' + target.id + '/test', { expectedRevision: configRevision })
+        const reply = await send!('GET', '/api/backups/workspace/destinations/' + target.id + '/space') as { space?: { freeBytes?: unknown } | null }
+        const free = reply?.space?.freeBytes
+        say(sftpStatus, typeof free === 'number' ? t('Connected. {free} free on the remote path.', { free: size(free) }) : t('Connected. The remote server does not report free space.'), 'saved')
+      } catch { say(sftpStatus, t('The connection test failed or requires review. The destination stays inactive.'), 'failed') }
+      finally { busy = false; await load() }
+    }
+    async function load(): Promise<void> {
+      if (!admitted()) return
+      try {
+        const lifecycle = await send!('GET', '/api/backups/workspace/destination-lifecycle') as { revision?: unknown; destinations?: unknown }
+        if (!lifecycle || typeof lifecycle.revision !== 'string' || !/^[0-9a-f]{64}$/.test(lifecycle.revision) || !Array.isArray(lifecycle.destinations)) throw new Error('invalid_lifecycle')
+        configRevision = lifecycle.revision
+        destinations = lifecycle.destinations.flatMap(item => { const row = item as Record<string, unknown>; return typeof row.id === 'string' && typeof row.name === 'string' && typeof row.kind === 'string' && typeof row.endpoint === 'string' && typeof row.state === 'string' && typeof row.pathPrefix === 'string'
+          ? [{ id: row.id, name: row.name, kind: row.kind, endpoint: row.endpoint, username: typeof row.username === 'string' ? row.username : null, pathPrefix: row.pathPrefix, state: row.state, credentialRef: typeof row.credentialRef === 'string' ? row.credentialRef : null }] : [] })
+        view = backupRunsView(await send!('GET', '/api/backups/workspace/runs'))
+      } catch { view = null; lock(); return }
+      const sftp = destinations.find(item => item.kind === 'sftp')
+      if (sftp) {
+        try { const url = new URL(sftp.endpoint); for (const [key, value] of [['sftp-host', url.hostname], ['sftp-port', url.port || '22'], ['sftp-user', sftp.username ?? ''], ['sftp-path', sftp.pathPrefix], ['sftp-key', sftp.credentialRef ? '/etc/xpanel/backup-keys/' + sftp.credentialRef : '']] as const) { const input = field(key); if (input) input.value = value } } catch { /* endpoint shown as saved */ }
+        if (!sftpStatus?.dataset.state || sftpStatus.dataset.state === 'read') say(sftpStatus, sftp.state === 'active' ? t('Verified and active.') : sftp.state === 'verified' ? t('Verified, not yet active.') : t('Not verified yet. Test the connection.'))
+      }
+      if (view.reason === 'invalid_ledger') say(restoreStatus, t('The run history file {path} is in an older or unreadable format. Move it aside (for example to {path}.old) to start a new history; nothing runs until then.', { path: '/var/lib/xpanel/backup-runs.json' }), 'failed')
+      paintSummary(); paintRuns(); paintFailure(); paintLog(); paintWizard()
+    }
+    for (const button of buttons('run-now')) button.addEventListener('click', () => { if (!button.disabled) void startRun() })
+    for (const button of buttons('rerun-account')) button.addEventListener('click', () => { if (!button.disabled) void startRun(failedAccounts()) })
+    for (const button of buttons('run-log')) button.addEventListener('click', () => { if (!button.disabled) paintLog() })
+    for (const button of buttons('restore-run')) button.addEventListener('click', () => { if (!button.disabled) one<HTMLElement>('[data-backup-section="restore"]')?.scrollIntoView?.({ block: 'start' }) })
+    for (const button of buttons('restore-back')) button.addEventListener('click', () => { if (button.disabled) return; step = Math.max(1, step - 1); if (step < 3) { reviewed = false } if (step === 1) { account = null; inventory = null } paintWizard() })
+    for (const button of buttons('restore-continue')) button.addEventListener('click', () => { if (!button.disabled) { step = Math.min(3, step + 1); paintWizard() } })
+    for (const button of buttons('restore-review')) button.addEventListener('click', () => { if (!button.disabled) void review() })
+    for (const button of buttons('restore-apply')) button.addEventListener('click', () => { if (!button.disabled) void apply() })
+    for (const button of buttons('test-sftp')) button.addEventListener('click', () => { if (!button.disabled) void testSftp() })
+    field('restore-search')?.addEventListener('input', () => paintWizard())
+    root.addEventListener('change', event => { const target = event.target as HTMLElement; if (target.id?.startsWith('backup-layout-restore-')) { if (target.id !== 'backup-layout-restore-acknowledge') reviewed = false; lock() } })
+    lock(); void load()
+  })
+}
+
+export const WHM_BACKUPS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const backupKinds=${JSON.stringify(backupKinds)};const backupObject=${backupObject.toString()};const backupText=${backupText.toString()};const backupIdentity=${backupIdentity.toString()};const backupInteger=${backupInteger.toString()};const backupBoolean=${backupBoolean.toString()};const backupArray=${backupArray.toString()};const backupRevision=${backupRevision.toString()};const backupApplication=${backupApplication.toString()};const readWhmBackupDestination=${readWhmBackupDestination.toString()};const readWhmBackupSchedule=${readWhmBackupSchedule.toString()};const readWhmBackupWorkspace=${readWhmBackupWorkspace.toString()};const backupStable=${backupStable.toString()};const backupUnknown=${backupUnknown.toString()};const backupRunsView=${readWhmBackupRunsView.toString()};const backupRestoreReply=${readRestoreMoreReply.toString()};const bindWhmBackups=${bindWhmBackups.toString()};const bindWhmBackupOperations=${bindWhmBackupOperations.toString()};return ask=>{bindWhmBackups(ask);bindWhmBackupOperations(ask)};})()`

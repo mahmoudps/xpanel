@@ -9,24 +9,32 @@ import type { BackupRemoteArchive } from './acct-backup-plan.ts'
 /** Root-owned credential store; the request path never names it and its secrets never leave this module. */
 export const BACKUP_CREDENTIALS_PATH = '/etc/xpanel/backup-credentials.json'
 export const BACKUP_S3_KINDS = ['s3', 'backblaze'] as const
+/** Destination kinds a run can upload to: S3-compatible here, SFTP in acct-backup-sftp.ts, a separate disk in acct-backup-local.ts. */
+export const BACKUP_TRANSFER_KINDS = [...BACKUP_S3_KINDS, 'sftp', 'local'] as const
+/** SFTP private keys live in this root-only directory; the credential file names one, the request never does. */
+export const BACKUP_SSH_KEY_DIR = '/etc/xpanel/backup-keys'
+const MAX_SSH_KEY_BYTES = 16 * 1024
 const MAX_CREDENTIAL_FILE_BYTES = 64 * 1024
 const MAX_LIST_PAGE_BYTES = 2 * 1024 * 1024
 const MAX_LIST_PAGES = 20
 const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
 const PROBE_KEY = /^\.xpanel-probe\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
-export interface BackupArchiveSource { bytes: number; sha256: string; chunks(): AsyncIterable<Uint8Array> }
+/** `path` names the local file for transports that upload by path (sftp put); chunks() re-reads the same bytes. */
+export interface BackupArchiveSource { bytes: number; sha256: string; path?: string; chunks(): AsyncIterable<Uint8Array> }
 /** A probe session that can also move whole account archives; every name is relative to the confined destination prefix. */
 export interface BackupTransferSession extends BackupDestinationProbeSession {
   putArchive(name: string, source: BackupArchiveSource, signal: AbortSignal): Promise<void>
   readArchive(name: string, maxBytes: number, signal: AbortSignal): Promise<AsyncIterable<Uint8Array> | null>
   listArchives(signal: AbortSignal): Promise<BackupRemoteArchive[]>
   deleteArchive(name: string, signal: AbortSignal): Promise<void>
+  /** Free space where archives are stored, for transports that can tell (SFTP statvfs, local disk). */
+  space?(signal: AbortSignal): Promise<{ freeBytes: number; totalBytes: number } | null>
 }
 export interface BackupTransferProvider extends BackupDestinationProbeProvider {
   open(binding: { destinationId: string; targetDigest: string; credentialRef: string; credentialRevision: string }, signal: AbortSignal): Promise<BackupTransferSession>
 }
-interface StoredCredential { profile: BackupCredentialProfile; accessKeyId: string; secretAccessKey: string }
+export type StoredCredential = { profile: BackupCredentialProfile; accessKeyId: string; secretAccessKey: string } | { profile: BackupCredentialProfile; privateKeyPath: string }
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>
 
 const hex = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex')
@@ -53,22 +61,37 @@ export function signS3Request(input: { method: string; host: string; path: strin
   return { headers: { ...rest, authorization: `AWS4-HMAC-SHA256 Credential=${input.accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}` }, query }
 }
 
-/** Reads the root-only (mode 0600, uid 0, no link) credential file; revision changes whenever a key is rotated. */
+/**
+ * Reads the root-only (mode 0600, uid 0, no link) credential file; revision changes whenever a key is rotated.
+ * S3 profiles hold an access key pair; SFTP profiles name a private key file in BACKUP_SSH_KEY_DIR, whose content digest is the revision.
+ */
 export async function readBackupCredentialFile(path = BACKUP_CREDENTIALS_PATH, io: { lstat: typeof fsLstat; readFile: typeof fsReadFile } = { lstat: fsLstat, readFile: fsReadFile }): Promise<StoredCredential[]> {
   const bad = (): never => { throw new Error('invalid_backup_credentials') }
-  let info: Awaited<ReturnType<typeof fsLstat>>
-  try { info = await io.lstat(path) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error }
-  if (!info.isFile() || info.isSymbolicLink() || (Number(info.mode) & 0o077) !== 0 || Number(info.uid) !== 0 || Number(info.size) > MAX_CREDENTIAL_FILE_BYTES) return bad()
+  const privateFile = async (file: string, max: number): Promise<boolean> => {
+    const info = await io.lstat(file)
+    return info.isFile() && !info.isSymbolicLink() && (Number(info.mode) & 0o077) === 0 && Number(info.uid) === 0 && Number(info.size) <= max
+  }
+  try { if (!await privateFile(path, MAX_CREDENTIAL_FILE_BYTES)) return bad() } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error }
   const raw: unknown = JSON.parse(String(await io.readFile(path, 'utf8')))
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).sort().join() !== 'profiles,version' || (raw as { version: unknown }).version !== 1 || !Array.isArray((raw as { profiles: unknown }).profiles)) return bad()
-  const stored = ((raw as { profiles: unknown[] }).profiles).map(item => {
+  const stored: StoredCredential[] = []
+  for (const item of (raw as { profiles: unknown[] }).profiles) {
     const value = item as Record<string, unknown>
-    if (!value || typeof value !== 'object' || Object.keys(value).sort().join() !== 'accessKeyId,kinds,label,ref,secretAccessKey' || !isBackupCredentialRef(value.ref)
-      || typeof value.accessKeyId !== 'string' || !/^[A-Za-z0-9]{16,128}$/.test(value.accessKeyId) || typeof value.secretAccessKey !== 'string' || !/^[A-Za-z0-9/+=]{16,128}$/.test(value.secretAccessKey)
-      || !Array.isArray(value.kinds) || value.kinds.some(kind => !(BACKUP_S3_KINDS as readonly unknown[]).includes(kind))) return bad()
-    const revision = hex(JSON.stringify([value.ref, value.kinds, value.accessKeyId, value.secretAccessKey]))
-    return { profile: { ref: value.ref, label: value.label as string, kinds: value.kinds as BackupCredentialProfile['kinds'], revision }, accessKeyId: value.accessKeyId, secretAccessKey: value.secretAccessKey }
-  })
+    // `local-disk` is the built-in separate-disk profile and is never a stored credential.
+    if (!value || typeof value !== 'object' || !isBackupCredentialRef(value.ref) || value.ref === 'local-disk' || !Array.isArray(value.kinds) || typeof value.label !== 'string') return bad()
+    const keys = Object.keys(value).sort().join()
+    if (keys === 'accessKeyId,kinds,label,ref,secretAccessKey') {
+      if (typeof value.accessKeyId !== 'string' || !/^[A-Za-z0-9]{16,128}$/.test(value.accessKeyId) || typeof value.secretAccessKey !== 'string' || !/^[A-Za-z0-9/+=]{16,128}$/.test(value.secretAccessKey)
+        || value.kinds.some(kind => !(BACKUP_S3_KINDS as readonly unknown[]).includes(kind))) return bad()
+      const revision = hex(JSON.stringify([value.ref, value.kinds, value.accessKeyId, value.secretAccessKey]))
+      stored.push({ profile: { ref: value.ref, label: value.label, kinds: value.kinds as BackupCredentialProfile['kinds'], revision }, accessKeyId: value.accessKeyId, secretAccessKey: value.secretAccessKey })
+    } else if (keys === 'kinds,label,privateKeyPath,ref') {
+      const keyPath = value.privateKeyPath
+      if (value.kinds.join() !== 'sftp' || typeof keyPath !== 'string' || !keyPath.startsWith(BACKUP_SSH_KEY_DIR + '/') || !/^[A-Za-z0-9._-]{1,64}$/.test(keyPath.slice(BACKUP_SSH_KEY_DIR.length + 1)) || keyPath.endsWith('/..') || !await privateFile(keyPath, MAX_SSH_KEY_BYTES)) return bad()
+      const revision = hex(JSON.stringify([value.ref, value.kinds, keyPath, hex(await io.readFile(keyPath))]))
+      stored.push({ profile: { ref: value.ref, label: value.label, kinds: ['sftp'], revision }, privateKeyPath: keyPath })
+    } else return bad()
+  }
   readBackupCredentialProfiles(stored.map(item => item.profile))
   return stored
 }
@@ -114,7 +137,7 @@ export function createS3BackupProvider(deps: { readDestination(id: string): Prom
     async open(binding) {
       const target = await deps.readDestination(binding.destinationId)
       const credential = (await readCredentials()).find(item => item.profile.ref === binding.credentialRef)
-      if (!target || backupDestinationTargetDigest(target) !== binding.targetDigest || target.credentialRef !== binding.credentialRef || !credential || credential.profile.revision !== binding.credentialRevision
+      if (!target || backupDestinationTargetDigest(target) !== binding.targetDigest || target.credentialRef !== binding.credentialRef || !credential || !('accessKeyId' in credential) || credential.profile.revision !== binding.credentialRevision
         || !credential.profile.kinds.includes(target.kind as BackupCredentialProfile['kinds'][number])) throw new Error('backup_destination_binding_changed')
       const site = s3DestinationBinding(target), keys = { accessKeyId: credential.accessKeyId, secretAccessKey: credential.secretAccessKey }
       const call = async (method: string, key: string | null, signal: AbortSignal, options: { query?: [string, string][]; body?: BackupArchiveSource | Uint8Array; headers?: Record<string, string> } = {}): Promise<Response> => {

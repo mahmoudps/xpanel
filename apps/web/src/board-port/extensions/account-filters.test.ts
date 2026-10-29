@@ -15,7 +15,7 @@ describe('account filter configuration view', () => {
   })
   it('retains all required configuration actions and truthful native limitations', () => {
     const html=renderAccountFilters({expectedAccountId:'account-a',lang:'en',canManage:true,mailboxes:[]})
-    for(const text of ['Filter name','Match mode','Add condition','Action','Save configuration','With no conditions','Native Sieve installation','Dry-run trace'])expect(html).toContain(text)
+    for(const text of ['Filter name','Match mode','Add condition','Action','Save configuration','With no conditions','whether the mail server runs it','Add action','Stop processing later rules','Test a message','Run test'])expect(html).toContain(text)
     expect(html).toContain('data-filter-editor')
     expect(html).toContain('hidden')
     expect(html).not.toContain('name="accountId"')

@@ -62,18 +62,16 @@ describe('short usernames retain API routes, scope and transport limits', () => 
   beforeEach(() => { seen.length = 0 })
   afterAll(async () => { await state?.close(); await db?.close() })
 
-  it.each(names)('dispatches owned files/shell/certificate and root backup for %s', async username => {
+  it.each(names)('dispatches owned files/certificate and root backup for %s', async username => {
     const token = tokens.get(username)!
     expect(validateUsername(username)).toBe(username)
     expect((await call(token, `/api/accounts/${username}/files`, 'POST', { op: 'list', path: '' })).status).toBe(200)
-    expect((await call(token, `/api/accounts/${username}/shell`, 'POST', { command: 'whoami' })).status).toBe(200)
     expect((await call(token, `/api/accounts/${username}/certificates`, 'POST', { domain: username + '.example.test' })).status).toBe(503)
     expect((await call(rootToken, `/api/backups/accounts/${username}`, 'GET')).status).toBe(200)
-    expect(seen.map(item => item.path)).toEqual([`/accounts/${username}/files`, `/accounts/${username}/shell`, `/accounts/${username}/certificates`, `/accounts/${username}/backups`])
+    expect(seen.map(item => item.path)).toEqual([`/accounts/${username}/files`, `/accounts/${username}/certificates`, `/accounts/${username}/backups`])
   })
   it.each(names)('keeps capability and backup role classifications for %s', async username => {
     expect(policyForRequest(`/api/accounts/${username}/files`, 'POST')).toMatchObject({ resource: 'files', acl: 'edit-account', toolIds: ['file-manager'] })
-    expect(policyForRequest(`/api/accounts/${username}/shell`, 'POST')).toMatchObject({ resource: 'shell', acl: 'edit-account', toolIds: ['ssh-access'] })
     expect(policyForRequest(`/api/accounts/${username}/certificates`, 'POST')).toMatchObject({ resource: 'accounts', acl: 'manage-ssl', toolIds: ['ssl-install'] })
     expect(policyForRequest(`/api/backups/accounts/${username}`, 'GET')).toEqual({ resource: 'backups', rootOnly: true, toolIds: ['backup-restoration'] })
     expect((await call(tokens.get(username)!, `/api/backups/accounts/${username}`, 'GET')).status).toBe(403)
@@ -82,11 +80,11 @@ describe('short usernames retain API routes, scope and transport limits', () => 
   })
   it('does not forward neighboring account requests and preserves feature refusal', async () => {
     const token = tokens.get('a')!
-    for (const suffix of ['files', 'shell', 'certificates']) expect((await call(token, '/api/accounts/ab/' + suffix, 'POST', suffix === 'certificates' ? { domain: 'ab.example.test' } : suffix === 'files' ? { op: 'list', path: '' } : { command: 'whoami' })).status).toBe(404)
+    for (const suffix of ['files', 'certificates']) expect((await call(token, '/api/accounts/ab/' + suffix, 'POST', suffix === 'certificates' ? { domain: 'ab.example.test' } : { op: 'list', path: '' })).status).toBe(404)
     expect(seen).toEqual([])
     await state.store.updateFeatureList(featureId, { disabled: ['file-manager', 'ssh-access', 'ssl-install'] })
     try {
-      for (const suffix of ['files', 'shell', 'certificates']) expect((await call(token, '/api/accounts/a/' + suffix, 'POST', suffix === 'files' ? { op: 'list', path: '' } : {})).status).toBe(403)
+      for (const suffix of ['files', 'certificates']) expect((await call(token, '/api/accounts/a/' + suffix, 'POST', suffix === 'files' ? { op: 'list', path: '' } : {})).status).toBe(403)
       expect(seen).toEqual([])
     } finally { await state.store.updateFeatureList(featureId, { disabled: [] }) }
   })

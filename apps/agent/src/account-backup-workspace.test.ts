@@ -73,7 +73,7 @@ describe('account archive inspection and ownership', () => {
       { path: 'change.txt', bytes: 3, sha256: digest('new'), mode: 0o640 },
       { path: 'same.txt', bytes: 4, sha256: digest('same'), mode: 0o640 },
       { path: 'mail/domain/inbox', bytes: 4, sha256: digest('mail'), mode: 0o640 },
-    ] }
+    ], parts: [] }
     const current = [currentFile('change.txt', 'old'), currentFile('same.txt', 'same'), currentFile('keep.txt', 'keep')]
     const preview = accountBackupPreview(account, inventory, current)
     expect(preview.counts).toEqual({ add: 1, replace: 1, unchanged: 1, keep: 1, 'preserve-mail': 1 })

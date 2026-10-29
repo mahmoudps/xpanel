@@ -7,7 +7,8 @@ import { createAgentApp, FakeHostExecutor, HostReconciler } from '@xpanel/agent'
 import { createDb, createRootPrincipal, createUserPrincipal, listAudit, migrate } from '@xpanel/db'
 import { defaultPlan } from '@xpanel/core'
 import { profileFor } from '@xpanel/os'
-import { StateStore } from '@xpanel/state'
+import { atomicWriteJson, StateStore } from '@xpanel/state'
+import { runtimeRegistryPath } from '../../agent/src/account-runtime.ts'
 import { CSRF_HEADER_NAME, hashPasswordArgon2id, parseCookies, SESSION_COOKIE_NAME } from './auth.ts'
 import { startPanelServer } from './test-panel-server.ts'
 import { ExtendedFeaturesStore, type InstalledAppRecord } from './extended-routes.ts'
@@ -346,8 +347,10 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
       },
     })
     assert.equal(domFwdRes.status, 201)
-    const domFwdBody = (await domFwdRes.json()) as { compiledVirtualMap: string }
-    assert.match(domFwdBody.compiledVirtualMap, /@nebula-old\.test @nebula\.test/)
+    const domFwdBody = (await domFwdRes.json()) as { domainForwarder: { sourceDomain: string; targetDomain: string }; revision: number }
+    assert.equal(domFwdBody.domainForwarder.sourceDomain, 'nebula-old.test')
+    assert.equal(domFwdBody.domainForwarder.targetDomain, 'nebula.test')
+    assert.ok(Number.isSafeInteger(domFwdBody.revision))
 
     const fwdRes = await root.request('/api/mail/forwarders', {
       method: 'POST',
@@ -378,12 +381,12 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
         mailbox: 'founder@nebula.test',
         name: 'Route Invoices',
         conditions: [{ field: 'subject', comparator: 'contains', value: 'Invoice' }],
-        action: { type: 'fileinto', target: 'Billing' },
+        actions: [{ type: 'fileinto', target: 'Billing' }],
       },
     })
     assert.equal(filterRes.status, 201)
     const filterBody = (await filterRes.json()) as { compiledSieve: string }
-    assert.match(filterBody.compiledSieve, /fileinto "Billing"/)
+    assert.match(filterBody.compiledSieve, /fileinto :create "Billing"/)
 
     const spamRes = await root.request('/api/mail/spam-settings', {
       method: 'PUT',
@@ -757,20 +760,17 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     const maintBody = (await maintRes.json()) as { status: string }
     assert.equal(maintBody.status, 'healthy')
 
-    const cacheRes = await root.request(`/api/cache/${account.id}`, {
-      method: 'PUT',
-      body: {
-        redis: { enabled: true, maxMemoryMb: 256 },
-        memcached: { enabled: true, maxMemoryMb: 128 },
-      },
-    })
+    // Cache and container views project the saved runtime registry; only the owner's runtime route changes it.
+    await atomicWriteJson(runtimeRegistryPath(serverHandle.store.rootDir, account.id), { apps: [], cache: { redis: { enabled: true, memoryMb: 64, binary: '/usr/bin/redis-server', updatedAt: '2026-10-29T00:00:00.000Z' }, memcached: null },
+      containers: [{ name: 'search', image: 'docker.io/getmeili/meilisearch:v1.11', env: { MEILI_ENV: 'production' }, enabled: true, updatedAt: '2026-10-29T00:00:00.000Z' }] }, 0o600)
+    const cacheRes = await root.request(`/api/cache/${account.id}`)
     assert.equal(cacheRes.status, 200)
-    const cacheBody = (await cacheRes.json()) as {
-      cache: { slice: string; redis: { socketPath: string; enabled: boolean } }
-    }
+    const cacheBody = (await cacheRes.json()) as { cache: { slice: string; redis: { socketPath: string; enabled: boolean; maxMemoryMb: number }; memcached: { socketPath: string; enabled: boolean } } }
     assert.equal(cacheBody.cache.slice, `xpanel-${account.uid}.slice`)
-    assert.equal(cacheBody.cache.redis.enabled, true)
-    assert.equal(cacheBody.cache.redis.socketPath, '/run/xpanel/cache/nebula/redis.sock')
+    assert.deepEqual([cacheBody.cache.redis.enabled, cacheBody.cache.redis.maxMemoryMb, cacheBody.cache.memcached.enabled], [true, 64, false])
+    assert.equal(cacheBody.cache.redis.socketPath, `/home/${account.username}/.xpanel-cache/redis.sock`)
+    assert.equal(cacheBody.cache.memcached.socketPath, `/home/${account.username}/.xpanel-cache/memcached.sock`)
+    assert.equal((await root.request(`/api/cache/${account.id}`, { method: 'PUT', body: { redis: { enabled: false } } })).status, 405)
 
     // ---- Step H: Server Fine Settings, Containers, 1-Click Apps + Staging, Cluster, Branding, Languages, WHMCS ----
     const fineRes = await root.request('/api/server/fine-settings', {
@@ -793,21 +793,11 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.match(fineBody.settings.mta.compiledPostfixMainCf, /relay\.mailchannels\.net/)
     assert.match(fineBody.settings.logRotation.compiledLogrotateConf, /rotate 30/)
 
-    const containerRes = await root.request(`/api/containers/${account.id}`, {
-      method: 'POST',
-      body: {
-        name: 'meilisearch',
-        image: 'getmeili/meilisearch:v1.11',
-        runtime: 'podman',
-        internalPort: 7700,
-      },
-    })
-    assert.equal(containerRes.status, 201)
-    const containerBody = (await containerRes.json()) as {
-      container: { slice: string; systemdUnit: string }
-    }
-    assert.equal(containerBody.container.slice, `xpanel-${account.uid}.slice`)
-    assert.match(containerBody.container.systemdUnit, /Slice=xpanel-/)
+    const containerRes = await root.request(`/api/containers/${account.id}`)
+    assert.equal(containerRes.status, 200)
+    const containerBody = (await containerRes.json()) as { containers: { name: string; slice: string; systemdUnit: string; publishedPorts: unknown[]; envKeys: string[] }[] }
+    assert.deepEqual(containerBody.containers.map(c => [c.name, c.slice, c.systemdUnit, c.publishedPorts, c.envKeys]), [['search', `xpanel-${account.uid}.slice`, `xpanel-ctr-${account.username}-search.service`, [], ['MEILI_ENV']]])
+    assert.equal((await root.request(`/api/containers/${account.id}`, { method: 'POST', body: { name: 'x', image: 'docker.io/library/redis:7' } })).status, 405)
 
     const storedAccount = await serverHandle.store.getAccount(account.id)
     assert.ok(storedAccount)
@@ -868,37 +858,6 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.ok(legacyStatsBody.awstats.uniqueVisitors > 0)
     assert.ok(legacyStatsBody.webalizer.dailyAvgHits > 0)
 
-    const brandRes = await root.request('/api/branding', {
-      method: 'PUT',
-      body: {
-        companyName: 'Nebula Cloud Hosting',
-        productName: 'NebulaPanel',
-        hidePoweredBy: true,
-      },
-    })
-    assert.equal(brandRes.status, 200)
-
-    const langRes = await root.request('/api/languages/ar', {
-      method: 'PUT',
-      body: {
-        direction: 'rtl',
-        overrides: { 'app.title': 'لوحة استضافة نيبولا' },
-      },
-    })
-    assert.equal(langRes.status, 200)
-
-    const whmcsRes = await root.request('/api/whmcs', {
-      method: 'PUT',
-      body: {
-        enabled: true,
-        whmcsUrl: 'https://billing.nebulacloud.test',
-        webhookSecret: 'whmcs-hmac-secret-2026',
-      },
-    })
-    assert.equal(whmcsRes.status, 200)
-    const whmcsBody = (await whmcsRes.json()) as { whmcs: { webhookSecretConfigured: boolean } }
-    assert.equal(whmcsBody.whmcs.webhookSecretConfigured, true)
-
     // Verify audit log captured all major extended operations
     const audits = await listAudit(serverHandle.db, { limit: 200 })
     const actions = new Set(audits.map((a) => a.action))
@@ -912,7 +871,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.ok(actions.has('dns.email_auth.batch_provisioned'))
     assert.ok(!audits.some(a => a.action === 'backup.snapshot.restore_file' && a.outcome === 'ok'))
     assert.ok(actions.has('git.repo.deployed'))
-    assert.ok(actions.has('cache.updated'))
+    assert.ok(!actions.has('cache.updated') && !actions.has('container.created'))
     assert.ok(!actions.has('app.installed'))
     assert.ok(!actions.has('app.staging.cloned'))
     assert.ok(!actions.has('app.staging.pushed'))

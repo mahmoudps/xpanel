@@ -5,7 +5,11 @@ import {
   fpmAccountLogDir,
   fpmPaths,
   quoteExecArg,
-  renderAppUnit,
+  renderAppUnits,
+  renderCacheUnit,
+  renderContainerUnit,
+  cachePaths,
+  isContainerImage,
   renderCronUnits,
   CRON_COMMAND_RUNNER,
   cronCommandPath,
@@ -34,8 +38,8 @@ describe('renderFpmUnit', () => {
     expect(unitValues(unit.content, 'ProtectSystem')).toEqual(['strict'])
     expect(unitValues(unit.content, 'ProtectHome')).toEqual(['tmpfs'])
     expect(unitValues(unit.content, 'BindPaths')).toEqual(['/home/alice'])
-    expect(unitValues(unit.content, 'ReadWritePaths')).toEqual(['/home/alice /run/xpanel/fpm/alice-8.3 /var/log/xpanel/php-fpm/alice'])
-    expect(unitValues(unit.content, 'RuntimeDirectory')).toEqual(['xpanel/fpm/alice-8.3'])
+    expect(unitValues(unit.content, 'ReadWritePaths')).toEqual(['/home/alice /run/xpanel-fpm/alice-8.3 /var/log/xpanel/php-fpm/alice'])
+    expect(unitValues(unit.content, 'RuntimeDirectory')).toEqual(['xpanel-fpm/alice-8.3'])
     expect(unitValues(unit.content, 'LogsDirectory')).toEqual(['xpanel/php-fpm/alice'])
     expect(unitValues(unit.content, 'RuntimeDirectoryMode')).toEqual(['0750'])
     expect(unitValues(unit.content, 'LogsDirectoryMode')).toEqual(['0750'])
@@ -111,9 +115,9 @@ describe('renderFpmUnit', () => {
       unit: 'xpanel-php-fpm-alice-8.3.service',
       config: '/etc/xpanel/php-fpm/8.3/alice.conf',
       pool: '/etc/xpanel/php-fpm/8.3/alice.pool.conf',
-      runtimeDirectory: 'xpanel/fpm/alice-8.3',
-      socketDir: '/run/xpanel/fpm/alice-8.3',
-      socket: '/run/xpanel/fpm/alice-8.3/php-fpm.sock',
+      runtimeDirectory: 'xpanel-fpm/alice-8.3',
+      socketDir: '/run/xpanel-fpm/alice-8.3',
+      socket: '/run/xpanel-fpm/alice-8.3/php-fpm.sock',
       logsDirectory: 'xpanel/php-fpm/alice',
       logDir: '/var/log/xpanel/php-fpm/alice',
     })
@@ -142,66 +146,107 @@ describe('quoteExecArg', () => {
   })
 })
 
-describe('renderAppUnit', () => {
-  const app: AppSpec = {
-    name: 'api',
-    kind: 'node',
-    port: 3000,
-    execStart: ['/usr/bin/node', 'server.js', '--title', 'My "App" 100%'],
-    workingDir: '/home/alice/apps/api',
-    env: { NODE_ENV: 'production', DB_PASS: "p@ss'w$rd\"\\" },
-  }
-  const { unit, envFile } = renderAppUnit(account, app, debianOs, { reservedPorts: [8080] })
+describe('renderAppUnits', () => {
+  const app: AppSpec = { name: 'api', kind: 'node', root: '/home/alice/apps/api', startup: 'server.js', env: { NODE_ENV: 'staging', DB_PASS: "p@ss'w$rd\"\\" } }
+  const r = renderAppUnits(account, app, debianOs)
 
-  it('runs the app isolated in the slice, with PORT and loopback HOST', () => {
-    expect(unit.path).toBe('/etc/systemd/system/xpanel-app-alice-api.service')
-    expect(unitValues(unit.content, 'Slice')).toEqual(['xpanel-1001.slice'])
-    expect(unitValues(unit.content, 'User')).toEqual(['alice'])
-    expect(unitValues(unit.content, 'Environment')).toEqual(['"PORT=3000" "HOST=127.0.0.1"'])
-    expect(unitValues(unit.content, 'ExecStart')).toEqual(['/usr/bin/node "server.js" "--title" "My \\"App\\" 100%%"'])
-    expect(unitValues(unit.content, 'WorkingDirectory')).toEqual(['/home/alice/apps/api'])
-    expect(unitValues(unit.content, 'SocketBindAllow')).toEqual(['tcp:3000', 'udp'])
-    expect(unitValues(unit.content, 'SocketBindDeny')).toEqual(['any'])
-    expect(unitValues(unit.content, 'RestrictAddressFamilies')).toEqual(['AF_UNIX AF_INET AF_INET6 AF_NETLINK'])
-    expect(unitValues(unit.content, 'ProtectHome')).toEqual(['tmpfs'])
-    expect(unitValues(unit.content, 'NoNewPrivileges')).toEqual(['yes'])
+  it('runs the app isolated in the slice on a unix socket in its own runtime directory', () => {
+    expect(r.service.path).toBe('/etc/systemd/system/xpanel-app-alice-api.service')
+    expect(unitValues(r.service.content, 'Slice')).toEqual(['xpanel-1001.slice'])
+    expect(unitValues(r.service.content, 'User')).toEqual(['alice'])
+    expect(unitValues(r.service.content, 'Environment')).toEqual(['"PORT=/run/xpanel-apps/alice-api/app.sock" "NODE_ENV=production"'])
+    expect(unitValues(r.service.content, 'ExecStart')).toEqual(['/usr/bin/node "/home/alice/apps/api/server.js"'])
+    expect(unitValues(r.service.content, 'WorkingDirectory')).toEqual(['/home/alice/apps/api'])
+    expect(unitValues(r.service.content, 'RuntimeDirectory')).toEqual(['xpanel-apps/alice-api'])
+    expect(unitValues(r.service.content, 'RuntimeDirectoryMode')).toEqual(['0700'])
+    expect(unitValues(r.service.content, 'SocketBindAllow')).toEqual(['udp'])
+    expect(unitValues(r.service.content, 'SocketBindDeny')).toEqual(['any'])
+    expect(unitValues(r.service.content, 'ProtectHome')).toEqual(['tmpfs'])
+    expect(unitValues(r.service.content, 'NoNewPrivileges')).toEqual(['yes'])
+  })
+
+  it('fronts the app with a root-owned socket for the Nginx group, proxied as the account', () => {
+    expect(unitValues(r.proxySocket.content, 'ListenStream')).toEqual(['/run/xpanel-app-proxy/alice-api.sock'])
+    expect(unitValues(r.proxySocket.content, 'SocketUser')).toEqual(['root'])
+    expect(unitValues(r.proxySocket.content, 'SocketGroup')).toEqual([debianOs.paths.nginxUser])
+    expect(unitValues(r.proxySocket.content, 'SocketMode')).toEqual(['0660'])
+    expect(unitValues(r.proxyService.content, 'ExecStart')).toEqual(['/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=10min /run/xpanel-apps/alice-api/app.sock'])
+    expect(unitValues(r.proxyService.content, 'User')).toEqual(['alice'])
+    expect(unitValues(r.proxyService.content, 'Slice')).toEqual(['xpanel-1001.slice'])
   })
 
   it('keeps secrets out of the unit, in a root-only EnvironmentFile', () => {
-    expect(unit.content).not.toContain('DB_PASS')
-    expect(unitValues(unit.content, 'EnvironmentFile')).toEqual(['/etc/xpanel/apps/alice/api.env'])
-    expect(envFile.mode).toBe(0o600)
-    expect(envFile.owner).toBe('root')
-    expect(envFile.content).toContain("NODE_ENV='production'\n")
-    expect(envFile.content).toContain('DB_PASS="p@ss\'w\\$rd\\"\\\\"\n')
+    expect(r.service.content).not.toContain('DB_PASS')
+    expect(unitValues(r.service.content, 'EnvironmentFile')).toEqual(['/etc/xpanel/runtime/alice/api.env'])
+    expect(r.envFile).toMatchObject({ mode: 0o600, owner: 'root', group: 'root' })
+    expect(r.envFile.content).toContain("NODE_ENV='staging'\n")
+    expect(r.envFile.content).toContain('DB_PASS="p@ss\'w\\$rd\\"\\\\"\n')
   })
 
-  it('adds PYTHONUNBUFFERED for python apps', () => {
-    const py = renderAppUnit(account, { ...app, kind: 'python', execStart: ['/home/alice/venv/bin/gunicorn', 'app:app'] }, rhelOs)
-    expect(unitValues(py.unit.content, 'Environment')).toContain('"PYTHONUNBUFFERED=1"')
-    expect(unitValues(py.unit.content, 'ExecStart')).toEqual(['/home/alice/venv/bin/gunicorn "app:app"'])
+  it('serves python through the venv and the stdlib launcher, ruby through bundle exec puma', () => {
+    const py = renderAppUnits(account, { ...app, kind: 'python', startup: 'passenger_wsgi.py' }, rhelOs)
+    expect(unitValues(py.service.content, 'ExecStart')).toEqual(['/home/alice/apps/api/.venv/bin/python /etc/xpanel/runtime/wsgi-unix.py "/run/xpanel-apps/alice-api/app.sock" "/home/alice/apps/api/passenger_wsgi.py"'])
+    const rb = renderAppUnits(account, { ...app, kind: 'ruby', startup: 'config.ru' }, debianOs)
+    expect(unitValues(rb.service.content, 'ExecStart')).toEqual(['/usr/bin/bundle exec puma --bind "unix:///run/xpanel-apps/alice-api/app.sock" "/home/alice/apps/api/config.ru"'])
+    expect(unitValues(rb.service.content, 'Environment')[0]).toContain('"BUNDLE_PATH=/home/alice/apps/api/vendor/bundle"')
   })
 
   it.each([
     ['name with slash', { name: '../x' }],
     ['uppercase name', { name: 'API' }],
-    ['kind', { kind: 'ruby' }],
-    ['privileged port', { port: 80 }],
-    ['reserved port', { port: 8080 }],
-    ['port overflow', { port: 70000 }],
-    ['relative executable', { execStart: ['node', 'x.js'] }],
-    ['empty argv', { execStart: [] }],
-    ['executable with space', { execStart: ['/usr/bin/node x', 'a'] }],
-    ['newline in arg', { execStart: ['/usr/bin/node', 'a\nExecStartPre=/bin/sh'] }],
-    ['NUL in arg', { execStart: ['/usr/bin/node', 'a\u0000b'] }],
-    ['workdir outside home', { workingDir: '/home/bob' }],
-    ['workdir prefix trick', { workingDir: '/home/alicex' }],
-    ['workdir traversal', { workingDir: '/home/alice/../bob' }],
+    ['kind', { kind: 'php' }],
+    ['root outside home', { root: '/home/bob/app' }],
+    ['root prefix trick', { root: '/home/alicex/app' }],
+    ['root is the home', { root: '/home/alice' }],
+    ['root traversal', { root: '/home/alice/../bob' }],
+    ['startup traversal', { startup: '../../bob/x.js' }],
+    ['startup newline', { startup: 'a\nExecStartPre=/bin/sh' }],
     ['env name', { env: { 'A-B': '1' } }],
     ['env PORT override', { env: { PORT: '1' } }],
     ['env newline', { env: { A: 'x\nB=y' } }],
   ])('rejects %s', (_, patch) => {
-    expect(() => renderAppUnit(account, { ...app, ...patch } as AppSpec, debianOs, { reservedPorts: [8080] })).toThrowError(XpanelError)
+    expect(() => renderAppUnits(account, { ...app, ...patch } as AppSpec, debianOs)).toThrowError(XpanelError)
+  })
+})
+
+describe('renderCacheUnit', () => {
+  it('runs redis as the account on a socket in its home, no TCP, no persistence, memory capped', () => {
+    const unit = renderCacheUnit(account, { service: 'redis', memoryMb: 64, binary: '/usr/bin/redis-server' }, debianOs)
+    expect(unit.path).toBe('/etc/systemd/system/xpanel-redis-alice.service')
+    expect(unitValues(unit.content, 'ExecStart')).toEqual(['/usr/bin/redis-server --port 0 --unixsocket "/home/alice/.xpanel-cache/redis.sock" --unixsocketperm 700 --maxmemory 64mb --maxmemory-policy allkeys-lru --save "" --appendonly no --dir "/home/alice/.xpanel-cache" --daemonize no --logfile ""'])
+    expect(unitValues(unit.content, 'MemoryMax')).toEqual(['96M'])
+    expect(unitValues(unit.content, 'Slice')).toEqual(['xpanel-1001.slice'])
+    expect(unitValues(unit.content, 'SocketBindDeny')).toEqual(['any'])
+  })
+
+  it('runs memcached on a unix socket only (no network listener)', () => {
+    const unit = renderCacheUnit(account, { service: 'memcached', memoryMb: 32, binary: '/usr/bin/memcached' }, debianOs)
+    expect(unitValues(unit.content, 'ExecStart')).toEqual(['/usr/bin/memcached -s "/home/alice/.xpanel-cache/memcached.sock" -a 0700 -m 32 -c 256 -t 1'])
+    expect(cachePaths(account, 'memcached').socket).toBe('/home/alice/.xpanel-cache/memcached.sock')
+  })
+
+  it.each([['memory below floor', { memoryMb: 4 }], ['relative binary', { binary: 'redis-server' }], ['service', { service: 'mongodb' }]])('rejects %s', (_, patch) => {
+    expect(() => renderCacheUnit(account, { service: 'redis', memoryMb: 64, binary: '/usr/bin/redis-server', ...patch } as never, debianOs)).toThrowError(XpanelError)
+  })
+})
+
+describe('renderContainerUnit', () => {
+  const limits = { memoryMb: 512, cpuPercent: 50, maxProcesses: 64 }
+  it('runs podman rootless as the account in a delegated cgroup with plan limits and no published port', () => {
+    const r = renderContainerUnit(account, { name: 'kuma', image: 'docker.io/louislam/uptime-kuma:1', env: { TZ: 'UTC' } }, limits, debianOs)
+    expect(r.unit).toBe('xpanel-ctr-alice-kuma.service')
+    expect(unitValues(r.service.content, 'User')).toEqual(['alice'])
+    expect(unitValues(r.service.content, 'Slice')).toEqual(['xpanel-1001.slice'])
+    expect(unitValues(r.service.content, 'Delegate')).toEqual(['yes'])
+    const exec = unitValues(r.service.content, 'ExecStart')[0]!
+    expect(exec).toBe('/usr/bin/podman --cgroup-manager=cgroupfs run --rm --replace --name kuma --cgroups=split --log-driver=passthrough --security-opt=no-new-privileges --pull=missing --memory=512m --cpus=0.50 --pids-limit=64 --env TZ "docker.io/louislam/uptime-kuma:1"')
+    expect(exec).not.toMatch(/ (?:-p|--publish)\b/)
+    expect(r.envFile).toMatchObject({ path: '/etc/xpanel/runtime/alice/ctr-kuma.env', mode: 0o600, owner: 'root' })
+  })
+
+  it.each(['louislam/uptime-kuma:1', 'docker.io/louislam/uptime-kuma', 'evil.example/x:1', 'docker.io/../x:1', 'docker.io/X:1'])('rejects image %s', (image) => {
+    expect(() => renderContainerUnit(account, { name: 'kuma', image }, limits, debianOs)).toThrowError(XpanelError)
+    expect(isContainerImage(image)).toBe(false)
   })
 })
 

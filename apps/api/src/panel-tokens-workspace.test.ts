@@ -43,11 +43,11 @@ describe('API token scope vocabulary', () => {
   it('is exactly the resources the route policy assigns, and the web labels cover the same list', () => {
     const sample: Record<string, string> = {
       accounts: '/api/accounts', 'account-preferences': '/api/account/preferences', analytics: '/api/analytics', apps: '/api/apps/x', audit: '/api/audit', auth: '/api/auth/me',
-      backups: '/api/backups', branding: '/api/branding', cache: '/api/cache/x', catalog: '/api/catalog', cluster: '/api/cluster', containers: '/api/containers/x', cron: '/api/account/cron',
+      backups: '/api/backups', branding: '/api/server/panel/branding', cache: '/api/cache/x', catalog: '/api/catalog', cluster: '/api/cluster', containers: '/api/containers/x', cron: '/api/account/cron',
       databases: '/api/databases', dns: '/api/dns', domains: '/api/domains', events: '/api/events/recent', 'feature-lists': '/api/feature-lists', files: '/api/accounts/x/files',
-      firewall: '/api/firewall', generations: '/api/generations', git: '/api/git', ips: '/api/ips', jobs: '/api/jobs', languages: '/api/languages', lifecycle: '/api/transfers',
+      firewall: '/api/firewall', generations: '/api/generations', git: '/api/git', ips: '/api/ips', jobs: '/api/jobs', languages: '/api/server/panel/languages', lifecycle: '/api/transfers',
       mail: '/api/mail', plans: '/api/plans', reconcile: '/api/reconcile', resellers: '/api/resellers', search: '/api/search', security: '/api/security/workspace', server: BASE,
-      'service-users': '/api/service-users', shell: '/api/accounts/x/shell', tls: '/api/certificate-workspace', webmail: '/api/webmail/x', whmcs: '/api/whmcs',
+      'service-users': '/api/service-users', shell: '/api/account/terminal', tls: '/api/certificate-workspace', webmail: '/api/webmail/x', whmcs: '/api/server/panel/whmcs',
     }
     expect(Object.keys(sample).sort()).toEqual([...API_TOKEN_SCOPE_RESOURCES].sort())
     for (const [resource, path] of Object.entries(sample)) expect(policyForRequest(path, 'GET').resource, path).toBe(resource)

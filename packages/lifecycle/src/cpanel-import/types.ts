@@ -72,6 +72,12 @@ export interface ImportCertificate {
   key: FileRef | null
 }
 
+/** A crontab line of the account; imported paused until the owner reviews it. */
+export interface ImportCronJob {
+  schedule: string
+  command: string
+}
+
 export interface ImportPlan {
   format: 'cpmove' | 'backup'
   topDir: string
@@ -86,6 +92,7 @@ export interface ImportPlan {
   /** forwarders and default addresses per domain, in the renderer's shapes */
   mail: DomainMail[]
   certificates: ImportCertificate[]
+  cronJobs: ImportCronJob[]
   home: { files: number; directories: number; symlinks: number; bytes: number; skipped: number }
   warnings: ImportWarning[]
 }

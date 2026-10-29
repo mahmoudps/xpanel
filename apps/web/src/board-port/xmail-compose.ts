@@ -724,7 +724,7 @@ export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel =>
     identityDkim: shownIdentity(props.identityDkim),
     identitySpf: shownIdentity(props.identitySpf),
     identitySize: shownIdentity(props.identitySize),
-    vacationStatus: vacationKnown ? (vacationOn ? (translator(locale)('Requested on; activation unverified')) : (translator(locale)('Requested off; activation unverified'))) : (translator(locale)('Not read; activation unverified')),
+    vacationStatus: vacationKnown ? (vacationOn ? translator(locale)(msgctxt('vacation-state', 'On')) : translator(locale)(msgctxt('vacation-state', 'Off'))) : translator(locale)(msgctxt('xmail-compose', 'Not read')),
     vacationOn,
     vacationCanManage: props.vacationCanManage===true,
     vacationOpenLabel: translator(locale)('Set up responder'),

@@ -7,16 +7,22 @@ const displayDateTime = formatDisplayDateTime
 // Module-local alias: the binding source refers to it by this name, defined again in ACCT_RESTORE_CLIENT_BINDING.
 const readFilesReply = readBackupFilesReply
 export type RestoreMoreMailbox = { address: string; messages: number; bytes: number; current: 'exists' | 'missing' }
-export type RestoreMoreInventory = { sha256: string; files: { files: number; bytes: number }; mail: { state: 'available' | 'unavailable'; mailboxes: RestoreMoreMailbox[]; truncated: boolean }; mailSettingsFiles: number }
+export type RestoreMoreDatabase = { name: string; bytes: number; current: 'exists' | 'missing' }
+export type RestoreMorePartState = 'available' | 'unavailable' | 'not-in-archive'
+export type RestoreMoreInventory = { sha256: string; files: { files: number; bytes: number }; mail: { state: 'available' | 'unavailable'; mailboxes: RestoreMoreMailbox[]; truncated: boolean }; mailSettingsFiles: number
+  databases: { state: RestoreMorePartState; databases: RestoreMoreDatabase[] }; dns: { state: RestoreMorePartState; zones: RestoreMoreDatabase[] } }
+/** Accepted database restore: it runs on the server in the background and its per-database results are recorded and audited. */
+export type RestoreMorePartsStarted = { restoreId: string; databases: string[]; zones: string[] }
 export type RestoreMorePreview = { rows: { path: string; bytes: number }[]; counts: { messages: number; present: number; batch: number; remaining: number; refused: number }; quota: { limitMb: number | 'unlimited'; plannedBytes: number; fits: boolean }; writer: 'available' | 'unavailable'; revision: string }
 export type RestoreMoreResult = 'restored' | 'skipped-exists' | 'failed' | 'not-attempted'
 export type RestoreMoreRestore = { results: { path: string; result: RestoreMoreResult; reason: string | null; verificationRequired: boolean }[]; counts: Record<RestoreMoreResult, number>; complete: boolean; remaining: number; verificationRequired: boolean }
-export type RestoreMoreExpected = { username: string; file: string; mailboxes?: string[]; revision?: string }
+export type RestoreMoreExpected = { username: string; file: string; mailboxes?: string[]; revision?: string; databases?: string[]; zones?: string[]; sha256?: string }
 
 /** Strict reply contract for /api/backups/components (apps/api/src/acct-restore-workspace.ts): bound to account, archive, mailboxes and revision. */
 export function readRestoreMoreReply(kind: 'inventory', value: unknown, expected: RestoreMoreExpected): RestoreMoreInventory
 export function readRestoreMoreReply(kind: 'preview', value: unknown, expected: RestoreMoreExpected): RestoreMorePreview
 export function readRestoreMoreReply(kind: 'restore', value: unknown, expected: RestoreMoreExpected): RestoreMoreRestore
+export function readRestoreMoreReply(kind: 'parts', value: unknown, expected: RestoreMoreExpected): RestoreMorePartsStarted
 export function readRestoreMoreReply(kind: string, value: unknown, expected: RestoreMoreExpected): unknown {
   const bad = (): never => { throw new Error('invalid_restore_more_' + kind) }
   const object = (item: unknown): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item)
@@ -28,14 +34,27 @@ export function readRestoreMoreReply(kind: string, value: unknown, expected: Res
     const match = typeof item === 'string' && item.length <= 4096 && !/[\u0000-\u001f\u007f\\]/.test(item) ? /^mail\/([^/]+)\/([^/]+)\/(?:\.[^/]+\/)?(?:cur|new)\/[^/]+$/.exec(item) : null
     return !!match && selected.has(match[2] + '@' + match[1])
   }
+  const owned = (item: unknown): item is string => typeof item === 'string' && /^[a-z][a-z0-9]{0,15}_[a-z0-9_]{1,47}$/.test(item) && item.startsWith(expected.username + '_')
+  const zone = (item: unknown): item is string => typeof item === 'string' && item.length <= 253 && /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$/.test(item)
+  if (kind === 'parts') {
+    if (!object(value) || !object(value.context) || value.context.username !== expected.username || !object(value.archive) || value.archive.file !== expected.file || value.archive.sha256 !== expected.sha256 || value.state !== 'running'
+      || typeof value.restoreId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.restoreId) || !Array.isArray(value.databases) || value.databases.join('\n') !== (expected.databases ?? []).join('\n') || !value.databases.every(owned)
+      || !Array.isArray(value.zones) || value.zones.join('\n') !== (expected.zones ?? []).join('\n') || !value.zones.every(zone)) return bad()
+    return { restoreId: value.restoreId, databases: [...value.databases as string[]], zones: [...value.zones as string[]] }
+  }
   if (!object(value) || !object(value.context) || value.context.username !== expected.username || !object(value.archive) || value.archive.file !== expected.file || value.archive.integrity !== 'verified' || !digest(value.archive.sha256)) return bad()
   if (kind === 'inventory') {
     const c = value.components
     if (!object(c) || !object(c.files) || !count(c.files.files) || !count(c.files.bytes) || !object(c.mail) || !['available', 'unavailable'].includes(c.mail.state as string) || !Array.isArray(c.mail.mailboxes) || c.mail.mailboxes.length > 1000 || typeof c.mail.truncated !== 'boolean'
-      || !object(c.mailSettings) || c.mailSettings.state !== 'not-restorable' || !count(c.mailSettings.files) || !object(c.databases) || c.databases.state !== 'not-in-archive' || !object(c.dns) || c.dns.state !== 'not-in-archive') return bad()
+      || !object(c.mailSettings) || c.mailSettings.state !== 'not-restorable' || !count(c.mailSettings.files) || !object(c.databases) || !['available', 'unavailable', 'not-in-archive'].includes(c.databases.state as string) || !Array.isArray(c.databases.databases) || c.databases.databases.length > 1000
+      || (c.databases.state === 'not-in-archive') !== (c.databases.databases.length === 0) || !object(c.dns) || !['available', 'unavailable', 'not-in-archive'].includes(c.dns.state as string) || !Array.isArray(c.dns.zones) || c.dns.zones.length > 1000
+      || (c.dns.state === 'not-in-archive') !== (c.dns.zones.length === 0)) return bad()
+    const zones = c.dns.zones.map(row => object(row) && zone(row.name) && count(row.bytes) && (row.current === 'exists' || row.current === 'missing') ? { name: row.name, bytes: row.bytes, current: row.current } as RestoreMoreDatabase : bad())
+    const databases = c.databases.databases.map(row => object(row) && owned(row.name) && count(row.bytes) && (row.current === 'exists' || row.current === 'missing') ? { name: row.name, bytes: row.bytes, current: row.current } as RestoreMoreDatabase : bad())
     const mailboxes = c.mail.mailboxes.map(box => object(box) && address(box.address) && count(box.messages) && count(box.bytes) && (box.current === 'exists' || box.current === 'missing') ? { address: box.address, messages: box.messages, bytes: box.bytes, current: box.current } as RestoreMoreMailbox : bad())
     if (new Set(mailboxes.map(box => box.address)).size !== mailboxes.length) return bad()
-    return { sha256: value.archive.sha256, files: { files: c.files.files, bytes: c.files.bytes }, mail: { state: c.mail.state, mailboxes, truncated: c.mail.truncated }, mailSettingsFiles: c.mailSettings.files }
+    return { sha256: value.archive.sha256, files: { files: c.files.files, bytes: c.files.bytes }, mail: { state: c.mail.state, mailboxes, truncated: c.mail.truncated }, mailSettingsFiles: c.mailSettings.files,
+      databases: { state: c.databases.state as RestoreMorePartState, databases }, dns: { state: c.dns.state as RestoreMorePartState, zones } }
   }
   if (!Array.isArray(value.mailboxes) || value.mailboxes.join('\n') !== (expected.mailboxes ?? []).join('\n') || !digest(value.revision)) return bad()
   if (kind === 'preview') {

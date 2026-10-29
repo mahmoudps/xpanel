@@ -28,7 +28,7 @@ export type MonitoringAlertsView = {
 
 /** Strict reader for /api/server/monitoring-alerts views: fixed rule order, thresholds inside the served bounds, and a delivery log of known results only. */
 export function readMonitoringAlertsView(value: unknown): MonitoringAlertsView {
-  const IDS = ['load', 'memory', 'swap', 'disk-space', 'disk-inodes', 'services', 'drift', 'certificates', 'reboot']
+  const IDS = ['load', 'memory', 'swap', 'disk-space', 'disk-inodes', 'services', 'drift', 'certificates', 'reboot', 'bandwidth']
   const bad = (): never => { throw new Error('invalid_monitoring_alerts') }
   const object = (item: unknown): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item)
   const iso = (item: unknown): string => typeof item === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(item) && Number.isFinite(Date.parse(item)) ? item : bad()
@@ -115,7 +115,7 @@ function bindWhmMonitoringAlerts(): void {
     const quietOn = one<HTMLInputElement>('quiet'), quietStart = one<HTMLInputElement>('quiet-start'), quietEnd = one<HTMLInputElement>('quiet-end')
     const rows = Array.from(root.querySelectorAll<HTMLElement>('[data-whm-alerts-rule]'))
     const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
-    if (!status || !evalStatus || !saveStatus || !form || !results || !log || !evaluate || !save || !reload || !quietOn || !quietStart || !quietEnd || rows.length !== 9) return
+    if (!status || !evalStatus || !saveStatus || !form || !results || !log || !evaluate || !save || !reload || !quietOn || !quietStart || !quietEnd || rows.length !== 10) return
     const cell = <T extends HTMLElement>(row: HTMLElement, name: string): T | null => row.querySelector<T>('[data-whm-alerts-' + name + ']')
     const inputs = (): HTMLInputElement[] => rows.flatMap(row => [cell<HTMLInputElement>(row, 'enabled'), cell<HTMLInputElement>(row, 'threshold')]).filter((item): item is HTMLInputElement => !!item)
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'

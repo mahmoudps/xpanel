@@ -7,7 +7,6 @@ import type {
   ServerSettings,
   FeatureList,
   FirewallRule,
-  IoAnalyticsSnapshot,
   MailIpConfig,
   Plan,
   Principal,
@@ -18,7 +17,6 @@ import type {
 import { canManagePlan } from '@xpanel/core'
 import { renderPlanEditor } from '../plan-editor.ts'
 import { accountListModel, accountListRowAttributes, accountPlanPreviewModel, renderAccountListControls, renderAccountPlanPreview } from '../account-list.ts'
-import { renderServerIoMonitorChart } from '../charts.ts'
 import { formatDisplayName } from '../display-name.ts'
 import { roleLabel } from '../chrome.ts'
 import { renderHandoffButton } from '../panel-handoff-controls.ts'
@@ -96,7 +94,6 @@ export interface WhmSurfaceProps {
   availableVersion?: string
   generationId?: number
   adminSessionIp?: string
-  ioSnapshot?: IoAnalyticsSnapshot
   services?: WhmServiceHealthRow[]
   plans?: Plan[]
   featureLists?: readonly (Pick<FeatureList, 'id' | 'name'> & Partial<Pick<FeatureList, 'disabled' | 'ownerId'>>)[]
@@ -176,7 +173,6 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
   const availableVersion = props.availableVersion ?? (translator(locale)('Unavailable'))
   const generationId = props.generationId !== undefined && Number.isSafeInteger(props.generationId) && props.generationId > 0 ? props.generationId : undefined
   const adminSessionIp = props.adminSessionIp ?? ''
-  const ioSnapshot = props.ioSnapshot
   const services = props.services ?? []
   const plans = props.plans ?? []
   const accounts = props.accounts ?? []
@@ -271,18 +267,6 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           <div class="xp-table-wrap"><table class="xp-table"><thead><tr><th>${translator(locale)('Time')}</th><th>${translator(locale)('Actor')}</th><th>${translator(locale)('Action')}</th><th>${translator(locale)('Result')}</th></tr></thead><tbody>${auditEntries.length ? auditEntries.slice(0, 8).map(entry => `<tr><td><bdi dir="ltr">${escapeHtml(formatAsciiDate(entry.at, { includeTime: true }))}</bdi></td><td><bdi dir="ltr">${escapeHtml(auditActorLabel(entry.actor))}</bdi></td><td>${auditActionHtml(entry.action, locale, entry)}</td><td>${escapeHtml(auditOutcomeLabel(entry.action, entry.outcome, locale))}</td></tr>`).join('') : `<tr><td colspan="4">${translator(locale)('No audit entries yet')}</td></tr>`}</tbody></table></div>
         </section>
       </section>
-` : ''}
-      ${section === 'io' && ioSnapshot ? `      <!-- Real-Time Server IO & Per-Account cgroup v2 Slice Monitor -->
-      <section class="xp-card" id="whm-io-monitor" data-section="server-io-monitor" aria-labelledby="whm-io-heading">
-        <div class="xp-card__header" style="margin-block-end:var(--xp-space-group,24px)">
-          <div>
-            <h1 id="whm-io-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-          </div>
-        </div>
-
-        ${renderServerIoMonitorChart(ioSnapshot, locale)}
-      </section>
-
 ` : ''}
       ${section === 'services' ? `      <!-- Service Health Table (nginx, apache/ols, php-fpm, mariadb, dovecot, postfix, pdns, nftables) -->
       <section class="xp-card" id="whm-services" data-section="service-health" aria-labelledby="whm-services-heading" style="display:flex;flex-direction:column;gap:var(--xp-space-group,24px)">
@@ -1017,7 +1001,7 @@ ${section === 'upgrade' ? `<section class="xp-card" data-section="root-lifecycle
 ${section === 'transfer' ? `<section class="xp-card" data-section="root-lifecycle"><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1><p class="xp-prose">${translator(locale)('Choose the transfer source and review its accounts before importing.')}</p><button type="button" class="xp-btn xp-btn--primary" data-action="start-transfer" ${isRoot ? '' : 'disabled'}>${translator(locale)('Start transfer')}</button></section>` : ''}
 ${section === 'security' ? `<section class="xp-card" data-section="account-security" style="display:flex;flex-direction:column;gap:var(--xp-space-group,24px)"><h1 class="xp-page-title" style="margin:0">${escapeHtml(pageTitle)}</h1></section>` : ''}
 ${section === 'design' ? renderDesignMain(activeRoute, locale) : ''}
-${section === undefined || (section === 'io' && !ioSnapshot) || (section === 'mail-ips' && !mailIpConfig) ? renderSurfaceUnavailable(locale, '/whm') : ''}`
+${section === undefined || (section === 'mail-ips' && !mailIpConfig) ? renderSurfaceUnavailable(locale, '/whm') : ''}`
   const rawHtml = renderSurfaceShell({
     surface: 'xwhm', locale,
     attributes: `data-principal-kind="${escapeHtml(principal.kind)}"`,

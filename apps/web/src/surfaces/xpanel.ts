@@ -31,6 +31,7 @@ import { renderXpanelHome, xpanelHomeFromProps } from '../board-port/xpanel-home
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderApprovedXpanelWorkspace } from '../board-port/approved-xpanel-workspaces.ts'
 import { renderComposedXpanel } from '../board-port/composed/render.ts'
+import { renderAccountTerminalPage } from '../board-port/ops-terminal-workspace.ts'
 import { composedRouteSpecs } from '../board-port/composed/all.ts'
 import { copyOf } from '../board-port/composed/types.ts'
 import { renderEmailAccountsExtension, emailAccountsRouteSpec } from '../board-port/extensions/email-accounts.ts'
@@ -86,25 +87,11 @@ export interface PanelSurfaceProps {
     memoryBytes: number | null
     processCount: number | null
     bandwidth: 'unmeasured'
+    bandwidthMonth?: { month: string; totalBytes: number | null; limitBytes: number | null; usedPercent: number | null; enforced: boolean; limited: boolean }
     ioEnforced?: boolean | null
   }
-  terminalSessionId?: string
   actionState?: AsyncActionBannerProps
 }
-
-const ALLOWLISTED_SHELL_BINARIES = [
-  'php',
-  'composer',
-  'wp',
-  'git',
-  'node',
-  'npm',
-  'python3',
-  'tar',
-  'gzip',
-  'mysql',
-  'mysqldump',
-] as const
 
 /**
  * Account resources. Measured agent observations are rendered by the reading board,
@@ -187,9 +174,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
   const databaseUsers = props.databaseUsers ?? []
   const serviceUsers = (props.serviceUsers ?? []).filter(user => activeRoute === '/files/ftp' ? user.services.ftp : user.services.email)
   const dnsRecords = props.dnsRecords ?? []
-  const terminalSessionId = props.terminalSessionId
 
-  const sliceUnit = `xpanel-${account.uid}.slice`
   const shellEnabled = plan?.shell === 'jailed' && account.shell === 'jailed' && account.status === 'active'
   const visibility = props.visibility?.principal.kind === 'user' && props.visibility.principal.accountId === account.id ? props.visibility : undefined
   const xpanelNav = visibleNavigation(visibility, props.catalog).find((n) => n.surface === 'xpanel')
@@ -522,43 +507,7 @@ ${section === 'resources' ? `<div style="display:grid;gap:32px;min-inline-size:0
       </section>
 
 ` : ''}
-      ${section === 'terminal' ? `      <!-- 6. Jailed Shell Terminal (systemd-run --slice=xpanel-<uid>.slice --uid=<uid>) -->
-      <section class="xp-card" id="xpanel-terminal" data-section="jailed-shell-terminal" aria-labelledby="xpanel-terminal-heading" style="display:flex;flex-direction:column;gap:var(--xp-space-group,24px)">
-        <div class="xp-card__header" style="margin:0">
-          <div>
-            <h1 id="xpanel-terminal-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-            <p class="xp-prose">${escapeHtml(translator(locale)('Running as UID {uid} inside systemd cgroup v2 unit xpanel-{uid}.slice with private /tmp and open_basedir isolation.', { uid: account.uid }))}</p>
-          </div>
-          ${renderStatusBadge(shellEnabled ? 'ok' : 'suspended', shellEnabled ? `Jailed (${sliceUnit})` : (translator(locale)('Shell access disabled')))}
-        </div>
-
-        ${
-          shellEnabled
-            ? `
-          <div>
-            <span class="xp-label">${translator(locale)('Allowed commands')}</span>
-            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-block-start: 6px;">
-              ${ALLOWLISTED_SHELL_BINARIES.map((bin) => `<code class="xp-mono">${escapeHtml(bin)}</code>`).join(' · ')}
-            </div>
-          </div>
-
-          <pre class="xp-terminal" dir="ltr" style="margin:0" data-terminal-output="${escapeHtml(terminalSessionId ?? '')}">${escapeHtml(translator(locale)('No terminal session has started.'))}</pre>
-
-          <div class="xp-reconcile-banner" role="status" data-terminal-execution="unavailable">
-            ${renderStatusBadge('suspended', translator(locale)('Command execution unavailable'))}
-            <p class="xp-prose">${translator(locale)('No qualified command-execution path exists on this server; no command can be run from this page and no output is fabricated.')}</p>
-          </div>
-        `
-            : `
-          <div class="xp-reconcile-banner" role="status" data-terminal-disabled="true">
-            ${renderStatusBadge('suspended', translator(locale)('Shell access disabled'))}
-            <p class="xp-prose">${translator(locale)('Terminal access is disabled on your current plan.')}</p>
-          </div>
-        `
-        }
-      </section>
-
-` : ''}
+      ${section === 'terminal' ? renderAccountTerminalPage({ locale, account, shellEnabled, canUse: visibility !== undefined, title: pageTitle }) : ''}
             <!-- 7. Databases (MariaDB + .trash), Email & FTP Users, and DNS Zone Editor -->
 
 ${section === 'databases' ? `        <section class="xp-card" data-section="mariadb-databases" aria-labelledby="xpanel-db-heading">

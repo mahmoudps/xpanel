@@ -3,7 +3,7 @@ import { MAILX_DEFAULTS, MAILX_MARKER, mailxMailboxEffects, readMailxMailboxSpam
 import type { MailxSaved } from './mailx-policy.ts'
 
 const at = '2026-10-28T10:00:00.000Z'
-const empty = (): MailxSaved => ({ sections: { spam: null, relay: null, bcc: null, marketing: null }, archives: [] })
+const empty = (): MailxSaved => ({ sections: { spam: null, relay: null, bcc: null, marketing: null, server: null, routing: null }, archives: [] })
 
 describe('mail policy grammar', () => {
   it('accepts exact policies and rejects unknown, unordered or unsafe values', () => {
@@ -67,5 +67,36 @@ describe('mailbox spam preference effects', () => {
     expect(renderMailxMailboxSettings([{ ...row, inherit: false, enabled: false }]).content).toContain('want_spam = yes;')
     for (const bad of [{ ...pref, extra: 1 }, { ...pref, allowlist: ['x"@y.example'] }, { ...pref, ownerAuthority: { ...pref.ownerAuthority, mailbox: 'b@shop.example' } }, { ...pref, addHeaderScore: 101 }])
       expect(() => readMailxMailboxSpam(bad)).toThrow()
+  })
+})
+
+describe('server settings and routing policy', () => {
+  const policy = { postfix: { myhostname: 'mx.shop.example', smtpd_tls_protocols: '!SSLv2, !SSLv3, !TLSv1, !TLSv1.1', message_size_limit: '52428800' }, dovecot: { protocols: 'imap lmtp', ssl_min_protocol: 'TLSv1.2' },
+    rbl: ['zen.spamhaus.org'], certificates: { smtp: 'c1', submission: null, imap: null } }
+  it('accepts reviewed values only and keys every invalid value by its setting', async () => {
+    const { parseMailxServer, parseMailxRouting } = await import('./mailx-policy.ts')
+    expect(parseMailxServer(policy)).toEqual(policy)
+    for (const [bad, field] of [[{ ...policy, postfix: { smtpd_milters: 'x' } }, 'postfix'], [{ ...policy, postfix: { mynetworks: '0.0.0.0/0,1.1.1.1/32' } }, 'mynetworks'],
+      [{ ...policy, postfix: { mynetworks: '127.0.0.0/8, 0.0.0.0/0' } }, 'mynetworks'], [{ ...policy, postfix: { mynetworks: '[::]/0' } }, 'mynetworks'],
+      [{ ...policy, postfix: { smtpd_tls_protocols: '!SSLv2, !SSLv3, !TLSv1, !TLSv1.1', smtpd_tls_mandatory_protocols: '!SSLv2, !SSLv3' } }, 'smtpd_tls_mandatory_protocols'],
+      [{ ...policy, dovecot: { protocols: 'imap' } }, 'protocols'], [{ ...policy, dovecot: { ssl_cipher_list: 'HIGH;rm -rf' } }, 'ssl_cipher_list'], [{ ...policy, rbl: ['a.example', 'a.example'] }, 'rbl'],
+      [{ ...policy, certificates: { smtp: 'default', submission: null, imap: null } }, 'certificates.smtp'], [{ ...policy, postfix: { mailbox_size_limit: '0' } }, 'postfix']] as const) {
+      let caught: unknown = null
+      try { parseMailxServer(bad) } catch (error) { caught = error }
+      expect((caught as { field?: string }).field).toBe(field)
+    }
+    expect(parseMailxRouting({ domains: [{ domain: 'b.example', mode: 'remote' }, { domain: 'a.example', mode: 'backup' }] }).domains.map(row => row.domain)).toEqual(['a.example', 'b.example'])
+    for (const bad of [{ domains: [{ domain: 'a.example', mode: 'local' }] }, { domains: [{ domain: 'a.example', mode: 'backup' }, { domain: 'a.example', mode: 'remote' }] }]) expect(() => parseMailxRouting(bad)).toThrow()
+  })
+  it('renders derived Postfix keys, the port 25 certificate and the Dovecot file only for saved sections', async () => {
+    const { renderMailxDovecot } = await import('./mailx-policy.ts')
+    const saved = empty()
+    expect(renderMailxPostfix(saved).master).toBeUndefined()
+    expect(renderMailxDovecot(saved)).toBeNull()
+    saved.sections.server = { section: 'server', policy, updatedAt: at, updatedBy: 'root' }
+    const plan = renderMailxPostfix(saved)
+    expect(plan.settings).toMatchObject({ myhostname: 'mx.shop.example', mailbox_size_limit: '0', smtpd_client_restrictions: 'permit_mynetworks, permit_sasl_authenticated, reject_rbl_client zen.spamhaus.org' })
+    expect(plan.master).toBe('c1')
+    expect(renderMailxDovecot(saved)).toMatchObject({ path: '/etc/dovecot/conf.d/99-xpanel-server.conf', content: `${MAILX_MARKER}\nprotocols = imap lmtp\nssl_min_protocol = TLSv1.2\n` })
   })
 })

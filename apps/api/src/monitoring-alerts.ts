@@ -32,7 +32,7 @@ export interface MonitoringAlertsHelpers extends AlertCycleHelpers, Pick<Extende
 }
 
 export interface AlertBound { unit: 'per-processor' | 'percent' | 'days'; direction: 'above' | 'below'; min: number; max: number; decimals: 0 | 1; default: number }
-export const ALERT_CHECK_IDS: readonly ServerHealthCheckId[] = ['load', 'memory', 'swap', 'disk-space', 'disk-inodes', 'services', 'drift', 'certificates', 'reboot']
+export const ALERT_CHECK_IDS: readonly ServerHealthCheckId[] = ['load', 'memory', 'swap', 'disk-space', 'disk-inodes', 'services', 'drift', 'certificates', 'reboot', 'bandwidth']
 /**
  * Documented threshold bounds. Defaults are the health warning levels (apps/agent/src/server-health.ts; a test keeps them equal).
  * Certificates stop at 14 days because the health check lists only certificates inside its 14-day window.
@@ -48,6 +48,7 @@ export const ALERT_BOUNDS: Readonly<Record<ServerHealthCheckId, AlertBound | nul
   drift: null,
   certificates: { unit: 'days', direction: 'below', min: 1, max: 14, decimals: 0, default: 14 },
   reboot: null,
+  bandwidth: { unit: 'percent', direction: 'above', min: 50, max: 100, decimals: 0, default: 80 },
 }
 export interface AlertRule { id: ServerHealthCheckId; enabled: boolean; threshold: number | null }
 export interface QuietWindow { start: string; end: string }

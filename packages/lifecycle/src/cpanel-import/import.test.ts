@@ -154,8 +154,19 @@ describe('readCpanelArchive: plan', async () => {
   })
 
   it('reports unsupported items once', () => {
-    expect(codes(plan)).toEqual(expect.arrayContaining(['password-not-kept', 'cron-not-imported', 'postgresql-unsupported', 'dkim-keys-not-imported', 'unsupported-item']))
+    expect(codes(plan)).toEqual(expect.arrayContaining(['password-not-kept', 'cron-paused', 'postgresql-unsupported', 'dkim-keys-not-imported', 'unsupported-item']))
     expect(plan.warnings.filter((w) => w.code === 'unsupported-item').map((w) => w.message)).toEqual(['frobnicator is not imported'])
+  })
+
+  it('imports the account crontab as jobs for the new home and reports what it leaves out', async () => {
+    const entries = cpmoveEntries().filter((e) => !e.name.endsWith('/cron/bob'))
+    const crontab = ['MAILTO=bob@gmail.com', '# nightly', '15 3 * * * /home/bob/backup.sh --full', '@daily php /home/bob/public_html/cron.php', '@reboot /home/bob/start.sh', ''].join('\n')
+    entries.push({ name: 'cpmove-bob/cron/bob', content: crontab },
+      { name: 'cpmove-bob/mm/bob-news_bob.example/config.pck', content: 'x' }, { name: 'cpmove-bob/mm/bob-news_bob.example/members', content: 'y' })
+    const { plan: renamed } = await run(entries, { targetUsername: 'robert' })
+    expect(renamed.cronJobs).toEqual([{ schedule: '15 3 * * *', command: '/home/robert/backup.sh --full' }, { schedule: '@daily', command: 'php /home/robert/public_html/cron.php' }])
+    expect(codes(renamed)).toEqual(expect.arrayContaining(['cron-variable-skipped', 'cron-line-skipped', 'cron-paused']))
+    expect(renamed.warnings.filter((w) => w.code === 'mailing-list-skipped')).toEqual([{ code: 'mailing-list-skipped', message: 'mailing list bob-news_bob.example is not imported; recreate it', path: 'mm/bob-news_bob.example' }])
   })
 })
 

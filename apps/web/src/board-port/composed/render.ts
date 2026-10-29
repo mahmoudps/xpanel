@@ -38,14 +38,6 @@ const readView = (spec: ComposedRoute, context: ComposedContext): ReadView => {
       { label: msgid('Bandwidth'), value: cell(choose(context, 'Not measured')) },
     ] }
   }
-  if (spec.bind === 'accounts') {
-    if (context.failedReads?.includes('accounts')) return { state: 'failed' }
-    if (context.accounts === undefined) return { state: 'unread' }
-    const principal = context.principal!
-    const rows = context.accounts.filter(account => principal.kind === 'root' || account.ownerId === principal.id)
-    const status = { active: msgid('Active'), suspended: msgctxt('render', 'Suspended'), terminating: msgctxt('render', 'Terminating') } as const
-    return complete(rows.map(row => [cell(row.username, true), cell(row.primaryDomain, true), cell(copyOf(status[row.status], context.locale)), cell(choose(context, 'Not measured'))]))
-  }
   if (spec.bind === 'resellers' || spec.bind === 'reseller-acl') {
     if (context.failedReads?.includes('resellers')) return { state: 'failed' }
     if (context.resellers === undefined) return { state: 'unread' }

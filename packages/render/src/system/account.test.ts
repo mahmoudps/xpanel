@@ -156,10 +156,10 @@ describe('accountTerminateActions', () => {
       // exactly the files the edge FPM renderers write (fpmPaths is their source)
       '/etc/xpanel/php-fpm/8.3/alice.conf',
       '/etc/xpanel/php-fpm/8.3/alice.pool.conf',
-      '/run/xpanel/fpm/alice-8.3',
+      '/run/xpanel-fpm/alice-8.3',
       // logs of a terminated account must not reach the next account with the same name
       '/var/log/xpanel/php-fpm/alice',
-      '/etc/xpanel/apps/alice',
+      '/etc/xpanel/runtime/alice',
     ]))
     expect(new Set(removed).size).toBe(removed.length)
     expect(kinds.indexOf('systemd-daemon-reload')).toBeGreaterThan(kinds.lastIndexOf('systemd'))
@@ -186,6 +186,10 @@ describe('isAccountUnit', () => {
     expect(isAccountUnit('alice', 'xpanel-cron-alice-nightly-backup.timer')).toBe(true)
     expect(isAccountUnit('ali', 'xpanel-cron-alice-x.timer')).toBe(false)
     expect(isAccountUnit('alice', 'xpanel-app-alice-api.timer')).toBe(false)
+    expect(['xpanel-appproxy-alice-api.socket', 'xpanel-appproxy-alice-api.service', 'xpanel-ctr-alice-kuma.service', 'xpanel-redis-alice.service', 'xpanel-memcached-alice.service'].every(u => isAccountUnit('alice', u))).toBe(true)
+    expect(isAccountUnit('alice', 'xpanel-redis-bob.service')).toBe(false)
+    expect(isAccountUnit('alice', 'xpanel-app-alice-api.socket')).toBe(false)
+    expect(isAccountUnit('alice', 'xpanel-cron-alice-x.socket')).toBe(false)
   })
 })
 

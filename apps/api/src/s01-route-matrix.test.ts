@@ -345,9 +345,10 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       { method: 'GET', path: '/api/transfers/sessions' },
       { method: 'POST', path: '/api/lifecycle/cpanel-import', body: { username: 'rogueimport' } },
       { method: 'GET', path: '/api/cluster/nodes' },
-      { method: 'PUT', path: '/api/branding', body: { companyName: 'Hijacked' } },
-      { method: 'PUT', path: '/api/languages/en', body: { overrides: { a: 'b' } } },
-      { method: 'GET', path: '/api/whmcs' },
+      { method: 'PUT', path: '/api/server/panel/branding', body: { companyName: 'Hijacked' } },
+      { method: 'GET', path: '/api/server/panel/languages' },
+      { method: 'GET', path: '/api/server/panel/whmcs' },
+      { method: 'GET', path: '/api/server/panel/settings' },
     ]
 
     for (const probe of rootOnlyProbes) {

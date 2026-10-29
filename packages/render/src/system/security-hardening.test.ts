@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   assertSafeAccountRootChain,
   buildJailedFileOpArgv,
-  buildJailedShellArgv,
   homeBaseProtectionActions,
   renderDomainCustomIncludes,
   renderJailShellBinary,
@@ -115,12 +114,12 @@ describe('symlink protection, account root protection, and jailed shell', () => 
     ).toThrow(/SymLinksIfOwnerMatch/)
   })
 
-  it('builds isolated systemd-run jailed shell argv without bash -c and rejects shell metacharacters or unapproved binaries', () => {
+  it('builds isolated systemd-run jailed argv without bash -c and rejects shell metacharacters or unapproved binaries', () => {
     const bin = renderJailShellBinary()
     expect(bin.path).toBe('/opt/xpanel/bin/jailshell')
     expect(bin.content).toContain('if [ -L "$HOME" ]; then')
 
-    const argv = buildJailedShellArgv(alice, { name: 'Pro', shell: 'jailed' }, ['composer', 'install', '--no-dev'], {
+    const argv = buildJailedFileOpArgv(alice, ['composer', 'install', '--no-dev'], {
       cwdRel: 'public_html',
       env: { APP_ENV: 'production' },
     })
@@ -136,8 +135,8 @@ describe('symlink protection, account root protection, and jailed shell', () => 
     expect(argv.slice(-3)).toEqual(['/usr/bin/composer', 'install', '--no-dev'])
 
     // Reject shell metacharacters and bash/sh execution
-    expect(() => buildJailedShellArgv(alice, { name: 'Pro', shell: 'jailed' }, 'php -v; id')).toThrow(/metacharacters/)
-    expect(() => buildJailedShellArgv(alice, { name: 'Pro', shell: 'jailed' }, ['bash', '-c', 'id'])).toThrow(/not permitted/)
+    expect(() => buildJailedFileOpArgv(alice, ['php', '-v; id'])).toThrow(/metacharacters/)
+    expect(() => buildJailedFileOpArgv(alice, ['bash', '-c', 'id'])).toThrow(/not permitted/)
 
     // Jailed file operation argv runs inside the account's slice and UID
     const fileOpArgv = buildJailedFileOpArgv(alice, ['chmod', '0640', 'public_html/index.php'])

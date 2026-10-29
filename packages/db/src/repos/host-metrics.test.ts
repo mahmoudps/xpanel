@@ -4,7 +4,7 @@ import { createTestDb, type TestDbHandle } from '../client.ts'
 import { listMetricsHistory, pruneMetricsHistory, recordHostMetricsSample, recordMetricsSample, type HostMetricsObservation } from './metrics.ts'
 import { downsampleHostMetrics } from '../../../../apps/api/src/monitoring-workspace.ts'
 const at = '2026-10-27T10:00:00.000Z'
-const observation = (values: Partial<HostMetricsObservation> = {}): HostMetricsObservation => ({ load1: 0, load5: null, load15: null, memoryTotalBytes: 8388608, memoryAvailableBytes: 2097152, swapTotalBytes: 0, swapFreeBytes: 0, diskTotalBytes: null, diskUsedBytes: null, diskAvailableBytes: null, ...values })
+const observation = (values: Partial<HostMetricsObservation> = {}): HostMetricsObservation => ({ load1: 0, load5: null, load15: null, memoryTotalBytes: 8388608, memoryAvailableBytes: 2097152, swapTotalBytes: 0, swapFreeBytes: 0, diskTotalBytes: null, diskUsedBytes: null, diskAvailableBytes: null, cpuPercent: null, processes: null, ...values })
 let handle: TestDbHandle | undefined
 afterEach(async () => { await handle?.close(); handle = undefined })
 describe('host observation persistence and performance projection', () => {
@@ -31,6 +31,27 @@ describe('host observation persistence and performance projection', () => {
     const none = Object.fromEntries(Object.keys(observation()).map(key => [key, null])) as unknown as HostMetricsObservation
     expect(await recordHostMetricsSample(handle.db, { at, observation: none })).toBeNull()
     await expect(recordHostMetricsSample(handle.db, { at, observation: observation({ memoryAvailableBytes: 999999999 }) })).rejects.toThrow()
+    expect(await listMetricsHistory(handle.db, { scope: 'host' })).toHaveLength(0)
+  })
+  it('records host CPU % and process count, and reads rows recorded before those fields as unavailable', async () => {
+    handle = await createTestDb()
+    await recordHostMetricsSample(handle.db, { at, observation: observation({ cpuPercent: 37.5, processes: 212 }) })
+    const legacy = { ...observation() } as Partial<HostMetricsObservation>
+    delete legacy.cpuPercent; delete legacy.processes
+    await handle.db.query(`INSERT INTO metrics_history (at, scope, host_observation_json) VALUES ($1, 'host', $2)`, [at, JSON.stringify(legacy)])
+    const history = await listMetricsHistory(handle.db, { scope: 'host' })
+    const pairs = history.map(row => [row.hostObservation?.cpuPercent, row.hostObservation?.processes])
+    expect(pairs).toHaveLength(2); expect(pairs).toContainEqual([37.5, 212]); expect(pairs).toContainEqual([null, null])
+    const values = downsampleHostMetrics(history, '1h', Date.parse(at), false).points.at(-1)!.values
+    expect(values.cpuPercent).toEqual({ avg: 37.5, max: 37.5 }); expect(values.processes).toEqual({ avg: 212, max: 212 })
+    await expect(recordHostMetricsSample(handle.db, { at, observation: observation({ cpuPercent: 100.5 }) })).rejects.toThrow()
+    await expect(recordHostMetricsSample(handle.db, { at, observation: observation({ processes: 1.5 }) })).rejects.toThrow()
+  })
+  it('prunes only host samples when scoped', async () => {
+    handle = await createTestDb()
+    await recordHostMetricsSample(handle.db, { at, observation: observation() })
+    await recordMetricsSample(handle.db, { scope: 'account', accountId: randomUUID(), at })
+    expect(await pruneMetricsHistory(handle.db, '2026-10-27T10:00:01.000Z', 'host')).toBe(1)
     expect(await listMetricsHistory(handle.db, { scope: 'host' })).toHaveLength(0)
   })
   it('retains historical numeric samples and deletes new observations with the existing retention path', async () => {

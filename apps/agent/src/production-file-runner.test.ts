@@ -9,6 +9,8 @@ import type { AccountFileContext } from './file-manager.ts'
 
 const harness = vi.hoisted(() => ({
   installed: true,
+  digest: 'a'.repeat(64) as string | null,
+  verifiedDigests: [] as (string | undefined)[],
   initialized: 0,
   initializationFailure: undefined as Error | undefined,
   verificationFailure: undefined as Error | undefined,
@@ -18,6 +20,8 @@ const harness = vi.hoisted(() => ({
   helperCgroup: undefined as string | undefined,
   helperError: undefined as { errno: number; errnoName: string } | undefined,
 }))
+
+vi.mock('./installed-helper-digest.ts', () => ({ readInstalledHelperDigest: async () => harness.digest }))
 
 vi.mock('node:fs', async (importOriginal) => ({
   ...await importOriginal<typeof import('node:fs')>(),
@@ -30,8 +34,9 @@ vi.mock('./account-file-runner.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./account-file-runner.ts')>()
   return {
     ...actual,
-    verifyHelperBinary: async (binaryPath: string) => {
+    verifyHelperBinary: async (binaryPath: string, expectedSha256?: string) => {
       harness.verifiedPaths.push(binaryPath)
+      harness.verifiedDigests.push(expectedSha256)
       if (harness.verificationFailure) throw harness.verificationFailure
       return 'a'.repeat(64)
     },
@@ -76,6 +81,8 @@ const code = (expected: string) => (error: unknown): boolean => isXpanelError(er
 
 beforeEach(() => {
   harness.installed = true
+  harness.digest = 'a'.repeat(64)
+  harness.verifiedDigests.length = 0
   harness.initialized = 0
   harness.initializationFailure = undefined
   harness.verificationFailure = undefined
@@ -92,6 +99,7 @@ describe('daemon production account file runner composition', () => {
     assert.ok(runner)
     assert.deepEqual(await runner.run(context, { op: 'list', path: 'public_html', showHidden: false }), [])
     assert.deepEqual(harness.verifiedPaths, [binaryPath])
+    assert.deepEqual(harness.verifiedDigests, ['a'.repeat(64)])
     assert.equal(harness.constructed[0]?.expectedSha256, 'a'.repeat(64))
     assert.equal(harness.payloads[0]?.context.requireCgroup, true)
     assert.equal(harness.payloads[0]?.context.cgroupPath, '/sys/fs/cgroup/xpanel.slice/xpanel-29101.slice')
@@ -121,6 +129,13 @@ describe('daemon production account file runner composition', () => {
     harness.initializationFailure = failure
     await assert.rejects(() => createProductionAccountFileRunner(binaryPath), (error) => error === failure)
     assert.equal(harness.initialized, 1)
+    assert.equal(harness.payloads.length, 0)
+  })
+
+  it('keeps a helper without the installer digest unavailable and never verifies or runs it', async () => {
+    harness.digest = null
+    assert.equal(await createProductionAccountFileRunner(binaryPath), undefined)
+    assert.equal(harness.verifiedPaths.length, 0)
     assert.equal(harness.payloads.length, 0)
   })
 

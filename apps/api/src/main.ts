@@ -11,7 +11,7 @@ import { canOpenRegisteredRoute, canonicalNavigationRoute, visibleNavigation, ty
 import { mapAgentHostInfo, mapAgentServices } from '../../web/src/board-port/xwhm-dashboard.ts'
 import { parseWebsiteAnalyticsSnapshot, type WebsiteAnalyticsWindow } from '../../web/src/charts.ts'
 import { publicContactEmail } from '../../web/src/display-name.ts'
-import { requestLocale } from '../../web/src/i18n.ts'
+import { isOfferedLocale, requestLocale } from '../../web/src/i18n.ts'
 import type { WebAppRenderState } from '../../web/src/app.ts'
 import { createDb, getMailboxSession, initializeOperationalMetadata, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, type AuditQuery, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
@@ -27,6 +27,9 @@ import { teamToolIds } from './team-access.ts'
 import { teamFileReader, teamMemberResolver } from './team-session.ts'
 import { createHandoffSessionCheck } from './panel-handoff-authority.ts'
 import { readAdminPreferenceValues } from './admin-preferences.ts'
+import { brandingForDocuments, panelBrandingFile, servePanelBrandingAsset } from './panel-branding.ts'
+import { panelSettingsFile } from './panel-settings.ts'
+import { installSavedLanguages } from './panel-languages.ts'
 import { requireMailboxPrincipalAccess } from './authorization.ts'
 import { createAgentClient } from './agent-client.ts'
 import { startAlertScheduler } from './alert-runtime.ts'
@@ -118,6 +121,7 @@ interface AccountUsageObservation {
   processCount: number | null
   bandwidth: 'unmeasured'
   ioEnforced?: boolean | null
+  bandwidthMonth?: { month: string; totalBytes: number | null; limitBytes: number | null; usedPercent: number | null; enforced: boolean; limited: boolean }
 }
 
 /** Same four windows the agent website-analytics route accepts. */
@@ -172,8 +176,14 @@ export const createDefaultWebRenderer = async (deps: {
         processCount?: unknown
         bandwidth?: unknown
         ioEnforced?: unknown
+        bandwidthMonth?: unknown
       }
       if (body.bandwidth !== 'unmeasured') return null
+      const month = body.bandwidthMonth as Record<string, unknown> | undefined
+      const nullableCount = (value: unknown): boolean => value === null || Number.isSafeInteger(value) && (value as number) >= 0
+      const bandwidthMonth = month && typeof month === 'object' && typeof month.month === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(month.month) && nullableCount(month.totalBytes) && nullableCount(month.limitBytes)
+        && (month.usedPercent === null || readUsageNumber(month.usedPercent) !== null) && typeof month.enforced === 'boolean' && typeof month.limited === 'boolean'
+        ? { month: month.month, totalBytes: month.totalBytes as number | null, limitBytes: month.limitBytes as number | null, usedPercent: month.usedPercent as number | null, enforced: month.enforced, limited: month.limited } : null
       return {
         phpVersion: typeof body.phpVersion === 'string' && /^\d+\.\d+$/.test(body.phpVersion) ? body.phpVersion : null,
         diskBytes: readUsageNumber(body.diskBytes),
@@ -181,6 +191,7 @@ export const createDefaultWebRenderer = async (deps: {
         processCount: readUsageNumber(body.processCount),
         bandwidth: 'unmeasured' as const,
         ...(typeof body.ioEnforced === 'boolean' ? { ioEnforced: body.ioEnforced } : {}),
+        ...(bandwidthMonth ? { bandwidthMonth } : {}),
       }
     } catch {
       return null
@@ -211,13 +222,21 @@ export const createDefaultWebRenderer = async (deps: {
     const headers = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }
     // Every authenticated document of a handed-off session carries the identity banner.
     let impersonation: { target: string; issuer: string } | undefined
+    // Saved branding, default appearance and the live-updates switch reach every rendered document; page state still wins.
+    const panelDocumentState = async (): Promise<Partial<WebAppRenderState>> => {
+      const [brandingRead, settings] = await Promise.all([panelBrandingFile(deps.store).read().catch(() => null), panelSettingsFile(deps.store).current()])
+      const branding = brandingRead?.raw !== null ? brandingRead?.value ?? null : null
+      return { ...(branding ? { branding: brandingForDocuments(branding), theme: branding.defaultTheme, density: branding.defaultDensity } : {}),
+        ...(settings.liveUpdates ? {} : { realtimeEnabled: false }) }
+    }
     const serve = (request: Request, state?: () => Promise<WebAppRenderState>) =>
-      serveWebUi(request, state && (async () => ({ ...await state(), ...(impersonation ? { impersonation } : {}) })))
+      serveWebUi(request, state && (async () => ({ ...await panelDocumentState(), ...await state(), ...(impersonation ? { impersonation } : {}) })))
     let resolvedContact: string | undefined | null = null
     const supportEmail = async (): Promise<string | undefined> => {
       if (resolvedContact !== null) return resolvedContact || undefined
       try {
-        resolvedContact = publicContactEmail((await deps.store.getServerSettings())?.adminEmail) ?? ''
+        const branded = (await panelBrandingFile(deps.store).current()).supportEmail
+        resolvedContact = publicContactEmail(branded || (await deps.store.getServerSettings())?.adminEmail) ?? ''
       } catch {
         resolvedContact = ''
       }
@@ -280,6 +299,8 @@ export const createDefaultWebRenderer = async (deps: {
       }))
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') return new Response(null, { status: 405, headers })
+    const brandingAsset = await servePanelBrandingAsset(deps.store, url.pathname)
+    if (brandingAsset) return brandingAsset
     if (url.pathname === '/favicon.ico' || url.pathname === '/assets' || url.pathname.startsWith('/assets/')) {
       return serveWebUi(req)
     }
@@ -329,8 +350,17 @@ export const createDefaultWebRenderer = async (deps: {
       return new Response(null, { status: 303, headers: { ...headers, location: '/login' } })
     }
     const principal = caller.principal
+    const panelSettings = await panelSettingsFile(deps.store).current()
+    if (panelSettings.offlineMode && principal.kind !== 'root') {
+      const surface: EntryPoint = documentRoute.surface === 'xwhm' || documentRoute.surface === 'xmail' ? documentRoute.surface : 'xpanel'
+      const offline = await serve(req, async () => ({ surface: deps.entryPoint ?? surface, mfaRuntimeMode: mfaRuntimePolicy.mode, activeRoute: url.pathname,
+        error: { status: 503, surface: deps.entryPoint ?? surface, retryHref: url.pathname, ...(panelSettings.offlineMessage ? { notice: panelSettings.offlineMessage } : {}) } }))
+      offline.headers.set('retry-after', '300')
+      return offline
+    }
     const savedAppearance = await readAdminPreferenceValues(deps.store.rootDir, principal)
-    const adminAppearance = savedAppearance ? { locale: savedAppearance.language, theme: savedAppearance.theme, density: savedAppearance.density } : {}
+    // A saved language the administrator no longer offers falls back to normal negotiation.
+    const adminAppearance = savedAppearance ? { ...(isOfferedLocale(savedAppearance.language) ? { locale: savedAppearance.language } : {}), theme: savedAppearance.theme, density: savedAppearance.density } : {}
     const security = { totpEnabled: caller.principalRecord.totpEnabled }
     // Mailbox identities belong to xMail alone, and only they may open it.
     const mailboxIdentity = principal.kind === 'user' && isMailboxPrincipalUsername(principal.username)
@@ -987,6 +1017,9 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
       return opened
     })
     const store = new StateStore(stateDir)
+    // Saved locale policy and uploaded catalogs apply from panel start; invalid saved state keeps the release catalogs.
+    const languages = await installSavedLanguages(store.rootDir)
+    if (languages.policy === 'invalid' || languages.rejected.length) console.warn(`languages: saved policy ${languages.policy}; catalogs not applied: ${languages.rejected.join(', ') || 'none'}`)
     if (!opts.agentApp) client = createLifecycleBackgroundResources(() => createAgentClient({ socketPath: opts.agentSocket ?? process.env.XPANEL_AGENT_SOCKET ?? '/run/xpanel/agent.sock', token: agentToken }))
     const sharedAgent = opts.agentApp ?? client!
     const agentApp: AgentApp = {

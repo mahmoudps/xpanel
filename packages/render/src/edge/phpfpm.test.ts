@@ -18,7 +18,7 @@ describe('renderFpmPool', () => {
     expect(c).toContain('[alice]')
     expect(valueOf(c, 'user')).toBe(a.username)
     expect(valueOf(c, 'group')).toBe(a.username)
-    expect(valueOf(c, 'listen')).toBe('/run/xpanel/fpm/alice-8.3/php-fpm.sock')
+    expect(valueOf(c, 'listen')).toBe('/run/xpanel-fpm/alice-8.3/php-fpm.sock')
     expect(valueOf(c, 'listen.owner')).toBe('alice')
     expect(valueOf(c, 'listen.group')).toBe('alice')
     expect(valueOf(c, 'listen.mode')).toBe('0660')
@@ -152,7 +152,7 @@ describe('renderFpmMaster', () => {
     const f = renderFpmMaster(a, '8.3', debianOs)
     expect(f.path).toBe('/etc/xpanel/php-fpm/8.3/alice.conf')
     expect(f).toMatchObject({ mode: 0o640, owner: 'root', group: 'alice' })
-    expect(valueOf(f.content, 'pid')).toBe('/run/xpanel/fpm/alice-8.3/php-fpm.pid')
+    expect(valueOf(f.content, 'pid')).toBe('/run/xpanel-fpm/alice-8.3/php-fpm.pid')
     expect(valueOf(f.content, 'error_log')).toBe('/var/log/xpanel/php-fpm/alice/8.3.error.log')
     expect(valueOf(f.content, 'daemonize')).toBe('no')
     expect(valueOf(f.content, 'include')).toBe('/etc/xpanel/php-fpm/8.3/alice.pool.conf')
@@ -163,11 +163,21 @@ describe('renderFpmMaster', () => {
     const unit = renderFpmUnit(a, '8.3', debianOs).content
     expect(unit).toContain(`--fpm-config ${renderFpmMaster(a, '8.3', debianOs).path}`)
     expect(unit).toContain(`ExecStart=${phpFpmBinary(debianOs, '8.3')} `)
-    expect(unit).toContain('RuntimeDirectory=xpanel/fpm/alice-8.3')
-    expect(valueOf(renderFpmPool(a, php(), debianOs).content, 'listen')?.startsWith('/run/xpanel/fpm/alice-8.3/')).toBe(true)
+    expect(unit).toContain('RuntimeDirectory=xpanel-fpm/alice-8.3')
+    expect(valueOf(renderFpmPool(a, php(), debianOs).content, 'listen')?.startsWith('/run/xpanel-fpm/alice-8.3/')).toBe(true)
     expect(fpmSocketPath('alice', '8.3')).toBe(valueOf(renderFpmPool(a, php(), debianOs).content, 'listen'))
     const log = valueOf(renderFpmMaster(a, '8.3', debianOs).content, 'error_log') ?? ''
     expect(unit).toContain(`LogsDirectory=${log.slice('/var/log/'.length, log.lastIndexOf('/'))}`)
+  })
+
+  it('keeps every socket, pid and runtime path out of the agent runtime dir that systemd wipes on agent stop', () => {
+    for (const os of [debianOs, rhelOs]) {
+      const rendered = [renderFpmPool(a, php(), os).content, renderFpmMaster(a, '8.3', os).content, renderFpmUnit(a, '8.3', os).content].join('\n')
+      expect(rendered).not.toMatch(/\/run\/xpanel\//)
+      expect(rendered).not.toMatch(/RuntimeDirectory=xpanel\//)
+      expect(rendered).toContain('/run/xpanel-fpm/alice-8.3/php-fpm.sock')
+      expect(os.phpFpmSocketDir.startsWith('/run/xpanel/')).toBe(false)
+    }
   })
 
   it('rejects bad versions', () => {

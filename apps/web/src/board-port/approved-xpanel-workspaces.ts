@@ -22,6 +22,7 @@ import { renderAccountCollaborationWorkspace } from './account-collaboration-wor
 import { renderMailxArchiveWorkspace } from './mailx-archive-workspace.ts';
 import { renderMailxCollectionsWorkspace } from './mailx-collections-workspace.ts';
 import { renderSwApplicationsWorkspace } from './sw-applications-workspace.ts';
+import { renderAccountCacheWorkspace, renderAccountContainersWorkspace } from './account-runtime-workspace.ts';
 import { renderSwOptimizeWorkspace } from './sw-optimize-workspace.ts';
 import { renderAccountDbEngineWorkspace } from './db-engines-workspace.ts';
 import type { AccountDbEnginePage } from './db-engines-workspace.ts';
@@ -38,7 +39,7 @@ export interface ApprovedXpanelWorkspaceProps extends Omit<PanelSurfaceProps, 'l
     readOnly: boolean;
     nativeHtml?: string;
 }
-export const approvedXpanelWorkspaceRoutes: ReadonlySet<string> = new Set(['/domains/reverse-proxy', '/resources', '/email/accounts', '/files/manager', '/files/trash', '/files/directory-privacy', '/domains/site-settings', '/files/backup', '/databases/mariadb', '/domains', '/domains/zone-editor', '/metrics/traffic', '/security/ssl', '/security/account', '/software/php', '/software/htaccess', '/advanced/cron', '/advanced/error-pages', '/advanced/indexes', '/advanced/mime-types', '/advanced/handlers', '/security/hotlink', '/security/ip-blocker', '/domains/redirects', '/security/ssh', '/metrics/logs', '/health', '/security/virus-scanner', '/advanced/network-tools', '/databases/insights', '/domains/dynamic-dns', '/domains/site-publisher', '/files/git', '/email/encryption', '/software/packages', '/databases/remote-access', '/email/calendars-contacts', '/advanced/api-shell', '/email/archive', '/domains/staging', '/preferences/team', '/databases/phpmyadmin', '/databases/postgresql', '/databases/phppgadmin', '/software/apps', '/software/optimize', '/security/waf', '/domains/cloudflare']);
+export const approvedXpanelWorkspaceRoutes: ReadonlySet<string> = new Set(['/domains/reverse-proxy', '/resources', '/email/accounts', '/files/manager', '/files/trash', '/files/directory-privacy', '/domains/site-settings', '/files/backup', '/databases/mariadb', '/domains', '/domains/zone-editor', '/metrics/traffic', '/security/ssl', '/security/account', '/software/php', '/software/htaccess', '/advanced/cron', '/advanced/error-pages', '/advanced/indexes', '/advanced/mime-types', '/advanced/handlers', '/security/hotlink', '/security/ip-blocker', '/domains/redirects', '/security/ssh', '/metrics/logs', '/health', '/security/virus-scanner', '/advanced/network-tools', '/databases/insights', '/domains/dynamic-dns', '/domains/site-publisher', '/files/git', '/email/encryption', '/software/packages', '/databases/remote-access', '/email/calendars-contacts', '/advanced/api-shell', '/email/archive', '/domains/staging', '/preferences/team', '/databases/phpmyadmin', '/databases/postgresql', '/databases/phppgadmin', '/software/apps', '/software/containers', '/software/cache', '/software/optimize', '/security/waf', '/domains/cloudflare']);
 const copy = (p: ApprovedXpanelWorkspaceProps, x: Copy): string => escapeHtml(translator(p.locale)(x));
 const value = (x: unknown): string => escapeHtml(normalizeAsciiDigits(x == null ? '' : String(x)));
 const unread: Copy = msgctxt('approved-xpanel-workspaces', 'Not read');
@@ -156,7 +157,9 @@ export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): 
     if (!approvedXpanelWorkspaceRoutes.has(p.route))
         return undefined;
     if (p.route === '/domains/reverse-proxy') {
-        return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="/domains/reverse-proxy" data-workspace-section="workspace" data-workspace-mode="read-only" data-wiring="unavailable" data-capability-unavailable="true"><header class="xp-panel-detail__heading"><h1>${copy(p, msgid('Reverse proxy'))}</h1><p role="status">${copy(p, msgid('Reverse proxy changes are unavailable here. Nothing has been read or changed.'))}</p></header>${renderAccountReverseProxyWorkspace({ lang: p.locale, accountId: '', home: '', canManage: false })}</section>`;
+        const principal = p.visibility?.principal;
+        const canManage = !p.readOnly && p.account?.status === 'active' && principal?.kind === 'user' && principal.accountId === p.account.id && p.catalog?.some(tool => tool.id === 'domains' && tool.status === 'verified') === true;
+        return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="/domains/reverse-proxy" data-workspace-section="workspace" data-workspace-mode="${canManage ? 'connected' : 'read-only'}"${canManage ? '' : ' data-wiring="soon"'}><header class="xp-panel-detail__heading"><h1>${copy(p, msgid('Reverse proxy'))}</h1><p>${copy(p, msgid('Send a domain’s requests to an application, with WebSocket and header options.'))}</p></header>${renderAccountReverseProxyWorkspace({ lang: p.locale, accountId: canManage ? p.account!.id : '', home: canManage ? p.account!.home : '', canManage })}</section>`;
     }
     if (p.route === '/advanced/cron') {
         const page = pageFor(p), principal = p.visibility?.principal;
@@ -180,6 +183,8 @@ export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): 
         '/databases/postgresql': [msgid('PostgreSQL databases'), msgid('Create PostgreSQL databases and users for your account and manage their passwords and trash.')],
         '/databases/phppgadmin': ['phpPgAdmin', msgid('See whether the PostgreSQL web client can be opened for your account.')],
         '/software/apps': [msgid('Applications'), msgid('Install signed-catalog applications on your domains as verified jobs.')],
+        '/software/containers': [msgid('Containers'), msgid('Containers that run under your own user, with their images and logs.')],
+        '/software/cache': [msgid('Redis & Memcached'), msgid('A private Redis or Memcached for your account on a socket in your home, capped by your plan.')],
         '/software/optimize': [msgid('Optimize website'), msgid('See the compression and response cache that serve your sites.')],
         '/email/archive': [msgid('Email archive'), msgid('Keep copies of incoming and outgoing mail for your domains in a mailbox you choose.')],
         '/email/calendars-contacts': [msgid('Calendars and contacts'), msgid('Manage supported collections in your existing mailbox stores.')],
@@ -203,7 +208,7 @@ export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): 
         const owner = !p.readOnly && p.account?.status === 'active' && principal?.kind === 'user' && principal.accountId === p.account.id;
         const verified = (id: string): boolean => owner && p.catalog?.some(tool => tool.id === id && tool.status === 'verified') === true;
         const selected = domains.find(domain => domain.accountId === accountId && domain.name === p.activeDomain);
-        const newTool = ({ '/domains/dynamic-dns': 'dynamic-dns', '/domains/site-publisher': 'site-publisher', '/files/git': 'git-version-control', '/email/encryption': 'email-encryption', '/software/packages': 'php-pear-packages', '/databases/remote-access': 'remote-database-access', '/email/calendars-contacts': 'calendars-contacts-management', '/email/archive': 'email-archive', '/domains/staging': 'site-staging', '/preferences/team': 'manage-team', '/databases/phpmyadmin': 'phpmyadmin', '/databases/postgresql': 'postgresql-databases', '/databases/phppgadmin': 'phppgadmin', '/software/apps': 'application-manager', '/software/optimize': 'optimize-website', '/advanced/api-shell': 'api-shell', '/security/waf': 'modsecurity', '/domains/cloudflare': 'cloudflare-account' } as Readonly<Record<string, string>>)[p.route];
+        const newTool = ({ '/domains/dynamic-dns': 'dynamic-dns', '/domains/site-publisher': 'site-publisher', '/files/git': 'git-version-control', '/email/encryption': 'email-encryption', '/software/packages': 'php-pear-packages', '/databases/remote-access': 'remote-database-access', '/email/calendars-contacts': 'calendars-contacts-management', '/email/archive': 'email-archive', '/domains/staging': 'site-staging', '/preferences/team': 'manage-team', '/databases/phpmyadmin': 'phpmyadmin', '/databases/postgresql': 'postgresql-databases', '/databases/phppgadmin': 'phppgadmin', '/software/apps': 'application-manager', '/software/containers': 'account-containers', '/software/cache': 'account-cache-services', '/software/optimize': 'optimize-website', '/advanced/api-shell': 'api-shell', '/security/waf': 'modsecurity', '/domains/cloudflare': 'cloudflare-account' } as Readonly<Record<string, string>>)[p.route];
         if (newTool) {
             const canManage = verified(newTool), body = p.route === '/domains/dynamic-dns' ? renderAccountDynamicDnsWorkspace({ lang: p.locale, accountId, canManage })
                 : p.route === '/domains/site-publisher' ? renderAccountSitePublisherWorkspace({ lang: p.locale, accountId, domains: domains.filter(domain => domain.accountId === accountId), canManage })
@@ -214,6 +219,8 @@ export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): 
                 : p.route === '/email/archive' ? renderMailxArchiveWorkspace({ locale: p.locale, canManage })
                 : ['/databases/phpmyadmin', '/databases/postgresql', '/databases/phppgadmin'].includes(p.route) ? renderAccountDbEngineWorkspace({ page: p.route.slice(11) as AccountDbEnginePage, lang: p.locale, accountId, username: p.readOnly ? '' : p.account?.username ?? '', canManage })
                 : p.route === '/software/apps' ? renderSwApplicationsWorkspace({ lang: p.locale, canManage })
+                : p.route === '/software/containers' ? renderAccountContainersWorkspace({ lang: p.locale, canManage })
+                : p.route === '/software/cache' ? renderAccountCacheWorkspace({ lang: p.locale, canManage })
                 : p.route === '/software/optimize' ? renderSwOptimizeWorkspace({ lang: p.locale, canRead: canManage })
                 : p.route === '/email/calendars-contacts' ? renderAccountCollaborationWorkspace({ locale: p.locale, canManage }) + renderMailxCollectionsWorkspace({ locale: p.locale, canManage })
                 : p.route === '/domains/staging' ? renderAccountStagingWorkspace({ lang: p.locale, accountId, canManage })
