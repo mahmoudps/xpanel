@@ -94,7 +94,7 @@ function bindAccountReverseProxy(askDialog: ((options: Record<string, unknown>) 
     }
     const request = (method: string, path: string, body?: unknown): Promise<unknown> => !send || !eligible() ? Promise.reject({ details: { stateChanged: false } }) : body === undefined ? send(method, path) : send(method, path, body)
     const read = async (): Promise<DomainWorkspaceView> => rpReadWorkspace(await request('GET', '/api/domains'), { accountId, home })
-    const cell = (tr: HTMLTableRowElement, text: string, technical: boolean): HTMLTableCellElement => { const td = document.createElement('td'), content = document.createElement(technical ? 'bdi' : 'span'); content.dir = technical ? 'ltr' : 'auto'; content.textContent = text; td.append(content); tr.append(td); return td }
+    const cell = (tr: HTMLTableRowElement, text: string, technical: boolean): HTMLTableCellElement => { const td = document.createElement('td'), content = document.createElement(technical ? 'bdi' : 'span'); if (technical) content.className = 'xp-technical-token'; content.dir = technical ? 'ltr' : 'auto'; content.textContent = text; td.append(content); tr.append(td); return td }
     const fill = (): void => {
       const target = row()
       selectedName.textContent = target ? target.name : t('None selected')
@@ -194,7 +194,9 @@ function bindAccountReverseProxy(askDialog: ((options: Record<string, unknown>) 
       }
       if (siteType === target.siteType && address === target.upstream && (!options || rpStable(options) === rpStable(reverseProxyOptionsOf(target)))) { note('fields', fieldMessage('unchanged')); return }
       fieldError('')
+      headersNote('')
       if (!askDialog) { note('failed', t('Confirmation is unavailable. Nothing was sent.')); return }
+      note('read', t('Saved domain configuration read.'))
       confirming = true; lock()
       let approved = false
       try { approved = await askDialog({ title: t('Change how this domain is served?'), danger: false, confirm: t('Save'),

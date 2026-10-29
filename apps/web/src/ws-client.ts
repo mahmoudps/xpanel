@@ -23,6 +23,7 @@ import { ACCOUNT_SESSIONS_CLIENT_BINDING } from './account-sessions-client.ts'
 import { ACCOUNT_SSL_CLIENT_BINDING } from './account-ssl-client.ts'
 import { ACCOUNT_CONTACT_CLIENT_BINDING } from './account-contact-client.ts'
 import { DOMAIN_WORKSPACE_CLIENT_BINDING } from './domain-workspace-client.ts'
+import { ACCOUNT_REVERSE_PROXY_CLIENT_BINDING } from './account-reverse-proxy-client.ts'
 import { DATABASE_WORKSPACE_CLIENT_BINDING } from './database-workspace-client.ts'
 import { MAIL_FOLDER_WORKSPACE_CLIENT_BINDING } from './mail-folder-workspace-client.ts'
 import { MAIL_CONTACTS_WORKSPACE_CLIENT_BINDING } from './mail-contacts-workspace-client.ts'
@@ -1868,6 +1869,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${ACCOUNT_HTACCESS_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_QUARANTINE_CLIENT_BINDING})(askDialog);
     (${DOMAIN_WORKSPACE_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_REVERSE_PROXY_CLIENT_BINDING})(askDialog);
     (${DATABASE_WORKSPACE_CLIENT_BINDING})(askDialog);
     (${MAIL_FOLDER_WORKSPACE_CLIENT_BINDING})(askDialog, rtl);
     (${MAIL_CONTACTS_WORKSPACE_CLIENT_BINDING})(askDialog);

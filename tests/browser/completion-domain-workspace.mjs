@@ -6,11 +6,17 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { domainToASCII } from 'node:url'
 import { createVisualFixture } from './visual-fixture.mjs'
+import { translator } from '../../apps/web/src/i18n.ts'
 
 process.env.PLAYWRIGHT_BROWSERS_PATH ||= resolve('.tools/playwright-browsers')
 const { chromium }=await import('@playwright/test')
 const output=resolve(process.env.XPANEL_DOMAIN_WORKSPACE_OUTPUT||'test-results/completion-domain-workspace')
-const sourcePaths=['apps/web/src/domain-workspace-client.ts','apps/web/src/board-port/extensions/account-domains.ts','apps/web/src/surfaces/xpanel.ts','apps/web/src/board-port/approved-xpanel-workspaces.ts','apps/web/src/board-port/approved-xpanel-pages.ts','apps/web/src/ws-client.ts','apps/web/src/login-client.ts','apps/web/src/board-port/extensions/shared.ts','tests/browser/visual-fixture.mjs','tests/browser/completion-domain-workspace.mjs']
+const scope=process.env.XPANEL_DOMAIN_WORKSPACE_SCOPE||'all'
+assert.ok(['all','domains','reverse-proxy'].includes(scope),'Known domain browser scope')
+const selectedTuple=process.env.XPANEL_DOMAIN_WORKSPACE_TUPLE||''
+assert.ok(!selectedTuple||scope==='reverse-proxy'&&/^(en|ar):(390|1440):(light|dark)$/.test(selectedTuple),'A focused tuple requires the reverse-proxy scope')
+const includesTuple=(lang,width,theme)=>!selectedTuple||selectedTuple===lang+':'+width+':'+theme
+const sourcePaths=['apps/web/src/domain-workspace-client.ts','apps/web/src/account-reverse-proxy-client.ts','apps/web/src/board-port/account-reverse-proxy-workspace.ts','apps/web/src/board-port/account-ssh-workspace.ts','apps/web/src/board-port/extensions/account-domains.ts','apps/web/src/surfaces/xpanel.ts','apps/web/src/board-port/approved-xpanel-workspaces.ts','apps/web/src/board-port/approved-xpanel-pages.ts','apps/web/src/app.ts','apps/web/src/tokens.ts','apps/web/src/i18n.ts','apps/web/src/locales/ar.po','apps/web/src/ws-client.ts','apps/web/src/login-client.ts','apps/web/src/board-port/extensions/shared.ts','tests/browser/visual-fixture.mjs','tests/browser/completion-domain-workspace.mjs']
 const snapshot=()=>sourcePaths.map(path=>({path,sha256:createHash('sha256').update(readFileSync(path)).digest('hex')}))
 const copy=value=>JSON.parse(JSON.stringify(value))
 const accountId='visual-account',home='/home/preview',api='/api/domains'
@@ -123,7 +129,59 @@ class MockDomains{
     await route.fulfill({status,json:result})
   }
 }
-async function mockSession(page,model){
+const proxyAccountId='11111111-1111-4111-8111-111111111111'
+const proxyRoot='[data-reverse-proxy]'
+const proxyDefaultOptions={websocket:true,hostHeader:'client',headers:[]}
+class MockReverseProxy extends MockDomains{
+  constructor(){
+    super()
+    const primary=record(primaryId,primaryName,'primary',null,home+'/public_html')
+    const parent=record('proxy-parent','shop.example.test','addon')
+    const alias=record('proxy-alias','mirror.example.test','alias',parent.id,parent.docRoot)
+    this.records=new Map([primary,parent,alias,{...record('proxy-node','node.example.test','addon'),siteType:'node',upstream:'http://127.0.0.1:3001'},
+      {...record('proxy-redirect','moved.example.test','addon'),redirect:{to:'https://example.test/',code:301}}].map(row=>[row.id,{...row,accountId:proxyAccountId}]))
+    this.applied=false;this.readVersion=0
+  }
+  get revision(){return createHash('sha256').update(JSON.stringify({context:{accountId:proxyAccountId,home},rows:[...this.records.values()],version:this.readVersion})).digest('hex')}
+  view(){return {context:{accountId:proxyAccountId,home},domains:copy([...this.records.values()]),revision:this.revision,limits:copy(this.limits),removals:this.removals(),application:{status:'unverified',targetVerified:false}}}
+  async route(route){
+    const request=route.request(),method=request.method(),url=new URL(request.url()),body=method==='GET'?undefined:request.postDataJSON()
+    assert.equal(url.search,'');assert.ok(method==='GET'&&url.pathname===api||method==='PUT'&&url.pathname===api+'/'+primaryId+'/reverse-proxy','Only the selected proxy endpoint is mocked')
+    this.calls.push({method,path:url.pathname,...(body===undefined?{}:{body:copy(body)})})
+    const gate=this.gates.find(gate=>gate.method===method&&!gate.started),observed=this.view()
+    if(gate){gate.started=true;gate.entered();await gate.promise}
+    let status=200,result
+    if(method==='GET'){
+      if(this.mode==='read-failed'){status=503;result={code:'domain_read_failed',details:{stateChanged:false}}}
+      else result=observed
+    }else{
+      const proxy=body.siteType==='proxy'
+      assert.deepEqual(Object.keys(body).sort(),(proxy?['expectedRevision','proxy','siteType','upstream']:['expectedRevision','siteType']).sort())
+      assert.match(body.expectedRevision,/^[0-9a-f]{64}$/);assert.ok(['proxy','php','static'].includes(body.siteType))
+      if(proxy){assert.equal(typeof body.upstream,'string');assert.deepEqual(Object.keys(body.proxy).sort(),['headers','hostHeader','websocket']);assert.equal(typeof body.proxy.websocket,'boolean');assert.ok(['client','upstream'].includes(body.proxy.hostHeader));assert.ok(Array.isArray(body.proxy.headers)&&body.proxy.headers.length<=8)}
+      if(body.expectedRevision!==this.revision){status=409;result={code:'stale_revision',details:{stateChanged:false}}}
+      else if(this.mode==='refused'){status=422;result={code:'invalid_proxy',details:{stateChanged:false,fields:[{field:'upstream',code:'reserved_port'}]}}}
+      else if(this.mode==='uncertain'){status=503;result={code:'proxy_outcome_unknown',details:{stateChanged:true,verificationRequired:true,unknownOutcome:true}}}
+      else{
+        const previous=this.records.get(primaryId),changed={...previous,siteType:body.siteType,upstream:proxy?body.upstream:null}
+        delete changed.proxy
+        if(proxy&&JSON.stringify(body.proxy)!==JSON.stringify(proxyDefaultOptions))changed.proxy=copy(body.proxy)
+        this.records.set(primaryId,changed)
+        result={...this.view(),domain:copy(changed),stateChanged:true,application:{status:this.applied?'global_configuration_applied':'not_requested',targetVerified:false},
+          reconcile:this.applied?{status:'applied',generation:{id:7,status:'active',checksum:'c'.repeat(64)},filesCount:2,durationMs:1}:null}
+      }
+    }
+    if(status>=400)result={type:'about:blank',title:'Synthetic proxy request refused',status,detail:'Synthetic reverse proxy request failure',instance:url.pathname,...result}
+    await route.fulfill({status,json:result})
+  }
+}
+function proxyFixtureState({state},active=true){
+  state.accountId=proxyAccountId
+  state.visibility={...state.visibility,principal:{...state.visibility.principal,accountId:proxyAccountId}}
+  state.panel={...state.panel,account:{...state.panel.account,id:proxyAccountId,status:active?'active':'suspended'},domains:new MockReverseProxy().view().domains}
+  return state
+}
+async function mockSession(page,model,{reverseProxy=false}={}){
   await page.addInitScript(()=>{
     const transport=async(method,path,body)=>{
       const response=await fetch(path,{method,credentials:'same-origin',cache:'no-store',headers:{accept:'application/json',...(body===undefined?{}:{'content-type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})}),data=await response.json().catch(()=>null)
@@ -135,6 +193,7 @@ async function mockSession(page,model){
     Object.defineProperty(window,'xpanelSessionRequest',{get:()=>transport,set:()=>{},configurable:false})
   })
   await page.route('**/api/domains',handle);await page.route('**/api/domains/*',handle)
+  if(reverseProxy)await page.route('**/api/domains/*/reverse-proxy',handle)
   async function handle(route){try{await model.route(route)}catch(error){model.errors.push(String(error));await route.fulfill({status:500,json:{type:'about:blank',title:'Synthetic mock failure',status:500,code:'mock_contract_failure',details:{unknownOutcome:true,verificationRequired:true}}})}}
 }
 async function state(page,wanted){
@@ -234,12 +293,139 @@ function assertGeometry(g,lang,width){
   assert.equal(g.table.role,'region');assert.ok(g.table.tabIndex>=0&&g.table.label,'Labelled keyboard-reachable table scroll region');assert.ok(g.table.wrap<=width+1,'Contained table viewport')
 }
 
+async function proxyGeometry(page){
+  await page.evaluate(()=>document.fonts.ready)
+  return page.locator(proxyRoot).evaluate(root=>{
+    const rect=node=>{const r=node.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}}
+    const visible=node=>node.checkVisibility()&&rect(node).width>0&&rect(node).height>0
+    const children=node=>[...node.children].filter(child=>child.tagName!=='STYLE'&&visible(child))
+    const rtl=getComputedStyle(root).direction==='rtl',edge=r=>rtl?r.right:r.left
+    const textRects=node=>{const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT),boxes=[];let text;while((text=walker.nextNode())){if(!text.textContent.trim())continue;const range=document.createRange();range.selectNodeContents(text);for(const r of range.getClientRects())if(r.width>0&&r.height>0)boxes.push({left:r.left,right:r.right,top:r.top,bottom:r.bottom})}return boxes}
+    const lineEdges=boxes=>{const lines=[];for(const box of boxes){let line=lines.find(line=>box.top<line.bottom-0.5&&box.bottom>line.top+0.5);if(!line){line={...box};lines.push(line)}else{line.left=Math.min(line.left,box.left);line.right=Math.max(line.right,box.right);line.top=Math.min(line.top,box.top);line.bottom=Math.max(line.bottom,box.bottom)}}return lines.map(edge)}
+    const siblings=nodes=>nodes.slice(1).map((node,index)=>{const a=rect(nodes[index]),b=rect(node),sameRow=Math.abs(a.top-b.top)<=1;return {axis:sameRow?'horizontal':'vertical',gap:sameRow?Math.max(a.left,b.left)-Math.min(a.right,b.right):b.top-a.bottom}})
+    const words=node=>{const output=[],walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);let text;while((text=walker.nextNode())){if(!visible(text.parentElement))continue;for(const match of text.textContent.matchAll(/\S+/gu)){const range=document.createRange();range.setStart(text,match.index);range.setEnd(text,match.index+match[0].length);const tops=[...range.getClientRects()].map(r=>r.top).sort((a,b)=>a-b),lineHeight=parseFloat(getComputedStyle(text.parentElement).lineHeight)||22;let lines=0,last=-Infinity;for(const top of tops)if(top-last>Math.max(8,lineHeight/2)){lines++;last=top}output.push({text:match[0],lines})}}return output}
+    const fields=[...root.querySelectorAll('label[for]')].filter(visible).map(label=>{
+      const control=document.getElementById(label.htmlFor);if(!control||!visible(control))return null
+      const labels=textRects(label),box=rect(control),style=getComputedStyle(control),anchor=style.textAlign==='start'?(style.direction==='rtl'?'right':'left'):style.textAlign==='end'?(style.direction==='rtl'?'left':'right'):style.textAlign
+      const labelEdge=rtl?Math.max(...labels.map(r=>r.right)):Math.min(...labels.map(r=>r.left)),valueEdge=anchor==='right'?box.right-parseFloat(style.paddingRight)-parseFloat(style.borderRightWidth):box.left+parseFloat(style.paddingLeft)+parseFloat(style.borderLeftWidth)
+      return {label:label.textContent.trim(),gap:box.top-Math.max(...labels.map(r=>r.bottom)),alignment:Math.abs(labelEdge-valueEdge),height:box.height,direction:style.direction,textAlign:style.textAlign}
+    }).filter(Boolean)
+    const cards=[...root.querySelectorAll(':scope > .xp-acct-tool__card')].filter(visible).map(card=>{
+      const nodes=children(card),bounds=rect(card),style=getComputedStyle(card),heading=textRects(nodes[0]),headingEdge=rtl?Math.max(...heading.map(r=>r.right)):Math.min(...heading.map(r=>r.left))
+      const clipped=(box,node)=>{const viewport=node.closest('.xp-acct-tool__table');if(!viewport)return box;const clip=rect(viewport);return {...box,left:Math.max(box.left,clip.left),right:Math.min(box.right,clip.right)}}
+      const paint=[...card.querySelectorAll('h2,p,li,dt,dd,label,span,bdi')].filter(visible).flatMap(node=>textRects(node).map(box=>clipped(box,node))).concat([...card.querySelectorAll('input,select,button')].filter(visible).map(node=>clipped(rect(node),node))).filter(box=>box.right>box.left)
+      const paintLeft=Math.min(...paint.map(box=>box.left)),paintRight=Math.max(...paint.map(box=>box.right))
+      const contentEnds=[...card.querySelectorAll('.xp-acct-tool__table,input:not([type=checkbox]),select,[data-rp-warning]')].filter(node=>visible(node)&&!node.closest('.xp-acct-tool__table input')).map(node=>({kind:node.tagName,edge:rtl?rect(node).left:rect(node).right})),furthestEnd=contentEnds.length?(rtl?Math.min(...contentEnds.map(item=>item.edge)):Math.max(...contentEnds.map(item=>item.edge))):null
+      return {heading:nodes[0].textContent.trim(),top:rect(nodes[0]).top-bounds.top-parseFloat(style.borderTopWidth),bottom:bounds.bottom-rect(nodes.at(-1)).bottom-parseFloat(style.borderBottomWidth),inlineStart:rtl?bounds.right-parseFloat(style.borderRightWidth)-headingEdge:headingEdge-bounds.left-parseFloat(style.borderLeftWidth),paintInsets:{left:paintLeft-bounds.left-parseFloat(style.borderLeftWidth),right:bounds.right-parseFloat(style.borderRightWidth)-paintRight},inlineEnd:furthestEnd===null?null:rtl?furthestEnd-bounds.left-parseFloat(style.borderLeftWidth):bounds.right-parseFloat(style.borderRightWidth)-furthestEnd,contentEndKinds:contentEnds.map(item=>item.kind),computedPadding:[style.paddingTop,style.paddingRight,style.paddingBottom,style.paddingLeft].map(parseFloat),groups:siblings(nodes)}
+    })
+    const facts=[...root.querySelectorAll('.xp-acct-tool__facts > div')].map(field=>{
+      const label=field.querySelector('dt'),value=field.querySelector('dd'),labels=textRects(label),values=textRects(value),labelEdge=rtl?Math.max(...labels.map(r=>r.right)):Math.min(...labels.map(r=>r.left))
+      return {label:label.textContent.trim(),value:value.textContent.trim(),gap:rect(value).top-rect(label).bottom,glyphEdges:lineEdges(values).map(valueEdge=>Math.abs(labelEdge-valueEdge)),isolates:[...value.querySelectorAll('bdi')].map(node=>({direction:getComputedStyle(node).direction,isolation:getComputedStyle(node).unicodeBidi}))}
+    })
+    const tables=[...root.querySelectorAll('.xp-acct-tool__table')].filter(visible).map(wrap=>({box:rect(wrap),table:rect(wrap.querySelector('table')),role:wrap.getAttribute('role'),tabIndex:wrap.tabIndex,label:wrap.getAttribute('aria-label')||wrap.getAttribute('aria-labelledby'),headers:wrap.querySelectorAll('thead th').length,
+      technical:[...wrap.querySelectorAll('tbody bdi')].filter(visible).map(node=>({text:node.textContent,className:node.className,direction:getComputedStyle(node).direction,isolation:getComputedStyle(node).unicodeBidi,whiteSpace:getComputedStyle(node).whiteSpace,overflowWrap:getComputedStyle(node).overflowWrap,words:words(node),lines:new Set(textRects(node).map(r=>Math.round(r.top))).size})),human:[...wrap.querySelectorAll('tbody td')].flatMap(cell=>[...cell.children].filter(node=>node.tagName!=='BDI').flatMap(words))}))
+    const choices=[...root.querySelectorAll('input[type=checkbox]')].filter(visible).map(control=>{const label=control.closest('label'),texts=textRects(label),box=rect(control);return {box,label:rect(label),gap:rtl?box.left-Math.max(...texts.map(r=>r.right)):Math.min(...texts.map(r=>r.left))-box.right,words:words(label)}})
+    const targets=[...root.querySelectorAll('button,input:not([type=checkbox]),select')].filter(visible).map(node=>({box:rect(node),words:node.tagName==='BUTTON'?words(node):[]}))
+    const wrapper=root.closest('[data-approved-xpanel-workspace]'),header=wrapper.querySelector(':scope > header'),heading=header.querySelector('h1'),lede=header.querySelector('p'),dialog=document.querySelector('[data-xp-prompt][open]')
+    const prompt=dialog?{box:rect(dialog),groups:siblings(children(dialog.querySelector('form'))),headerGap:rect(dialog.querySelector('[data-xp-prompt-body]')).top-rect(dialog.querySelector('[data-xp-prompt-title]')).bottom,buttons:[...dialog.querySelectorAll('button')].filter(visible).map(node=>({box:rect(node),words:words(node)})),footer:siblings(children(dialog.querySelector('.xp-dialog__footer')))}:null
+    return {direction:getComputedStyle(root).direction,scrollWidth:document.documentElement.scrollWidth,headingGap:rect(lede).top-rect(heading).bottom,majorGap:rect(root).top-rect(header).bottom,sections:siblings(children(root)),fields,cards,facts,tables,choices,targets,prompt,
+      fieldSiblings:[...root.querySelectorAll('.xp-acct-tool__fields,[data-rp-options],.xp-acct-tool__facts')].filter(visible).flatMap(group=>siblings(children(group))),asciiDigits:!/[\u0660-\u0669\u06f0-\u06f9]/u.test(wrapper.innerText),state:root.querySelector('[data-rp-status]').dataset.state,text:wrapper.innerText}
+  })
+}
+function assertProxyGeometry(g,lang,width){
+  const near=(actual,expected,label)=>assert.ok(Math.abs(actual-expected)<=1,label+': '+actual)
+  assert.equal(g.direction,lang==='ar'?'rtl':'ltr');assert.ok(g.scrollWidth<=width+1,'Proxy document stays contained');assert.equal(g.asciiDigits,true)
+  near(g.headingGap,8,'Proxy heading/lede');near(g.majorGap,32,'Proxy header/body');assert.equal(g.cards.length,4)
+  for(const section of g.sections)near(section.gap,32,'Proxy major section')
+  for(const card of g.cards){const expected=width<=600?16:24;for(const padding of [card.top,card.bottom,card.inlineStart,...card.computedPadding])near(padding,expected,'Proxy card padding '+card.heading);for(const [edge,inset]of Object.entries(card.paintInsets))assert.ok(inset>=expected-1,'Proxy painted '+edge+' content inset '+card.heading+': '+inset);if(card.inlineEnd!==null)near(card.inlineEnd,expected,'Proxy actual control/table/callout inline-end '+card.heading);for(const group of card.groups)near(group.gap,24,'Proxy card group '+card.heading)}
+  for(const field of g.fields){near(field.gap,8,'Proxy label gap '+field.label);assert.ok(field.alignment<=1,'Proxy field content edge '+field.label+': '+field.alignment);assert.ok(field.height>=43.5)}
+  for(const sibling of g.fieldSiblings)near(sibling.gap,16,'Proxy sibling field '+sibling.axis)
+  assert.equal(g.facts.length,3);for(const fact of g.facts){near(fact.gap,8,'Proxy fact gap '+fact.label);for(const edge of fact.glyphEdges)assert.ok(edge<=1,'Proxy fact glyph edge '+fact.label+': '+edge);for(const bdi of fact.isolates){assert.equal(bdi.direction,'ltr');assert.ok(bdi.isolation.includes('isolate'))}}
+  for(const table of g.tables){assert.equal(table.role,'region');assert.ok(table.tabIndex>=0&&table.label);assert.ok(table.box.left>=-0.5&&table.box.right<=width+0.5,'Proxy table viewport stays contained');for(const token of table.technical){assert.equal(token.direction,'ltr');assert.ok(token.isolation.includes('isolate'));assert.ok(token.lines<=1,'Proxy technical value stays intact: '+token.text)}for(const word of table.human)assert.ok(word.lines<=1,'Proxy table word stays intact: '+word.text)}
+  for(const target of g.targets){assert.ok(target.box.width>=43.5&&target.box.height>=43.5,'Proxy real control target');for(const word of target.words)assert.ok(word.lines<=1,'Proxy action word stays intact: '+word.text)}
+  for(const choice of g.choices){assert.ok(choice.label.width>=43.5&&choice.label.height>=43.5,'Proxy associated checkbox label target');near(choice.gap,8,'Proxy checkbox/text separation');for(const word of choice.words)assert.ok(word.lines<=1,'Proxy checkbox word stays intact: '+word.text)}
+  if(g.prompt){assert.ok(g.prompt.box.left>=-0.5&&g.prompt.box.right<=width+0.5,'Proxy confirmation contained');near(g.prompt.headerGap,8,'Proxy confirmation heading/body');for(const group of g.prompt.groups)near(group.gap,24,'Proxy confirmation groups');for(const sibling of g.prompt.footer)near(sibling.gap,16,'Proxy confirmation actions');for(const target of g.prompt.buttons){assert.ok(target.box.width>=43.5&&target.box.height>=43.5);for(const word of target.words)assert.ok(word.lines<=1,'Proxy confirmation word stays intact: '+word.text)}}
+}
+async function proxyState(page,wanted){await page.waitForFunction(wanted=>document.querySelector('[data-rp-status]')?.dataset.state===wanted,wanted)}
+async function proxyFailureDiagnostic(page){return page.evaluate(()=>{const root=document.querySelector('[data-reverse-proxy]'),wrapper=root?.closest('[data-approved-xpanel-workspace]');return {url:location.href,readyState:document.readyState,surface:document.documentElement.dataset.surface,workspaceMode:wrapper?.dataset.workspaceMode,wiring:wrapper?.dataset.wiring,account:root?.dataset.rpAccount,home:root?.dataset.rpHome,manage:root?.dataset.rpManage,bound:root?.dataset.rpBound,status:root?.querySelector('[data-rp-status]')?.textContent,state:root?.querySelector('[data-rp-status]')?.dataset.state,transport:typeof window.xpanelSessionRequest,scripts:[...document.scripts].map(script=>({id:script.id,src:script.getAttribute('src')})),text:wrapper?.innerText}}).catch(error=>({url:page.url(),diagnosticError:String(error)}))}
+async function runReverseProxyAcceptance(browser,cases){
+  const host=await createVisualFixture({qualifiedCatalog:true,transformState:proxyFixtureState}),screens=output+'/reverse-proxy'
+  mkdirSync(screens,{recursive:true})
+  try{
+    for(const lang of ['en','ar'])for(const width of [1440,390])for(const theme of ['light','dark']){
+      if(!includesTuple(lang,width,theme))continue
+      const context=await browser.newContext({viewport:{width,height:1000}}),page=await context.newPage(),model=new MockReverseProxy(),pageErrors=[],frames=[]
+      let checkpoint='reading'
+      page.on('pageerror',error=>pageErrors.push(error.name+': '+error.message))
+      const control=key=>page.locator('[data-rp-'+key+']')
+      const capture=async name=>{checkpoint=name;const measured=await proxyGeometry(page);frames.push({state:name,geometry:measured});await page.screenshot({path:screens+'/'+lang+'-'+width+'-'+theme+'-'+name+'.jpg',type:'jpeg',quality:70,fullPage:true});assertProxyGeometry(measured,lang,width);return measured}
+      const configureProxy=async()=>{await control('mode').selectOption('proxy');await control('upstream').fill('http://127.0.0.1:3000/app')}
+      const approve=async wanted=>{const checking=model.hold('GET');await control('save').click();await page.locator('[data-xp-prompt-confirm]').waitFor({state:'visible'});await confirmation(page,true);await entered(checking);await proxyState(page,'saving');await releaseReply(page,checking);await proxyState(page,wanted)}
+      try{
+        await mockSession(page,model,{reverseProxy:true});const pending=model.hold('GET')
+        const response=await page.goto(host.baseUrl+'/domains/reverse-proxy?lang='+lang+'&theme='+theme,{waitUntil:'load'});assert.equal(response.status(),200)
+        await entered(pending);await proxyState(page,'reading');await capture('reading');pending.release();await proxyState(page,'read')
+        assert.equal(await page.locator('[data-approved-xpanel-workspace="/domains/reverse-proxy"]').getAttribute('data-workspace-mode'),'connected')
+        assert.equal(await page.locator(proxyRoot).getAttribute('data-rp-account'),proxyAccountId);assert.equal(await page.locator(proxyRoot).getAttribute('data-rp-manage'),'true')
+        assert.equal(await control('rows').locator('tr').count(),5);assert.deepEqual(await control('rows').locator('button').evaluateAll(nodes=>nodes.map(node=>node.disabled)),[false,true,true,true,true]);await capture('loaded')
+        await control('rows').locator('tr').first().locator('button').click();assert.equal((await control('selected').textContent()).trim(),primaryName)
+        assert.equal(await control('upstream-field').isVisible(),false);await capture('php-selected');await configureProxy()
+        await control('websocket').uncheck();await control('host').selectOption('upstream');await control('add-header').click()
+        await page.locator('[data-rp-header-field="name"]').fill('X-Tenant');await page.locator('[data-rp-header-field="value"]').fill('shop-1');await capture('proxy-editor')
+        const noDispatch=model.calls.length;await control('upstream').fill('http://127.0.0.1:80');await control('save').click();await proxyState(page,'fields')
+        assert.equal(model.calls.length,noDispatch);assert.equal(await control('upstream').getAttribute('aria-invalid'),'true');await capture('upstream-error')
+        await configureProxy();await page.locator('[data-rp-header-field="name"]').fill('Connection');await control('save').click();await proxyState(page,'fields')
+        assert.equal(model.calls.length,noDispatch);assert.equal(await control('headers-error').isVisible(),true);assert.equal((await control('headers-error').textContent()).trim(),translator(lang)('This header is set by the server and cannot be replaced.'));await capture('header-error');await page.locator('[data-rp-header-field="name"]').fill('X-Tenant')
+        await control('save').click();await page.locator('[data-xp-prompt-confirm]').waitFor({state:'visible'});assert.equal(writes(model).length,0)
+        assert.equal(await control('headers-error').isVisible(),false,'Valid confirmation clears obsolete header validation feedback');assert.equal((await control('headers-error').textContent()).trim(),'')
+        assert.equal(await control('status').getAttribute('data-state'),'read');assert.equal(await control('status').getAttribute('role'),'status');assert.equal((await control('status').textContent()).trim(),translator(lang)('Saved domain configuration read.'))
+        const review=await capture('confirmation');assert.ok(review.prompt,'Real confirmation is open');await confirmation(page,false);assert.equal(writes(model).length,0)
+        assert.equal(await control('upstream').inputValue(),'http://127.0.0.1:3000/app');assert.equal(await page.locator('[data-rp-header-field="name"]').inputValue(),'X-Tenant');assert.equal(await page.locator('[data-rp-header-field="value"]').inputValue(),'shop-1');assert.equal(await control('websocket').isChecked(),false);assert.equal(await control('host').inputValue(),'upstream');await approve('saved')
+        assert.deepEqual(writes(model).at(-1).body,{expectedRevision:writes(model).at(-1).body.expectedRevision,siteType:'proxy',upstream:'http://127.0.0.1:3000/app',proxy:{websocket:false,hostHeader:'upstream',headers:[{name:'X-Tenant',value:'shop-1'}]}})
+        assert.equal((await control('application').textContent()).trim(),translator(lang)('The server configuration was not applied by this request; the site keeps its previous serving until it is applied.'));await capture('saved-not-applied')
+        assert.equal(await control('websocket').isChecked(),false);assert.equal(await control('host').inputValue(),'upstream');assert.equal(await page.locator('[data-rp-header-field="value"]').inputValue(),'shop-1')
+        await control('mode').selectOption('php');assert.equal(await control('options').isVisible(),false);const beforePhp=writes(model).length;model.applied=true;await approve('saved')
+        assert.equal(writes(model).length,beforePhp+1);assert.deepEqual(writes(model).at(-1).body,{expectedRevision:writes(model).at(-1).body.expectedRevision,siteType:'php'})
+        assert.equal((await control('application').textContent()).trim(),translator(lang)('The server configuration was applied as generation {generation}. Whether the site answers through its upstream has not been checked.',{generation:7}));await capture('saved-applied')
+        await configureProxy();model.readVersion++;const staleWrites=writes(model).length;await approve('stale');assert.equal(writes(model).length,staleWrites);assert.equal(await control('save').isDisabled(),true);await capture('stale-review')
+        await control('refresh').click();await proxyState(page,'read');await configureProxy();model.mode='refused';await approve('fields');await capture('server-refusal')
+        model.mode=null;await control('refresh').click();await proxyState(page,'read');await configureProxy();model.mode='uncertain';await approve('uncertain')
+        assert.equal(await control('save').isDisabled(),true);const uncertainWrites=writes(model).length;await page.waitForFunction(()=>document.querySelector('[data-reverse-proxy]')?.getAttribute('aria-busy')==='false');assert.equal(writes(model).length,uncertainWrites);await capture('uncertain-review')
+        model.mode='read-failed';await control('refresh').click();await proxyState(page,'failed');assert.equal(writes(model).length,uncertainWrites);await capture('read-failed')
+        assert.deepEqual(model.errors,[]);assert.deepEqual(pageErrors,[])
+        cases.push({scope:'reverse-proxy',lang,width,theme,status:'passed',frames,calls:model.calls,pageErrors,checks:['UUID owner fixture','native connected workspace','loaded and blocked rows','proxy/host/WebSocket/header editor','real confirmation and cancel','saved versus applied readback','local/server error','stale and unknown review','actual spacing, edges, targets, RTL and ASCII']})
+      }catch(error){const diagnostic=await proxyFailureDiagnostic(page),screenshotError=await page.screenshot({path:screens+'/'+lang+'-'+width+'-'+theme+'-failure.jpg',type:'jpeg',quality:70,fullPage:true}).then(()=>null,error=>String(error));cases.push({scope:'reverse-proxy',lang,width,theme,status:'failed',checkpoint,error:String(error),diagnostic,screenshotError,frames,calls:model.calls,mockErrors:model.errors,pageErrors});throw error}
+      finally{for(const gate of model.gates)gate.release();await context.close()}
+    }
+  }finally{await host.close()}
+  for(const boundary of ['unqualified','inactive-owner']){
+    const inert=await createVisualFixture({qualifiedCatalog:boundary!=='unqualified',transformState:args=>proxyFixtureState(args,boundary!=='inactive-owner')})
+    try{
+      for(const lang of ['en','ar'])for(const width of [1440,390])for(const theme of ['light','dark']){
+        if(!includesTuple(lang,width,theme))continue
+        const context=await browser.newContext({viewport:{width,height:1000}}),page=await context.newPage(),model=new MockReverseProxy(),pageErrors=[]
+        page.on('pageerror',error=>pageErrors.push(error.name+': '+error.message))
+        try{
+          await mockSession(page,model,{reverseProxy:true});const response=await page.goto(inert.baseUrl+'/domains/reverse-proxy?lang='+lang+'&theme='+theme,{waitUntil:'load'});assert.equal(response.status(),200)
+          await proxyState(page,'unavailable');assert.equal(await page.locator(proxyRoot).getAttribute('data-rp-account'),'');assert.equal(await page.locator(proxyRoot).getAttribute('data-rp-manage'),'false')
+          assert.ok(await page.locator(proxyRoot+' button').count()>0);assert.equal(await page.locator(proxyRoot+' :is(button,input,select)').evaluateAll(nodes=>nodes.every(node=>node.disabled)),true)
+          const measured=await proxyGeometry(page);await page.screenshot({path:screens+'/'+lang+'-'+width+'-'+theme+'-'+boundary+'.jpg',type:'jpeg',quality:70,fullPage:true});assertProxyGeometry(measured,lang,width)
+          assert.equal(await page.locator(proxyRoot+' form').count(),0);assert.deepEqual(model.calls,[]);assert.deepEqual(pageErrors,[])
+          cases.push({scope:'reverse-proxy',boundary,lang,width,theme,status:'passed',geometry:measured,calls:[],pageErrors})
+        }catch(error){const diagnostic=await proxyFailureDiagnostic(page),screenshotError=await page.screenshot({path:screens+'/'+lang+'-'+width+'-'+theme+'-'+boundary+'-failure.jpg',type:'jpeg',quality:70,fullPage:true}).then(()=>null,error=>String(error));cases.push({scope:'reverse-proxy',boundary,lang,width,theme,status:'failed',error:String(error),diagnostic,screenshotError,calls:model.calls,pageErrors});throw error}
+        finally{await context.close()}
+      }
+    }finally{await inert.close()}
+  }
+}
+
 mkdirSync(output,{recursive:true})
 const before=snapshot(),fixture=await createVisualFixture({qualifiedCatalog:true}),browser=await chromium.launch({headless:true})
 const runtime={node:process.version,chromium:browser.version(),playwright:JSON.parse(readFileSync(resolve('node_modules/@playwright/test/package.json'),'utf8')).version}
 const cases=[]
 let checkpoint='start',activePage,activeModel,measured,settingsMeasured
 try{
+  if(scope!=='reverse-proxy'){
   for(const lang of ['en','ar'])for(const width of [1440,390]){
     const context=await browser.newContext({viewport:{width,height:1000}}),page=await context.newPage(),model=new MockDomains(),pageErrors=[]
     activePage=page;activeModel=model;measured=null;settingsMeasured=null;page.on('pageerror',error=>pageErrors.push(error.name+': '+error.message))
@@ -336,12 +522,14 @@ try{
   checkpoint='unqualified'
   const unqualified=await createVisualFixture({qualifiedCatalog:false})
   try{const page=await browser.newPage();let calls=0;await page.route('**/api/domains**',route=>{calls++;return route.fulfill({status:503,json:{type:'about:blank',status:503,code:'unexpected_domain_request'}})});await page.goto(unqualified.baseUrl+'/domains?lang=en',{waitUntil:'load'});assert.equal(calls,0);cases.push({status:'passed',scope:'unqualified',calls:0,checks:['no domain read or mutation transport']});await page.close()}finally{await unqualified.close()}
+  }
+  if(scope!=='domains'){checkpoint='reverse-proxy';await runReverseProxyAcceptance(browser,cases)}
 }catch(error){
   const diagnostic=activePage&&!activePage.isClosed()?await activePage.evaluate(()=>({status:document.querySelector('[data-domain-status]')?.textContent,state:document.querySelector('[data-domain-status]')?.getAttribute('data-state'),createName:document.querySelector('[data-domain-create] [name=name]')?.value,root:document.querySelector('[data-domain-settings-form] [name=docRoot]')?.value,selected:document.querySelector('[data-domain-selected-name]')?.textContent,confirmationOpen:!!document.querySelector('[data-xp-prompt-confirm]')?.getClientRects().length})):undefined
   cases.push({status:'failed',checkpoint,error:String(error),diagnostic,geometry:measured,settingsGeometry:settingsMeasured,calls:activeModel?.calls,mockErrors:activeModel?.errors});process.exitCode=1
 }finally{
   for(const gate of activeModel?.gates??[])gate.release();await browser.close();await fixture.close()
-  const after=snapshot(),result={at:new Date().toISOString(),runtime,scope:'Actual domain renderer/client/dialogs with explicit mock session/HTTP. No authenticated tenant, durable index/audit, native provisioning/DNS/TLS/runtime/serving/recovery or production proof. This harness does not establish complete design parity.',sourceUnchanged:JSON.stringify(before)===JSON.stringify(after),before,after,cases}
+  const after=snapshot(),result={at:new Date().toISOString(),runtime,selectedScope:scope,selectedTuple:selectedTuple||null,scope:'Actual domain and reverse-proxy renderer/client/dialogs with explicit mock session/HTTP. No authenticated tenant, durable index/audit, native provisioning/DNS/TLS/runtime/serving/recovery or production proof. This harness does not establish complete design parity.',sourceUnchanged:JSON.stringify(before)===JSON.stringify(after),before,after,cases}
   if(!result.sourceUnchanged)process.exitCode=1
   writeFileSync(output+'/results.json',JSON.stringify(result,null,2));console.log(JSON.stringify({status:process.exitCode?'failed':'passed',cases:cases.length,output}))
 }
