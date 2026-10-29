@@ -5,6 +5,7 @@ import type { Certificate, ConfigTest, Domain, Id, OsProfile } from '@xpanel/cor
 import { edge, services } from '@xpanel/render'
 import type { AgentExecutor } from '../executor.ts'
 import type { AuthoritativeDnsServiceAdapter } from './dns.ts'
+import { publishCertificateCandidate } from './certificate-candidate.ts'
 
 type AcmeChallengeType = services.AcmeChallengeType
 type AcmeOrderPlan = services.AcmeOrderPlan
@@ -102,6 +103,8 @@ export interface AcmeCertificateAdapterOptions {
 }
 
 export interface IssueOrRenewCertificateInput {
+  /** Server-owned fresh issuance stages immutable files before domain binding/reconcile. */
+  prepareOnly?: boolean
   certId: string
   accountId: Id | null
   callerRole: 'root' | 'reseller' | 'user'
@@ -114,6 +117,7 @@ export interface IssueOrRenewCertificateInput {
 }
 
 export interface IssueOrRenewCertificateResult {
+  application: { status: 'candidate_files_written' | 'installed'; servedTlsVerified: boolean }
   certId: string
   identifiers: string[]
   challenge: AcmeChallengeType
@@ -286,6 +290,7 @@ export class AcmeCertificateServiceAdapter {
   readonly caIssuerDomain: string
   readonly directoryUrl: string
   private readonly locks = new Map<string, Promise<void>>()
+  private readonly hasSniVerifier: boolean
 
   constructor(opts: AcmeCertificateAdapterOptions) {
     if (!opts?.executor || !opts?.os || typeof opts.caClient !== 'function') {
@@ -308,13 +313,15 @@ export class AcmeCertificateServiceAdapter {
     this.tlsGroup = tlsGroup
     this.caIssuerDomain = services.normalizeHostname(opts.caIssuerDomain ?? DEFAULT_CA_ISSUER_DOMAIN, 'CA issuer domain')
     this.directoryUrl = opts.directoryUrl ?? 'https://acme-v02.api.letsencrypt.org/directory'
+    this.hasSniVerifier = typeof opts.sniVerifier === 'function'
     this.sniVerifier =
       opts.sniVerifier ??
-      (async ({ servername, expectedFingerprintSha256 }) => ({
+      (async ({ servername }) => ({
         servername,
-        ok: true,
-        fingerprintSha256: expectedFingerprintSha256,
+        ok: false,
+        fingerprintSha256: null,
         notAfter: null,
+        error: 'served_certificate_verifier_unavailable',
       }))
   }
 
@@ -695,6 +702,7 @@ export class AcmeCertificateServiceAdapter {
    * - Rollback to the existing valid certificate if Nginx/Apache reload or SNI verification fails
    */
   async issueOrRenewCertificate(input: IssueOrRenewCertificateInput): Promise<IssueOrRenewCertificateResult> {
+    if (input.prepareOnly !== undefined && typeof input.prepareOnly !== 'boolean') return fail('VALIDATION', 'invalid certificate preparation mode', { stateChanged: false })
     const now = input.now ?? new Date()
     this.assertClockPreflight(now, input.caReferenceNow)
     services.certFiles(input.certId)
@@ -711,8 +719,13 @@ export class AcmeCertificateServiceAdapter {
     return this.withMultiKeyLock(lockKeys, async () => {
       this.assertDomainOwnership(plan.identifiers, input.accountId, input.callerRole, input.domains)
       await this.verifyCaaPreflight(plan.identifiers)
+      if (!input.prepareOnly && !this.hasSniVerifier) return fail('PRECONDITION_FAILED', 'a real served-certificate verifier is required for installation', { stateChanged: false })
 
       const existingOrder = await this.readOrderState(input.certId)
+      if (existingOrder && (existingOrder.certId !== input.certId || existingOrder.accountId !== input.accountId
+        || existingOrder.directoryUrl !== this.directoryUrl || existingOrder.challenge !== plan.challenge
+        || !Array.isArray(existingOrder.identifiers) || existingOrder.identifiers.length > 100 || !existingOrder.identifiers.every(name => typeof name === 'string')
+        || !Number.isSafeInteger(existingOrder.attempts) || existingOrder.attempts < 0 || existingOrder.attempts > 1_000_000)) return fail('PRECONDITION_FAILED', 'persisted certificate order authority requires review')
       const sameIdentifiers =
         existingOrder !== null &&
         existingOrder.identifiers.length === plan.identifiers.length &&
@@ -805,7 +818,12 @@ export class AcmeCertificateServiceAdapter {
           }
         }
 
-        const installed = await this.installValidatedCertificateWithRollback({
+        const candidateBundle = validatedBundle
+        const installed = input.prepareOnly ? await (async () => {
+          const files = await publishCertificateCandidate({ executor: this.executor, certificateId: input.certId,
+            fullchain: candidateBundle.fullchain, privateKey: candidateBundle.privkey })
+          return { fullchainPath: files.certPath, privkeyPath: files.keyPath, sniObservations: [] as SniHandshakeObservation[] }
+        })() : await this.installValidatedCertificateWithRollback({
           certId: input.certId,
           identifiers: plan.identifiers,
           fullchain: validatedBundle.fullchain,
@@ -815,8 +833,8 @@ export class AcmeCertificateServiceAdapter {
 
         state = {
           ...state,
-          phase: 'installed',
-          issuedPem: null, // Clear private key material from order checkpoint once installed in /etc/xpanel/ssl
+          phase: input.prepareOnly ? 'issued' : 'installed',
+          issuedPem: input.prepareOnly ? state.issuedPem : null,
           lastError: null,
           nextRetryAt: null,
           updatedAt: new Date().toISOString(),
@@ -834,6 +852,7 @@ export class AcmeCertificateServiceAdapter {
         }
 
         return {
+          application: { status: input.prepareOnly ? 'candidate_files_written' : 'installed', servedTlsVerified: !input.prepareOnly },
           certId: input.certId,
           identifiers: plan.identifiers,
           challenge: plan.challenge,
@@ -841,8 +860,8 @@ export class AcmeCertificateServiceAdapter {
           orderUrl,
           fullchainPath: installed.fullchainPath,
           privkeyPath: installed.privkeyPath,
-          privkeyMode: 0o640,
-          privkeyGroup: this.tlsGroup,
+          privkeyMode: input.prepareOnly ? 0o600 : 0o640,
+          privkeyGroup: input.prepareOnly ? 'root' : this.tlsGroup,
           fingerprintSha256: validatedBundle.fingerprintSha256,
           notAfter: validatedBundle.notAfterIso,
           sniObservations: installed.sniObservations,

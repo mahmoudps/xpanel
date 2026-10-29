@@ -1,22 +1,13 @@
+import '../../../i18n.ts'
 import type { ComposedRoute } from '../types.ts'
-
 export const xwhm_panel: readonly ComposedRoute[] = [
   {
     "route": "/whm/panel/settings",
     "surface": "xwhm",
     "section": "panel",
-    "group": [
-      "Panel & integrations",
-      "اللوحة والتكاملات"
-    ],
-    "title": [
-      "Panel settings",
-      "إعدادات اللوحة"
-    ],
-    "lede": [
-      "No global panel settings have been read. Configuration changes are unavailable.",
-      "لم تُقرأ إعدادات اللوحة العامة. تغييرات الإعدادات غير متاحة."
-    ],
+    "group": msgid('Panel & integrations'),
+    "title": msgid('Panel settings'),
+    "lede": msgid('No global panel settings have been read. Configuration changes are unavailable.'),
     "layout": "settings",
     "action": null,
     "columns": [],
@@ -27,18 +18,9 @@ export const xwhm_panel: readonly ComposedRoute[] = [
     "route": "/whm/panel/data",
     "surface": "xwhm",
     "section": "panel",
-    "group": [
-      "Panel & integrations",
-      "اللوحة والتكاملات"
-    ],
-    "title": [
-      "Panel data & recovery",
-      "بيانات اللوحة واستعادتها"
-    ],
-    "lede": [
-      "Generation history remains in the existing authorized view. This composition does not execute rollback.",
-      "يبقى سجل الأجيال في واجهته الحالية المصرح بها. لا تنفذ هذه الشاشة تراجعًا."
-    ],
+    "group": msgid('Panel & integrations'),
+    "title": msgid('Panel data & recovery'),
+    "lede": msgid('Generation history remains in the existing authorized view. This composition does not execute rollback.'),
     "layout": "settings",
     "action": null,
     "columns": [],
@@ -49,18 +31,9 @@ export const xwhm_panel: readonly ComposedRoute[] = [
     "route": "/whm/panel/branding",
     "surface": "xwhm",
     "section": "panel",
-    "group": [
-      "Panel & integrations",
-      "اللوحة والتكاملات"
-    ],
-    "title": [
-      "Branding & themes",
-      "الهوية البصرية والسمات"
-    ],
-    "lede": [
-      "No branding configuration has been read. Uploads and appearance changes are unavailable.",
-      "لم تُقرأ إعدادات الهوية البصرية. رفع الملفات وتغييرات المظهر غير متاحة."
-    ],
+    "group": msgid('Panel & integrations'),
+    "title": msgid('Branding & themes'),
+    "lede": msgid('No branding configuration has been read. Uploads and appearance changes are unavailable.'),
     "layout": "settings",
     "action": null,
     "columns": [],
@@ -71,18 +44,9 @@ export const xwhm_panel: readonly ComposedRoute[] = [
     "route": "/whm/panel/languages",
     "surface": "xwhm",
     "section": "panel",
-    "group": [
-      "Panel & integrations",
-      "اللوحة والتكاملات"
-    ],
-    "title": [
-      "Languages",
-      "اللغات"
-    ],
-    "lede": [
-      "No locale configuration has been read. Import, export and locale changes are unavailable.",
-      "لم تُقرأ إعدادات اللغات. الاستيراد والتصدير وتغييرات اللغات غير متاحة."
-    ],
+    "group": msgid('Panel & integrations'),
+    "title": msgid('Languages'),
+    "lede": msgid('No locale configuration has been read. Import, export and locale changes are unavailable.'),
     "layout": "list",
     "action": null,
     "columns": [],
@@ -93,18 +57,9 @@ export const xwhm_panel: readonly ComposedRoute[] = [
     "route": "/whm/panel/notifications",
     "surface": "xwhm",
     "section": "panel",
-    "group": [
-      "Panel & integrations",
-      "اللوحة والتكاملات"
-    ],
-    "title": [
-      "Notifications",
-      "الإشعارات"
-    ],
-    "lede": [
-      "No notification configuration has been read. Channel changes and test delivery are unavailable.",
-      "لم تُقرأ إعدادات الإشعارات. تغييرات القنوات والإرسال التجريبي غير متاحة."
-    ],
+    "group": msgid('Panel & integrations'),
+    "title": msgid('Notifications'),
+    "lede": msgid('No notification configuration has been read. Channel changes and test delivery are unavailable.'),
     "layout": "list",
     "action": null,
     "columns": [],
@@ -115,18 +70,9 @@ export const xwhm_panel: readonly ComposedRoute[] = [
     "route": "/whm/panel/integrations",
     "surface": "xwhm",
     "section": "panel",
-    "group": [
-      "Panel & integrations",
-      "اللوحة والتكاملات"
-    ],
-    "title": [
-      "Integrations",
-      "التكاملات"
-    ],
-    "lede": [
-      "No integration inventory has been read. Connecting or changing external services is unavailable.",
-      "لم يُقرأ مخزون التكاملات. وصل الخدمات الخارجية أو تغييرها غير متاح."
-    ],
+    "group": msgid('Panel & integrations'),
+    "title": msgid('Integrations'),
+    "lede": msgid('No integration inventory has been read. Connecting or changing external services is unavailable.'),
     "layout": "list",
     "action": null,
     "columns": [],
@@ -137,18 +83,9 @@ export const xwhm_panel: readonly ComposedRoute[] = [
     "route": "/whm/panel/whmcs",
     "surface": "xwhm",
     "section": "panel",
-    "group": [
-      "Panel & integrations",
-      "اللوحة والتكاملات"
-    ],
-    "title": [
-      "WHMCS",
-      "WHMCS"
-    ],
-    "lede": [
-      "No billing integration configuration has been read. Provisioning and connection changes are unavailable.",
-      "لم تُقرأ إعدادات تكامل الفوترة. التزويد وتغييرات الاتصال غير متاحة."
-    ],
+    "group": msgid('Panel & integrations'),
+    "title": "WHMCS",
+    "lede": msgid('No billing integration configuration has been read. Provisioning and connection changes are unavailable.'),
     "layout": "settings",
     "action": null,
     "columns": [],
@@ -159,18 +96,9 @@ export const xwhm_panel: readonly ComposedRoute[] = [
     "route": "/whm/panel/api-tokens",
     "surface": "xwhm",
     "section": "panel",
-    "group": [
-      "Panel & integrations",
-      "اللوحة والتكاملات"
-    ],
-    "title": [
-      "API tokens",
-      "رموز API"
-    ],
-    "lede": [
-      "No API-token inventory has been read. Token creation, changes and revocation are unavailable.",
-      "لم يُقرأ مخزون رموز API. إنشاء الرموز وتغييرها وإلغاؤها غير متاح."
-    ],
+    "group": msgid('Panel & integrations'),
+    "title": msgid('API tokens'),
+    "lede": msgid('No API-token inventory has been read. Token creation, changes and revocation are unavailable.'),
     "layout": "list",
     "action": null,
     "columns": [],
@@ -181,18 +109,9 @@ export const xwhm_panel: readonly ComposedRoute[] = [
     "route": "/whm/panel/developer",
     "surface": "xwhm",
     "section": "panel",
-    "group": [
-      "Panel & integrations",
-      "اللوحة والتكاملات"
-    ],
-    "title": [
-      "Developer tools",
-      "أدوات المطورين"
-    ],
-    "lede": [
-      "No developer-tool configuration has been read. Hooks, app registration and API-console operations are unavailable.",
-      "لم تُقرأ إعدادات أدوات المطورين. عمليات الخطافات وتسجيل التطبيقات وواجهة API غير متاحة."
-    ],
+    "group": msgid('Panel & integrations'),
+    "title": msgid('Developer tools'),
+    "lede": msgid('No developer-tool configuration has been read. Hooks, app registration and API-console operations are unavailable.'),
     "layout": "settings",
     "action": null,
     "columns": [],
@@ -203,18 +122,9 @@ export const xwhm_panel: readonly ComposedRoute[] = [
     "route": "/whm/preferences",
     "surface": "xwhm",
     "section": "panel",
-    "group": [
-      "Panel & integrations",
-      "اللوحة والتكاملات"
-    ],
-    "title": [
-      "My preferences",
-      "تفضيلاتي"
-    ],
-    "lede": [
-      "No persisted preference record has been read. Existing language and theme navigation remains available without saving a preference here.",
-      "لم يُقرأ سجل تفضيلات محفوظ. يبقى التنقل الحالي بين اللغة والسمة متاحًا دون حفظ تفضيل هنا."
-    ],
+    "group": msgid('Panel & integrations'),
+    "title": msgid('My preferences'),
+    "lede": msgid('No persisted preference record has been read. Existing language and theme navigation remains available without saving a preference here.'),
     "layout": "settings",
     "action": null,
     "columns": [],

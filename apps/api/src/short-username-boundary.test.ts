@@ -48,6 +48,13 @@ describe('short usernames retain API routes, scope and transport limits', () => 
     const agentApp: AgentApp = { subscribe: () => () => {}, fetch: async request => {
       const path = new URL(request.url).pathname; seen.push({ method: request.method, path })
       if (path.endsWith('/certificates')) return Response.json({ detail: 'Synthetic CA unavailable' }, { status: 503 })
+      if (path.endsWith('/files')) {
+        const body = await request.json() as { op: string; path?: string; content?: string; mode?: number }
+        if (body.op === 'list') return Response.json({ entries: [] })
+        if (body.op === 'write') return Response.json({ name: body.path!.split('/').at(-1), path: body.path, kind: 'file',
+          sizeBytes: Buffer.byteLength(body.content!, 'utf8'), mode: body.mode ?? 0o640, mtime: '2026-01-01T00:00:00.000Z' })
+        throw new Error('Unexpected synthetic file operation')
+      }
       return Response.json(path.endsWith('/backups') ? { backups: [] } : { files: [], stdout: 'Synthetic transport' })
     } }
     app = createApiApp({ db: db.db, store: state.store, serverSecret: 'short-username-synthetic-server-secret-32-bytes', agentToken: 'a'.repeat(64), agentApp })
@@ -91,7 +98,17 @@ describe('short usernames retain API routes, scope and transport limits', () => 
   it('retains the file 3 MiB transport bucket for 1/2-character routes, while generic requests remain 1 MiB', async () => {
     const server = await listenApiServer(app)
     try {
-      const body = JSON.stringify({ op: 'write', path: 'public_html/large.txt', content: 'x'.repeat(1024 * 1024 + 128) })
+      const oversized = JSON.stringify({ op: 'write', path: 'public_html/large.txt', content: 'x'.repeat(1024 * 1024 + 128) })
+      for (const username of ['a', 'ab']) {
+        const response = await fetch(`http://127.0.0.1:${server.port}/api/accounts/${username}/files`, { method: 'POST', headers: { authorization: 'Bearer ' + rootToken, 'content-type': 'application/json' }, body: oversized })
+        expect(response.status).toBe(422)
+      }
+      expect(seen).toEqual([])
+      const content = '\n'.repeat(512 * 1024 + 64)
+      expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(1024 * 1024)
+      const body = JSON.stringify({ op: 'write', path: 'public_html/large.txt', content })
+      expect(Buffer.byteLength(body, 'utf8')).toBeGreaterThan(1024 * 1024)
+      expect(Buffer.byteLength(body, 'utf8')).toBeLessThan(3 * 1024 * 1024)
       for (const username of ['a', 'ab']) {
         const response = await fetch(`http://127.0.0.1:${server.port}/api/accounts/${username}/files`, { method: 'POST', headers: { authorization: 'Bearer ' + rootToken, 'content-type': 'application/json' }, body })
         expect(response.status).toBe(200)

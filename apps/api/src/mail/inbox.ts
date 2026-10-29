@@ -1,11 +1,13 @@
+import '../../../web/src/i18n.ts'
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto'
-import { fail, isXpanelError } from '@xpanel/core'
+import { fail, isXpanelError, msgid } from '@xpanel/core'
 import type { Principal } from '@xpanel/core'
 import {
   createAuthenticatedSession,
   createUserPrincipal,
   findPrincipalByUsername,
   getMailboxSession,
+  saveHandoffMailboxSession,
   saveMailboxSession,
 } from '@xpanel/db'
 import type { Db, MailboxSessionRecord, PrincipalRecord, SessionRecord } from '@xpanel/db'
@@ -19,6 +21,7 @@ import { attachmentsFromBodyStructure, ImapProtocolClient, type ImapFetchedMessa
 import { imapDialPlan } from './idle.ts'
 import { smtpHumanCopy, SmtpSubmissionClient } from './smtp.ts'
 import { sanitizeEmailHtml } from './mime.ts'
+import type { MimeAttachmentInput } from './mime.ts'
 
 export interface MailAttachmentSummary {
   name: string
@@ -27,6 +30,9 @@ export interface MailAttachmentSummary {
 
 export interface InboxSummary {
   uid: number
+  /** Present only when the actual fetched selection advertised this matching identity. */
+  uidValidity?: number
+  uidValidityObserved?: boolean
   from: string
   /** Display name from the From header. Empty when the header has only an address. */
   fromName?: string
@@ -63,15 +69,22 @@ export interface MailboxSendInput {
   text: string
   /** Sanitized rich text; text remains the required plain-text alternative. */
   html?: string
+  /** Trusted values resolved from the saved identity and validated actual file bytes. */
+  fromName?: string
+  replyTo?: string
+  attachments?: readonly MimeAttachmentInput[]
   idempotencyKey: string
 }
 
 export interface MailboxTransport {
   verify(mailbox: string, password: string): Promise<void>
   list(mailbox: string, password: string, folder?: string): Promise<InboxSummary[]>
-  read(mailbox: string, password: string, uid: number, folder?: string): Promise<InboxMessage>
-  remove(mailbox: string, password: string, uid: number, folder?: string): Promise<void>
-  move?(mailbox: string, password: string, uid: number, fromFolder: string, toFolder: string): Promise<{ uid?: number } | void>
+  read(mailbox: string, password: string, uid: number, folder?: string, options?: { authorize?: () => void | Promise<void> }): Promise<InboxMessage>
+  remove(mailbox: string, password: string, uid: number, folder?: string, options?: { uidValidity: number }): Promise<void>
+  move?(mailbox: string, password: string, uid: number, fromFolder: string, toFolder: string, options?: { uidValidity: number }): Promise<{
+    uid?: number; uidValidity?: number; uidValidityObserved?: boolean; sourceUidValidity?: number; sourceUidValidityObserved?: boolean
+    unknownOutcome?: boolean; verificationRequired?: boolean
+  } | void>
   counts?(mailbox: string, password: string): Promise<MailFolderCount[]>
   quota?(mailbox: string, password: string): Promise<{ usedMb: number; limitMb?: number; usedBytes?: number } | null>
   send(mailbox: string, password: string, input: MailboxSendInput): Promise<{ messageId: string; savedToSent?: boolean }>
@@ -148,16 +161,16 @@ const unsealMailboxPassword = (sealed: Uint8Array, serverSecret: string): string
 
 const RAW_MAIL_ERROR = /SMTP |IMAP |ECONN|ENOTFOUND|ETIMEDOUT|timed out|ServerName|TLS |socket closed|STARTTLS|EHLO|AUTH PLAIN|MAIL FROM|RCPT |recipients rejected/
 
-/** IMAP move and copy failures. A send sentence is the wrong explanation for a folder. */
-export const imapHumanCopy = (raw: string): { en: string; ar: string } => {
+/** IMAP move and copy failures as an English source sentence. A send sentence is the wrong explanation for a folder. */
+export const imapHumanCopy = (raw: string): string => {
   const text = raw.toLowerCase()
   if (/timed out|econnrefused|econnreset|enotfound|ehostunreach|enetunreach|socket closed|\beconn/.test(text)) {
-    return { en: 'the mail server could not be reached.', ar: 'تعذر الوصول إلى خادم البريد.' }
+    return msgid('the mail server could not be reached.')
   }
   if (/trycreate|does not exist|no such mailbox|unknown mailbox|mailbox doesn't exist/.test(text)) {
-    return { en: 'That folder is not on this mailbox yet.', ar: 'هذا المجلد غير موجود في صندوق البريد بعد.' }
+    return msgid('That folder is not on this mailbox yet.')
   }
-  return { en: 'The message could not be moved.', ar: 'تعذر نقل الرسالة.' }
+  return msgid('The message could not be moved.')
 }
 
 const mailFailure = (err: unknown): never => {
@@ -165,7 +178,7 @@ const mailFailure = (err: unknown): never => {
   const raw = err instanceof Error ? err.message : 'mail server unavailable'
   const copy = /\bIMAP\b/.test(raw) && !/\bSMTP\b/.test(raw) ? imapHumanCopy(raw) : smtpHumanCopy(raw)
   const code = isXpanelError(err) ? err.code : 'PRECONDITION_FAILED'
-  return fail(code, copy.en, { ...(isXpanelError(err) ? err.detail : {}), messageAr: copy.ar })
+  return fail(code, copy, { ...(isXpanelError(err) ? err.detail : {}) })
 }
 
 export const mailFolderName = (value: string | null | undefined): string => {
@@ -188,15 +201,24 @@ export const mailReceivedAtUtc = (value: string | null | undefined): string => {
 const previewOf = (text: string): string =>
   text.split(/\r?\n/).map(line => line.trim()).find(line => line.length > 0)?.slice(0, 180) ?? ''
 
-const summaryOf = (message: ImapFetchedMessage): InboxSummary => {
+const requiredMailboxUidValidity = (options?: { uidValidity: number }): number => {
+  const value = options?.uidValidity
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > 0xffffffff) return fail('PRECONDITION_FAILED', 'an observed mailbox identity is required before changing messages', { stateChanged: false })
+  return value
+}
+
+const summaryOf = (message: ImapFetchedMessage, observedValidity = false): InboxSummary => {
   const parsed = message.parsed
   const fromMime = parsed.attachments
     .filter(item => item.disposition !== 'inline' && item.filename.length > 0)
     .map(item => ({ name: item.filename, sizeBytes: item.sizeBytes }))
   const fromStructure = attachmentsFromBodyStructure(message.bodyStructure ?? '')
   const attachments = fromMime.length > 0 ? fromMime : fromStructure
+  const verifiedIdentity = observedValidity && Number.isSafeInteger(message.uidValidity) && message.uidValidity > 0 && message.uidValidity <= 0xffffffff
   return {
     uid: message.uid,
+    uidValidityObserved: verifiedIdentity,
+    ...(verifiedIdentity ? { uidValidity: message.uidValidity } : {}),
     from: parsed.from,
     ...(parsed.fromName ? { fromName: parsed.fromName } : {}),
     to: parsed.to.join(', '),
@@ -210,8 +232,11 @@ const summaryOf = (message: ImapFetchedMessage): InboxSummary => {
   }
 }
 
-const withImap = async <T>(host: string, port: number, tls: boolean, mailbox: string, password: string, fn: (client: ImapProtocolClient) => Promise<T>, timeoutMs = 15_000): Promise<T> => {
-  const client = new ImapProtocolClient({ host, port, tls, timeoutMs })
+/** Trusted message-detail bounds, aligned with the attachment and draft readers. */
+const INBOX_READ_LIMITS = { maxLiteralBytes: 25 * 1024 * 1024, maxResponseLineBytes: 1024 * 1024 }
+
+const withImap = async <T>(host: string, port: number, tls: boolean, mailbox: string, password: string, fn: (client: ImapProtocolClient) => Promise<T>, timeoutMs = 15_000, limits: { maxLiteralBytes?: number; maxResponseLineBytes?: number } = {}): Promise<T> => {
+  const client = new ImapProtocolClient({ host, port, tls, timeoutMs, ...limits })
   try {
     await client.connect()
     await client.login(mailbox, password)
@@ -244,9 +269,9 @@ export const createLocalMailboxTransport = (
   const smtpTimeout = Number(env.XPANEL_SMTP_TIMEOUT_MS || '20000')
   // Port 143 is cleartext and loopback-only. A non-loopback host needs 993 or XPANEL_IMAP_TLS=1.
   const imapPlan = imapDialPlan(imapHost, imapPort, env.XPANEL_IMAP_TLS)
-  const imap = async <T>(mailbox: string, password: string, fn: (client: ImapProtocolClient) => Promise<T>): Promise<T> => {
+  const imap = async <T>(mailbox: string, password: string, fn: (client: ImapProtocolClient) => Promise<T>, limits?: typeof INBOX_READ_LIMITS): Promise<T> => {
     if (!imapPlan) return fail('PRECONDITION_FAILED', 'cleartext mail is limited to loopback; use port 993 or XPANEL_IMAP_TLS=1')
-    return withImap(imapHost, imapPort, imapPlan.tls, mailbox, password, fn, imapTimeout)
+    return withImap(imapHost, imapPort, imapPlan.tls, mailbox, password, fn, imapTimeout, limits)
   }
   return {
     async verify(mailbox, password) {
@@ -257,34 +282,48 @@ export const createLocalMailboxTransport = (
       return imap(mailbox, password, async client => {
         const uids = await client.searchAllUids(name)
         if (uids.length === 0) return []
-        const messages: ImapFetchedMessage[] = []
+        const messages: InboxSummary[] = []
         for (let index = 0; index < uids.length; index += 50) {
           const fetched = await client.fetchMessagesByUid(name, uids.slice(index, index + 50).join(','))
-          messages.push(...fetched.messages)
+          messages.push(...fetched.messages.map(message => summaryOf(message, fetched.state.uidValidityObserved === true && fetched.state.folder === name && fetched.state.uidValidity === message.uidValidity)))
         }
-        return messages.map(summaryOf).sort((left, right) => right.uid - left.uid)
+        return messages.sort((left, right) => right.uid - left.uid)
       })
     },
-    async read(mailbox, password, uid, folder = 'INBOX') {
+    async read(mailbox, password, uid, folder = 'INBOX', options) {
       const name = mailFolderName(folder)
       return imap(mailbox, password, async client => {
         const fetched = await client.fetchMessagesByUid(name, uid)
         const message = fetched.messages.find(item => item.uid === uid)
         if (!message) return fail('NOT_FOUND', 'message not found')
-        await client.storeFlagsByUid(name, uid, 'add', ['\\Seen'])
-        return { ...summaryOf(message), unread: false, body: message.parsed.textBody }
-      })
+        // A header-only or partial fetch must never look like a complete empty body or change \Seen.
+        if (message.rfc822SizeObserved !== true || message.bodyComplete !== true || !(message.rawMimeBytes instanceof Uint8Array)
+          || message.rawMimeBytes.byteLength !== message.sizeBytes) return fail('PRECONDITION_FAILED', 'the complete message body has not been observed', { stateChanged: false })
+        const observed = fetched.state.uidValidityObserved === true && fetched.state.folder === name && fetched.state.uidValidity === message.uidValidity
+          && Number.isSafeInteger(message.uidValidity) && message.uidValidity > 0 && message.uidValidity <= 0xffffffff
+        if (observed) {
+          await options?.authorize?.()
+          await client.storeFlagsByUid(name, uid, 'add', ['\\Seen'], mailbox, message.uidValidity)
+        }
+        return { ...summaryOf(message, observed), ...(observed ? { unread: false } : {}), body: message.parsed.textBody }
+      }, INBOX_READ_LIMITS)
     },
-    async remove(mailbox, password, uid, folder = 'INBOX') {
+    async remove(mailbox, password, uid, folder = 'INBOX', options) {
       const name = mailFolderName(folder)
-      await imap(mailbox, password, client => client.deleteByUid(name, uid))
+      const validity = requiredMailboxUidValidity(options)
+      await imap(mailbox, password, client => client.deleteByUid(name, uid, mailbox, validity))
     },
-    async move(mailbox, password, uid, fromFolder, toFolder) {
+    async move(mailbox, password, uid, fromFolder, toFolder, options) {
       const from = mailFolderName(fromFolder)
       const to = mailFolderName(toFolder)
-      if (from === to) return
-      const destination = await imap(mailbox, password, client => client.moveOrCopyByUid(from, uid, to, 'move'))
-      return typeof destination === 'number' ? { uid: destination } : undefined
+      const validity = requiredMailboxUidValidity(options)
+      const result = await imap(mailbox, password, client => client.moveOrCopyByUidWithIdentity(from, uid, to, 'move', validity, mailbox))
+      return { sourceUidValidity: result.sourceUidValidity, sourceUidValidityObserved: result.sourceUidValidityObserved,
+        ...(result.destinationUid === null ? {} : { uid: result.destinationUid }),
+        ...(result.destinationUidValidity === null ? {} : { uidValidity: result.destinationUidValidity }),
+        uidValidityObserved: result.destinationUidValidityObserved,
+        ...(result.unknownOutcome ? { unknownOutcome: true } : {}), ...(result.verificationRequired ? { verificationRequired: true } : {}),
+      }
     },
     async counts(mailbox, password) {
       return imap(mailbox, password, async client => {
@@ -308,7 +347,7 @@ export const createLocalMailboxTransport = (
         }
         let bytes = 0
         for (const folder of MAIL_FOLDERS) {
-          const uids = await client.searchAllUids(folder).catch(() => [] as number[])
+          const uids = await client.searchAllUids(folder, mailbox)
           if (uids.length === 0) continue
           const fetched = await client.fetchMessagesByUid(folder, uids.join(','))
           bytes += fetched.messages.reduce((sum, item) => sum + item.sizeBytes, 0)
@@ -332,12 +371,15 @@ export const createLocalMailboxTransport = (
           idempotencyKey: input.idempotencyKey,
           authenticatedMailbox: mailbox,
           from: mailbox,
-          to: input.to.split(',').map(address => address.trim()),
+          ...(input.fromName ? { fromName: input.fromName } : {}),
+          ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+          to: input.to.split(',').map(address => address.trim()).filter(Boolean),
           ...(input.cc && input.cc.length > 0 ? { cc: input.cc } : {}),
           ...(input.bcc && input.bcc.length > 0 ? { bcc: input.bcc } : {}),
           subject: input.subject,
           textBody: input.text,
           ...(input.html ? { htmlBody: input.html } : {}),
+          ...(input.attachments?.length ? { attachments: input.attachments } : {}),
         })
         let savedToSent = false
         const submitted = result.rawMime
@@ -358,6 +400,60 @@ export const createLocalMailboxTransport = (
       }
     },
   }
+}
+
+/** The persisted user principal behind a mailbox identity; its random password is never used to sign in. */
+const ensureMailboxPrincipal = async (db: Db, mailbox: string, accountId: string): Promise<PrincipalRecord> => {
+  const username = mailboxPrincipalUsername(mailbox)
+  const existing = await findPrincipalByUsername(db, username)
+  if (existing && (existing.kind !== 'user' || existing.accountId !== accountId)) {
+    return fail('CONFLICT', 'mailbox identity does not match this account')
+  }
+  return existing ?? createUserPrincipal(db, {
+    username,
+    accountId,
+    passwordHash: await hashPasswordArgon2id(randomBytes(32).toString('hex')),
+    forcePasswordChange: false,
+  })
+}
+
+/**
+ * Opens a mailbox session from a consumed one-time handoff. The session records its issuer and carries no
+ * mailbox password, so IMAP-backed reads stay unavailable instead of borrowing another credential.
+ */
+export const establishHandoffMailboxSession = async (input: {
+  db: Db
+  entryPoint: EntryPoint
+  mailbox: string
+  serviceUserId: string
+  accountId: string
+  impersonator: { principalId: string; login: string; teamMemberId?: string }
+  ttlMs: number
+  ip: string
+  userAgent: string
+}): Promise<EstablishedMailboxSession> => {
+  const mailbox = normalizeMailbox(input.mailbox)
+  const principalRecord = await ensureMailboxPrincipal(input.db, mailbox, input.accountId)
+  const rawToken = randomBytes(32).toString('hex')
+  const session = await input.db.transaction(async tx => {
+    const created = await createAuthenticatedSession(tx, {
+      principalId: principalRecord.id,
+      tokenHash: sessionTokenHash(rawToken, input.entryPoint),
+      expiresAt: new Date(Date.now() + input.ttlMs).toISOString(),
+      ip: input.ip,
+      userAgent: input.userAgent,
+      mfaVerified: false,
+      impersonator: input.impersonator,
+      expectedPasswordHash: principalRecord.passwordHash,
+      expectedTotpEnabled: principalRecord.totpEnabled,
+      expectedSealedSecret: principalRecord.totpSecretEnc,
+    })
+    if (!created) return fail('UNAUTHENTICATED', 'mailbox identity changed; open the mailbox again')
+    await saveHandoffMailboxSession(tx, { sessionId: created.id, mailbox, serviceUserId: input.serviceUserId, accountId: input.accountId })
+    return created
+  })
+  const principal: Principal = { kind: 'user', id: principalRecord.id, username: principalRecord.username, accountId: input.accountId }
+  return { principal, principalRecord, session, rawToken, mailbox }
 }
 
 export interface EstablishedMailboxSession {
@@ -392,19 +488,7 @@ export const establishMailboxSession = async (input: {
     if (isXpanelError(err) && err.code === 'UNAUTHENTICATED') return fail('UNAUTHENTICATED', 'invalid username or password')
     throw err
   }
-  const username = mailboxPrincipalUsername(mailbox)
-  let principalRecord = await findPrincipalByUsername(input.db, username)
-  if (principalRecord && (principalRecord.kind !== 'user' || principalRecord.accountId !== account.id)) {
-    return fail('CONFLICT', 'mailbox identity does not match this account')
-  }
-  if (!principalRecord) {
-    principalRecord = await createUserPrincipal(input.db, {
-      username,
-      accountId: account.id,
-      passwordHash: await hashPasswordArgon2id(randomBytes(32).toString('hex')),
-      forcePasswordChange: false,
-    })
-  }
+  const principalRecord = await ensureMailboxPrincipal(input.db, mailbox, account.id)
   const rawToken = randomBytes(32).toString('hex')
   const session = await createAuthenticatedSession(input.db, {
     principalId: principalRecord.id,
@@ -448,29 +532,32 @@ export const revokeMailboxIdentity = async (db: Db, mailbox: string, serviceUser
       await tx.query(`DELETE FROM principals WHERE id IN (${slots})`, ids)
     }
     await tx.query(`DELETE FROM mailbox_sessions WHERE mailbox = $1 OR service_user_id = $2`, [address, serviceUserId])
+    await tx.query(`DELETE FROM handoff_mailbox_sessions WHERE mailbox = $1 OR service_user_id = $2`, [address, serviceUserId])
   })
 }
 
-export const openMailboxSession = async (
-  db: Db,
-  serverSecret: string,
-  sessionId: string | null,
-): Promise<{ record: MailboxSessionRecord; password: string }> => {
+export const requireMailboxSessionRecord = async (db: Db, sessionId: string | null): Promise<MailboxSessionRecord> => {
   if (!sessionId) return fail('UNAUTHENTICATED', 'mailbox sign-in is required')
   const record = await getMailboxSession(db, sessionId)
   if (!record) return fail('UNAUTHENTICATED', 'mailbox sign-in is required')
-  return { record, password: unsealMailboxPassword(record.sealedPassword, serverSecret) }
+  return record
 }
 
-/** Revalidate the current mailbox capability before starting or retaining a watch. */
-export const openAuthorizedMailboxSession = async (
+/** Null for a handed-off session, which never holds the mailbox password. */
+export const mailboxSessionPassword = (record: MailboxSessionRecord, serverSecret: string): string | null =>
+  record.sealedPassword === null ? null : unsealMailboxPassword(record.sealedPassword, serverSecret)
+
+const requireMailboxPassword = (record: MailboxSessionRecord, serverSecret: string): string =>
+  mailboxSessionPassword(record, serverSecret)
+    ?? fail('SERVICE_UNAVAILABLE', 'this mailbox was opened from the hosting account without its password; sign in with the mailbox address to read mail', { stateChanged: false, mailboxCredential: 'unavailable' })
+
+/** The current mailbox binding and capability, without opening the mailbox credential. */
+export const authorizeMailboxSessionBinding = async (
   db: Db,
   store: StateStore,
-  serverSecret: string,
   caller: AuthenticatedCaller,
-): Promise<{ record: MailboxSessionRecord; password: string }> => {
-  const opened = await openMailboxSession(db, serverSecret, caller.sessionId)
-  const { record } = opened
+): Promise<MailboxSessionRecord> => {
+  const record = await requireMailboxSessionRecord(db, caller.sessionId)
   if (caller.principal.kind !== 'user' || caller.principal.accountId !== record.accountId
     || ![mailboxPrincipalUsername(record.mailbox), record.mailbox].includes(caller.principal.username.toLowerCase())) {
     return fail('FORBIDDEN', 'mailbox session binding is unavailable')
@@ -482,7 +569,18 @@ export const openAuthorizedMailboxSession = async (
     return fail('FORBIDDEN', 'mailbox service is unavailable')
   }
   await assertAccountFeatures(store, caller, account, ['email-accounts', 'webmail-message-list'])
-  return opened
+  return record
+}
+
+/** Revalidate the current mailbox capability before starting or retaining a watch. */
+export const openAuthorizedMailboxSession = async (
+  db: Db,
+  store: StateStore,
+  serverSecret: string,
+  caller: AuthenticatedCaller,
+): Promise<{ record: MailboxSessionRecord; password: string }> => {
+  const record = await authorizeMailboxSessionBinding(db, store, caller)
+  return { record, password: requireMailboxPassword(record, serverSecret) }
 }
 
 const MAX_MAILBOX_RECIPIENTS = 100
@@ -504,7 +602,7 @@ export const parseMailboxSend = (body: { to?: unknown; cc?: unknown; bcc?: unkno
   const bcc = mailboxRecipients(body.bcc, 'bcc')
   const subject = typeof body.subject === 'string' ? body.subject.trim() : ''
   const text = typeof body.text === 'string' ? body.text : ''
-  if (to.length === 0) fail('VALIDATION', 'a recipient address is required')
+  if (to.length + cc.length + bcc.length === 0) fail('VALIDATION', 'a recipient address is required')
   if (to.length + cc.length + bcc.length > MAX_MAILBOX_RECIPIENTS) fail('VALIDATION', 'too many recipient addresses')
   if (!subject || subject.length > 200 || /[\r\n\u0000]/.test(subject)) fail('VALIDATION', 'subject is required and must be a single line')
   if (!text.trim() || text.length > MAX_MAILBOX_BODY_BYTES || /[\u0000]/.test(text)) fail('VALIDATION', 'message text is required')

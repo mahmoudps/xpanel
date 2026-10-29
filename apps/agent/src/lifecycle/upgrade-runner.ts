@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual, verify as cryptoVerify } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual, verify as cryptoVerify } from 'node:crypto'
 import { fail } from '@xpanel/core'
 import type { AuditEntry, HostAction, OsProfile, Principal } from '@xpanel/core'
 import {
@@ -104,6 +104,41 @@ export const verifyReleaseArtifactSignature = (
   if (!ok) {
     fail('VALIDATION', 'release artifact Ed25519 signature verification failed')
   }
+}
+
+const MANIFEST_FIELDS = ['bytes', 'keyId', 'schemaVersion', 'sha256', 'signature', 'version']
+
+/** Strict wire grammar: unsigned extra fields (for example release notes) are refused, not shown. */
+export const parseSignedReleaseManifest = (value: unknown): SignedReleaseManifest => {
+  const m = value as Record<string, unknown>
+  if (!m || typeof m !== 'object' || Array.isArray(m) || Object.keys(m).sort().join(',') !== MANIFEST_FIELDS.join(',')
+    || typeof m.version !== 'string' || !/^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$/.test(m.version)
+    || !Number.isSafeInteger(m.schemaVersion) || (m.schemaVersion as number) < 0
+    || typeof m.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(m.sha256)
+    || !Number.isSafeInteger(m.bytes) || (m.bytes as number) < 1
+    || typeof m.signature !== 'string' || !/^[0-9a-f]{64,256}$/.test(m.signature)
+    || typeof m.keyId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(m.keyId)) return fail('VALIDATION', 'release manifest is malformed')
+  return { version: m.version, schemaVersion: m.schemaVersion as number, sha256: m.sha256, bytes: m.bytes as number, signature: m.signature, keyId: m.keyId }
+}
+
+/** Persist only this digest in redacted job metadata; the consumer reloads the signed manifest. */
+export const signedReleaseManifestDigest = (value: unknown): string => createHash('sha256').update(JSON.stringify(parseSignedReleaseManifest(value))).digest('hex')
+
+/** Binds the signed manifest to the exact release the machine will run, then verifies the signature. */
+export const verifySignedManifestForRelease = (
+  manifest: SignedReleaseManifest,
+  release: Pick<ReleaseInfo, 'version' | 'schemaVersion' | 'sha256' | 'bytes'>,
+  trustedKeys: readonly ReleaseVerificationKey[],
+): void => {
+  if (
+    manifest.version !== release.version ||
+    manifest.schemaVersion !== release.schemaVersion ||
+    manifest.sha256 !== release.sha256 ||
+    manifest.bytes !== release.bytes
+  ) {
+    fail('VALIDATION', 'signed release manifest fields do not match upgrade plan release info')
+  }
+  verifyReleaseArtifactSignature(manifest, trustedKeys)
 }
 
 export interface CanaryHttpProbeResult {
@@ -282,15 +317,7 @@ export class PanelUpgradeRunner {
     signedManifest: SignedReleaseManifest,
   ): Promise<UpgradeResult> {
     normalizeUpgradePlan(plan)
-    if (
-      signedManifest.version !== plan.release.version ||
-      signedManifest.schemaVersion !== plan.release.schemaVersion ||
-      signedManifest.sha256 !== plan.release.sha256 ||
-      signedManifest.bytes !== plan.release.bytes
-    ) {
-      fail('VALIDATION', 'signed release manifest fields do not match upgrade plan release info')
-    }
-    verifyReleaseArtifactSignature(signedManifest, this.deps.trustedReleaseKeys)
+    verifySignedManifestForRelease(signedManifest, plan.release, this.deps.trustedReleaseKeys)
     const safety = await createNativeUpgradeSafety({ db: this.deps.db, actorId: plan.actor.id, operation: 'upgrade', release: plan.release, ...(plan.layout ? { layout: plan.layout } : {}) })
     return runUpgrade({ ...this.ports, safety }, plan)
   }

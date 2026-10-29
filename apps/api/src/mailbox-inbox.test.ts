@@ -22,7 +22,7 @@ interface Box {
 }
 
 const message = (uid: number, subject: string, body: string): InboxMessage => ({
-  uid, from: 'sender@example.test', to: 'inbox@alpha.example.test', subject, receivedAt: '2026-10-23T12:00:00.000Z', unread: true, sizeBytes: body.length, body,
+  uid, uidValidity: 17, uidValidityObserved: true, from: 'sender@example.test', to: 'inbox@alpha.example.test', subject, receivedAt: '2026-10-23T12:00:00.000Z', unread: true, sizeBytes: body.length, body,
 })
 
 const harness = async (transport: MailboxTransport) => {
@@ -87,16 +87,17 @@ describe('xMail mailbox inbox', () => {
         found.unread = false
         return { ...found }
       },
-      async remove(mailbox, password, uid) {
+      async remove(mailbox, password, uid, _folder, options) {
         await this.verify(mailbox, password)
+        if (options?.uidValidity !== 17) return fail('CONFLICT', 'declared source namespace changed', { stateChanged: false })
         const box = boxes.get(mailbox)!
         const next = box.messages.filter(item => item.uid !== uid)
         if (next.length === box.messages.length) fail('NOT_FOUND', 'message not found')
         box.messages = next
       },
-      async move(mailbox, password, uid) {
-        await this.remove(mailbox, password, uid)
-        return { uid: uid + 40 }
+      async move(mailbox, password, uid, from, _to, options) {
+        await this.remove(mailbox, password, uid, from, options)
+        return { uid: uid + 40, uidValidity: 23, uidValidityObserved: true, sourceUidValidity: 17, sourceUidValidityObserved: true }
       },
       async send(mailbox, password, input) {
         await this.verify(mailbox, password)
@@ -155,7 +156,7 @@ describe('xMail mailbox inbox', () => {
     const invalid = await call('POST', '/api/webmail/send', { to: 'not-an-address', subject: 'Hello', text: 'A real message' }, session)
     expect(invalid.status).toBe(422)
 
-    const removed = await call('DELETE', '/api/webmail/inbox/7', undefined, session)
+    const removed = await call('DELETE', '/api/webmail/inbox/7', { uidValidity: 17 }, session)
     expect(removed.status).toBe(200)
     const empty = await call('GET', '/api/webmail/inbox', undefined, session)
     expect(empty.payload.messages).toEqual([])
@@ -177,29 +178,33 @@ describe('xMail mailbox inbox', () => {
       async verify() { return undefined },
       async list(mailbox) { return boxes.get(mailbox)!.messages },
       async read() { return fail('NOT_FOUND', 'message not found') },
-      async remove() { removed += 1 },
-      async move(_mailbox, _password, uid, _from, to) {
+      async remove(_mailbox, _password, uid, folder, options) {
+        if (uid !== 16 || folder !== 'Trash' || options?.uidValidity !== 23) return fail('CONFLICT', 'declared Trash identity changed', { stateChanged: false })
+        removed += 1
+      },
+      async move(_mailbox, _password, uid, _from, to, options) {
+        if (options?.uidValidity !== 17) return fail('CONFLICT', 'declared source namespace changed', { stateChanged: false })
         movedTo = to
         boxes.get('inbox@alpha.example.test')!.messages = []
-        return { uid: uid + 9 }
+        return { uid: uid + 9, uidValidity: 23, uidValidityObserved: true, sourceUidValidity: 17, sourceUidValidityObserved: true }
       },
       async send() { return { messageId: '<x>' } },
     }
     const { call, login, sessionOf } = await harness(transport)
     const session = sessionOf(await login('inbox@alpha.example.test', 'alpha-secret'))
-    const trashed = await call('DELETE', '/api/webmail/inbox/7?folder=INBOX', undefined, session)
+    const trashed = await call('DELETE', '/api/webmail/inbox/7?folder=INBOX', { uidValidity: 17 }, session)
     expect(trashed.status).toBe(200)
     expect(movedTo).toBe('Trash')
     expect(removed).toBe(0)
     expect(trashed.payload).toMatchObject({ uid: 16, folder: 'Trash' })
-    const blocked = await call('DELETE', '/api/webmail/inbox/7?folder=Trash', undefined, session)
+    const blocked = await call('DELETE', '/api/webmail/inbox/16?folder=Trash', { uidValidity: 23 }, session)
     expect(blocked.status).toBe(412)
     expect(blocked.payload.detail).toBe('Deleting a message from Trash removes it permanently.')
     expect(removed).toBe(0)
-    const gone = await call('DELETE', '/api/webmail/inbox/7?folder=Trash&confirm=delete', undefined, session)
+    const gone = await call('DELETE', '/api/webmail/inbox/16?folder=Trash&confirm=delete', { uidValidity: 23 }, session)
     expect(gone.status).toBe(200)
     expect(removed).toBe(1)
-    expect(imapHumanCopy('IMAP UID MOVE/COPY failed: NO [TRYCREATE] Mailbox does not exist').en).toBe('That folder is not on this mailbox yet.')
+    expect(imapHumanCopy('IMAP UID MOVE/COPY failed: NO [TRYCREATE] Mailbox does not exist')).toBe('That folder is not on this mailbox yet.')
   })
 
   it('converts a mail date to UTC and keeps text that is not a date', () => {

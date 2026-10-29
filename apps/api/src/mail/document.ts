@@ -1,7 +1,8 @@
-import type { Limit } from '@xpanel/core'
+import type { Limit, Locale } from '@xpanel/core'
 import type { Db } from '@xpanel/db'
 import { ExtendedFeaturesStore, type EmailFilter, type StateStore } from '@xpanel/state'
-import { openMailboxSession, type MailboxTransport } from './inbox.ts'
+import { translator } from '../../../web/src/i18n.ts'
+import { mailboxSessionPassword, requireMailboxSessionRecord, type MailboxTransport } from './inbox.ts'
 
 export interface MailDocumentAttachment {
   name: string
@@ -150,12 +151,12 @@ export const smtpdMiltersConnected = smtpdMiltersConfigured
 export type DkimProbeStatus = 'signing' | 'refused' | 'unknown'
 
 /** The compose label. It names the probe result, never the presence of a milter line. */
-export const dkimIdentityLine = (status: DkimProbeStatus, selector: string | undefined, locale: 'en' | 'ar' = 'en'): string => {
-  const ar = locale === 'ar'
-  if (status === 'signing' && selector) return ar ? `OpenDKIM يوقّع بالمحدد ${selector}` : `OpenDKIM is signing with ${selector}`
-  if (status === 'signing') return ar ? 'OpenDKIM يوقّع' : 'OpenDKIM is signing'
-  if (status === 'refused') return ar ? 'OpenDKIM رفض الاتصال' : 'OpenDKIM refused the connection'
-  return ar ? 'حالة OpenDKIM غير معروفة' : 'OpenDKIM status unknown'
+export const dkimIdentityLine = (status: DkimProbeStatus, selector: string | undefined, locale?: Locale): string => {
+  const t = translator(locale)
+  if (status === 'signing' && selector) return t('OpenDKIM is signing with {selector}', { selector })
+  if (status === 'signing') return t('OpenDKIM is signing')
+  if (status === 'refused') return t('OpenDKIM refused the connection')
+  return t('OpenDKIM status unknown')
 }
 
 /** 10,240,000 B is 9.77 MiB and is shown as 10 MB. Values under 9.5 MB keep one decimal. */
@@ -219,11 +220,12 @@ export const loadMailDocument = async (input: {
   /** Public DKIM material from the live writer. The private key is not here. */
   dkimByDomain?: Readonly<Record<string, { selector: string; dnsTxt: string }>>
   zones?: readonly { name: string; records: readonly { name: string; type: string; content: string }[] }[]
-  locale?: 'en' | 'ar'
+  locale?: Locale
   reply?: { mode: 'reply' | 'reply-all' | 'forward'; uid: number }
 }): Promise<MailDocument> => {
   if (!input.sessionId) return { mailbox: '' }
-  const { record, password } = await openMailboxSession(input.db, input.serverSecret, input.sessionId)
+  const record = await requireMailboxSessionRecord(input.db, input.sessionId)
+  const password = mailboxSessionPassword(record, input.serverSecret)
   const snap = await input.store.readSnapshot()
   const serviceUser = snap.serviceUsers.find(user => user.accountId === record.accountId && user.login.toLowerCase() === record.mailbox)
   const extended = new ExtendedFeaturesStore(input.store.rootDir)
@@ -248,7 +250,7 @@ export const loadMailDocument = async (input: {
 
   try {
     const domain = (record.mailbox.split('@')[1] ?? '').toLowerCase()
-    const locale = input.locale === 'ar' ? 'ar' : 'en'
+    const locale = input.locale
     const auth = domain ? await extended.readEmailAuth(domain) : null
     const material = domain ? input.dkimByDomain?.[domain] : undefined
     const zone = input.zones?.find(item => item.name.toLowerCase() === domain)
@@ -269,8 +271,8 @@ export const loadMailDocument = async (input: {
       const zoneDmarc = zoneTxt(records, domain, '_dmarc').find(content => content.toLowerCase().startsWith('v=dmarc1'))
       const spf = zoneSpf ?? auth?.spfTxtValue ?? (material ? 'v=spf1 a mx ~all' : null)
       const dmarc = zoneDmarc ?? auth?.dmarcTxtValue ?? (material ? 'v=DMARC1; p=none' : null)
-      const spfLabel = spf ?? (locale === 'ar' ? 'سجل SPF غير موجود' : 'SPF record missing')
-      const dmarcLabel = dmarc ?? (locale === 'ar' ? 'سجل DMARC غير موجود' : 'DMARC record missing')
+      const spfLabel = spf ?? translator(locale)('SPF record missing')
+      const dmarcLabel = dmarc ?? translator(locale)('DMARC record missing')
       document.identitySpf = `${spfLabel} · ${dmarcLabel}`
     }
   } catch { /* unknown */ }
@@ -292,6 +294,11 @@ export const loadMailDocument = async (input: {
     }
   } catch { /* unknown */ }
 
+  // A handed-off session has no mailbox credential: the message list is unavailable, never empty.
+  if (password === null) {
+    document.mailListFailed = true
+    return document
+  }
   try {
     if (input.transport.quota) {
       const measured = await input.transport.quota(record.mailbox, password)

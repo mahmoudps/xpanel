@@ -9,7 +9,7 @@ const execute = (audience: string | null, kind: string, ar = false) => {
   const errors: unknown[][] = []
   let cleared = 0
   runInNewContext('function redirectToWorkspace() {' + match![1] + '\n}\nredirectToWorkspace()', {
-    principal: { kind }, ar, shell: { getAttribute: () => audience },
+    principal: { kind }, lang: ar ? 'ar' : 'en', shell: { getAttribute: () => audience },
     clearCredentials: () => { cleared++ }, clearEnrollment: () => { cleared++ },
     copy: { unexpected: 'Unexpected server response.' }, message: (...args: unknown[]) => errors.push(args),
     window: { location: { assign: (path: string) => paths.push(path) } },

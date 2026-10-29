@@ -1,8 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { randomUUID } from 'node:crypto'
-import { lstat, mkdtemp, readFile, rename, rm } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import { resolveServingDomain } from '@xpanel/core'
+import { constants } from 'node:fs'
+import { lstat, mkdtemp, open, readFile, rename, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, join, relative } from 'node:path'
 import {
   assertAliasTarget,
   assertArgon2Hash,
@@ -10,8 +12,16 @@ import {
   assertCapAvailable,
   assertDbNameOwned,
   assertDbPrivileges,
+  parseOwnerDatabaseStateRequest,
+  databaseRemoteAccessRevision,
+  parseDatabaseRemoteEntries,
   assertDomainUnique,
   assertEmail,
+  accountContactRevision,
+  assertAccountContactRevision,
+  assertAccountDomainGraph,
+  assertDomainWorkspaceRevision,
+  domainWorkspaceRevision,
   assertId,
   assertIdOrNull,
   assertInt,
@@ -57,9 +67,14 @@ import type {
   AccountStatus,
   Database,
   DatabaseUser,
+  DatabaseRemoteAccessEntry,
+  DatabaseRemoteAccessSnapshot,
+  DatabaseRemoteAccessTransaction,
   Domain,
   DomainCustomConfig,
   DomainKind,
+  DomainWorkspaceSource,
+  DomainWorkspaceTransition,
   FeatureList,
   FirewallRule,
   Id,
@@ -78,10 +93,18 @@ import type {
   AccountFilter,
   CronJobState,
   DnsZoneState,
+  DnsZoneMutationOptions,
+  CronMutationOptions,
+  CertificateMutationOptions,
   DomainPatch,
+  DomainMutationOptions,
+  DomainWorkspaceRead,
+  DatabaseMutationOptions,
   FirewallGuard,
   FirewallState,
   MutationOptions,
+  ServerSettingsMutationOptions,
+  RestoreGenerationMutationOptions,
   NewAccount,
   NewCertificate,
   NewDatabaseUser,
@@ -131,6 +154,7 @@ import {
   validateUidAllocator,
 } from './validate-state.ts'
 import { WriterLock, type WriterLease, type WriterLockOptions } from './writer-lock.ts'
+import { toPublicPostgresqlUser, validatePostgresqlDatabaseFile, validatePostgresqlUserFile, type PostgresqlUser, type StoredPostgresqlUser } from './pg-state.ts'
 
 export * from './writer-lock.ts'
 
@@ -143,6 +167,12 @@ const CAP_OF: Record<Exclude<DomainKind, 'primary'>, PlanCapKey> = {
   subdomain: 'subdomains',
 }
 const RULE_ID_MAX = 64
+
+interface MutationJournal {
+  recorded: boolean
+  restored: boolean
+  rollbackProjection?: () => Promise<void>
+}
 
 const mustExist = <T>(row: T | null | undefined, what: string, id: unknown): T =>
   row ?? fail('NOT_FOUND', `${what} not found`, { what, id: String(id).slice(0, 128) })
@@ -162,9 +192,25 @@ const toPublicAccount = (a: StoredAccount): Account => ({
   ipv4: a.ipv4,
   ...(a.ipv6 !== undefined && { ipv6: a.ipv6 }),
   ...(a.extraIps !== undefined && { extraIps: [...a.extraIps] }),
+  ...(a.databaseRemoteAccess !== undefined && { databaseRemoteAccess: a.databaseRemoteAccess.map(entry => ({ ...entry })) }),
   shell: a.shell,
   createdAt: a.createdAt,
 })
+
+const pinnedAccountPreimage = async (path: string): Promise<{ bytes: Buffer; identity: string }> => {
+  const before = await lstat(path, { bigint: true })
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n || before.size > 1024n * 1024n) fail('PRECONDITION_FAILED', 'account source is not a bounded regular file', { stateChanged: false })
+  const identity = (value: typeof before) => `${value.dev}:${value.ino}:${value.size}:${value.mtimeNs}:${value.ctimeNs}`
+  const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+  try {
+    const opened = await handle.stat({ bigint: true })
+    if (!opened.isFile() || identity(opened) !== identity(before)) fail('CONFLICT', 'account source changed while opening', { stateChanged: false })
+    const bytes = await handle.readFile()
+    const held = await handle.stat({ bigint: true }), named = await lstat(path, { bigint: true })
+    if (!named.isFile() || named.isSymbolicLink() || identity(held) !== identity(before) || identity(named) !== identity(before)) fail('CONFLICT', 'account source changed while reading', { stateChanged: false })
+    return { bytes, identity: identity(before) }
+  } finally { await handle.close() }
+}
 
 const toPublicServiceUser = (u: StoredServiceUser): ServiceUser => ({
   id: u.id,
@@ -439,6 +485,8 @@ export class StateStore {
     const serviceUsers: StoredServiceUser[] = []
     const databases: Database[] = []
     const databaseUsers: StoredDatabaseUser[] = []
+    const postgresqlDatabases: Database[] = []
+    const postgresqlUsers: StoredPostgresqlUser[] = []
     const cronJobs: CronJobState[] = []
     const domainCustomConfigs: DomainCustomConfig[] = []
 
@@ -487,6 +535,9 @@ export class StateStore {
         const dbu = validateDatabaseUserFile(await readJsonIfExists(duf), { account, databasesById: dbsById })
         databaseUsers.push(dbu)
       }
+      const postgresql = await this.readAccountPostgresqlUnlocked(account)
+      postgresqlDatabases.push(...postgresql.databases)
+      postgresqlUsers.push(...postgresql.users)
 
       const rawCron = await readJsonIfExists<unknown[]>(join(this.accountDir(username), 'cron.json'))
       if (rawCron !== null) {
@@ -500,6 +551,8 @@ export class StateStore {
     serviceUsers.sort((a, b) => a.login.localeCompare(b.login))
     databases.sort((a, b) => a.name.localeCompare(b.name))
     databaseUsers.sort((a, b) => a.name.localeCompare(b.name))
+    postgresqlDatabases.sort((a, b) => a.name.localeCompare(b.name))
+    postgresqlUsers.sort((a, b) => a.name.localeCompare(b.name))
     cronJobs.sort((a, b) => a.id.localeCompare(b.id))
     domainCustomConfigs.sort((a, b) => a.domainId.localeCompare(b.domainId))
 
@@ -522,6 +575,7 @@ export class StateStore {
       ...(domainCustomConfigs.length > 0 ? { domainCustomConfigs } : {}),
       ...(ipPool.length > 0 ? { ipPool } : {}),
       ...(mailIpConfig !== null ? { mailIpConfig } : {}),
+      ...(postgresqlUsers.length > 0 ? { postgresqlDatabases, postgresqlUsers } : {}),
     }
     return { ...base, checksum: checksumStateTree(base) }
   }
@@ -560,7 +614,32 @@ export class StateStore {
     })
   }
 
-  /** Changes the canonical hostname and its wizard projection under one explicit source lease. */
+  /**
+   * Pins an active account lifetime against termination and username reuse.
+   * Use local ports only; never reenter snapshots, mutations or agent RPC here.
+   * Host/read operations under this lease do not advance desired-state revision.
+   */
+  async withAccountLifecycleLease<T>(accountId: Id, operation: (account: Account) => Promise<T>): Promise<T> {
+    this.assertNotReentrant()
+    return this.mutex.run(() => this.runOperation(async () => {
+      const lease = await this.writerLock.acquire()
+      try {
+        const account = await this.lockStoredAccount(accountId)
+        if (account.status !== 'active') fail('PRECONDITION_FAILED', 'an active account is required', { stateChanged: false })
+        await lease.assertFencingToken()
+        const result = await operation(toPublicAccount(account))
+        await lease.assertFencingToken()
+        return result
+      } finally { await lease.release() }
+    }))
+  }
+
+  /** Coherent cron preparation; release the API-side lease before agent RPC. */
+  withCronAccountLease<T>(accountId: Id, operation: (account: Account, jobs: readonly CronJobState[]) => Promise<T>): Promise<T> {
+    return this.withAccountLifecycleLease(accountId, async account => operation(account, await this.listCronJobs(account.id)))
+  }
+
+  /** Changes canonical hostname and wizard projection under their source lease. */
   commitHostname<T extends { hostname: string; updatedAt: string }>(
     hostname: string,
     prepareWizard: (canonical: string, now: string) => Promise<T>,
@@ -605,17 +684,21 @@ export class StateStore {
     return s ? s.settings : null
   }
 
-  saveServerSettings(s: ServerSettings, opts?: MutationOptions): Promise<ServerSettings> {
+  saveServerSettings(s: ServerSettings, opts?: ServerSettingsMutationOptions): Promise<ServerSettings> {
     return this.withMutationLock(opts, async (lease) => {
       const validated = validateServerSettings(s)
       const current = await this.readServerFile()
+      await opts?.settingsGuard?.(current?.settings ?? null)
+      const settings = validated.defaultSite === undefined && current?.settings.defaultSite !== undefined
+        ? { ...validated, defaultSite: current.settings.defaultSite }
+        : validated
       const next: StoredServerSettings = {
-        settings: validated,
+        settings,
         setupCompletedAt: current?.setupCompletedAt ?? null,
         updatedAt: new Date().toISOString(),
       }
       await this.writeStateJson(lease, this.path('server.json'), next)
-      return validated
+      return settings
     })
   }
 
@@ -1390,6 +1473,60 @@ export class StateStore {
     })
   }
 
+  /** Contact metadata and its derived index share one writer lease and guarded compensation. */
+  async updateAccountContactEmail(
+    id: Id,
+    contactEmail: unknown,
+    ports: {
+      expectedContactRevision: string
+      authorize: (current: Account) => Promise<void>
+      prepareIndex: (current: Account) => Promise<() => Promise<void>>
+      synchronizeIndex: (updated: Account) => Promise<void>
+    },
+  ): Promise<Account> {
+    const email = assertEmail(contactEmail, 'contactEmail')
+    const expected = assertAccountContactRevision(ports.expectedContactRevision)
+    let intentRecorded = false
+    let restored = false
+    let restoreIndex: (() => Promise<void>) | undefined
+    let reason = 'contact_update_failed'
+    try {
+      return await this.withMutationLock(undefined, async lease => {
+        const current = mustExist(await this.findStoredAccountById(assertId(id)), 'account', id)
+        const account = toPublicAccount(current)
+        await ports.authorize(account)
+        if (accountContactRevision(account) !== expected) {
+          return fail('CONFLICT', 'account contact details changed; reload before saving', { reason: 'contact_revision_conflict', stateChanged: false })
+        }
+        restoreIndex = await ports.prepareIndex(account)
+        const relPath = `accounts/${current.username}/account.json`
+        const contentBase64 = (await readFile(this.path(relPath))).toString('base64')
+        await lease.recordIntent({ op: 'updateAccountContactEmail', createdRelPaths: [], backups: [{ relPath, existed: true, contentBase64 }] })
+        intentRecorded = true
+        const updated = toPublicAccount({ ...current, contactEmail: email })
+        await this.writeStateJson(lease, this.path(relPath), { ...current, contactEmail: email })
+        reason = 'contact_index_failed'
+        await ports.synchronizeIndex(updated)
+        reason = 'contact_commit_failed'
+        return updated
+      }, {
+        restoreAuthorityOnAbort: true,
+        onAbort: async lease => {
+          if (!intentRecorded) return
+          // Keep the state intent if index restoration fails, so recovery evidence survives.
+          await restoreIndex!()
+          await lease.rollbackIntent()
+          restored = true
+        },
+      })
+    } catch (error) {
+      if (!intentRecorded) throw error
+      return fail('SERVICE_UNAVAILABLE', 'account contact update requires verification', {
+        reason, verificationRequired: true, stateChanged: !restored, ...(!restored && { unknownOutcome: true }),
+      })
+    }
+  }
+
   // ---------------------------------------------------------------- domains
 
   async countDomainsByKind(accountId: Id): Promise<Record<DomainKind, number>> {
@@ -1410,8 +1547,161 @@ export class StateStore {
     return cid
   }
 
-  createDomain(input: NewDomain, opts?: MutationOptions): Promise<Domain> {
-    return this.withMutationLock(opts, async (lease) => {
+  private async domainWorkspaceUnlocked(accountId: Id): Promise<DomainWorkspaceRead> {
+    const account = mustExist(await this.findStoredAccountById(accountId), 'account', accountId)
+    const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
+    const features = mustExist(await this.getFeatureList(plan.featureListId), 'feature list', plan.featureListId)
+    const allDomains = await this.readAllDomainsUnlocked()
+    assertAccountDomainGraph(allDomains, account.id)
+    const domains = allDomains.filter(domain => domain.accountId === account.id)
+    const dependencies = domains.map(domain => ({ domainId: domain.id,
+      childCount: domains.filter(child => child.parentId === domain.id).length, serviceUserCount: 0 }))
+    const byId = new Map(dependencies.map(dependency => [dependency.domainId, dependency]))
+    const byName = new Map(domains.map(domain => [domain.name, domain.id]))
+    for (const file of await listJsonFiles(join(this.accountDir(account.username), 'users'))) {
+      const raw = await readJsonIfExists<Record<string, unknown>>(file)
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail('PRECONDITION_FAILED', 'service user configuration requires review', { stateChanged: false })
+      if (raw.accountId !== undefined && raw.accountId !== account.id) fail('PRECONDITION_FAILED', 'service user scope requires review', { stateChanged: false })
+      const bindings = new Set<Id>()
+      if (typeof raw.domainId === 'string') {
+        if (!byId.has(raw.domainId)) fail('PRECONDITION_FAILED', 'service user domain requires review', { stateChanged: false })
+        bindings.add(raw.domainId)
+      }
+      if (typeof raw.login === 'string') {
+        const name = raw.login.slice(raw.login.lastIndexOf('@') + 1).toLowerCase()
+        const bound = byName.get(name)
+        if (!bound) return fail('PRECONDITION_FAILED', 'service user domain requires review', { stateChanged: false })
+        bindings.add(bound)
+      }
+      if (!bindings.size) fail('PRECONDITION_FAILED', 'service user binding requires review', { stateChanged: false })
+      for (const id of bindings) byId.get(id)!.serviceUserCount++
+    }
+    const managedConfigDigests: Record<Id, string> = {}
+    for (const domain of domains) {
+      const file = join(this.accountDir(account.username), 'userdata', `${domain.id}.json`)
+      try {
+        const stat = await lstat(file)
+        if (!stat.isFile() || stat.isSymbolicLink()) fail('PRECONDITION_FAILED', 'managed domain configuration requires review', { stateChanged: false })
+        const bytes = await readFile(file)
+        JSON.parse(bytes.toString('utf8'))
+        managedConfigDigests[domain.id] = createHash('sha256').update(bytes).digest('hex')
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    }
+    const source: DomainWorkspaceSource = { account: toPublicAccount(account), plan, disabledFeatures: features.disabled,
+      domains, dependencies, managedConfigDigests }
+    return { source, revision: domainWorkspaceRevision(source) }
+  }
+
+  async readDomainWorkspace(accountId: Id): Promise<DomainWorkspaceRead> {
+    const aid = assertId(accountId, 'accountId')
+    this.assertNotReentrant()
+    return this.runOperation(async () => {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const before = await this.writerLock.readAuthorityAtBarrier()
+        let outcome: { value: DomainWorkspaceRead } | { error: unknown }
+        try { outcome = { value: await this.domainWorkspaceUnlocked(aid) } } catch (error) { outcome = { error } }
+        const after = await this.writerLock.readAuthorityAtBarrier()
+        if (before.revision === after.revision && before.fencingToken === after.fencingToken) {
+          if ('error' in outcome) throw outcome.error
+          return outcome.value
+        }
+      }
+      return this.mutex.run(async () => {
+        const lease = await this.writerLock.acquire()
+        try {
+          await lease.assertFencingToken()
+          const result = await this.domainWorkspaceUnlocked(aid)
+          await lease.assertFencingToken()
+          return result
+        } finally { await lease.release() }
+      })
+    })
+  }
+
+  private withJournaledMutation<T>(opts: MutationOptions | undefined, resource: 'domain' | 'database' | 'certificate',
+    onCommitted: ((revision: number) => void) | undefined,
+    fn: (lease: WriterLease, journal: MutationJournal) => Promise<T>): Promise<T> {
+    const journal: MutationJournal = { recorded: false, restored: false }
+    return this.withMutationLock(opts, lease => fn(lease, journal), {
+      restoreAuthorityOnAbort: true,
+      onAbort: async lease => {
+        if (!journal.recorded) return
+        await journal.rollbackProjection?.()
+        await lease.rollbackIntent()
+        journal.restored = true
+      },
+      onCommit: async (_lease, _result, authority) => { onCommitted?.(authority.revision) },
+    }).catch(error => {
+      if (!journal.recorded) {
+        if (isXpanelError(error)) return fail(error.code, error.message, { ...error.detail, stateChanged: false })
+        throw error
+      }
+      return fail('SERVICE_UNAVAILABLE', resource + ' configuration requires verification', {
+        reason: resource + '_state_unverified', stateChanged: !journal.restored,
+        verificationRequired: true, ...(!journal.restored && { unknownOutcome: true }),
+      })
+    })
+  }
+
+  private withDomainMutation<T>(opts: DomainMutationOptions | undefined,
+    fn: (lease: WriterLease, journal: MutationJournal) => Promise<T>): Promise<T> {
+    return this.withJournaledMutation(opts, 'domain', opts?.domainGuard?.onCommitted, fn)
+  }
+
+  private withDatabaseMutation<T>(opts: DatabaseMutationOptions | undefined,
+    fn: (lease: WriterLease, journal: MutationJournal) => Promise<T>): Promise<T> {
+    return this.withJournaledMutation(opts, 'database', opts?.onCommitted, fn)
+  }
+
+  private async authorizeDomainMutation(opts: DomainMutationOptions | undefined, account: StoredAccount, current: Domain | null): Promise<DomainWorkspaceRead> {
+    const guard = opts?.domainGuard
+    if (guard) {
+      if (guard.accountId !== account.id) fail('FORBIDDEN', 'domain scope is unavailable', { stateChanged: false })
+      await guard.authorize(toPublicAccount(account), current)
+    }
+    const workspace = await this.domainWorkspaceUnlocked(account.id)
+    if (guard && assertDomainWorkspaceRevision(guard.expectedRevision) !== workspace.revision) {
+      fail('CONFLICT', 'domain workspace changed; reload before retrying', { stateChanged: false })
+    }
+    return workspace
+  }
+
+  private async prepareDomainMutation(lease: WriterLease, journal: MutationJournal, opts: DomainMutationOptions | undefined,
+    account: StoredAccount, before: Domain[], after: Domain[], extraPaths: string[] = []): Promise<(() => Promise<void>) | undefined> {
+    const transition: DomainWorkspaceTransition = { account: toPublicAccount(account), before, after,
+      affectedIds: [...new Set([...before, ...after].map(domain => domain.id))] }
+    const projection = await opts?.domainGuard?.prepareProjection?.(transition)
+    const paths = [...new Set([...before, ...after].map(domain => join(this.accountDir(account.username), 'domains', `${domain.name}.json`)).concat(extraPaths))]
+    const backups: { relPath: string; existed: boolean; contentBase64?: string }[] = []
+    for (const file of paths) {
+      const relPath = relative(this.rootDir, file).replaceAll('\\', '/')
+      try {
+        const stat = await lstat(file)
+        if (!stat.isFile() || stat.isSymbolicLink()) fail('PRECONDITION_FAILED', 'domain configuration requires review', { stateChanged: false })
+        const bytes = await readFile(file)
+        const expected = before.find(domain => file === join(this.accountDir(account.username), 'domains', `${domain.name}.json`))
+        if (expected) {
+          const raw = JSON.parse(bytes.toString('utf8'))
+          if (raw.id !== expected.id || raw.accountId !== account.id || raw.name !== expected.name) fail('PRECONDITION_FAILED', 'domain source requires review', { stateChanged: false })
+        } else if (after.some(domain => file === join(this.accountDir(account.username), 'domains', `${domain.name}.json`))) {
+          fail('CONFLICT', 'domain source already exists', { stateChanged: false })
+        }
+        backups.push({ relPath, existed: true, contentBase64: bytes.toString('base64') })
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        if (before.some(domain => file === join(this.accountDir(account.username), 'domains', `${domain.name}.json`))) fail('PRECONDITION_FAILED', 'domain source is missing', { stateChanged: false })
+        backups.push({ relPath, existed: false })
+      }
+    }
+    journal.rollbackProjection = projection?.rollback
+    // Mark before publication: an uncertain journal rename must retain unknown outcome.
+    journal.recorded = true
+    await lease.recordIntent({ op: 'domainWorkspace', createdRelPaths: [], backups })
+    return projection?.apply
+  }
+
+  createDomain(input: NewDomain, opts?: DomainMutationOptions): Promise<Domain> {
+    return this.withDomainMutation(opts, async (lease, journal) => {
       if (typeof input !== 'object' || input === null) fail('VALIDATION', 'domain must be an object')
       const kind = oneOf(input.kind, KINDS, 'kind')
       if (kind === 'primary') fail('VALIDATION', 'the primary domain is created with the account; rename it instead')
@@ -1421,12 +1711,14 @@ export class StateStore {
       if ((kind === 'addon') !== (parentId === null)) fail('VALIDATION', `${kind} domains ${kind === 'addon' ? 'have no' : 'need a'} parent`)
 
       const account = await this.lockStoredAccount(input.accountId)
+      await this.authorizeDomainMutation(opts, account, null)
       const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
       const counts = await this.countDomainsByKind(account.id)
       assertCapAvailable(plan, { [capKey]: counts[kind] }, capKey)
 
       const allDomains = await this.readAllDomainsUnlocked()
       let docRoot = input.docRoot
+      let inheritedRuntime: Pick<Domain, 'siteType' | 'upstream' | 'redirect' | 'php'> | undefined
       if (parentId !== null) {
         const parent = mustExist(allDomains.find((d) => d.id === parentId), 'parent domain', parentId)
         if (parent.accountId !== account.id) fail('FORBIDDEN', 'parent domain belongs to another account')
@@ -1440,6 +1732,7 @@ export class StateStore {
             fail('VALIDATION', 'an alias uses the document root of the domain it points at', { docRoot: parent.docRoot })
           }
           docRoot = parent.docRoot
+          if (opts?.domainGuard?.safeLeaf) inheritedRuntime = { siteType: parent.siteType, upstream: parent.upstream, redirect: parent.redirect, php: parent.php }
         }
         if (kind === 'subdomain' && !name.endsWith(`.${parent.name}`)) {
           fail('VALIDATION', `subdomain must end with .${parent.name}`)
@@ -1454,6 +1747,7 @@ export class StateStore {
       const domain = validateDomainFile(
         {
           ...input,
+          ...inheritedRuntime,
           id: randomUUID(),
           accountId: account.id,
           name,
@@ -1466,7 +1760,9 @@ export class StateStore {
       )
       if (domain.ipv4 != null) assertIpAssignableToDomain(domain.ipv4, { expectedVersion: 4, account })
       if (domain.ipv6 != null) assertIpAssignableToDomain(domain.ipv6, { expectedVersion: 6, account })
+      const applyProjection = await this.prepareDomainMutation(lease, journal, opts, account, [], [domain])
       await this.writeStateJson(lease, join(this.accountDir(account.username), 'domains', `${domain.name}.json`), domain)
+      await applyProjection?.()
       return domain
     })
   }
@@ -1491,13 +1787,14 @@ export class StateStore {
     )
   }
 
-  updateDomain(id: Id, patch: DomainPatch, opts?: MutationOptions): Promise<Domain> {
-    return this.withMutationLock(opts, async (lease) => {
+  updateDomain(id: Id, patch: DomainPatch, opts?: DomainMutationOptions): Promise<Domain> {
+    return this.withDomainMutation(opts, async (lease, journal) => {
       if (typeof patch !== 'object' || patch === null) fail('VALIDATION', 'domain patch must be an object')
       const did = assertId(id, 'id')
       const allDomains = await this.readAllDomainsUnlocked()
       const current = mustExist(allDomains.find((d) => d.id === did), 'domain', id)
       const account = await this.lockStoredAccount(current.accountId)
+      await this.authorizeDomainMutation(opts, account, current)
       const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
       if (patch.docRoot !== undefined && current.kind === 'alias') {
         fail('VALIDATION', 'an alias uses the document root of the domain it points at')
@@ -1526,13 +1823,18 @@ export class StateStore {
       }
       if (next.ipv4 != null) assertIpAssignableToDomain(next.ipv4, { expectedVersion: 4, account })
       if (next.ipv6 != null) assertIpAssignableToDomain(next.ipv6, { expectedVersion: 6, account })
+      const aliases = patch.docRoot !== undefined && next.docRoot !== current.docRoot
+        ? allDomains.filter(d => d.accountId === account.id && d.parentId === current.id && d.kind === 'alias') : []
+      const updatedAliases = aliases.map(alias => ({ ...alias, docRoot: next.docRoot }))
+      const applyProjection = await this.prepareDomainMutation(lease, journal, opts, account, [current, ...aliases], [next, ...updatedAliases])
       await this.writeStateJson(lease, join(this.accountDir(account.username), 'domains', `${next.name}.json`), next)
       if (patch.docRoot !== undefined && next.docRoot !== current.docRoot) {
-        for (const alias of allDomains.filter((d) => d.parentId === current.id && d.kind === 'alias')) {
+        for (const alias of aliases) {
           const updatedAlias: Domain = { ...alias, docRoot: next.docRoot }
           await this.writeStateJson(lease, join(this.accountDir(account.username), 'domains', `${alias.name}.json`), updatedAlias)
         }
       }
+      await applyProjection?.()
       return next
     })
   }
@@ -1604,38 +1906,51 @@ export class StateStore {
     })
   }
 
-  deleteDomain(id: Id, opts?: MutationOptions): Promise<boolean> {
-    return this.withMutationLock(opts, async (lease) => {
+  deleteDomain(id: Id, opts?: DomainMutationOptions): Promise<boolean> {
+    return this.withDomainMutation(opts, async (lease, journal) => {
       if (!isUuid(id)) return false
       const did = id.toLowerCase()
       const allDomains = await this.readAllDomainsUnlocked()
       const current = allDomains.find((d) => d.id === did)
-      if (!current) return false
-      if (current.kind === 'primary') fail('PRECONDITION_FAILED', 'the primary domain is removed only with its account')
+      if (!current) {
+        if (opts?.domainGuard) fail('CONFLICT', 'domain no longer exists; reload before retrying', { stateChanged: false })
+        return false
+      }
       const account = mustExist(await this.findStoredAccountById(current.accountId), 'account', current.accountId)
+      const workspace = await this.authorizeDomainMutation(opts, account, current)
+      if (current.kind === 'primary') fail('PRECONDITION_FAILED', 'the primary domain is removed only with its account', { stateChanged: false })
+      if (opts?.domainGuard?.safeLeaf) {
+        const dependency = workspace.source.dependencies.find(item => item.domainId === current.id)!
+        if (dependency.childCount || dependency.serviceUserCount) fail('PRECONDITION_FAILED', 'remove dependent domains and service users first', { stateChanged: false, reason: 'domain_dependencies' })
+      }
       const toDelete = new Set<Id>([current.id])
       let added = true
       while (added) {
         added = false
         for (const d of allDomains) {
-          if (d.parentId && toDelete.has(d.parentId) && !toDelete.has(d.id)) {
+          if (d.accountId === account.id && d.parentId && toDelete.has(d.parentId) && !toDelete.has(d.id)) {
             toDelete.add(d.id)
             added = true
           }
         }
       }
       const pool = await this.readIpPoolFile()
-      for (const domain of allDomains.filter(domain => toDelete.has(domain.id))) this.assertDomainIpRelease(domain, account, pool, true)
-      for (const d of allDomains.filter((x) => toDelete.has(x.id))) {
+      const removing = allDomains.filter(domain => domain.accountId === account.id && toDelete.has(domain.id))
+      for (const domain of removing) this.assertDomainIpRelease(domain, account, pool, true)
+      const names = new Set(removing.map(domain => domain.name))
+      const userFiles: string[] = []
+      for (const file of await listJsonFiles(join(this.accountDir(account.username), 'users'))) {
+        const raw = await readJsonIfExists<{ domainId?: string; login?: string }>(file)
+        if ((raw?.domainId && toDelete.has(raw.domainId)) || (raw?.login && names.has(raw.login.slice(raw.login.lastIndexOf('@') + 1).toLowerCase()))) userFiles.push(file)
+      }
+      const userdata = removing.map(domain => join(this.accountDir(account.username), 'userdata', `${domain.id}.json`))
+      const applyProjection = await this.prepareDomainMutation(lease, journal, opts, account, removing, [], [...userdata, ...userFiles])
+      for (const d of removing) {
         await this.removeStatePath(lease, join(this.accountDir(account.username), 'domains', `${d.name}.json`))
-        await this.removeStatePath(lease, join(this.accountDir(account.username), 'userdata', `${d.id}.json`)).catch(() => false)
+        await this.removeStatePath(lease, join(this.accountDir(account.username), 'userdata', `${d.id}.json`))
       }
-      // Cascade service users on deleted domains
-      const userFiles = await listJsonFiles(join(this.accountDir(account.username), 'users'))
-      for (const uf of userFiles) {
-        const raw = await readJsonIfExists<{ domainId?: string }>(uf)
-        if (raw?.domainId && toDelete.has(raw.domainId)) await this.removeStatePath(lease, uf)
-      }
+      for (const file of userFiles) await this.removeStatePath(lease, file)
+      await applyProjection?.()
       return true
     })
   }
@@ -1848,9 +2163,22 @@ export class StateStore {
     return out.sort((a, b) => a.user.name.localeCompare(b.user.name))
   }
 
-  createDatabase(input: { accountId: Id; name: string }, opts?: MutationOptions): Promise<Database> {
-    return this.withMutationLock(opts, async (lease) => {
+  private async prepareDatabaseCreationIntent(lease: WriterLease, journal: MutationJournal,
+    opts: DatabaseMutationOptions | undefined, file: string): Promise<void> {
+    try {
+      await lstat(file)
+      return fail('PRECONDITION_FAILED', 'database configuration path already exists', { stateChanged: false })
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    opts?.onMutationStarted?.()
+    journal.recorded = true
+    await lease.recordIntent({ op: 'databaseWorkspaceCreate', createdRelPaths: [],
+      backups: [{ relPath: relative(this.rootDir, file).replaceAll('\\', '/'), existed: false }] })
+  }
+
+  createDatabase(input: { accountId: Id; name: string }, opts?: DatabaseMutationOptions): Promise<Database> {
+    return this.withDatabaseMutation(opts, async (lease, journal) => {
       const account = await this.lockStoredAccount(input.accountId)
+      await opts?.authorize?.(toPublicAccount(account))
       const name = assertDbNameOwned(account.username, input.name)
       const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
       const allDbs = await this.readAllDatabasesUnlocked()
@@ -1858,7 +2186,7 @@ export class StateStore {
         fail('CONFLICT', `database "${name}" already exists`, { name })
       }
       const liveCount = allDbs.filter((x) => x.db.accountId === account.id && x.db.trashedAt === null).length
-      assertCapAvailable(plan, { databases: liveCount }, 'databases')
+      assertCapAvailable(plan, { databases: liveCount + await this.livePostgresqlDatabases(account) }, 'databases')
       const db: Database = {
         id: randomUUID(),
         accountId: account.id,
@@ -1866,7 +2194,12 @@ export class StateStore {
         name,
         trashedAt: null,
       }
-      await this.writeStateJson(lease, join(this.accountDir(account.username), 'databases', `${db.name}.json`), db)
+      const projection = await opts?.prepareIndex?.(toPublicAccount(account), db)
+      journal.rollbackProjection = projection?.rollback
+      const file = join(this.accountDir(account.username), 'databases', `${db.name}.json`)
+      await this.prepareDatabaseCreationIntent(lease, journal, opts, file)
+      await this.writeStateJson(lease, file, db)
+      await projection?.apply()
       return db
     })
   }
@@ -1878,7 +2211,7 @@ export class StateStore {
   }
 
   /** Reads one account's database metadata under a lease without scanning other accounts. */
-  async readAccountDatabases(id: Id, hint?: { username: string }): Promise<{
+  async readAccountDatabases(id: Id, hint?: { username: string; includeTrashed?: boolean }): Promise<{
     databases: Database[]
     databaseUsers: DatabaseUser[]
   }> {
@@ -1907,13 +2240,131 @@ export class StateStore {
         }
         await lease.assertFencingToken()
         return {
-          databases: databases.filter(database => database.trashedAt === null).sort((a, b) => a.name.localeCompare(b.name)),
+          databases: databases.filter(database => hint?.includeTrashed || database.trashedAt === null).sort((a, b) => a.name.localeCompare(b.name)),
           databaseUsers: databaseUsers.sort((a, b) => a.name.localeCompare(b.name)),
         }
       } finally {
         await lease.release()
       }
     }))
+  }
+
+  private async databaseRemoteAccessUnlocked(accountId: Id): Promise<DatabaseRemoteAccessSnapshot> {
+    const account = await this.lockStoredAccount(accountId)
+    if (account.status !== 'active') fail('PRECONDITION_FAILED', 'an active account is required', { stateChanged: false })
+    const databases: Database[] = []
+    for (const file of await listJsonFiles(join(this.accountDir(account.username), 'databases'))) {
+      databases.push(validateDatabaseFile(await readJsonIfExists(file), account))
+    }
+    const databasesById = new Map(databases.map(database => [database.id, database]))
+    const users: StoredDatabaseUser[] = []
+    for (const file of await listJsonFiles(join(this.accountDir(account.username), 'db-users'))) {
+      users.push(validateDatabaseUserFile(await readJsonIfExists(file), { account, databasesById }))
+    }
+    return { account: toPublicAccount(account), databases: databases.sort((a, b) => a.name.localeCompare(b.name)), users: users.sort((a, b) => a.name.localeCompare(b.name)) }
+  }
+
+  /** Private service snapshot; stored authentication data must never be projected to an HTTP view. */
+  async readDatabaseRemoteAccess(accountId: Id): Promise<DatabaseRemoteAccessSnapshot> {
+    this.assertNotReentrant()
+    return this.mutex.run(() => this.runOperation(async () => {
+      const lease = await this.writerLock.acquire()
+      try {
+        const snapshot = await this.databaseRemoteAccessUnlocked(assertId(accountId))
+        await lease.assertFencingToken()
+        return snapshot
+      } finally { await lease.release() }
+    }))
+  }
+
+  /** One canonical account preimage and native compensation share the same fenced writer lease. */
+  async withDatabaseRemoteAccessLease<T>(accountId: Id, expectedRevision: string,
+    callback: (snapshot: DatabaseRemoteAccessSnapshot, tx: DatabaseRemoteAccessTransaction) => Promise<T>): Promise<T> {
+    if (!/^[0-9a-f]{64}$/.test(expectedRevision)) fail('VALIDATION', 'a current remote-access revision is required', { stateChanged: false })
+    let restore: (() => Promise<void>) | undefined
+    let intent = false
+    let committed = false
+    let writeStarted = false
+    let externalChange = false
+    let published: Awaited<ReturnType<typeof pinnedAccountPreimage>> | undefined
+    let accountPath = ''
+    return this.withMutationLock(undefined, async lease => {
+      const snapshot = await this.databaseRemoteAccessUnlocked(assertId(accountId))
+      if (databaseRemoteAccessRevision(snapshot) !== expectedRevision) fail('CONFLICT', 'database remote access changed; reload before saving', { stateChanged: false })
+      const relPath = `accounts/${snapshot.account.username}/account.json`
+      accountPath = this.path(relPath)
+      const preimage = await pinnedAccountPreimage(accountPath)
+      const original = JSON.parse(preimage.bytes.toString('utf8')) as Record<string, unknown>
+      if (JSON.stringify(toPublicAccount(validateAccountFile(original))) !== JSON.stringify(snapshot.account)) fail('CONFLICT', 'account lifetime changed before remote-access preparation', { stateChanged: false })
+      await lease.recordIntent({ op: 'databaseRemoteAccess', createdRelPaths: [], backups: [{ relPath, existed: true, contentBase64: preimage.bytes.toString('base64') }] })
+      intent = true
+      const result = await callback(snapshot, {
+        onAbort: operation => {
+          if (restore || committed || typeof operation !== 'function') fail('PRECONDITION_FAILED', 'remote-access recovery must be registered once before effects', { stateChanged: false })
+          restore = operation
+        },
+        commit: async (entries: DatabaseRemoteAccessEntry[]) => {
+          if (committed || !restore) fail('PRECONDITION_FAILED', 'remote-access commit requires one registered recovery operation', { stateChanged: false })
+          const canonical = parseDatabaseRemoteEntries(entries)
+          await lease.assertFencingToken()
+          let current: Awaited<ReturnType<typeof pinnedAccountPreimage>>
+          try { current = await pinnedAccountPreimage(accountPath) }
+          catch (error) { externalChange = true; throw error }
+          if (current.identity !== preimage.identity || !current.bytes.equals(preimage.bytes)) {
+            externalChange = true
+            fail('CONFLICT', 'account source changed outside the remote-access transaction', { stateChanged: false })
+          }
+          const next = { ...original, databaseRemoteAccess: canonical }
+          validateAccountFile(next)
+          writeStarted = true
+          await this.writeStateJson(lease, accountPath, next)
+          try { published = await pinnedAccountPreimage(accountPath) }
+          catch (error) { externalChange = true; throw error }
+          if (JSON.stringify(JSON.parse(published.bytes.toString('utf8'))) !== JSON.stringify(next)) {
+            externalChange = true
+            fail('SERVICE_UNAVAILABLE', 'remote-access metadata requires readback review', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
+          }
+          committed = true
+        },
+      })
+      if (!committed) fail('PRECONDITION_FAILED', 'remote-access transaction did not commit a canonical policy', { stateChanged: false })
+      let final: Awaited<ReturnType<typeof pinnedAccountPreimage>>
+      try { final = await pinnedAccountPreimage(accountPath) }
+      catch (error) { externalChange = true; throw error }
+      if (!published || final.identity !== published.identity || !final.bytes.equals(published.bytes)) {
+        externalChange = true
+        fail('SERVICE_UNAVAILABLE', 'remote-access source changed before acknowledgment', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
+      }
+      return result
+    }, { restoreAuthorityOnAbort: true, onAbort: async lease => {
+      if (!intent) return
+      if (!externalChange && writeStarted && published) {
+        try { const current = await pinnedAccountPreimage(accountPath); externalChange = current.identity !== published.identity || !current.bytes.equals(published.bytes) }
+        catch { externalChange = true }
+      }
+      if (externalChange) {
+        const failures: unknown[] = []
+        try { await lease.quarantineExternalAccountIntent(relative(this.rootDir, accountPath).replaceAll('\\', '/')) } catch (error) { failures.push(error) }
+        try { if (restore) await restore() } catch (error) { failures.push(error) }
+        if (failures.length) throw new AggregateError(failures, 'external account source was preserved; native recovery requires review')
+        return
+      }
+      let nativeRecoveryFailure: unknown
+      let nativeRecoveryFailed = false
+      try { if (restore) await restore() } catch (error) { nativeRecoveryFailed = true; nativeRecoveryFailure = error }
+      if (nativeRecoveryFailed) throw nativeRecoveryFailure
+      if (!writeStarted) { await lease.rollbackIntent(); return }
+      if (published) {
+        let current: Awaited<ReturnType<typeof pinnedAccountPreimage>>
+        try { current = await pinnedAccountPreimage(accountPath) }
+        catch (error) { await lease.quarantineExternalAccountIntent(relative(this.rootDir, accountPath).replaceAll('\\', '/')); throw error }
+        if (current.identity !== published.identity || !current.bytes.equals(published.bytes)) {
+          await lease.quarantineExternalAccountIntent(relative(this.rootDir, accountPath).replaceAll('\\', '/'), createHash('sha256').update(current.bytes).digest('hex'))
+          fail('SERVICE_UNAVAILABLE', 'external account changes were preserved; remote-access recovery requires review', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
+        }
+      }
+      await lease.rollbackIntent()
+    } })
   }
 
   async listDatabases(accountId: Id, opts: { includeTrashed?: boolean } = {}): Promise<Database[]> {
@@ -1924,31 +2375,52 @@ export class StateStore {
       .filter((d) => d.accountId === aid && (opts.includeTrashed ? true : d.trashedAt === null))
   }
 
-  trashDatabase(id: Id, opts?: MutationOptions): Promise<Database> {
-    return this.withMutationLock(opts, async (lease) => {
-      const did = assertId(id, 'id')
-      const entry = mustExist((await this.readAllDatabasesUnlocked()).find((x) => x.db.id === did), 'database', id)
-      if (entry.db.trashedAt !== null) return entry.db
-      const next: Database = { ...entry.db, trashedAt: new Date().toISOString() }
-      await this.writeStateJson(lease, join(this.accountDir(entry.username), 'databases', `${next.name}.json`), next)
-      return next
-    })
-  }
-
-  restoreDatabase(id: Id, opts?: MutationOptions): Promise<Database> {
-    return this.withMutationLock(opts, async (lease) => {
+  private changeDatabaseTrashState(id: Id, action: 'trash' | 'restore', opts?: DatabaseMutationOptions): Promise<Database> {
+    return this.withDatabaseMutation(opts, async (lease, journal) => {
       const did = assertId(id, 'id')
       const allDbs = await this.readAllDatabasesUnlocked()
       const entry = mustExist(allDbs.find((x) => x.db.id === did), 'database', id)
       const account = await this.lockStoredAccount(entry.db.accountId)
-      if (entry.db.trashedAt === null) return entry.db
-      const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
-      const liveCount = allDbs.filter((x) => x.db.accountId === account.id && x.db.trashedAt === null).length
-      assertCapAvailable(plan, { databases: liveCount }, 'databases')
-      const next: Database = { ...entry.db, trashedAt: null }
-      await this.writeStateJson(lease, join(this.accountDir(entry.username), 'databases', `${next.name}.json`), next)
+      await opts?.authorize?.(toPublicAccount(account))
+      if (opts?.stateGuard) {
+        const guard = parseOwnerDatabaseStateRequest(opts.stateGuard, action)
+        if (guard.confirmation !== entry.db.name || guard.expectedTrashedAt !== entry.db.trashedAt) {
+          fail('CONFLICT', 'database state changed; reload before retrying', { stateChanged: false })
+        }
+      }
+      if (action === 'trash' ? entry.db.trashedAt !== null : entry.db.trashedAt === null) return entry.db
+      if (action === 'restore') {
+        const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
+        const liveCount = allDbs.filter(x => x.db.accountId === account.id && x.db.trashedAt === null).length
+        assertCapAvailable(plan, { databases: liveCount + await this.livePostgresqlDatabases(account) }, 'databases')
+      }
+      const next: Database = { ...entry.db, trashedAt: action === 'trash' ? new Date().toISOString() : null }
+      const projection = await opts?.prepareTransitionIndex?.(toPublicAccount(account), entry.db, next)
+      const file = join(this.accountDir(entry.username), 'databases', `${next.name}.json`)
+      const stat = await lstat(file)
+      if (!stat.isFile() || stat.isSymbolicLink()) fail('PRECONDITION_FAILED', 'database configuration requires review', { stateChanged: false })
+      const bytes = await readFile(file)
+      const source = JSON.parse(bytes.toString('utf8'))
+      if (source.id !== next.id || source.accountId !== account.id || source.name !== next.name || source.trashedAt !== entry.db.trashedAt) {
+        fail('PRECONDITION_FAILED', 'database source requires review', { stateChanged: false })
+      }
+      opts?.onMutationStarted?.()
+      journal.rollbackProjection = projection?.rollback
+      journal.recorded = true
+      await lease.recordIntent({ op: 'databaseWorkspaceState', createdRelPaths: [],
+        backups: [{ relPath: relative(this.rootDir, file).replaceAll('\\', '/'), existed: true, contentBase64: bytes.toString('base64') }] })
+      await this.writeStateJson(lease, file, next)
+      await projection?.apply()
       return next
     })
+  }
+
+  trashDatabase(id: Id, opts?: DatabaseMutationOptions): Promise<Database> {
+    return this.changeDatabaseTrashState(id, 'trash', opts)
+  }
+
+  restoreDatabase(id: Id, opts?: DatabaseMutationOptions): Promise<Database> {
+    return this.changeDatabaseTrashState(id, 'restore', opts)
   }
 
   async listTrashedDatabasesBefore(cutoff: Date): Promise<Database[]> {
@@ -1980,9 +2452,10 @@ export class StateStore {
     })
   }
 
-  createDatabaseUser(input: NewDatabaseUser, opts?: MutationOptions): Promise<DatabaseUser> {
-    return this.withMutationLock(opts, async (lease) => {
+  createDatabaseUser(input: NewDatabaseUser, opts?: DatabaseMutationOptions): Promise<DatabaseUser> {
+    return this.withDatabaseMutation(opts, async (lease, journal) => {
       const account = await this.lockStoredAccount(input.accountId)
+      await opts?.authorize?.(toPublicAccount(account))
       const owned = assertDbNameOwned(account.username, input.name)
       const name = dbUserName(account.username, owned.slice(account.username.length + 1))
       const auth = assertDbAuth(input.authPlugin, input.authString)
@@ -1990,14 +2463,26 @@ export class StateStore {
       if (allUsers.some((u) => u.user.name === name)) {
         fail('CONFLICT', `database user "${name}" already exists`, { name })
       }
+      const grants: DatabaseUser['grants'] = []
+      if (input.initialGrant !== undefined) {
+        if (!input.initialGrant || typeof input.initialGrant !== 'object' || Array.isArray(input.initialGrant)) fail('VALIDATION', 'initial grant must be an object')
+        const databaseId = assertId(input.initialGrant.databaseId, 'databaseId')
+        const privileges = assertDbPrivileges(input.initialGrant.privileges)
+        const target = mustExist(await this.getDatabase(databaseId), 'database', databaseId)
+        if (target.accountId !== account.id) fail('FORBIDDEN', 'database belongs to another account')
+        if (target.trashedAt !== null) fail('PRECONDITION_FAILED', 'database is in the trash')
+        grants.push({ databaseId, privileges })
+      }
       const stored: StoredDatabaseUser = {
         id: randomUUID(),
         accountId: account.id,
         name,
         ...auth,
-        grants: [],
+        grants,
       }
-      await this.writeStateJson(lease, join(this.accountDir(account.username), 'db-users', `${stored.name}.json`), stored)
+      const file = join(this.accountDir(account.username), 'db-users', `${stored.name}.json`)
+      await this.prepareDatabaseCreationIntent(lease, journal, opts, file)
+      await this.writeStateJson(lease, file, stored)
       return toPublicDatabaseUser(stored)
     })
   }
@@ -2032,21 +2517,42 @@ export class StateStore {
     })
   }
 
-  setGrant(input: { databaseUserId: Id; databaseId: Id; privileges: string[] }, opts?: MutationOptions): Promise<DatabaseUser> {
-    return this.withMutationLock(opts, async (lease) => {
+  setGrant(input: { databaseUserId: Id; databaseId: Id; privileges: string[]; expectedPrivileges?: string[] | null }, opts?: DatabaseMutationOptions): Promise<DatabaseUser> {
+    return this.withDatabaseMutation(opts, async (lease, journal) => {
       const userId = assertId(input.databaseUserId, 'databaseUserId')
       const databaseId = assertId(input.databaseId, 'databaseId')
       const privileges = assertDbPrivileges(input.privileges)
       const userEntry = mustExist((await this.readAllDatabaseUsersUnlocked()).find((x) => x.user.id === userId), 'database user', userId)
+      const account = await this.lockStoredAccount(userEntry.user.accountId)
+      await opts?.authorize?.(toPublicAccount(account))
       const target = mustExist(await this.getDatabase(databaseId), 'database', databaseId)
       if (target.accountId !== userEntry.user.accountId) fail('FORBIDDEN', 'database belongs to another account')
       if (target.trashedAt !== null) fail('PRECONDITION_FAILED', 'database is in the trash')
+      if (Object.hasOwn(input, 'expectedPrivileges')) {
+        const expected = input.expectedPrivileges === null ? null : assertDbPrivileges(input.expectedPrivileges)
+        const current = userEntry.user.grants.find(grant => grant.databaseId === databaseId)?.privileges ?? null
+        if (JSON.stringify(expected) !== JSON.stringify(current)) {
+          fail('CONFLICT', 'database privileges changed; reload before retrying', { stateChanged: false })
+        }
+      }
       const grants = [
         ...userEntry.user.grants.filter((g) => g.databaseId !== databaseId),
         { databaseId, privileges },
       ].sort((a, b) => a.databaseId.localeCompare(b.databaseId))
       const next: StoredDatabaseUser = { ...userEntry.user, grants }
-      await this.writeStateJson(lease, join(this.accountDir(userEntry.username), 'db-users', `${next.name}.json`), next)
+      const file = join(this.accountDir(userEntry.username), 'db-users', `${next.name}.json`)
+      const stat = await lstat(file)
+      if (!stat.isFile() || stat.isSymbolicLink()) fail('PRECONDITION_FAILED', 'database user configuration requires review', { stateChanged: false })
+      const bytes = await readFile(file)
+      const source = JSON.parse(bytes.toString('utf8'))
+      if (source.id !== next.id || source.accountId !== account.id || source.name !== next.name) {
+        fail('PRECONDITION_FAILED', 'database user source requires review', { stateChanged: false })
+      }
+      opts?.onMutationStarted?.()
+      journal.recorded = true
+      await lease.recordIntent({ op: 'databaseWorkspaceGrant', createdRelPaths: [],
+        backups: [{ relPath: relative(this.rootDir, file).replaceAll('\\', '/'), existed: true, contentBase64: bytes.toString('base64') }] })
+      await this.writeStateJson(lease, file, next)
       return toPublicDatabaseUser(next)
     })
   }
@@ -2077,6 +2583,150 @@ export class StateStore {
     })
   }
 
+  // ---------------------------------------------------------------- PostgreSQL databases & users
+
+  private postgresqlPath(account: StoredAccount, kind: 'users' | 'databases', name: string): string {
+    return join(this.accountDir(account.username), 'postgresql', kind, `${name}.json`)
+  }
+
+  private async readAccountPostgresqlUnlocked(account: StoredAccount): Promise<{ databases: Database[]; users: StoredPostgresqlUser[] }> {
+    const dir = join(this.accountDir(account.username), 'postgresql')
+    const users: StoredPostgresqlUser[] = []
+    for (const file of await listJsonFiles(join(dir, 'users'))) users.push(validatePostgresqlUserFile(await readJsonIfExists(file), account))
+    const owners = new Set(users.map((user) => user.name))
+    const databases: Database[] = []
+    for (const file of await listJsonFiles(join(dir, 'databases'))) databases.push(validatePostgresqlDatabaseFile(await readJsonIfExists(file), account, owners))
+    return { databases: databases.sort((a, b) => a.name.localeCompare(b.name)), users: users.sort((a, b) => a.name.localeCompare(b.name)) }
+  }
+
+  /** Plans cap MariaDB and PostgreSQL databases together; trashed databases do not count. */
+  private async livePostgresqlDatabases(account: StoredAccount): Promise<number> {
+    return (await this.readAccountPostgresqlUnlocked(account)).databases.filter((database) => database.trashedAt === null).length
+  }
+
+  private async liveMariadbDatabases(account: StoredAccount): Promise<number> {
+    let count = 0
+    for (const file of await listJsonFiles(join(this.accountDir(account.username), 'databases'))) {
+      if (validateDatabaseFile(await readJsonIfExists(file), account).trashedAt === null) count++
+    }
+    return count
+  }
+
+  /** One account's PostgreSQL databases (trashed ones included) and users, without verifiers. */
+  async readAccountPostgresql(accountId: Id): Promise<{ databases: Database[]; users: PostgresqlUser[] }> {
+    this.assertNotReentrant()
+    return this.mutex.run(() => this.runOperation(async () => {
+      const lease = await this.writerLock.acquire()
+      try {
+        await lease.assertFencingToken()
+        const account = await this.findStoredAccountById(assertId(accountId, 'accountId'))
+        const read = account ? await this.readAccountPostgresqlUnlocked(account) : { databases: [], users: [] }
+        await lease.assertFencingToken()
+        return { databases: read.databases, users: read.users.map(toPublicPostgresqlUser) }
+      } finally {
+        await lease.release()
+      }
+    }))
+  }
+
+  private async lockPostgresqlAccount(accountId: Id, opts: DatabaseMutationOptions | undefined) {
+    const account = await this.lockStoredAccount(accountId)
+    await opts?.authorize?.(toPublicAccount(account))
+    return { account, ...(await this.readAccountPostgresqlUnlocked(account)) }
+  }
+
+  /** One journaled PostgreSQL state file change: `next` writes the file, null removes it. */
+  private async commitPostgresqlFile(lease: WriterLease, journal: MutationJournal, opts: DatabaseMutationOptions | undefined,
+    file: string, expected: 'absent' | 'present', next: object | null): Promise<void> {
+    let bytes: Buffer | null = null
+    try {
+      const stat = await lstat(file)
+      if (!stat.isFile() || stat.isSymbolicLink()) fail('PRECONDITION_FAILED', 'PostgreSQL configuration requires review', { stateChanged: false })
+      bytes = await readFile(file)
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    if ((bytes !== null) !== (expected === 'present')) fail('CONFLICT', 'PostgreSQL configuration changed; reload before retrying', { stateChanged: false })
+    opts?.onMutationStarted?.()
+    journal.recorded = true
+    await lease.recordIntent({ op: 'postgresqlWorkspace', createdRelPaths: [], backups: [{ relPath: relative(this.rootDir, file).replaceAll('\\', '/'),
+      existed: bytes !== null, ...(bytes !== null && { contentBase64: bytes.toString('base64') }) }] })
+    if (next) await this.writeStateJson(lease, file, next)
+    else await this.removeStatePath(lease, file)
+  }
+
+  createPostgresqlUser(input: { accountId: Id; name: string; authString: string }, opts?: DatabaseMutationOptions): Promise<PostgresqlUser> {
+    return this.withDatabaseMutation(opts, async (lease, journal) => {
+      const { account, users } = await this.lockPostgresqlAccount(input.accountId, opts)
+      const stored = validatePostgresqlUserFile({ id: randomUUID(), accountId: account.id, name: input.name, authPlugin: 'scram-sha-256', authString: input.authString }, account)
+      if (users.some((user) => user.name === stored.name)) fail('CONFLICT', `PostgreSQL user "${stored.name}" already exists`, { name: stored.name, stateChanged: false })
+      await this.commitPostgresqlFile(lease, journal, opts, this.postgresqlPath(account, 'users', stored.name), 'absent', stored)
+      return toPublicPostgresqlUser(stored)
+    })
+  }
+
+  setPostgresqlUserPassword(input: { accountId: Id; id: Id; authString: string }, opts?: DatabaseMutationOptions): Promise<PostgresqlUser> {
+    return this.withDatabaseMutation(opts, async (lease, journal) => {
+      const { account, users } = await this.lockPostgresqlAccount(input.accountId, opts)
+      const user = mustExist(users.find((item) => item.id === assertId(input.id, 'id')), 'PostgreSQL user', input.id)
+      const next = validatePostgresqlUserFile({ ...user, authString: input.authString }, account)
+      await this.commitPostgresqlFile(lease, journal, opts, this.postgresqlPath(account, 'users', user.name), 'present', next)
+      return toPublicPostgresqlUser(next)
+    })
+  }
+
+  /** A user that owns a database (in the trash or not) stays until that database is deleted. */
+  deletePostgresqlUser(input: { accountId: Id; id: Id }, opts?: DatabaseMutationOptions): Promise<PostgresqlUser> {
+    return this.withDatabaseMutation(opts, async (lease, journal) => {
+      const { account, users, databases } = await this.lockPostgresqlAccount(input.accountId, opts)
+      const user = mustExist(users.find((item) => item.id === assertId(input.id, 'id')), 'PostgreSQL user', input.id)
+      if (databases.some((database) => database.owner === user.name)) fail('PRECONDITION_FAILED', 'delete the PostgreSQL databases this user owns first', { stateChanged: false })
+      await this.commitPostgresqlFile(lease, journal, opts, this.postgresqlPath(account, 'users', user.name), 'present', null)
+      return toPublicPostgresqlUser(user)
+    })
+  }
+
+  createPostgresqlDatabase(input: { accountId: Id; name: string; owner: string }, opts?: DatabaseMutationOptions): Promise<Database> {
+    return this.withDatabaseMutation(opts, async (lease, journal) => {
+      const { account, users, databases } = await this.lockPostgresqlAccount(input.accountId, opts)
+      const database = validatePostgresqlDatabaseFile({ id: randomUUID(), accountId: account.id, engine: 'postgresql', name: input.name, owner: input.owner, trashedAt: null },
+        account, new Set(users.map((user) => user.name)))
+      if (databases.some((item) => item.name === database.name)) fail('CONFLICT', `PostgreSQL database "${database.name}" already exists`, { name: database.name, stateChanged: false })
+      const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
+      assertCapAvailable(plan, { databases: databases.filter((item) => item.trashedAt === null).length + await this.liveMariadbDatabases(account) }, 'databases')
+      await this.commitPostgresqlFile(lease, journal, opts, this.postgresqlPath(account, 'databases', database.name), 'absent', database)
+      return database
+    })
+  }
+
+  setPostgresqlDatabaseTrash(input: { accountId: Id; id: Id; action: 'trash' | 'restore' }, opts?: DatabaseMutationOptions): Promise<Database> {
+    return this.withDatabaseMutation(opts, async (lease, journal) => {
+      const { account, databases } = await this.lockPostgresqlAccount(input.accountId, opts)
+      const database = mustExist(databases.find((item) => item.id === assertId(input.id, 'id')), 'PostgreSQL database', input.id)
+      if (opts?.stateGuard) {
+        const guard = parseOwnerDatabaseStateRequest(opts.stateGuard, input.action)
+        if (guard.confirmation !== database.name || guard.expectedTrashedAt !== database.trashedAt) fail('CONFLICT', 'database state changed; reload before retrying', { stateChanged: false })
+      }
+      if (input.action === 'trash' ? database.trashedAt !== null : database.trashedAt === null) return database
+      if (input.action === 'restore') {
+        const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
+        assertCapAvailable(plan, { databases: databases.filter((item) => item.trashedAt === null).length + await this.liveMariadbDatabases(account) }, 'databases')
+      }
+      const next: Database = { ...database, trashedAt: input.action === 'trash' ? new Date().toISOString() : null }
+      await this.commitPostgresqlFile(lease, journal, opts, this.postgresqlPath(account, 'databases', database.name), 'present', next)
+      return next
+    })
+  }
+
+  /** Removes a trashed database from desired state; the caller drops it on the server first. */
+  purgePostgresqlDatabase(input: { accountId: Id; id: Id }, opts?: DatabaseMutationOptions): Promise<Database> {
+    return this.withDatabaseMutation(opts, async (lease, journal) => {
+      const { account, databases } = await this.lockPostgresqlAccount(input.accountId, opts)
+      const database = mustExist(databases.find((item) => item.id === assertId(input.id, 'id')), 'PostgreSQL database', input.id)
+      if (database.trashedAt === null) fail('PRECONDITION_FAILED', 'move the database to the trash first', { stateChanged: false })
+      await this.commitPostgresqlFile(lease, journal, opts, this.postgresqlPath(account, 'databases', database.name), 'present', null)
+      return database
+    })
+  }
+
   // ---------------------------------------------------------------- certificates, DNS zones & cron jobs
 
   createCertificate(input: NewCertificate, opts?: MutationOptions): Promise<StoredCertificate> {
@@ -2098,6 +2748,68 @@ export class StateStore {
     })
   }
 
+  /** Publish validated certificate metadata and its selected domain in one recoverable lease. */
+  saveCertificateBinding(input: NewCertificate, domainId: Id, opts?: CertificateMutationOptions): Promise<StoredCertificate> {
+    return this.withJournaledMutation(opts, 'certificate', undefined, async (lease, journal) => {
+      const cert = validateCertificateFile({ ...input, id: input.id ?? randomUUID(),
+        challenge: input.challenge ?? null, notBefore: input.notBefore ?? null, autoRenew: input.autoRenew ?? false,
+        chainPath: input.chainPath ?? null, fingerprintSha256: input.fingerprintSha256 ?? null, lastError: null, renewedAt: null })
+      if (cert.accountId === null) return fail('VALIDATION', 'an owned certificate is required for a domain binding', { stateChanged: false })
+      const account = await this.lockStoredAccount(cert.accountId)
+      if (account.status !== 'active') return fail('PRECONDITION_FAILED', 'an active account is required for certificate installation', { stateChanged: false })
+      const domains = await this.readAllDomainsUnlocked()
+      const domain = domains.find(row => row.id === assertId(domainId, 'domainId') && row.accountId === account.id)
+      if (!domain) return fail('NOT_FOUND', 'certificate domain not found', { stateChanged: false })
+      const current = await this.getCertificate(cert.id)
+      if (current && current.accountId !== account.id) return fail('NOT_FOUND', 'certificate not found', { stateChanged: false })
+      const exact = domains.map(row => ({ ...row, wildcard: false }))
+      const covers = (name: string): boolean => cert.names.some(candidate => candidate === name
+        || (candidate.startsWith('*.') && name.indexOf('.') > 0 && name.slice(name.indexOf('.') + 1) === candidate.slice(2)))
+      if (new Set(cert.names).size !== cert.names.length || cert.names.some(name => {
+        const owner = name.startsWith('*.') ? exact.find(row => row.name === name.slice(2)) : resolveServingDomain(name, exact)
+        return owner?.accountId !== account.id
+      })) return fail('FORBIDDEN', 'every certificate name must belong to this account', { stateChanged: false })
+      if (!covers(domain.name)) return fail('VALIDATION', 'certificate names do not cover this domain', { stateChanged: false })
+      if (current && current.names.some(name => !cert.names.includes(name))) return fail('CONFLICT', 'existing certificate names must be preserved', { stateChanged: false })
+      if (domains.some(row => row.certificateId === cert.id && (row.accountId !== account.id || !covers(row.name)))) return fail('CONFLICT', 'existing certificate assignments require review', { stateChanged: false })
+      await opts?.certificateGuard?.(current, domains)
+      const next = { ...domain, certificateId: cert.id }
+      const certFile = this.path('certificates', cert.id + '.json')
+      const domainFile = join(this.accountDir(account.username), 'domains', domain.name + '.json')
+      await this.prepareCertificateIntent(lease, journal, 'saveCertificateBinding', [
+        { file: certFile, current }, { file: domainFile, current: domain },
+      ])
+      await this.writeStateJson(lease, certFile, cert)
+      await this.writeStateJson(lease, domainFile, next)
+      if (JSON.stringify(await readJsonIfExists(certFile)) !== JSON.stringify(cert)
+        || JSON.stringify(await readJsonIfExists(domainFile)) !== JSON.stringify(next)) throw new Error('certificate_binding_readback_mismatch')
+      return cert
+    })
+  }
+
+  private async prepareCertificateIntent(lease: WriterLease, journal: MutationJournal, op: string,
+    files: { file: string; current: { id: Id; accountId: Id | null; name?: string } | null }[]): Promise<void> {
+    const backups: { relPath: string; existed: boolean; contentBase64?: string }[] = []
+    for (const { file, current } of files) {
+      const relPath = relative(this.rootDir, file).replaceAll('\\', '/')
+      try {
+        const stat = await lstat(file)
+        if (!stat.isFile() || stat.isSymbolicLink()) return fail('PRECONDITION_FAILED', 'certificate configuration requires review', { stateChanged: false })
+        const bytes = await readFile(file)
+        if (!current) return fail('CONFLICT', 'certificate source already exists', { stateChanged: false })
+        const raw = JSON.parse(bytes.toString('utf8'))
+        if (raw.id !== current.id || raw.accountId !== current.accountId || (current.name !== undefined && raw.name !== current.name)) return fail('PRECONDITION_FAILED', 'certificate source requires review', { stateChanged: false })
+        backups.push({ relPath, existed: true, contentBase64: bytes.toString('base64') })
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        if (current) return fail('PRECONDITION_FAILED', 'certificate source is missing', { stateChanged: false })
+        backups.push({ relPath, existed: false })
+      }
+    }
+    journal.recorded = true
+    await lease.recordIntent({ op, createdRelPaths: [], backups })
+  }
+
   async getCertificate(id: Id): Promise<StoredCertificate | null> {
     if (!isUuid(id)) return null
     const raw = await readJsonIfExists<unknown>(this.path('certificates', `${id.toLowerCase()}.json`))
@@ -2110,26 +2822,37 @@ export class StateStore {
     return aid === undefined ? all : all.filter((c) => c.accountId === aid)
   }
 
-  deleteCertificate(id: Id, opts?: MutationOptions): Promise<boolean> {
-    return this.withMutationLock(opts, async (lease) => {
+  deleteCertificate(id: Id, opts?: CertificateMutationOptions): Promise<boolean> {
+    return this.withJournaledMutation(opts, 'certificate', undefined, async (lease, journal) => {
       if (!isUuid(id)) return false
       const cid = id.toLowerCase()
-      // Unset certificateId on any domain using it
       const [accounts, domains] = await Promise.all([this.readAllAccountsUnlocked(), this.readAllDomainsUnlocked()])
+      const current = await this.getCertificate(cid)
+      await opts?.certificateGuard?.(current, domains)
+      if (!current) return false
       const accById = new Map(accounts.map((a) => [a.id, a]))
-      for (const d of domains.filter((x) => x.certificateId === cid)) {
-        const acc = accById.get(d.accountId)
-        if (acc) {
-          await this.writeStateJson(lease, join(this.accountDir(acc.username), 'domains', `${d.name}.json`), { ...d, certificateId: null })
-        }
+      const bound = domains.filter(row => row.certificateId === cid).map(domain => {
+        const account = mustExist(accById.get(domain.accountId), 'account', domain.accountId)
+        return { domain, file: join(this.accountDir(account.username), 'domains', domain.name + '.json') }
+      })
+      const certFile = this.path('certificates', cid + '.json')
+      await this.prepareCertificateIntent(lease, journal, 'deleteCertificateBindings', [
+        { file: certFile, current }, ...bound.map(({ domain, file }) => ({ file, current: domain })),
+      ])
+      for (const { domain, file } of bound) await this.writeStateJson(lease, file, { ...domain, certificateId: null })
+      if (!await this.removeStatePath(lease, certFile)) throw new Error('certificate_removal_unverified')
+      if (await readJsonIfExists(certFile) !== null) throw new Error('certificate_removal_readback_mismatch')
+      for (const { domain, file } of bound) {
+        if (JSON.stringify(await readJsonIfExists(file)) !== JSON.stringify({ ...domain, certificateId: null })) throw new Error('certificate_assignment_removal_readback_mismatch')
       }
-      return this.removeStatePath(lease, this.path('certificates', `${cid}.json`))
+      return true
     })
   }
 
-  saveDnsZone(zone: DnsZoneState, opts?: MutationOptions): Promise<DnsZoneState> {
+  saveDnsZone(zone: DnsZoneState, opts?: DnsZoneMutationOptions): Promise<DnsZoneState> {
     return this.withMutationLock(opts, async (lease) => {
       const validated = validateDnsZoneFile(zone)
+      await opts?.dnsGuard?.(await this.getDnsZone(validated.name))
       if (validated.accountId !== null) mustExist(await this.findStoredAccountById(validated.accountId), 'account', validated.accountId)
       await this.writeStateJson(lease, this.path('zones', `${validated.name}.json`), validated)
       return validated
@@ -2153,7 +2876,7 @@ export class StateStore {
     return aid === undefined ? all : all.filter((z) => z.accountId === aid)
   }
 
-  deleteDnsZone(name: string, opts?: MutationOptions): Promise<boolean> {
+  deleteDnsZone(name: string, opts?: DnsZoneMutationOptions): Promise<boolean> {
     return this.withMutationLock(opts, async (lease) => {
       let canonical: string
       try {
@@ -2161,15 +2884,17 @@ export class StateStore {
       } catch {
         return false
       }
+      await opts?.dnsGuard?.(await this.getDnsZone(canonical))
       return this.removeStatePath(lease, this.path('zones', `${canonical}.json`))
     })
   }
 
-  saveCronJobs(accountId: Id, jobs: CronJobState[], opts?: MutationOptions): Promise<CronJobState[]> {
+  saveCronJobs(accountId: Id, jobs: CronJobState[], opts?: CronMutationOptions): Promise<CronJobState[]> {
     return this.withMutationLock(opts, async (lease) => {
       const account = await this.lockStoredAccount(accountId)
       if (!Array.isArray(jobs)) fail('VALIDATION', 'jobs must be an array')
       const validated = jobs.map((j) => validateCronJob({ ...j, accountId: account.id }, account.id))
+      await opts?.cronGuard?.(toPublicAccount(account), await this.listCronJobs(account.id))
       await this.writeStateJson(lease, join(this.accountDir(account.username), 'cron.json'), validated)
       return validated
     })
@@ -2620,6 +3345,12 @@ export class StateStore {
     return readJsonIfExists<StateSnapshot>(this.path('generations', `${id}.json`))
   }
 
+  /** Read-only validation for guarded recovery admission; preserves the legacy raw reader. */
+  async readValidatedGenerationSnapshot(genId: number): Promise<StateSnapshot | null> {
+    const snapshot = await this.readGenerationSnapshot(genId)
+    return snapshot === null ? null : this.validateRestoreSnapshot(snapshot)
+  }
+
   private validateRestoreSnapshot(raw: unknown): StateSnapshot {
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return fail('VALIDATION', 'generation snapshot must be an object')
     const input = raw as Record<string, unknown>
@@ -2685,6 +3416,15 @@ export class StateStore {
     })
     restoreIndex(databaseUsers, (value) => value.id, 'database user')
     restoreIndex(databaseUsers, (value) => value.name, 'database user name')
+    const postgresqlUsers = collection('postgresqlUsers', true).map((value) => validatePostgresqlUserFile(value, accountFor(value)))
+    restoreIndex(postgresqlUsers, (value) => value.id, 'PostgreSQL user')
+    restoreIndex(postgresqlUsers, (value) => value.name, 'PostgreSQL user name')
+    const postgresqlDatabases = collection('postgresqlDatabases', true).map((value) => {
+      const account = accountFor(value)
+      return validatePostgresqlDatabaseFile(value, account, new Set(postgresqlUsers.filter((user) => user.accountId === account.id).map((user) => user.name)))
+    })
+    restoreIndex(postgresqlDatabases, (value) => value.id, 'PostgreSQL database')
+    restoreIndex(postgresqlDatabases, (value) => value.name, 'PostgreSQL database name')
     const cronJobs = collection('cronJobs').map((value) => validateCronJob(value, accountFor(value).id))
     restoreIndex(cronJobs, (value) => value.id, 'cron job')
     const domainCustomConfigs = collection('domainCustomConfigs', true).map((value) => {
@@ -2713,6 +3453,10 @@ export class StateStore {
       databaseUsers: databaseUsers.sort((a, b) => a.name.localeCompare(b.name)),
       cronJobs: cronJobs.sort((a, b) => a.id.localeCompare(b.id)),
       ...(domainCustomConfigs.length ? { domainCustomConfigs } : {}), ...(ipPool.length ? { ipPool } : {}), ...(mailIpConfig ? { mailIpConfig } : {}),
+      ...(postgresqlUsers.length ? {
+        postgresqlDatabases: postgresqlDatabases.sort((a, b) => a.name.localeCompare(b.name)),
+        postgresqlUsers: postgresqlUsers.sort((a, b) => a.name.localeCompare(b.name)),
+      } : {}),
     }
     normalized.domainCustomConfigs?.sort((a, b) => a.domainId.localeCompare(b.domainId))
     return { ...normalized, checksum: checksumStateTree(normalized) }
@@ -2735,6 +3479,8 @@ export class StateStore {
     for (const user of snap.serviceUsers) await this.writeStateJson(lease, accountPath(user.accountId, 'users', `${user.id}.json`), user)
     for (const database of snap.databases) await this.writeStateJson(lease, accountPath(database.accountId, 'databases', `${database.name}.json`), database)
     for (const user of snap.databaseUsers) await this.writeStateJson(lease, accountPath(user.accountId, 'db-users', `${user.name}.json`), user)
+    for (const user of snap.postgresqlUsers ?? []) await this.writeStateJson(lease, accountPath(user.accountId, 'postgresql', 'users', `${user.name}.json`), user)
+    for (const database of snap.postgresqlDatabases ?? []) await this.writeStateJson(lease, accountPath(database.accountId, 'postgresql', 'databases', `${database.name}.json`), database)
     for (const account of snap.accounts) {
       const jobs = snap.cronJobs.filter((job) => job.accountId === account.id)
       if (jobs.length) await this.writeStateJson(lease, accountPath(account.id, 'cron.json'), jobs)
@@ -2767,14 +3513,132 @@ export class StateStore {
     return this.readSnapshotUnderLease(lease, lease.initialAuthority.revision + 1)
   }
 
+  /** Applies one reviewed multi-file change: preimages of every touched path are journaled first, any failure restores them. */
+  private async journaledFileSet(lease: WriterLease, op: string, created: string[], touched: string[], build: () => Promise<{ writes: [string, unknown][]; removes: string[] }>): Promise<void> {
+    const backups: { relPath: string; existed: boolean; contentBase64?: string }[] = []
+    for (const file of new Set(touched)) {
+      const relPath = relative(this.rootDir, file).replaceAll('\\', '/')
+      try { backups.push({ relPath, existed: true, contentBase64: (await readFile(file)).toString('base64') }) }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; backups.push({ relPath, existed: false }) }
+    }
+    await lease.recordIntent({ op, createdRelPaths: created, backups })
+    try {
+      const { writes, removes } = await build()
+      const allowed = new Set(touched)
+      if ([...writes.map(([file]) => file), ...removes].some(file => !allowed.has(file) && !created.some(rel => relative(this.rootDir, file).replaceAll('\\', '/').startsWith(rel + '/')))) fail('PRECONDITION_FAILED', 'a journaled change touched an unplanned path')
+      for (const [file, value] of writes) await this.writeStateJson(lease, file, value)
+      for (const file of removes) await this.removeStatePath(lease, file)
+    } catch (error) {
+      await lease.rollbackIntent().catch(() => undefined)
+      throw error
+    }
+  }
+
+  /**
+   * Converts an addon domain into its own account in one journaled mutation. The new account takes the addon as its
+   * primary domain, with the addon's subdomains and aliases (document roots moved under the new home), their mail
+   * service users, DNS zones and certificates; the account keeps the source addresses. Pass the reviewed revision.
+   */
+  convertAddonDomain(input: AddonConversionInput, opts?: MutationOptions): Promise<AddonConversionResult> {
+    return this.withMutationLock(opts, async (lease) => {
+      const username = validateUsername(input.username)
+      const home = validateHome(`/home/${username}`)
+      const passwordHash = assertArgon2Hash(input.passwordHash)
+      const contactEmail = assertEmail(input.contactEmail, 'contactEmail')
+      const shell = oneOf(input.shell, SHELLS, 'shell')
+      const source = await this.lockStoredAccount(input.sourceAccountId)
+      if (source.status !== 'active') fail('PRECONDITION_FAILED', 'the source account must be active', { stateChanged: false })
+      const plan = mustExist(await this.getPlan(assertId(input.planId, 'planId')), 'plan', input.planId)
+      this.assertPlanUsable(plan, null)
+      const [accounts, resellers, domains, users, zones, certificates, pool, mailIpConfig, server] = await Promise.all([this.readAllAccountsUnlocked(), this.readResellerFiles(), this.readAllDomainsUnlocked(),
+        this.readAllServiceUsersUnlocked(), this.readZoneFiles(), this.readCertificateFiles(), this.readIpPoolFile(), this.readMailIpConfigFile(), this.readServerFile()])
+      if (accounts.some(a => a.username === username) || resellers.some(r => r.username.toLowerCase() === username)) fail('CONFLICT', `username "${username}" is already taken`, { stateChanged: false })
+      const addon = mustExist(domains.find(d => d.id === input.domainId && d.kind === 'addon' && d.accountId === source.id), 'addon domain', input.domainId)
+      const moved = [addon]
+      for (let i = 0; i < moved.length; i++) moved.push(...domains.filter(d => d.parentId === moved[i]!.id && !moved.includes(d)))
+      const movedIds = new Set(moved.map(d => d.id)), names = new Set(moved.map(d => d.name))
+      const docRoot = defaultDocRoot({ home, username }, 'primary', addon.name)
+      const remap = (path: string): string => path === addon.docRoot ? docRoot : path.startsWith(addon.docRoot + '/') ? docRoot + path.slice(addon.docRoot.length)
+        : fail('PRECONDITION_FAILED', 'a subdomain of the addon has its document root outside the addon document root', { stateChanged: false })
+      const movedUsers = users.filter(u => movedIds.has(u.domainId))
+      if (movedUsers.some(u => Object.entries(u.services).some(([service, on]) => service !== 'email' && on))) fail('PRECONDITION_FAILED', 'move or remove the FTP and WebDisk users of this domain first', { stateChanged: false })
+      const certIds = new Set(moved.flatMap(d => d.certificateId ? [d.certificateId] : []))
+      if (domains.some(d => !movedIds.has(d.id) && d.certificateId !== null && certIds.has(d.certificateId))) fail('PRECONDITION_FAILED', 'a certificate of this domain also serves a domain that stays', { stateChanged: false })
+      for (const d of moved) if (await readJsonIfExists(join(this.accountDir(source.username), 'userdata', `${d.id}.json`)) !== null) fail('PRECONDITION_FAILED', 'remove the custom web server configuration of this domain first', { stateChanged: false })
+      for (const [kind, key] of [['subdomain', 'subdomains'], ['alias', 'aliasDomains']] as const) {
+        const cap = plan.caps[key], count = moved.filter(d => d.kind === kind).length
+        if (cap !== 'unlimited' && count > cap) fail('LIMIT_EXCEEDED', `the plan allows ${cap} ${key}; the domain brings ${count}`, { stateChanged: false })
+      }
+      const mailCap = plan.caps.mailboxes, mailboxes = movedUsers.filter(u => u.services.email).length
+      if (mailCap !== 'unlimited' && mailboxes > mailCap) fail('LIMIT_EXCEEDED', `the plan allows ${mailCap} mailboxes; the domain brings ${mailboxes}`, { stateChanged: false })
+      const accountId = randomUUID()
+      const ips = resolveAccountIpAssignment({ ipv4: source.ipv4, ...(source.ipv6 ? { ipv6: source.ipv6 } : {}) }, { accountId, ownerId: null, planDedicatedIp: plan.dedicatedIp, reseller: null, pool, allAccounts: accounts, domains, mailIpConfig })
+      const reserved = new Set<number>(server ? [server.settings.panelPort, server.settings.sshPort, server.settings.backendPort, server.settings.backendTlsPort] : [])
+      const sourceDir = this.accountDir(source.username), targetDir = this.accountDir(username)
+      const zoneFiles = zones.filter(z => names.has(z.name)), certFiles = certificates.filter(c => certIds.has(c.id))
+      const removes = [...moved.map(d => join(sourceDir, 'domains', `${d.name}.json`)), ...movedUsers.map(u => join(sourceDir, 'users', `${u.id}.json`))]
+      const rewrites = [...zoneFiles.map(z => this.path('zones', `${z.name}.json`)), ...certFiles.map(c => this.path('certificates', `${c.id}.json`))]
+      let result!: AddonConversionResult
+      await this.journaledFileSet(lease, 'convertAddonDomain', [`accounts/${username}`], [...removes, ...rewrites, this.path('uid-allocator.json')], async () => {
+        const uid = await this.allocateUidUnlocked(lease, username)
+        const account: StoredAccount = { id: accountId, username, uid, gid: uid, home, primaryDomain: addon.name, planId: plan.id, ownerId: null, status: 'active', suspendReason: null, suspendedAt: null,
+          contactEmail, ipv4: ips.ipv4, ...(ips.ipv6 !== undefined && { ipv6: ips.ipv6 }), ...(ips.extraIps !== undefined && { extraIps: ips.extraIps }), shell, createdAt: new Date().toISOString() }
+        const nextDomains = moved.map(d => validateDomainFile({ ...d, accountId, kind: d.id === addon.id ? 'primary' : d.kind, parentId: d.id === addon.id ? null : d.parentId, docRoot: remap(d.docRoot) }, { account, plan, reservedLoopbackPorts: reserved }))
+        const byId = new Map(nextDomains.map(d => [d.id, d]))
+        const nextUsers = movedUsers.map(u => validateServiceUserFile({ ...u, accountId }, { account, plan, domainsById: byId }))
+        result = { account: toPublicAccount(account), domains: nextDomains.map(d => d.name), serviceUsers: nextUsers.map(u => u.login), zones: zoneFiles.map(z => z.name), certificates: certFiles.map(c => c.id) }
+        return { removes, writes: [
+          ...nextDomains.map((d): [string, unknown] => [join(targetDir, 'domains', `${d.name}.json`), d]),
+          ...nextUsers.map((u): [string, unknown] => [join(targetDir, 'users', `${u.id}.json`), u]),
+          ...zoneFiles.map((z): [string, unknown] => [this.path('zones', `${z.name}.json`), validateDnsZoneFile({ ...z, accountId })]),
+          ...certFiles.map((c): [string, unknown] => [this.path('certificates', `${c.id}.json`), validateCertificateFile({ ...c, accountId })]),
+          [join(targetDir, 'account.json'), account],
+        ] }
+      })
+      return result
+    })
+  }
+
+  /**
+   * Undoes convertAddonDomain while the new account still holds exactly the converted domains and mail users: the
+   * original domain records return to the source account and the new account's files are removed. Its UID stays burnt.
+   */
+  revertAddonConversion(input: { accountId: Id; sourceAccountId: Id; domains: readonly Domain[] }, opts?: MutationOptions): Promise<{ domains: string[] }> {
+    return this.withMutationLock(opts, async (lease) => {
+      const target = await this.lockStoredAccount(input.accountId), source = await this.lockStoredAccount(input.sourceAccountId)
+      const plan = mustExist(await this.getPlan(source.planId), 'plan', source.planId)
+      const [domains, users, zones, certificates, server] = await Promise.all([this.readAllDomainsUnlocked(), this.readAllServiceUsersUnlocked(), this.readZoneFiles(), this.readCertificateFiles(), this.readServerFile()])
+      const current = domains.filter(d => d.accountId === target.id), ids = new Set(input.domains.map(d => d.id))
+      if (current.length !== ids.size || current.some(d => !ids.has(d.id))) fail('CONFLICT', 'the converted account changed; it cannot be reverted automatically', { stateChanged: false })
+      if (await readJsonIfExists(join(this.accountDir(target.username), 'cron.json')) !== null || (await listJsonFiles(join(this.accountDir(target.username), 'databases'))).length) fail('CONFLICT', 'the converted account has new resources; it cannot be reverted automatically', { stateChanged: false })
+      const reserved = new Set<number>(server ? [server.settings.panelPort, server.settings.sshPort, server.settings.backendPort, server.settings.backendTlsPort] : [])
+      const restored = input.domains.map(d => validateDomainFile({ ...d, accountId: source.id }, { account: source, plan, reservedLoopbackPorts: reserved }))
+      const byId = new Map([...domains.filter(d => d.accountId === source.id), ...restored].map(d => [d.id, d]))
+      const movedUsers = users.filter(u => u.accountId === target.id)
+      const nextUsers = movedUsers.map(u => validateServiceUserFile({ ...u, accountId: source.id }, { account: source, plan, domainsById: byId }))
+      const names = new Set(restored.map(d => d.name)), targetDir = this.accountDir(target.username), sourceDir = this.accountDir(source.username)
+      const zoneFiles = zones.filter(z => names.has(z.name) && z.accountId === target.id), certFiles = certificates.filter(c => c.accountId === target.id)
+      const removes = [...current.map(d => join(targetDir, 'domains', `${d.name}.json`)), ...movedUsers.map(u => join(targetDir, 'users', `${u.id}.json`)), join(targetDir, 'account.json')]
+      const writes: [string, unknown][] = [
+        ...restored.map((d): [string, unknown] => [join(sourceDir, 'domains', `${d.name}.json`), d]),
+        ...nextUsers.map((u): [string, unknown] => [join(sourceDir, 'users', `${u.id}.json`), u]),
+        ...zoneFiles.map((z): [string, unknown] => [this.path('zones', `${z.name}.json`), validateDnsZoneFile({ ...z, accountId: source.id })]),
+        ...certFiles.map((c): [string, unknown] => [this.path('certificates', `${c.id}.json`), validateCertificateFile({ ...c, accountId: source.id })]),
+      ]
+      await this.journaledFileSet(lease, 'revertAddonConversion', [], [...removes, ...writes.map(([file]) => file)], async () => ({ writes, removes }))
+      return { domains: restored.map(d => d.name) }
+    })
+  }
+
   /** Validates before mutation and rolls back ordinary publication failures under the cross-process writer lock. */
-  restoreGenerationSnapshot(genId: number, opts?: MutationOptions): Promise<StateSnapshot> {
+  restoreGenerationSnapshot(genId: number, opts?: RestoreGenerationMutationOptions): Promise<StateSnapshot> {
     const artifacts: string[] = []
     return this.withMutationLock(
       opts,
       async (lease) => {
         const id = this.assertGenId(genId)
         const snap = this.validateRestoreSnapshot(mustExist(await readJsonIfExists<unknown>(this.path('generations', `${id}.json`)), 'generation snapshot', id))
+        if (opts?.restoreGuard) await opts.restoreGuard(await this.readSnapshotUnderLease(lease), snap)
         const currentUids = await this.readUidAllocatorFile()
         const allocated = new Map(currentUids.allocated.map((allocation) => [allocation.uid, allocation]))
         for (const allocation of snap.uidAllocator.allocated) {
@@ -2807,6 +3671,10 @@ export class StateStore {
     )
   }
 }
+
+/** StateStore.convertAddonDomain: the reviewed addon, the new account name and plan, and an unusable password hash. */
+export interface AddonConversionInput { sourceAccountId: Id; domainId: Id; username: string; planId: Id; passwordHash: string; contactEmail: string; shell: ShellAccess }
+export interface AddonConversionResult { account: Account; domains: string[]; serviceUsers: string[]; zones: string[]; certificates: string[] }
 
 export const createStateStore = (rootDir: string, hooks: StateStoreHooks = {}): StateStore => new StateStore(rootDir, hooks)
 

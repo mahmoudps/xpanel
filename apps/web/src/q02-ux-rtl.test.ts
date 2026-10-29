@@ -1,10 +1,12 @@
 import { SYNTHETIC_WEBSITE_ANALYTICS, SYNTHETIC_WHM_IO_SNAPSHOT } from '../../../tests/fixtures/analytics-snapshots.ts'
 import assert from 'node:assert/strict'
+import { runInNewContext } from 'node:vm'
+import * as readableDateTimeTokens from './tokens.ts'
 import { describe, it } from 'vitest'
 import { defaultPlan, type Account } from '@xpanel/core'
 import { renderWebApp, serveStaticAsset } from './app.ts'
+import { localeDirection, translator } from './i18n.ts'
 import {
-  dirForLocale,
   formatAsciiBytes,
   formatAsciiDate,
   formatUtcClock,
@@ -13,8 +15,7 @@ import {
   formatAsciiPercent,
   normalizeAsciiDigits,
   renderLtrValue,
-  t,
-} from './i18n.ts'
+} from './tokens.ts'
 import { renderMailSurface, type MailSurfaceProps } from './surfaces/xmail.ts'
 import { renderPanelSurface, type PanelSurfaceProps } from './surfaces/xpanel.ts'
 import { renderWhmSurface, type WhmSurfaceProps } from './surfaces/xwhm.ts'
@@ -51,11 +52,11 @@ describe('H03 & Q02 — Bilingual UX/UI, RTL <bdi dir="ltr"> isolation, ASCII di
     assert.equal(formatAsciiNumber(1234567.89, { decimals: 2 }), '1,234,567.89')
     assert.equal(formatAsciiBytes(15 * 1024 * 1024), '15.7 MB')
     assert.equal(formatAsciiPercent(84.5), '84.5%')
-    assert.equal(formatAsciiDate('2026-10-22T14:05:09.000Z', { includeTime: true }), '2026-10-22 14:05:09 UTC')
+    assert.equal(formatAsciiDate('2026-10-22T14:05:09.000Z', { includeTime: true }), '2026-10-22 14:05 UTC')
     assert.equal(formatUtcClock('2026-10-22T17:29:00.000Z'), '17:29 UTC')
     assert.equal(formatUtcDay('2026-10-22T22:30:00.000Z'), '2026-10-22 UTC')
 
-    const arTranslated = t('ar', 'reconcile.meta.summary', {
+    const arTranslated = translator('ar')('{filesCount} files · {durationMs} ms · sha256 {checksum}', {
       filesCount: '٣٨',
       durationMs: 184,
       checksum: '9f86d081884c',
@@ -81,9 +82,25 @@ describe('H03 & Q02 — Bilingual UX/UI, RTL <bdi dir="ltr"> isolation, ASCII di
     }
   })
 
+  it('preserves the complete observed SHA256 checksum in isolated reconcile metadata for English and Arabic', () => {
+    const checksum = '0123456789abcdef'.repeat(4)
+    for (const locale of ['en', 'ar'] as const) {
+      const live = createLiveEventStore()
+      assert.doesNotMatch(renderReconcileBanner(live.getState(), locale), /class="xp-reconcile-meta /)
+      live.dispatch({ id: 'full-checksum-event', at: '2026-10-27T10:30:00Z', kind: 'reconcile.applied', scope: { accountId: null }, data: { generationId: 143, stateChecksum: checksum, filesCount: 38, durationMs: 184 } })
+      const html = renderReconcileBanner(live.getState(), locale)
+      const metadata = html.match(/<span class="xp-reconcile-meta [^>]*>([\s\S]*?)<\/span>/)?.[1]
+      assert.ok(metadata, 'Observed reconciliation includes its metadata')
+      const checksumValue = metadata.match(/<bdi dir="ltr"[^>]*>([^<]+)<\/bdi>/)?.[1]
+      assert.equal(checksumValue, checksum, 'The visible checksum retains every observed character')
+      assert.equal(live.getState().reconcile.stateChecksum, checksum, 'Display does not alter observed state')
+      assert.equal(EASTERN_ARABIC_DIGIT_RE.test(metadata), false)
+    }
+  })
+
   it('A56 & A57: enforces RTL document direction, <bdi dir="ltr"> isolation on technical tokens, and inline-start alignment for LTR inputs in RTL', () => {
-    assert.equal(dirForLocale('ar'), 'rtl')
-    assert.equal(dirForLocale('en'), 'ltr')
+    assert.equal(localeDirection('ar'), 'rtl')
+    assert.equal(localeDirection('en'), 'ltr')
 
     const isolatedJob = renderLtrValue('JOB-٠٠٠١٤٢', 'xp-mono')
     assert.equal(isolatedJob, '<bdi dir="ltr" class="xp-mono">JOB-000142</bdi>')
@@ -220,5 +237,80 @@ describe('H03 & Q02 — Bilingual UX/UI, RTL <bdi dir="ltr"> isolation, ASCII di
     assert.ok(missingRes)
     assert.equal(missingRes.status, 404)
     assert.equal(serveStaticAsset('/panel'), null)
+  })
+})
+
+describe('readable datetime presentation', () => {
+  type Value = string | Date | null | undefined
+  type Formatter = (value: Value) => string
+  const published = readableDateTimeTokens as typeof readableDateTimeTokens & { formatDisplayDateTime?: Formatter; DISPLAY_DATETIME_BINDING?: string }
+  const formatter = (mode: 'server' | 'serialized'): Formatter => {
+    if (mode === 'server') {
+      assert.equal(typeof published.formatDisplayDateTime, 'function', 'The shared server formatter is exported')
+      return published.formatDisplayDateTime!
+    }
+    assert.equal(typeof published.DISPLAY_DATETIME_BINDING, 'string', 'The shared browser expression is exported')
+    const sandbox: Record<string, unknown> = {}
+    const display = runInNewContext(published.DISPLAY_DATETIME_BINDING!, sandbox) as Formatter
+    assert.equal(typeof display, 'function')
+    assert.deepEqual(Object.keys(sandbox), [], 'The expression keeps dependencies local without window globals')
+    return display
+  }
+  for (const mode of ['server', 'serialized'] as const) {
+    describe(mode, () => {
+      it('renders the fixed readable YYYY-MM-DD HH:mm UTC example', () => {
+        assert.equal(formatter(mode)('2026-10-27T09:01:02.000Z'), '2026-10-27 09:01 UTC')
+      })
+      it('drops seconds and every supplied fractional digit', () => {
+        const display = formatter(mode)
+        assert.equal(display('2026-10-27T09:01:02.234567Z'), '2026-10-27 09:01 UTC')
+        assert.equal(display('2026-10-27T09:01:02.000001Z'), '2026-10-27 09:01 UTC')
+        assert.equal(display('2026-10-27T09:01:02.1200Z'), '2026-10-27 09:01 UTC')
+      })
+      it('shows whole and all-zero fractional seconds to the minute', () => {
+        const display = formatter(mode)
+        assert.equal(display('2026-10-27T09:01:02.000000Z'), '2026-10-27 09:01 UTC')
+        assert.equal(display('2026-10-27T09:01:02Z'), '2026-10-27 09:01 UTC')
+      })
+      it('converts explicit offsets and midnight/year boundaries to UTC', () => {
+        const display = formatter(mode)
+        assert.equal(display('2026-10-27T11:31:02.234567+02:30'), '2026-10-27 09:01 UTC')
+        assert.equal(display('2026-10-27T00:15:00.000+03:00'), '2026-10-26 21:15 UTC')
+        assert.equal(display('2026-12-31T23:45:00.000-02:30'), '2027-01-01 02:15 UTC')
+      })
+      it('uses ASCII digits for normalized input and output', () => {
+        const input = '\u0662\u0660\u0662\u0666-\u0661\u0660-\u0662\u0667T\u0660\u0669:\u0660\u0661:\u0660\u0662.\u0661\u0662\u0660\u0660Z'
+        const shown = formatter(mode)(input)
+        assert.equal(shown, '2026-10-27 09:01 UTC')
+        assert.equal(EASTERN_ARABIC_DIGIT_RE.test(shown), false)
+      })
+      it('shows a clear unavailable value for invalid or unzoned input', () => {
+        const display = formatter(mode)
+        for (const input of [null, undefined, '', 'not-a-date', '2026-10-27', '2026-10-27T09:01:02', '2026-02-30T09:01:02Z', '2026-10-27T09:01:02+25:00', new Date(Number.NaN)]) {
+          assert.equal(display(input), '—', 'Invalid input remains unavailable: ' + String(input))
+        }
+      })
+      it('formats a Date instant without modifying its value', () => {
+        const input = new Date('2026-10-27T09:01:02.120Z'), epoch = input.getTime()
+        assert.equal(formatter(mode)(input), '2026-10-27 09:01 UTC')
+        assert.equal(input.getTime(), epoch)
+      })
+    })
+  }
+  it('keeps the existing default date, invalid fallback, UTC clock and day contracts', () => {
+    assert.equal(formatAsciiDate('2026-10-27T09:01:02.345Z'), '2026-10-27')
+    assert.equal(formatAsciiDate('not-a-date'), 'not-a-date')
+    assert.equal(formatAsciiDate(new Date(Number.NaN)), '')
+    assert.equal(formatAsciiDate('\u0662\u0660\u0662\u0666-\u0661\u0660-\u0662\u0667T\u0660\u0669:\u0660\u0661:\u0660\u0662Z'), '2026-10-27T09:01:02Z')
+    assert.equal(formatUtcClock('2026-10-27T00:15:00.000+03:00'), '21:15 UTC')
+    assert.equal(formatUtcDay('2026-10-27T00:15:00.000+03:00'), '2026-10-26 UTC')
+  })
+  it('embeds the same generated expression in a raw standalone client closure', () => {
+    assert.equal(typeof published.DISPLAY_DATETIME_BINDING, 'string')
+    const sandbox: Record<string, unknown> = {}
+    const script = String.raw`(()=>{const display = ${published.DISPLAY_DATETIME_BINDING};return function (value) { return display(value); };})()`
+    const display = runInNewContext(script, sandbox) as Formatter
+    assert.equal(display('2026-10-27T11:31:02.234567+02:30'), '2026-10-27 09:01 UTC')
+    assert.deepEqual(Object.keys(sandbox), [])
   })
 })

@@ -1,9 +1,7 @@
 import type { ApprovedXpanelWorkspaceProps } from './approved-xpanel-workspaces.ts';
 import { formatBytes } from '../tokens.ts';
-type Copy = readonly [
-    string,
-    string
-];
+import { translator } from '../i18n.ts'
+type Copy = string;
 export interface PanelWorkspaceField {
     label: Copy;
     key?: string;
@@ -41,7 +39,7 @@ const f = (label: Copy, value?: unknown, type?: string, choices?: readonly Copy[
     }),
     ...(type ? {
         type
-    } : choices && radioFields.has(label[0]) ? {
+    } : choices && radioFields.has(label) ? {
         type: 'radio'
     } : {}),
     ...(choices ? {
@@ -50,10 +48,10 @@ const f = (label: Copy, value?: unknown, type?: string, choices?: readonly Copy[
 });
 const collectionColumns: Record<string, Copy[]> = {
     forwarders: [
-        ['Address', 'العنوان'], ['Destination', 'الوجهة']
+        msgid('Address'), msgid('Destination')
     ],
     autoresponders: [
-        ['Address', 'العنوان'], ['Subject', 'الموضوع'], ['Schedule', 'الجدولة']
+        msgid('Address'), msgid('Subject'), msgctxt('approved-xpanel-pages', 'Schedule')
     ],
 };
 const s = (id: string, title: Copy, fields: PanelWorkspaceField[] = [], actions?: Copy[]): PanelWorkspaceSection => ({
@@ -71,88 +69,88 @@ const t = (id: string, title: Copy, columns: Copy[], rows?: string[][], read = f
 const d = (id: string, title: Copy, message: Copy): PanelWorkspaceSection => ({
     id, title, message
 });
-const notRead: Copy = ['Not read', 'لم تُقرأ البيانات'];
+const notRead: Copy = msgctxt('approved-xpanel-pages', 'Not read');
 const additionalSections = (route: string): PanelWorkspaceSection[] => route === '/email/accounts' ? [
-    s('service-access', ['Create a service user', 'إنشاء مستخدم خدمة'], [
-        f(['Username', 'اسم المستخدم']), f(['Password', 'كلمة المرور'], undefined, 'password'), f(['Mailbox quota (MB)', 'حصة صندوق البريد (MB)'], undefined, 'number'), f(['Email access', 'الوصول إلى البريد'], undefined, 'checkbox'), f(['FTP access', 'الوصول عبر FTP'], undefined, 'checkbox'), f(['Web Disk access', 'الوصول إلى قرص الويب'], undefined, 'checkbox'), f(['Unlimited mailbox quota', 'حصة بريد غير محدودة'], undefined, 'checkbox'), f(['FTP and Web Disk directory', 'مجلد FTP وقرص الويب']), f(['Web Disk access mode', 'وضع وصول قرص الويب'], undefined, undefined, [
-            ['Read and write', 'قراءة وكتابة'], ['Read only', 'قراءة فقط']
+    s('service-access', msgid('Create a service user'), [
+        f(msgid('Username')), f(msgid('Password'), undefined, 'password'), f(msgid('Mailbox quota (MB)'), undefined, 'number'), f(msgid('Email access'), undefined, 'checkbox'), f(msgid('FTP access'), undefined, 'checkbox'), f(msgid('Web Disk access'), undefined, 'checkbox'), f(msgid('Unlimited mailbox quota'), undefined, 'checkbox'), f(msgid('FTP and Web Disk directory')), f(msgid('Web Disk access mode'), undefined, undefined, [
+            msgid('Read and write'), msgid('Read only')
         ])
     ], [
-        ['Generate password', 'توليد كلمة مرور'], ['Cancel', 'إلغاء'], ['Create user', 'إنشاء مستخدم']
+        msgid('Generate password'), msgid('Cancel'), msgid('Create user')
     ]),
-    s('forwarder-management', ['Manage forwarder', 'إدارة إعادة التوجيه'], [
-        f(['Address', 'العنوان'])
+    s('forwarder-management', msgid('Manage forwarder'), [
+        f(msgid('Address'))
     ], [
-        ['Delete forwarder', 'حذف إعادة التوجيه']
+        msgid('Delete forwarder')
     ]),
-    s('autoresponder-management', ['Manage autoresponder', 'إدارة الرد التلقائي'], [
-        f(['Address', 'العنوان'])
+    s('autoresponder-management', msgid('Manage autoresponder'), [
+        f(msgid('Address'))
     ], [
-        ['Edit autoresponder', 'تعديل الرد التلقائي'], ['Delete autoresponder', 'حذف الرد التلقائي']
+        msgid('Edit autoresponder'), msgid('Delete autoresponder')
     ]),
 ] : route === '/security/account' ? [
     {
-        ...s('token-one-time', ['Save your token', 'احفظ رمزك'], [
-            f(['New token (shown once)', 'الرمز الجديد (يظهر مرة واحدة)'], undefined, 'password')
+        ...s('token-one-time', msgid('Save your token'), [
+            f(msgid('New token (shown once)'), undefined, 'password')
         ], [
-            ['Copy token', 'نسخ الرمز'], ['Done', 'تم']
+            msgid('Copy token'), msgid('Done')
         ]),
-        message: ['No token was issued by this workspace. A newly issued secret must be shown only once and must not be reconstructed from the token list.', 'لم يُصدر أي رمز من مساحة العمل هذه. يجب إظهار السر الجديد مرة واحدة فقط وعدم استنتاجه من قائمة الرموز.']
+        message: msgid('No token was issued by this workspace. A newly issued secret must be shown only once and must not be reconstructed from the token list.')
     },
-    t('token-list', ['API token list', 'قائمة رموز API'], [
-        ['Name', 'الاسم'], ['Scopes', 'النطاقات'], ['Allowed from', 'العناوين المسموحة'], ['Created', 'الإنشاء'], ['Expires', 'الانتهاء'], ['Last used', 'آخر استخدام'], ['Action', 'الإجراء']
+    t('token-list', msgid('API token list'), [
+        msgid('Name'), msgid('Scopes'), msgid('Allowed from'), msgctxt('approved-xpanel-pages', 'Created'), msgctxt('approved-xpanel-pages', 'Expires'), msgid('Last used'), msgid('Action')
     ]),
-    s('token-revocation', ['Revoke a token', 'إلغاء رمز'], [
-        f(['Token name', 'اسم الرمز'])
+    s('token-revocation', msgid('Revoke a token'), [
+        f(msgid('Token name'))
     ], [
-        ['Keep', 'إبقاء'], ['Revoke', 'إلغاء الرمز']
+        msgid('Keep'), msgid('Revoke')
     ]),
-    s('token-scopes', ['Token scopes', 'نطاقات الرمز'], [
-        f(['files:read', 'files:read'], undefined, 'checkbox', undefined, {
+    s('token-scopes', msgid('Token scopes'), [
+        f('files:read', undefined, 'checkbox', undefined, {
             technicalLabel: true
-        }), f(['files:write', 'files:write'], undefined, 'checkbox', undefined, {
+        }), f('files:write', undefined, 'checkbox', undefined, {
             technicalLabel: true
-        }), f(['databases:read', 'databases:read'], undefined, 'checkbox', undefined, {
+        }), f('databases:read', undefined, 'checkbox', undefined, {
             technicalLabel: true
-        }), f(['dns:write', 'dns:write'], undefined, 'checkbox', undefined, {
+        }), f('dns:write', undefined, 'checkbox', undefined, {
             technicalLabel: true
-        }), f(['email:write', 'email:write'], undefined, 'checkbox', undefined, {
+        }), f('email:write', undefined, 'checkbox', undefined, {
             technicalLabel: true
-        }), f(['backups:create', 'backups:create'], undefined, 'checkbox', undefined, {
+        }), f('backups:create', undefined, 'checkbox', undefined, {
             technicalLabel: true
-        }), f(['cron:write', 'cron:write'], undefined, 'checkbox', undefined, {
+        }), f('cron:write', undefined, 'checkbox', undefined, {
             technicalLabel: true
         })
     ]),
-    t('ssh-key-list', ['SSH keys', 'مفاتيح SSH'], [
-        ['Name', 'الاسم'], ['Fingerprint', 'البصمة'], ['Added', 'الإضافة'], ['Action', 'الإجراء']
+    t('ssh-key-list', msgid('SSH keys'), [
+        msgid('Name'), msgid('Fingerprint'), msgctxt('approved-xpanel-pages', 'Added'), msgid('Action')
     ]),
-    s('ssh-key-removal', ['Remove an SSH key', 'إزالة مفتاح SSH'], [
-        f(['Key name', 'اسم المفتاح'])
+    s('ssh-key-removal', msgid('Remove an SSH key'), [
+        f(msgid('Key name'))
     ], [
-        ['Keep', 'إبقاء'], ['Remove key', 'إزالة المفتاح']
+        msgid('Keep'), msgid('Remove key')
     ]),
-    s('shell-access', ['Shell access', 'الوصول إلى الطرفية'], [
-        f(['Access mode', 'وضع الوصول'])
+    s('shell-access', msgid('Shell access'), [
+        f(msgid('Access mode'))
     ]),
-    t('blocked-addresses', ['Blocked addresses', 'العناوين المحظورة'], [
-        ['Address or range', 'العنوان أو النطاق'], ['Covers', 'نطاق التغطية']
+    t('blocked-addresses', msgid('Blocked addresses'), [
+        msgid('Address or range'), msgid('Covers')
     ]),
-    s('unblock-address', ['Unblock an address', 'إلغاء حظر عنوان'], [
-        f(['Address or range', 'العنوان أو النطاق'])
+    s('unblock-address', msgid('Unblock an address'), [
+        f(msgid('Address or range'))
     ], [
-        ['Unblock', 'إلغاء الحظر']
+        msgid('Unblock')
     ]),
-    s('hotlink-referrer', ['Hotlink request policy', 'سياسة طلبات الربط'], [
-        f(['Allow requests with no referrer', 'السماح بطلبات بلا محيل'], undefined, 'checkbox')
+    s('hotlink-referrer', msgid('Hotlink request policy'), [
+        f(msgid('Allow requests with no referrer'), undefined, 'checkbox')
     ]),
-    t('protected-directory-list', ['Protected folders', 'المجلدات المحمية'], [
-        ['Folder', 'المجلد'], ['Prompt', 'رسالة الدخول'], ['Users', 'المستخدمون']
+    t('protected-directory-list', msgid('Protected folders'), [
+        msgid('Folder'), msgid('Prompt'), msgid('Users')
     ]),
-    s('remove-directory-protection', ['Remove protection', 'إزالة الحماية'], [
-        f(['Folder', 'المجلد'])
+    s('remove-directory-protection', msgid('Remove protection'), [
+        f(msgid('Folder'))
     ], [
-        ['Keep', 'إبقاء'], ['Remove', 'إزالة']
+        msgid('Keep'), msgid('Remove')
     ]),
 ] : [];
 const unreadNativeSections = (p: ApprovedXpanelWorkspaceProps): PanelWorkspaceSection[] => {
@@ -160,30 +158,28 @@ const unreadNativeSections = (p: ApprovedXpanelWorkspaceProps): PanelWorkspaceSe
         if (p.route === '/domains')
             return [
                 {
-                    ...s('domain-create-details', ['Additional domain creation choices', 'خيارات إنشاء النطاق الإضافية'], [
-                        f(['Alias name', 'الاسم البديل']), f(['Subdomain', 'النطاق الفرعي']),
-                        f(['Under', 'ضمن'], undefined, undefined, (p.account ? p.domains?.filter(row => row.accountId === p.account!.id) : undefined)?.map(row => [
-                            row.name, row.name
-                        ]) ?? []),
-                        f(['Document root', 'مجلد الموقع']), f(['PHP version', 'إصدار PHP']),
-                        f(['Site type', 'نوع الموقع'], undefined, 'radio', [
-                            ['PHP', 'PHP'], ['Static', 'ملفات ثابتة'], ['Proxy', 'وكيل']
+                    ...s('domain-create-details', msgid('Additional domain creation choices'), [
+                        f(msgid('Alias name')), f(msgctxt('approved-xpanel-pages', 'Subdomain')),
+                        f(msgid('Under'), undefined, undefined, (p.account ? p.domains?.filter(row => row.accountId === p.account!.id) : undefined)?.map(row => row.name) ?? []),
+                        f(msgid('Document root')), f(msgid('PHP version')),
+                        f(msgid('Site type'), undefined, 'radio', [
+                            'PHP', msgid('Static'), msgid('Proxy')
                         ]),
-                        f(['Create DNS records', 'إنشاء سجلات DNS'], undefined, 'checkbox'), f(['Issue a TLS certificate', 'إصدار شهادة TLS'], undefined, 'checkbox')
-                    ]), message: ['The existing name and type form remains available. These additional choices are not connected to that form and stay disabled; they are not submitted.', 'يبقى نموذج الاسم والنوع الحالي متاحًا. هذه الخيارات الإضافية غير مرتبطة به وتبقى معطّلة ولا تُرسل.']
+                        f(msgid('Create DNS records'), undefined, 'checkbox'), f(msgid('Issue a TLS certificate'), undefined, 'checkbox')
+                    ]), message: msgid('The existing name and type form remains available. These additional choices are not connected to that form and stay disabled; they are not submitted.')
                 }
             ];
         if (p.route === '/databases/mariadb') {
-            const unread = p.locale === 'ar' ? notRead[1] : notRead[0];
+            const unread = translator(p.locale)(notRead);
             const databases = p.account ? p.databases?.filter(row => row.accountId === p.account!.id && !row.trashedAt) : undefined;
             return [
                 {
-                    ...t('database-list-details', ['Database details', 'تفاصيل قواعد البيانات'], [
-                        ['Database', 'قاعدة البيانات'], ['Size', 'الحجم'], ['Tables', 'الجداول'], ['Users with access', 'المستخدمون المسموحون'], ['Collation', 'ترتيب الأحرف'], ['Last write', 'آخر كتابة']
+                    ...t('database-list-details', msgid('Database details'), [
+                        msgid('Database'), msgid('Size'), msgid('Tables'), msgid('Users with access'), msgid('Collation'), msgid('Last write')
                     ], databases?.map(row => [
                         row.name, unread, unread, unread, unread, unread
                     ]), databases !== undefined),
-                    message: ['The existing database actions remain available. Table counts, collation and last-write readings have not been loaded; no values are inferred.', 'تبقى إجراءات قواعد البيانات الحالية متاحة. لم تُحمّل أعداد الجداول وترتيب الأحرف وآخر كتابة، ولا تُفترض قيم لها.']
+                    message: msgid('The existing database actions remain available. Table counts, collation and last-write readings have not been loaded; no values are inferred.')
                 }
             ];
         }
@@ -191,113 +187,113 @@ const unreadNativeSections = (p: ApprovedXpanelWorkspaceProps): PanelWorkspaceSe
     }
     switch (p.route) {
         case '/email/accounts': return [
-            t('mailbox-users-unread', ['Service users', 'مستخدمو الخدمة'], [
-                ['Login', 'اسم الدخول'], ['Services', 'الخدمات'], ['Mailbox quota (MB)', 'حصة صندوق البريد (MB)'], ['File directory', 'مجلد الملفات'], ['Last sign-in', 'آخر دخول']
+            t('mailbox-users-unread', msgid('Service users'), [
+                msgid('Login'), msgid('Services'), msgid('Mailbox quota (MB)'), msgid('File directory'), msgid('Last sign-in')
             ]),
-            s('mailbox-create-unread', ['Create mailbox', 'إنشاء صندوق بريد'], [
-                f(['Local name', 'الاسم المحلي']), f(['Domain', 'النطاق'], undefined, undefined, []), f(['Password', 'كلمة المرور'], undefined, 'password'), f(['Requested quota (MB)', 'الحصة المطلوبة (MB)'], undefined, 'number')
+            s('mailbox-create-unread', msgid('Create mailbox'), [
+                f(msgid('Local name')), f(msgid('Domain'), undefined, undefined, []), f(msgid('Password'), undefined, 'password'), f(msgid('Requested quota (MB)'), undefined, 'number')
             ], [
-                ['Generate password', 'توليد كلمة مرور'], ['Create mailbox', 'إنشاء صندوق بريد']
+                msgid('Generate password'), msgid('Create mailbox')
             ]),
-            s('mailbox-password-unread', ['New mailbox password', 'كلمة مرور صندوق البريد الجديدة'], [
-                f(['Password', 'كلمة المرور'], undefined, 'password')
+            s('mailbox-password-unread', msgid('New mailbox password'), [
+                f(msgid('Password'), undefined, 'password')
             ], [
-                ['Cancel', 'إلغاء'], ['Save', 'حفظ']
+                msgid('Cancel'), msgid('Save')
             ]),
-            s('mailbox-quota-unread', ['Mailbox quota', 'حصة صندوق البريد'], [
-                f(['Quota (MB)', 'الحصة (MB)'], undefined, 'number')
+            s('mailbox-quota-unread', msgid('Mailbox quota'), [
+                f(msgid('Quota (MB)'), undefined, 'number')
             ], [
-                ['Cancel', 'إلغاء'], ['Save', 'حفظ']
+                msgid('Cancel'), msgid('Save')
             ]),
-            s('mailbox-delete-unread', ['Delete mailbox', 'حذف صندوق البريد'], [
-                f(['Confirmation', 'التأكيد'])
+            s('mailbox-delete-unread', msgid('Delete mailbox'), [
+                f(msgid('Confirmation'))
             ], [
-                ['Cancel', 'إلغاء'], ['Delete mailbox', 'حذف صندوق البريد']
+                msgid('Cancel'), msgid('Delete mailbox')
             ])
         ];
         case '/files/manager':
         case '/files/trash': return [
-            s('file-browser-unread', ['Browse files', 'استعراض الملفات'], [
-                f(['Path', 'المسار']), f(['Show hidden files', 'إظهار الملفات المخفية'], undefined, 'checkbox')
+            s('file-browser-unread', msgid('Browse files'), [
+                f(msgid('Path')), f(msgid('Show hidden files'), undefined, 'checkbox')
             ], [
-                ['Files', 'الملفات'], ['Trash', 'السلة'], ['Parent folder', 'المجلد الأب'], ['Copy path', 'نسخ المسار'], ['Refresh', 'تحديث'], ['Upload', 'رفع ملف'], ['New file', 'ملف جديد'], ['New folder', 'مجلد جديد'], ['Clear selection', 'إلغاء التحديد']
+                msgid('Files'), msgid('Trash'), msgid('Parent folder'), msgid('Copy path'), msgid('Refresh'), msgid('Upload'), msgid('New file'), msgid('New folder'), msgctxt('approved-xpanel-pages', 'Clear selection')
             ]),
-            t('file-list-unread', ['Files', 'الملفات'], [
-                ['Name', 'الاسم'], ['Type', 'النوع'], ['Size', 'الحجم'], ['Permissions', 'الصلاحيات'], ['Modified (UTC)', 'التعديل (UTC)'], ['Owner', 'المالك'], ['Actions', 'الإجراءات']
+            t('file-list-unread', msgid('Files'), [
+                msgid('Name'), msgid('Type'), msgid('Size'), msgid('Permissions'), msgid('Modified (UTC)'), msgid('Owner'), msgid('Actions')
             ]),
-            s('file-editor-unread', ['File editor', 'محرر الملفات'], [
-                f(['File', 'الملف']), f(['File contents', 'محتوى الملف'], undefined, 'textarea')
+            s('file-editor-unread', msgctxt('approved-xpanel-pages', 'File editor'), [
+                f(msgid('File')), f(msgid('File contents'), undefined, 'textarea')
             ], [
-                ['Close', 'إغلاق'], ['Discard draft', 'تجاهل المسودة'], ['Save', 'حفظ']
+                msgid('Close'), msgid('Discard draft'), msgid('Save')
             ]),
-            s('file-upload-unread', ['Upload files', 'رفع ملفات'], [
-                f(['Files to upload', 'الملفات المطلوب رفعها'], undefined, 'file')
+            s('file-upload-unread', msgid('Upload files'), [
+                f(msgid('Files to upload'), undefined, 'file')
             ], [
-                ['Cancel', 'إلغاء'], ['Upload', 'رفع ملف']
+                msgid('Cancel'), msgid('Upload')
             ]),
-            s('file-folder-unread', ['New folder', 'مجلد جديد'], [
-                f(['Folder name', 'اسم المجلد'])
+            s('file-folder-unread', msgid('New folder'), [
+                f(msgid('Folder name'))
             ], [
-                ['Cancel', 'إلغاء'], ['Create folder', 'إنشاء مجلد']
+                msgid('Cancel'), msgid('Create folder')
             ]),
-            s('file-rename-unread', ['Rename file', 'إعادة تسمية ملف'], [
-                f(['New name', 'الاسم الجديد'])
+            s('file-rename-unread', msgid('Rename file'), [
+                f(msgid('New name'))
             ], [
-                ['Cancel', 'إلغاء'], ['Rename', 'إعادة التسمية']
+                msgid('Cancel'), msgid('Rename')
             ]),
-            s('file-permissions-unread', ['File permissions', 'صلاحيات الملف'], [
-                f(['Octal mode', 'الصلاحيات بالنظام الثماني'])
+            s('file-permissions-unread', msgid('File permissions'), [
+                f(msgid('Octal mode'))
             ], [
-                ['Cancel', 'إلغاء'], ['Save permissions', 'حفظ الصلاحيات']
+                msgid('Cancel'), msgid('Save permissions')
             ]),
             {
-                ...t('file-trash-unread', ['Trash', 'السلة'], [
-                    ['Name', 'الاسم'], ['Was in', 'المكان السابق'], ['Deleted (UTC)', 'الحذف (UTC)'], ['Removed for good on', 'الحذف النهائي في'], ['Actions', 'الإجراءات']
+                ...t('file-trash-unread', msgid('Trash'), [
+                    msgid('Name'), msgid('Was in'), msgid('Deleted (UTC)'), msgid('Removed for good on'), msgid('Actions')
                 ]), actions: [
-                    ['Empty trash', 'إفراغ السلة']
+                    msgctxt('approved-xpanel-pages', 'Empty trash')
                 ]
             },
-            s('file-delete-unread', ['File removal and recovery', 'إزالة الملفات واستعادتها'], [
-                f(['Confirmation', 'التأكيد'])
+            s('file-delete-unread', msgid('File removal and recovery'), [
+                f(msgid('Confirmation'))
             ], [
-                ['Cancel', 'إلغاء'], ['Move to trash', 'نقل إلى السلة'], ['Restore selected', 'استعادة المحدد'], ['Delete for good', 'الحذف نهائيًا']
+                msgid('Cancel'), msgid('Move to trash'), msgid('Restore selected'), msgid('Delete for good')
             ])
         ];
         case '/domains': return [
-            t('domain-list-unread', ['Your domains', 'نطاقاتك'], [
-                ['Domain', 'النطاق'], ['Type', 'النوع'], ['Document root', 'مجلد الموقع'], ['IPv4', 'IPv4'], ['IPv6', 'IPv6'], ['Runtime', 'بيئة التشغيل'], ['Status', 'الحالة'], ['Actions', 'الإجراءات']
+            t('domain-list-unread', msgid('Your domains'), [
+                msgid('Domain'), msgid('Type'), msgid('Document root'), 'IPv4', 'IPv6', msgid('Runtime'), msgid('Status'), msgid('Actions')
             ]),
-            s('domain-create-unread', ['Create domain', 'إنشاء نطاق'], [
-                f(['Domain name', 'اسم النطاق']), f(['Type', 'النوع'], undefined, 'radio', [
-                    ['Addon domain', 'نطاق إضافي'], ['Subdomain', 'نطاق فرعي'], ['Alias', 'اسم بديل']
-                ]), f(['Alias name', 'الاسم البديل']), f(['Subdomain', 'النطاق الفرعي']), f(['Under', 'ضمن'], undefined, undefined, []), f(['Parent domain', 'النطاق الأب'], undefined, undefined, []), f(['Document root', 'مجلد الموقع']), f(['Site type', 'نوع الموقع'], undefined, undefined, [
-                    ['PHP', 'PHP'], ['Static', 'ملفات ثابتة'], ['Proxy', 'وكيل']
-                ]), f(['IPv4', 'IPv4']), f(['IPv6', 'IPv6']), f(['PHP version', 'إصدار PHP']), f(['Create DNS records', 'إنشاء سجلات DNS'], undefined, 'checkbox'), f(['Issue a TLS certificate', 'إصدار شهادة TLS'], undefined, 'checkbox')
+            s('domain-create-unread', msgid('Create domain'), [
+                f(msgid('Domain name')), f(msgid('Type'), undefined, 'radio', [
+                    msgid('Addon domain'), msgid('Subdomain'), msgid('Alias')
+                ]), f(msgid('Alias name')), f(msgctxt('approved-xpanel-pages', 'Subdomain')), f(msgid('Under'), undefined, undefined, []), f(msgid('Parent domain'), undefined, undefined, []), f(msgid('Document root')), f(msgid('Site type'), undefined, undefined, [
+                    'PHP', msgid('Static'), msgid('Proxy')
+                ]), f('IPv4'), f('IPv6'), f(msgid('PHP version')), f(msgid('Create DNS records'), undefined, 'checkbox'), f(msgid('Issue a TLS certificate'), undefined, 'checkbox')
             ], [
-                ['Cancel', 'إلغاء'], ['Create domain', 'إنشاء نطاق']
+                msgid('Cancel'), msgid('Create domain')
             ])
         ];
         case '/databases/mariadb': return [
-            t('database-list-unread', ['Your databases', 'قواعد بياناتك'], [
-                ['Database', 'قاعدة البيانات'], ['Size', 'الحجم'], ['Tables', 'الجداول'], ['Users with access', 'المستخدمون المسموحون'], ['Collation', 'ترتيب الأحرف'], ['Last write', 'آخر كتابة'], ['Actions', 'الإجراءات']
+            t('database-list-unread', msgid('Your databases'), [
+                msgid('Database'), msgid('Size'), msgid('Tables'), msgid('Users with access'), msgid('Collation'), msgid('Last write'), msgid('Actions')
             ]),
-            s('database-create-unread', ['Create database', 'إنشاء قاعدة بيانات'], [
-                f(['Database name', 'اسم قاعدة البيانات'])
+            s('database-create-unread', msgid('Create database'), [
+                f(msgid('Database name'))
             ], [
-                ['Create database', 'إنشاء قاعدة بيانات']
+                msgid('Create database')
             ]),
-            t('database-user-list-unread', ['Database users', 'مستخدمو قواعد البيانات'], [
-                ['User', 'المستخدم'], ['Database grants', 'صلاحيات القواعد'], ['Last connection', 'آخر اتصال'], ['Actions', 'الإجراءات']
+            t('database-user-list-unread', msgid('Database users'), [
+                msgid('User'), msgid('Database grants'), msgid('Last connection'), msgid('Actions')
             ]),
-            s('database-user-create-unread', ['Create database user', 'إنشاء مستخدم قاعدة بيانات'], [
-                f(['Username', 'اسم المستخدم']), f(['Password', 'كلمة المرور'], undefined, 'password'), f(['Database', 'قاعدة البيانات'], undefined, undefined, [])
+            s('database-user-create-unread', msgid('Create database user'), [
+                f(msgid('Username')), f(msgid('Password'), undefined, 'password'), f(msgid('Database'), undefined, undefined, [])
             ], [
-                ['Create user', 'إنشاء مستخدم']
+                msgid('Create user')
             ])
         ];
         case '/domains/zone-editor': return [
-            t('dns-records-unread', ['Zone records', 'سجلات المنطقة'], [
-                ['Name', 'الاسم'], ['Type', 'النوع'], ['TTL', 'TTL'], ['Content', 'المحتوى'], ['Priority', 'الأولوية'], ['Actions', 'الإجراءات']
+            t('dns-records-unread', msgid('Zone records'), [
+                msgid('Name'), msgid('Type'), 'TTL', msgid('Content'), msgid('Priority'), msgid('Actions')
             ])
         ];
         default: return [];
@@ -308,32 +304,30 @@ export const buildApprovedPanelPage = (p: ApprovedXpanelWorkspaceProps): PanelWo
     const domains = a ? p.domains?.filter(x => x.accountId === a.id) : undefined;
     const domain = domains?.find(x => x.name === p.activeDomain || x.name === a?.primaryDomain) ?? domains?.[0];
     const php = domain?.php;
-    const account = s('account-context', ['Account and plan', 'الحساب والخطة'], [
-        f(['Account', 'الحساب'], a?.username), f(['Domain', 'النطاق'], a?.primaryDomain), f(['Plan', 'الخطة'], plan?.name)
+    const account = s('account-context', msgid('Account and plan'), [
+        f(msgid('Account'), a?.username), f(msgid('Domain'), a?.primaryDomain), f(msgid('Plan'), plan?.name)
     ]);
     const certificateSections: PanelWorkspaceSection[] = p.route === '/security/ssl' ? [
-        s('certificate-names', ['Certificate names', 'أسماء الشهادة'], [
-            f(['Name coverage', 'تغطية الأسماء'], undefined, 'radio', [
-                ['A single name', 'اسم واحد'], ['Wildcard and base domain', 'البدل الشامل والنطاق الأساسي'], ['Custom names', 'أسماء مخصصة']
-            ]), f(['Name', 'الاسم']), f(['Additional names (SAN)', 'أسماء إضافية (SAN)'], undefined, 'textarea')
+        s('certificate-names', msgid('Certificate names'), [
+            f(msgid('Name coverage'), undefined, 'radio', [
+                msgid('A single name'), msgid('Wildcard and base domain'), msgid('Custom names')
+            ]), f(msgid('Name')), f(msgid('Additional names (SAN)'), undefined, 'textarea')
         ]),
         {
-            ...s('certificate-targets', ['Installation targets', 'أهداف التثبيت'], domains?.length ? domains.map(row => f([
-                row.name, row.name
-            ], undefined, 'checkbox', undefined, {
+            ...s('certificate-targets', msgid('Installation targets'), domains?.length ? domains.map(row => f(row.name, undefined, 'checkbox', undefined, {
                 technicalLabel: true
             })) : [
-                f(['Installation targets not read', 'لم تُقرأ أهداف التثبيت'], undefined, undefined, [])
-            ]), message: ['Coverage has not been read from the certificate. No target is assumed to be covered.', 'لم تُقرأ تغطية الأسماء من الشهادة. لا يُفترض أن أي هدف مشمول بالتغطية.']
+                f(msgid('Installation targets not read'), undefined, undefined, [])
+            ]), message: msgid('Coverage has not been read from the certificate. No target is assumed to be covered.')
         },
         {
-            ...t('installed-certificates', ['Installed certificates', 'الشهادات المثبتة'], [
-                ['Names', 'الأسماء'], ['Issuer', 'الجهة المصدرة'], ['Key', 'المفتاح'], ['Expires', 'الانتهاء'], ['Renewal', 'التجديد'], ['Installed on', 'مثبتة على']
+            ...t('installed-certificates', msgid('Installed certificates'), [
+                msgid('Names'), msgctxt('approved-xpanel-pages', 'Issuer'), msgid('Key'), msgctxt('approved-xpanel-pages', 'Expires'), msgid('Renewal'), msgid('Installed on')
             ]), actions: [
-                ['View', 'عرض'], ['Renew now', 'التجديد الآن'], ['Remove', 'إزالة']
+                msgid('View'), msgid('Renew now'), msgid('Remove')
             ]
         },
-        d('certificate-outcome', ['What happened', 'ماذا حدث'], ['No certificate installation result has been read. The issue or renewal response must confirm the affected names, installation and errors before success is shown.', 'لم تُقرأ نتيجة تثبيت شهادة. يجب أن تؤكد استجابة الإصدار أو التجديد الأسماء المتأثرة والتثبيت والأخطاء قبل إظهار النجاح.']),
+        d('certificate-outcome', msgid('What happened'), msgid('No certificate installation result has been read. The issue or renewal response must confirm the affected names, installation and errors before success is shown.')),
     ] : [];
     const page = (title: Copy, description: Copy, sections: PanelWorkspaceSection[], aside: PanelWorkspaceSection[] = []): PanelWorkspacePage => ({
         title, description, sections: [
@@ -343,610 +337,592 @@ export const buildApprovedPanelPage = (p: ApprovedXpanelWorkspaceProps): PanelWo
         ]
     });
     switch (p.route) {
-        case '/resources': return page(['Resources & quotas', 'الموارد والحصص'], ['Your account limits, live readings and the services in its slice.', 'حدود الحساب وقراءاته والخدمات ضمن شريحته.'], [
-            s('slice-readings', ['Limits on your slice', 'حدود شريحتك'], [
-                f(['Slice', 'الشريحة'], a ? `xpanel-${a.uid}.slice` : undefined), f(['Disk', 'القرص'], p.usage?.diskBytes == null ? undefined : formatBytes(p.usage.diskBytes)), f(['Memory', 'الذاكرة'], p.usage?.memoryBytes == null ? undefined : formatBytes(p.usage.memoryBytes)), f(['Processes', 'العمليات'], p.usage?.processCount)
+        case '/resources': return page(msgid('Resources & quotas'), msgid('Your account limits, live readings and the services in its slice.'), [
+            s('slice-readings', msgctxt('approved-xpanel-pages', 'Limits on your slice'), [
+                f(msgctxt('approved-xpanel-pages', 'Slice'), a ? `xpanel-${a.uid}.slice` : undefined), f(msgid('Disk'), p.usage?.diskBytes == null ? undefined : formatBytes(p.usage.diskBytes)), f(msgid('Memory'), p.usage?.memoryBytes == null ? undefined : formatBytes(p.usage.memoryBytes)), f(msgid('Processes'), p.usage?.processCount)
             ], [
-                ['Refresh live values', 'تحديث القراءات الحية']
+                msgid('Refresh live values')
             ]),
             {
-                ...d('disk-io', ['Disk IO, last hour', 'إدخال وإخراج القرص، آخر ساعة'], ['Account IO history has not been read. No chart is inferred from plan limits.', 'لم يُقرأ سجل إدخال وإخراج الحساب. لا يُفترض رسم بياني من حدود الخطة.']), chart: true
+                ...d('disk-io', msgctxt('approved-xpanel-pages', 'Disk IO, last hour'), msgid('Account IO history has not been read. No chart is inferred from plan limits.')), chart: true
             },
-            t('resource-limits', ['Plan and applied limits', 'حدود الخطة والحدود المطبقة'], [
-                ['Limit', 'الحد'], ['Plan value', 'قيمة الخطة'], ['Applied on host', 'المطبق على المضيف'], ['State', 'الحالة'], ['Live usage', 'الاستخدام الحي']
+            t('resource-limits', msgid('Plan and applied limits'), [
+                msgid('Limit'), msgid('Plan value'), msgctxt('approved-xpanel-pages', 'Applied on host'), msgid('State'), msgid('Live usage')
             ], ([
-                ['CPU weight', 'وزن المعالج'], ['CPU quota', 'حصة المعالج'], ['Memory', 'الذاكرة'], ['Processes', 'العمليات'], ['IO weight', 'وزن إدخال القرص وإخراجه'], ['IO read', 'قراءة القرص'], ['IO write', 'كتابة القرص'], ['Bandwidth', 'حركة البيانات']
+                msgid('CPU weight'), msgid('CPU quota'), msgid('Memory'), msgid('Processes'), msgid('IO weight'), msgid('IO read'), msgid('IO write'), msgctxt('approved-xpanel-pages', 'Bandwidth')
             ] as const).map(label => [
-                label[p.locale === 'ar' ? 1 : 0], ...Array<string>(4).fill(p.locale === 'ar' ? notRead[1] : notRead[0])
+                translator(p.locale)(label), ...Array<string>(4).fill(translator(p.locale)(notRead))
             ])),
-            s('resource-live', ['CPU, bandwidth and IO', 'المعالج وحركة البيانات وإدخال القرص وإخراجه'], [
-                f(['CPU', 'المعالج']), f(['Bandwidth', 'حركة البيانات']), f(['IO read', 'قراءة القرص']), f(['IO write', 'كتابة القرص'])
+            s('resource-live', msgid('CPU, bandwidth and IO'), [
+                f(msgid('CPU')), f(msgctxt('approved-xpanel-pages', 'Bandwidth')), f(msgid('IO read')), f(msgid('IO write'))
             ]),
-            t('slice-processes', ['Processes in your slice', 'العمليات في شريحتك'], [
-                ['PID', 'معرف العملية'], ['Command and unit', 'الأمر والوحدة'], ['User', 'المستخدم'], ['CPU', 'المعالج'], ['Memory', 'الذاكرة'], ['Started (UTC)', 'البدء (UTC)']
-            ]), s('resource-actions', ['Resource readings', 'قراءات الموارد'], [], [
-                ['Try again', 'إعادة المحاولة'], ['View unit', 'عرض الوحدة']
+            t('slice-processes', msgctxt('approved-xpanel-pages', 'Processes in your slice'), [
+                msgid('PID'), msgid('Command and unit'), msgid('User'), msgid('CPU'), msgid('Memory'), msgid('Started (UTC)')
+            ]), s('resource-actions', msgid('Resource readings'), [], [
+                msgid('Try again'), msgid('View unit')
             ])
         ], [
-            s('serving-site', ['Who serves this site', 'من يخدم هذا الموقع'], [
-                f(['Domain', 'النطاق'], domain?.name), f(['Document root', 'مجلد الموقع'], domain?.docRoot), f(['PHP version', 'إصدار PHP'], php?.version), f(['Handler', 'المعالج'], php?.handler)
+            s('serving-site', msgid('Who serves this site'), [
+                f(msgid('Domain'), domain?.name), f(msgid('Document root'), domain?.docRoot), f(msgid('PHP version'), php?.version), f(msgid('Handler'), php?.handler)
             ])
         ]);
-        case '/email/accounts': return page(['Email and service users', 'البريد ومستخدمو الخدمة'], ['Mailboxes, service access, forwarding and automatic replies.', 'صناديق البريد والوصول للخدمات وإعادة التوجيه والردود التلقائية.'], [
-            s('forwarders', ['Forwarders', 'إعادة التوجيه'], [
-                f(['Address', 'العنوان']), f(['Forward to', 'إعادة التوجيه إلى']), f(['Delivery', 'التسليم'], undefined, undefined, [
-                    ['Forward to an address', 'إعادة التوجيه إلى عنوان'], ['Reject with an error', 'الرفض برسالة خطأ']
+        case '/email/accounts': return page(msgid('Email and service users'), msgid('Mailboxes, service access, forwarding and automatic replies.'), [
+            s('forwarders', msgid('Forwarders'), [
+                f(msgid('Address')), f(msgid('Forward to')), f(msgctxt('approved-xpanel-pages', 'Delivery'), undefined, undefined, [
+                    msgid('Forward to an address'), msgid('Reject with an error')
                 ])
             ], [
-                ['Add forwarder', 'إضافة إعادة توجيه']
+                msgid('Add forwarder')
             ]),
-            s('autoresponders', ['Autoresponders', 'الردود التلقائية'], [
-                f(['Address', 'العنوان']), f(['Subject', 'الموضوع']), f(['Message', 'الرسالة'], undefined, 'textarea'), f(['Starts (UTC)', 'البدء (UTC)'], undefined, 'datetime-local'), f(['Ends (UTC)', 'الانتهاء (UTC)'], undefined, 'datetime-local'), f(['No end date', 'بلا تاريخ انتهاء'], undefined, 'checkbox')
+            s('autoresponders', msgid('Autoresponders'), [
+                f(msgid('Address')), f(msgid('Subject')), f(msgid('Message'), undefined, 'textarea'), f(msgid('Starts (UTC)'), undefined, 'datetime-local'), f(msgid('Ends (UTC)'), undefined, 'datetime-local'), f(msgid('No end date'), undefined, 'checkbox')
             ], [
-                ['Add autoresponder', 'إضافة رد تلقائي']
+                msgid('Add autoresponder')
             ]),
-            s('default-address', ['Default address', 'العنوان الافتراضي'], [
-                f(['Domain', 'النطاق'], undefined, undefined, (domains ?? []).map(x => [
-                    x.name, x.name
-                ])), f(['Unknown recipient', 'المستلم غير الموجود'], undefined, undefined, [
-                    ['Reject with an error', 'الرفض برسالة خطأ'], ['Forward to an address', 'إعادة التوجيه إلى عنوان'], ['Discard silently', 'التجاهل بصمت']
+            s('default-address', msgid('Default address'), [
+                f(msgid('Domain'), undefined, undefined, (domains ?? []).map(x => x.name)), f(msgid('Unknown recipient'), undefined, undefined, [
+                    msgid('Reject with an error'), msgid('Forward to an address'), msgid('Discard silently')
                 ])
             ], [
-                ['Save default address', 'حفظ العنوان الافتراضي']
+                msgid('Save default address')
             ])
         ], [
-            d('service-user-contract', ['How service users work', 'كيف يعمل مستخدمو الخدمة'], ['Email, FTP and Web Disk credentials are separate from account control-panel access.', 'بيانات دخول البريد وFTP وقرص الويب منفصلة عن الوصول إلى لوحة الحساب.']), s('mail-connections', ['Connection settings', 'إعدادات الاتصال'], [
-                f(['Mailbox host', 'مضيف البريد']), f(['IMAP / SMTP', 'IMAP / SMTP']), f(['TLS', 'TLS'])
+            d('service-user-contract', msgid('How service users work'), msgid('Email, FTP and Web Disk credentials are separate from account control-panel access.')), s('mail-connections', msgid('Connection settings'), [
+                f(msgid('Mailbox host')), f('IMAP / SMTP'), f('TLS')
             ])
         ]);
         case '/files/manager':
-        case '/files/trash': return page(['File manager', 'مدير الملفات'], ['Browse, edit and recover files in your account.', 'استعراض ملفات الحساب وتعديلها واستعادتها.'], [
-            s('selection-actions', ['Selection actions', 'إجراءات الملفات المحددة'], [], [
-                ['Copy', 'نسخ'], ['Move', 'نقل'], ['Compress', 'ضغط'], ['Extract', 'فك الضغط']
+        case '/files/trash': return page(msgid('File manager'), msgid('Browse, edit and recover files in your account.'), [
+            s('selection-actions', msgid('Selection actions'), [], [
+                msgid('Copy'), msgid('Move'), msgid('Compress'), msgid('Extract')
             ])
         ], [
-            s('file-boundary', ['Your file workspace', 'مساحة ملفاتك'], [
-                f(['Home', 'المجلد الرئيسي'], a?.home)
-            ]), d('file-permissions', ['Permissions', 'الصلاحيات'], ['File operations stay inside the account home and retain its permission boundaries.', 'تبقى عمليات الملفات داخل المجلد الرئيسي للحساب وتحافظ على حدود صلاحياته.'])
+            s('file-boundary', msgid('Your file workspace'), [
+                f(msgctxt('approved-xpanel-pages', 'Home'), a?.home)
+            ]), d('file-permissions', msgid('Permissions'), msgid('File operations stay inside the account home and retain its permission boundaries.'))
         ]);
-        case '/files/directory-privacy': return page(['Directory privacy', 'خصوصية المجلدات'], ['Protect folders with separate credentials.', 'حماية المجلدات ببيانات دخول منفصلة.'], [
-            t('protected-folders', ['Protected folders', 'المجلدات المحمية'], [
-                ['Folder', 'المجلد'], ['Prompt', 'رسالة الدخول'], ['Users', 'المستخدمون']
+        case '/files/directory-privacy': return page(msgctxt('approved-xpanel-pages', 'Directory privacy'), msgid('Protect folders with separate credentials.'), [
+            t('protected-folders', msgid('Protected folders'), [
+                msgid('Folder'), msgid('Prompt'), msgid('Users')
             ]),
-            s('protect-folder', ['Protect a folder', 'حماية مجلد'], [
-                f(['Folder', 'المجلد'], domain?.docRoot), f(['Prompt shown', 'رسالة الدخول']), f(['First user', 'المستخدم الأول']), f(['Password for this user', 'كلمة مرور هذا المستخدم'], undefined, 'password')
+            s('protect-folder', msgctxt('approved-xpanel-pages', 'Protect a folder'), [
+                f(msgid('Folder'), domain?.docRoot), f(msgid('Prompt shown')), f(msgid('First user')), f(msgid('Password for this user'), undefined, 'password')
             ], [
-                ['Protect folder', 'حماية المجلد']
+                msgid('Protect folder')
             ])
         ]);
-        case '/domains/site-settings': return page(['Site settings', 'إعدادات الموقع'], ['Site names, runtime, redirects, proxy and lifecycle settings.', 'أسماء الموقع وبيئة التشغيل والتحويلات والوكيل وإعدادات حالة الموقع.'], [
-            s('site-selector', ['Site', 'الموقع'], [
-                f(['Site', 'الموقع'], undefined, undefined, (domains ?? []).map(row => [
-                    row.name, row.name
-                ]))
+        case '/domains/site-settings': return page(msgid('Site settings'), msgid('Site names, runtime, redirects, proxy and lifecycle settings.'), [
+            s('site-selector', msgid('Site'), [
+                f(msgid('Site'), undefined, undefined, (domains ?? []).map(row => row.name))
             ]),
-            s('site-binding', ['Names bound to this site', 'الأسماء المرتبطة بالموقع'], [
-                f(['Primary name', 'الاسم الرئيسي'], domain?.name), f(['Bind another name', 'ربط اسم آخر'])
+            s('site-binding', msgid('Names bound to this site'), [
+                f(msgid('Primary name'), domain?.name), f(msgid('Bind another name'))
             ], [
-                ['Bind name', 'ربط الاسم']
+                msgid('Bind name')
             ]),
-            t('site-bound-names', ['Names bound to this site', 'الأسماء المرتبطة بالموقع'], [
-                ['Name', 'الاسم'], ['Type', 'النوع'], ['Ports', 'المنافذ'], ['DNS', 'DNS'], ['Document root', 'مجلد الموقع'], ['Action', 'الإجراء']
+            t('site-bound-names', msgid('Names bound to this site'), [
+                msgid('Name'), msgid('Type'), msgid('Ports'), 'DNS', msgid('Document root'), msgid('Action')
             ], domains?.map(x => [
-                x.name, x.kind, p.locale === 'ar' ? notRead[1] : notRead[0], p.locale === 'ar' ? notRead[1] : notRead[0], x.docRoot, p.locale === 'ar' ? notRead[1] : notRead[0]
+                x.name, x.kind, translator(p.locale)(notRead), translator(p.locale)(notRead), x.docRoot, translator(p.locale)(notRead)
             ]), domains !== undefined),
-            s('site-name-actions', ['Manage bound names', 'إدارة الأسماء المرتبطة'], [], [
-                ['Unbind', 'إلغاء الربط'], ['Edit', 'تعديل'], ['Delete', 'حذف']
+            s('site-name-actions', msgid('Manage bound names'), [], [
+                msgid('Unbind'), msgid('Edit'), msgid('Delete')
             ]),
-            t('site-header-rows', ['Custom headers', 'الترويسات المخصصة'], [
-                ['Name', 'الاسم'], ['Value', 'القيمة']
+            t('site-header-rows', msgid('Custom headers'), [
+                msgid('Name'), msgid('Value')
             ], p.customConfig ? Object.entries(p.customConfig.customHeaders).map(([name, value]) => [
                 name, value
             ]) : undefined, p.customConfig !== undefined),
-            s('site-template', ['Template and headers', 'القالب والترويسات'], [
-                f(['Template', 'القالب'], undefined, undefined, [
-                    ['Default', 'الافتراضي'], ['WordPress', 'WordPress'], ['Laravel', 'Laravel'], ['Custom', 'مخصص']
-                ]), f(['Header name', 'اسم الترويسة']), f(['Header value', 'قيمة الترويسة'])
+            s('site-template', msgid('Template and headers'), [
+                f(msgid('Template'), undefined, undefined, [
+                    msgid('Default'), 'WordPress', 'Laravel', msgid('Custom')
+                ]), f(msgid('Header name')), f(msgid('Header value'))
             ], [
-                ['Add header', 'إضافة ترويسة'], ['Remove header', 'إزالة الترويسة']
+                msgid('Add header'), msgid('Remove header')
             ]),
-            s('site-runtime', ['Runtime and document root', 'بيئة التشغيل ومجلد الموقع'], [
-                f(['Document root', 'مجلد الموقع'], domain?.docRoot), f(['Run directory', 'مجلد التشغيل'], undefined, undefined, [
-                    ['Document root', 'مجلد الموقع'], ['Subfolder /public', 'المجلد الفرعي /public']
-                ]), f(['Site type', 'نوع الموقع'], domain?.siteType, undefined, [
-                    ['php', 'PHP'], ['static', 'ملفات ثابتة'], ['proxy', 'وكيل'], ['node', 'Node.js'], ['python', 'Python']
-                ]), f(['Node version', 'إصدار Node']), f(['App folder', 'مجلد التطبيق']), f(['Start command', 'أمر التشغيل']), f(['Port', 'المنفذ'], undefined, 'number'), f(['Python version', 'إصدار Python']), f(['Entry point', 'نقطة الدخول']), f(['Server', 'الخادم']), f(['Forward every request to', 'توجيه جميع الطلبات إلى'], domain?.upstream)
+            s('site-runtime', msgid('Runtime and document root'), [
+                f(msgid('Document root'), domain?.docRoot), f(msgid('Run directory'), undefined, undefined, [
+                    msgid('Document root'), msgid('Subfolder /public')
+                ]), f(msgid('Site type'), domain?.siteType, undefined, [
+                    msgid('php'), msgid('static'), msgid('proxy'), msgid('node'), msgid('python')
+                ]), f(msgid('Node version')), f(msgid('App folder')), f(msgid('Start command')), f(msgid('Port'), undefined, 'number'), f(msgid('Python version')), f(msgid('Entry point')), f(msgid('Server')), f(msgid('Forward every request to'), domain?.upstream)
             ]),
-            t('site-redirect-list', ['Saved redirects', 'التحويلات المحفوظة'], [
-                ['From', 'من'], ['To', 'إلى'], ['Query string', 'معاملات الرابط'], ['Status', 'الحالة'], ['Actions', 'الإجراءات']
+            t('site-redirect-list', msgid('Saved redirects'), [
+                msgid('From'), msgid('To'), msgid('Query string'), msgid('Status'), msgid('Actions')
             ]),
-            s('site-redirects', ['Redirects', 'التحويلات'], [
-                f(['From path', 'من المسار']), f(['To', 'إلى']), f(['Redirect type', 'نوع التحويل'], undefined, undefined, [
-                    ['301 Permanent', '301 دائم'], ['302 Temporary', '302 مؤقت']
-                ]), f(['Keep query string', 'الاحتفاظ بمعاملات الرابط'], undefined, 'checkbox')
+            s('site-redirects', msgctxt('approved-xpanel-pages', 'Redirects'), [
+                f(msgid('From path')), f(msgid('To')), f(msgid('Redirect type'), undefined, undefined, [
+                    msgid('301 Permanent'), msgid('302 Temporary')
+                ]), f(msgid('Keep query string'), undefined, 'checkbox')
             ], [
-                ['Add redirect', 'إضافة تحويل']
+                msgid('Add redirect')
             ]),
-            s('site-proxy', ['Proxy', 'الوكيل'], [
-                f(['Path on this site', 'المسار على هذا الموقع']), f(['Upstream URL', 'رابط الخدمة الخلفية'], domain?.upstream), f(['Host header sent', 'ترويسة Host المرسلة']), f(['Cache responses', 'تخزين الاستجابات مؤقتًا'], undefined, 'checkbox'), f(['Keep for (seconds)', 'مدة الاحتفاظ (ثوانٍ)'], undefined, 'number'), f(['WebSocket upgrade', 'ترقية WebSocket'], undefined, 'checkbox')
+            s('site-proxy', msgctxt('approved-xpanel-pages', 'Proxy'), [
+                f(msgid('Path on this site')), f(msgid('Upstream URL'), domain?.upstream), f(msgid('Host header sent')), f(msgid('Cache responses'), undefined, 'checkbox'), f(msgid('Keep for (seconds)'), undefined, 'number'), f(msgid('WebSocket upgrade'), undefined, 'checkbox')
             ]),
-            s('site-logs', ['Runtime logs', 'سجلات التشغيل'], [
-                f(['Log kind', 'نوع السجل'], undefined, undefined, [
-                    ['Access', 'الوصول'], ['Error', 'الأخطاء'], ['Application', 'التطبيق']
-                ]), f(['Lines', 'السطور'], undefined, 'number'), f(['Log preview', 'معاينة السجل'], undefined, 'textarea')
+            s('site-logs', msgid('Runtime logs'), [
+                f(msgid('Log kind'), undefined, undefined, [
+                    msgid('Access'), msgctxt('approved-xpanel-pages', 'Error'), msgid('Application')
+                ]), f(msgid('Lines'), undefined, 'number'), f(msgid('Log preview'), undefined, 'textarea')
             ], [
-                ['Refresh', 'تحديث'], ['Download', 'تنزيل']
+                msgid('Refresh'), msgid('Download')
             ]),
-            s('site-lifecycle', ['Stop, expiry and path quota', 'الإيقاف والانتهاء وحصة المسار'], [
-                f(['Message on the stopped page', 'رسالة الصفحة الموقوفة'], undefined, 'textarea'), f(['Stop the site on', 'إيقاف الموقع في'], domain?.expiresAt, 'date'), f(['Folder', 'المجلد'], domain?.docRoot), f(['Path quota (MB)', 'حصة المسار (MB)'], domain?.pathQuotaMb), f(['Unlimited path quota', 'حصة مسار غير محدودة'], domain?.pathQuotaMb === 'unlimited', 'checkbox'), f(['No expiry', 'بلا تاريخ انتهاء'], domain?.expiresAt === null, 'checkbox'), f(['Expiry reminder address', 'عنوان تذكير الانتهاء'], a?.contactEmail, 'email'), f(['Reminder days before expiry', 'أيام التذكير قبل الانتهاء'], undefined, 'number')
+            s('site-lifecycle', msgid('Stop, expiry and path quota'), [
+                f(msgid('Message on the stopped page'), undefined, 'textarea'), f(msgid('Stop the site on'), domain?.expiresAt, 'date'), f(msgid('Folder'), domain?.docRoot), f(msgid('Path quota (MB)'), domain?.pathQuotaMb), f(msgid('Unlimited path quota'), domain?.pathQuotaMb === 'unlimited', 'checkbox'), f(msgid('No expiry'), domain?.expiresAt === null, 'checkbox'), f(msgid('Expiry reminder address'), a?.contactEmail, 'email'), f(msgid('Reminder days before expiry'), undefined, 'number')
             ], [
-                ['Reset', 'إعادة الضبط'], ['Stop site', 'إيقاف الموقع'], ['Start site', 'تشغيل الموقع'], ['Save site settings', 'حفظ إعدادات الموقع']
+                msgid('Reset'), msgid('Stop site'), msgid('Start site'), msgid('Save site settings')
             ])
         ], [
-            s('site-summary', ['Site binding', 'ربط الموقع'], [
-                f(['Name', 'الاسم'], domain?.name), f(['Runtime', 'بيئة التشغيل'], domain?.siteType), f(['PHP', 'PHP'], php?.version)
+            s('site-summary', msgid('Site binding'), [
+                f(msgid('Name'), domain?.name), f(msgid('Runtime'), domain?.siteType), f('PHP', php?.version)
             ])
         ]);
-        case '/files/backup': return page(['Backup', 'النسخ الاحتياطي'], ['Choose contents, then review a restore before replacing data.', 'اختيار المحتويات ومراجعة الاسترجاع قبل استبدال البيانات.'], [
+        case '/files/backup': return page(msgctxt('approved-xpanel-pages', 'Backup'), msgid('Choose contents, then review a restore before replacing data.'), [
             {
-                ...s('backup-wizard', ['Backup wizard', 'معالج النسخ الاحتياطي'], [
-                    f(['Operation', 'العملية'], undefined, 'radio', [
-                        ['Back up', 'نسخ احتياطي'], ['Restore', 'استعادة']
-                    ]), f(['Backup type', 'نوع النسخة'], undefined, 'radio', [
-                        ['Full account', 'الحساب كاملًا'], ['Home directory', 'المجلد الرئيسي'], ['Databases', 'قواعد البيانات'], ['Mail config', 'إعداد البريد']
+                ...s('backup-wizard', msgctxt('approved-xpanel-pages', 'Backup wizard'), [
+                    f(msgid('Operation'), undefined, 'radio', [
+                        msgid('Back up'), msgid('Restore')
+                    ]), f(msgid('Backup type'), undefined, 'radio', [
+                        msgid('Full account'), msgctxt('approved-xpanel-pages', 'Home directory'), msgid('Databases'), msgid('Mail config')
                     ])
                 ]), steps: [
-                    ['What to include', 'محتوى النسخة'], ['Destination', 'الوجهة'], ['Review', 'المراجعة'], ['Result', 'النتيجة']
+                    msgid('What to include'), msgid('Destination'), msgid('Review'), msgid('Result')
                 ]
             },
-            s('backup-include', ['What do you want to back up?', 'ماذا تريد نسخه؟'], [
-                f(['Home directory files', 'ملفات المجلد الرئيسي'], undefined, 'checkbox'),
-                f(['Folder', 'المجلد']), f(['Databases', 'قواعد البيانات'], undefined, 'checkbox'),
-                f(['Mailboxes', 'صناديق البريد'], undefined, 'checkbox'), f(['Mail config', 'إعداد البريد'], undefined, 'checkbox')
+            s('backup-include', msgid('What do you want to back up?'), [
+                f(msgctxt('approved-xpanel-pages', 'Home directory files'), undefined, 'checkbox'),
+                f(msgid('Folder')), f(msgid('Databases'), undefined, 'checkbox'),
+                f(msgid('Mailboxes'), undefined, 'checkbox'), f(msgid('Mail config'), undefined, 'checkbox')
             ]),
             {
-                ...t('backup-databases', ['Database selection', 'اختيار قواعد البيانات'], [
-                    ['Database', 'قاعدة البيانات'], ['Size', 'الحجم']
+                ...t('backup-databases', msgid('Database selection'), [
+                    msgid('Database'), msgid('Size')
                 ], (a ? p.databases?.filter(row => row.accountId === a.id && !row.trashedAt) : undefined)?.map(row => [
-                    row.name, p.locale === 'ar' ? notRead[1] : notRead[0]
+                    row.name, translator(p.locale)(notRead)
                 ]), a !== undefined && p.databases !== undefined),
-                fields: (a ? p.databases?.filter(row => row.accountId === a.id && !row.trashedAt) : undefined)?.map(row => f([
-                    row.name, row.name
-                ], undefined, 'checkbox', undefined, {
+                fields: (a ? p.databases?.filter(row => row.accountId === a.id && !row.trashedAt) : undefined)?.map(row => f(row.name, undefined, 'checkbox', undefined, {
                     technicalLabel: true
                 })) ?? [],
-                message: ['A folder selection excludes mailboxes. Database selection and a consistent dump must be confirmed before a backup can run.', 'اختيار مجلد لا يشمل صناديق البريد. يجب تأكيد اختيار قواعد البيانات ونسختها المتسقة قبل تشغيل النسخ.']
+                message: msgid('A folder selection excludes mailboxes. Database selection and a consistent dump must be confirmed before a backup can run.')
             },
-            s('backup-destination', ['Where should the archive go?', 'أين يذهب الأرشيف؟'], [
-                f(['Destination', 'الوجهة'], undefined, 'radio', [
-                    ['Download to this device', 'تنزيل إلى هذا الجهاز'], ['Local storage', 'تخزين محلي'], ['Remote storage', 'تخزين بعيد']
-                ]), f(['Remote storage', 'التخزين البعيد'], undefined, undefined, []),
-                f(['Email me when it is done', 'إرسال بريد عند الاكتمال'], undefined, 'checkbox'),
-                f(['Completion email', 'بريد إشعار الاكتمال'], a?.contactEmail, 'email'), f(['Space check', 'فحص المساحة'])
+            s('backup-destination', msgid('Where should the archive go?'), [
+                f(msgid('Destination'), undefined, 'radio', [
+                    msgid('Download to this device'), msgid('Local storage'), msgctxt('approved-xpanel-pages', 'Remote storage')
+                ]), f(msgid('Remote storage'), undefined, undefined, []),
+                f(msgid('Email me when it is done'), undefined, 'checkbox'),
+                f(msgid('Completion email'), a?.contactEmail, 'email'), f(msgid('Space check'))
             ], [
-                ['Back', 'رجوع'], ['Review backup', 'مراجعة النسخة']
+                msgid('Back'), msgid('Review backup')
             ]),
-            s('backup-summary', ['Review backup', 'مراجعة النسخة'], [
-                f(['Contents', 'المحتويات']), f(['Destination', 'الوجهة']), f(['Estimated size', 'الحجم المتوقع']), f(['Available space', 'المساحة المتاحة'])
+            s('backup-summary', msgid('Review backup'), [
+                f(msgid('Contents')), f(msgid('Destination')), f(msgid('Estimated size')), f(msgid('Available space'))
             ], [
-                ['Create backup', 'إنشاء نسخة احتياطية']
+                msgctxt('approved-xpanel-pages', 'Create backup')
             ]),
             {
-                ...t('backup-progress', ['Backup progress and result', 'تقدم النسخ ونتيجته'], [
-                    ['Time (UTC)', 'الوقت (UTC)'], ['Event', 'الحدث'], ['Result', 'النتيجة']
+                ...t('backup-progress', msgid('Backup progress and result'), [
+                    msgid('Time (UTC)'), msgid('Event'), msgid('Result')
                 ]), actions: [
-                    ['Cancel backup', 'إلغاء النسخ']
+                    msgid('Cancel backup')
                 ],
-                message: ['No backup run or result has been read. No archive, progress percentage or completed job is assumed.', 'لم تُقرأ عملية نسخ أو نتيجتها. لا يُفترض وجود أرشيف أو نسبة تقدم أو مهمة مكتملة.']
+                message: msgid('No backup run or result has been read. No archive, progress percentage or completed job is assumed.')
             },
-            s('backup-restore', ['Choose an archive', 'اختيار أرشيف'], [
-                f(['Archive', 'الأرشيف'], undefined, undefined, []), f(['Upload archive', 'رفع أرشيف'], undefined, 'file'),
-                f(['Restore home directory files', 'استعادة ملفات المجلد الرئيسي'], undefined, 'checkbox'),
-                f(['Restore databases', 'استعادة قواعد البيانات'], undefined, 'checkbox'),
-                f(['Restore mailboxes', 'استعادة صناديق البريد'], undefined, 'checkbox'),
-                f(['Restore mail config', 'استعادة إعداد البريد'], undefined, 'checkbox')
+            s('backup-restore', msgid('Choose an archive'), [
+                f(msgid('Archive'), undefined, undefined, []), f(msgid('Upload archive'), undefined, 'file'),
+                f(msgid('Restore home directory files'), undefined, 'checkbox'),
+                f(msgid('Restore databases'), undefined, 'checkbox'),
+                f(msgid('Restore mailboxes'), undefined, 'checkbox'),
+                f(msgid('Restore mail config'), undefined, 'checkbox')
             ], [
-                ['Review the difference', 'مراجعة الفرق']
+                msgid('Review the difference')
             ]),
-            s('backup-diff-summary', ['Difference summary', 'ملخص الفروق'], [
-                f(['Added', 'المضاف']), f(['Changed', 'المتغير']), f(['Unchanged', 'دون تغيير']), f(['Missing from archive', 'غير الموجود في الأرشيف']),
-                f(['Difference filter', 'تصفية الفرق'], undefined, 'radio', [
-                    ['All differences', 'كل الفروق'], ['Added', 'المضاف'], ['Changed', 'المتغير'], ['Missing from archive', 'غير الموجود في الأرشيف'], ['Unchanged', 'دون تغيير']
+            s('backup-diff-summary', msgid('Difference summary'), [
+                f(msgid('Added')), f(msgid('Changed')), f(msgid('Unchanged')), f(msgid('Missing from archive')),
+                f(msgid('Difference filter'), undefined, 'radio', [
+                    msgid('All differences'), msgid('Added'), msgid('Changed'), msgid('Missing from archive'), msgid('Unchanged')
                 ])
             ]),
             {
-                ...t('backup-diff', ['Review the difference', 'مراجعة الفرق'], [
-                    ['Path', 'المسار'], ['Result', 'النتيجة'], ['In archive', 'في الأرشيف'], ['On disk now', 'على القرص الآن'], ['Planned action', 'الإجراء المخطط']
+                ...t('backup-diff', msgid('Review the difference'), [
+                    msgid('Path'), msgid('Result'), msgid('In archive'), msgid('On disk now'), msgid('Planned action')
                 ]), actions: [
-                    ['Download full list (CSV)', 'تنزيل القائمة كاملة (CSV)']
+                    msgid('Download full list (CSV)')
                 ],
-                message: ['No archive has been selected or compared. Difference counts and planned changes have not been read.', 'لم يُحدد أو يُقارن أي أرشيف. لم تُقرأ أعداد الفروق أو التغييرات المخططة.']
+                message: msgid('No archive has been selected or compared. Difference counts and planned changes have not been read.')
             },
-            t('backup-db-diff', ['Database differences', 'فروق قواعد البيانات'], [
-                ['Database', 'قاعدة البيانات'], ['Planned action', 'الإجراء المخطط']
+            t('backup-db-diff', msgid('Database differences'), [
+                msgid('Database'), msgid('Planned action')
             ]),
-            t('backup-mail-diff', ['Mailbox differences', 'فروق صناديق البريد'], [
-                ['Mailbox', 'صندوق البريد'], ['Missing messages', 'الرسائل الناقصة'], ['Planned action', 'الإجراء المخطط']
+            t('backup-mail-diff', msgid('Mailbox differences'), [
+                msgid('Mailbox'), msgid('Missing messages'), msgid('Planned action')
             ]),
-            t('backup-mail-config-diff', ['Mail config differences', 'فروق إعداد البريد'], [
-                ['Setting', 'الإعداد'], ['In archive', 'في الأرشيف'], ['Current', 'الحالي'], ['Planned action', 'الإجراء المخطط']
+            t('backup-mail-config-diff', msgid('Mail config differences'), [
+                msgid('Setting'), msgid('In archive'), msgid('Current'), msgid('Planned action')
             ]),
             {
-                ...s('backup-restore-review', ['Before a restore', 'قبل الاسترجاع'], [
-                    f(['Archive', 'الأرشيف']), f(['Selected parts', 'الأجزاء المحددة']), f(['Destination', 'الوجهة']),
-                    f(['Overwrite warning', 'تنبيه الاستبدال']), f(['I reviewed the proposed restore changes', 'راجعت تغييرات الاستعادة المقترحة'], undefined, 'checkbox')
+                ...s('backup-restore-review', msgctxt('approved-xpanel-pages', 'Before a restore'), [
+                    f(msgid('Archive')), f(msgid('Selected parts')), f(msgid('Destination')),
+                    f(msgid('Overwrite warning')), f(msgid('I reviewed the proposed restore changes'), undefined, 'checkbox')
                 ], [
-                    ['Back', 'رجوع'], ['Restore selected parts', 'استعادة الأجزاء المحددة']
+                    msgid('Back'), msgid('Restore selected parts')
                 ]),
-                message: ['Acknowledgement stays unavailable until the actual archive, selected parts and proposed changes have been read. An uploaded archive is not proof of a successful restore.', 'يبقى التأكيد غير متاح حتى تُقرأ بيانات الأرشيف والأجزاء المحددة والتغييرات المقترحة. رفع الأرشيف لا يثبت نجاح الاسترجاع.']
+                message: msgid('Acknowledgement stays unavailable until the actual archive, selected parts and proposed changes have been read. An uploaded archive is not proof of a successful restore.')
             },
             {
-                ...t('backup-history', ['Archives', 'الأرشيفات'], [
-                    ['Archive', 'الأرشيف'], ['Created (UTC)', 'أُنشئت (UTC)'], ['Contents', 'المحتويات'], ['Size', 'الحجم'], ['Location', 'المكان'], ['Status', 'الحالة']
+                ...t('backup-history', msgid('Archives'), [
+                    msgid('Archive'), msgctxt('approved-xpanel-pages', 'Created (UTC)'), msgid('Contents'), msgid('Size'), msgid('Location'), msgid('Status')
                 ]), actions: [
-                    ['Restore selected archive', 'استعادة الأرشيف المحدد'], ['Download selected archive', 'تنزيل الأرشيف المحدد'], ['Delete selected archive', 'حذف الأرشيف المحدد']
+                    msgid('Restore selected archive'), msgid('Download selected archive'), msgid('Delete selected archive')
                 ]
             }
         ], [
-            d('backup-safety', ['What a restore never does', 'ما لا تفعله الاستعادة'], ['A restore must show the difference first, keep files missing from the archive, keep newer mail and unrelated mail settings, and restore databases separately from home files. These protections have not been verified by a run here.', 'يجب أن تعرض الاستعادة الفروق أولًا وتحافظ على الملفات غير الموجودة في الأرشيف والبريد الأحدث وإعدادات البريد الأخرى، وأن تستعيد قواعد البيانات منفصلة عن ملفات المجلد الرئيسي. لم تُثبت هذه الضمانات بعملية استعادة هنا.']),
-            s('backup-location', ['Where archives live', 'أماكن الأرشيفات'], [
-                f(['Account folder', 'مجلد الحساب']), f(['Remote storage', 'التخزين البعيد']), f(['Server backups', 'نسخ السيرفر']), f(['Retention policy', 'سياسة الاحتفاظ'])
+            d('backup-safety', msgid('What a restore never does'), msgid('A restore must show the difference first, keep files missing from the archive, keep newer mail and unrelated mail settings, and restore databases separately from home files. These protections have not been verified by a run here.')),
+            s('backup-location', msgctxt('approved-xpanel-pages', 'Where archives live'), [
+                f(msgid('Account folder')), f(msgid('Remote storage')), f(msgctxt('approved-xpanel-pages', 'Server backups')), f(msgid('Retention policy'))
             ])
         ]);
-        case '/databases/mariadb': return page(['MariaDB databases', 'قواعد بيانات MariaDB'], ['Databases, users and grants within this account.', 'قواعد البيانات والمستخدمون والصلاحيات ضمن الحساب.'], [
-            s('database-rename', ['Rename database', 'إعادة تسمية قاعدة بيانات'], [
-                f(['Database', 'قاعدة البيانات'], undefined, undefined, []), f(['New database name', 'الاسم الجديد لقاعدة البيانات'])
+        case '/databases/mariadb': return page(msgid('MariaDB databases'), msgid('Databases, users and grants within this account.'), [
+            s('database-rename', msgid('Rename database'), [
+                f(msgid('Database'), undefined, undefined, []), f(msgid('New database name'))
             ], [
-                ['Cancel', 'إلغاء'], ['Rename database', 'إعادة تسمية قاعدة البيانات']
+                msgid('Cancel'), msgctxt('approved-xpanel-pages', 'Rename database')
             ]),
-            s('database-drop-confirmation', ['Drop database permanently', 'حذف قاعدة البيانات نهائيًا'], [
-                f(['Database name to confirm', 'اسم قاعدة البيانات للتأكيد'])
+            s('database-drop-confirmation', msgid('Drop database permanently'), [
+                f(msgid('Database name to confirm'))
             ], [
-                ['Cancel', 'إلغاء'], ['Drop permanently', 'الحذف نهائيًا']
+                msgid('Cancel'), msgid('Drop permanently')
             ]),
-            s('database-generate-password', ['New database user password', 'كلمة مرور مستخدم قاعدة البيانات الجديد'], [
-                f(['Password', 'كلمة المرور'], undefined, 'password')
+            s('database-generate-password', msgid('New database user password'), [
+                f(msgid('Password'), undefined, 'password')
             ], [
-                ['Generate password', 'توليد كلمة مرور'], ['Clear', 'مسح']
+                msgid('Generate password'), msgid('Clear')
             ]),
-            s('database-advanced-privileges', ['Advanced privileges', 'الصلاحيات المتقدمة'], [
-                f(['All privileges', 'كل الصلاحيات'], undefined, 'checkbox')
+            s('database-advanced-privileges', msgid('Advanced privileges'), [
+                f(msgid('All privileges'), undefined, 'checkbox')
             ], [
-                ['Show advanced privileges', 'إظهار الصلاحيات المتقدمة'], ['Hide advanced privileges', 'إخفاء الصلاحيات المتقدمة']
+                msgid('Show advanced privileges'), msgid('Hide advanced privileges')
             ]),
-            t('remote-database-hosts', ['Allowed database hosts', 'مضيفو قواعد البيانات المسموحون'], [
-                ['Host', 'المضيف'], ['Comment', 'الملاحظة'], ['Added', 'الإضافة'], ['Firewall', 'الجدار الناري']
+            t('remote-database-hosts', msgid('Allowed database hosts'), [
+                msgid('Host'), msgctxt('approved-xpanel-pages', 'Comment'), msgctxt('approved-xpanel-pages', 'Added'), msgid('Firewall')
             ]),
-            s('remote-database-remove', ['Remove allowed host', 'إزالة مضيف مسموح'], [
-                f(['Host', 'المضيف'])
+            s('remote-database-remove', msgid('Remove allowed host'), [
+                f(msgid('Host'))
             ], [
-                ['Remove', 'إزالة']
+                msgid('Remove')
             ]),
-            s('database-create-options', ['Create database options', 'خيارات إنشاء قاعدة البيانات'], [
-                f(['Collation', 'ترتيب الأحرف'], undefined, undefined, [
-                    ['Use server default', 'استخدام افتراضي السيرفر'], ['utf8mb4_unicode_ci', 'utf8mb4_unicode_ci'], ['utf8mb4_general_ci', 'utf8mb4_general_ci']
-                ]), f(['Create a user with this database', 'إنشاء مستخدم لهذه القاعدة'], undefined, 'checkbox')
+            s('database-create-options', msgid('Create database options'), [
+                f(msgid('Collation'), undefined, undefined, [
+                    msgid('Use server default'), 'utf8mb4_unicode_ci', 'utf8mb4_general_ci'
+                ]), f(msgid('Create a user with this database'), undefined, 'checkbox')
             ]),
-            s('database-grants-review', ['Desired privileges', 'الصلاحيات المطلوبة'], [
-                f(['Database', 'قاعدة البيانات'], undefined, undefined, (a ? p.databases?.filter(x => x.accountId === a.id && !x.trashedAt) : [])?.map(x => [
-                    x.name, x.name
-                ]) ?? []), f(['User', 'المستخدم'], undefined, undefined, p.databaseUsers?.map(x => [
-                    x.name, x.name
-                ]) ?? []), f(['SELECT', 'SELECT'], undefined, 'checkbox', undefined, {
+            s('database-grants-review', msgid('Desired privileges'), [
+                f(msgid('Database'), undefined, undefined, (a ? p.databases?.filter(x => x.accountId === a.id && !x.trashedAt) : [])?.map(x => x.name) ?? []), f(msgid('User'), undefined, undefined, p.databaseUsers?.map(x => x.name) ?? []), f('SELECT', undefined, 'checkbox', undefined, {
                     technicalLabel: true
-                }), f(['INSERT', 'INSERT'], undefined, 'checkbox', undefined, {
+                }), f('INSERT', undefined, 'checkbox', undefined, {
                     technicalLabel: true
-                }), f(['UPDATE', 'UPDATE'], undefined, 'checkbox', undefined, {
+                }), f('UPDATE', undefined, 'checkbox', undefined, {
                     technicalLabel: true
-                }), f(['DELETE', 'DELETE'], undefined, 'checkbox', undefined, {
+                }), f('DELETE', undefined, 'checkbox', undefined, {
                     technicalLabel: true
-                }), f(['CREATE', 'CREATE'], undefined, 'checkbox', undefined, {
+                }), f('CREATE', undefined, 'checkbox', undefined, {
                     technicalLabel: true
-                }), f(['ALTER', 'ALTER'], undefined, 'checkbox', undefined, {
+                }), f('ALTER', undefined, 'checkbox', undefined, {
                     technicalLabel: true
-                }), f(['DROP', 'DROP'], undefined, 'checkbox', undefined, {
+                }), f('DROP', undefined, 'checkbox', undefined, {
                     technicalLabel: true
-                }), f(['INDEX', 'INDEX'], undefined, 'checkbox', undefined, {
+                }), f('INDEX', undefined, 'checkbox', undefined, {
                     technicalLabel: true
-                }), f(['CREATE VIEW', 'CREATE VIEW'], undefined, 'checkbox', undefined, {
+                }), f('CREATE VIEW', undefined, 'checkbox', undefined, {
                     technicalLabel: true
-                }), f(['SHOW VIEW', 'SHOW VIEW'], undefined, 'checkbox', undefined, {
+                }), f('SHOW VIEW', undefined, 'checkbox', undefined, {
                     technicalLabel: true
-                }), f(['TRIGGER', 'TRIGGER'], undefined, 'checkbox', undefined, {
+                }), f('TRIGGER', undefined, 'checkbox', undefined, {
                     technicalLabel: true
-                }), f(['EVENT', 'EVENT'], undefined, 'checkbox', undefined, {
+                }), f('EVENT', undefined, 'checkbox', undefined, {
                     technicalLabel: true
-                }), f(['EXECUTE', 'EXECUTE'], undefined, 'checkbox', undefined, {
+                }), f('EXECUTE', undefined, 'checkbox', undefined, {
                     technicalLabel: true
                 })
             ], [
-                ['Discard changes', 'تجاهل التغييرات'], ['Save privileges', 'حفظ الصلاحيات']
+                msgid('Discard changes'), msgid('Save privileges')
             ]),
-            s('database-change-password', ['Change user password', 'تغيير كلمة مرور المستخدم'], [
-                f(['User', 'المستخدم'], undefined, undefined, p.databaseUsers?.map(x => [
-                    x.name, x.name
-                ]) ?? []), f(['New password', 'كلمة المرور الجديدة'], undefined, 'password'), f(['Repeat password', 'تكرار كلمة المرور'], undefined, 'password')
+            s('database-change-password', msgid('Change user password'), [
+                f(msgid('User'), undefined, undefined, p.databaseUsers?.map(x => x.name) ?? []), f(msgid('New password'), undefined, 'password'), f(msgid('Repeat password'), undefined, 'password')
             ], [
-                ['Change password', 'تغيير كلمة المرور']
+                msgid('Change password')
             ]),
-            s('database-trash-policy', ['Database trash', 'سلة قواعد البيانات'], [], [
-                ['Undo deletion', 'التراجع عن الحذف'], ['Restore selected', 'استعادة المحدد'], ['Delete for good', 'الحذف نهائيًا']
+            s('database-trash-policy', msgid('Database trash'), [], [
+                msgid('Undo deletion'), msgid('Restore selected'), msgid('Delete for good')
             ]),
-            t('database-usage', ['Database usage', 'استخدام قواعد البيانات'], [
-                ['Database', 'قاعدة البيانات'], ['Engine', 'المحرك'], ['Size', 'الحجم']
+            t('database-usage', msgid('Database usage'), [
+                msgid('Database'), msgid('Engine'), msgid('Size')
             ], (a ? p.databases?.filter(x => x.accountId === a.id && !x.trashedAt) : undefined)?.map(x => [
-                x.name, x.engine, p.locale === 'ar' ? notRead[1] : notRead[0]
+                x.name, x.engine, translator(p.locale)(notRead)
             ]), a !== undefined && p.databases !== undefined),
-            s('database-privileges', ['User privileges', 'صلاحيات المستخدم'], [
-                f(['Database', 'قاعدة البيانات'], undefined, undefined, (a ? p.databases?.filter(x => x.accountId === a.id && !x.trashedAt) : [])?.map(x => [
-                    x.name, x.name
-                ]) ?? []), f(['SELECT', 'SELECT'], undefined, 'checkbox', undefined, {
+            s('database-privileges', msgid('User privileges'), [
+                f(msgid('Database'), undefined, undefined, (a ? p.databases?.filter(x => x.accountId === a.id && !x.trashedAt) : [])?.map(x => x.name) ?? []), f('SELECT', undefined, 'checkbox', undefined, {
                     technicalLabel: true
-                }), f(['INSERT', 'INSERT'], undefined, 'checkbox', undefined, {
+                }), f('INSERT', undefined, 'checkbox', undefined, {
                     technicalLabel: true
-                }), f(['UPDATE', 'UPDATE'], undefined, 'checkbox', undefined, {
+                }), f('UPDATE', undefined, 'checkbox', undefined, {
                     technicalLabel: true
-                }), f(['DELETE', 'DELETE'], undefined, 'checkbox', undefined, {
+                }), f('DELETE', undefined, 'checkbox', undefined, {
                     technicalLabel: true
-                }), f(['CREATE / ALTER / DROP', 'CREATE / ALTER / DROP'], undefined, 'checkbox', undefined, {
+                }), f('CREATE / ALTER / DROP', undefined, 'checkbox', undefined, {
                     technicalLabel: true
                 })
             ], [
-                ['Save privileges', 'حفظ الصلاحيات']
+                msgid('Save privileges')
             ]),
-            s('database-connection', ['Connection details', 'تفاصيل الاتصال'], [
-                f(['Host', 'المضيف']), f(['Port', 'المنفذ']), f(['Database name', 'اسم قاعدة البيانات']), f(['Username', 'اسم المستخدم'])
+            s('database-connection', msgid('Connection details'), [
+                f(msgid('Host')), f(msgid('Port')), f(msgid('Database name')), f(msgid('Username'))
             ], [
-                ['Copy connection details', 'نسخ تفاصيل الاتصال']
+                msgid('Copy connection details')
             ]),
-            s('remote-database-access', ['Remote access', 'الوصول البعيد'], [
-                f(['Allowed host or address', 'المضيف أو العنوان المسموح']), f(['Comment (optional)', 'ملاحظة (اختيارية)'])
+            s('remote-database-access', msgid('Remote access'), [
+                f(msgid('Allowed host or address')), f(msgctxt('approved-xpanel-pages', 'Comment (optional)'))
             ], [
-                ['Add host', 'إضافة مضيف']
+                msgid('Add host')
             ])
         ], [
-            d('database-grants', ['Names and grants', 'الأسماء والصلاحيات'], ['Users receive access only to databases included in their saved grants.', 'لا يحصل المستخدم إلا على الوصول إلى قواعد البيانات المحددة في صلاحياته المحفوظة.'])
+            d('database-grants', msgid('Names and grants'), msgid('Users receive access only to databases included in their saved grants.'))
         ]);
-        case '/domains': return page(['Domains', 'النطاقات'], ['Names, document roots, IP addresses and runtimes.', 'الأسماء ومجلدات المواقع وعناوين IP وبيئات التشغيل.'], [
-            s('domain-rename-primary', ['Rename primary domain', 'إعادة تسمية النطاق الرئيسي'], [
-                f(['Current primary domain', 'النطاق الرئيسي الحالي'], a?.primaryDomain), f(['New primary domain', 'النطاق الرئيسي الجديد']), f(['Keep old domain as an alias', 'الاحتفاظ بالنطاق القديم كاسم بديل'], undefined, 'checkbox'), f(['Type current primary domain to confirm', 'اكتب النطاق الرئيسي الحالي للتأكيد'])
+        case '/domains': return page(msgid('Domains'), msgid('Names, document roots, IP addresses and runtimes.'), [
+            s('domain-rename-primary', msgid('Rename primary domain'), [
+                f(msgid('Current primary domain'), a?.primaryDomain), f(msgid('New primary domain')), f(msgid('Keep old domain as an alias'), undefined, 'checkbox'), f(msgid('Type current primary domain to confirm'))
             ], [
-                ['Rename primary domain', 'إعادة تسمية النطاق الرئيسي']
+                msgid('Rename primary domain')
             ]),
-            d('domain-rename-changes', ['What changes', 'ما الذي يتغير'], ['The reviewed rename plan must list affected mailboxes, certificates and subdomains. No migration plan has been read or applied.', 'يجب أن تسرد خطة إعادة التسمية صناديق البريد والشهادات والنطاقات الفرعية المتأثرة. لم تُقرأ أو تُطبق خطة نقل.']),
-            d('domain-rename-stays', ['What stays', 'ما الذي يبقى'], ['The account identity, files and databases must remain intact. No rename is available from this workspace until its scoped migration and rollback are implemented.', 'يجب الحفاظ على هوية الحساب وملفاته وقواعد بياناته. لا تتوفر إعادة التسمية من هذه المساحة حتى تنفيذ النقل المحدد للحساب والتراجع عنه.']),
-            d('domain-create-review', ['This will create', 'ما الذي سيُنشأ'], ['The domain, aliases, DNS and certificate changes must be reviewed from an actual plan. No creation plan has been read.', 'يجب مراجعة تغييرات النطاق والأسماء البديلة وDNS والشهادة من خطة فعلية. لم تُقرأ خطة إنشاء.']),
-            s('domain-binding', ['How names are served', 'كيف تُخدم الأسماء'], [
-                f(['Primary domain', 'النطاق الرئيسي'], a?.primaryDomain), f(['Default IPv4', 'عنوان IPv4 الافتراضي'], a?.ipv4), f(['Default IPv6', 'عنوان IPv6 الافتراضي'], a?.ipv6)
+            d('domain-rename-changes', msgid('What changes'), msgid('The reviewed rename plan must list affected mailboxes, certificates and subdomains. No migration plan has been read or applied.')),
+            d('domain-rename-stays', msgid('What stays'), msgid('The account identity, files and databases must remain intact. No rename is available from this workspace until its scoped migration and rollback are implemented.')),
+            d('domain-create-review', msgid('This will create'), msgid('The domain, aliases, DNS and certificate changes must be reviewed from an actual plan. No creation plan has been read.')),
+            s('domain-binding', msgid('How names are served'), [
+                f(msgctxt('approved-xpanel-pages', 'Primary domain'), a?.primaryDomain), f(msgid('Default IPv4'), a?.ipv4), f(msgid('Default IPv6'), a?.ipv6)
             ])
         ], [
-            s('domain-limits', ['Domain limits', 'حدود النطاقات'], [
-                f(['Saved domains', 'النطاقات المحفوظة'], domains?.length), f(['Addon-domain limit', 'حد النطاقات الإضافية'], plan?.caps.addonDomains)
+            s('domain-limits', msgid('Domain limits'), [
+                f(msgid('Saved domains'), domains?.length), f(msgid('Addon-domain limit'), plan?.caps.addonDomains)
             ])
         ]);
-        case '/domains/zone-editor': return page(['Zone editor', 'محرر المنطقة'], ['Review records and check deliverability separately.', 'مراجعة السجلات وفحص قابلية التسليم بصورة منفصلة.'], [
-            s('email-deliverability', ['Email deliverability', 'قابلية تسليم البريد'], [
-                f(['SPF', 'SPF']), f(['DKIM', 'DKIM']), f(['DMARC', 'DMARC']), f(['Reverse DNS', 'DNS العكسي'])
+        case '/domains/zone-editor': return page(msgid('Zone editor'), msgid('Review records and check deliverability separately.'), [
+            s('email-deliverability', msgid('Email deliverability'), [
+                f('SPF'), f('DKIM'), f('DMARC'), f(msgid('Reverse DNS'))
             ], [
-                ['Check status', 'فحص الحالة'], ['Check again', 'الفحص مجددًا'], ['Fix', 'إصلاح']
+                msgid('Check status'), msgid('Check again'), msgid('Fix')
             ]),
-            s('dns-record-filter', ['Record type filter', 'تصفية نوع السجل'], [
-                f(['Zone', 'المنطقة'], undefined, undefined, (domains ?? []).map(row => [
-                    row.name, row.name
-                ])), f(['Show record types', 'أنواع السجلات المعروضة'], undefined, 'radio', [
-                    ['All', 'الكل'], ['A', 'A'], ['AAAA', 'AAAA'], ['CNAME', 'CNAME'], ['MX', 'MX'], ['TXT', 'TXT'], ['SRV', 'SRV'], ['CAA', 'CAA']
+            s('dns-record-filter', msgid('Record type filter'), [
+                f(msgid('Zone'), undefined, undefined, (domains ?? []).map(row => row.name)), f(msgid('Show record types'), undefined, 'radio', [
+                    msgid('All'), 'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'SRV', 'CAA'
                 ], {
                     technicalChoices: true
                 })
             ], [
-                ['Edit record', 'تعديل سجل'], ['Delete record', 'حذف سجل']
+                msgid('Edit record'), msgid('Delete record')
             ]),
             {
-                ...s('dns-add-record', ['Records and zone editor', 'السجلات ومحرر المنطقة'], [
-                    f(['Type', 'النوع'], undefined, undefined, [
-                        ['A', 'A'], ['AAAA', 'AAAA'], ['CNAME', 'CNAME'], ['MX', 'MX'], ['TXT', 'TXT'], ['SRV', 'SRV'], ['CAA', 'CAA']
-                    ]), f(['Name', 'الاسم']), f(['Content', 'المحتوى']), f(['TTL', 'TTL'], undefined, 'number'), f(['Priority', 'الأولوية'], undefined, 'number'), f(['Weight', 'الوزن'], undefined, 'number'), f(['Port', 'المنفذ'], undefined, 'number'), f(['Target', 'الهدف']), f(['Flags', 'العلامات'], undefined, 'number'), f(['Tag', 'الوسم'])
+                ...s('dns-add-record', msgid('Records and zone editor'), [
+                    f(msgid('Type'), undefined, undefined, [
+                        'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'SRV', 'CAA'
+                    ]), f(msgid('Name')), f(msgid('Content')), f('TTL', undefined, 'number'), f(msgid('Priority'), undefined, 'number'), f(msgid('Weight'), undefined, 'number'), f(msgid('Port'), undefined, 'number'), f(msgid('Target')), f(msgid('Flags'), undefined, 'number'), f(msgid('Tag'))
                 ], [
-                    ['Add record', 'إضافة سجل']
+                    msgid('Add record')
                 ]), binding: 'dns'
             }
         ], [
-            s('zone-facts', ['Zone facts', 'معلومات المنطقة'], [
-                f(['Zone', 'المنطقة'], domain?.name), f(['Records read', 'السجلات المقروءة'], p.dnsRecords?.length)
-            ]), d('dns-change', ['How a change is applied', 'كيف يُطبّق التغيير'], ['Saving a record is separate from public DNS propagation and mail-delivery checks.', 'حفظ السجل منفصل عن انتشار DNS العام وفحوص تسليم البريد.'])
+            s('zone-facts', msgid('Zone facts'), [
+                f(msgid('Zone'), domain?.name), f(msgid('Records read'), p.dnsRecords?.length)
+            ]), d('dns-change', msgid('How a change is applied'), msgid('Saving a record is separate from public DNS propagation and mail-delivery checks.'))
         ]);
         case '/metrics/traffic': {
             const x = p.websiteAnalytics;
-            return page(['Metrics', 'المقاييس'], ['Traffic, response status and bandwidth from log observations.', 'الزيارات وحالات الاستجابة وحركة البيانات من قراءة السجلات.'], [
-                s('metrics-scope', ['Traffic selection', 'اختيار حركة البيانات'], [
-                    f(['Domain', 'النطاق'], undefined, undefined, (domains ?? []).map(row => [
-                        row.name, row.name
-                    ])), f(['Range', 'الفترة'], undefined, undefined, [
-                        ['Last 7 days', 'آخر 7 أيام'], ['Last 30 days', 'آخر 30 يومًا']
+            return page(msgid('Metrics'), msgid('Traffic, response status and bandwidth from log observations.'), [
+                s('metrics-scope', msgid('Traffic selection'), [
+                    f(msgid('Domain'), undefined, undefined, (domains ?? []).map(row => row.name)), f(msgid('Range'), undefined, undefined, [
+                        msgid('Last 7 days'), msgid('Last 30 days')
                     ])
                 ]),
                 {
-                    ...s('visitors', ['Unique visitors per day', 'الزوار الفريدون يوميًا'], [
-                        f(['Unique visitors', 'الزوار الفريدون'], x?.totals.uniqueVisitors), f(['Requests', 'الطلبات'], x?.totals.requests)
-                    ]), chart: true, message: ['Daily visitor readings have not been read. Request totals do not establish a daily visitor series.', 'لم تُقرأ قراءات الزوار اليومية. إجمالي الطلبات لا يثبت سلسلة يومية للزوار.']
+                    ...s('visitors', msgid('Unique visitors per day'), [
+                        f(msgid('Unique visitors'), x?.totals.uniqueVisitors), f(msgid('Requests'), x?.totals.requests)
+                    ]), chart: true, message: msgid('Daily visitor readings have not been read. Request totals do not establish a daily visitor series.')
                 },
-                t('top-pages', ['Top pages', 'الصفحات الأكثر زيارة'], [
-                    ['Path', 'المسار'], ['Requests', 'الطلبات'], ['Transferred', 'البيانات المنقولة']
+                t('top-pages', msgid('Top pages'), [
+                    msgid('Path'), msgid('Requests'), msgid('Transferred')
                 ], x?.topPaths.map(row => [
                     row.key, String(row.requests), formatBytes(row.bytes)
                 ]), x !== undefined),
-                s('response-status', ['Responses by status', 'الاستجابات حسب الحالة'], [
-                    f(['2xx', '2xx'], x?.totals.status2xx), f(['3xx', '3xx'], x?.totals.status3xx), f(['4xx', '4xx'], x?.totals.status4xx), f(['5xx', '5xx'], x?.totals.status5xx)
+                s('response-status', msgid('Responses by status'), [
+                    f('2xx', x?.totals.status2xx), f('3xx', x?.totals.status3xx), f('4xx', x?.totals.status4xx), f('5xx', x?.totals.status5xx)
                 ]),
-                t('error-paths', ['Errors by path', 'الأخطاء حسب المسار'], [
-                    ['Path', 'المسار'], ['Errors', 'الأخطاء']
+                t('error-paths', msgid('Errors by path'), [
+                    msgid('Path'), msgid('Errors')
                 ], x?.topPaths.filter(row => (row.errors5xx ?? 0) > 0).map(row => [
                     row.key, String(row.errors5xx)
                 ]), x !== undefined)
             ], [
-                s('bandwidth', ['Bandwidth by domain', 'حركة البيانات حسب النطاق'], [
-                    f(['Domain', 'النطاق'], x?.domain), f(['Transferred', 'البيانات المنقولة'], x ? formatBytes(x.totals.bytes) : undefined)
-                ]), s('raw-logs', ['Raw access logs', 'سجلات الوصول الخام'], [], [
-                    ['Download logs', 'تنزيل السجلات']
+                s('bandwidth', msgid('Bandwidth by domain'), [
+                    f(msgid('Domain'), x?.domain), f(msgid('Transferred'), x ? formatBytes(x.totals.bytes) : undefined)
+                ]), s('raw-logs', msgid('Raw access logs'), [], [
+                    msgid('Download logs')
                 ])
             ]);
         }
-        case '/security/ssl': return page(['SSL/TLS', 'SSL/TLS'], ['Choose the certificate, names and validation, then review installation.', 'اختيار الشهادة والأسماء والتحقق ثم مراجعة التثبيت.'], [
+        case '/security/ssl': return page('SSL/TLS', msgid('Choose the certificate, names and validation, then review installation.'), [
             {
-                ...s('certificate-wizard', ['Certificate wizard', 'معالج الشهادة'], [
-                    f(['Existing certificate', 'الشهادة الموجودة'], undefined, undefined, []), f(['Certificate source', 'مصدر الشهادة'], undefined, undefined, [
-                        ['Issue with ACME', 'الإصدار باستخدام ACME'], ['Use an existing certificate', 'استخدام شهادة موجودة'], ['Upload a private key and certificate', 'رفع مفتاح خاص وشهادة']
-                    ]), f(['Domain', 'النطاق'], domain?.name), f(['Private key', 'المفتاح الخاص'], undefined, 'textarea'), f(['Certificate', 'الشهادة'], undefined, 'textarea'), f(['CA bundle (optional)', 'سلسلة الجهة المصدرة (اختيارية)'], undefined, 'textarea'), f(['Validation', 'التحقق'], undefined, undefined, [
-                        ['HTTP-01', 'HTTP-01'], ['DNS-01', 'DNS-01']
+                ...s('certificate-wizard', msgid('Certificate wizard'), [
+                    f(msgid('Existing certificate'), undefined, undefined, []), f(msgid('Certificate source'), undefined, undefined, [
+                        msgid('Issue with ACME'), msgid('Use an existing certificate'), msgid('Upload a private key and certificate')
+                    ]), f(msgid('Domain'), domain?.name), f(msgid('Private key'), undefined, 'textarea'), f(msgid('Certificate'), undefined, 'textarea'), f(msgid('CA bundle (optional)'), undefined, 'textarea'), f(msgid('Validation'), undefined, undefined, [
+                        'HTTP-01', 'DNS-01'
                     ], {
                         technicalChoices: true
                     })
                 ], [
-                    ['Cancel', 'إلغاء'], ['Back', 'رجوع'], ['Review choices', 'مراجعة الخيارات'], ['Install or issue certificate', 'تثبيت الشهادة أو إصدارها']
+                    msgid('Cancel'), msgid('Back'), msgid('Review choices'), msgid('Install or issue certificate')
                 ]), steps: [
-                    ['Source', 'المصدر'], ['Names', 'الأسماء'], ['Validation', 'التحقق'], ['Install', 'التثبيت'], ['Result', 'النتيجة']
+                    msgid('Source'), msgid('Names'), msgid('Validation'), msgctxt('approved-xpanel-pages', 'Install'), msgid('Result')
                 ]
             }
         ], [
-            s('certificate-choices', ['Your choices', 'خياراتك'], [
-                f(['Domain', 'النطاق'], domain?.name), f(['Installed certificate', 'الشهادة المثبتة'], domain ? domain.certificateId ? p.locale === 'ar' ? 'محفوظة' : 'Stored' : p.locale === 'ar' ? 'غير مضبوطة' : 'Not configured' : undefined)
-            ]), d('wildcards', ['About wildcard certificates', 'عن شهادات البدل الشامل'], ['A wildcard covers one label level and requires DNS validation.', 'تغطي شهادة البدل الشامل مستوى اسم واحدًا وتتطلب تحقق DNS.'])
+            s('certificate-choices', msgid('Your choices'), [
+                f(msgid('Domain'), domain?.name), f(msgid('Installed certificate'), domain ? domain.certificateId ? translator(p.locale)('Stored') : translator(p.locale)(msgctxt('approved-xpanel-pages', 'Not configured')) : undefined)
+            ]), d('wildcards', msgid('About wildcard certificates'), msgid('A wildcard covers one label level and requires DNS validation.'))
         ]);
-        case '/security/account': return page(['Account security', 'أمان الحساب'], ['Sign-in, API credentials, SSH access and site protection.', 'تسجيل الدخول وبيانات API والوصول عبر SSH وحماية الموقع.'], [
-            d('sign-in', ['Sign-in', 'تسجيل الدخول'], ['Password and optional two-factor controls are provided by the account authentication panel.', 'توفر لوحة مصادقة الحساب عناصر كلمة المرور والمصادقة الثنائية الاختيارية.']),
-            s('account-password', ['Password', 'كلمة المرور'], [
-                f(['Current password', 'كلمة المرور الحالية'], undefined, 'password'), f(['New password', 'كلمة المرور الجديدة'], undefined, 'password'), f(['Repeat new password', 'تكرار كلمة المرور الجديدة'], undefined, 'password'), f(['Show passwords', 'إظهار كلمات المرور'], undefined, 'checkbox')
+        case '/security/account': return page(msgid('Account security'), msgid('Sign-in, API credentials, SSH access and site protection.'), [
+            d('sign-in', msgid('Sign-in'), msgid('Password and optional two-factor controls are provided by the account authentication panel.')),
+            s('account-password', msgid('Password'), [
+                f(msgid('Current password'), undefined, 'password'), f(msgid('New password'), undefined, 'password'), f(msgid('Repeat new password'), undefined, 'password'), f(msgid('Show passwords'), undefined, 'checkbox')
             ], [
-                ['Change password', 'تغيير كلمة المرور']
+                msgid('Change password')
             ]),
-            s('ip-blocker', ['IP blocker', 'حظر عناوين الشبكة'], [
-                f(['Address or range', 'العنوان أو النطاق'])
+            s('ip-blocker', msgid('IP blocker'), [
+                f(msgid('Address or range'))
             ], [
-                ['Block address', 'حظر العنوان']
+                msgid('Block address')
             ]),
-            s('hotlink-protection', ['Hotlink protection', 'حماية الربط المباشر'], [
-                f(['Enable hotlink protection', 'تفعيل حماية الربط المباشر'], undefined, 'checkbox'), f(['Sites allowed to embed', 'المواقع المسموح لها بالتضمين']), f(['File types', 'أنواع الملفات']), f(['Allow requests with no referrer', 'السماح بطلبات بلا محيل'], undefined, 'checkbox')
+            s('hotlink-protection', msgid('Hotlink protection'), [
+                f(msgid('Enable hotlink protection'), undefined, 'checkbox'), f(msgid('Sites allowed to embed')), f(msgid('File types')), f(msgid('Allow requests with no referrer'), undefined, 'checkbox')
             ], [
-                ['Save hotlink rules', 'حفظ قواعد الربط']
+                msgid('Save hotlink rules')
             ]),
-            s('api-tokens', ['API tokens', 'رموز API'], [
-                f(['Name', 'الاسم']), f(['Expires after', 'تنتهي بعد'], undefined, undefined, [
-                    ['1 day', 'يوم واحد'], ['30 days', '30 يومًا'], ['90 days', '90 يومًا']
-                ]), f(['Allowed addresses (optional)', 'العناوين المسموحة (اختياري)'])
+            s('api-tokens', msgid('API tokens'), [
+                f(msgid('Name')), f(msgid('Expires after'), undefined, undefined, [
+                    msgid('1 day'), msgid('30 days'), msgid('90 days')
+                ]), f(msgid('Allowed addresses (optional)'))
             ], [
-                ['Create token', 'إنشاء رمز']
+                msgid('Create token')
             ]),
-            s('account-directory-privacy', ['Directory privacy', 'خصوصية المجلدات'], [
-                f(['Folder', 'المجلد']), f(['Prompt shown', 'رسالة الدخول']), f(['First user', 'المستخدم الأول']), f(['Password for this user', 'كلمة مرور هذا المستخدم'], undefined, 'password')
+            s('account-directory-privacy', msgctxt('approved-xpanel-pages', 'Directory privacy'), [
+                f(msgid('Folder')), f(msgid('Prompt shown')), f(msgid('First user')), f(msgid('Password for this user'), undefined, 'password')
             ], [
-                ['Protect folder', 'حماية المجلد']
+                msgid('Protect folder')
             ]),
-            s('ssh-access', ['SSH access', 'الوصول عبر SSH'], [
-                f(['Name', 'الاسم']), f(['Public key', 'المفتاح العام'], undefined, 'textarea')
+            s('ssh-access', msgid('SSH access'), [
+                f(msgid('Name')), f(msgid('Public key'), undefined, 'textarea')
             ], [
-                ['Add key', 'إضافة مفتاح']
+                msgid('Add key')
             ])
         ], [
-            s('site-protection', ['Site protection', 'حماية الموقع'], [
-                f(['Address or range', 'العنوان أو النطاق']), f(['Sites allowed to embed', 'المواقع المسموح لها بالتضمين']), f(['File types', 'أنواع الملفات'])
+            s('site-protection', msgid('Site protection'), [
+                f(msgid('Address or range')), f(msgid('Sites allowed to embed')), f(msgid('File types'))
             ], [
-                ['Block address', 'حظر العنوان'], ['Save hotlink rules', 'حفظ قواعد الربط']
+                msgid('Block address'), msgid('Save hotlink rules')
             ])
         ]);
-        case '/software/php': return page(['PHP', 'PHP'], ['Select the domain runtime, worker pool and per-site INI values.', 'اختيار بيئة تشغيل النطاق ومجموعة العمليات وقيم INI الخاصة بالموقع.'], [
+        case '/software/php': return page('PHP', msgid('Select the domain runtime, worker pool and per-site INI values.'), [
             {
-                ...s('php-domain', ['Domain and version', 'النطاق والإصدار'], [
-                    f(['Domain', 'النطاق'], domain?.name), f(['PHP version', 'إصدار PHP'], php?.version), f(['Handler', 'المعالج'], php?.handler, undefined, [
-                        ['fpm', 'PHP-FPM'], ['cgi', 'CGI'], ['suphp', 'suPHP'], ['lsphp', 'lsphp']
+                ...s('php-domain', msgid('Domain and version'), [
+                    f(msgid('Domain'), domain?.name), f(msgid('PHP version'), php?.version), f(msgid('Handler'), php?.handler, undefined, [
+                        msgid('fpm'), msgid('cgi'), msgid('suphp'), 'lsphp'
                     ])
                 ]), binding: 'php'
             },
-            s('php-pool', ['PHP-FPM pool', 'مجموعة PHP-FPM'], [
-                f(['Process manager', 'مدير العمليات'], php?.fpm.mode, undefined, [
-                    ['ondemand', 'ondemand'], ['dynamic', 'dynamic'], ['static', 'static']
-                ]), f(['pm.max_children', 'pm.max_children'], php?.fpm.maxChildren, 'number'), f(['pm.start_servers', 'pm.start_servers'], php?.fpm.startServers, 'number'), f(['pm.min_spare_servers', 'pm.min_spare_servers'], php?.fpm.minSpareServers, 'number'), f(['pm.max_spare_servers', 'pm.max_spare_servers'], php?.fpm.maxSpareServers, 'number'), f(['pm.max_requests', 'pm.max_requests'], php?.fpm.maxRequests, 'number'), f(['Idle timeout (seconds)', 'مهلة الخمول (ثوانٍ)'], php?.fpm.processIdleTimeoutSec, 'number')
+            s('php-pool', msgid('PHP-FPM pool'), [
+                f(msgid('Process manager'), php?.fpm.mode, undefined, [
+                    'ondemand', 'dynamic', 'static'
+                ]), f('pm.max_children', php?.fpm.maxChildren, 'number'), f('pm.start_servers', php?.fpm.startServers, 'number'), f('pm.min_spare_servers', php?.fpm.minSpareServers, 'number'), f('pm.max_spare_servers', php?.fpm.maxSpareServers, 'number'), f('pm.max_requests', php?.fpm.maxRequests, 'number'), f(msgid('Idle timeout (seconds)'), php?.fpm.processIdleTimeoutSec, 'number')
             ]),
-            s('php-extra-ini', ['Additional INI values', 'قيم INI الإضافية'], [
-                f(['max_input_vars', 'max_input_vars'], php?.ini.max_input_vars), f(['date.timezone', 'date.timezone'], php?.ini['date.timezone']), f(['display_errors', 'display_errors'], php?.ini.display_errors, undefined, [
-                    ['Off', 'إيقاف'], ['On', 'تشغيل']
+            s('php-extra-ini', msgid('Additional INI values'), [
+                f('max_input_vars', php?.ini.max_input_vars), f('date.timezone', php?.ini['date.timezone']), f('display_errors', php?.ini.display_errors, undefined, [
+                    msgctxt('approved-xpanel-pages', 'Off'), msgctxt('approved-xpanel-pages', 'On')
                 ])
             ]),
-            s('php-save-target', ['Save to', 'موضع الحفظ'], [
-                f(['Configuration target', 'موضع الإعداد'], undefined, 'radio', [
-                    ['.user.ini', '.user.ini'], ['PHP-FPM pool', 'مجموعة PHP-FPM']
+            s('php-save-target', msgid('Save to'), [
+                f(msgid('Configuration target'), undefined, 'radio', [
+                    '.user.ini', msgid('PHP-FPM pool')
                 ])
             ]),
             {
-                ...s('php-config-preview', ['Configuration preview', 'معاينة الإعداد'], [
-                    f(['Candidate configuration', 'الإعداد المرشح'], undefined, 'textarea')
-                ]), message: ['The effective configuration and candidate preview have not been read. No configuration file is generated or saved by this preview.', 'لم يُقرأ الإعداد الفعلي أو معاينة الإعداد المرشح. لا تُنشأ أو تُحفظ ملفات إعداد من هذه المعاينة.']
+                ...s('php-config-preview', msgid('Configuration preview'), [
+                    f(msgid('Candidate configuration'), undefined, 'textarea')
+                ]), message: msgid('The effective configuration and candidate preview have not been read. No configuration file is generated or saved by this preview.')
             },
-            s('php-ini', ['INI values', 'قيم INI'], [
-                f(['memory_limit', 'memory_limit'], php?.ini.memory_limit), f(['upload_max_filesize', 'upload_max_filesize'], php?.ini.upload_max_filesize), f(['post_max_size', 'post_max_size'], php?.ini.post_max_size), f(['max_execution_time', 'max_execution_time'], php?.ini.max_execution_time)
+            s('php-ini', msgid('INI values'), [
+                f('memory_limit', php?.ini.memory_limit), f('upload_max_filesize', php?.ini.upload_max_filesize), f('post_max_size', php?.ini.post_max_size), f('max_execution_time', php?.ini.max_execution_time)
             ], [
-                ['Reset', 'إعادة الضبط'], ['Save PHP settings', 'حفظ إعدادات PHP']
+                msgid('Reset'), msgid('Save PHP settings')
             ])
         ], [
-            s('php-running', ['Running now', 'تعمل الآن'], [
-                f(['Domain', 'النطاق'], domain?.name), f(['Version', 'الإصدار'], php?.version), f(['Handler', 'المعالج'], php?.handler)
-            ]), d('php-disabled-functions', ['Disabled functions', 'الدوال المعطلة'], ['The effective disabled-function list has not been read.', 'لم تُقرأ قائمة الدوال المعطلة الفعلية.'])
+            { ...s('php-running', msgid('Saved PHP assignment'), [
+                f(msgid('Domain'), domain?.name), f(msgid('Version'), php?.version), f(msgid('Handler'), php?.handler)
+            ]), message: msgid('Stored assignment only. The running PHP service has not been observed here.') }, d('php-disabled-functions', msgid('Disabled functions'), msgid('The effective disabled-function list has not been read.'))
         ]);
-        case '/software/htaccess': return page(['.htaccess editor', 'محرر .htaccess'], ['Edit site rules and validate before replacing the saved file.', 'تعديل قواعد الموقع والتحقق قبل استبدال الملف المحفوظ.'], [
-            s('htaccess-editor', ['Site rules', 'قواعد الموقع'], [
-                f(['File', 'الملف'], domain ? `${domain.docRoot}/.htaccess` : undefined), f(['Insert', 'إدراج'], undefined, undefined, [
-                    ['Redirect', 'تحويل'], ['Rewrite rule', 'قاعدة إعادة كتابة'], ['Access restriction', 'تقييد الوصول']
-                ]), f(['File contents', 'محتوى الملف'], undefined, 'textarea')
+        case '/software/htaccess': return page(msgid('.htaccess editor'), msgid('Edit site rules and validate before replacing the saved file.'), [
+            s('htaccess-editor', msgid('Site rules'), [
+                f(msgid('File'), domain ? `${domain.docRoot}/.htaccess` : undefined), f(msgid('Insert'), undefined, undefined, [
+                    msgctxt('approved-xpanel-pages', 'Redirect'), msgid('Rewrite rule'), msgid('Access restriction')
+                ]), f(msgid('File contents'), undefined, 'textarea')
             ], [
-                ['Insert at cursor', 'إدراج عند المؤشر'], ['Discard draft', 'تجاهل المسودة'], ['Save and check site', 'الحفظ وفحص الموقع']
+                msgid('Insert at cursor'), msgid('Discard draft'), msgid('Save and check site')
             ]),
             {
-                ...t('htaccess-php-compatibility', ['PHP directive compatibility', 'توافق تعليمات PHP'], [
-                    ['Directive', 'التعليمة'], ['Value', 'القيمة'], ['Compatibility', 'التوافق']
+                ...t('htaccess-php-compatibility', msgid('PHP directive compatibility'), [
+                    msgctxt('approved-xpanel-pages', 'Directive'), msgid('Value'), msgid('Compatibility')
                 ]), actions: [
-                    ['Move PHP settings to .user.ini', 'نقل إعدادات PHP إلى .user.ini'], ['Undo move', 'التراجع عن النقل']
+                    msgid('Move PHP settings to .user.ini'), msgid('Undo move')
                 ]
             },
-            d('htaccess-php', ['PHP settings in .htaccess', 'إعدادات PHP في .htaccess'], ['Read existing directives before moving PHP values to .user.ini.', 'اقرأ التعليمات الموجودة قبل نقل قيم PHP إلى .user.ini.'])
+            d('htaccess-php', msgctxt('approved-xpanel-pages', 'PHP settings in .htaccess'), msgid('Read existing directives before moving PHP values to .user.ini.'))
         ], [
             {
-                ...t('htaccess-versions', ['Versions', 'الإصدارات'], [
-                    ['Version', 'الإصدار'], ['Saved (UTC)', 'الحفظ (UTC)'], ['Author', 'الكاتب'], ['Result', 'النتيجة']
+                ...t('htaccess-versions', msgid('Versions'), [
+                    msgid('Version'), msgid('Saved (UTC)'), msgid('Author'), msgid('Result')
                 ]), actions: [
-                    ['Restore selected version', 'استعادة الإصدار المحدد']
+                    msgid('Restore selected version')
                 ]
-            }, d('htaccess-save', ['What a save does', 'ماذا يفعل الحفظ'], ['Validation and site checks must pass; a failure preserves the previous working file.', 'يجب نجاح التحقق وفحص الموقع؛ يحافظ الفشل على الملف العامل السابق.'])
+            }, d('htaccess-save', msgid('What a save does'), msgid('Validation and site checks must pass; a failure preserves the previous working file.'))
         ]);
-        case '/advanced/cron': return page(['Cron jobs', 'مهام Cron'], ['Scheduled commands, run results and output delivery.', 'الأوامر المجدولة ونتائج التشغيل وتسليم المخرجات.'], [
-            t('scheduled-jobs', ['Scheduled jobs', 'المهام المجدولة'], [
-                ['Job', 'المهمة'], ['Schedule', 'الجدولة'], ['Command', 'الأمر'], ['Last run', 'آخر تشغيل'], ['Duration', 'المدة'], ['Next run', 'التشغيل التالي'], ['Actions', 'الإجراءات']
+        case '/advanced/cron': return page(msgid('Cron jobs'), msgid('Scheduled commands, run results and output delivery.'), [
+            t('scheduled-jobs', msgid('Scheduled jobs'), [
+                msgid('Job'), msgctxt('approved-xpanel-pages', 'Schedule'), msgid('Command'), msgid('Last run'), msgid('Duration'), msgid('Next run'), msgid('Actions')
             ]),
-            s('cron-selected-job', ['Selected job', 'المهمة المحددة'], [
-                f(['Delete confirmation', 'تأكيد الحذف'])
+            s('cron-selected-job', msgid('Selected job'), [
+                f(msgid('Delete confirmation'))
             ], [
-                ['View unit', 'عرض الوحدة'], ['Run selected job now', 'تشغيل المهمة المحددة الآن'], ['Keep', 'إبقاء'], ['Delete job', 'حذف المهمة']
+                msgid('View unit'), msgid('Run selected job now'), msgid('Keep'), msgid('Delete job')
             ]),
             {
-                ...s('cron-unit-preview', ['Unit preview', 'معاينة الوحدة'], [
-                    f(['Unit contents', 'محتوى الوحدة'], undefined, 'textarea')
-                ]), message: ['No job or unit has been selected or read.', 'لم تُحدد أو تُقرأ مهمة أو وحدة.']
+                ...s('cron-unit-preview', msgid('Unit preview'), [
+                    f(msgid('Unit contents'), undefined, 'textarea')
+                ]), message: msgid('No job or unit has been selected or read.')
             },
-            t('cron-next-runs', ['Next runs (UTC)', 'التشغيلات التالية (UTC)'], [
-                ['Run', 'التشغيل'], ['Scheduled time', 'الوقت المجدول']
+            t('cron-next-runs', msgid('Next runs (UTC)'), [
+                msgctxt('approved-xpanel-pages', 'Run'), msgid('Scheduled time')
             ]),
-            s('add-cron', ['Add a cron job', 'إضافة مهمة Cron'], [
-                f(['Common schedules', 'جداول شائعة'], undefined, undefined, [
-                    ['Every 5 minutes', 'كل 5 دقائق'], ['Every hour', 'كل ساعة'], ['Twice a day', 'مرتين يوميًا'], ['Every day', 'كل يوم'], ['Every Sunday', 'كل أحد'], ['On the 1st of the month', 'في اليوم الأول من الشهر'], ['Custom schedule', 'جدول مخصص']
-                ]), f(['Minute', 'الدقيقة']), f(['Hour', 'الساعة']), f(['Day', 'اليوم']), f(['Month', 'الشهر']), f(['Weekday', 'يوم الأسبوع']), f(['Command to run', 'الأمر المطلوب تشغيله']), f(['Stop after (seconds)', 'الإيقاف بعد (ثوانٍ)'], undefined, 'number'), f(['Unlimited timeout', 'مهلة غير محدودة'], undefined, 'checkbox'), f(['Send output', 'إرسال المخرجات'], undefined, undefined, [
-                    ['Only when it fails', 'عند الفشل فقط'], ['After every run', 'بعد كل تشغيل'], ['Never', 'أبدًا']
+            s('add-cron', msgctxt('approved-xpanel-pages', 'Add a cron job'), [
+                f(msgctxt('approved-xpanel-pages', 'Common schedules'), undefined, undefined, [
+                    msgid('Every 5 minutes'), msgid('Every hour'), msgctxt('approved-xpanel-pages', 'Twice a day'), msgid('Every day'), msgid('Every Sunday'), msgid('On the 1st of the month'), msgid('Custom schedule')
+                ]), f(msgid('Minute')), f(msgid('Hour')), f(msgid('Day')), f(msgid('Month')), f(msgid('Weekday')), f(msgid('Command to run')), f(msgid('Stop after (seconds)'), undefined, 'number'), f(msgid('Unlimited timeout'), undefined, 'checkbox'), f(msgid('Send output'), undefined, undefined, [
+                    msgid('Only when it fails'), msgid('After every run'), msgid('Never')
                 ])
             ], [
-                ['Reset', 'إعادة الضبط'], ['Add cron job', 'إضافة مهمة Cron']
+                msgid('Reset'), msgctxt('approved-xpanel-pages', 'Add cron job')
             ])
         ], [
-            d('cron-runtime', ['How a job runs', 'كيف تعمل المهمة'], ['Commands run with the account identity and limits. A schedule does not establish successful execution.', 'تعمل الأوامر بهوية الحساب وحدوده. وجود جدول لا يثبت نجاح التنفيذ.']), s('cron-output', ['Output email', 'بريد المخرجات'], [
-                f(['Send job output to', 'إرسال مخرجات المهمة إلى'], a?.contactEmail, 'email')
+            d('cron-runtime', msgid('How a job runs'), msgid('Commands run with the account identity and limits. A schedule does not establish successful execution.')), s('cron-output', msgctxt('approved-xpanel-pages', 'Output email'), [
+                f(msgctxt('approved-xpanel-pages', 'Send job output to'), a?.contactEmail, 'email')
             ], [
-                ['Save address', 'حفظ العنوان']
+                msgid('Save address')
             ])
         ]);
         default: throw new Error('Unsupported account workspace');

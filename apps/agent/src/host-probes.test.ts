@@ -11,6 +11,19 @@ import { parseLoadavg, parseMeminfo } from './host-info.ts'
 import { classifyHostBinaries, probeAuditLog, readHostMeasurements } from './host-probes.ts'
 
 describe('host capability probes', () => {
+  it('requires every exact benchmark binary and actual parsed network evidence', () => {
+    const binaries = ['/usr/bin/nice', '/usr/bin/ionice', '/usr/bin/openssl', '/usr/bin/dd', '/usr/bin/rm']
+    expect(classifyHostBinaries(path => binaries.includes(path), false).benchmark).toBe('passed')
+    for (const missing of binaries) expect(classifyHostBinaries(path => binaries.includes(path) && path !== missing, false).benchmark).toBe('failed')
+    expect(classifyHostBinaries(() => true, false)['network-counters']).toBe('failed')
+    expect(classifyHostBinaries(() => false, false, false, { networkCounters: true })['network-counters']).toBe('passed')
+  })
+
+  it('qualifies interface counters only after reading the actual proc format', async () => {
+    const reader = { readFile: async (path: string) => path === '/proc/net/dev' ? 'Inter-| Receive | Transmit\n face |bytes packets errs drop fifo frame compressed multicast|bytes packets errs drop fifo colls carrier compressed\n eth0: 10 1 0 0 0 0 0 0 20 1 0 0 0 0 0 0\n' : null, runCommand: async () => ({ ok: true }) }
+    expect((await readHostMeasurements(reader)).networkCounters).toBe(true)
+    expect((await readHostMeasurements({ ...reader, readFile: async () => 'malformed' })).networkCounters).toBe(false)
+  })
   it('reports host limit evidence unavailable when the account or plan read fails, despite all controllers', async () => {
     const state = await createTestStateStore()
     const database = await createTestDb()
@@ -98,6 +111,37 @@ describe('host capability probes', () => {
     await expect(probeAuditLog(async () => { throw new Error('unread') })).resolves.toBe(false)
   })
 
+  it.each([
+    ['mail-queue', ['/usr/sbin/postqueue', '/usr/sbin/postsuper']],
+    ['journal', ['/usr/bin/journalctl']],
+    ['procps', ['/usr/bin/ps', '/usr/bin/kill', '/usr/bin/df']],
+    ['mail-config', ['/usr/sbin/postconf', '/usr/bin/doveconf']],
+    ['iproute', ['/usr/sbin/ip']],
+    ['mariadb-admin', ['/usr/bin/mariadb']],
+    ['fail2ban', ['/usr/bin/fail2ban-client']],
+    ['clamav', ['/usr/bin/clamscan', '/usr/bin/freshclam', '/usr/bin/nice']],
+    ['getent', ['/usr/bin/getent']],
+  ] as const)('passes %s only with every binary its argv grammar executes', (probe, paths) => {
+    expect(classifyHostBinaries(path => (paths as readonly string[]).includes(path), false)[probe]).toBe('passed')
+    for (const missing of paths) expect(classifyHostBinaries(path => path !== missing && (paths as readonly string[]).includes(path), false)[probe], missing).toBe('failed')
+    expect(classifyHostBinaries(() => false, false)[probe]).toBe('failed')
+  })
+
+  it('passes packages only with the startup family tools and host jobs only with a runner', () => {
+    const debian = ['/usr/bin/apt-get', '/usr/bin/apt-mark', '/usr/bin/apt-cache', '/usr/bin/dpkg', '/usr/bin/dpkg-query']
+    const rhel = ['/usr/bin/dnf', '/usr/bin/rpm']
+    const all = new Set([...debian, ...rhel])
+    expect(classifyHostBinaries(path => all.has(path), false, false, { packageFamily: 'debian' }).packages).toBe('passed')
+    expect(classifyHostBinaries(path => all.has(path), false, false, { packageFamily: 'rhel' }).packages).toBe('passed')
+    for (const missing of debian) expect(classifyHostBinaries(path => path !== missing && all.has(path), false, false, { packageFamily: 'debian' }).packages, missing).toBe('failed')
+    for (const missing of rhel) expect(classifyHostBinaries(path => path !== missing && all.has(path), false, false, { packageFamily: 'rhel' }).packages, missing).toBe('failed')
+    expect(classifyHostBinaries(path => all.has(path), false).packages).toBe('failed')
+    for (const packageFamily of ['alpine', 'constructor', '']) expect(classifyHostBinaries(path => all.has(path), false, false, { packageFamily }).packages, packageFamily).toBe('failed')
+    expect(classifyHostBinaries(() => true, true, true)['host-jobs']).toBe('failed')
+    expect(classifyHostBinaries(() => true, true, true, { hostJobs: false })['host-jobs']).toBe('failed')
+    expect(classifyHostBinaries(() => false, false, false, { hostJobs: true })['host-jobs']).toBe('passed')
+  })
+
   it('requires both postfix and dovecot, and the confined file runner', () => {
     const present = new Set(['/usr/sbin/postfix', '/usr/sbin/dovecot', '/usr/bin/certbot'])
     expect(classifyHostBinaries(path => present.has(path), false).mail).toBe('passed')
@@ -167,7 +211,11 @@ describe('host capability probes', () => {
     expect(match('/proc/self/mountinfo', 'write')).toBe(false)
     expect(match('/proc/self/mountinfo', 'remove')).toBe(false)
     expect(match('/proc/1/mountinfo', 'read')).toBe(false)
-    expect(match('/proc/stat', 'read')).toBe(false)
+    expect(match('/proc/stat', 'read')).toBe(true)
+    expect(match('/proc/stat', 'write')).toBe(false)
+    expect(match('/proc/net/dev', 'read')).toBe(true)
+    expect(match('/proc/net/dev', 'write')).toBe(false)
+    expect(match('/proc/net/dev', 'remove')).toBe(false)
     expect(match('/etc/xpanel/runtime.env', 'read')).toBe(true)
     expect(match('/etc/xpanel/runtime.env', 'write')).toBe(true)
     expect(match('/etc/xpanel/runtime.env.bak.20261024T000000Z', 'write')).toBe(true)

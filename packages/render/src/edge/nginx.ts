@@ -1,6 +1,8 @@
 // Nginx edge on 80/443. It proxies to the loopback backend (Apache or OpenLiteSpeed) or to an
 // app upstream, caches responses (never files), and never opens anything inside a home.
-import { validateNginxWorkers } from '@xpanel/core'
+import { validateDefaultSitePolicy, validateNginxWorkers } from '@xpanel/core'
+import { readAdmittedTrustedProxyPolicy, renderTrustedProxyRealIp } from '../../../core/src/trusted-proxies.ts'
+import type { TrustedProxyRenderAuthority } from '../../../core/src/trusted-proxies.ts'
 import type { Account, Certificate, ConfigTest, Domain, HostAction, Limit, OsProfile, RenderedFile, ServerSettings } from '@xpanel/core'
 import { certPaths, DEFAULT_TLS, nginxAccessLog, nginxBinary, nginxErrorLog, nginxModuleIncludes, XP_PATHS } from './paths.ts'
 import { nginxQuote } from './quote.ts'
@@ -13,8 +15,8 @@ import {
   assertSafeAbsPath,
   assertSystemUser,
   formatCidr,
-  invalid,
   parseCidr,
+  invalid,
 } from './validate.ts'
 import { renderWafHttp, renderWafSite, type ModsecuritySettings, type WafGlobalPolicy, type WafSitePolicy } from './waf.ts'
 
@@ -26,9 +28,9 @@ export interface EdgeExtras {
   /** present only when ModSecurity v3 + the nginx connector are installed */
   modsecurity?: ModsecuritySettings | null
   waf?: WafGlobalPolicy | null
-  /** CDN / load balancer addresses whose client-IP header is trusted (empty: none) */
+  /** Legacy alternate authority; rendering refuses this field. Use the guarded third renderer argument. */
   trustedProxies?: string[]
-  /** default X-Forwarded-For; 'proxy_protocol' when the balancer speaks it */
+  /** Legacy alternate authority; custom and PROXY-protocol headers are not admitted here. */
   realIpHeader?: string
   /** default request body cap per site, MB (default 128) */
   clientMaxBodyMb?: Limit
@@ -56,16 +58,11 @@ const block = (head: string, body: string[]): string[] => [`${head} {`, ...inden
 
 // ---- main ---------------------------------------------------------------------------------
 
-const REAL_IP_HEADER = /^[A-Za-z][A-Za-z0-9-]{0,63}$/
-
-const realIp = (e: EdgeExtras): string[] => {
-  const proxies = (e.trustedProxies ?? []).map((p) => formatCidr(parseCidr(p, 'trusted proxy')))
-  if (proxies.length === 0) return ['# real client IP: TCP peer (no trusted proxies configured)']
-  const header = e.realIpHeader ?? 'X-Forwarded-For'
-  if (header !== 'proxy_protocol' && !REAL_IP_HEADER.test(header)) invalid('real IP header', header, 'is not a header name')
-  return [...proxies.map((p) => `set_real_ip_from ${p};`), `real_ip_header ${header};`, 'real_ip_recursive on;']
+const realIp = (e: EdgeExtras, authority?: TrustedProxyRenderAuthority): string[] => {
+  if (e.trustedProxies !== undefined || e.realIpHeader !== undefined) invalid('real IP authority', 'legacy edge extras', 'use the guarded canonical trusted proxy policy')
+  const policy = authority ? readAdmittedTrustedProxyPolicy(authority) : { cidrs: [], header: 'X-Forwarded-For' as const }
+  return renderTrustedProxyRealIp(policy).trimEnd().split('\n')
 }
-
 const METRICS_FORMAT = [
   `'{"time":"$time_iso8601","host":"$host","ip":"$remote_addr","method":"$request_method",'`,
   `'"uri":"$request_uri","status":$status,"body_bytes":$body_bytes_sent,"bytes":$bytes_sent,'`,
@@ -78,7 +75,7 @@ const METRICS_FORMAT = [
 export const assertNginxTuning = (s: ServerSettings): ServerSettings['nginx'] => validateNginxWorkers(s.nginx)
 
 /** /etc/nginx/nginx.conf (path from the OsProfile). */
-export const renderNginxMain = (settings: ServerSettings, os: OsProfile): RenderedFile => {
+export const renderNginxMain = (settings: ServerSettings, os: OsProfile, trustedProxyAuthority?: TrustedProxyRenderAuthority): RenderedFile => {
   const n = assertNginxTuning(settings)
   const e = extras(settings)
   const user = assertSystemUser(os.paths.nginxUser, 'nginx user')
@@ -109,7 +106,7 @@ export const renderNginxMain = (settings: ServerSettings, os: OsProfile): Render
     '    ;',
     `access_log ${XP_PATHS.nginxLogDir}/access.log xpanel_metrics;`,
     '',
-    ...realIp(e),
+    ...realIp(e, trustedProxyAuthority),
     '',
     'ssl_protocols TLSv1.2 TLSv1.3;',
     'ssl_prefer_server_ciphers off;',
@@ -217,7 +214,8 @@ const proxyLocation = (t: ProxyTarget, cache: boolean): string[] => {
     `proxy_pass ${t.url};`,
     'proxy_set_header Host $host;',
     'proxy_set_header X-Real-IP $remote_addr;',
-    'proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;',
+    'proxy_set_header X-Forwarded-For $remote_addr;',
+    'proxy_set_header Forwarded "";',
     'proxy_set_header X-Forwarded-Proto $scheme;',
     'proxy_set_header X-Forwarded-Host $host;',
     'proxy_set_header X-Forwarded-Port $server_port;',
@@ -309,6 +307,7 @@ const renderGroup = (g: SiteGroup, ctx: SiteCtx, certs: Certificate[]): string[]
   const waf = renderWafSite(name, ctx.opts.waf?.[name], {
     defaultBodyMb: ctx.e.clientMaxBodyMb ?? 128,
     modsecurityPresent: Boolean(ctx.e.modsecurity),
+    ...(ctx.e.waf?.denyStatus ? { denyStatus: ctx.e.waf.denyStatus } : {}),
   })
   const head = (names: string[]): string[] => [
     `server_name ${names.join(' ')};`,
@@ -403,8 +402,9 @@ export interface DefaultSiteOptions {
 /** Catch-all for names no account has bound: a static notice, 404, and ACME for the hostname. */
 export const renderDefaultSite = (opts: DefaultSiteOptions = {}): string => {
   const e = opts.settings ? extras(opts.settings) : {}
+  const policy = opts.settings?.defaultSite === undefined ? undefined : validateDefaultSitePolicy(opts.settings.defaultSite)
   const hostname = opts.settings ? assertDomainName(opts.settings.hostname, 'hostname') : null
-  const tls = e.sslRejectHandshake && !opts.cert
+  const tls = (policy?.refuseHttps ?? e.sslRejectHandshake) && !opts.cert
     ? ['ssl_reject_handshake on;']
     : (() => {
         const p = opts.cert ? certPaths(opts.cert.id) : DEFAULT_TLS
@@ -421,7 +421,7 @@ export const renderDefaultSite = (opts: DefaultSiteOptions = {}): string => {
     `root ${XP_PATHS.defaultSiteDir};`,
     'error_page 404 /index.html;',
     ...block('location = /index.html', ['internal;']),
-    ...block('location /', ['return 404;']),
+    ...block('location /', [policy?.response === 'redirect' ? `return 302 ${nginxQuote(policy.redirectTo!, 'default site redirect')};` : 'return 404;']),
   ]
   return ['# Managed by xPanel: default site for unbound names', ...block('server', body)].join('\n') + '\n'
 }
@@ -471,7 +471,8 @@ export const assertNginxZeroHomeAccess = (
 const REQUIRED_PROXY_HEADERS = [
   'proxy_set_header Host $host;',
   'proxy_set_header X-Real-IP $remote_addr;',
-  'proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;',
+  'proxy_set_header X-Forwarded-For $remote_addr;',
+    'proxy_set_header Forwarded "";',
   'proxy_set_header X-Forwarded-Proto $scheme;',
   'proxy_set_header X-Forwarded-Host $host;',
   'proxy_set_header X-Forwarded-Port $server_port;',
@@ -485,6 +486,11 @@ const REQUIRED_PROXY_HEADERS = [
 export const assertNginxEdgeHeaderSanitization = (nginxSiteContent: string): void => {
   if (typeof nginxSiteContent !== 'string') return invalid('nginx site config', nginxSiteContent, 'must be a string')
   if (!nginxSiteContent.includes('proxy_pass ')) return
+  if (nginxSiteContent.includes('$proxy_add_x_forwarded_for')) invalid('nginx proxy header sanitization', 'appended forwarding chain', 'client forwarding chains must be overwritten')
+  for (const match of nginxSiteContent.matchAll(/proxy_set_header\s+(X-Forwarded-For|Forwarded)\s+([^;]+);/gi)) {
+    const expected = match[1]!.toLowerCase() === 'forwarded' ? '""' : '$remote_addr'
+    if (match[2]!.trim() !== expected) invalid('nginx proxy header sanitization', match[1], 'forwarding identity headers must be overwritten or cleared')
+  }
   for (const required of REQUIRED_PROXY_HEADERS) {
     if (!nginxSiteContent.includes(required)) {
       invalid('nginx proxy header sanitization', required, `missing mandatory edge header sanitization directive: ${required}`)
@@ -504,6 +510,7 @@ export interface NginxEdgeIsolationProof {
     defaultServer443: boolean
     returns404: boolean
     noProxyPass: boolean
+    fixedRedirect?: string
   }
 }
 
@@ -512,7 +519,7 @@ export interface NginxEdgeIsolationProof {
  * 1. Nginx never opens `/home` or any account home (`assertNginxZeroHomeAccess`).
  * 2. Untrusted client `X-Real-IP`, `X-Forwarded-*`, and `Proxy` headers are overwritten/stripped at the edge.
  * 3. `set_real_ip_from` is absent unless explicit `trustedProxies` are configured.
- * 4. Default catch-all server (`000-xpanel-default.conf`) answers unbound `Host`/SNI with 404 (or `ssl_reject_handshake`) without proxying to Apache.
+ * 4. The default catch-all answers with the original 404 or an explicitly validated fixed redirect; it never proxies to Apache.
  */
 export const verifyNginxEdgeIsolation = (
   account: Account,
@@ -536,8 +543,11 @@ export const verifyNginxEdgeIsolation = (
   const defaultServer443 = /listen 443 ssl(?: http2)? default_server;/.test(def.content)
   const returns404 = def.content.includes('return 404;')
   const noProxyPass = !def.content.includes('proxy_pass')
-  if (!defaultServer80 || !defaultServer443 || !returns404 || !noProxyPass) {
-    return invalid('nginx default catch-all site', def.path, 'must be default_server on 80/443 returning 404 without proxy_pass')
+  const policy = settings.defaultSite === undefined ? undefined : validateDefaultSitePolicy(settings.defaultSite)
+  const fixedRedirect = policy?.response === 'redirect' ? policy.redirectTo! : undefined
+  const responseMatches = fixedRedirect === undefined ? returns404 : !returns404 && def.content.includes(`return 302 ${nginxQuote(fixedRedirect, 'default site redirect')};`)
+  if (!defaultServer80 || !defaultServer443 || !responseMatches || !noProxyPass) {
+    return invalid('nginx default catch-all site', def.path, 'must be default_server on 80/443 with the explicit response policy and without proxy_pass')
   }
 
   return {
@@ -552,6 +562,7 @@ export const verifyNginxEdgeIsolation = (
       defaultServer443,
       returns404,
       noProxyPass,
+      ...(fixedRedirect !== undefined ? { fixedRedirect } : {}),
     },
   }
 }

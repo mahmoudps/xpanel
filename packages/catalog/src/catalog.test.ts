@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { Principal } from '@xpanel/core'
 import { groups, specs, tools } from './data/index.ts'
-import { catalogKeys } from './i18n.ts'
-import arCatalog from './locales/ar.json' with { type: 'json' }
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { catalogFromEntries, catalogKey, parsePo } from '@xpanel/core'
+import { CATALOG_LOCALE_DIR, catalogKeys } from './i18n.ts'
 
-const ar: Record<string, string> = arCatalog
+const arCatalog = catalogFromEntries(parsePo(readFileSync(join(CATALOG_LOCALE_DIR, 'ar.po'), 'utf8')).entries)
+const ar = (key: string, source: string): string | undefined => arCatalog.get(catalogKey(source, key)) ?? arCatalog.get(source)
 import { isVisible, visibleTools } from './visibility.ts'
 import type { CatalogTool } from './types.ts'
 
@@ -53,9 +56,9 @@ describe('catalog data', () => {
 
   it('has an Arabic translation for every group and in-scope tool name', () => {
     const missing = [
-      ...groups.map(g => catalogKeys.groupName(g.id)),
-      ...tools.filter(t => t.status !== 'out-of-scope').map(t => catalogKeys.toolName(t.id)),
-    ].filter(key => !ar[key]?.trim())
+      ...groups.map(g => [catalogKeys.groupName(g.id), g.name] as const),
+      ...tools.filter(t => t.status !== 'out-of-scope').map(t => [catalogKeys.toolName(t.id), t.name] as const),
+    ].filter(([key, name]) => !ar(key, name)?.trim()).map(([key]) => key)
     expect(missing).toEqual([])
   })
 

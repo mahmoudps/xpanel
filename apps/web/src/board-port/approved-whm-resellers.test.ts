@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { qualifyHostTools, tools } from '@xpanel/catalog'
 import type { Account, Plan, Reseller } from '@xpanel/core'
-import { renderApprovedWhmResellers } from './approved-whm-resellers.ts'
+import { renderApprovedWhmResellers, resellerDetailAnchor } from './approved-whm-resellers.ts'
+import { renderWhmSurface } from '../surfaces/xwhm.ts'
 import type { WhmSurfaceProps } from '../surfaces/xwhm.ts'
 
 const reseller: Reseller = {
@@ -142,5 +143,60 @@ describe('detailed reseller administration', () => {
     expect(html).not.toContain('<img onerror')
     expect(html).toMatch(/<button[^>]*disabled[^>]*>Suspend reseller<\/button>/)
     expect(html).not.toContain('Resolves to')
+  })
+
+  it('follows the approved list-then-detail selection: Open links in the native list select one detail section', () => {
+    const html = renderWhmSurface({ ...base(), principal: { kind: 'root', id: 'root-private-marker', username: 'administrator7' }, activeRoute: '/whm/resellers' })
+    expect(html).not.toMatch(/<details[^>]*data-reseller-detail=|class="xp-reseller-select"/)
+    for (const [index, item] of [reseller, other].entries()) {
+      const anchor = resellerDetailAnchor(item.id)
+      expect(html).toContain(`<section class="xp-reseller-detail" id="${anchor}" data-reseller-detail="${index}"${index === 0 ? ' data-reseller-default' : ''} aria-labelledby="whm-reseller-detail-${index}-heading">`)
+      const row = html.match(new RegExp(`<tr data-reseller-row="${item.username}">[\\s\\S]*?<\\/tr>`))![0]
+      expect(row).toContain(`href="#${anchor}" data-reseller-open="${anchor}" aria-label="Open ${item.username}"`)
+      expect(row).toContain(`data-reseller-viewing="${anchor}"`)
+      expect(row).toContain('Open below')
+    }
+    expect(html).toContain('.xp-reseller-reference:not(:has(.xp-reseller-detail:target,.xp-reseller-detail :target)) .xp-reseller-detail:not([data-reseller-default]){display:none}')
+    // A target inside a detail (its Change ownership section) keeps that detail selected.
+    expect(html).toContain('.xp-reseller-reference:has(.xp-reseller-detail:target,.xp-reseller-detail :target) .xp-reseller-detail:not(:target):not(:has(:target))')
+    const otherAnchor = resellerDetailAnchor(other.id)
+    expect(html).toContain(`.xp-reseller-reference:has(#${otherAnchor}:target,#${otherAnchor} :target) [data-reseller-viewing="${otherAnchor}"]{display:inline-flex}`)
+    expect(html).toMatch(/class="xp-reseller-header"/)
+  })
+
+  it('renders Change ownership as the approved non-disclosure section reached from the detail header', () => {
+    const html = renderApprovedWhmResellers(base())
+    const first = html.slice(html.indexOf('data-reseller-detail="0"'), html.indexOf('data-reseller-detail="1"'))
+    expect(first).not.toMatch(/<details\b|<summary\b/)
+    expect(first).toContain('<section class="xp-reseller-ownership" id="whm-reseller-detail-0-ownership" data-reseller-ownership aria-labelledby="whm-reseller-detail-0-ownership-heading"><div class="xp-reseller-ownership__head"><h4 id="whm-reseller-detail-0-ownership-heading">Change ownership</h4>')
+    const header = first.slice(first.indexOf('<header class="xp-reseller-header">'), first.indexOf('</header>'))
+    expect(header).toMatch(/<a class="xp-btn" href="#whm-reseller-detail-0-ownership"><svg aria-hidden="true"[^>]*>[\s\S]*?<\/svg>Change ownership<\/a>/)
+    expect(header).not.toContain('Suspend reseller')
+    const section = first.slice(first.indexOf('data-reseller-ownership'), first.indexOf('</section>', first.indexOf('data-reseller-ownership')))
+    expect(section).toContain('data-reseller-owner-form="true" data-account-username="owner7"')
+    expect(section).toMatch(/<button type="submit" class="xp-btn">Change owner<\/button>/)
+    expect(first.indexOf('data-reseller-ownership')).toBeLessThan(first.indexOf('<table class="xp-table">'))
+    const scoped = renderApprovedWhmResellers({ ...base(), catalog: catalog.map(tool => tool.id === 'modify-account' ? { ...tool, status: 'researched' as const } : tool) })
+    const headerStart = scoped.indexOf('<header class="xp-reseller-header">'), unavailable = scoped.slice(headerStart, scoped.indexOf('</header>', headerStart))
+    expect(unavailable).toMatch(/<button class="xp-btn" type="button" disabled data-wiring="soon"><svg[\s\S]*?<\/svg>Change ownership<\/button>/)
+    expect(unavailable).not.toContain('href="#whm-reseller-detail-0-ownership"')
+    expect(scoped).toMatch(/data-reseller-ownership[\s\S]*?<select id="whm-reseller-detail-0-owner-account" class="xp-input" disabled data-wiring="soon">/)
+  })
+
+  it('renders the approved save bar card with Suspend first and status, Discard and Save at the end', () => {
+    const html = renderApprovedWhmResellers(base())
+    const form = html.slice(html.indexOf('data-reseller-update-form="true"'), html.indexOf('</form>', html.indexOf('data-reseller-update-form="true"')))
+    expect(form).toContain('<div class="xp-reseller-savebar" data-reseller-savebar><button class="xp-btn" type="button" disabled data-wiring="soon">Suspend reseller</button><div class="xp-reseller-actions"><p class="xp-help" data-reseller-update-status role="status"></p><button type="reset" class="xp-btn">Discard changes</button><button type="submit" class="xp-btn xp-btn--primary">Save reseller</button></div></div>')
+    expect(form.trimEnd().endsWith('</div></div>')).toBe(true)
+    expect(html).toContain('.xp-reseller-reference .xp-reseller-savebar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--xp-space-field,16px);padding:var(--xp-space-field,16px) var(--xp-space-card,24px);border:1px solid var(--xp-border);border-radius:var(--xp-radius-lg,12px);background:var(--xp-bg-surface)}')
+    const readOnly = renderApprovedWhmResellers({ ...base(), capabilityUnavailable: true })
+    expect(readOnly).toContain('<div class="xp-reseller-savebar" data-reseller-savebar><button class="xp-btn" type="button" disabled data-wiring="soon">Suspend reseller</button><div class="xp-reseller-actions"><button class="xp-btn" type="button" disabled data-wiring="soon">Discard changes</button><button class="xp-btn" type="button" disabled data-wiring="soon">Save reseller</button></div></div>')
+  })
+
+  it('keeps reseller anchors CSS-safe and distinct for any stored id', () => {
+    expect(resellerDetailAnchor(reseller.id)).toBe('whm-reseller-' + reseller.id)
+    expect(resellerDetailAnchor('a.b')).not.toBe(resellerDetailAnchor('a-b'))
+    expect(resellerDetailAnchor('a_2e_b')).not.toBe(resellerDetailAnchor('a.b'))
+    expect(resellerDetailAnchor('"]}</style><x')).toMatch(/^whm-reseller-[A-Za-z0-9_-]+$/)
   })
 })

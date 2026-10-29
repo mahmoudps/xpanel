@@ -1,5 +1,7 @@
-import type { Locale } from '../i18n.ts'
-import { formatAsciiBytes } from '../tokens.ts'
+import { translator, type Locale } from '../i18n.ts'
+import { formatAsciiBytes, formatDisplayDateTime } from '../tokens.ts'
+
+const formatMailDateTime = formatDisplayDateTime
 
 export interface MailboxQuotaText {
   text: string
@@ -32,8 +34,7 @@ export const formatMailboxQuota = (
   locale: Locale,
   usedBytes?: number,
 ): MailboxQuotaText => {
-  const ar = locale === 'ar'
-  const unlimited = ar ? 'بلا حد' : 'unlimited'
+  const unlimited = translator(locale)('unlimited')
   const usedKnown = typeof used === 'number' && Number.isFinite(used) && used >= 0
   const limitKnown = typeof limit === 'number' && Number.isFinite(limit) && limit > 0
   const bytesKnown = typeof usedBytes === 'number' && Number.isFinite(usedBytes) && usedBytes >= 0 && usedBytes < 1024 * 1024
@@ -63,7 +64,7 @@ export const formatMailStamp = (value: string): { time: string; full: string; da
     return { time: raw || '—', full: raw || '—', datetime: raw }
   }
   const iso = new Date(raw).toISOString()
-  const day = iso.slice(0, 10)
   const clock = iso.slice(11, 16)
-  return { time: `${clock} UTC`, full: `${day} ${clock} UTC`, datetime: iso }
+  const full = formatMailDateTime(raw)
+  return { time: `${clock} UTC`, full: full === '—' ? formatMailDateTime(iso) : full, datetime: iso }
 }

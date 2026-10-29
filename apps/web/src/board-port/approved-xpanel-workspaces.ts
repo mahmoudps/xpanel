@@ -1,22 +1,47 @@
 import type { PanelSurfaceProps } from '../surfaces/xpanel.ts';
-import type { Locale } from '../i18n.ts';
+import { type Locale, translator } from '../i18n.ts'
 import { escapeHtml, normalizeAsciiDigits } from '../tokens.ts';
 import { buildApprovedPanelPage } from './approved-xpanel-pages.ts';
-import { renderConnectedPanelPhp, renderConnectedPanelDns } from './approved-xpanel-bindings.ts';
-type Copy = readonly [
-    string,
-    string
-];
+import { renderAccountBackupWorkspace } from './account-backup-workspace.ts';
+import { renderAccountCronWorkspace } from './account-cron-workspace.ts';
+import { renderAccountHtaccessWorkspace } from './account-htaccess-workspace.ts';
+import { ACCOUNT_WEB_DIRECTIVE_ROUTES, renderAccountWebDirectivePage } from './account-web-directives-workspace.ts';
+import { renderAccountSshWorkspace } from './account-ssh-workspace.ts';
+import { renderAccountLogsWorkspace } from './account-logs-workspace.ts';
+import { renderAccountVirusScanWorkspace } from './account-virus-scan-workspace.ts';
+import { renderAccountNetworkToolsWorkspace } from './account-network-tools-workspace.ts';
+import { renderAccountDatabaseInsightsWorkspace } from './account-database-insights-workspace.ts';
+import { renderAccountDynamicDnsWorkspace } from './account-dynamic-dns-workspace.ts';
+import { renderAccountSitePublisherWorkspace } from './account-site-publisher-workspace.ts';
+import { renderAccountGitWorkspace } from './account-git-workspace.ts';
+import { renderAccountReverseProxyWorkspace } from './account-reverse-proxy-workspace.ts';
+import { renderAccountPgpWorkspace } from './account-pgp-workspace.ts';
+import { renderAccountPackagesWorkspace } from './account-packages-workspace.ts';
+import { renderAccountDatabaseRemoteWorkspace } from './account-database-remote-workspace.ts';
+import { renderAccountCollaborationWorkspace } from './account-collaboration-workspace.ts';
+import { renderMailxArchiveWorkspace } from './mailx-archive-workspace.ts';
+import { renderMailxCollectionsWorkspace } from './mailx-collections-workspace.ts';
+import { renderSwApplicationsWorkspace } from './sw-applications-workspace.ts';
+import { renderSwOptimizeWorkspace } from './sw-optimize-workspace.ts';
+import { renderAccountDbEngineWorkspace } from './db-engines-workspace.ts';
+import type { AccountDbEnginePage } from './db-engines-workspace.ts';
+import { renderAccountStagingWorkspace } from './acct-staging-workspace.ts';
+import { renderAccountTeamWorkspace } from './acct-team-workspace.ts';
+import { renderWhmDeveloperWorkspace } from './whm-developer-workspace.ts';
+import { renderSiteHealthWorkspace } from './site-health-workspace.ts';
+import { renderSecWorkspace } from './sec-workspace.ts';
+import { renderConnectedPanelPhp, renderConnectedPanelDns, renderConnectedPanelDirectoryPrivacy, renderConnectedPanelSsl, renderConnectedPanelSessions } from './approved-xpanel-bindings.ts';
+type Copy = string;
 export interface ApprovedXpanelWorkspaceProps extends Omit<PanelSurfaceProps, 'locale'> {
     route: string;
     locale: Locale;
     readOnly: boolean;
     nativeHtml?: string;
 }
-export const approvedXpanelWorkspaceRoutes: ReadonlySet<string> = new Set(['/resources', '/email/accounts', '/files/manager', '/files/trash', '/files/directory-privacy', '/domains/site-settings', '/files/backup', '/databases/mariadb', '/domains', '/domains/zone-editor', '/metrics/traffic', '/security/ssl', '/security/account', '/software/php', '/software/htaccess', '/advanced/cron']);
-const copy = (p: ApprovedXpanelWorkspaceProps, x: Copy): string => escapeHtml(x[p.locale === 'ar' ? 1 : 0]);
+export const approvedXpanelWorkspaceRoutes: ReadonlySet<string> = new Set(['/domains/reverse-proxy', '/resources', '/email/accounts', '/files/manager', '/files/trash', '/files/directory-privacy', '/domains/site-settings', '/files/backup', '/databases/mariadb', '/domains', '/domains/zone-editor', '/metrics/traffic', '/security/ssl', '/security/account', '/software/php', '/software/htaccess', '/advanced/cron', '/advanced/error-pages', '/advanced/indexes', '/advanced/mime-types', '/advanced/handlers', '/security/hotlink', '/security/ip-blocker', '/domains/redirects', '/security/ssh', '/metrics/logs', '/health', '/security/virus-scanner', '/advanced/network-tools', '/databases/insights', '/domains/dynamic-dns', '/domains/site-publisher', '/files/git', '/email/encryption', '/software/packages', '/databases/remote-access', '/email/calendars-contacts', '/advanced/api-shell', '/email/archive', '/domains/staging', '/preferences/team', '/databases/phpmyadmin', '/databases/postgresql', '/databases/phppgadmin', '/software/apps', '/software/optimize', '/security/waf', '/domains/cloudflare']);
+const copy = (p: ApprovedXpanelWorkspaceProps, x: Copy): string => escapeHtml(translator(p.locale)(x));
 const value = (x: unknown): string => escapeHtml(normalizeAsciiDigits(x == null ? '' : String(x)));
-const unread: Copy = ['Not read', 'لم تُقرأ البيانات'];
+const unread: Copy = msgctxt('approved-xpanel-workspaces', 'Not read');
 interface Field {
     label: Copy;
     key?: string;
@@ -48,9 +73,9 @@ const facts = (p: ApprovedXpanelWorkspaceProps, fields: readonly Field[]): strin
 const control = (p: ApprovedXpanelWorkspaceProps, section: string, field: Field, index: number): string => {
     const id = `panel-detail-${section}-${index}`;
     const label = field.technicalLabel ? `<bdi dir="ltr">${copy(p, field.label)}</bdi>` : copy(p, field.label);
-    const choiceCopy = (choice: Copy) => field.technicalChoices && choice[0] === choice[1] ? `<bdi dir="ltr">${copy(p, choice)}</bdi>` : copy(p, choice);
+    const choiceCopy = (choice: Copy) => field.technicalChoices ? `<bdi dir="ltr">${copy(p, choice)}</bdi>` : copy(p, choice);
     if (field.type === 'radio' && field.choices) {
-        return `<fieldset class="xp-panel-detail__radio" disabled><legend>${label}</legend>${field.choices.map((choice, choiceIndex) => `<label class="xp-check" for="${id}-${choiceIndex}"><input id="${id}-${choiceIndex}" name="${id}" type="radio" value="${value(choice[0])}" disabled><span>${choiceCopy(choice)}</span></label>`).join('')}</fieldset>`;
+        return `<fieldset class="xp-panel-detail__radio" disabled><legend>${label}</legend>${field.choices.map((choice, choiceIndex) => `<label class="xp-check" for="${id}-${choiceIndex}"><input id="${id}-${choiceIndex}" name="${id}" type="radio" value="${value(choice)}" disabled><span>${choiceCopy(choice)}</span></label>`).join('')}</fieldset>`;
     }
     let input: string;
     if (field.choices) {
@@ -83,32 +108,163 @@ const renderSection = (p: ApprovedXpanelWorkspaceProps, section: Section, aside 
     const title = copy(p, section.title);
     const steps = section.steps ? `<ol class="xp-panel-detail__steps">${section.steps.map((step, index) => `<li><b>${index + 1}</b>${copy(p, step)}</li>`).join('')}</ol>` : '';
     const message = section.message ? `<p>${copy(p, section.message)}</p>` : '';
-    const chart = section.chart ? `<div class="xp-panel-detail__plot" role="img" aria-label="${title}" data-chart-state="unread">${copy(p, ['No observed series is available.', 'لا تتوفر سلسلة قراءات مرصودة.'])}</div>` : '';
-    const fields = !section.fields ? '' : aside ? facts(p, section.fields) : `<div class="xp-panel-detail__fields">${section.fields.map((field, index) => control(p, section.id, field, index)).join('')}</div>`;
+    const chart = section.chart ? `<div class="xp-panel-detail__plot" role="img" aria-label="${title}" data-chart-state="unread">${copy(p, msgid('No observed series is available.'))}</div>` : '';
+    const fields = !section.fields?.length ? '' : aside ? facts(p, section.fields) : `<div class="xp-panel-detail__fields">${section.fields.map((field, index) => control(p, section.id, field, index)).join('')}</div>`;
     let table = '';
     if (section.columns) {
         const columns = section.columns;
-        const rows = section.rows?.length ? section.rows.map(row => `<tr>${columns.map((_, index) => tableCell(p, section, row, index)).join('')}</tr>`).join('') : `<tr><td colspan="${columns.length}">${copy(p, section.read ? ['No records were returned.', 'لم تُرجع القراءة أي سجلات.'] : ['These records have not been read.', 'لم تُقرأ هذه السجلات.'])}</td></tr>`;
+        const rows = section.rows?.length ? section.rows.map(row => `<tr>${columns.map((_, index) => tableCell(p, section, row, index)).join('')}</tr>`).join('') : `<tr><td colspan="${columns.length}">${copy(p, section.read ? msgid('No records were returned.') : msgid('These records have not been read.'))}</td></tr>`;
         table = `<div class="xp-table-wrap" tabindex="0" role="region" aria-label="${title}"><table class="xp-table" data-workspace-table="${section.id}"><thead><tr>${columns.map(column => `<th scope="col">${copy(p, column)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
     }
-    const actions = section.actions ? `<div class="xp-panel-detail__actions">${section.actions.map((action, index) => `<button type="button" class="xp-btn${index === section.actions!.length - 1 ? ' xp-btn--primary' : ''}" disabled data-wiring="soon">${copy(p, action)}</button>`).join('')}</div><p class="xp-help" role="status">${copy(p, ['This control is unavailable until its service and permissions are confirmed. No change has been made.', 'هذا العنصر غير متاح حتى تُؤكد خدمته وصلاحياته. لم يُجرَ أي تغيير.'])}</p>` : '';
+    const actions = section.actions ? `<div class="xp-panel-detail__actions">${section.actions.map((action, index) => `<button type="button" class="xp-btn${index === section.actions!.length - 1 ? ' xp-btn--primary' : ''}" disabled data-wiring="soon">${copy(p, action)}</button>`).join('')}</div><p class="xp-help" role="status">${copy(p, msgid('This control is unavailable until its service and permissions are confirmed. No change has been made.'))}</p>` : '';
     return `<section class="xp-panel-detail__card" data-workspace-section="${section.id}" aria-labelledby="panel-detail-${section.id}"><h2 id="panel-detail-${section.id}">${title}</h2>${steps}${message}${chart}${table}${fields}${actions}</section>`;
 };
-const styles = `<style>.xp-approved-panel{display:flex;flex-direction:column;gap:32px;min-inline-size:0;text-align:start}.xp-approved-panel h1,.xp-approved-panel h2,.xp-approved-panel p,.xp-approved-panel dl,.xp-approved-panel dd{margin:0}.xp-panel-detail__heading{display:flex;flex-direction:column;gap:8px}.xp-panel-detail__heading h1{font-size:26px;line-height:34px}.xp-panel-detail__layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(240px,320px);gap:24px;align-items:start;min-inline-size:0}.xp-panel-detail__main,.xp-panel-detail__aside,.xp-panel-detail__native{display:flex;flex-direction:column;gap:24px;min-inline-size:0}.xp-panel-detail__card{display:flex;flex-direction:column;gap:24px;min-inline-size:0;padding:24px;border:1px solid var(--xp-border,#e2e6ec);border-radius:12px;background:var(--xp-bg-surface)}.xp-panel-detail__card h2{font-size:18px;line-height:28px}.xp-panel-detail__card p{line-height:1.6}.xp-panel-detail__facts,.xp-panel-detail__fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:16px;min-inline-size:0}.xp-panel-detail__facts>div,.xp-approved-panel .xp-field{display:flex;flex-direction:column;align-items:stretch;gap:8px;min-inline-size:0}.xp-panel-detail__facts dt{font-size:14px;color:var(--xp-text-muted,#5d6b7e)}.xp-panel-detail__facts dd{overflow-wrap:anywhere;text-align:start}.xp-panel-detail__actions{display:flex;flex-wrap:wrap;gap:16px}.xp-approved-panel input,.xp-approved-panel select,.xp-approved-panel textarea{text-align:match-parent;max-inline-size:100%;min-inline-size:0}.xp-approved-panel bdi{unicode-bidi:isolate;overflow-wrap:anywhere}.xp-approved-panel .xp-table-wrap{min-inline-size:0;max-inline-size:100%;overflow:auto}.xp-approved-panel .xp-table{inline-size:100%}.xp-approved-panel .xp-table th,.xp-approved-panel .xp-table td{text-align:start;vertical-align:top;overflow-wrap:anywhere}.xp-panel-detail__steps{display:flex;flex-wrap:wrap;gap:16px;margin:0;padding:0;list-style:none}.xp-panel-detail__steps li{display:flex;align-items:center;gap:8px}.xp-panel-detail__steps b{display:inline-flex;align-items:center;justify-content:center;inline-size:32px;block-size:32px;border:1px solid var(--xp-border,#e2e6ec);border-radius:50%}.xp-panel-detail__radio{display:flex;flex-direction:column;gap:16px;border:0;padding:0;margin:0;min-inline-size:0}.xp-panel-detail__radio legend{margin-block-end:8px;font-weight:600}.xp-panel-detail__radio .xp-check{display:flex;align-items:center;gap:8px;min-block-size:44px}.xp-panel-detail__plot{display:flex;align-items:center;justify-content:center;min-block-size:160px;padding:16px;border:1px dashed var(--xp-border,#e2e6ec);border-radius:8px;text-align:center}.xp-panel-detail__aside .xp-panel-detail__facts{grid-template-columns:minmax(0,1fr)}.xp-approved-panel .xp-panel-detail__technical-cell{direction:ltr;unicode-bidi:isolate;white-space:nowrap;overflow-wrap:normal;word-break:normal}.xp-approved-panel[data-approved-xpanel-workspace="/resources"] [data-section="slice-resources"] .xp-board-dl{display:grid;gap:16px;min-inline-size:0}.xp-approved-panel[data-approved-xpanel-workspace="/resources"] [data-section="slice-resources"] .xp-fact{flex-direction:column;align-items:stretch;gap:8px;padding:0;border:0}.xp-approved-panel[data-approved-xpanel-workspace="/resources"] [data-section="slice-resources"] .xp-fact dd{min-inline-size:0;max-inline-size:100%;text-align:start;overflow-x:auto}.xp-approved-panel[data-approved-xpanel-workspace="/resources"] [data-section="slice-resources"] .xp-fact dd bdi{white-space:nowrap;overflow-wrap:normal;word-break:normal}@media(max-width:1100px){.xp-panel-detail__layout{grid-template-columns:minmax(0,1fr)}}@media(max-width:800px){.xp-panel-detail__card{padding:16px}.xp-panel-detail__heading h1{line-height:36px}.xp-panel-detail__fields{grid-template-columns:minmax(0,1fr)}}</style>`;
+const styles = `<style>.xp-approved-panel{display:flex;flex-direction:column;gap:32px;min-inline-size:0;text-align:start}.xp-approved-panel h1,.xp-approved-panel h2,.xp-approved-panel p,.xp-approved-panel dl,.xp-approved-panel dd{margin:0}.xp-panel-detail__heading{display:flex;flex-direction:column;gap:8px}.xp-panel-detail__heading h1{font-size:26px;line-height:34px}.xp-panel-detail__layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(240px,320px);gap:24px;align-items:start;min-inline-size:0}.xp-panel-detail__main,.xp-panel-detail__aside,.xp-panel-detail__native{display:flex;flex-direction:column;gap:24px;min-inline-size:0}.xp-panel-detail__card{display:flex;flex-direction:column;gap:24px;min-inline-size:0;padding:24px;border:1px solid var(--xp-border,#e2e6ec);border-radius:12px;background:var(--xp-bg-surface)}.xp-panel-detail__card h2{font-size:18px;line-height:28px}.xp-panel-detail__card p{line-height:1.6}.xp-panel-detail__facts,.xp-panel-detail__fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:16px;min-inline-size:0}.xp-panel-detail__facts>div,.xp-approved-panel .xp-field{display:flex;flex-direction:column;align-items:stretch;gap:8px;min-inline-size:0}.xp-panel-detail__facts dt{font-size:14px;color:var(--xp-text-muted,#5d6b7e)}.xp-panel-detail__facts dd{overflow-wrap:anywhere;text-align:start}.xp-panel-detail__actions{display:flex;flex-wrap:wrap;gap:16px}.xp-approved-panel input,.xp-approved-panel select,.xp-approved-panel textarea{text-align:left;max-inline-size:100%;min-inline-size:0}.xp-approved-panel:lang(ar) :is(input,select,textarea){text-align:right}.xp-approved-panel bdi{unicode-bidi:isolate;overflow-wrap:anywhere}.xp-approved-panel .xp-table-wrap{min-inline-size:0;max-inline-size:100%;overflow:auto}.xp-approved-panel .xp-table{inline-size:100%}.xp-approved-panel .xp-table th,.xp-approved-panel .xp-table td{text-align:start;vertical-align:top;overflow-wrap:anywhere}.xp-panel-detail__steps{display:flex;flex-wrap:wrap;gap:16px;margin:0;padding:0;list-style:none}.xp-panel-detail__steps li{display:flex;align-items:center;gap:8px}.xp-panel-detail__steps b{display:inline-flex;align-items:center;justify-content:center;inline-size:32px;block-size:32px;border:1px solid var(--xp-border,#e2e6ec);border-radius:50%}.xp-panel-detail__radio{display:flex;flex-direction:column;gap:16px;border:0;padding:0;margin:0;min-inline-size:0}.xp-panel-detail__radio legend{margin-block-end:8px;font-weight:600}.xp-panel-detail__radio .xp-check{display:flex;align-items:center;gap:8px;min-block-size:44px}.xp-panel-detail__plot{display:flex;align-items:center;justify-content:center;min-block-size:160px;padding:16px;border:1px dashed var(--xp-border,#e2e6ec);border-radius:8px;text-align:center}.xp-panel-detail__aside .xp-panel-detail__facts{grid-template-columns:minmax(0,1fr)}.xp-approved-panel .xp-panel-detail__technical-cell{direction:ltr;unicode-bidi:isolate;white-space:nowrap;overflow-wrap:normal;word-break:normal}.xp-approved-panel[data-approved-xpanel-workspace="/resources"] [data-section="slice-resources"] .xp-board-dl{display:grid;gap:16px;min-inline-size:0}.xp-approved-panel[data-approved-xpanel-workspace="/resources"] [data-section="slice-resources"] .xp-fact{flex-direction:column;align-items:stretch;gap:8px;padding:0;border:0}.xp-approved-panel[data-approved-xpanel-workspace="/resources"] [data-section="slice-resources"] .xp-fact dd{min-inline-size:0;max-inline-size:100%;text-align:start;overflow-x:auto}.xp-approved-panel[data-approved-xpanel-workspace="/resources"] [data-section="slice-resources"] .xp-fact dd bdi{white-space:nowrap;overflow-wrap:normal;word-break:normal}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] .xp-panel-detail__main{gap:32px}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] #xpanel-file-manager .xp-field>label{text-box-trim:trim-end;text-box-edge:text}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] [data-file-manager-table] td:nth-child(2){white-space:nowrap;overflow-wrap:normal;word-break:normal}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] #jailed-code-editor{direction:ltr;text-align:left;white-space:pre;tab-size:2;overflow:auto}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] [data-file-manager-table] td:last-child{white-space:nowrap}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] [data-file-manager-table] .xp-btn{white-space:nowrap;overflow-wrap:normal;word-break:normal;inline-size:max-content;min-inline-size:44px;max-inline-size:none;flex:none}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] .xp-file-location{display:inline-flex;direction:ltr;unicode-bidi:isolate;white-space:nowrap;gap:0;min-inline-size:0;max-inline-size:100%;overflow:auto}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] .xp-file-location>*{flex:none}@media(max-width:1100px){.xp-panel-detail__layout{grid-template-columns:minmax(0,1fr)}}@media(max-width:600px){.xp-panel-detail__card{padding:16px}}@media(max-width:800px){.xp-panel-detail__heading h1{line-height:36px}.xp-panel-detail__fields{grid-template-columns:minmax(0,1fr)}}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] #xpanel-file-manager>.xp-card__header,.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] #xpanel-file-manager [data-in-browser-editor]>.xp-card__header,.xp-approved-panel[data-approved-xpanel-workspace="/files/trash"] #xpanel-file-manager>.xp-card__header{margin-block-end:var(--xp-space-group)}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] #xpanel-file-manager [data-chmod-policy-modal]{gap:var(--xp-space-group)}.xp-approved-panel:dir(rtl)[data-approved-xpanel-workspace="/files/directory-privacy"] [data-directory-privacy-prompt]{text-align:right}.xp-approved-panel:dir(rtl)[data-approved-xpanel-workspace="/files/manager"] #jailed-code-editor{text-align:right}.xp-approved-panel[data-approved-xpanel-workspace="/files/trash"] [data-file-manager-table] :is(td:first-child,td:nth-child(3),td:nth-child(4),td:nth-child(5),td:last-child){white-space:nowrap;overflow-wrap:normal;word-break:normal}.xp-approved-panel[data-approved-xpanel-workspace="/files/trash"] [data-file-manager-table] .xp-btn{white-space:nowrap;overflow-wrap:normal;word-break:normal;inline-size:max-content;min-inline-size:var(--xp-hit-target);max-inline-size:none;flex:none}.xp-approved-panel[data-approved-xpanel-workspace="/security/ssl"] [data-certificate-form]>h3{margin:0;font-size:var(--xp-type-card);line-height:var(--xp-leading-card)}
+.xp-approved-panel[data-approved-xpanel-workspace="/email/accounts"] .xp-panel-detail__layout {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--xp-space-section);
+}
+.xp-approved-panel[data-approved-xpanel-workspace="/email/accounts"] .xp-panel-detail__main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--xp-space-section);
+  align-items: start;
+}
+.xp-approved-panel[data-approved-xpanel-workspace="/email/accounts"] .xp-panel-detail__native {
+  grid-column: 1 / -1;
+}
+.xp-approved-panel[data-approved-xpanel-workspace="/email/accounts"] .xp-panel-detail__aside {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--xp-space-group);
+  align-items: start;
+}
+.xp-approved-panel[data-approved-xpanel-workspace="/email/accounts"] .xp-panel-detail__card h2 {
+  font-size: var(--xp-type-card);
+  line-height: var(--xp-leading-card);
+}
+@media (min-width: 1101px) {
+  .xp-approved-panel[data-approved-xpanel-workspace="/email/accounts"] .xp-panel-detail__main {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .xp-approved-panel[data-approved-xpanel-workspace="/email/accounts"] .xp-panel-detail__aside {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+</style>`;
 export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): string | undefined => {
     if (!approvedXpanelWorkspaceRoutes.has(p.route))
         return undefined;
+    if (p.route === '/domains/reverse-proxy') {
+        return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="/domains/reverse-proxy" data-workspace-section="workspace" data-workspace-mode="read-only" data-wiring="unavailable" data-capability-unavailable="true"><header class="xp-panel-detail__heading"><h1>${copy(p, msgid('Reverse proxy'))}</h1><p role="status">${copy(p, msgid('Reverse proxy changes are unavailable here. Nothing has been read or changed.'))}</p></header>${renderAccountReverseProxyWorkspace({ lang: p.locale, accountId: '', home: '', canManage: false })}</section>`;
+    }
+    if (p.route === '/advanced/cron') {
+        const page = pageFor(p), principal = p.visibility?.principal;
+        const canManage = !p.readOnly && p.account?.status === 'active' && principal?.kind === 'user' && principal.accountId === p.account.id && p.catalog?.some(tool => tool.id === 'cron-jobs' && tool.status === 'verified') === true;
+        return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="/advanced/cron" data-workspace-section="workspace" data-workspace-mode="${canManage ? 'connected' : 'read-only'}"${canManage ? '' : ' data-wiring="soon"'}><header class="xp-panel-detail__heading"><h1>${copy(p, page.title)}</h1><p>${copy(p, page.description)}</p></header>${renderAccountCronWorkspace({ lang: p.locale, expectedAccountId: p.account?.id ?? '', canManage })}</section>`;
+    }
+    const webDirective = ACCOUNT_WEB_DIRECTIVE_ROUTES[p.route];
+    if (webDirective) {
+        const principal = p.visibility?.principal, toolId = ({ 'error-pages': 'error-pages', indexes: 'indexes', 'mime-types': 'mime-types', handlers: 'apache-handlers', hotlink: 'hotlink-protection', 'ip-blocker': 'ip-blocker', redirects: 'redirects' } as const)[webDirective];
+        const canManage = !p.readOnly && p.account?.status === 'active' && principal?.kind === 'user' && principal.accountId === p.account.id
+            && ['aapanel-url-rewrite', toolId].every(id => p.catalog?.some(tool => tool.id === id && tool.status === 'verified') === true);
+        const domains = p.readOnly ? [] : p.domains ?? [], selected = domains.find(domain => domain.accountId === p.account?.id && domain.name === p.activeDomain);
+        return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="${p.route}" data-workspace-section="workspace" data-workspace-mode="${canManage ? 'connected' : 'read-only'}"${canManage ? '' : ' data-wiring="soon"'}>${renderAccountWebDirectivePage(webDirective, { locale: p.locale, accountId: p.readOnly ? '' : p.account?.id ?? '', domains, ...(selected ? { selectedDomainId: selected.id } : {}), canManage })}</section>`;
+    }
+    const ACCOUNT_TOOL_PAGES: Readonly<Record<string, readonly [Copy, Copy]>> = {
+        '/software/packages': [msgid('Account packages'), msgid('Inspect reviewed account PHP libraries and their recovery state.')],
+        '/databases/remote-access': [msgid('Remote database access'), msgid('Review the saved account host policy and native SQL and firewall availability.')],
+        '/domains/staging': [msgid('Staging sites'), msgid('Copy a site to a private staging folder, review the changes and promote them to the live site.')],
+        '/preferences/team': [msgid('Account team'), msgid('Record who works on this account and which tools their roles cover.')],
+        '/databases/phpmyadmin': ['phpMyAdmin', msgid('Open phpMyAdmin for your own databases with a single-use sign-on.')],
+        '/databases/postgresql': [msgid('PostgreSQL databases'), msgid('Create PostgreSQL databases and users for your account and manage their passwords and trash.')],
+        '/databases/phppgadmin': ['phpPgAdmin', msgid('See whether the PostgreSQL web client can be opened for your account.')],
+        '/software/apps': [msgid('Applications'), msgid('Install signed-catalog applications on your domains as verified jobs.')],
+        '/software/optimize': [msgid('Optimize website'), msgid('See the compression and response cache that serve your sites.')],
+        '/email/archive': [msgid('Email archive'), msgid('Keep copies of incoming and outgoing mail for your domains in a mailbox you choose.')],
+        '/email/calendars-contacts': [msgid('Calendars and contacts'), msgid('Manage supported collections in your existing mailbox stores.')],
+        '/advanced/api-shell': [msgid('API explorer'), msgid('Run supported API reads with your current account session.')],
+        '/security/ssh': [msgid('SSH access'), msgid('Manage the public keys that can sign in to this account over SSH.')],
+        '/metrics/logs': [msgid('Logs'), msgid('Read recent web access and error logs for your domains.')],
+        '/health': [msgid('Site health'), msgid('Check DNS, website, certificate and PHP for every site you own.')],
+        '/security/virus-scanner': [msgid('Virus scanner'), msgid('Scan the files in your home directory for malware with ClamAV.')],
+        '/advanced/network-tools': [msgid('Network tools'), msgid('Look up DNS records, ping a host, trace the route or check a port from this server.')],
+        '/databases/insights': [msgid('Database insights'), msgid('See the size, largest tables and server state of your own MariaDB databases and database users.')],
+        '/domains/dynamic-dns': [msgid('Dynamic DNS'), msgid('Manage update credentials for DNS records in your own zones.')],
+        '/domains/site-publisher': [msgid('Site publisher'), msgid('Preview a template and inspect publication and recovery availability for your domains.')],
+        '/files/git': [msgid('Git version control'), msgid('Manage registered repositories within your account. Native operations require a qualified runner.')],
+        '/email/encryption': [msgid('OpenPGP keys'), msgid('Manage your account keyring. Message encryption is unavailable.')],
+        '/security/waf': [msgid('Web application firewall'), msgid('See the protection that applies to your sites and switch ModSecurity per domain.')],
+        '/domains/cloudflare': [msgid('Cloudflare'), msgid('Inspect the Cloudflare zone of your connected domains and purge their cache.')],
+    };
+    const accountTool = ACCOUNT_TOOL_PAGES[p.route];
+    if (accountTool) {
+        const principal = p.visibility?.principal, accountId = p.readOnly ? '' : p.account?.id ?? '', domains = p.readOnly ? [] : p.domains ?? [];
+        const owner = !p.readOnly && p.account?.status === 'active' && principal?.kind === 'user' && principal.accountId === p.account.id;
+        const verified = (id: string): boolean => owner && p.catalog?.some(tool => tool.id === id && tool.status === 'verified') === true;
+        const selected = domains.find(domain => domain.accountId === accountId && domain.name === p.activeDomain);
+        const newTool = ({ '/domains/dynamic-dns': 'dynamic-dns', '/domains/site-publisher': 'site-publisher', '/files/git': 'git-version-control', '/email/encryption': 'email-encryption', '/software/packages': 'php-pear-packages', '/databases/remote-access': 'remote-database-access', '/email/calendars-contacts': 'calendars-contacts-management', '/email/archive': 'email-archive', '/domains/staging': 'site-staging', '/preferences/team': 'manage-team', '/databases/phpmyadmin': 'phpmyadmin', '/databases/postgresql': 'postgresql-databases', '/databases/phppgadmin': 'phppgadmin', '/software/apps': 'application-manager', '/software/optimize': 'optimize-website', '/advanced/api-shell': 'api-shell', '/security/waf': 'modsecurity', '/domains/cloudflare': 'cloudflare-account' } as Readonly<Record<string, string>>)[p.route];
+        if (newTool) {
+            const canManage = verified(newTool), body = p.route === '/domains/dynamic-dns' ? renderAccountDynamicDnsWorkspace({ lang: p.locale, accountId, canManage })
+                : p.route === '/domains/site-publisher' ? renderAccountSitePublisherWorkspace({ lang: p.locale, accountId, domains: domains.filter(domain => domain.accountId === accountId), canManage })
+                : p.route === '/files/git' ? renderAccountGitWorkspace({ lang: p.locale, accountId, canManage })
+                : p.route === '/email/encryption' ? renderAccountPgpWorkspace({ lang: p.locale, accountId, username: p.readOnly ? '' : p.account?.username ?? '', canManage })
+                : p.route === '/software/packages' ? renderAccountPackagesWorkspace({ lang: p.locale, accountId, canManage })
+                : p.route === '/databases/remote-access' ? renderAccountDatabaseRemoteWorkspace({ lang: p.locale, accountId, username: p.readOnly ? '' : p.account?.username ?? '', canManage })
+                : p.route === '/email/archive' ? renderMailxArchiveWorkspace({ locale: p.locale, canManage })
+                : ['/databases/phpmyadmin', '/databases/postgresql', '/databases/phppgadmin'].includes(p.route) ? renderAccountDbEngineWorkspace({ page: p.route.slice(11) as AccountDbEnginePage, lang: p.locale, accountId, username: p.readOnly ? '' : p.account?.username ?? '', canManage })
+                : p.route === '/software/apps' ? renderSwApplicationsWorkspace({ lang: p.locale, canManage })
+                : p.route === '/software/optimize' ? renderSwOptimizeWorkspace({ lang: p.locale, canRead: canManage })
+                : p.route === '/email/calendars-contacts' ? renderAccountCollaborationWorkspace({ locale: p.locale, canManage }) + renderMailxCollectionsWorkspace({ locale: p.locale, canManage })
+                : p.route === '/domains/staging' ? renderAccountStagingWorkspace({ lang: p.locale, accountId, canManage })
+                : p.route === '/preferences/team' ? renderAccountTeamWorkspace({ lang: p.locale, accountId, canManage })
+                : p.route === '/security/waf' || p.route === '/domains/cloudflare' ? renderSecWorkspace({ page: p.route === '/security/waf' ? 'account-waf' : 'account-cloudflare', locale: p.locale, canRead: canManage, canManage })
+                : renderWhmDeveloperWorkspace({ locale: p.locale, surface: 'account', canRead: canManage });
+            return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="${p.route}" data-workspace-section="workspace" data-workspace-mode="${canManage ? 'connected' : 'read-only'}"${canManage ? '' : ' data-wiring="soon"'}><header class="xp-panel-detail__heading"><h1>${copy(p, accountTool[0])}</h1><p>${copy(p, accountTool[1])}</p></header>${body}</section>`;
+        }
+        const connected = p.route === '/security/ssh' ? verified('ssh-access') : p.route === '/metrics/logs' ? verified('raw-access') || verified('errors') : p.route === '/security/virus-scanner' ? verified('virus-scanner') : p.route === '/advanced/network-tools' ? verified('track-dns') : p.route === '/databases/insights' ? verified('database-insights') : verified('account-health-overview');
+        const body = p.route === '/security/ssh' ? renderAccountSshWorkspace({ lang: p.locale, accountId, username: p.readOnly ? '' : p.account?.username ?? '', canManage: verified('ssh-access') })
+            : p.route === '/metrics/logs' ? renderAccountLogsWorkspace({ lang: p.locale, accountId, domains, ...(selected ? { selectedDomainId: selected.id } : {}), kinds: [...(verified('raw-access') ? ['access' as const] : []), ...(verified('errors') ? ['error' as const] : [])] })
+            : p.route === '/security/virus-scanner' ? renderAccountVirusScanWorkspace({ lang: p.locale, accountId, canManage: verified('virus-scanner') })
+            : p.route === '/advanced/network-tools' ? renderAccountNetworkToolsWorkspace({ lang: p.locale, accountId, canManage: verified('track-dns') })
+            : p.route === '/databases/insights' ? renderAccountDatabaseInsightsWorkspace({ lang: p.locale, accountId, canManage: verified('database-insights') })
+            : renderSiteHealthWorkspace({ lang: p.locale, accountId, canManage: verified('account-health-overview') });
+        return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="${p.route}" data-workspace-section="workspace" data-workspace-mode="${connected ? 'connected' : 'read-only'}"${connected ? '' : ' data-wiring="soon"'}><header class="xp-panel-detail__heading"><h1>${copy(p, accountTool[0])}</h1><p>${copy(p, accountTool[1])}</p></header>${body}</section>`;
+    }
     p = p.readOnly ? {
         route: p.route, locale: p.locale, readOnly: true
     } : p;
     const page = pageFor(p);
+    if (p.route === '/domains' && !p.readOnly && p.nativeHtml?.includes('data-domain-workspace')) {
+        return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="/domains" data-workspace-mode="connected"><header class="xp-panel-detail__heading"><h1>${copy(p, page.title)}</h1><p>${copy(p, page.description)}</p></header>${p.nativeHtml}</section>`;
+    }
+    if (p.route === '/databases/mariadb' && !p.readOnly && p.nativeHtml?.includes('data-database-workspace')) {
+        return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="/databases/mariadb" data-workspace-mode="connected"><header class="xp-panel-detail__heading"><h1>${copy(p, page.title)}</h1><p>${copy(p, page.description)}</p></header>${p.nativeHtml}</section>`;
+    }
+    const accountBackup = p.route === '/files/backup' && !p.readOnly && p.account
+        && p.visibility?.principal.kind === 'user' && p.visibility.principal.accountId === p.account.id
+        ? renderAccountBackupWorkspace({ lang: p.locale, accountId: p.account.id, username: p.account.username,
+            canManage: p.account.status === 'active' && ['backup', 'backup-restoration'].every(id => p.catalog?.some(tool => tool.id === id && tool.status === 'verified') === true) })
+        : undefined;
+    if (p.route === '/software/htaccess' && !p.readOnly && p.account) {
+        const canManage = p.account.status === 'active' && p.visibility?.principal.kind === 'user' && p.visibility.principal.accountId === p.account.id
+            && p.catalog?.some(tool => tool.id === 'aapanel-url-rewrite' && tool.status === 'verified') === true;
+        const selected = p.domains?.find(domain => domain.accountId === p.account!.id && domain.name === p.activeDomain);
+        return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="/software/htaccess" data-workspace-mode="connected">${renderAccountHtaccessWorkspace({ locale: p.locale, accountId: p.account.id,
+            domains: p.domains ?? [], ...(selected ? { selectedDomainId: selected.id } : {}), canManage })}</section>`;
+    }
     const php = renderConnectedPanelPhp(p);
     const dns = renderConnectedPanelDns(p);
-    const replacesNative = p.route === '/software/php' || dns !== undefined;
+    const directoryPrivacy = renderConnectedPanelDirectoryPrivacy(p);
+    const ssl = renderConnectedPanelSsl(p);
+    const sessions = renderConnectedPanelSessions(p);
+    const replacesNative = p.route === '/software/php' || p.route === '/files/backup' || dns !== undefined || directoryPrivacy !== undefined || ssl !== undefined;
     const nativeHtml = !p.readOnly && !replacesNative ? p.nativeHtml : undefined;
     const sections = page.sections.filter(section => php === undefined || !['php-domain', 'php-pool', 'php-ini'].includes(section.id))
-        .filter(section => dns === undefined || !['dns-add-record', 'dns-records-unread'].includes(section.id));
+        .filter(section => dns === undefined || !['dns-add-record', 'dns-records-unread'].includes(section.id))
+        .filter(section => directoryPrivacy === undefined || !['protected-folders', 'protect-folder'].includes(section.id))
+        .filter(section => ssl === undefined || !['certificate-wizard', 'installed-certificates'].includes(section.id));
     const heading = nativeHtml ? '' : `<header class="xp-panel-detail__heading"><h1>${copy(p, page.title)}</h1><p>${copy(p, page.description)}</p></header>`;
-    return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="${escapeHtml(p.route)}" data-workspace-mode="${p.readOnly ? 'read-only' : 'connected'}">${heading}<div class="xp-panel-detail__layout"><div class="xp-panel-detail__main">${nativeHtml ? `<div class="xp-panel-detail__native">${nativeHtml}</div>` : ''}${php ?? ''}${dns ?? ''}${sections.map(section => renderSection(p, section)).join('')}</div><aside class="xp-panel-detail__aside" aria-label="${copy(p, ['Workspace information', 'معلومات مساحة العمل'])}">${page.aside.map(section => renderSection(p, section, true)).join('')}</aside></div></section>`;
+    return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="${escapeHtml(p.route)}" data-workspace-mode="${p.readOnly ? 'read-only' : 'connected'}">${heading}<div class="xp-panel-detail__layout"><div class="xp-panel-detail__main">${nativeHtml ? `<div class="xp-panel-detail__native">${nativeHtml}</div>` : ''}${php ?? ''}${dns ?? ''}${directoryPrivacy ?? ''}${ssl ?? ''}${sessions ?? ''}${accountBackup ?? ''}${sections.map(section => renderSection(p, section)).join('')}</div><aside class="xp-panel-detail__aside" aria-label="${copy(p, msgid('Workspace information'))}">${page.aside.map(section => renderSection(p, section, true)).join('')}</aside></div></section>`;
 };
 const pageFor = buildApprovedPanelPage;

@@ -1,3 +1,5 @@
+import type { DatabaseRemoteAccessEntry } from './database-remote-access.ts'
+
 // Domain model shared by api, agent, render, state, db, lifecycle and web.
 // Desired state lives in files under /var/lib/xpanel/state/; these types are its pure, framework-free shape.
 
@@ -20,6 +22,23 @@ export type Principal =
   | { kind: 'root'; id: Id; username: string }
   | { kind: 'reseller'; id: Id; username: string }
   | { kind: 'user'; id: Id; username: string; accountId: Id }
+
+/** xPanel team roles (catalog spec manage-team). */
+export type TeamRole = 'administrator' | 'database' | 'email' | 'web'
+/**
+ * A signed-in account team member. It is never a Principal: a team session acts as its owning account's
+ * user principal, narrowed on every request to these roles, so it cannot reach root, reseller or other accounts.
+ */
+export interface TeamPrincipal {
+  kind: 'team'
+  /** Member id in the account team file. */
+  id: Id
+  username: string
+  /** Sign-in name, member@primary-domain. */
+  login: string
+  accountId: Id
+  roles: readonly TeamRole[]
+}
 
 /** Per-account resource caps. Applied to `xpanel-<uid>.slice` through cgroup v2. */
 export interface ResourceLimits {
@@ -102,6 +121,8 @@ export interface Account {
   ipv6?: string | null
   /** Additional dedicated/delegated IPv4 or IPv6 addresses assigned to this account */
   extraIps?: string[]
+  /** Canonical account database host allowlist; localhost remains implicit. */
+  databaseRemoteAccess?: DatabaseRemoteAccessEntry[]
   shell: ShellAccess
   createdAt: string
 }
@@ -171,6 +192,8 @@ export interface Domain {
   expiresAt: string | null
   /** per-path quota inside the account quota, MB */
   pathQuotaMb: Limit
+  /** Ordered directory index basenames; omission preserves the legacy engine defaults. */
+  indexFiles?: string[]
   /** Optional domain-specific IPv4 override (defaults to account.ipv4 when null/omitted) */
   ipv4?: string | null
   /** Optional domain-specific IPv6 override (defaults to account.ipv6 when null/omitted) */
@@ -191,10 +214,12 @@ export interface ServiceUser {
 export interface Database {
   id: Id
   accountId: Id
-  engine: 'mariadb'
+  engine: 'mariadb' | 'postgresql'
   /** always prefixed `<username>_` */
   name: string
-  /** set when moved to the MariaDB trash, dropped after retention */
+  /** PostgreSQL only: the owning `<username>_<suffix>` login role, fixed at creation */
+  owner?: string
+  /** set when moved to the trash, dropped after retention */
   trashedAt: string | null
 }
 
@@ -248,6 +273,12 @@ export interface FirewallRule {
   enabled: boolean
 }
 
+export interface DefaultSitePolicy {
+  response: 'reject' | 'redirect'
+  redirectTo: string | null
+  refuseHttps: boolean
+}
+
 export interface ServerSettings {
   hostname: string
   nameservers: string[]
@@ -274,6 +305,8 @@ export interface ServerSettings {
   /** loopback port Apache/OLS listens on behind Nginx; closed in the firewall */
   backendPort: number
   backendTlsPort: number
+  /** Explicit policy for unbound HTTP names; absent preserves the original 404 catch-all. */
+  defaultSite?: DefaultSitePolicy
 }
 
 export interface AuditEntry {

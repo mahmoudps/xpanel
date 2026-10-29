@@ -38,6 +38,9 @@ export const MAX_PREFIX_LISTS = 256
 export const MAX_PREFIX_ENTRIES = 1048576
 export const DEFAULT_WEB_PORTS: readonly number[] = [80, 443]
 export const FORWARDING_SYSCTL_PATH = '/etc/sysctl.d/90-xpanel-forward.conf'
+/** Sets owned by the remote-database provider; packages/os db-remote-command.ts uses the same names (render cannot import os). */
+export const DB_REMOTE_SET_V4 = 'xpanel_dbremote4'
+export const DB_REMOTE_SET_V6 = 'xpanel_dbremote6'
 
 export interface FirewallBan {
   ip: string
@@ -63,7 +66,23 @@ export interface NftSettings {
   /** epoch seconds; required when `bans` is not empty */
   now?: number
   forwardPolicy?: 'drop' | 'accept'
+  /** Union of active accounts' remote-database sources (canonical CIDRs); opens TCP/3306 only. */
+  databaseRemoteSources?: readonly string[]
+  /** per-source limits on the web ports and a global ping limit; absent or null renders no flood rules */
+  flood?: NftFloodSettings | null
 }
+
+export interface NftFloodSettings {
+  /** concurrent connections per source address (nft ct count) */
+  connectionsPerAddress: number | null
+  /** new connections per second per source address, with a packet burst */
+  newPerSecond: number | null
+  newBurst: number | null
+  /** ICMP/ICMPv6 echo requests per second, all sources together */
+  pingPerSecond: number | null
+}
+export const FLOOD_SETS = { conn4: 'xpanel_flood_conn4', conn6: 'xpanel_flood_conn6', rate4: 'xpanel_flood_rate4', rate6: 'xpanel_flood_rate6' } as const
+export const FLOOD_COMMENT_PREFIX = 'xpanel-flood:'
 
 type Proto = 'tcp' | 'udp'
 
@@ -87,9 +106,11 @@ interface NormalSettings {
   backendPorts: number[]
   webPorts: number[]
   lists: Map<string, PrefixSets>
+  databaseRemote: PrefixSets
   banTimeoutSec: number
   bans: { ip: IpAddress; remaining: number }[]
   forwardPolicy: 'drop' | 'accept'
+  flood: NftFloodSettings | null
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
@@ -130,6 +151,20 @@ const normalizeLists = (input: unknown): Map<string, PrefixSets> => {
   return out
 }
 
+/** Same host rule as the remote-access policy: canonical CIDR, no /0, IPv6 exact addresses only. */
+const normalizeDatabaseRemote = (input: unknown): PrefixSets => {
+  const sets: PrefixSets = { v4: [], v6: [] }
+  if (input === undefined) return sets
+  if (!Array.isArray(input) || input.length > MAX_PREFIX_ENTRIES) return invalid('databaseRemoteSources must be a bounded list')
+  const seen = new Set<string>()
+  for (const raw of input) {
+    const c = parseCidr(raw)
+    if (!c || formatCidr(c) !== raw || c.prefix === 0 || (c.version === 6 && c.prefix !== 128)) return invalid('database remote source must be a canonical address or IPv4 network', { source: String(raw).slice(0, 64) })
+    if (!seen.has(raw)) { seen.add(raw); (c.version === 4 ? sets.v4 : sets.v6).push(c) }
+  }
+  return sets
+}
+
 const normalizeSettings = (s: NftSettings): NormalSettings => {
   if (!isPlainObject(s)) return invalid('firewall settings must be an object')
   const panelPort = assertPort('panelPort', s.panelPort)
@@ -156,7 +191,44 @@ const normalizeSettings = (s: NftSettings): NormalSettings => {
     const remaining = assertInt('ban expiresAt', b.expiresAt, 0, 2 ** 40) - now
     return remaining > 0 ? [{ ip, remaining }] : []
   })
-  return { panelPort, managementPorts, sshPort, backendPorts, webPorts, lists: normalizeLists(s.prefixLists), banTimeoutSec, bans, forwardPolicy }
+  return { panelPort, managementPorts, sshPort, backendPorts, webPorts, lists: normalizeLists(s.prefixLists), databaseRemote: normalizeDatabaseRemote(s.databaseRemoteSources), banTimeoutSec, bans, forwardPolicy, flood: normalizeFlood(s.flood) }
+}
+
+const normalizeFlood = (f: NftSettings['flood']): NftFloodSettings | null => {
+  if (f === undefined || f === null) return null
+  if (!isPlainObject(f)) return invalid('flood settings must be an object')
+  const opt = (what: string, v: unknown, max: number): number | null => (v === null ? null : assertInt(what, v, 1, max))
+  const newPerSecond = opt('new connections per second', f.newPerSecond, 100000)
+  const newBurst = newPerSecond === null ? null : assertInt('new connection burst', f.newBurst, 1, 100000)
+  return { connectionsPerAddress: opt('connections per address', f.connectionsPerAddress, 100000), newPerSecond, newBurst, pingPerSecond: opt('ping per second', f.pingPerSecond, 10000) }
+}
+
+// nftables wiki "Connlimits" and "Meters": dynamic sets keyed by source address; established traffic is accepted before these run.
+const floodSets = (f: NftFloodSettings | null): string[] => {
+  if (!f) return []
+  const set = (name: string, type: string, timeout: boolean): string[] => [`  set ${name} {`, `    type ${type}`, `    size ${BAN_SET_SIZE}`, `    flags dynamic${timeout ? ',timeout' : ''}`, ...(timeout ? ['    timeout 60s'] : []), '  }']
+  return [
+    ...(f.connectionsPerAddress ? [...set(FLOOD_SETS.conn4, 'ipv4_addr', false), ...set(FLOOD_SETS.conn6, 'ipv6_addr', false)] : []),
+    ...(f.newPerSecond ? [...set(FLOOD_SETS.rate4, 'ipv4_addr', true), ...set(FLOOD_SETS.rate6, 'ipv6_addr', true)] : []),
+  ]
+}
+const floodRules = (f: NftFloodSettings | null, webPorts: readonly number[]): string[] => {
+  if (!f) return []
+  const web = `tcp dport ${portSet(webPorts)}`
+  return [
+    ...(f.connectionsPerAddress ? [
+      `ct state new ${web} add @${FLOOD_SETS.conn4} { ip saddr ct count over ${f.connectionsPerAddress} } drop comment "${FLOOD_COMMENT_PREFIX} connections"`,
+      `ct state new ${web} add @${FLOOD_SETS.conn6} { ip6 saddr ct count over ${f.connectionsPerAddress} } drop comment "${FLOOD_COMMENT_PREFIX} connections"`,
+    ] : []),
+    ...(f.newPerSecond ? [
+      `ct state new ${web} update @${FLOOD_SETS.rate4} { ip saddr limit rate over ${f.newPerSecond}/second burst ${f.newBurst} packets } drop comment "${FLOOD_COMMENT_PREFIX} rate"`,
+      `ct state new ${web} update @${FLOOD_SETS.rate6} { ip6 saddr limit rate over ${f.newPerSecond}/second burst ${f.newBurst} packets } drop comment "${FLOOD_COMMENT_PREFIX} rate"`,
+    ] : []),
+    ...(f.pingPerSecond ? [
+      `icmp type echo-request limit rate over ${f.pingPerSecond}/second burst ${f.pingPerSecond * 2} packets drop comment "${FLOOD_COMMENT_PREFIX} ping"`,
+      `icmpv6 type echo-request limit rate over ${f.pingPerSecond}/second burst ${f.pingPerSecond * 2} packets drop comment "${FLOOD_COMMENT_PREFIX} ping"`,
+    ] : []),
+  ]
 }
 
 /** Checks that need the host's ports and lists. Disabled rules never reach the kernel, so they pass. */
@@ -280,6 +352,10 @@ export const renderNftables = (rules: readonly FirewallRule[], settings: NftSett
   const sets = [
     ...banSet(BAN_SET_V4, 'ipv4_addr', ns, 4),
     ...banSet(BAN_SET_V6, 'ipv6_addr', ns, 6),
+    // Always declared, even empty, so the remote-database provider can replace their elements in one nft batch.
+    ...prefixSet(DB_REMOTE_SET_V4, 'ipv4_addr', ns.databaseRemote.v4),
+    ...prefixSet(DB_REMOTE_SET_V6, 'ipv6_addr', ns.databaseRemote.v6),
+    ...floodSets(ns.flood),
     ...usedLists.flatMap((name) => {
       const s = ns.lists.get(name) as PrefixSets
       return [
@@ -303,7 +379,11 @@ export const renderNftables = (rules: readonly FirewallRule[], settings: NftSett
     'icmpv6 type { mld-listener-query, mld-listener-report, mld-listener-done, mld2-listener-report } ip6 saddr fe80::/10 accept',
     // DHCPv6 replies come from another address than the multicast solicit, so conntrack misses them.
     'ip6 daddr fe80::/64 udp dport 546 accept comment "xpanel: dhcpv6 client"',
+    ...floodRules(ns.flood, ns.webPorts),
     ...filters.flatMap((r) => inputLines(r, ns.lists)),
+    // After the operator's list: an administrator drop for a source or for 3306 always wins over tenant access.
+    `ip saddr @${DB_REMOTE_SET_V4} tcp dport 3306 accept comment "xpanel: remote database access"`,
+    `ip6 saddr @${DB_REMOTE_SET_V6} tcp dport 3306 accept comment "xpanel: remote database access"`,
   ])
 
   const forwardMatches = (r: NormalRule, verdict: string): string[] => {

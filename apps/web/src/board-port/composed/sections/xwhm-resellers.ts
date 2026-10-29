@@ -1,37 +1,19 @@
+import '../../../i18n.ts'
 import type { ComposedRoute } from '../types.ts'
-
 export const xwhm_resellers: readonly ComposedRoute[] = [
   {
     "route": "/whm/resellers/more",
     "surface": "xwhm",
     "section": "resellers",
-    "group": [
-      "Resellers",
-      "الموزعون"
-    ],
-    "title": [
-      "More reseller tools",
-      "أدوات الموزعين الإضافية"
-    ],
-    "lede": [
-      "Only loaded, stored reseller account limits and nameserver records are shown. Usage and bulk ownership changes are unavailable.",
-      "تظهر فقط حدود الحسابات وخوادم الأسماء المحفوظة للموزعين التي جرت قراءتها. قياسات الاستخدام وتغييرات الملكية الجماعية غير متاحة."
-    ],
+    "group": msgid('Resellers'),
+    "title": msgid('More reseller tools'),
+    "lede": msgid('Only loaded, stored reseller account limits and nameserver records are shown. Usage and bulk ownership changes are unavailable.'),
     "layout": "list",
     "action": null,
     "columns": [
-      [
-        "Reseller",
-        "الموزع"
-      ],
-      [
-        "Account limit",
-        "حد الحسابات"
-      ],
-      [
-        "Nameservers",
-        "خوادم الأسماء"
-      ]
+      msgid('Reseller'),
+      msgid('Account limit'),
+      msgid('Nameservers')
     ],
     "fields": [],
     "bind": "resellers"
@@ -40,29 +22,14 @@ export const xwhm_resellers: readonly ComposedRoute[] = [
     "route": "/whm/resellers/privileges",
     "surface": "xwhm",
     "section": "resellers",
-    "group": [
-      "Resellers",
-      "الموزعون"
-    ],
-    "title": [
-      "Reseller privileges",
-      "صلاحيات الموزعين"
-    ],
-    "lede": [
-      "Only loaded, stored reseller ACL values are shown. This view does not change privileges.",
-      "تظهر فقط الصلاحيات المحفوظة للموزعين التي جرت قراءتها. لا تغيّر هذه الواجهة الصلاحيات."
-    ],
+    "group": msgid('Resellers'),
+    "title": msgid('Reseller privileges'),
+    "lede": msgid('Only loaded, stored reseller ACL values are shown. This view does not change privileges.'),
     "layout": "matrix",
     "action": null,
     "columns": [
-      [
-        "Reseller",
-        "الموزع"
-      ],
-      [
-        "Privileges",
-        "الصلاحيات"
-      ]
+      msgid('Reseller'),
+      msgid('Privileges')
     ],
     "fields": [],
     "bind": "reseller-acl"
@@ -71,33 +38,15 @@ export const xwhm_resellers: readonly ComposedRoute[] = [
     "route": "/whm/resellers/ips-nameservers",
     "surface": "xwhm",
     "section": "resellers",
-    "group": [
-      "Resellers",
-      "الموزعون"
-    ],
-    "title": [
-      "IPs & nameservers",
-      "عناوين IP وخوادم الأسماء"
-    ],
-    "lede": [
-      "Only loaded reseller nameserver and account-limit records are shown. IP delegation changes are unavailable.",
-      "تظهر فقط سجلات خوادم الأسماء وحدود الحسابات للموزعين التي جرت قراءتها. تغييرات تفويض عناوين IP غير متاحة."
-    ],
+    "group": msgid('Resellers'),
+    "title": msgid('IPs & nameservers'),
+    "lede": msgid('Only loaded reseller nameserver and account-limit records are shown. IP delegation changes are unavailable.'),
     "layout": "list",
     "action": null,
     "columns": [
-      [
-        "Reseller",
-        "الموزع"
-      ],
-      [
-        "Account limit",
-        "حد الحسابات"
-      ],
-      [
-        "Nameservers",
-        "خوادم الأسماء"
-      ]
+      msgid('Reseller'),
+      msgid('Account limit'),
+      msgid('Nameservers')
     ],
     "fields": [],
     "bind": "resellers"

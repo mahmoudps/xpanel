@@ -1,8 +1,11 @@
+import { createHash } from 'node:crypto'
 import { canOpenRegisteredRoute, canonicalNavigationRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { canSeeAccount, type Account, type MfaRuntimeMode, type Plan } from '@xpanel/core'
-import { panelLabel, renderSecurityNavLink, renderSupportNotice, renderUserMenu, roleLabel, safePanelLinks, type PanelLink } from './chrome.ts'
+import { panelLabel, renderSecurityNavLink, renderSupportNotice, renderUserMenu, roleLabel } from './chrome.ts'
+import { HANDOFF_CLIENT_BINDING } from './panel-handoff-client.ts'
+import { HANDOFF_CONTROLS_CSS, renderImpersonationBanner } from './panel-handoff-controls.ts'
 import { formatDisplayName } from './display-name.ts'
-import { dirForLocale, type Locale, SUPPORTED_LOCALES, t } from './i18n.ts'
+import { LOCALES, SOURCE_LOCALE, clientI18nAsset, inlineScriptMessageKeys, isLocale, localeDirection, renderClientI18nScript, requestLocale, requestedLocale, translator, type Locale } from './i18n.ts'
 import { isStatusCode, renderStatusBody, statusPageCopy, type StatusPageModel } from './status-page.ts'
 import { designHeading, renderDesignMain, renderDesignNav, renderDisabledScreen } from './design-board.ts'
 import { ACCOUNT_SECURITY_ROUTES, renderAccountSecurityCard } from './surfaces/account-security.ts'
@@ -11,14 +14,16 @@ import { type MailSurfaceProps, renderMailSurface, renderUnavailableMailBody } f
 import { type PanelSurfaceProps, renderPanelSurface } from './surfaces/xpanel.ts'
 import { renderWhmSurface, type WhmSurfaceProps } from './surfaces/xwhm.ts'
 import { LOGIN_CLIENT_SCRIPT } from './login-client.ts'
+import { TEAM_PASSWORD_CLIENT_BINDING } from './team-password.ts'
 import { contextualizeDocumentLinks, resolveWebDocumentRoute } from './document-routes.ts'
 import { composedRouteSpecs, nativeComposedRoutePaths } from './board-port/composed/all.ts'
+import { renderUnavailableComposedRoute } from './board-port/composed/render.ts'
 import { copyOf } from './board-port/composed/types.ts'
 import { accountPageRouteSpecs } from './board-port/extensions/account-pages.ts'
 import { renderApprovedXpanelWorkspace } from './board-port/approved-xpanel-workspaces.ts'
 import { renderCommandPaletteModal } from './command-palette.ts'
 import { renderWhmDetailPage } from './board-port/approved-xwhm.ts'
-import { storeRouteSpecs } from './board-port/extensions/store.ts'
+import { renderStoreExtension, storeRouteSpecs } from './board-port/extensions/store.ts'
 import { getSurfacePageTitle, renderSurfaceShell, resolveSurfaceSection } from './shell.ts'
 import {
   type AsyncActionBannerProps,
@@ -70,34 +75,34 @@ export interface WebAppRenderState {
   /** Present only for an HTTP status screen. It does not invent a workspace. */
   error?: Omit<StatusPageModel, 'locale' | 'theme' | 'density' | 'surface' | 'path' | 'visibility'> & { surface?: StatusPageModel['surface'] }
   supportEmail?: string
-  panels?: readonly PanelLink[]
+  /** A session opened through a one-time handoff: who acts, and who opened it. */
+  impersonation?: { target: string; issuer: string }
 }
 
 const renderWorkspaceSummary = (state: WebAppRenderState, locale: Locale): string => {
   const principal = state.visibility?.principal
   if (!principal) return ''
-  const isAr = locale === 'ar'
   const field = (key: string, label: string, value: string, ltr = false) =>
     `<div class="xp-field" data-workspace-field="${key}"><span class="xp-label">${escapeHtml(label)}</span><strong class="xp-field-value">${ltr ? `<bdi dir="ltr">${escapeHtml(value)}</bdi>` : escapeHtml(value)}</strong></div>`
   const role = roleLabel(principal.kind, locale)
-  const identityFields = field('username', isAr ? 'اسم المستخدم' : 'Username', principal.username, true)
-    + field('role', isAr ? 'الدور' : 'Role', role)
+  const identityFields = field('username', translator(locale)('Username'), principal.username, true)
+    + field('role', translator(locale)('Role'), role)
   const account = state.surface === 'xpanel' ? (state.workspaceSummary ? state.workspaceSummary.account : state.panel?.account) : undefined
   const plan = state.workspaceSummary ? state.workspaceSummary.plan : state.panel?.plan
   const authorized = account && canSeeAccount(principal, account)
   const accountFields = authorized
-    ? (account.username === principal.username ? '' : field('account', isAr ? 'الحساب المحدد' : 'Selected account', account.username, true))
-      + field('primary-domain', isAr ? 'النطاق الأساسي' : 'Primary domain', account.primaryDomain, true)
-      + field('plan', isAr ? 'الخطة' : 'Plan', plan?.id === account.planId ? formatDisplayName(plan.name) : (isAr ? 'غير متاحة' : 'Unavailable'))
-      + field('status', isAr ? 'الحالة' : 'Status', account.status === 'active' ? (isAr ? 'نشط' : 'Active')
-        : account.status === 'suspended' ? (isAr ? 'معلق' : 'Suspended') : (isAr ? 'قيد الإنهاء' : 'Terminating'))
+    ? (account.username === principal.username ? '' : field('account', translator(locale)('Selected account'), account.username, true))
+      + field('primary-domain', translator(locale)('Primary domain'), account.primaryDomain, true)
+      + field('plan', translator(locale)('Plan'), plan?.id === account.planId ? formatDisplayName(plan.name) : (translator(locale)(msgctxt('app', 'Unavailable'))))
+      + field('status', translator(locale)('Status'), account.status === 'active' ? (translator(locale)('Active'))
+        : account.status === 'suspended' ? (translator(locale)('Suspended')) : (translator(locale)('Terminating')))
     : ''
-  const title = state.surface === 'xpanel' ? (isAr ? 'ملخص الحساب' : 'Account overview') : (isAr ? 'الجلسة الحالية' : 'Current session')
+  const title = state.surface === 'xpanel' ? (translator(locale)('Account overview')) : (translator(locale)('Current session'))
   const emptyAccount = state.surface === 'xpanel' && !authorized
-    ? `<p class="xp-prose" data-workspace-account-empty="true">${isAr ? 'لا يتوفر حساب مصرح به لعرضه.' : 'No authorized account is available to display.'}</p>`
+    ? `<p class="xp-prose" data-workspace-account-empty="true">${translator(locale)('No authorized account is available to display.')}</p>`
     : ''
   const mfaLink = state.mfaRuntimeMode !== 'disabled' && state.surface === 'xwhm' && principal.kind === 'root' && state.security?.totpEnabled === false && state.activeRoute !== '/whm/security/sign-in'
-    ? `<p class="xp-prose" data-mfa-optional-link><a href="/whm/security/sign-in">${escapeHtml(t(locale, 'security.2fa.workspaceLink'))}</a></p>`
+    ? `<p class="xp-prose" data-mfa-optional-link><a href="/whm/security/sign-in">${escapeHtml(translator(locale)('Two-factor authentication is off. You can enable it on the security page.'))}</a></p>`
     : ''
   return `<section class="xp-card" data-workspace-identity="true"${state.surface === 'xpanel' ? ' data-workspace-account-overview="true"' : ''} aria-labelledby="xp-workspace-summary-title">
     <h2 id="xp-workspace-summary-title">${title}</h2>
@@ -111,13 +116,13 @@ const workspacePath = (surface: WebSurfaceKind, activeRoute?: string): string =>
   activeRoute ?? (surface === 'xwhm' ? '/whm' : surface === 'xmail' ? '/mail/inbox' : '/home')
 
 const securityPageHeading = (route: string, locale: Locale): string | undefined => {
-  const titles: Record<string, readonly [string, string]> = {
-    '/whm/security/sign-in': ['Sign-in security', 'أمان تسجيل الدخول'],
-    '/security/account': ['Account security', 'أمان الحساب'],
-    '/mail/settings/security': ['Mail security', 'أمان البريد'],
+  const titles: Record<string, string> = {
+    '/whm/security/sign-in': msgid('Sign-in security'),
+    '/security/account': msgid('Account security'),
+    '/mail/settings/security': msgid('Mail security'),
   }
-  const pair = titles[route]
-  return pair ? pair[locale === 'ar' ? 1 : 0] : undefined
+  const title = titles[route]
+  return title ? translator(locale)(title) : undefined
 }
 
 export const workspacePageHeading = (surface: WebSurfaceKind, locale: Locale, activeRoute: string): string => {
@@ -154,15 +159,22 @@ const renderUnavailableWorkspace = (
   // A registered, role-admitted document keeps its detailed read-only layout.
   // Unqualified provider data is deliberately not forwarded to these renderers.
   const admitted = canOpenRegisteredRoute(path, state?.visibility)
+  const storeAccount = state?.workspaceSummary ? state.workspaceSummary.account : state?.panel?.account
+  const store = admitted && !securityPage && principal
+    ? renderStoreExtension({ locale, route: path, principal,
+      ...(storeAccount ? { account: { id: storeAccount.id, status: storeAccount.status } } : {}),
+    }) : undefined
   const detailed = !securityPage && admitted
-    ? panelSurface === 'xpanel'
+    ? store || (panelSurface === 'xpanel'
       ? renderApprovedXpanelWorkspace({ route: path, locale, readOnly: true })
       : panelSurface === 'xwhm'
         ? renderWhmDetailPage({ activeRoute: path, locale, capabilityUnavailable: true })
-        : renderUnavailableMailBody({ route: path, locale, theme })
+        : renderUnavailableMailBody({ route: path, locale, theme }))
     : undefined
   const canonicalPath = canonicalNavigationRoute(path)
-  const design = securityPage ? '' : (detailed || renderDesignMain(path, locale)
+  const composed = admitted && !securityPage && panelSurface !== 'xmail'
+    ? renderUnavailableComposedRoute(panelSurface, path, locale) : undefined
+  const design = securityPage ? '' : (detailed || composed || renderDesignMain(path, locale)
     || (canonicalPath !== path ? renderDesignMain(canonicalPath, locale) : '')
     || renderDisabledScreen(pageHeading, locale))
   return renderSurfaceShell({
@@ -191,20 +203,17 @@ const renderUnavailableWorkspace = (
 }
 
 const renderActivityDrawer = (liveState: LiveEventState, locale: Locale): string => {
-  const isAr = locale === 'ar'
   return `
 <div id="xp-activity-drawer" class="xp-drawer-backdrop" data-xp-drawer="activity" hidden role="dialog" aria-modal="true" aria-labelledby="xp-activity-drawer-title">
   <aside class="xp-drawer" tabindex="-1">
     <div class="xp-card__header">
-      <h2 id="xp-activity-drawer-title">${escapeHtml(isAr ? 'البث المباشر للمهام وسجل التدقيق' : 'Live Jobs & Reconcile Stream')}</h2>
-      <button type="button" class="xp-btn" data-action="close-activity-drawer">${escapeHtml(t(locale, 'common.close'))}</button>
-      ${liveState.reconcile.generationId > 0 && liveState.reconcile.updatedAt !== null ? renderStatusBadge(liveState.reconcile.status === 'applied' ? 'ok' : 'warn', `Gen #${liveState.reconcile.generationId}`) : ''}
+      <h2 id="xp-activity-drawer-title">${escapeHtml(translator(locale)('Live Jobs & Reconcile Stream'))}</h2>
+      <button type="button" class="xp-btn" data-action="close-activity-drawer">${escapeHtml(translator(locale)('Close (Esc)'))}</button>
+      ${liveState.reconcile.generationId > 0 && liveState.reconcile.updatedAt !== null ? renderStatusBadge(liveState.reconcile.status === 'applied' ? 'ok' : 'warn', translator(locale)('Generation {generationId}', { generationId: liveState.reconcile.generationId })) : ''}
     </div>
     <p class="xp-prose">
       ${escapeHtml(
-        isAr
-          ? 'يستقبل هذا الدرج تحديثات فورية عبر WebSocket (/api/ws) لجميع عمليات المطابقة والمهام الخلفية.'
-          : 'Streams RBAC-scoped events over RFC 6455 WebSocket (/api/ws): reconcile.stage, reconcile.applied, reconcile.failed, job.updated, and audit.entry.',
+        translator(locale)('Streams RBAC-scoped events over RFC 6455 WebSocket (/api/ws): reconcile.stage, reconcile.applied, reconcile.failed, job.updated, and audit.entry.'),
       )}
     </p>
   </aside>
@@ -218,8 +227,8 @@ const renderActivityDrawer = (liveState: LiveEventState, locale: Locale): string
  * Command Palette (`Cmd/Ctrl+K`), and the embedded WebSocket client script.
  */
 export function renderWebApp(state: WebAppRenderState): string {
-  const locale: Locale = state.locale && SUPPORTED_LOCALES.includes(state.locale) ? state.locale : 'en'
-  const dir = dirForLocale(locale)
+  const locale: Locale = isLocale(state.locale) ? state.locale : SOURCE_LOCALE
+  const dir = localeDirection(locale)
   const theme: ThemeMode = state.theme === 'dark' ? 'dark' : 'light'
   const density: TableDensity = state.density === 'compact' ? 'compact' : 'comfortable'
   const generationId = state.generationId ?? state.liveState?.reconcile?.generationId ?? 0
@@ -237,9 +246,9 @@ export function renderWebApp(state: WebAppRenderState): string {
 
   const loginAudience = state.surface === 'login' && (state.login?.audience === 'xpanel' || state.login?.audience === 'xwhm' || state.login?.audience === 'xmail') ? state.login.audience : undefined
   const loginIdentity = loginAudience ? {
-    xpanel: { brand: 'xPanel', en: 'Account sign in', ar: 'دخول الحساب' },
-    xwhm: { brand: 'xWHM', en: 'Server sign in', ar: 'دخول إدارة الخادم' },
-    xmail: { brand: 'xMail', en: 'Mail sign in', ar: 'دخول البريد' },
+    xpanel: { brand: 'xPanel', title: msgid('Account sign in') },
+    xwhm: { brand: 'xWHM', title: msgid('Server sign in') },
+    xmail: { brand: 'xMail', title: msgid('Mail sign in') },
   }[loginAudience] : undefined
   const faviconHref = loginAudience ? `/assets/favicon-${loginAudience}.svg` : '/assets/favicon.svg'
 
@@ -249,6 +258,8 @@ export function renderWebApp(state: WebAppRenderState): string {
   const routeMatches = (pages: ReturnType<typeof visibleNavigation>): boolean =>
     pages.some(item => item.surface === state.surface && item.sections.some(section => section.pages.some(page => page.route === canonicalNavigationRoute(activeRoute))))
   let routeReady = routeMatches(visibleNavigation(state.visibility, state.catalog))
+  // These persisted personal settings do not depend on host-native capability qualification.
+  if (state.surface === 'xwhm' && activeRoute === '/whm/preferences' && (securityPrincipal === 'root' || securityPrincipal === 'reseller')) routeReady = true
   const sessionPrincipal = state.visibility?.principal
   const accountRecordReady = sessionPrincipal?.kind === 'user'
     && state.panel?.account?.status === 'active'
@@ -267,9 +278,9 @@ export function renderWebApp(state: WebAppRenderState): string {
   const pageTitle = state.title ?? (state.error && isStatusCode(state.error.status)
     ? `${statusPageCopy(state.error.status, locale).title} — ${panelLabel(statusSurface)}`
     : loginIdentity
-      ? `${loginIdentity.brand} — ${loginIdentity[locale]}`
+      ? `${loginIdentity.brand} — ${translator(locale)(loginIdentity.title)}`
       : state.surface === 'login'
-        ? `${t(locale, 'surface.login')} — ${t(locale, 'app.title')}`
+        ? `${translator(locale)('xPanel Sign In')} — ${translator(locale)('xPanel Control Plane')}`
         : `${pageHeading} — ${panelLabel(state.surface === 'xwhm' || state.surface === 'xmail' ? state.surface : 'xpanel')}`)
   if (state.error && isStatusCode(state.error.status)) {
     const principal = state.visibility?.principal
@@ -286,7 +297,6 @@ export function renderWebApp(state: WebAppRenderState): string {
       ...(principal ? { username: principal.username, role: roleLabel(principal.kind, locale), signedIn: true } : {}),
       ...(state.accountId ? { accountId: state.accountId } : {}),
       ...(state.supportEmail ? { supportEmail: state.supportEmail } : {}),
-      ...(state.panels ? { panels: state.panels } : {}),
     })
   } else if (state.surface !== 'login' && !hasVerifiedSurface)
     surfaceBodyHtml = renderUnavailableWorkspace(state.surface, locale, state.visibility !== undefined, state.actionState, activeRoute, theme, density, state)
@@ -295,7 +305,6 @@ export function renderWebApp(state: WebAppRenderState): string {
       surfaceBodyHtml = renderLoginSurface({
         locale,
         theme,
-        ...(state.panels ? { panels: state.panels } : {}),
         ...(state.supportEmail ? { supportEmail: state.supportEmail } : {}),
         ...state.login,
         mfaMode: state.mfaRuntimeMode ?? 'optional',
@@ -309,7 +318,6 @@ export function renderWebApp(state: WebAppRenderState): string {
         ...(state.actionState !== undefined && { actionState: state.actionState }),
         ...state.whm,
         density,
-        ...(state.panels ? { panels: state.panels } : {}),
         realtimeEnabled: hasVerifiedSurface && state.realtimeEnabled !== false,
         activeRoute,
         ...(state.catalog ? { catalog: state.catalog } : {}),
@@ -324,7 +332,6 @@ export function renderWebApp(state: WebAppRenderState): string {
         ...(state.actionState !== undefined && { actionState: state.actionState }),
         ...state.panel,
         density,
-        xmailOrigin: safePanelLinks(state.panels).find(panel => panel.surface === 'xmail')?.origin,
         realtimeEnabled: hasVerifiedSurface && state.realtimeEnabled !== false,
         activeRoute,
         ...(state.catalog ? { catalog: state.catalog } : {}),
@@ -369,6 +376,26 @@ export function renderWebApp(state: WebAppRenderState): string {
       ? `<div class="xp-global-reconcile-wrap" style="padding: 12px var(--xp-space-card) 0;">${renderReconcileBanner(fullLiveState, locale)}</div>`
       : ''
 
+  const realtime = state.surface !== 'login' && !state.error
+  const impersonationHtml = state.surface !== 'login' && state.impersonation ? renderImpersonationBanner(locale, state.impersonation) : ''
+  const handoffControls = hasVerifiedSurface && (state.surface === 'xwhm' || state.surface === 'xpanel') && surfaceBodyHtml.includes('data-handoff=')
+  const bodyHtml = `
+  ${impersonationHtml || handoffControls ? `<style id="xpanel-handoff-controls">${HANDOFF_CONTROLS_CSS}</style>` : ''}
+  ${impersonationHtml}
+  ${reconcileBannerHtml}
+  ${surfaceBodyHtml}
+  ${hasVerifiedSurface ? contextualizeDocumentLinks(renderCommandPaletteModal(state.surface, locale, state.visibility, state.catalog,
+    state.surface === 'xwhm' ? { accounts: state.whm?.accounts ?? [], domains: state.whm?.domains ?? [] }
+      : state.surface === 'xpanel' ? { accounts: state.panel?.account ? [state.panel.account] : [], domains: state.panel?.domains ?? [] }
+        : undefined), context) : ''}
+  ${hasVerifiedSurface && state.liveState?.reconcile !== undefined ? renderActivityDrawer(fullLiveState, locale) : ''}
+  <script id="xpanel-login-client">${LOGIN_CLIENT_SCRIPT}</script>
+  ${state.surface === 'login' ? `<script id="xpanel-team-password-client">${TEAM_PASSWORD_CLIENT_BINDING}</script>` : ''}
+  ${handoffControls ? `<script id="xpanel-handoff-client">(${HANDOFF_CLIENT_BINDING})()</script>` : ''}
+  ${realtime ? `<script id="xpanel-i18n-realtime" src="/assets/i18n-${locale}.js?v=${I18N_ASSET_VERSION}"></script>
+  <script id="xpanel-realtime-client" src="/assets/ws-client.js?v=${REALTIME_SCRIPT_VERSION}"></script>` : ''}
+`
+
   return `<!doctype html>
 <html lang="${locale}" dir="${dir}" data-theme="${theme}" data-density="${density}" data-surface="${state.error ? statusSurface : state.surface}" data-mfa-mode="${state.mfaRuntimeMode === 'disabled' ? 'disabled' : 'optional'}" data-realtime-enabled="${hasVerifiedSurface && state.realtimeEnabled !== false}"${state.error && isStatusCode(state.error.status) ? ` data-status="${state.error.status}"` : ''}>
 <head>
@@ -378,20 +405,11 @@ export function renderWebApp(state: WebAppRenderState): string {
   <link rel="icon" type="image/svg+xml" href="${faviconHref}" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style id="xpanel-design-tokens">${DESIGN_TOKENS_CSS}</style>
+  ${renderClientI18nScript(locale, inlineScriptMessageKeys(bodyHtml))}
 </head>
-<body>
-  ${reconcileBannerHtml}
-  ${surfaceBodyHtml}
-  ${hasVerifiedSurface ? contextualizeDocumentLinks(renderCommandPaletteModal(state.surface, locale, state.visibility, state.catalog,
-    state.surface === 'xwhm' ? { accounts: state.whm?.accounts ?? [], domains: state.whm?.domains ?? [] }
-      : state.surface === 'xpanel' ? { accounts: state.panel?.account ? [state.panel.account] : [], domains: state.panel?.domains ?? [] }
-        : undefined), context) : ''}
-  ${hasVerifiedSurface && state.liveState?.reconcile !== undefined ? renderActivityDrawer(fullLiveState, locale) : ''}
-  <script id="xpanel-login-client">${LOGIN_CLIENT_SCRIPT}</script>
-  ${state.surface !== 'login' && !state.error ? `<script id="xpanel-realtime-client">${BROWSER_REALTIME_SCRIPT}</script>` : ''}
-</body>
+<body>${bodyHtml}</body>
 </html>`
 }
 
@@ -402,6 +420,14 @@ const LOGIN_FAVICONS = {
   xwhm: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#101828"/><g transform="translate(8 8)" fill="none" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01M12 6.5h5M12 17.5h5"/></g></svg>',
   xmail: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#087F5B"/><g transform="translate(8 8)" fill="none" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></g></svg>',
 }
+
+// The shared realtime client is ~1.5 MB: serve it once as an immutable cached asset instead of inlining it in every page.
+// A synchronous external script keeps the execution order of the former inline script.
+const REALTIME_SCRIPT_VERSION = createHash('sha256').update(BROWSER_REALTIME_SCRIPT).digest('hex').slice(0, 16)
+
+// The whole UI catalog per locale as an immutable cached asset; inline page scripts get their own subset in <head>.
+const I18N_ASSETS = new Map(LOCALES.map(info => [info.tag, clientI18nAsset(info.tag)]))
+const I18N_ASSET_VERSION = createHash('sha256').update([...I18N_ASSETS.values()].join('\n')).digest('hex').slice(0, 16)
 
 const PUBLIC_STATIC_ASSETS: Readonly<Record<string, { body: string; contentType: string }>> = {
   '/assets/favicon-xpanel.svg': { body: LOGIN_FAVICONS.xpanel, contentType: 'image/svg+xml; charset=utf-8' },
@@ -435,6 +461,7 @@ const PUBLIC_STATIC_ASSETS: Readonly<Record<string, { body: string; contentType:
     body: DESIGN_TOKENS_CSS,
     contentType: 'text/css; charset=utf-8',
   },
+  ...Object.fromEntries([...I18N_ASSETS].map(([tag, body]) => [`/assets/i18n-${tag}.js`, { body, contentType: 'application/javascript; charset=utf-8' }])),
 }
 
 /**
@@ -493,8 +520,9 @@ export async function serveWebUi(
     inferredSurface = 'xmail'
   }
 
-  const rawLang = url.searchParams.get('lang')
-  const locale: Locale = rawLang === 'ar' ? 'ar' : 'en'
+  // An explicit ?lang= wins, then a saved preference from the state provider, then Accept-Language.
+  const explicitLocale = requestedLocale(url)
+  const locale = requestLocale(url, req)
   const rawTheme = url.searchParams.get('theme')
   const theme: ThemeMode = rawTheme === 'dark' ? 'dark' : 'light'
   const rawDensity = url.searchParams.get('density')
@@ -502,12 +530,14 @@ export async function serveWebUi(
   const rawTarget = url.searchParams.get('target')
   const targetSurface = rawTarget === 'xwhm' || rawTarget === 'xmail' || rawTarget === 'xpanel' ? rawTarget : 'xpanel'
 
-  const htmlHeaders = {
+  const htmlHeaders = (language: Locale) => ({
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-store',
+    'content-language': language,
+    vary: 'Accept-Language',
     'x-content-type-options': 'nosniff',
     'x-frame-options': 'SAMEORIGIN',
-  }
+  })
   if (!stateProvider && !documentRoute) {
     const fallbackSurface = inferredSurface === 'xwhm' || inferredSurface === 'xmail' ? inferredSurface : 'xpanel'
     const html = renderWebApp({
@@ -518,7 +548,7 @@ export async function serveWebUi(
       activeRoute: path,
       error: { status: 404, surface: fallbackSurface },
     })
-    return new Response(html, { status: 404, headers: htmlHeaders })
+    return new Response(html, { status: 404, headers: htmlHeaders(locale) })
   }
 
   const baseState: WebAppRenderState = stateProvider
@@ -530,16 +560,17 @@ export async function serveWebUi(
         density,
       }
 
+  const pageLocale = explicitLocale ?? baseState.locale ?? locale
   const html = renderWebApp({
-    locale,
-    theme,
-    density,
     login: { targetSurface, ...baseState.login },
     ...baseState,
+    locale: pageLocale,
+    theme: rawTheme === null ? baseState.theme ?? theme : theme,
+    density: rawDensity === null ? baseState.density ?? density : density,
     activeRoute: baseState.activeRoute ?? documentRoute?.activeRoute,
     accountId: baseState.accountId ?? (baseState.error ? undefined : url.searchParams.get('accountId') ?? undefined),
   })
   const status = baseState.error && isStatusCode(baseState.error.status) ? baseState.error.status : 200
 
-  return new Response(html, { status, headers: htmlHeaders })
+  return new Response(html, { status, headers: htmlHeaders(pageLocale) })
 }

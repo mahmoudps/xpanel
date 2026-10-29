@@ -4,6 +4,7 @@ import { attachmentsFromBodyStructure } from './imap.ts'
 import { tlsConnectOptions, smtpHumanCopy } from './smtp.ts'
 import { composeDraftFromMessage, dkimIdentityLine, formatMessageSizeLimit, messageSizeLimitBytes, messageSizeLimitFromPostconf, smtpdMiltersConfigured } from './document.ts'
 import { imapHumanCopy } from './inbox.ts'
+import { translator } from '../../../web/src/i18n.ts'
 
 describe('live mail truth', () => {
   it('omits the TLS server name when the SMTP host is an IP', () => {
@@ -14,10 +15,10 @@ describe('live mail truth', () => {
 
   it('maps the Node IP server-name error to a human sentence', () => {
     const copy = smtpHumanCopy('TLS ServerName to an IP address is not permitted')
-    expect(copy.en).toBe('A secure mail connection cannot use an IP address as the server name.')
-    expect(copy.ar).toContain('IP')
-    expect(copy.en).not.toContain('TLS ServerName')
-    expect(copy.ar).not.toContain('TLS ServerName')
+    expect(copy).toBe('A secure mail connection cannot use an IP address as the server name.')
+    expect(translator('ar')(copy)).toContain('IP')
+    expect(copy).not.toContain('TLS ServerName')
+    expect(translator('ar')(copy)).not.toContain('TLS ServerName')
   })
 
   it('keeps the display name and the Cc list from the message headers', () => {
@@ -79,10 +80,10 @@ describe('live mail truth', () => {
 
   it('explains an IMAP move with folder copy instead of a send failure', () => {
     const missing = imapHumanCopy('IMAP UID MOVE/COPY failed: NO [TRYCREATE] Mailbox does not exist')
-    expect(missing.en).toBe('That folder is not on this mailbox yet.')
-    expect(missing.en).not.toContain('could not be sent')
+    expect(missing).toBe('That folder is not on this mailbox yet.')
+    expect(missing).not.toContain('could not be sent')
     const failed = imapHumanCopy('IMAP UID MOVE/COPY failed: NO')
-    expect(failed.en).toBe('The message could not be moved.')
-    expect(failed.ar).toBe('تعذر نقل الرسالة.')
+    expect(failed).toBe('The message could not be moved.')
+    expect(translator('ar')(failed)).toBe('تعذر نقل الرسالة.')
   })
 })

@@ -360,7 +360,17 @@ export interface RenderedCron {
   onCalendar: string[]
   service: RenderedFile
   timer: RenderedFile
+  /** Private account-readable source; never embedded in unit properties or executable argv. */
+  commandFile: RenderedFile
 }
+
+export const CRON_COMMAND_ROOT = `${XPANEL_CONFIG_ROOT}/cron`
+export const cronCommandDir = (username: string): string => `${CRON_COMMAND_ROOT}/${assertUsername(username)}`
+export const cronCommandPath = (username: string, id: string): string => `${cronCommandDir(username)}/${assertShortName('cron job id', id)}.command`
+
+// The source is evaluated as a builtin after systemd applies User/Group. The sentinel preserves
+// trailing newlines; the temporary variable and trusted path argument are removed before evaluation.
+export const CRON_COMMAND_RUNNER = '_xpanel_cron_source=$(/bin/cat "$1" && printf .) || exit; _xpanel_cron_source=${_xpanel_cron_source%.}; shift; eval "unset _xpanel_cron_source; $_xpanel_cron_source"'
 
 export const cronUnitNames = (username: string, id: string): { service: string; timer: string } => ({
   service: `xpanel-cron-${username}-${id}.service`,
@@ -375,6 +385,7 @@ export const renderCronUnits = (account: AccountRef, job: CronJob, os: OsProfile
   if (command.trim() === '') return invalid('cron command is empty')
   const timeout = job.maxRuntimeSec === undefined ? 'infinity' : `${assertInt('maxRuntimeSec', job.maxRuntimeSec, 1, 7 * 86400)}s`
   const names = cronUnitNames(ctx.username, id)
+  const commandFile: RenderedFile = { path: cronCommandPath(ctx.username, id), content: command, mode: 0o640, owner: 'root', group: ctx.username }
 
   const service = unitFile(`${ctx.systemdDir}/${names.service}`, [
     header(`cron job ${id} for ${ctx.username}`),
@@ -385,7 +396,8 @@ export const renderCronUnits = (account: AccountRef, job: CronJob, os: OsProfile
     'Type=oneshot',
     `WorkingDirectory=${ctx.home}`,
     `Environment=${quoteEnvAssignment('PATH', '/usr/local/bin:/usr/bin:/bin')}`,
-    `ExecStart=${SH_BINARY} -c ${quoteExecArg(command)}`,
+    `ExecStart=${SH_BINARY} -c ${quoteExecArg(CRON_COMMAND_RUNNER)} ${quoteExecArg(SH_BINARY)} ${quoteExecArg(commandFile.path)}`,
+    'StandardInput=null',
     `TimeoutStartSec=${timeout}`,
     // a job may not start a listener that squats another account's app port
     ...NO_TCP_LISTEN,
@@ -405,7 +417,7 @@ export const renderCronUnits = (account: AccountRef, job: CronJob, os: OsProfile
     '[Install]',
     'WantedBy=timers.target',
   ])
-  return { serviceName: names.service, timerName: names.timer, onCalendar, service, timer }
+  return { serviceName: names.service, timerName: names.timer, onCalendar, service, timer, commandFile }
 }
 
 // ---------------------------------------------------------------- logind sessions

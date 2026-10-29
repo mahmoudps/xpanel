@@ -18,6 +18,37 @@ export interface MetricsSample {
   ioWriteBps: number
   processes: number
   load1: number
+  /** Present only for observed host samples. Absent on legacy rows and account counters. */
+  hostObservation?: HostMetricsObservation
+}
+
+export interface HostMetricsObservation {
+  load1: number | null
+  load5: number | null
+  load15: number | null
+  memoryTotalBytes: number | null
+  memoryAvailableBytes: number | null
+  swapTotalBytes: number | null
+  swapFreeBytes: number | null
+  diskTotalBytes: number | null
+  diskUsedBytes: number | null
+  diskAvailableBytes: number | null
+}
+
+const hostFields = ['load1', 'load5', 'load15', 'memoryTotalBytes', 'memoryAvailableBytes', 'swapTotalBytes', 'swapFreeBytes', 'diskTotalBytes', 'diskUsedBytes', 'diskAvailableBytes'] as const
+const validateHostObservation = (value: HostMetricsObservation): HostMetricsObservation => {
+  for (const key of hostFields) {
+    const number = value[key]
+    if (number !== null && (typeof number !== 'number' || !Number.isFinite(number) || number < 0 || number > Number.MAX_SAFE_INTEGER || key.endsWith('Bytes') && !Number.isSafeInteger(number))) fail('VALIDATION', `invalid host ${key}`)
+  }
+  for (const [total, parts] of [
+    [value.memoryTotalBytes, [value.memoryAvailableBytes]],
+    [value.swapTotalBytes, [value.swapFreeBytes]],
+    [value.diskTotalBytes, [value.diskUsedBytes, value.diskAvailableBytes]],
+  ] as const) {
+    if (parts.some(part => part !== null && (total === null || part > total))) fail('VALIDATION', 'invalid host measurement bounds')
+  }
+  return Object.fromEntries(hostFields.map(key => [key, value[key]])) as unknown as HostMetricsObservation
 }
 
 export interface MetricsCursor {
@@ -44,6 +75,7 @@ interface MetricsRow {
   io_write_bps: number
   processes: number
   load1: number
+  host_observation_json?: string | null
   [k: string]: unknown
 }
 
@@ -60,6 +92,19 @@ const fromRow = (r: MetricsRow): MetricsSample => ({
   ioWriteBps: r.io_write_bps,
   processes: r.processes,
   load1: r.load1,
+  ...(r.host_observation_json ? { hostObservation: validateHostObservation(JSON.parse(r.host_observation_json) as HostMetricsObservation) } : {}),
+})
+
+/** Observed host values are separate from legacy account counters. No row for a wholly failed read. */
+export const recordHostMetricsSample = (db: Db, input: { at?: string; observation: HostMetricsObservation }): Promise<MetricsSample | null> => withSqliteErrors(async () => {
+  const observation = validateHostObservation(input.observation)
+  if (hostFields.every(key => observation[key] === null)) return null
+  const at = input.at === undefined ? nowIso() : assertIsoDate(input.at, 'at').toISOString()
+  const rows = await db.query<MetricsRow>(
+    `INSERT INTO metrics_history (at, scope, host_observation_json) VALUES ($1, 'host', $2) RETURNING *`,
+    [at, JSON.stringify(observation)],
+  )
+  return fromRow(rows[0]!)
 })
 
 const assertNonNegNum = (v: unknown, what: string): number =>

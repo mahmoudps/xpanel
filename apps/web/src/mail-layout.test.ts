@@ -57,6 +57,47 @@ function expectLocalComposerSendBoundary(html: string, locale: 'en' | 'ar'): voi
 }
 
 describe('bounded mail reference layout', () => {
+  it.each(['en', 'ar'].flatMap(locale => ['/mail/inbox', '/mail/sent', '/mail/drafts', '/mail/trash', '/mail/compose'].map(activeRoute => ({ locale: locale as 'en' | 'ar', activeRoute }))))('connects $activeRoute to the existing accessible mobile navigation in $locale', ({ locale, activeRoute }) => {
+    const document = new DOMParser().parseFromString(renderMailSurface(fixture({ locale, activeRoute })), 'text/html')
+    const root = document.querySelector('.xp-board-port.xp-shell')!
+    const navigation = root.querySelector<HTMLElement>('#xp-sidebar[data-xp-sidebar][data-mail-pane="folders"]')!
+    const trigger = root.querySelector<HTMLButtonElement>('header [data-action="toggle-mobile-nav"]')!
+    const close = navigation.querySelector<HTMLButtonElement>('[data-action="close-mobile-nav"]')!
+    const backdrop = root.querySelector<HTMLButtonElement>('[data-xp-nav-backdrop]')!
+    expect(document.querySelectorAll('.xp-shell')).toHaveLength(1)
+    expect(root.getAttribute('data-mail-layout')).toBe('reference')
+    expect(navigation.tagName).toBe('NAV')
+    expect(navigation.classList.contains('xp-sidebar')).toBe(true)
+    expect(navigation.tabIndex).toBe(-1)
+    expect(navigation.getAttribute('aria-label')).toBe(locale === 'ar' ? 'مجلدات البريد' : 'Mail folders')
+    expect(navigation.hasAttribute('aria-modal')).toBe(false)
+    expect(trigger.type).toBe('button')
+    expect(trigger.getAttribute('aria-controls')).toBe(navigation.id)
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(close.type).toBe('button')
+    expect(close.getAttribute('aria-controls')).toBe(navigation.id)
+    expect(backdrop.hidden).toBe(true)
+    expect(backdrop.getAttribute('data-action')).toBe('close-mobile-nav')
+    expect(backdrop.parentElement).toBe(navigation.parentElement)
+    expect(navigation.closest('[data-xp-shell-content]')).not.toBeNull()
+    expect(navigation.querySelector('a[href^="/mail/compose"]')).not.toBeNull()
+    expect(navigation.querySelector('a[href^="/mail/inbox"]')).not.toBeNull()
+    expect(root.querySelectorAll('#main-content')).toHaveLength(1)
+  })
+
+  it.each([
+    '/mail/later', '/mail/calendar', '/mail/contacts', '/mail/settings/calendars',
+    '/mail/settings/spam', '/mail/settings/forwarders', '/mail/overview',
+    '/mail/tools/disk-usage', '/mail/tools/connect-devices', '/mail/tools/track-delivery',
+    '/mail/tools/mailing-lists', '/mail/settings/preferences', '/mail/settings/identities',
+    '/mail/settings/security', '/mail/search',
+  ])('renders one page heading on the mailbox workspace %s', activeRoute => {
+    const document = new DOMParser().parseFromString(renderMailSurface(fixture({ activeRoute })), 'text/html')
+    expect(document.querySelectorAll('h1')).toHaveLength(1)
+    expect(document.querySelector('h1')!.textContent!.trim()).not.toBe('')
+    expect(document.querySelector('h1')!.textContent).not.toMatch(/Page unavailable|الصفحة غير متاحة/)
+  })
+
   it.each(['/mail/inbox', '/mail/compose', '/mail/settings/filters', '/mail/settings/autoresponder'])('keeps one active authorized navigation link on %s', activeRoute => {
     const html = renderMailSurface(fixture({ activeRoute }))
     const active = [...html.matchAll(/<a\b[^>]*aria-current="page"[^>]*>/g)]
@@ -94,11 +135,13 @@ describe('bounded mail reference layout', () => {
 
   it('does not manufacture folders, unread counts, mailbox quotas or connection successes', () => {
     const html = renderMailSurface(fixture({ messages: [], quotaUsedMb: undefined, quotaLimitMb: undefined }))
+    // Inert <template> rows are cloned only by the client; they are not rendered observations.
+    const rendered = html.replace(/<template\b[\s\S]*?<\/template>/g, '')
     expect(html).toContain('No messages in this folder.')
     expect(html).toContain('data-mail-pane="empty"')
-    expect(html).not.toMatch(/data-mail-uid=|class="xp-mail-count|xp-mail-sidebar-quota/)
-    expect(html).toContain('href="/mail/inbox?folder=Sent"')
-    expect(html).toContain('href="/mail/inbox?folder=Drafts"')
+    expect(rendered).not.toMatch(/data-mail-uid=|class="xp-mail-count|xp-mail-sidebar-quota/)
+    expect(html).toContain('href="/mail/sent"')
+    expect(html).toContain('href="/mail/drafts"')
     expect(html).not.toMatch(/TLS:|DKIM: pass|SPF: pass|DMARC: pass|Live stream connected/)
     expect(html).not.toContain('Billing')
     expect(html).not.toContain('Starred')
@@ -109,10 +152,10 @@ describe('bounded mail reference layout', () => {
     expect(html).toContain('sent-body-observed')
     expect(html).not.toContain('inbox-body-must-stay-out')
     expect(html).not.toContain('invalid-message')
-    expect(html.match(/data-mail-uid=/g)).toHaveLength(1)
+    expect(html.replace(/<template\b[\s\S]*?<\/template>/g, '').match(/data-mail-uid=/g)).toHaveLength(1)
     // Read-only folder observations have no route that the production adapter cannot honor.
     expect(html).toContain('<li data-mail-folder="Sent">')
-    expect(html).toContain('href="/mail/inbox?folder=Sent"')
+    expect(html).toContain('href="/mail/sent"')
     expect(html).not.toMatch(/href="\/mail\/inbox[^"]*[?&](?:amp;)?uid=/)
   })
 
@@ -132,7 +175,9 @@ describe('bounded mail reference layout', () => {
     expect(html).toContain('data-mail-send-availability="available"')
     expect(html).toContain('data-mail-send="true"')
     expectLocalComposerSendBoundary(html, locale)
-    expect(html).toMatch(/<button type="button"[^>]+data-mail-send="true" aria-describedby="mail-send-status"/)
+    // Product send stays disabled until the sender identities are read; it is also described by that status.
+    expect(html).toMatch(/<button type="button"[^>]+data-mail-send="true" disabled aria-describedby="mail-send-status compose-identities-status"/)
+    expect(html).toContain('id="compose-identities-status"')
     for (const id of ['compose-from', 'compose-to', 'compose-subject', 'compose-body']) {
       expect(html).toContain(`for="${id}"`)
       expect(html).toContain(`id="${id}"`)
@@ -243,5 +288,18 @@ describe('bounded mail reference layout', () => {
     const html = renderMailSurface(fixture({ activeRoute: '/mail/not-implemented' }))
     expect(html).toContain('data-screen="unavailable"')
     expect(html).not.toMatch(/data-compose-form=|data-mail-pane="message-list"/)
+  })
+})
+
+
+describe('reachable metadata datetime', () => {
+  it.each(['en', 'ar'] as const)('keeps the current admitted Inbox SSR surface date readable in %s', locale => {
+    const receivedAt = '2026-10-27T12:34:56.789Z', item = message({ receivedAt })
+    document.body.innerHTML = renderMailSurface(fixture({ locale, activeRoute: '/mail/inbox', messages: [item] }))
+    try {
+      expect(document.querySelector('[data-mail-detail-date]')!.textContent).toBe('2026-10-27 12:34 UTC')
+      expect(document.querySelector('[data-mail-detail-date]')!.getAttribute('datetime')).toBe(receivedAt)
+      expect(item.receivedAt).toBe(receivedAt)
+    } finally { document.body.replaceChildren() }
   })
 })

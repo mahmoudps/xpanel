@@ -4,7 +4,7 @@ import type { Db } from '../client.ts'
 import { loadMigrations } from '../migrate.ts'
 import { assertDatabaseTransaction, assertNoActiveDatabaseTransaction, assertRegisteredDatabaseRunner, assertStrictDurableTransaction } from '../sql-runner.ts'
 import { lexSql } from '../sql-lexer.ts'
-import { isReviewedOperationalMigrationSet, matchesReviewedOperationalMigrations, OPERATIONAL_SCHEMA_VERSION } from '../schema.ts'
+import { isReviewedOperationalMigrationSet, matchesReviewedOperationalMigrations, OPERATIONAL_IDENTITY_MIGRATIONS_JSON, OPERATIONAL_SCHEMA_VERSION } from '../schema.ts'
 import { withSqliteErrors } from '../sqlite-errors.ts'
 import { assertOperationIntentReceipt } from './operation-audit-authority.ts'
 
@@ -55,14 +55,14 @@ export const initializeOperationalMetadata = (db: Db): Promise<{ issuerId: strin
       if (!runtime || normalizedSql(runtime.sql) !== normalizedSql(expectedRuntime)) fail('PRECONDITION_FAILED', 'existing job runtime schema requires explicit compatibility review')
       const existing = await tx.query<IdentityRow>('SELECT issuer_id,schema_version,migration_checksums_json FROM operational_identity WHERE singleton=1')
       if (existing[0]) {
-        if (existing[0].schema_version !== OPERATIONAL_SCHEMA_VERSION || existing[0].migration_checksums_json !== expectedJson) fail('PRECONDITION_FAILED', 'unsupported operational metadata version or migration receipt')
+        if (existing[0].schema_version !== OPERATIONAL_SCHEMA_VERSION || !matchesReviewedOperationalMigrations(existing[0].migration_checksums_json, expected)) fail('PRECONDITION_FAILED', 'unsupported operational metadata version or migration receipt')
         return { issuerId: assertId(existing[0].issuer_id), imported: 0 }
       }
       const rows = await tx.query<{ job_id: string; reference_code: string; updated_at: string }>('SELECT job_id,reference_code,updated_at FROM job_runtime_leases ORDER BY job_id')
       const issuerId = randomUUID()
       const now = new Date().toISOString()
       const digest = createHash('sha256').update(JSON.stringify(rows)).digest('hex')
-      await tx.query('INSERT INTO operational_identity(singleton,issuer_id,initialized_at,schema_version,migration_checksums_json,legacy_import_count,legacy_import_sha256) VALUES(1,$1,$2,$3,$4,$5,$6)', [issuerId, now, OPERATIONAL_SCHEMA_VERSION, expectedJson, rows.length, digest])
+      await tx.query('INSERT INTO operational_identity(singleton,issuer_id,initialized_at,schema_version,migration_checksums_json,legacy_import_count,legacy_import_sha256) VALUES(1,$1,$2,$3,$4,$5,$6)', [issuerId, now, OPERATIONAL_SCHEMA_VERSION, OPERATIONAL_IDENTITY_MIGRATIONS_JSON, rows.length, digest])
       let imported = 0
       for (const row of rows) {
         const reason = legacyReviewReason(row.reference_code)

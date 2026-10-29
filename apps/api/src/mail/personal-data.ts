@@ -102,18 +102,12 @@ const DEFAULT_MAX_IMPORT_BYTES = 2 * 1024 * 1024 // 2 MiB
 const DEFAULT_MAX_IMPORT_ITEMS = 500
 const DEFAULT_MAX_RECURRENCE_COUNT = 730
 
-const ARABIC_INDIC_DIGITS_MAP: Readonly<Record<string, string>> = {
-  '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
-  '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
-  '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
-  '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
-}
-
 /**
  * Normalizes Eastern Arabic / Persian numerals to ASCII digits `0-9` for UI and export consistency.
+ * U+0660..U+0669 and U+06F0..U+06F9 both end in their digit value.
  */
 export const toAsciiDigits = (input: string): string =>
-  input.replace(/[٠-٩۰-۹]/g, (ch) => ARABIC_INDIC_DIGITS_MAP[ch] ?? ch)
+  input.replace(/[\u0660-\u0669\u06f0-\u06f9]/g, (ch) => String(ch.charCodeAt(0) & 0xf))
 
 const normalizePrincipal = (mailbox: string): string => {
   const clean = mailbox.trim().toLowerCase()

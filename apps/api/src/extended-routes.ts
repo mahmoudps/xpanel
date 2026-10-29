@@ -4,6 +4,8 @@ import { services as mailServices } from '@xpanel/render'
 import { join } from 'node:path'
 import {
   fail,
+  assessMailboxMetadataAuthority,
+  isXpanelError,
   suggestServerSettings,
   validateDomainName,
   validateServerIpEntry,
@@ -15,21 +17,35 @@ import type {
   DnsRecord,
   Id,
   LiveEventScope,
+  MailboxMetadataAuthority,
   ServerSettings,
 } from '@xpanel/core'
 import type { Db } from '@xpanel/db'
-import {
-  buildReview,
-  createTransferSession,
-  reviewDigest,
-  transition,
-} from '@xpanel/lifecycle'
-import type { TransferEvent, TransferSession } from '@xpanel/lifecycle'
 import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
 import type { StateStore } from '@xpanel/state'
 import { passwordHashFromInput } from './auth.ts'
 import type { AuthenticatedCaller } from './auth.ts'
+import { createContactToolsRoutes, createContactMetadataAccess, assertContactMutationCapacity } from './mail/contact-tools-routes.ts'
+import { assertMailboxMetadataAuthority, captureMailboxMetadataAuthority, readBoundMailboxIdentityRecords, MAILBOX_METADATA_REVIEW_REQUIRED } from './mail/metadata-authority.ts'
+import { createIdentityMetadataRoutes } from './mail/identity-routes.ts'
+import { readContactVcards } from './mail/contact-vcard.ts'
+import { createCalendarWorkspaceRoutes } from './mail/calendar-workspace.ts'
+import { createAccountCollaborationRoutes } from './account-collaboration-workspace.ts'
+import { parseCalendarWorkspaceIcs, renderCalendarWorkspaceIcs } from './mail/calendar-ics.ts'
+import { createWhmBackupWorkspaceRoutes } from './backup-workspace.ts'
+import { createTransferWorkspaceRoutes } from './transfer-workspace.ts'
+import type { TransferWorkspacePorts } from './transfer-workspace.ts'
+import { createTransferSourceDiscovery } from './acct-transfer-discovery.ts'
+import { readTransferCredentialToken } from './acct-transfer-credentials.ts'
+import { validateForwarderInput } from './mail/forwarder-validation.ts'
+import { createFilterRoutes } from './mail/filter-routes.ts'
+import { compileFilterRulesSafe } from './mail/filter-validation.ts'
+import { contactWorkspaceRevision, projectContactWorkspace, parseContactWorkspaceRequest,
+  createWorkspaceContact, updateWorkspaceContact, normalizeContactGroups, updateWorkspaceContactGroups } from './mail/contact-workspace.ts'
+import { compileVacationWorkspace, parseVacationWorkspaceRequest, projectVacationWorkspace,
+  vacationWorkspaceRevision } from './mail/vacation-workspace.ts'
 import {
+  assertAccountFeatures,
   isMailboxPrincipal,
   ownedAccounts,
   requireDomainAccount,
@@ -41,9 +57,13 @@ export interface ExtendedRouteHelpers {
   db: Db
   store: StateStore
   homeBaseDir?: string
+  serverSecret?: string
+  backupDestinationHost?: (caller: AuthenticatedCaller, path: string, body?: unknown) => Promise<unknown>
+  /** Server-to-server transfer execution (apps/api/src/lifecycle-transfer-execution.ts); absent without the host agent. */
+  transferExecution?: TransferWorkspacePorts['execution']
   /** Authenticated agent result. Private key material must never cross this boundary. */
   readDkimPublicMaterial?: (caller: AuthenticatedCaller, domain: string) => Promise<{ selector: string; publicKeyPem: string } | null>
-  requireCaller: (req: Request, opts?: { allowUnverifiedMfa?: boolean }) => Promise<AuthenticatedCaller>
+  requireCaller: (req: Request, opts?: { allowUnverifiedMfa?: boolean; deferDeniedAudit?: (input: Parameters<ExtendedRouteHelpers['emitAudit']>[0]) => void }) => Promise<AuthenticatedCaller>
   assertRoot: (caller: AuthenticatedCaller, action: string) => Promise<void>
   assertCanAccessAccount: (
     caller: AuthenticatedCaller,
@@ -101,6 +121,8 @@ export interface MailingListRecord {
   moderation: 'open' | 'members' | 'moderated'
   archiveEnabled: boolean
   createdAt: string
+  selfSubscription?: 'open' | 'closed'
+  memberAuthorities?: Record<string, MailboxMetadataAuthority>
 }
 
 export interface SieveFilterCondition {
@@ -186,6 +208,7 @@ export interface WebmailMessage {
 export interface WebmailIdentity {
   id: Id
   mailbox: string
+  ownerAuthority?: MailboxMetadataAuthority
   displayName: string
   email: string
   replyTo: string
@@ -197,6 +220,7 @@ export interface WebmailIdentity {
 
 export interface WebmailVacationConfig {
   mailbox: string
+  ownerAuthority?: MailboxMetadataAuthority
   enabled: boolean
   subject: string
   body: string
@@ -222,10 +246,11 @@ export interface WebmailCalendarEvent {
 export interface WebmailCalendar {
   id: Id
   owner: string
+  ownerAuthority?: MailboxMetadataAuthority
   name: string
   color: string
   timezone: string
-  shares: { principal: string; permission: 'read' | 'read-write'; sharedAt: string }[]
+  shares: { principal: string; permission: 'read' | 'read-write'; sharedAt: string; granteeAuthority?: MailboxMetadataAuthority }[]
   events?: WebmailCalendarEvent[]
   createdAt: string
 }
@@ -233,13 +258,14 @@ export interface WebmailCalendar {
 export interface WebmailContact {
   id: Id
   owner: string
+  ownerAuthority?: MailboxMetadataAuthority
   fullName: string
   email: string
   phone: string
   organization: string
   title: string
   groups: string[]
-  shares?: { principal: string; permission: 'read' | 'read-write'; sharedAt: string }[]
+  shares?: { principal: string; permission: 'read' | 'read-write'; sharedAt: string; granteeAuthority?: MailboxMetadataAuthority }[]
   vcard: string
   createdAt: string
 }
@@ -257,15 +283,6 @@ export interface DnsTemplateDefinition {
   }[]
 }
 
-export interface DnsClusterConfig {
-  enabled: boolean
-  provider: 'powerdns-cluster' | 'cloudflare' | 'route53' | 'axfr'
-  nodes: { id: Id; hostname: string; ip: string; role: 'nameserver' | 'supermaster'; status: 'synced' | 'pending' }[]
-  cloudflareZoneMap: Record<string, string>
-  autoSyncOnReconcile: boolean
-  updatedAt: string
-}
-
 export interface BackupDestination {
   id: Id
   name: string
@@ -277,6 +294,8 @@ export interface BackupDestination {
   username: string | null
   retentionDays: number
   enabled: boolean
+  credentialRef?: string | null
+  verification?: import('../../../packages/core/src/backup-destination.ts').BackupDestinationProof | null
   createdAt: string
 }
 
@@ -387,44 +406,12 @@ export interface GitRepositoryRecord {
   createdAt: string
 }
 
-export interface PostgresDatabaseRecord {
-  id: Id
-  accountId: Id
-  name: string
-  encoding: string
-  locale: string
-  extensions: string[]
-  compiledSql: string
-  createdAt: string
-}
-
-export interface PostgresUserRecord {
-  id: Id
-  accountId: Id
-  username: string
-  databaseIds: Id[]
-  privileges: ('ALL' | 'CONNECT' | 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE')[]
-  scramHash: string
-  compiledSql: string
-  createdAt: string
-}
-
 export interface RemoteDatabaseHostsConfig {
   accountId: Id
   hosts: { address: string; engine: 'mariadb' | 'postgresql' | 'both'; comment: string }[]
   compiledPgHba: string
   compiledMariaDbGrants: string
   updatedAt: string
-}
-
-export interface MongoDatabaseRecord {
-  id: Id
-  accountId: Id
-  name: string
-  username: string
-  roles: string[]
-  connectionUri: string
-  createdAt: string
 }
 
 export interface AccountCacheConfig {
@@ -582,66 +569,7 @@ const readJsonBody = async <T = Record<string, unknown>>(req: Request): Promise<
   return body as T
 }
 
-export const compileSieveRules = (rules: readonly SieveFilterRule[]): string => {
-  const active = [...rules].filter((r) => r.enabled).sort((a, b) => a.priority - b.priority)
-  const lines: string[] = [
-    '# Generated by xPanel Sieve Compiler (RFC 5228)',
-    'require ["fileinto", "reject", "envelope", "body", "relational"];',
-    '',
-  ]
-  for (const rule of active) {
-    lines.push(`# Rule: ${rule.name} (priority ${rule.priority})`)
-    const condStrings = rule.conditions.map((c) => {
-      if (c.field === 'size') {
-        const dir = c.comparator === 'under' ? ':under' : ':over'
-        return `size ${dir} ${c.value}`
-      }
-      if (c.field === 'body') {
-        return `body :contains "${c.value.replace(/"/g, '\\"')}"`
-      }
-      const header =
-        c.field === 'from'
-          ? 'From'
-          : c.field === 'to'
-            ? 'To'
-            : c.field === 'subject'
-              ? 'Subject'
-              : (c.headerName ?? 'X-Spam-Flag')
-      const comp = c.comparator === 'is' ? ':is' : c.comparator === 'matches' ? ':matches' : ':contains'
-      return `header ${comp} "${header}" "${c.value.replace(/"/g, '\\"')}"`
-    })
-    const joiner = rule.matchAll ? 'allof' : 'anyof'
-    const conditionExpr =
-      condStrings.length === 0
-        ? 'true'
-        : condStrings.length === 1
-          ? condStrings[0]!
-          : `${joiner} (${condStrings.join(', ')})`
-    let actionStmt = 'keep;'
-    switch (rule.action.type) {
-      case 'fileinto':
-        actionStmt = `fileinto "${(rule.action.target ?? 'INBOX').replace(/"/g, '\\"')}"; stop;`
-        break
-      case 'redirect':
-        actionStmt = `redirect "${(rule.action.target ?? '').replace(/"/g, '\\"')}"; stop;`
-        break
-      case 'discard':
-        actionStmt = 'discard; stop;'
-        break
-      case 'reject':
-        actionStmt = `reject "${(rule.action.target ?? 'Message rejected by filter').replace(/"/g, '\\"')}"; stop;`
-        break
-      case 'keep':
-        actionStmt = 'keep;'
-        break
-    }
-    lines.push(`if ${conditionExpr} {`)
-    lines.push(`  ${actionStmt}`)
-    lines.push('}')
-    lines.push('')
-  }
-  return lines.join('\n')
-}
+export const compileSieveRules = (rules: readonly SieveFilterRule[]): string => compileFilterRulesSafe(rules)
 
 export const compileVacationSieve = (cfg: {
   enabled: boolean
@@ -649,16 +577,11 @@ export const compileVacationSieve = (cfg: {
   body: string
   replyIntervalHours: number
   mailbox: string
+  htmlBody?: string
+  startDate?: string | null
+  endDate?: string | null
 }): string => {
-  if (!cfg.enabled) {
-    return '# Vacation responder disabled\n'
-  }
-  const days = Math.max(1, Math.round(cfg.replyIntervalHours / 24))
-  return [
-    'require ["vacation"];',
-    `vacation :days ${days} :addresses ["${cfg.mailbox}"] :subject "${cfg.subject.replace(/"/g, '\\"')}" "${cfg.body.replace(/"/g, '\\"')}";`,
-    '',
-  ].join('\n')
+  return compileVacationWorkspace({ ...cfg, htmlBody: cfg.htmlBody ?? '', startDate: cfg.startDate ?? null, endDate: cfg.endDate ?? null })
 }
 
 const UNSAFE_CAL_VCARD_PATTERN = /<script\b|javascript:|vbscript:|data:text\/html|on[a-z]+\s*=|\0/i
@@ -681,178 +604,16 @@ const assertValidTimezone = (tz: string): string => {
   return trimmed
 }
 
-const parseAndValidateIcs = (icsText: string, defaultTimezone: string): WebmailCalendarEvent[] => {
-  if (typeof icsText !== 'string' || !icsText.trim() || Buffer.byteLength(icsText, 'utf8') > 256 * 1024) {
-    return fail('VALIDATION', 'valid ICS content is required')
-  }
-  if (UNSAFE_CAL_VCARD_PATTERN.test(icsText) || /ATTACH[^:\r\n]*:(?:file|javascript|data):/i.test(icsText)) {
-    return fail('VALIDATION', 'malicious or unsafe ICS payload rejected')
-  }
-  const lines = icsText.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
-  if (lines[0] !== 'BEGIN:VCALENDAR' || lines[lines.length - 1] !== 'END:VCALENDAR') {
-    return fail('VALIDATION', 'ICS payload must begin with BEGIN:VCALENDAR and end with END:VCALENDAR')
-  }
-  let inEvent = false
-  let current: Partial<WebmailCalendarEvent> = {}
-  const events: WebmailCalendarEvent[] = []
-  let calendarTz = defaultTimezone
-  for (const line of lines) {
-    if (line.startsWith('X-WR-TIMEZONE:')) {
-      calendarTz = assertValidTimezone(line.slice('X-WR-TIMEZONE:'.length))
-      continue
-    }
-    if (line === 'BEGIN:VEVENT') {
-      if (inEvent) return fail('VALIDATION', 'nested VEVENT blocks are not permitted')
-      inEvent = true
-      current = { id: randomUUID(), uid: randomUUID(), description: '', location: '', timezone: calendarTz }
-      continue
-    }
-    if (line === 'END:VEVENT') {
-      if (!inEvent) return fail('VALIDATION', 'unmatched END:VEVENT in ICS payload')
-      if (!current.summary || !current.dtstart) {
-        return fail('VALIDATION', 'each VEVENT requires SUMMARY and DTSTART')
-      }
-      events.push({
-        id: current.id ?? randomUUID(),
-        uid: current.uid ?? randomUUID(),
-        summary: current.summary,
-        description: current.description ?? '',
-        location: current.location ?? '',
-        dtstart: current.dtstart,
-        dtend: current.dtend ?? current.dtstart,
-        timezone: current.timezone ?? calendarTz,
-      })
-      inEvent = false
-      current = {}
-      continue
-    }
-    if (!inEvent) continue
-    const colonIdx = line.indexOf(':')
-    if (colonIdx <= 0) return fail('VALIDATION', 'malformed property line in VEVENT')
-    const rawKey = line.slice(0, colonIdx)
-    const rawVal = line.slice(colonIdx + 1).trim()
-    const [propName, ...params] = rawKey.split(';')
-    for (const param of params) {
-      if (param.toUpperCase().startsWith('TZID=')) {
-        current.timezone = assertValidTimezone(param.slice(5))
-      }
-    }
-    const keyUpper = (propName ?? '').toUpperCase()
-    if (keyUpper === 'UID') current.uid = assertSafeCalendarText(rawVal, 'UID')
-    else if (keyUpper === 'SUMMARY') current.summary = assertSafeCalendarText(rawVal, 'SUMMARY')
-    else if (keyUpper === 'DESCRIPTION') current.description = assertSafeCalendarText(rawVal, 'DESCRIPTION')
-    else if (keyUpper === 'LOCATION') current.location = assertSafeCalendarText(rawVal, 'LOCATION')
-    else if (keyUpper === 'DTSTART') {
-      if (!VALID_ICS_DATETIME_RE.test(rawVal)) return fail('VALIDATION', 'DTSTART must use ASCII iCalendar timestamp format')
-      current.dtstart = rawVal
-    } else if (keyUpper === 'DTEND') {
-      if (!VALID_ICS_DATETIME_RE.test(rawVal)) return fail('VALIDATION', 'DTEND must use ASCII iCalendar timestamp format')
-      current.dtend = rawVal
-    }
-  }
-  if (inEvent || events.length === 0) {
-    return fail('VALIDATION', 'ICS payload must contain at least one complete VEVENT')
-  }
-  return events
-}
-
-const renderCalendarIcs = (cal: WebmailCalendar): string => {
-  const lines = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//xPanel//Webmail CalDAV//EN',
-    'CALSCALE:GREGORIAN',
-    `X-WR-CALNAME:${cal.name}`,
-    `X-WR-TIMEZONE:${cal.timezone}`,
-  ]
-  for (const ev of cal.events ?? []) {
-    lines.push(
-      'BEGIN:VEVENT',
-      `UID:${ev.uid}`,
-      `SUMMARY:${ev.summary}`,
-      `DTSTART;TZID=${ev.timezone || cal.timezone}:${ev.dtstart}`,
-      `DTEND;TZID=${ev.timezone || cal.timezone}:${ev.dtend}`,
-      ...(ev.description ? [`DESCRIPTION:${ev.description}`] : []),
-      ...(ev.location ? [`LOCATION:${ev.location}`] : []),
-      'END:VEVENT',
-    )
-  }
-  lines.push('END:VCALENDAR')
-  return lines.join('\r\n')
-}
-
 const parseAndValidateVcards = (vcardText: string, owner: string): WebmailContact[] => {
-  if (typeof vcardText !== 'string' || !vcardText.trim() || Buffer.byteLength(vcardText, 'utf8') > 256 * 1024) {
-    return fail('VALIDATION', 'valid vCard content is required')
-  }
   if (UNSAFE_CAL_VCARD_PATTERN.test(vcardText)) {
     return fail('VALIDATION', 'malicious or unsafe vCard payload rejected')
   }
-  const lines = vcardText.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
-  const contacts: WebmailContact[] = []
-  let inCard = false
-  let fullName = ''
-  let email = ''
-  let phone = ''
-  let organization = ''
-  let title = ''
-  for (const line of lines) {
-    if (line === 'BEGIN:VCARD') {
-      if (inCard) return fail('VALIDATION', 'nested VCARD blocks are not permitted')
-      inCard = true
-      fullName = ''
-      email = ''
-      phone = ''
-      organization = ''
-      title = ''
-      continue
-    }
-    if (line === 'END:VCARD') {
-      if (!inCard) return fail('VALIDATION', 'unmatched END:VCARD in vCard payload')
-      if (!fullName || !email || !/^[^\s@/\\]+@[^\s@/\\]+$/.test(email)) {
-        return fail('VALIDATION', 'each vCard requires a valid FN and EMAIL')
-      }
-      const normalizedVcard = [
-        'BEGIN:VCARD',
-        'VERSION:3.0',
-        `FN:${fullName}`,
-        `EMAIL;TYPE=INTERNET:${email}`,
-        ...(phone ? [`TEL;TYPE=CELL:${phone}`] : []),
-        ...(organization ? [`ORG:${organization}`] : []),
-        ...(title ? [`TITLE:${title}`] : []),
-        'END:VCARD',
-      ].join('\r\n')
-      contacts.push({
-        id: randomUUID(),
-        owner,
-        fullName,
-        email,
-        phone,
-        organization,
-        title,
-        groups: [],
-        shares: [],
-        vcard: normalizedVcard,
-        createdAt: new Date().toISOString(),
-      })
-      inCard = false
-      continue
-    }
-    if (!inCard) return fail('VALIDATION', 'vCard payload must begin with BEGIN:VCARD and end with END:VCARD')
-    const colonIdx = line.indexOf(':')
-    if (colonIdx <= 0) return fail('VALIDATION', 'malformed vCard line')
-    const prop = line.slice(0, colonIdx).split(';')[0]!.toUpperCase()
-    const val = assertSafeCalendarText(line.slice(colonIdx + 1), prop)
-    if (prop === 'FN') fullName = val
-    else if (prop === 'EMAIL') email = val.toLowerCase()
-    else if (prop === 'TEL') phone = val
-    else if (prop === 'ORG') organization = val
-    else if (prop === 'TITLE') title = val
-  }
-  if (inCard || contacts.length === 0) {
-    return fail('VALIDATION', 'vCard payload must contain at least one complete VCARD')
-  }
-  return contacts
+  return readContactVcards(vcardText).map(card => {
+    const fields = { fullName: assertSafeCalendarText(card.fullName, 'FN'), email: assertSafeCalendarText(card.email, 'EMAIL'),
+      phone: assertSafeCalendarText(card.phone, 'TEL'), organization: assertSafeCalendarText(card.organization, 'ORG'), title: assertSafeCalendarText(card.title, 'TITLE') }
+    if (!fields.fullName || !/^[^\s@/\\]+@[^\s@/\\]+$/.test(fields.email)) return fail('VALIDATION', 'each vCard requires a valid FN and EMAIL')
+    return { id: randomUUID(), owner, ...fields, groups: normalizeContactGroups(card.groups), shares: [], vcard: card.vcard, createdAt: new Date().toISOString() }
+  })
 }
 
 const DEFAULT_DNS_TEMPLATES: DnsTemplateDefinition[] = [
@@ -924,11 +685,12 @@ export class ExtendedFeaturesStore {
 
 export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
   const ext = new ExtendedFeaturesStore(helpers.store.rootDir)
-  const liveTransfers = new Map<string, TransferSession>()
-  const publicPostgresUser = (user: PostgresUserRecord) => {
-    const { scramHash: _credential, compiledSql: _sql, ...safe } = user
-    return safe
+  const freshExtendedMailCaller = async (req: Request, previous: AuthenticatedCaller): Promise<AuthenticatedCaller> => {
+    const fresh = await helpers.requireCaller(req)
+    if (isMailboxPrincipal(fresh) || fresh.principal.id !== previous.principal.id || fresh.principal.kind !== previous.principal.kind || fresh.sessionId !== previous.sessionId || fresh.apiTokenId !== previous.apiTokenId || fresh.principal.kind === 'user' && previous.principal.kind === 'user' && fresh.principal.accountId !== previous.principal.accountId) return fail('FORBIDDEN', 'mail administration authorization changed', { stateChanged: false })
+    return fresh
   }
+  const publicMailingList = (record: MailingListRecord) => { const { memberAuthorities: _bindings, ...visible } = record; return visible }
   const publicDirectoryPrivacy = (config: DirectoryPrivacyConfig) => {
     const { compiledHtpasswd: _credentialFile, ...safe } = config
     return { ...safe, rules: safe.rules.map(rule => ({ ...rule, users: rule.users.map(user => ({ username: user.username })) })) }
@@ -969,8 +731,47 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     return account.id
   }
 
+  const handleFilterRoute = createFilterRoutes({
+    store: helpers.store, requireCaller: helpers.requireCaller, emitAudit: helpers.emitAudit,
+    readFilters: () => ext.readOrDefault<unknown[]>('mail/filters.json', []),
+    writeFilters: values => ext.write('mail/filters.json', values),
+    requireAccountId, assertRecordAccount, scopedRecords,
+  })
+  const handleContactToolsRoute = createContactToolsRoutes(helpers)
+  const handleIdentityMetadataRoute = createIdentityMetadataRoutes({
+    helpers,
+    readRecords: () => ext.readOrDefault<WebmailIdentity[]>('webmail/identities.json', []),
+    publishRecords: (records, lease) => atomicWriteJson(join(ext.baseDir, 'webmail', 'identities.json'), records, 0o640, () => lease.assertFencingToken()),
+  })
+  const handleCalendarWorkspaceRoute = createCalendarWorkspaceRoutes({
+    helpers,
+    readRecords: () => ext.readOrDefault<WebmailCalendar[]>('webmail/calendars.json', []),
+    publishRecords: (records, lease) => atomicWriteJson(join(ext.baseDir, 'webmail', 'calendars.json'), records, 0o640, () => lease.assertFencingToken()),
+    parseIcs: parseCalendarWorkspaceIcs, renderIcs: renderCalendarWorkspaceIcs,
+  })
+  const handleAccountCollaborationRoute = helpers.serverSecret ? createAccountCollaborationRoutes({
+    store: helpers.store, serverSecret: helpers.serverSecret, requireCaller: helpers.requireCaller,
+    assertCanAccessAccount: helpers.assertCanAccessAccount, emitAudit: helpers.emitAudit,
+    readCalendars: () => ext.readOrDefault<WebmailCalendar[]>('webmail/calendars.json', []),
+    readContacts: () => ext.readOrDefault<WebmailContact[]>('webmail/contacts.json', []),
+    calendarRoute: handleCalendarWorkspaceRoute,
+  }) : async (_req: Request, url: URL, _method: string): Promise<Response | null> => /^\/api\/account\/collaboration(?:\/|$)/.test(url.pathname) ? fail('PRECONDITION_FAILED', 'collaboration authority is unavailable', { stateChanged: false }) : null
+  const handleBackupWorkspaceRoute = createWhmBackupWorkspaceRoutes({
+    store: helpers.store, requireCaller: helpers.requireCaller, assertRoot: helpers.assertRoot, emitAudit: helpers.emitAudit,
+    read: key => ext.readOrDefault<unknown | null>(key, null),
+    publish: (key, value, lease) => atomicWriteJson(join(ext.baseDir, key), value, 0o640, () => lease.assertFencingToken()),
+    ...(helpers.backupDestinationHost ? { destinationHost: helpers.backupDestinationHost } : {}),
+  })
+  const handleTransferWorkspaceRoute = createTransferWorkspaceRoutes(helpers, { discover: createTransferSourceDiscovery({ readToken: id => readTransferCredentialToken(helpers.store, id) }),
+    ...(helpers.transferExecution ? { execution: helpers.transferExecution } : {}) })
   const handleExtendedRoute = async (req: Request, url: URL, method: string): Promise<Response | null> => {
     const { pathname } = url
+    const identityResponse = await handleIdentityMetadataRoute(req)
+    if (identityResponse) return identityResponse
+    for (const handle of [handleAccountCollaborationRoute, handleContactToolsRoute, handleCalendarWorkspaceRoute, handleBackupWorkspaceRoute, handleTransferWorkspaceRoute]) {
+      const response = await handle(req, url, method)
+      if (response) return response
+    }
 
     // =========================================================================
     // 1. First-Run Setup Wizard, Hostname & Quota Init
@@ -1270,72 +1071,81 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     const fwdDeleteMatch = /^\/api\/mail\/forwarders\/([^/]+)$/.exec(pathname)
     if (pathname === '/api/mail/forwarders' || fwdDeleteMatch) {
       const caller = await helpers.requireCaller(req)
-      const list = await ext.readOrDefault<EmailForwarder[]>('mail/forwarders.json', [])
-      if (method === 'GET') {
-        return jsonResponse({ forwarders: await scopedRecords(caller, list) })
-      }
-      if (method === 'POST') {
-        const body = await readJsonBody<{
-          accountId?: Id
-          sourceAddress?: string
-          destination?: string
-          destinations?: string[]
-        }>(req)
-        const sourceAddress = (body.sourceAddress ?? '').trim().toLowerCase()
-        if (!sourceAddress.includes('@')) {
-          return fail('VALIDATION', 'sourceAddress must be a valid email address')
+      let lease = method === 'POST' || method === 'DELETE' ? await helpers.store.getWriterLock().acquire() : null
+      try {
+        const list = await ext.readOrDefault<EmailForwarder[]>('mail/forwarders.json', [])
+        const application = { status: 'configuration_only', nativeApplied: false } as const
+        if (method === 'GET') {
+          return jsonResponse({ forwarders: await scopedRecords(caller, list), application })
         }
-        const destinations = Array.isArray(body.destinations)
-          ? body.destinations.map((d) => d.trim().toLowerCase()).filter(Boolean)
-          : body.destination
-            ? [body.destination.trim().toLowerCase()]
-            : []
-        if (destinations.length === 0) {
-          return fail('VALIDATION', 'at least one destination is required')
+        if (method === 'POST') {
+          const body = validateForwarderInput(await readJsonBody<unknown>(req))
+          const { sourceAddress, destinations } = body
+          const account = await requireDomainAccount(helpers.store, caller, sourceAddress.split('@')[1]!, 'mail.forwarder.create', body.accountId)
+          const accountRecords = list.filter(item => item.accountId === account.id)
+          if (accountRecords.some(item => item.sourceAddress.toLowerCase() === sourceAddress)) return fail('CONFLICT', 'A forwarder for this source already exists')
+          const plan = await helpers.store.getPlan(account.planId)
+          if (!plan) return fail('CONFLICT', 'The account plan is unavailable')
+          const cap = plan.caps.forwarders
+          if (cap !== 'unlimited' && accountRecords.length >= cap) return fail('CONFLICT', 'The account forwarder limit has been reached')
+          const record: EmailForwarder = {
+            id: randomUUID(),
+            accountId: account.id,
+            sourceAddress,
+            destinations,
+            createdAt: new Date().toISOString(),
+          }
+          list.push(record)
+          await lease!.assertFencingToken()
+          await ext.write('mail/forwarders.json', list)
+          await lease!.release()
+          lease = null
+          await helpers.emitAudit({
+            actor: caller.principal.username,
+            action: 'mail.forwarder.created',
+            target: `forwarder:${sourceAddress}`,
+            detail: { destinations, application },
+            outcome: 'ok',
+            principalId: caller.principal.id,
+          })
+          return jsonResponse({ forwarder: record, application }, 201)
         }
-        const account = await requireDomainAccount(helpers.store, caller, sourceAddress.split('@')[1]!, 'mail.forwarder.create', body.accountId)
-        const record: EmailForwarder = {
-          id: randomUUID(),
-          accountId: account.id,
-          sourceAddress,
-          destinations,
-          createdAt: new Date().toISOString(),
+        if (method === 'DELETE') {
+          const body = await readJsonBody<{ id?: string }>(req)
+          const targetId = fwdDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
+          const exact = list.find(item => item.id === targetId)
+          const record = exact ?? (await scopedRecords(caller, list)).find(item => item.sourceAddress === targetId)
+          await assertRecordAccount(caller, record, 'mail.forwarder.delete')
+          const next = list.filter(item => item !== record)
+          await lease!.assertFencingToken()
+          await ext.write('mail/forwarders.json', next)
+          await lease!.release()
+          lease = null
+          await helpers.emitAudit({
+            actor: caller.principal.username,
+            action: 'mail.forwarder.deleted',
+            target: `forwarder:${String(targetId)}`,
+            detail: { application },
+            outcome: 'ok',
+            principalId: caller.principal.id,
+          })
+          return jsonResponse({ ok: true, application })
         }
-        list.push(record)
-        await ext.write('mail/forwarders.json', list)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'mail.forwarder.created',
-          target: `forwarder:${sourceAddress}`,
-          detail: { destinations },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ forwarder: record }, 201)
-      }
-      if (method === 'DELETE') {
-        const body = await readJsonBody<{ id?: string }>(req)
-        const targetId = fwdDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
-        await assertRecordAccount(caller, list.find(item => item.id === targetId || item.sourceAddress === targetId), 'mail.forwarder.delete')
-        const next = list.filter((item) => item.id !== targetId && item.sourceAddress !== targetId)
-        await ext.write('mail/forwarders.json', next)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'mail.forwarder.deleted',
-          target: `forwarder:${String(targetId)}`,
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ ok: true })
-      }
+      } finally { await lease?.release() }
     }
 
     const mlDeleteMatch = /^\/api\/mail\/mailing-lists\/([^/]+)$/.exec(pathname)
     if (pathname === '/api/mail/mailing-lists' || mlDeleteMatch) {
-      const caller = await helpers.requireCaller(req)
+      let caller = await helpers.requireCaller(req)
+      let lease = method === 'POST' || method === 'DELETE' ? await helpers.store.getWriterLock().acquire() : null
+      let attempted = false
+      try {
+      if (lease) caller = await freshExtendedMailCaller(req, caller)
       const list = await ext.readOrDefault<MailingListRecord[]>('mail/mailing-lists.json', [])
       if (method === 'GET') {
-        return jsonResponse({ mailingLists: await scopedRecords(caller, list) })
+        const visible = (await scopedRecords(caller, list)).map(publicMailingList)
+        await freshExtendedMailCaller(req, caller)
+        return jsonResponse({ mailingLists: visible })
       }
       if (method === 'POST') {
         const body = await readJsonBody<{
@@ -1346,26 +1156,60 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           members?: string[]
           moderation?: 'open' | 'members' | 'moderated'
           archiveEnabled?: boolean
+          selfSubscription?: 'open' | 'closed'
         }>(req)
+        if (Object.hasOwn(body, 'memberAuthorities')) return fail('VALIDATION', 'mailing list ownership metadata cannot be supplied', { stateChanged: false })
+        if (Object.keys(body).some(key => !['accountId', 'name', 'domain', 'address', 'members', 'moderation', 'archiveEnabled', 'selfSubscription'].includes(key))) return fail('VALIDATION', 'unsupported mailing list field', { stateChanged: false })
+        if (body.selfSubscription !== undefined && !['open', 'closed'].includes(body.selfSubscription)) return fail('VALIDATION', 'selfSubscription must be open or closed', { stateChanged: false })
+        const mailingListUnsafe = /[\u0000-\u001f\u007f-\u009f]/
         const address = body.address
           ? body.address.trim().toLowerCase()
           : `${(body.name ?? 'list').trim().toLowerCase()}@${(body.domain ?? 'example.com').trim().toLowerCase()}`
         const [namePart, domainPart] = address.split('@')
-        if (!namePart || !domainPart) return fail('VALIDATION', 'valid mailing list address or name + domain required')
-        const account = await requireDomainAccount(helpers.store, caller, validateDomainName(domainPart), 'mail.mailing_list.create', body.accountId)
+        if (!namePart || !domainPart) return fail('VALIDATION', 'valid mailing list address or name + domain required', { stateChanged: false })
+        if (address.length > 254 || mailingListUnsafe.test(address) || !/^[^\s@/\\]+@[^\s@/\\]+$/.test(address)) {
+          return fail('VALIDATION', 'mailing list address must be a single valid email address', { stateChanged: false })
+        }
+        const localPart = namePart.trim()
+        if (!/^[a-z0-9](?:[a-z0-9._-]{0,63})$/.test(localPart)) return fail('VALIDATION', 'mailing list name must be up to 64 lowercase letters, digits, dots, underscores or dashes', { stateChanged: false })
+        if (body.name !== undefined && (typeof body.name !== 'string' || body.name.length > 128 || mailingListUnsafe.test(body.name))) {
+          return fail('VALIDATION', 'mailing list display name must be bounded text without control characters', { stateChanged: false })
+        }
+        if (body.members !== undefined && (!Array.isArray(body.members) || body.members.length > 1000)) return fail('VALIDATION', 'members must be an array of at most 1000 addresses', { stateChanged: false })
+        const listDomain = validateDomainName(domainPart)
+        const account = await requireDomainAccount(helpers.store, caller, listDomain, 'mail.mailing_list.create', body.accountId)
+        const members: string[] = []
+        for (const rawMember of body.members ?? []) {
+          if (typeof rawMember !== 'string') return fail('VALIDATION', 'each mailing list member must be an email address', { stateChanged: false })
+          const member = rawMember.trim().toLowerCase()
+          if (member.length > 254 || mailingListUnsafe.test(member) || !/^[^\s@/\\]+@[^\s@/\\]+$/.test(member)) return fail('VALIDATION', `invalid mailing list member: ${member.slice(0, 64)}`, { stateChanged: false })
+          if (members.includes(member)) return fail('VALIDATION', 'each mailing list member may be listed only once', { stateChanged: false })
+          members.push(member)
+        }
+        if (body.moderation !== undefined && !['open', 'members', 'moderated'].includes(body.moderation)) return fail('VALIDATION', 'moderation must be open, members or moderated', { stateChanged: false })
+        if (body.archiveEnabled !== undefined && typeof body.archiveEnabled !== 'boolean') return fail('VALIDATION', 'archiveEnabled must be a boolean', { stateChanged: false })
+        if (list.some(item => item.address.toLowerCase() === address)) return fail('CONFLICT', 'a mailing list with this address already exists', { stateChanged: false })
         const record: MailingListRecord = {
           id: randomUUID(),
           accountId: account.id,
-          name: body.name ?? namePart,
-          domain: validateDomainName(domainPart),
+          name: body.name === undefined ? localPart : body.name.trim() || localPart,
+          domain: listDomain,
           address,
-          members: (body.members ?? []).map((m) => m.trim().toLowerCase()),
+          members,
           moderation: body.moderation ?? 'members',
           archiveEnabled: body.archiveEnabled ?? true,
+          selfSubscription: body.selfSubscription ?? 'closed',
           createdAt: new Date().toISOString(),
         }
         list.push(record)
-        await ext.write('mail/mailing-lists.json', list)
+        caller = await freshExtendedMailCaller(req, caller)
+        const freshAccount = await requireDomainAccount(helpers.store, caller, listDomain, 'mail.mailing_list.create', account.id)
+        await assertAccountFeatures(helpers.store, caller, freshAccount, ['mailing-lists'])
+        await lease!.assertFencingToken(); attempted = true
+        await atomicWriteJson(join(ext.baseDir, 'mail', 'mailing-lists.json'), list, 0o640, () => lease!.assertFencingToken())
+        if (JSON.stringify(await ext.readOrDefault<MailingListRecord[]>('mail/mailing-lists.json', [])) !== JSON.stringify(list)) throw new Error('mailing list create readback mismatch')
+        caller = await freshExtendedMailCaller(req, caller)
+        await lease!.release(); lease = null
         await helpers.emitAudit({
           actor: caller.principal.username,
           action: 'mail.mailing_list.created',
@@ -1373,15 +1217,26 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           detail: { membersCount: record.members.length },
           outcome: 'ok',
           principalId: caller.principal.id,
-        })
-        return jsonResponse({ mailingList: record }, 201)
+        }, { accountId: account.id, resellerId: account.ownerId })
+        return jsonResponse({ mailingList: publicMailingList(record) }, 201)
       }
       if (method === 'DELETE') {
         const body = await readJsonBody<{ id?: string }>(req)
         const targetId = mlDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
-        await assertRecordAccount(caller, list.find(item => item.id === targetId || item.address === targetId), 'mail.mailing_list.delete')
+        const selected = list.find(item => item.id === targetId || item.address === targetId)
+        caller = await freshExtendedMailCaller(req, caller)
+        await assertRecordAccount(caller, selected, 'mail.mailing_list.delete')
+        if (selected?.accountId) {
+          const account = await helpers.store.getAccount(selected.accountId)
+          if (!account) return fail('NOT_FOUND', 'mailing list not found', { stateChanged: false })
+          await assertAccountFeatures(helpers.store, caller, account, ['mailing-lists'])
+        }
         const next = list.filter((item) => item.id !== targetId && item.address !== targetId)
-        await ext.write('mail/mailing-lists.json', next)
+        await lease!.assertFencingToken(); attempted = true
+        await atomicWriteJson(join(ext.baseDir, 'mail', 'mailing-lists.json'), next, 0o640, () => lease!.assertFencingToken())
+        if (JSON.stringify(await ext.readOrDefault<MailingListRecord[]>('mail/mailing-lists.json', [])) !== JSON.stringify(next)) throw new Error('mailing list delete readback mismatch')
+        caller = await freshExtendedMailCaller(req, caller)
+        await lease!.release(); lease = null
         await helpers.emitAudit({
           actor: caller.principal.username,
           action: 'mail.mailing_list.deleted',
@@ -1391,138 +1246,17 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         })
         return jsonResponse({ ok: true })
       }
+      } catch (error) {
+        if (attempted) return fail('SERVICE_UNAVAILABLE', 'mailing list administration outcome requires inspection', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
+        throw error
+      } finally { await lease?.release() }
     }
 
-    const filterDeleteMatch = /^\/api\/mail\/filters\/([^/]+)$/.exec(pathname)
-    if (pathname === '/api/mail/filters' || filterDeleteMatch) {
-      const caller = await helpers.requireCaller(req)
-      const filters = await ext.readOrDefault<SieveFilterRule[]>('mail/filters.json', [])
-      if (method === 'GET') {
-        if (isMailboxPrincipal(caller)) {
-          const mailbox = await requireMailbox(helpers.store, caller, url.searchParams.get('mailbox'))
-          const filtered = filters.filter((f) => f.scope === 'mailbox' && f.mailbox?.toLowerCase() === mailbox)
-          return jsonResponse({
-            filters: filtered,
-            compiledSieve: compileSieveRules(filtered),
-          })
-        }
-        const requestedMailbox = url.searchParams.get('mailbox')
-        const mailbox = requestedMailbox ? await requireMailbox(helpers.store, caller, requestedMailbox) : null
-        const visible = await scopedRecords(caller, filters)
-        const filtered = mailbox ? visible.filter((f) => f.mailbox === mailbox || f.scope === 'global') : visible
-        return jsonResponse({
-          filters: filtered,
-          compiledSieve: compileSieveRules(filtered),
-        })
-      }
-      if (method === 'POST') {
-        const body = await readJsonBody<{
-          accountId?: Id
-          scope?: 'global' | 'mailbox'
-          mailbox?: string | null
-          name?: string
-          priority?: number
-          enabled?: boolean
-          matchAll?: boolean
-          conditions?: SieveFilterCondition[]
-          action?: SieveFilterRule['action']
-        }>(req)
-        if (!body.name) return fail('VALIDATION', 'filter name is required')
-        let accountId: Id
-        let mailbox: string | null
-        let scope: 'global' | 'mailbox'
-        if (isMailboxPrincipal(caller)) {
-          if (body.scope === 'global') {
-            return fail('FORBIDDEN', 'mailbox principals cannot create global domain filters')
-          }
-          const bound = await requireMailboxPrincipalAccess(helpers.store, caller)
-          if (body.accountId && body.accountId !== bound.account.id) {
-            return fail('NOT_FOUND', 'account not found')
-          }
-          mailbox = await requireMailbox(helpers.store, caller, body.mailbox)
-          accountId = bound.account.id
-          scope = 'mailbox'
-        } else {
-          accountId = await requireAccountId(caller, body.accountId, 'mail.filter.create')
-          mailbox = body.mailbox ? await requireMailbox(helpers.store, caller, body.mailbox) : null
-          if (mailbox) {
-            const owner = (await helpers.store.listServiceUsers(accountId)).find(user => user.login.toLowerCase() === mailbox && user.services.email)
-            if (!owner) return fail('NOT_FOUND', 'mailbox not found')
-          }
-          scope = body.scope ?? (body.mailbox ? 'mailbox' : 'global')
-        }
-        const ruleBase: Omit<SieveFilterRule, 'compiledSieve'> = {
-          id: randomUUID(),
-          accountId,
-          scope,
-          mailbox,
-          name: body.name,
-          priority: body.priority ?? filters.length + 1,
-          enabled: body.enabled ?? true,
-          matchAll: body.matchAll ?? true,
-          conditions: body.conditions ?? [{ field: 'subject', comparator: 'contains', value: '[SPAM]' }],
-          action: body.action ?? { type: 'fileinto', target: 'Spam' },
-          createdAt: new Date().toISOString(),
-        }
-        const singleCompiled = compileSieveRules([{ ...ruleBase, compiledSieve: '' }])
-        const rule: SieveFilterRule = { ...ruleBase, compiledSieve: singleCompiled }
-        filters.push(rule)
-        await ext.write('mail/filters.json', filters)
-        const visibleAfter = isMailboxPrincipal(caller)
-          ? filters.filter((f) => f.scope === 'mailbox' && f.mailbox?.toLowerCase() === mailbox)
-          : await scopedRecords(caller, filters)
-        const compiledSieve = compileSieveRules(visibleAfter)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'mail.filter.created',
-          target: `sieve-filter:${rule.name}`,
-          detail: { scope: rule.scope, mailbox: rule.mailbox },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ filter: rule, compiledSieve }, 201)
-      }
-      if (method === 'DELETE') {
-        const body = await readJsonBody<{ id?: string }>(req)
-        const targetId = filterDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
-        const target = filters.find(filter => filter.id === targetId)
-        if (isMailboxPrincipal(caller)) {
-          if (!target) return fail('NOT_FOUND', 'resource not found')
-          if (target.scope !== 'mailbox' || !target.mailbox) {
-            return fail('FORBIDDEN', 'mailbox principals cannot delete global filters')
-          }
-          const boundMailbox = await requireMailbox(helpers.store, caller, target.mailbox)
-          const next = filters.filter((f) => f.id !== targetId)
-          await ext.write('mail/filters.json', next)
-          await helpers.emitAudit({
-            actor: caller.principal.username,
-            action: 'mail.filter.deleted',
-            target: `sieve-filter:${String(targetId)}`,
-            outcome: 'ok',
-            principalId: caller.principal.id,
-          })
-          return jsonResponse({
-            ok: true,
-            compiledSieve: compileSieveRules(next.filter((f) => f.scope === 'mailbox' && f.mailbox?.toLowerCase() === boundMailbox)),
-          })
-        }
-        await assertRecordAccount(caller, target, 'mail.filter.delete')
-        if (target?.mailbox) await requireMailbox(helpers.store, caller, target.mailbox)
-        const next = filters.filter((f) => f.id !== targetId)
-        await ext.write('mail/filters.json', next)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'mail.filter.deleted',
-          target: `sieve-filter:${String(targetId)}`,
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ ok: true, compiledSieve: compileSieveRules(await scopedRecords(caller, next)) })
-      }
-    }
+    const filterResponse = await handleFilterRoute(req, url, method)
+    if (filterResponse !== null) return filterResponse
 
     if (pathname === '/api/mail/spam-settings') {
-      const caller = await helpers.requireCaller(req)
+      let caller = await helpers.requireCaller(req)
       const requestedAccountId = url.searchParams.get('accountId') ?? (caller.principal.kind === 'user' ? caller.principal.accountId : null)
       const accountId = requestedAccountId ? await requireAccountId(caller, requestedAccountId, 'mail.spam_settings') : null
       if (!accountId) await helpers.assertRoot(caller, 'mail.spam_settings.global')
@@ -1546,13 +1280,69 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       }
       if (method === 'PUT') {
         const body = await readJsonBody<Partial<SpamSettingsState>>(req)
+        if (!body || typeof body !== 'object' || Array.isArray(body)) return fail('VALIDATION', 'spam settings must be an object', { stateChanged: false })
+        const allowedKeys = ['enabled', 'rewriteSubjectScore', 'addHeaderScore', 'greylistScore', 'rejectScore', 'spamBoxEnabled', 'autoDeleteSpam', 'autoDeleteScore', 'allowlist', 'blocklist'] as const
+        if (Object.keys(body).some(key => !(allowedKeys as readonly string[]).includes(key))) return fail('VALIDATION', 'unsupported spam settings field', { stateChanged: false })
+        const spamControl = /[\u0000-\u001f\u007f-\u009f]/
+        const booleanField = (key: 'enabled' | 'spamBoxEnabled' | 'autoDeleteSpam', fallback: boolean): boolean => {
+          const value = body[key]
+          if (value === undefined) return fallback
+          if (typeof value !== 'boolean') return fail('VALIDATION', `${key} must be a boolean`, { stateChanged: false })
+          return value
+        }
+        const scoreField = (key: 'rewriteSubjectScore' | 'addHeaderScore' | 'greylistScore' | 'rejectScore' | 'autoDeleteScore', fallback: number): number => {
+          const value = body[key]
+          if (value === undefined) return fallback
+          if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) return fail('VALIDATION', `${key} must be a number from 0 through 100`, { stateChanged: false })
+          return value
+        }
+        const listField = (key: 'allowlist' | 'blocklist', fallback: string[]): string[] => {
+          const value = body[key]
+          if (value === undefined) return fallback
+          if (!Array.isArray(value) || value.length > 500) return fail('VALIDATION', `${key} must be an array of at most 500 entries`, { stateChanged: false })
+          const seen = new Set<string>()
+          return value.map(raw => {
+            if (typeof raw !== 'string') return fail('VALIDATION', `${key} entries must be text`, { stateChanged: false })
+            const entry = raw.trim().toLowerCase()
+            if (!entry || entry.length > 254 || spamControl.test(entry) || !/^[a-z0-9._:@\[\]/-]+$/.test(entry) || entry.includes('..')) {
+              return fail('VALIDATION', `${key} entries must be bounded addresses, CIDRs or hostnames`, { stateChanged: false })
+            }
+            if (seen.has(entry)) return fail('VALIDATION', `${key} entries may not repeat`, { stateChanged: false })
+            seen.add(entry)
+            return entry
+          })
+        }
+        let lease: Awaited<ReturnType<ReturnType<StateStore['getWriterLock']>['acquire']>> | null = await helpers.store.getWriterLock().acquire()
+        let attempted = false
+        try {
+        const authorizeSpam = async (): Promise<void> => {
+          caller = await freshExtendedMailCaller(req, caller)
+          if (!accountId) return helpers.assertRoot(caller, 'mail.spam_settings.global')
+          const account = await requireResolvedAccount(caller, accountId, 'mail.spam_settings')
+          if (account.id !== accountId) return fail('FORBIDDEN', 'spam policy account changed', { stateChanged: false })
+          await assertAccountFeatures(helpers.store, caller, account, ['spam-filters'])
+        }
+        await authorizeSpam()
         const current = await ext.readOrDefault(spamKey, defaultSpam)
         const updated: SpamSettingsState = {
-          ...current,
-          ...body,
+          enabled: booleanField('enabled', current.enabled),
+          rewriteSubjectScore: scoreField('rewriteSubjectScore', current.rewriteSubjectScore),
+          addHeaderScore: scoreField('addHeaderScore', current.addHeaderScore),
+          greylistScore: scoreField('greylistScore', current.greylistScore),
+          rejectScore: scoreField('rejectScore', current.rejectScore),
+          spamBoxEnabled: booleanField('spamBoxEnabled', current.spamBoxEnabled),
+          autoDeleteSpam: booleanField('autoDeleteSpam', current.autoDeleteSpam),
+          autoDeleteScore: scoreField('autoDeleteScore', current.autoDeleteScore),
+          allowlist: listField('allowlist', current.allowlist),
+          blocklist: listField('blocklist', current.blocklist),
           updatedAt: new Date().toISOString(),
         }
-        await ext.write(spamKey, updated)
+        await authorizeSpam(); await lease!.assertFencingToken(); attempted = true
+        await atomicWriteJson(join(ext.baseDir, spamKey), updated, 0o640, () => lease!.assertFencingToken())
+        if (JSON.stringify(await ext.readOrDefault(spamKey, defaultSpam)) !== JSON.stringify(updated)) throw new Error('spam settings readback mismatch')
+        await authorizeSpam()
+        await lease!.release()
+        lease = null
         await helpers.emitAudit({
           actor: caller.principal.username,
           action: 'mail.spam_settings.updated',
@@ -1560,8 +1350,12 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           detail: { rejectScore: updated.rejectScore, spamBoxEnabled: updated.spamBoxEnabled },
           outcome: 'ok',
           principalId: caller.principal.id,
-        })
+        }, accountId ? { accountId } : {})
         return jsonResponse({ settings: updated })
+        } catch (error) {
+          if (attempted) return fail('SERVICE_UNAVAILABLE', 'spam settings outcome requires inspection', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
+          throw error
+        } finally { await lease?.release() }
       }
     }
 
@@ -1572,7 +1366,10 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         accountId?: Id
         kind?: 'mailboxes' | 'forwarders' | 'auto'
       }>(req)
-      const csvText = (body.csv ?? '').trim()
+      if (typeof body !== 'object' || body === null || Array.isArray(body) || typeof body.csv !== 'string') return fail('VALIDATION', 'csv must be a string')
+      if (body.kind !== undefined && !['mailboxes', 'forwarders', 'auto'].includes(body.kind)) return fail('VALIDATION', 'kind must be mailboxes, forwarders or auto')
+      if (body.accountId !== undefined && (typeof body.accountId !== 'string' || !body.accountId.trim())) return fail('VALIDATION', 'accountId must be a nonempty string')
+      const csvText = body.csv.trim()
       if (!csvText) return fail('VALIDATION', 'csv content is required')
 
       const accountId = await requireAccountId(caller, body.accountId, 'mail.import_csv')
@@ -1585,7 +1382,16 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       const importedMailboxes: { email: string; quotaMb: number }[] = []
       const importedForwarders: { sourceAddress: string; destination: string }[] = []
       const errors: { row: number; error: string }[] = []
-      const forwarders = await ext.readOrDefault<EmailForwarder[]>('mail/forwarders.json', [])
+      const includesForwarders = body.kind === 'forwarders' || lines.some((line, i) => {
+        if (i === 0 && /^(email|address|username|source)\b/i.test(line)) return false
+        const cols = line.split(',').map(column => column.trim())
+        return body.kind !== 'mailboxes' && (cols[1] ?? '').includes('@') && !cols[2]
+      })
+      if (includesForwarders) {
+        const account = await helpers.store.getAccount(accountId)
+        if (!account) return fail('NOT_FOUND', 'mail account not found')
+        await assertAccountFeatures(helpers.store, caller, account, ['forwarders'])
+      }
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i]!
@@ -1596,6 +1402,13 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         const col1 = cols[1] ?? ''
         const col2 = cols[2] ?? ''
 
+        const isForwarder =
+          body.kind === 'forwarders' || (body.kind !== 'mailboxes' && col1.includes('@') && !col2)
+        let forwarderInput: ReturnType<typeof validateForwarderInput> | null = null
+        if (isForwarder) {
+          try { forwarderInput = validateForwarderInput({ sourceAddress: col0, destination: col1 }) }
+          catch { errors.push({ row: i + 1, error: 'Invalid forwarder source or destination address' }); continue }
+        }
         if (!col0.includes('@')) {
           errors.push({ row: i + 1, error: 'Invalid email address in column 1' })
           continue
@@ -1605,23 +1418,31 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         const sourceAccount = await requireDomainAccount(helpers.store, caller, mailboxDomain, 'mail.import_csv', accountId)
         if (sourceAccount.id !== accountId) return fail('NOT_FOUND', 'mail domain not found')
 
-        const isForwarder =
-          body.kind === 'forwarders' || (body.kind !== 'mailboxes' && col1.includes('@') && !col2)
-
-        if (isForwarder) {
-          const dest = col1.toLowerCase()
-          if (!dest.includes('@')) {
-            errors.push({ row: i + 1, error: 'Invalid forwarder destination email' })
-            continue
-          }
-          forwarders.push({
-            id: randomUUID(),
-            accountId,
-            sourceAddress: col0,
-            destinations: [dest],
-            createdAt: new Date().toISOString(),
-          })
-          importedForwarders.push({ sourceAddress: col0, destination: dest })
+        if (isForwarder && forwarderInput) {
+          const lease = await helpers.store.getWriterLock().acquire()
+          try {
+            const forwarderAccount = await requireDomainAccount(helpers.store, caller, mailboxDomain, 'mail.import_csv', accountId)
+            await assertAccountFeatures(helpers.store, caller, forwarderAccount, ['forwarders'])
+            const forwarders = await ext.readOrDefault<EmailForwarder[]>('mail/forwarders.json', [])
+            const accountForwarders = forwarders.filter(item => item.accountId === accountId)
+            if (accountForwarders.some(item => item.sourceAddress.toLowerCase() === forwarderInput.sourceAddress)) {
+              errors.push({ row: i + 1, error: 'A forwarder for this source already exists' }); continue
+            }
+            const plan = await helpers.store.getPlan(forwarderAccount.planId)
+            if (!plan || plan.caps.forwarders !== 'unlimited' && accountForwarders.length >= plan.caps.forwarders) {
+              errors.push({ row: i + 1, error: 'The account forwarder limit has been reached' }); continue
+            }
+            forwarders.push({
+              id: randomUUID(),
+              accountId,
+              sourceAddress: forwarderInput.sourceAddress,
+              destinations: forwarderInput.destinations,
+              createdAt: new Date().toISOString(),
+            })
+            await lease.assertFencingToken()
+            await ext.write('mail/forwarders.json', forwarders)
+            importedForwarders.push({ sourceAddress: forwarderInput.sourceAddress, destination: forwarderInput.destinations[0]! })
+          } finally { await lease.release() }
         } else {
           const quotaMb = Number(col2) > 0 ? Number(col2) : 1024
           try {
@@ -1641,7 +1462,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         }
       }
 
-      await ext.write('mail/forwarders.json', forwarders)
+      const application = body.kind === 'forwarders' || importedForwarders.length > 0 ? { status: 'configuration_only', nativeApplied: false } as const : undefined
       await helpers.emitAudit({
         actor: caller.principal.username,
         action: 'mail.import_csv',
@@ -1649,6 +1470,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         detail: {
           mailboxesCount: importedMailboxes.length,
           forwardersCount: importedForwarders.length,
+          ...(application ? { application } : {}),
           errorsCount: errors.length,
         },
         outcome: 'ok',
@@ -1658,6 +1480,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         ok: true,
         importedMailboxes,
         importedForwarders,
+        ...(application ? { application } : {}),
         errors,
         summary: {
           mailboxesImported: importedMailboxes.length,
@@ -1855,7 +1678,8 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         const from = (body.from ?? mailbox).toLowerCase()
         if (from !== mailbox) return fail('FORBIDDEN', 'sender must match the authorized mailbox')
         if (body.identityId) {
-          const identities = await ext.readOrDefault<WebmailIdentity[]>('webmail/identities.json', [])
+          const identities = await readBoundMailboxIdentityRecords(helpers.store, mailbox,
+            () => ext.readOrDefault<WebmailIdentity[]>('webmail/identities.json', []))
           const identity = identities.find(item => item.id === body.identityId && item.mailbox.toLowerCase() === mailbox && item.email.toLowerCase() === from)
           if (!identity) return fail('NOT_FOUND', 'identity not found')
         }
@@ -1945,80 +1769,20 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       return jsonResponse({ query: q, hits, total: hits.length })
     }
 
-    const identityDeleteMatch = /^\/api\/webmail\/identities\/([^/]+)$/.exec(pathname)
-    if (pathname === '/api/webmail/identities' || identityDeleteMatch) {
-      const caller = await helpers.requireCaller(req)
-      const identities = await ext.readOrDefault<WebmailIdentity[]>('webmail/identities.json', [])
-      if (method === 'GET') {
-        const mailbox = await requireMailbox(helpers.store, caller, url.searchParams.get('mailbox'))
-        return jsonResponse({ identities: identities.filter(identity => identity.mailbox.toLowerCase() === mailbox) })
-      }
-      if (method === 'POST') {
-        const body = await readJsonBody<Partial<WebmailIdentity>>(req)
-        if (!body.email) return fail('VALIDATION', 'identity email is required')
-        const mailbox = isMailboxPrincipal(caller)
-          ? await requireMailbox(helpers.store, caller, body.mailbox)
-          : await requireMailbox(helpers.store, caller, body.mailbox ?? body.email)
-        if (body.email.toLowerCase() !== mailbox) return fail('FORBIDDEN', 'identity email must match its authorized mailbox')
-        const identity: WebmailIdentity = {
-          id: randomUUID(),
-          mailbox,
-          displayName: body.displayName ?? caller.principal.username,
-          email: body.email.toLowerCase(),
-          replyTo: (body.replyTo ?? body.email).toLowerCase(),
-          textSignature: body.textSignature ?? '',
-          htmlSignature: body.htmlSignature ?? '',
-          isDefault: body.isDefault ?? !identities.some(identity => identity.mailbox.toLowerCase() === mailbox),
-          createdAt: new Date().toISOString(),
-        }
-        identities.push(identity)
-        await ext.write('webmail/identities.json', identities)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'webmail.identity.created',
-          target: `identity:${identity.email}`,
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ identity }, 201)
-      }
-      if (method === 'PATCH' || method === 'PUT') {
-        const body = await readJsonBody<Partial<WebmailIdentity>>(req)
-        const targetId = identityDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
-        const target = identities.find(identity => identity.id === targetId)
-        if (!target) return fail('NOT_FOUND', 'identity not found')
-        await requireMailbox(helpers.store, caller, target.mailbox)
-        if (body.mailbox && body.mailbox.toLowerCase() !== target.mailbox.toLowerCase()) {
-          return fail('FORBIDDEN', 'identity mailbox cannot be changed')
-        }
-        if (body.email && body.email.toLowerCase() !== target.mailbox.toLowerCase()) {
-          return fail('FORBIDDEN', 'identity email must match its authorized mailbox')
-        }
-        if (body.displayName !== undefined) target.displayName = body.displayName
-        if (body.replyTo !== undefined) target.replyTo = body.replyTo.toLowerCase()
-        if (body.textSignature !== undefined) target.textSignature = body.textSignature
-        if (body.htmlSignature !== undefined) target.htmlSignature = body.htmlSignature
-        if (body.isDefault !== undefined) target.isDefault = body.isDefault
-        await ext.write('webmail/identities.json', identities)
-        return jsonResponse({ identity: target })
-      }
-      if (method === 'DELETE') {
-        const body = await readJsonBody<{ id?: string }>(req)
-        const targetId = identityDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
-        const target = identities.find(identity => identity.id === targetId)
-        if (!target) return fail('NOT_FOUND', 'identity not found')
-        await requireMailbox(helpers.store, caller, target.mailbox)
-        const next = identities.filter((i) => i.id !== targetId)
-        await ext.write('webmail/identities.json', next)
-        return jsonResponse({ ok: true })
-      }
-    }
+    // Identity routes above validate immutable ownership before every operation.
 
     if (pathname === '/api/webmail/vacation') {
       const caller = await helpers.requireCaller(req)
-      const body = method === 'PUT' ? await readJsonBody<Partial<WebmailVacationConfig>>(req) : {}
-      const mailbox = await requireMailbox(helpers.store, caller, body.mailbox ?? url.searchParams.get('mailbox'))
+      const raw = method === 'PUT' ? await readJsonBody<unknown>(req) : {}
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail('VALIDATION', 'vacation request must be an object', { stateChanged: false })
+      const body = raw as Partial<WebmailVacationConfig> & { expectedRevision?: string }
+      if (method === 'PUT' && Object.keys(body).some(key => !['mailbox', 'enabled', 'subject', 'body', 'htmlBody', 'startDate', 'endDate', 'replyIntervalHours', 'expectedRevision'].includes(key))) return fail('VALIDATION', 'unsupported vacation request field', { stateChanged: false })
+      if (body.mailbox !== undefined && typeof body.mailbox !== 'string') return fail('VALIDATION', 'mailbox must be an email address', { stateChanged: false })
+      const scoped = isMailboxPrincipal(caller)
+      if (scoped && url.searchParams.size) return fail('VALIDATION', 'vacation workspace does not accept mailbox selectors', { stateChanged: false })
+      const mailbox = await requireMailbox(helpers.store, caller, scoped ? undefined : body.mailbox ?? url.searchParams.get('mailbox'))
       const fileKey = `webmail/vacation/${encodeURIComponent(mailbox)}.json`
+      const application = { status: 'configuration_only', nativeApplied: false } as const
       const defaultVac: WebmailVacationConfig = {
         mailbox,
         enabled: false,
@@ -2032,210 +1796,68 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         updatedAt: new Date().toISOString(),
       }
       if (method === 'GET') {
-        return jsonResponse({ vacation: await ext.readOrDefault(fileKey, defaultVac) })
+        const authority = await captureMailboxMetadataAuthority(helpers.store, mailbox)
+        const stored = await ext.readOrDefault<WebmailVacationConfig | null>(fileKey, null)
+        const visible = stored && assessMailboxMetadataAuthority(stored.mailbox, stored.ownerAuthority, authority) === 'match' ? stored : null
+        if (!scoped) return jsonResponse({ vacation: projectVacationWorkspace(visible ?? defaultVac), metadataReview: MAILBOX_METADATA_REVIEW_REQUIRED })
+        return jsonResponse({ context: { mailbox }, vacation: visible ? projectVacationWorkspace(visible) : null,
+          revision: vacationWorkspaceRevision(visible), application, metadataReview: MAILBOX_METADATA_REVIEW_REQUIRED })
       }
       if (method === 'PUT') {
-        const current = await ext.readOrDefault(fileKey, defaultVac)
-        const merged = { ...current, ...body, mailbox }
-        const vacation: WebmailVacationConfig = {
-          ...merged,
-          compiledSieve: compileVacationSieve(merged),
-          updatedAt: new Date().toISOString(),
-        }
-        await ext.write(fileKey, vacation)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'webmail.vacation.updated',
-          target: `vacation:${vacation.mailbox}`,
-          detail: { enabled: vacation.enabled },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ vacation })
-      }
-    }
-
-    const calShareMatch = /^\/api\/webmail\/calendars\/([^/]+)\/share$/.exec(pathname)
-    const calExportMatch = /^\/api\/webmail\/calendars\/([^/]+)\/(?:export|ics)$/.exec(pathname)
-    const calImportMatch = /^\/api\/webmail\/calendars\/([^/]+)\/import$/.exec(pathname)
-    const calItemMatch = /^\/api\/webmail\/calendars\/([^/]+)$/.exec(pathname)
-    if (
-      pathname === '/api/webmail/calendars' ||
-      pathname === '/api/webmail/calendars/import' ||
-      calShareMatch ||
-      calExportMatch ||
-      calImportMatch ||
-      calItemMatch
-    ) {
-      const caller = await helpers.requireCaller(req)
-      const calendars = await ext.readOrDefault<WebmailCalendar[]>('webmail/calendars.json', [])
-      const resolveCalendarAccess = async (
-        cal: WebmailCalendar,
-        requestedMailbox: string | null | undefined,
-        requireWrite: boolean,
-      ): Promise<string> => {
-        const mailbox = await requireMailbox(
-          helpers.store,
-          caller,
-          requestedMailbox ?? (isMailboxPrincipal(caller) ? undefined : cal.owner),
-        )
-        if (cal.owner.toLowerCase() === mailbox) return mailbox
-        const share = cal.shares.find((s) => s.principal.toLowerCase() === mailbox)
-        if (!share) return fail('NOT_FOUND', `calendar "${cal.id}" not found`)
-        if (requireWrite && share.permission !== 'read-write') {
-          return fail('FORBIDDEN', 'calendar share is read-only')
-        }
-        return mailbox
-      }
-
-      if (method === 'GET' && pathname === '/api/webmail/calendars') {
-        const mailbox = await requireMailbox(helpers.store, caller, url.searchParams.get('mailbox'))
-        return jsonResponse({
-          calendars: calendars.filter(
-            (calendar) =>
-              calendar.owner.toLowerCase() === mailbox ||
-              calendar.shares.some((share) => share.principal.toLowerCase() === mailbox),
-          ),
-        })
-      }
-      if (method === 'POST' && pathname === '/api/webmail/calendars') {
-        const body = await readJsonBody<Partial<WebmailCalendar>>(req)
-        if (!body.name) return fail('VALIDATION', 'calendar name is required')
-        const name = assertSafeCalendarText(body.name, 'calendar name')
-        const timezone = assertValidTimezone(body.timezone ?? 'UTC')
-        const owner = await requireMailbox(helpers.store, caller, body.owner ?? url.searchParams.get('mailbox'))
-        const cal: WebmailCalendar = {
-          id: randomUUID(),
-          owner,
-          name,
-          color: body.color ?? 'oklch(0.65 0.18 250)',
-          timezone,
-          shares: [],
-          events: [],
-          createdAt: new Date().toISOString(),
-        }
-        calendars.push(cal)
-        await ext.write('webmail/calendars.json', calendars)
-        return jsonResponse({ calendar: cal }, 201)
-      }
-      if (calExportMatch && method === 'GET') {
-        const calId = calExportMatch[1]!
-        const cal = calendars.find((c) => c.id === calId)
-        if (!cal) return fail('NOT_FOUND', `calendar "${calId}" not found`)
-        await resolveCalendarAccess(cal, url.searchParams.get('mailbox'), false)
-        const ics = renderCalendarIcs(cal)
-        return jsonResponse({ calendarId: cal.id, ics, eventsCount: (cal.events ?? []).length })
-      }
-      if ((calImportMatch || pathname === '/api/webmail/calendars/import') && method === 'POST') {
-        const body = await readJsonBody<{ ics?: string; mailbox?: string; calendarId?: string }>(req)
-        const calId = calImportMatch?.[1] ?? body.calendarId ?? url.searchParams.get('calendarId') ?? ''
-        const cal = calendars.find((c) => c.id === calId)
-        if (!cal) return fail('NOT_FOUND', `calendar "${calId}" not found`)
-        await resolveCalendarAccess(cal, body.mailbox ?? url.searchParams.get('mailbox'), true)
-        const importedEvents = parseAndValidateIcs(body.ics ?? '', cal.timezone)
-        cal.events = [...(cal.events ?? []), ...importedEvents]
-        await ext.write('webmail/calendars.json', calendars)
-        return jsonResponse({ calendar: cal, importedCount: importedEvents.length, events: cal.events }, 201)
-      }
-      if (calShareMatch && (method === 'POST' || method === 'DELETE')) {
-        const calId = calShareMatch[1]!
-        const cal = calendars.find((c) => c.id === calId)
-        if (!cal) return fail('NOT_FOUND', `calendar "${calId}" not found`)
-        const callerMailbox = await resolveCalendarAccess(cal, url.searchParams.get('mailbox'), false)
-        if (cal.owner.toLowerCase() !== callerMailbox) {
-          return fail('FORBIDDEN', 'only the calendar owner may modify sharing')
-        }
-        const ownerMailbox = cal.owner.toLowerCase()
-        const body = await readJsonBody<{
-          principal?: string
-          grantee?: string
-          permission?: 'read' | 'read-write' | 'none' | 'revoke'
-          revoke?: boolean
-        }>(req)
-        const rawPrincipal =
-          body.principal ??
-          body.grantee ??
-          url.searchParams.get('principal') ??
-          url.searchParams.get('grantee') ??
-          ''
-        const targetPrincipal = rawPrincipal.trim().toLowerCase()
-        if (!targetPrincipal || !/^[^\s@/\\]+@[^\s@/\\]+$/.test(targetPrincipal)) {
-          return fail('VALIDATION', 'a valid share principal email address is required')
-        }
-        if (method === 'DELETE' || body.revoke === true || body.permission === 'none' || body.permission === 'revoke') {
-          cal.shares = cal.shares.filter((s) => s.principal.toLowerCase() !== targetPrincipal)
-          await ext.write('webmail/calendars.json', calendars)
-          await helpers.emitAudit({
-            actor: caller.principal.username,
-            action: 'webmail.calendar.share_revoked',
-            target: `calendar:${cal.id}`,
-            detail: { principal: targetPrincipal },
-            outcome: 'ok',
-            principalId: caller.principal.id,
-          })
-          return jsonResponse({ calendar: cal })
-        }
-        const allUsers = (await helpers.store.readSnapshot()).serviceUsers
-        const ownerUser = allUsers.find((u) => u.services.email && u.login.toLowerCase() === ownerMailbox)
-        const targetUser = allUsers.find((u) => u.services.email && u.login.toLowerCase() === targetPrincipal)
-        if (!ownerUser || !targetUser || targetUser.accountId !== ownerUser.accountId) {
-          return fail('NOT_FOUND', 'share target mailbox not found in account')
-        }
-        const permission = body.permission === 'read-write' ? 'read-write' : 'read'
-        const existingIdx = cal.shares.findIndex((s) => s.principal.toLowerCase() === targetPrincipal)
-        const shareEntry = {
-          principal: targetPrincipal,
-          permission,
-          sharedAt: new Date().toISOString(),
-        } as const
-        if (existingIdx >= 0) cal.shares[existingIdx] = shareEntry
-        else cal.shares.push(shareEntry)
-        await ext.write('webmail/calendars.json', calendars)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'webmail.calendar.shared',
-          target: `calendar:${cal.id}`,
-          detail: { principal: shareEntry.principal, permission },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ calendar: cal })
-      }
-      if (calItemMatch && (method === 'PATCH' || method === 'PUT')) {
-        const calId = calItemMatch[1]!
-        const cal = calendars.find((c) => c.id === calId)
-        if (!cal) return fail('NOT_FOUND', `calendar "${calId}" not found`)
-        const body = await readJsonBody<Partial<WebmailCalendar> & { mailbox?: string }>(req)
-        await resolveCalendarAccess(cal, body.mailbox ?? url.searchParams.get('mailbox'), true)
-        if (body.name !== undefined) cal.name = assertSafeCalendarText(body.name, 'calendar name')
-        if (body.color !== undefined) cal.color = body.color
-        if (body.timezone !== undefined) cal.timezone = assertValidTimezone(body.timezone)
-        if (Array.isArray(body.events)) {
-          cal.events = body.events.map((ev) => ({
-            id: ev.id ?? randomUUID(),
-            uid: assertSafeCalendarText(ev.uid ?? randomUUID(), 'UID'),
-            summary: assertSafeCalendarText(ev.summary ?? '', 'SUMMARY'),
-            description: assertSafeCalendarText(ev.description ?? '', 'DESCRIPTION'),
-            location: assertSafeCalendarText(ev.location ?? '', 'LOCATION'),
-            dtstart: ev.dtstart,
-            dtend: ev.dtend ?? ev.dtstart,
-            timezone: assertValidTimezone(ev.timezone ?? cal.timezone),
-          }))
-        }
-        await ext.write('webmail/calendars.json', calendars)
-        return jsonResponse({ calendar: cal })
-      }
-      if (calItemMatch && method === 'DELETE') {
-        const calId = calItemMatch[1]!
-        const cal = calendars.find((c) => c.id === calId)
-        if (!cal) return fail('NOT_FOUND', `calendar "${calId}" not found`)
-        const callerMailbox = await resolveCalendarAccess(cal, url.searchParams.get('mailbox'), false)
-        if (cal.owner.toLowerCase() !== callerMailbox) {
-          return fail('FORBIDDEN', 'only the calendar owner may delete the calendar')
-        }
-        const next = calendars.filter((c) => c.id !== calId)
-        await ext.write('webmail/calendars.json', next)
-        return jsonResponse({ ok: true })
+        const submitted = scoped ? parseVacationWorkspaceRequest(raw) : null
+        const selected = await helpers.store.getServiceUserByLogin(mailbox)
+        if (!selected) return fail('NOT_FOUND', 'mailbox not found', { stateChanged: false })
+        const lease = await helpers.store.getWriterLock().acquire()
+        let writeAttempted = false
+        let vacation: WebmailVacationConfig
+        let auditCaller = caller
+        let auditAccount: Account
+        try {
+          const fresh = await helpers.requireCaller(req)
+          if (fresh.principal.id !== caller.principal.id || fresh.principal.kind !== caller.principal.kind
+            || fresh.sessionId !== caller.sessionId || fresh.apiTokenId !== caller.apiTokenId) return fail('FORBIDDEN', 'vacation authorization changed')
+          const service = await helpers.store.getServiceUserByLogin(mailbox)
+          if (!service || service.id !== selected.id || service.accountId !== selected.accountId || !service.services.email) return fail('NOT_FOUND', 'mailbox not found')
+          if (isMailboxPrincipal(fresh)) {
+            const bound = await requireMailboxPrincipalAccess(helpers.store, fresh)
+            if (bound.mailbox !== mailbox || bound.serviceUserId !== service.id) return fail('NOT_FOUND', 'mailbox not found')
+            auditAccount = bound.account
+          } else {
+            const account = await helpers.store.getAccount(service.accountId)
+            if (!account || account.status !== 'active') return fail('FORBIDDEN', 'hosting account is unavailable')
+            await helpers.assertCanAccessAccount(fresh, account, 'mailbox.access')
+            await assertAccountFeatures(helpers.store, fresh, account, ['email-accounts'])
+            auditAccount = account
+          }
+          auditCaller = fresh
+          const authority = await captureMailboxMetadataAuthority(helpers.store, mailbox)
+          const current = await ext.readOrDefault<WebmailVacationConfig | null>(fileKey, null)
+          if (current) assertMailboxMetadataAuthority(current.mailbox, current.ownerAuthority, authority)
+          const merged = { ...(current ?? defaultVac), ...body }
+          const fields = submitted ?? parseVacationWorkspaceRequest({ enabled: merged.enabled, subject: merged.subject,
+            body: merged.body, htmlBody: merged.htmlBody, startDate: merged.startDate, endDate: merged.endDate,
+            replyIntervalHours: merged.replyIntervalHours, expectedRevision: body.expectedRevision ?? vacationWorkspaceRevision(current) })
+          if (fields.expectedRevision !== vacationWorkspaceRevision(current)) return fail('CONFLICT', 'vacation configuration changed; reload before saving', { stateChanged: false })
+          vacation = { mailbox, ownerAuthority: authority, enabled: fields.enabled, subject: fields.subject, body: fields.body, htmlBody: fields.htmlBody,
+            startDate: fields.startDate, endDate: fields.endDate, replyIntervalHours: fields.replyIntervalHours,
+            compiledSieve: compileVacationWorkspace({ ...fields, mailbox }), updatedAt: new Date().toISOString() }
+          await lease.assertFencingToken()
+          writeAttempted = true
+          await atomicWriteJson(join(ext.baseDir, fileKey), vacation, 0o640, () => lease.assertFencingToken())
+          await lease.assertFencingToken()
+        } catch (error) {
+          if (writeAttempted) return fail('SERVICE_UNAVAILABLE', 'vacation write requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
+          if (isXpanelError(error)) return fail(error.code, error.message, { ...error.detail, stateChanged: false })
+          throw error
+        } finally { await lease.release() }
+        try {
+          await helpers.emitAudit({ actor: auditCaller.principal.username, action: 'webmail.vacation.updated',
+            target: `vacation:${vacation.mailbox}`, detail: { enabled: vacation.enabled, nativeApplied: false },
+            outcome: 'ok', principalId: auditCaller.principal.id }, { accountId: auditAccount.id, resellerId: auditAccount.ownerId })
+        } catch { return fail('SERVICE_UNAVAILABLE', 'vacation audit requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true }) }
+        return scoped ? jsonResponse({ context: { mailbox }, vacation: projectVacationWorkspace(vacation),
+          revision: vacationWorkspaceRevision(vacation), stateChanged: true, application, metadataReview: MAILBOX_METADATA_REVIEW_REQUIRED })
+          : jsonResponse({ vacation: projectVacationWorkspace(vacation), metadataReview: MAILBOX_METADATA_REVIEW_REQUIRED })
       }
     }
 
@@ -2252,6 +1874,120 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     ) {
       const caller = await helpers.requireCaller(req)
       const contacts = await ext.readOrDefault<WebmailContact[]>('webmail/contacts.json', [])
+      if (!Array.isArray(contacts)) return fail('PRECONDITION_FAILED', 'contact collection requires review', { stateChanged: false })
+      const collectionRevision = (values: readonly WebmailContact[]) => createHash('sha256').update(JSON.stringify(values)).digest('hex')
+      const originalCollectionRevision = collectionRevision(contacts)
+      const mutateContacts = async <T>(mailbox: string, operation: (fresh: AuthenticatedCaller, current: WebmailContact[],
+        persist: (values: WebmailContact[]) => Promise<void>) => Promise<T>): Promise<T> => {
+        const selected = await helpers.store.getServiceUserByLogin(mailbox)
+        if (!selected) return fail('NOT_FOUND', 'mailbox not found', { stateChanged: false })
+        const lease = await helpers.store.getWriterLock().acquire()
+        let writeAttempted = false
+        try {
+          const fresh = await helpers.requireCaller(req)
+          if (fresh.principal.id !== caller.principal.id || fresh.principal.kind !== caller.principal.kind
+            || fresh.sessionId !== caller.sessionId || fresh.apiTokenId !== caller.apiTokenId) return fail('FORBIDDEN', 'contact authorization changed')
+          const service = await helpers.store.getServiceUserByLogin(mailbox)
+          if (!service || service.id !== selected.id || service.accountId !== selected.accountId || !service.services.email) return fail('NOT_FOUND', 'mailbox not found')
+          if (isMailboxPrincipal(fresh)) {
+            const bound = await requireMailboxPrincipalAccess(helpers.store, fresh)
+            if (bound.mailbox !== mailbox || bound.serviceUserId !== service.id) return fail('NOT_FOUND', 'mailbox not found')
+          } else {
+            const account = await helpers.store.getAccount(service.accountId)
+            if (!account || account.status !== 'active') return fail('FORBIDDEN', 'hosting account is unavailable')
+            await helpers.assertCanAccessAccount(fresh, account, 'mailbox.access')
+            await assertAccountFeatures(helpers.store, fresh, account, ['email-accounts'])
+          }
+          const current = await ext.readOrDefault<WebmailContact[]>('webmail/contacts.json', [])
+          if (!Array.isArray(current)) return fail('PRECONDITION_FAILED', 'contact collection requires review')
+          const authority = await captureMailboxMetadataAuthority(helpers.store, mailbox)
+          const access = createContactMetadataAccess(helpers.store, authority)
+          const persist = async (values: WebmailContact[]) => {
+            const previous = new Map(current.map(contact => [contact.id, contact]))
+            for (const contact of values) {
+              const before = previous.get(contact.id)
+              if (!before) {
+                if (contact.owner.toLowerCase() !== mailbox) return fail('FORBIDDEN', 'new contact owner must match the authorized mailbox')
+                contact.ownerAuthority = authority
+              } else if (JSON.stringify(before) !== JSON.stringify(contact)) {
+                if (contact.owner !== before.owner || JSON.stringify(contact.ownerAuthority) !== JSON.stringify(before.ownerAuthority)) return fail('VALIDATION', 'contact ownership is immutable')
+                if (before.owner.toLowerCase() === mailbox) assertMailboxMetadataAuthority(before.owner, before.ownerAuthority, authority)
+                else if ((await access(before))?.permission !== 'read-write') return fail('NOT_FOUND', 'contact not found')
+              }
+              const oldShares = before?.shares ?? []
+              for (const share of contact.shares ?? []) if (!oldShares.some(old => JSON.stringify(old) === JSON.stringify(share))) {
+                const grantee = await captureMailboxMetadataAuthority(helpers.store, share.principal)
+                if (grantee.accountId !== contact.ownerAuthority?.accountId) return fail('NOT_FOUND', 'share target mailbox not found in account')
+                share.granteeAuthority = grantee
+              }
+            }
+            const retained = new Set(values.map(contact => contact.id))
+            for (const contact of current) if (!retained.has(contact.id)) {
+              if (contact.owner.toLowerCase() !== mailbox) return fail('FORBIDDEN', 'only the contact owner may delete the contact')
+              assertMailboxMetadataAuthority(contact.owner, contact.ownerAuthority, authority)
+            }
+            await assertContactMutationCapacity(helpers.store, current, values, mailbox)
+            await lease.assertFencingToken()
+            writeAttempted = true
+            await atomicWriteJson(join(ext.baseDir, 'webmail', 'contacts.json'), values, 0o640, () => lease.assertFencingToken())
+            if (collectionRevision(await ext.readOrDefault<WebmailContact[]>('webmail/contacts.json', [])) !== collectionRevision(values)) throw new Error('contact publication readback mismatch')
+            await lease.commitAuthority({ incrementRevision: false })
+            const account = await helpers.store.getAccount(authority.accountId)
+            if (!account) throw new Error('contact audit account unavailable')
+            await helpers.emitAudit({ actor: fresh.principal.username, action: 'webmail.contact.metadata_written', target: 'mailbox:' + mailbox,
+              detail: { operation: method }, outcome: 'ok', principalId: fresh.principal.id }, { accountId: account.id, resellerId: account.ownerId })
+          }
+          return await operation(fresh, current, persist)
+        } catch (error) {
+          if (writeAttempted) return fail('SERVICE_UNAVAILABLE', 'contact write requires verification', {
+            stateChanged: true, verificationRequired: true, unknownOutcome: true,
+          })
+          if (isXpanelError(error)) return fail(error.code, error.message, { ...error.detail, stateChanged: false })
+          throw error
+        } finally { await lease.release() }
+      }
+      const persistLegacyContacts = (values: WebmailContact[], mailbox: string) => mutateContacts(mailbox, async (_fresh, current, persist) => {
+        if (collectionRevision(current) !== originalCollectionRevision) return fail('CONFLICT', 'contacts changed; reload before saving', { stateChanged: false })
+        await persist(values)
+      })
+      const isCollectionCreate = method === 'POST' && pathname === '/api/webmail/contacts'
+      const isItemEdit = Boolean(contactDeleteMatch) && (method === 'PATCH' || method === 'PUT')
+      if (isMailboxPrincipal(caller) && (isCollectionCreate || isItemEdit)) {
+        const mailbox = await requireMailbox(helpers.store, caller)
+        if (url.searchParams.size) return fail('VALIDATION', 'contact workspace does not accept mailbox selectors', { stateChanged: false })
+        const fields = parseContactWorkspaceRequest(await readJsonBody<unknown>(req), isItemEdit,
+          (value, field) => assertSafeCalendarText(value as string, field))
+        const saved = await mutateContacts(mailbox, async (fresh, current, persist) => {
+          const bound = await requireMailboxPrincipalAccess(helpers.store, fresh)
+          let next: WebmailContact
+          if (isItemEdit) {
+            const targetId = contactDeleteMatch![1]!
+            const target = current.find(value => value.id === targetId)
+            if (!target) return fail('NOT_FOUND', 'contact not found')
+            const authority = await captureMailboxMetadataAuthority(helpers.store, mailbox)
+            const access = await createContactMetadataAccess(helpers.store, authority)(target)
+            if (target.owner.toLowerCase() === mailbox) assertMailboxMetadataAuthority(target.owner, target.ownerAuthority, authority)
+            if (!access) return fail('NOT_FOUND', 'contact not found')
+            if (target.owner.toLowerCase() !== mailbox) {
+              if (access.permission !== 'read-write') return fail('FORBIDDEN', 'contact share is read-only')
+            }
+            if (contactWorkspaceRevision(target) !== fields.expectedRevision) return fail('CONFLICT', 'contact changed; reload before saving', { stateChanged: false })
+            next = updateWorkspaceContact(target, fields)
+            await persist(current.map(value => value.id === targetId ? next : value))
+          } else {
+            next = createWorkspaceContact(mailbox, fields)
+            await persist([...current, next])
+          }
+          return { contact: next, account: bound.account }
+        })
+        const contact = saved.contact
+        try {
+          await helpers.emitAudit({ actor: caller.principal.username, action: isItemEdit ? 'webmail.contact.updated' : 'webmail.contact.created',
+            target: 'contact:' + contact.id, outcome: 'ok', principalId: caller.principal.id },
+          { accountId: saved.account.id, resellerId: saved.account.ownerId })
+        } catch { return fail('SERVICE_UNAVAILABLE', 'contact audit requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true }) }
+        return jsonResponse({ context: { mailbox }, contact: projectContactWorkspace(contact), stateChanged: true }, isCollectionCreate ? 201 : 200)
+      }
       const resolveContactAccess = async (
         contact: WebmailContact,
         requestedMailbox: string | null | undefined,
@@ -2262,10 +1998,11 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           caller,
           requestedMailbox ?? (isMailboxPrincipal(caller) ? undefined : contact.owner),
         )
-        if (contact.owner.toLowerCase() === mailbox) return mailbox
-        const share = (contact.shares ?? []).find((s) => s.principal.toLowerCase() === mailbox)
-        if (!share) return fail('NOT_FOUND', 'contact not found')
-        if (requireWrite && share.permission !== 'read-write') {
+        const authority = await captureMailboxMetadataAuthority(helpers.store, mailbox)
+        if (contact.owner.toLowerCase() === mailbox) assertMailboxMetadataAuthority(contact.owner, contact.ownerAuthority, authority)
+        const access = await createContactMetadataAccess(helpers.store, authority)(contact)
+        if (!access) return fail('NOT_FOUND', 'contact not found')
+        if (requireWrite && access.permission !== 'read-write') {
           return fail('FORBIDDEN', 'contact share is read-only')
         }
         return mailbox
@@ -2273,13 +2010,11 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
 
       if (method === 'GET' && pathname === '/api/webmail/contacts/export') {
         const mailbox = await requireMailbox(helpers.store, caller, url.searchParams.get('mailbox'))
-        const visible = contacts.filter(
-          (contact) =>
-            contact.owner.toLowerCase() === mailbox ||
-            (contact.shares ?? []).some((s) => s.principal.toLowerCase() === mailbox),
-        )
+        const access = createContactMetadataAccess(helpers.store, await captureMailboxMetadataAuthority(helpers.store, mailbox))
+        const visible = (await Promise.all(contacts.map(async contact => await access(contact) ? contact : null))).filter((contact): contact is WebmailContact => contact !== null)
         return jsonResponse({
           mailbox,
+          metadataReview: MAILBOX_METADATA_REVIEW_REQUIRED,
           vcard: visible.map((c) => c.vcard).join('\r\n'),
           count: visible.length,
         })
@@ -2306,8 +2041,8 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         )
         const imported = parseAndValidateVcards(body.vcard ?? '', owner)
         contacts.push(...imported)
-        await ext.write('webmail/contacts.json', contacts)
-        return jsonResponse({ contacts: imported, importedCount: imported.length }, 201)
+        await persistLegacyContacts(contacts, owner)
+        return jsonResponse({ contacts: imported.map(projectContactWorkspace), importedCount: imported.length }, 201)
       }
       if (contactShareMatch && (method === 'POST' || method === 'DELETE')) {
         const contactId = contactShareMatch[1]!
@@ -2337,8 +2072,8 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         contact.shares = contact.shares ?? []
         if (method === 'DELETE' || body.revoke === true || body.permission === 'none' || body.permission === 'revoke') {
           contact.shares = contact.shares.filter((s) => s.principal.toLowerCase() !== targetPrincipal)
-          await ext.write('webmail/contacts.json', contacts)
-          return jsonResponse({ contact })
+          await persistLegacyContacts(contacts, callerMailbox)
+          return jsonResponse({ contact: projectContactWorkspace(contact) })
         }
         const allUsers = (await helpers.store.readSnapshot()).serviceUsers
         const ownerUser = allUsers.find((u) => u.services.email && u.login.toLowerCase() === ownerMailbox)
@@ -2355,17 +2090,18 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         const idx = contact.shares.findIndex((s) => s.principal.toLowerCase() === targetPrincipal)
         if (idx >= 0) contact.shares[idx] = shareEntry
         else contact.shares.push(shareEntry)
-        await ext.write('webmail/contacts.json', contacts)
-        return jsonResponse({ contact })
+        await persistLegacyContacts(contacts, callerMailbox)
+        return jsonResponse({ contact: projectContactWorkspace(contact) })
       }
       if (method === 'GET' && pathname === '/api/webmail/contacts') {
+        if (isMailboxPrincipal(caller) && url.searchParams.size) return fail('VALIDATION', 'contact workspace does not accept mailbox selectors', { stateChanged: false })
         const mailbox = await requireMailbox(helpers.store, caller, url.searchParams.get('mailbox'))
+        const access = createContactMetadataAccess(helpers.store, await captureMailboxMetadataAuthority(helpers.store, mailbox))
+        const visible = (await Promise.all(contacts.map(async contact => await access(contact) ? contact : null))).filter((contact): contact is WebmailContact => contact !== null)
         return jsonResponse({
-          contacts: contacts.filter(
-            (contact) =>
-              contact.owner.toLowerCase() === mailbox ||
-              (contact.shares ?? []).some((s) => s.principal.toLowerCase() === mailbox),
-          ),
+          context: { mailbox },
+          metadataReview: MAILBOX_METADATA_REVIEW_REQUIRED,
+          contacts: visible.map(projectContactWorkspace),
         })
       }
       if (method === 'POST' && pathname === '/api/webmail/contacts') {
@@ -2378,39 +2114,19 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         const organization = body.organization ? assertSafeCalendarText(body.organization, 'organization') : ''
         const title = body.title ? assertSafeCalendarText(body.title, 'title') : ''
         const owner = await requireMailbox(helpers.store, caller, body.owner ?? url.searchParams.get('mailbox'))
-        const vcard = [
-          'BEGIN:VCARD',
-          'VERSION:3.0',
-          `FN:${fullName}`,
-          `EMAIL;TYPE=INTERNET:${email}`,
-          ...(phone ? [`TEL;TYPE=CELL:${phone}`] : []),
-          ...(organization ? [`ORG:${organization}`] : []),
-          ...(title ? [`TITLE:${title}`] : []),
-          'END:VCARD',
-        ].join('\r\n')
-        const contact: WebmailContact = {
-          id: randomUUID(),
-          owner,
-          fullName,
-          email,
-          phone,
-          organization,
-          title,
-          groups: body.groups ?? [],
-          shares: [],
-          vcard,
-          createdAt: new Date().toISOString(),
-        }
+        const groups = normalizeContactGroups(body.groups ?? [])
+        const contact = updateWorkspaceContactGroups(createWorkspaceContact(owner, { fullName, email, phone, organization, title }), groups)
         contacts.push(contact)
-        await ext.write('webmail/contacts.json', contacts)
-        return jsonResponse({ contact }, 201)
+        await persistLegacyContacts(contacts, owner)
+        return jsonResponse({ contact: projectContactWorkspace(contact) }, 201)
       }
       if (contactDeleteMatch && (method === 'PATCH' || method === 'PUT')) {
         const targetId = contactDeleteMatch[1]!
         const target = contacts.find((c) => c.id === targetId)
         if (!target) return fail('NOT_FOUND', 'contact not found')
         const body = await readJsonBody<Partial<WebmailContact> & { mailbox?: string }>(req)
-        await resolveContactAccess(target, body.mailbox ?? url.searchParams.get('mailbox'), true)
+        const mailbox = await resolveContactAccess(target, body.mailbox ?? url.searchParams.get('mailbox'), true)
+        const original = { ...target }
         if (body.fullName !== undefined) target.fullName = assertSafeCalendarText(body.fullName, 'fullName')
         if (body.email !== undefined) {
           const email = assertSafeCalendarText(body.email, 'email').toLowerCase()
@@ -2420,19 +2136,11 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         if (body.phone !== undefined) target.phone = assertSafeCalendarText(body.phone, 'phone')
         if (body.organization !== undefined) target.organization = assertSafeCalendarText(body.organization, 'organization')
         if (body.title !== undefined) target.title = assertSafeCalendarText(body.title, 'title')
-        if (Array.isArray(body.groups)) target.groups = body.groups
-        target.vcard = [
-          'BEGIN:VCARD',
-          'VERSION:3.0',
-          `FN:${target.fullName}`,
-          `EMAIL;TYPE=INTERNET:${target.email}`,
-          ...(target.phone ? [`TEL;TYPE=CELL:${target.phone}`] : []),
-          ...(target.organization ? [`ORG:${target.organization}`] : []),
-          ...(target.title ? [`TITLE:${target.title}`] : []),
-          'END:VCARD',
-        ].join('\r\n')
-        await ext.write('webmail/contacts.json', contacts)
-        return jsonResponse({ contact: target })
+        const groups = body.groups === undefined ? target.groups : normalizeContactGroups(body.groups, original.groups)
+        Object.assign(target, updateWorkspaceContact(original, target))
+        if (JSON.stringify(groups) !== JSON.stringify(original.groups)) Object.assign(target, updateWorkspaceContactGroups(target, groups))
+        await persistLegacyContacts(contacts, mailbox)
+        return jsonResponse({ contact: projectContactWorkspace(target) })
       }
       if (method === 'DELETE') {
         const body = await readJsonBody<{ id?: unknown }>(req)
@@ -2456,7 +2164,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           return fail('FORBIDDEN', 'only the contact owner may delete the contact')
         }
         const next = contacts.filter((c) => c.id !== targetId)
-        await ext.write('webmail/contacts.json', next)
+        await persistLegacyContacts(next, callerMailbox)
         return jsonResponse({ ok: true })
       }
     }
@@ -2634,128 +2342,9 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       return jsonResponse({ ok: true, removedZones, keptZones })
     }
 
-    if (pathname === '/api/dns/cluster') {
-      const caller = await helpers.requireCaller(req)
-      await helpers.assertRoot(caller, 'dns.cluster')
-      const defaultCluster: DnsClusterConfig = {
-        enabled: false,
-        provider: 'powerdns-cluster',
-        nodes: [],
-        cloudflareZoneMap: {},
-        autoSyncOnReconcile: true,
-        updatedAt: new Date().toISOString(),
-      }
-      if (method === 'GET') {
-        return jsonResponse({ cluster: await ext.readOrDefault('dns/cluster.json', defaultCluster) })
-      }
-      if (method === 'PUT') {
-        const body = await readJsonBody<Partial<DnsClusterConfig>>(req)
-        const current = await ext.readOrDefault('dns/cluster.json', defaultCluster)
-        const cluster: DnsClusterConfig = {
-          ...current,
-          ...body,
-          updatedAt: new Date().toISOString(),
-        }
-        await ext.write('dns/cluster.json', cluster)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'dns.cluster.updated',
-          target: 'dns:cluster',
-          detail: { provider: cluster.provider, enabled: cluster.enabled, nodesCount: cluster.nodes.length },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ cluster })
-      }
-    }
-
     // =========================================================================
     // 5. Complete Backups & Transfers (/api/backups/*, /api/transfers/*, /api/lifecycle/cpanel-import)
     // =========================================================================
-    const destDeleteMatch = /^\/api\/backups\/destinations\/([^/]+)$/.exec(pathname)
-    if (pathname === '/api/backups/destinations' || destDeleteMatch) {
-      const caller = await helpers.requireCaller(req)
-      await helpers.assertRoot(caller, 'backups.destinations')
-      const destinations = await ext.readOrDefault<BackupDestination[]>('backups/destinations.json', [])
-      if (method === 'GET') {
-        return jsonResponse({ destinations })
-      }
-      if (method === 'POST') {
-        const body = await readJsonBody<Partial<BackupDestination>>(req)
-        if (!body.name || !body.kind) return fail('VALIDATION', 'destination name and kind are required')
-        const dest: BackupDestination = {
-          id: randomUUID(),
-          name: body.name,
-          kind: body.kind,
-          endpoint: body.endpoint ?? 'https://s3.us-east-1.amazonaws.com',
-          bucket: body.bucket ?? 'xpanel-backups',
-          region: body.region ?? 'us-east-1',
-          pathPrefix: body.pathPrefix ?? '/backups/daily',
-          username: body.username ?? null,
-          retentionDays: body.retentionDays ?? 30,
-          enabled: body.enabled ?? true,
-          createdAt: new Date().toISOString(),
-        }
-        destinations.push(dest)
-        await ext.write('backups/destinations.json', destinations)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'backup.destination.created',
-          target: `backup-destination:${dest.name}`,
-          detail: { kind: dest.kind, endpoint: dest.endpoint },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ destination: dest }, 201)
-      }
-      if (method === 'DELETE') {
-        const body = await readJsonBody<{ id?: string }>(req)
-        const targetId = destDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
-        const next = destinations.filter((d) => d.id !== targetId)
-        await ext.write('backups/destinations.json', next)
-        return jsonResponse({ ok: true })
-      }
-    }
-
-    if (pathname === '/api/backups/schedule') {
-      const caller = await helpers.requireCaller(req)
-      await helpers.assertRoot(caller, 'backups.schedule')
-      const defaultSched: BackupScheduleConfig = {
-        enabled: true,
-        frequency: 'daily',
-        cron: '0 2 * * *',
-        retentionCount: 7,
-        compress: 'zstd',
-        includeDatabases: true,
-        includeMail: true,
-        selectedAccounts: 'all',
-        destinationIds: [],
-        updatedAt: new Date().toISOString(),
-      }
-      if (method === 'GET') {
-        return jsonResponse({ schedule: await ext.readOrDefault('backups/schedule.json', defaultSched) })
-      }
-      if (method === 'PUT') {
-        const body = await readJsonBody<Partial<BackupScheduleConfig>>(req)
-        const current = await ext.readOrDefault('backups/schedule.json', defaultSched)
-        const schedule: BackupScheduleConfig = {
-          ...current,
-          ...body,
-          updatedAt: new Date().toISOString(),
-        }
-        await ext.write('backups/schedule.json', schedule)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'backup.schedule.updated',
-          target: 'backup:schedule',
-          detail: { frequency: schedule.frequency, retentionCount: schedule.retentionCount },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ schedule })
-      }
-    }
-
     const restoreFileMatch = /^\/api\/backups\/snapshots\/([^/]+)\/restore-file$/.exec(pathname)
     if (restoreFileMatch && method === 'POST') {
       const caller = await helpers.requireCaller(req)
@@ -2846,115 +2435,10 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       }
     }
 
-    const transferPatchMatch = /^\/api\/transfers\/sessions\/([^/]+)$/.exec(pathname)
-    if (pathname === '/api/transfers/sessions' || transferPatchMatch) {
-      const caller = await helpers.requireCaller(req)
-      await helpers.assertRoot(caller, 'transfers.sessions')
-      if (method === 'GET') {
-        return jsonResponse({ sessions: [...liveTransfers.values()] })
-      }
-      if (method === 'POST') {
-        const body = await readJsonBody<{ id?: string; auth?: unknown; events?: TransferEvent[] }>(req)
-        const id = body.id ?? randomUUID()
-        let session = createTransferSession({
-          id,
-          actor: caller.principal.username,
-          now: new Date().toISOString(),
-          auth: (body.auth as TransferSession['auth']) ?? {
-            kind: 'ssh-key',
-            host: 'cpanel-source.example.com',
-            port: 22,
-            user: 'root',
-            keyId: randomUUID(),
-            hostKeyFingerprint: 'SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-          },
-        })
-        for (const ev of body.events ?? []) {
-          session = transition(session, ev, new Date().toISOString())
-        }
-        liveTransfers.set(session.id, session)
-        return jsonResponse({ session }, 201)
-      }
-      if (method === 'PATCH') {
-        const body = await readJsonBody<{ id?: string; event?: TransferEvent }>(req)
-        const id = transferPatchMatch?.[1] ?? body.id ?? ''
-        const existing = liveTransfers.get(id)
-        if (!existing) return fail('NOT_FOUND', `transfer session "${id}" not found`)
-        const updated = body.event ? transition(existing, body.event, new Date().toISOString()) : existing
-        liveTransfers.set(updated.id, updated)
-        const review =
-          updated.state === 'reviewed' || updated.state === 'applying' ? buildReview(updated) : null
-        const digest = review ? reviewDigest(review) : updated.reviewDigest
-        return jsonResponse({ session: updated, review, digest })
-      }
-    }
-
     if (method === 'POST' && pathname === '/api/lifecycle/cpanel-import') {
       const caller = await helpers.requireCaller(req)
       await helpers.assertRoot(caller, 'lifecycle.cpanel_import')
-      const body = await readJsonBody<{
-        archiveName?: string
-        username?: string
-        primaryDomain?: string
-        planId?: Id
-        contactEmail?: string
-        databases?: string[]
-        mailboxes?: string[]
-        password?: string
-        passwordHash?: string
-      }>(req)
-      const username = (body.username ?? 'cpmoveuser').toLowerCase()
-      const primaryDomain = validateDomainName(body.primaryDomain ?? `${username}.example.com`)
-      let planId = body.planId
-      if (!planId) {
-        const plans = await helpers.store.listPlans()
-        planId = plans[0]?.id
-      }
-      if (!planId) return fail('PRECONDITION_FAILED', 'at least one hosting plan must exist before importing cpmove archive')
-
-      let account = await helpers.store.getAccountByUsername(username)
-      if (!account) {
-        account = await helpers.store.createAccount({
-          username,
-          passwordHash: await passwordHashFromInput(body),
-          primaryDomain,
-          planId,
-          ownerId: null,
-          contactEmail: body.contactEmail ?? `admin@${primaryDomain}`,
-          ipv4:
-            (await helpers.store.listServerIps()).find((ip) => ip.version === 4)?.address ??
-            '203.0.113.10',
-          shell: 'jailed',
-          php: {
-            version: '8.3',
-            handler: 'fpm',
-            fpm: {
-              mode: 'ondemand',
-              maxChildren: 4,
-              startServers: 2,
-              minSpareServers: 1,
-              maxSpareServers: 3,
-              maxRequests: 500,
-              processIdleTimeoutSec: 10,
-            },
-            ini: {},
-          },
-        })
-      }
-
-      await helpers.emitAudit({
-        actor: caller.principal.username,
-        action: 'lifecycle.cpanel_import',
-        target: `account:${account.username}`,
-        detail: { archiveName: body.archiveName ?? `cpmove-${username}.tar.gz`, primaryDomain },
-        outcome: 'ok',
-        principalId: caller.principal.id,
-      })
-      return jsonResponse({
-        ok: true,
-        importedAccount: account,
-        archiveName: body.archiveName ?? `cpmove-${username}.tar.gz`,
-      }, 201)
+      return fail('PRECONDITION_FAILED', 'cPanel import requires retained verified archive custody and a qualified execution adapter', { stateChanged: false, nativeApplied: false })
     }
 
     // =========================================================================
@@ -2991,7 +2475,36 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
               users?: { username: string; password?: string; passwordHash?: string }[]
             }[]
           }>(req)
-          const rules: DirectoryPrivacyRule[] = await Promise.all((body.rules ?? []).map(async (r) => ({
+          // The compiled nginx/apache fragments interpolate these values, so the input is
+          // normalized and constrained here before it can reach a rendered directive.
+          const controlText = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/
+          const rawRules = body.rules ?? []
+          if (!Array.isArray(rawRules) || rawRules.length > 1000) return fail('VALIDATION', 'directory privacy rules must be an array of at most 1000 entries', { stateChanged: false })
+          const seenPaths = new Set<string>()
+          for (const rule of rawRules) {
+            if (!rule || typeof rule !== 'object' || Array.isArray(rule)) return fail('VALIDATION', 'each directory privacy rule must be an object', { stateChanged: false })
+            if (typeof rule.path !== 'string' || rule.path.length > 512 || controlText.test(rule.path)) return fail('VALIDATION', 'each protected directory needs a canonical relative path', { stateChanged: false })
+            const normalizedPath = rule.path.startsWith('/') ? rule.path : `/${rule.path}`
+            if (!/^\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/.test(normalizedPath) || normalizedPath.split('/').slice(1).some(part => part === '' || part === '.' || part === '..')) {
+              return fail('VALIDATION', 'protected directory paths must be canonical and free of traversal segments', { stateChanged: false })
+            }
+            if (seenPaths.has(normalizedPath)) return fail('VALIDATION', 'each protected directory may be listed only once', { stateChanged: false })
+            seenPaths.add(normalizedPath)
+            if (rule.authName !== undefined && (typeof rule.authName !== 'string' || rule.authName.length > 128 || controlText.test(rule.authName))) {
+              return fail('VALIDATION', 'the authentication prompt must be bounded text without control characters', { stateChanged: false })
+            }
+            if (rule.enabled !== undefined && typeof rule.enabled !== 'boolean') return fail('VALIDATION', 'the enabled flag must be a boolean', { stateChanged: false })
+            if (rule.users !== undefined && (!Array.isArray(rule.users) || rule.users.length > 100)) return fail('VALIDATION', 'each protected directory may list at most 100 users', { stateChanged: false })
+            const seenUsers = new Set<string>()
+            for (const user of rule.users ?? []) {
+              if (!user || typeof user !== 'object' || Array.isArray(user) || typeof user.username !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(user.username)) {
+                return fail('VALIDATION', 'each protected-directory user needs a bounded username', { stateChanged: false })
+              }
+              if (seenUsers.has(user.username)) return fail('VALIDATION', 'each username may be listed only once per directory', { stateChanged: false })
+              seenUsers.add(user.username)
+            }
+          }
+          const rules: DirectoryPrivacyRule[] = await Promise.all(rawRules.map(async (r) => ({
             path: r.path.startsWith('/') ? r.path : `/${r.path}`,
             authName: r.authName ?? 'Protected Area',
             enabled: r.enabled ?? true,
@@ -3292,144 +2805,8 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     }
 
     // =========================================================================
-    // 7. Databases Beyond MariaDB (PostgreSQL, Remote Hosts, Maintenance/Repair, Mongo, Cache)
+    // 7. Database remote hosts, maintenance and cache
     // =========================================================================
-    const pgUserDeleteMatch = /^\/api\/databases\/postgres\/users\/([^/]+)$/.exec(pathname)
-    if (pathname === '/api/databases/postgres/users' || pgUserDeleteMatch) {
-      const caller = await helpers.requireCaller(req)
-      const users = await ext.readOrDefault<PostgresUserRecord[]>('databases/postgres-users.json', [])
-      if (method === 'GET' && !pgUserDeleteMatch) {
-        const accountIdFilter = url.searchParams.get('accountId')
-        if (accountIdFilter) {
-          const targetAccount = await requireResolvedAccount(caller, accountIdFilter, 'database.postgres.user.list')
-          return jsonResponse({
-            users: users.filter((u) => u.accountId === targetAccount.id).map(publicPostgresUser),
-          })
-        }
-        return jsonResponse({ users: (await scopedRecords(caller, users)).map(publicPostgresUser) })
-      }
-      if (method === 'POST' && !pgUserDeleteMatch) {
-        const body = await readJsonBody<{
-          accountId?: Id
-          username?: string
-          password?: string
-          databaseIds?: Id[]
-          privileges?: PostgresUserRecord['privileges']
-        }>(req)
-        const account = await requireResolvedAccount(caller, body.accountId, 'database.postgres.user.create')
-
-        const databaseIds = body.databaseIds ?? []
-        if (databaseIds.length > 0) {
-          const dbs = await ext.readOrDefault<PostgresDatabaseRecord[]>('databases/postgres-dbs.json', [])
-          for (const dbId of databaseIds) {
-            const db = dbs.find((d) => (d.id === dbId || d.name === dbId) && d.accountId === account.id)
-            if (!db) {
-              return fail('NOT_FOUND', `PostgreSQL database "${dbId}" not found`)
-            }
-          }
-        }
-
-        const rawName = (body.username ?? 'app').replace(new RegExp(`^${account.username}_`), '')
-        const pgRole = `${account.username}_${rawName}`
-        if (typeof body.password !== 'string' || body.password.length < 8) return fail('VALIDATION', 'a PostgreSQL password of at least 8 characters is required')
-        const scramHash = `SCRAM-SHA-256$4096:${createHash('sha256').update(body.password).digest('base64')}`
-        const compiledSql = `CREATE ROLE "${pgRole}" WITH LOGIN PASSWORD '${scramHash}';`
-        const record: PostgresUserRecord = {
-          id: randomUUID(),
-          accountId: account.id,
-          username: pgRole,
-          databaseIds,
-          privileges: body.privileges ?? ['ALL'],
-          scramHash,
-          compiledSql,
-          createdAt: new Date().toISOString(),
-        }
-        await helpers.assertCanAccessAccount(caller, account, 'database.postgres.user.create')
-        users.push(record)
-        await ext.write('databases/postgres-users.json', users)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'database.postgres.user.created',
-          target: `pg-user:${record.username}`,
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ user: publicPostgresUser(record) }, 201)
-      }
-      if (method === 'DELETE') {
-        const body = await readJsonBody<{ id?: string }>(req)
-        const targetId = pgUserDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
-        const targetUser = users.find((u) => u.id === targetId || u.username === targetId)
-        await assertRecordAccount(caller, targetUser, 'database.postgres.user.delete')
-        const next = users.filter((u) => u.id !== targetId && u.username !== targetId)
-        await ext.write('databases/postgres-users.json', next)
-        return jsonResponse({ ok: true })
-      }
-    }
-
-    const pgDeleteMatch = /^\/api\/databases\/postgres\/([^/]+)$/.exec(pathname)
-    if (pathname === '/api/databases/postgres' || pgDeleteMatch) {
-      const caller = await helpers.requireCaller(req)
-      const dbs = await ext.readOrDefault<PostgresDatabaseRecord[]>('databases/postgres-dbs.json', [])
-      if (method === 'GET') {
-        const accountIdFilter = url.searchParams.get('accountId')
-        if (accountIdFilter) {
-          const targetAccount = await requireResolvedAccount(caller, accountIdFilter, 'database.postgres.list')
-          return jsonResponse({ databases: dbs.filter((d) => d.accountId === targetAccount.id) })
-        }
-        return jsonResponse({ databases: await scopedRecords(caller, dbs) })
-      }
-      if (method === 'POST') {
-        const body = await readJsonBody<{
-          accountId?: Id
-          name?: string
-          encoding?: string
-          locale?: string
-          extensions?: string[]
-        }>(req)
-        const account = await requireResolvedAccount(caller, body.accountId, 'database.postgres.create')
-
-        const suffix = (body.name ?? 'app').replace(new RegExp(`^${account.username}_`), '')
-        const dbName = `${account.username}_${suffix}`
-        const encoding = body.encoding ?? 'UTF8'
-        const locale = body.locale ?? 'en_US.UTF-8'
-        const extensions = body.extensions ?? ['pg_stat_statements', 'uuid-ossp']
-        const compiledSql = [
-          `CREATE DATABASE "${dbName}" ENCODING '${encoding}' LC_COLLATE '${locale}' LC_CTYPE '${locale}';`,
-          ...extensions.map((extName) => `CREATE EXTENSION IF NOT EXISTS "${extName}";`),
-        ].join('\n')
-        const record: PostgresDatabaseRecord = {
-          id: randomUUID(),
-          accountId: account.id,
-          name: dbName,
-          encoding,
-          locale,
-          extensions,
-          compiledSql,
-          createdAt: new Date().toISOString(),
-        }
-        await helpers.assertCanAccessAccount(caller, account, 'database.postgres.create')
-        dbs.push(record)
-        await ext.write('databases/postgres-dbs.json', dbs)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'database.postgres.created',
-          target: `pg-db:${record.name}`,
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ database: record }, 201)
-      }
-      if (method === 'DELETE') {
-        const body = await readJsonBody<{ id?: string }>(req)
-        const targetId = pgDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
-        await assertRecordAccount(caller, dbs.find(database => database.id === targetId || database.name === targetId), 'database.postgres.delete')
-        const next = dbs.filter((d) => d.id !== targetId && d.name !== targetId)
-        await ext.write('databases/postgres-dbs.json', next)
-        return jsonResponse({ ok: true })
-      }
-    }
-
     const remoteHostsMatch = /^\/api\/databases\/([^/]+)\/remote-hosts$/.exec(pathname)
     if (remoteHostsMatch || pathname === '/api/databases/remote-hosts') {
       const caller = await helpers.requireCaller(req)
@@ -3540,65 +2917,6 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         tablesProcessed: 12,
         status: 'healthy',
       })
-    }
-
-    const mongoDeleteMatch = /^\/api\/databases\/mongo\/([^/]+)$/.exec(pathname)
-    if (pathname === '/api/databases/mongo' || mongoDeleteMatch) {
-      const caller = await helpers.requireCaller(req)
-      await helpers.assertRoot(caller, 'database.mongo')
-      const dbs = await ext.readOrDefault<MongoDatabaseRecord[]>('databases/mongo-dbs.json', [])
-      if (method === 'GET' && !mongoDeleteMatch) {
-        const accountIdFilter = url.searchParams.get('accountId')
-        if (accountIdFilter) {
-          const targetAccount = await requireResolvedAccount(caller, accountIdFilter, 'database.mongo.list')
-          return jsonResponse({ databases: dbs.filter((d) => d.accountId === targetAccount.id) })
-        }
-        return jsonResponse({ databases: await scopedRecords(caller, dbs) })
-      }
-      if (method === 'POST' && !mongoDeleteMatch) {
-        const body = await readJsonBody<{
-          accountId?: Id
-          name?: string
-          username?: string
-          roles?: string[]
-        }>(req)
-        const account = await requireResolvedAccount(caller, body.accountId, 'database.mongo.create')
-        const suffix = (body.name ?? 'app').replace(new RegExp(`^${account.username}_`), '')
-        const dbName = `${account.username}_${suffix}`
-        const dbUser = `${account.username}_${body.username ?? suffix}`
-        const record: MongoDatabaseRecord = {
-          id: randomUUID(),
-          accountId: account.id,
-          name: dbName,
-          username: dbUser,
-          roles: body.roles ?? ['readWrite', 'dbAdmin'],
-          connectionUri: `mongodb://${dbUser}:***@127.0.0.1:27017/${dbName}?authSource=${dbName}`,
-          createdAt: new Date().toISOString(),
-        }
-        await helpers.assertCanAccessAccount(caller, account, 'database.mongo.create')
-        dbs.push(record)
-        await ext.write('databases/mongo-dbs.json', dbs)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'database.mongo.created',
-          target: `mongo:${record.name}`,
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ database: record }, 201)
-      }
-      if (method === 'DELETE') {
-        const body = await readJsonBody<{ id?: string }>(req)
-        const targetId = mongoDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
-        await assertRecordAccount(
-          caller,
-          dbs.find((d) => d.id === targetId || d.name === targetId),
-          'database.mongo.delete',
-        )
-        const next = dbs.filter((d) => d.id !== targetId && d.name !== targetId)
-        await ext.write('databases/mongo-dbs.json', next)
-        return jsonResponse({ ok: true })
-      }
     }
 
     const cacheMatch = /^\/api\/cache\/([^/]+)$/.exec(pathname)
@@ -3835,133 +3153,43 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       await helpers.assertCanAccessAccount(caller, account, 'apps.manage')
       const fileKey = `apps/${account.id}.json`
       const apps = await ext.readOrDefault<InstalledAppRecord[]>(fileKey, [])
+      const applicationChangesUnavailable = (): never => fail('PRECONDITION_FAILED', 'application changes require a qualified native installation workflow', {
+        reason: 'application_provider_unavailable', stateChanged: false, nativeApplied: false,
+      })
 
       if (appListMatch && method === 'GET') {
         return jsonResponse({ apps })
       }
       if (appListMatch && method === 'POST') {
         const body = await readJsonBody<Partial<InstalledAppRecord>>(req)
-        const appType: AppCatalogType = body.appType ?? 'wordpress'
         const domain = validateDomainName(body.domain ?? account.primaryDomain)
         if (domain !== account.primaryDomain) {
           await requireDomainAccount(helpers.store, caller, domain, 'apps.manage', account.id)
         }
-        const appPath = body.path ?? '/'
-        const now = new Date().toISOString()
-        const app: InstalledAppRecord = {
-          id: randomUUID(),
-          accountId: account.id,
-          appType,
-          domain,
-          path: appPath,
-          docRoot: `${account.home}/domains/${domain}/public_html${appPath === '/' ? '' : appPath}`,
-          title: body.title ?? `${account.username} ${appType}`,
-          adminUser: body.adminUser ?? 'admin',
-          adminEmail: body.adminEmail ?? account.contactEmail,
-          version:
-            body.version ??
-            (appType === 'wordpress'
-              ? '6.7.2'
-              : appType === 'laravel'
-                ? '11.40.0'
-                : appType === 'nextcloud'
-                  ? '30.0.4'
-                  : '1.0.0'),
-          databaseName: body.databaseName ?? `${account.username}_${appType.slice(0, 4)}`,
-          environment: body.environment ?? 'production',
-          parentAppId: null,
-          createdAt: now,
-          updatedAt: now,
-        }
         await helpers.assertCanAccessAccount(caller, account, 'apps.manage')
-        apps.push(app)
-        await ext.write(fileKey, apps)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'app.installed',
-          target: `account:${account.username}:app:${app.appType}`,
-          detail: { domain: app.domain, version: app.version },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ app }, 201)
+        return applicationChangesUnavailable()
       }
       if (appStagingMatch && method === 'POST') {
         const appId = appStagingMatch[2]!
         const verb = appStagingMatch[3]!
-        const targetApp = apps.find((a) => a.id === appId)
+        const targetApp = apps.find(app => app.id === appId)
         if (!targetApp) return fail('NOT_FOUND', `installed app "${appId}" not found`)
-
         if (verb === 'staging-clone') {
           const body = await readJsonBody<{ stagingDomain?: string; stagingPath?: string }>(req)
-          const stagingDomain = body.stagingDomain
-            ? validateDomainName(body.stagingDomain)
-            : `staging.${targetApp.domain}`
+          const stagingDomain = body.stagingDomain ? validateDomainName(body.stagingDomain) : `staging.${targetApp.domain}`
           if (body.stagingDomain && stagingDomain !== account.primaryDomain && stagingDomain !== `staging.${targetApp.domain}`) {
             await requireDomainAccount(helpers.store, caller, stagingDomain, 'apps.manage', account.id)
           }
-          const now = new Date().toISOString()
-          const stagingApp: InstalledAppRecord = {
-            ...targetApp,
-            id: randomUUID(),
-            domain: stagingDomain,
-            path: body.stagingPath ?? '/staging',
-            docRoot: `${account.home}/domains/${stagingDomain}/public_html`,
-            databaseName: `${targetApp.databaseName}_stg`,
-            environment: 'staging',
-            parentAppId: targetApp.id,
-            createdAt: now,
-            updatedAt: now,
-          }
-          await helpers.assertCanAccessAccount(caller, account, 'apps.manage')
-          apps.push(stagingApp)
-          await ext.write(fileKey, apps)
-          await helpers.emitAudit({
-            actor: caller.principal.username,
-            action: 'app.staging.cloned',
-            target: `account:${account.username}:app:${stagingApp.id}`,
-            detail: { sourceAppId: targetApp.id, stagingDomain },
-            outcome: 'ok',
-            principalId: caller.principal.id,
-          })
-          return jsonResponse({ ok: true, sourceApp: targetApp, stagingApp }, 201)
         }
-
-        if (verb === 'staging-push') {
-          const prodApp =
-            (targetApp.parentAppId ? apps.find((a) => a.id === targetApp.parentAppId) : null) ??
-            apps.find((a) => a.environment === 'production') ??
-            targetApp
-          const pushedAt = new Date().toISOString()
-          await helpers.assertCanAccessAccount(caller, account, 'apps.manage')
-          prodApp.updatedAt = pushedAt
-          prodApp.version = targetApp.version
-          await ext.write(fileKey, apps)
-          await helpers.emitAudit({
-            actor: caller.principal.username,
-            action: 'app.staging.pushed',
-            target: `account:${account.username}:app:${prodApp.id}`,
-            detail: { stagingAppId: targetApp.id, productionAppId: prodApp.id },
-            outcome: 'ok',
-            principalId: caller.principal.id,
-          })
-          return jsonResponse({
-            ok: true,
-            stagingApp: targetApp,
-            productionApp: prodApp,
-            pushedAt,
-          })
-        }
+        await helpers.assertCanAccessAccount(caller, account, 'apps.manage')
+        return applicationChangesUnavailable()
       }
       if (method === 'DELETE' && !appStagingMatch) {
         const body = await readJsonBody<{ id?: string }>(req)
         const targetId = appItemMatch?.[2] ?? url.searchParams.get('id') ?? body.id
-        const existing = apps.find((a) => a.id === targetId)
-        if (!existing) return fail('NOT_FOUND', `installed app "${targetId ?? ''}" not found`)
+        if (!apps.some(app => app.id === targetId)) return fail('NOT_FOUND', `installed app "${targetId ?? ''}" not found`)
         await helpers.assertCanAccessAccount(caller, account, 'apps.manage')
-        const next = apps.filter((a) => a.id !== targetId)
-        await ext.write(fileKey, next)
-        return jsonResponse({ ok: true })
+        return applicationChangesUnavailable()
       }
     }
 

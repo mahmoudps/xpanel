@@ -7,11 +7,6 @@ import { DESIGN_TOKENS_CSS } from './tokens.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
 
 const owner: Principal = { kind: 'user', id: 'owner-id', username: 'mahmoud', accountId: 'account-id' }
-const panels = [
-  { surface: 'xpanel' as const, origin: 'https://panel.example.test:2083' },
-  { surface: 'xwhm' as const, origin: 'https://whm.example.test:2087' },
-  { surface: 'xmail' as const, origin: 'https://mail.example.test:2096' },
-]
 
 describe('display names', () => {
   it('spaces an unspaced camel-case plan name and keeps names that already have spaces or hyphens', () => {
@@ -59,11 +54,9 @@ describe('styled status pages', () => {
     const signedIn = renderWebApp({
       surface: 'xpanel', locale: 'en', theme: 'light',
       visibility: { principal: owner },
-      panels,
       error: {
         status,
         ...(status === 404 ? { workspaceHref: '/panel' } : {}),
-        ...(status === 403 ? { suggested: 'xwhm' } : {}),
         ...(status === 500 || status === 503 ? { retryHref: '/panel' } : {}),
       },
     })
@@ -84,17 +77,17 @@ describe('styled status pages', () => {
       expect(signedIn).toContain('xp-icon-back')
       expect(signedIn).toContain('href="/panel?')
     }
-    if (status === 403) expect(signedIn).toContain('https://whm.example.test:2087/login?lang=en&amp;theme=light')
-    if (status === 421) {
-      for (const origin of ['panel.example.test:2083', 'whm.example.test:2087', 'mail.example.test:2096']) expect(signedIn).toContain(origin)
-    }
+    // A status page brands and links only its own panel: no other origin, panel name or switch.
+    const visible = (html: string) => html.replace(/<(style|script)\b[\s\S]*?<\/\1>/g, '')
+    expect(visible(signedIn)).not.toMatch(/example\.test|data-panel-link|data-panel-switch|xWHM|xMail/)
     if (status === 500 || status === 503) expect(signedIn).toContain('Try again')
 
-    const guest = renderWebApp({ surface: 'xmail', locale: 'ar', theme: 'dark', panels, error: { status, surface: 'xmail' } })
+    const guest = renderWebApp({ surface: 'xmail', locale: 'ar', theme: 'dark', error: { status, surface: 'xmail' } })
     expect(guest).toContain('dir="rtl"')
     expect(guest).toContain('data-status-page="' + status + '"')
     expect(guest).toContain('xp-icon-back')
     expect(guest).not.toContain('data-user-menu')
+    expect(visible(guest)).not.toMatch(/example\.test|data-panel-link|xPanel|xWHM/)
     if (status !== 421) expect(guest).toContain('تسجيل الدخول')
   })
 

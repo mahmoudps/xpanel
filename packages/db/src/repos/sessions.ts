@@ -26,6 +26,11 @@ export interface SessionRecord {
   lastSeenAt: string
   expiresAt: string
   revokedAt: string | null
+  /** Set only for a session opened through a one-time panel handoff: the issuing principal and its display login. */
+  impersonatorPrincipalId: Id | null
+  impersonatorLogin: string | null
+  /** A team member issuer: `impersonatorPrincipalId` is then the owning account's principal. */
+  impersonatorTeamMemberId: Id | null
 }
 
 interface SessionRow {
@@ -39,6 +44,9 @@ interface SessionRow {
   last_seen_at: string
   expires_at: string
   revoked_at: string | null
+  impersonator_principal_id: string | null
+  impersonator_login: string | null
+  impersonator_team_member_id: string | null
   [k: string]: unknown
 }
 
@@ -53,6 +61,9 @@ const fromRow = (r: SessionRow): SessionRecord => ({
   lastSeenAt: r.last_seen_at,
   expiresAt: r.expires_at,
   revokedAt: r.revoked_at,
+  impersonatorPrincipalId: r.impersonator_principal_id ?? null,
+  impersonatorLogin: r.impersonator_login ?? null,
+  impersonatorTeamMemberId: r.impersonator_team_member_id ?? null,
 })
 
 export interface NewSession {
@@ -62,6 +73,7 @@ export interface NewSession {
   ip?: string | null
   userAgent?: string | null
   mfaVerified?: boolean
+  impersonator?: { principalId: Id; login: string; teamMemberId?: Id }
 }
 
 const prepareSession = (input: NewSession): SessionRecord => {
@@ -74,24 +86,30 @@ const prepareSession = (input: NewSession): SessionRecord => {
   const userAgent = input.userAgent == null
     ? null : assertLine(input.userAgent.slice(0, 512), 512, 'userAgent', { allowEmpty: true })
   const mfaVerified = assertBool(input.mfaVerified ?? false, 'mfaVerified')
+  const impersonatorPrincipalId = input.impersonator ? assertId(input.impersonator.principalId, 'impersonatorPrincipalId') : null
+  const impersonatorLogin = input.impersonator ? assertLine(input.impersonator.login, 254, 'impersonatorLogin', { allowEmpty: false }) : null
+  const impersonatorTeamMemberId = input.impersonator?.teamMemberId === undefined ? null : assertId(input.impersonator.teamMemberId, 'impersonatorTeamMemberId')
+  if (impersonatorPrincipalId === principalId) fail('VALIDATION', 'a session cannot impersonate its own principal')
   return { id: randomUUID(), principalId, tokenHash, ip, userAgent, mfaVerified,
-    createdAt: now, lastSeenAt: now, expiresAt, revokedAt: null }
+    createdAt: now, lastSeenAt: now, expiresAt, revokedAt: null, impersonatorPrincipalId, impersonatorLogin, impersonatorTeamMemberId }
 }
 
 const sessionInsertValues = (session: SessionRecord): unknown[] => [
   session.id, session.principalId, session.tokenHash, session.ip, session.userAgent,
   session.mfaVerified ? 1 : 0, session.createdAt, session.lastSeenAt, session.expiresAt,
+  session.impersonatorPrincipalId, session.impersonatorLogin, session.impersonatorTeamMemberId,
 ]
 
 const SESSION_INSERT = `INSERT INTO sessions (
-  id, principal_id, token_hash, ip, user_agent, mfa_verified, created_at, last_seen_at, expires_at
+  id, principal_id, token_hash, ip, user_agent, mfa_verified, created_at, last_seen_at, expires_at,
+  impersonator_principal_id, impersonator_login, impersonator_team_member_id
 )`
 
 export const createSession = (db: Db, input: NewSession): Promise<SessionRecord> =>
   withSqliteErrors(async () => {
     const session = prepareSession(input)
     const rows = await db.query<SessionRow>(
-      `${SESSION_INSERT} VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      `${SESSION_INSERT} VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
       sessionInsertValues(session),
     )
     return fromRow(mustExist(rows[0], 'session', session.id))
@@ -111,9 +129,9 @@ export const createAuthenticatedSession = (
       fail('VALIDATION', 'expected MFA state and sealed key must agree')
     }
     const rows = await db.query<SessionRow>(
-      `${SESSION_INSERT} SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9 FROM principals
-       WHERE id = $2 AND password_hash = $10 AND disabled = 0
-         AND (totp_enabled_at IS NOT NULL) = $11 AND totp_secret_enc IS $12
+      `${SESSION_INSERT} SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 FROM principals
+       WHERE id = $2 AND password_hash = $13 AND disabled = 0
+         AND (totp_enabled_at IS NOT NULL) = $14 AND totp_secret_enc IS $15
        RETURNING *`,
       [...sessionInsertValues(session), passwordHash, enabled ? 1 : 0, secret],
     )

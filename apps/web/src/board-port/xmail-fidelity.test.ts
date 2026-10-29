@@ -13,37 +13,25 @@ const scriptOf = (html: string, name: string): string => {
 
 describe('mail component fidelity and truthful actions', () => {
   it.each(['en', 'ar'] as const)('retains the complete responder editor without claiming a persisted change in %s', locale => {
-    const html = renderCompose(xmailComposeFromProps({ locale, mailbox: 'owner@example.test', vacationEnabled: false }))
-    for (const [id, type] of [['vac-from', 'date'], ['vac-to', 'date'], ['vac-subject', 'text']]) {
+    const html = renderCompose(xmailComposeFromProps({ locale, mailbox: 'owner@example.test', vacationEnabled: false, vacationCanManage: true }))
+    for (const [id, type] of [['vac-startDate', 'datetime-local'], ['vac-endDate', 'datetime-local'], ['vac-subject', 'text']]) {
       assert.match(html, new RegExp('<label[^>]*for="' + id + '"'))
       assert.match(html, new RegExp('<input[^>]*id="' + id + '"[^>]*type="' + type + '"'))
     }
-    assert.match(html, /data-mail-vacation-preview/)
-    assert.match(html, /data-mail-action="vacation-save"[^>]*disabled/)
-    assert.match(html, /aria-describedby="mail-vacation-availability"/)
+    assert.match(html, /data-vacation-preview/)
+    assert.match(html, /data-vacation-save disabled/)
+    assert.match(html, /data-vacation-manage="true"/)
+    assert.match(html, locale === 'en' ? /[Aa]ctivation (?:remains )?unverified/ : /التفعيل غير متحقق منه/)
     assert.doesNotMatch(html, /value="2026-12-24"|Away until 2 January|Orders ship on/)
   })
 
-  it('refuses production responder save even if a click is dispatched programmatically', () => {
-    const html = renderCompose(xmailComposeFromProps({ mailbox: 'owner@example.test', vacationEnabled: false }))
-    const status = { textContent: 'Off' }
-    const feedback = { textContent: '', hidden: true, style: { cssText: '' }, setAttribute() {} }
-    const panel = { style: { display: 'flex' } }
-    let click: ((event: unknown) => void) | undefined
-    const root = {
-      getAttribute(name: string) { return name === 'data-product' ? 'true' : name === 'data-vacation-unavailable' ? 'Responder was not saved.' : '' },
-      querySelector(selector: string) { return selector === '[data-mail-vacation-status]' ? status : selector === '[data-mail-feedback]' ? feedback : selector === '[data-mail-vacation-panel]' ? panel : null },
-      querySelectorAll() { return [] },
-      addEventListener(name: string, handler: (event: unknown) => void) { if (name === 'click') click = handler },
-    }
-    runInNewContext(scriptOf(html, 'xmail-compose-client'), { document: { querySelector() { return root } }, window: {} })
-    assert.ok(click)
-    const action = { getAttribute() { return 'vacation-save' } }
-    click({ target: { closest(selector: string) { return selector === '[data-mail-action]' ? action : null } } })
-    assert.equal(status.textContent, 'Off')
-    assert.equal(panel.style.display, 'flex')
-    assert.equal(feedback.textContent, 'Responder was not saved.')
-    assert.equal(feedback.hidden, false)
+  it('keeps responder saving in the verified session client instead of faking success in the page script', () => {
+    const html = renderCompose(xmailComposeFromProps({ mailbox: 'owner@example.test', vacationEnabled: false, vacationCanManage: true }))
+    const script = scriptOf(html, 'xmail-compose-client')
+    assert.doesNotMatch(script, /vacation/i)
+    assert.doesNotMatch(html, /data-mail-action="vacation-save"/)
+    assert.match(html, /data-vacation-save disabled/)
+    assert.match(html, /data-vacation-manage="true"/)
   })
 
   it('carries compose search to the inbox and initializes the same local filter there', () => {
@@ -90,10 +78,13 @@ describe('mail component fidelity and truthful actions', () => {
     const html = renderInbox(xmailInboxFromProps({ mailbox: 'owner@example.test', messages: [{ uid: 3, folder: 'INBOX', from: 'sender@example.test', to: 'owner@example.test', subject: 'Document', preview: '', body: '', receivedAt: '2026-10-25T00:00:00Z', unread: false, attachments: [{ name: 'report.pdf', sizeBytes: 2000 }] }] }))
     assert.match(html, /data-mail-new-folder[^>]*disabled/)
     assert.match(html, /data-mail-older[^>]*disabled/)
-    assert.match(html, /data-mail-attachment-download[^>]*disabled/)
+    // Attachments come from a native MIME read: the read control starts disabled with an explicit status.
+    assert.match(html, /data-attachment-refresh disabled/)
+    assert.match(html, /data-attachment-can-read="false"/)
+    assert.equal(html.includes('data-mail-attachment-download'), false)
     assert.match(html, /mail-folder-availability/)
     assert.match(html, /mail-pagination-availability/)
-    assert.match(html, /data-mail-attachment-availability/)
+    assert.match(html, /data-attachment-status data-state="unread" role="status"/)
   })
 })
 
@@ -114,7 +105,7 @@ describe('unqualified mailbox layout', () => {
         assert.match(html, /data-mail-pane="message-list"/)
         assert.match(html, /data-mail-pane="reading-pane"/)
       } else {
-        for (const id of ['compose-to', 'compose-cc', 'compose-bcc', 'compose-body', 'att-title', 'identity-title', 'vac-title', 'filters-title', 'vac-from', 'vac-to', 'vac-subject']) assert.ok(html.includes(`id="${id}"`), id)
+        for (const id of ['compose-to', 'compose-cc', 'compose-bcc', 'compose-body', 'att-title', 'identity-title', 'vac-title', 'filters-title', 'vac-startDate', 'vac-endDate', 'vac-subject', 'vac-replyIntervalHours']) assert.ok(html.includes(`id="${id}"`), id)
       }
     }
   })

@@ -1,3 +1,4 @@
+import type { Locale } from './i18n.ts'
 import { navigation, registeredDocumentAliases } from '@xpanel/catalog'
 import { designReferenceRoutesEnabled } from './design-board.ts'
 
@@ -27,7 +28,7 @@ export function resolveWebDocumentRoute(pathname: string): WebDocumentRoute | nu
 }
 
 export interface NavigationContext {
-  locale: 'en' | 'ar'
+  locale: Locale
   theme: 'light' | 'dark'
   density?: 'comfortable' | 'compact'
   accountId?: string

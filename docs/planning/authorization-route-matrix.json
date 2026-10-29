@@ -46,7 +46,7 @@
       "requiredScope": null,
       "resellerAcl": null,
       "featureEntitlement": [],
-      "ownershipSource": "db.principals + store.accounts(status===active)",
+      "ownershipSource": "db.principals + store.accounts(status===active); member@primary-domain on xPanel: team_credentials + accounts/team/<account>.json (active member); xMail admits only mailbox-address (user@domain) sign-in through the mail transport, never owner, reseller or root credentials",
       "allowedPrincipals": [
         "anonymous"
       ],
@@ -65,7 +65,8 @@
         "root",
         "reseller",
         "user",
-        "mailbox"
+        "mailbox",
+        "team"
       ],
       "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized"
     },
@@ -82,7 +83,8 @@
         "root",
         "reseller",
         "user",
-        "mailbox"
+        "mailbox",
+        "team"
       ],
       "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized"
     },
@@ -150,6 +152,1625 @@
         "user"
       ],
       "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/mailx/:section",
+      "sample": "/api/server/mailx/spam",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/mailx-workspace.ts:createMailxWorkspaceRoutes(server) + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/server/mailx/:section",
+      "sample": "/api/server/mailx/spam",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/mailx-workspace.ts:createMailxWorkspaceRoutes(server) + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/mailx/apply",
+      "sample": "/api/server/mailx/apply",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/mailx-workspace.ts:createMailxWorkspaceRoutes(server apply) + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/mailx/collections",
+      "sample": "/api/account/mailx/collections",
+      "surface": "api",
+      "resource": "webmail",
+      "requiredScope": "webmail:read",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "email-accounts",
+        "calendars-contacts-management",
+        "calendars-contacts-config"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/mailx-collections.ts:createMailxCollectionsRoutes + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/account/mailx/collections",
+      "sample": "/api/account/mailx/collections",
+      "surface": "api",
+      "resource": "webmail",
+      "requiredScope": "webmail:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "email-accounts",
+        "calendars-contacts-management",
+        "calendars-contacts-config"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/mailx-collections.ts:createMailxCollectionsRoutes + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/mailx/mail-tools",
+      "sample": "/api/account/mailx/mail-tools",
+      "surface": "api",
+      "resource": "mail",
+      "requiredScope": "mail:read",
+      "resellerAcl": "list-accounts",
+      "featureEntitlement": [
+        "email-accounts",
+        "spam-filters"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/mailx-workspace.ts:createMailxWorkspaceRoutes(tools) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/mailx/mail-tools/lists",
+      "sample": "/api/account/mailx/mail-tools/lists",
+      "surface": "api",
+      "resource": "mail",
+      "requiredScope": "mail:read",
+      "resellerAcl": "list-accounts",
+      "featureEntitlement": [
+        "email-accounts",
+        "mailing-lists"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/mailx-workspace.ts:createMailxWorkspaceRoutes(lists) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/mailx/mail-tools/lists",
+      "sample": "/api/account/mailx/mail-tools/lists",
+      "surface": "api",
+      "resource": "mail",
+      "requiredScope": "mail:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "email-accounts",
+        "mailing-lists"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/mailx-workspace.ts:createMailxWorkspaceRoutes(lists) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/mailx/mail-tools/learn",
+      "sample": "/api/account/mailx/mail-tools/learn",
+      "surface": "api",
+      "resource": "mail",
+      "requiredScope": "mail:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "email-accounts",
+        "spam-filters"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/mailx-workspace.ts:createMailxWorkspaceRoutes(tools learn) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/mailx/mail-tools/apply",
+      "sample": "/api/account/mailx/mail-tools/apply",
+      "surface": "api",
+      "resource": "mail",
+      "requiredScope": "mail:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "email-accounts",
+        "spam-filters"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/mailx-workspace.ts:createMailxWorkspaceRoutes(tools apply) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/mailx/archive",
+      "sample": "/api/account/mailx/archive",
+      "surface": "api",
+      "resource": "mail",
+      "requiredScope": "mail:read",
+      "resellerAcl": "list-accounts",
+      "featureEntitlement": [
+        "email-accounts",
+        "email-archive"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/mailx-workspace.ts:createMailxWorkspaceRoutes(archive) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/account/mailx/archive",
+      "sample": "/api/account/mailx/archive",
+      "surface": "api",
+      "resource": "mail",
+      "requiredScope": "mail:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "email-accounts",
+        "email-archive"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/mailx-workspace.ts:createMailxWorkspaceRoutes(archive) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/mailx/archive/retention",
+      "sample": "/api/account/mailx/archive/retention",
+      "surface": "api",
+      "resource": "mail",
+      "requiredScope": "mail:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "email-accounts",
+        "email-archive"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/mailx-workspace.ts:createMailxWorkspaceRoutes(archive retention) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/team",
+      "sample": "/api/account/team",
+      "surface": "api",
+      "resource": "team",
+      "requiredScope": "team:read",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "manage-team"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted); team callers refused",
+      "allowedPrincipals": [
+        "user"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/acct-team-workspace.ts:handleTeamRoute + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/team",
+      "sample": "/api/account/team",
+      "surface": "api",
+      "resource": "team",
+      "requiredScope": "team:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "manage-team"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted); team callers refused",
+      "allowedPrincipals": [
+        "user"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/acct-team-workspace.ts:handleTeamRoute + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/account/team/:id",
+      "sample": "/api/account/team/11111111-1111-4111-8111-111111111111",
+      "surface": "api",
+      "resource": "team",
+      "requiredScope": "team:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "manage-team"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted); member id from the account team file",
+      "allowedPrincipals": [
+        "user"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/acct-team-workspace.ts:handleTeamRoute + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/account/team/:id",
+      "sample": "/api/account/team/11111111-1111-4111-8111-111111111111",
+      "surface": "api",
+      "resource": "team",
+      "requiredScope": "team:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "manage-team"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted); member id from the account team file",
+      "allowedPrincipals": [
+        "user"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/acct-team-workspace.ts:handleTeamRoute + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/team/:id/suspend",
+      "sample": "/api/account/team/11111111-1111-4111-8111-111111111111/suspend",
+      "surface": "api",
+      "resource": "team",
+      "requiredScope": "team:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "manage-team"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted); member id from the account team file",
+      "allowedPrincipals": [
+        "user"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/acct-team-workspace.ts:handleTeamRoute + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/team/:id/reinstate",
+      "sample": "/api/account/team/11111111-1111-4111-8111-111111111111/reinstate",
+      "surface": "api",
+      "resource": "team",
+      "requiredScope": "team:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "manage-team"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted); member id from the account team file",
+      "allowedPrincipals": [
+        "user"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/acct-team-workspace.ts:handleTeamRoute + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/team/:id/password-link",
+      "sample": "/api/account/team/11111111-1111-4111-8111-111111111111/password-link",
+      "surface": "api",
+      "resource": "team",
+      "requiredScope": "team:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "manage-team"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted); member id from the account team file",
+      "allowedPrincipals": [
+        "user"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/acct-team-workspace.ts:handleTeamRoute + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/team/password",
+      "sample": "/api/auth/team/password",
+      "surface": "api",
+      "resource": "auth",
+      "requiredScope": null,
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "single-use password link (SHA-256 in team_credentials) + accounts/team/<account>.json member state",
+      "allowedPrincipals": [
+        "anonymous"
+      ],
+      "listeners": [
+        "xpanel",
+        "xwhm",
+        "xmail"
+      ],
+      "enforcementPoint": "apps/api/src/team-session.ts:handleTeamPasswordRoute"
+    },
+    {
+      "method": "POST",
+      "path": "/api/handoff/xpanel",
+      "sample": "/api/handoff/xpanel",
+      "surface": "api",
+      "resource": "handoff",
+      "requiredScope": "handoff:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [],
+      "ownershipSource": "interactive first-hand xWHM session; store.accounts(id) active and owned by the reseller (root: any); db.principals owner of that account; issuer and target re-read at consumption",
+      "allowedPrincipals": [
+        "root",
+        "reseller"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/panel-handoff-routes.ts:issueXpanel + apps/api/src/authorization.ts:assertAccountAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/handoff/xmail",
+      "sample": "/api/handoff/xmail",
+      "surface": "api",
+      "resource": "handoff",
+      "requiredScope": "handoff:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "email-accounts"
+      ],
+      "ownershipSource": "interactive first-hand xPanel session of the account owner or an email-role team member; store.serviceUsers(login) of the same active account with email enabled; issuer and target re-read at consumption",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/panel-handoff-routes.ts:issueXmail + apps/api/src/authorization.ts:assertAccountAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/staging",
+      "sample": "/api/account/staging",
+      "surface": "api",
+      "resource": "staging",
+      "requiredScope": "staging:read",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "site-staging"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/acct-staging-workspace.ts:handleStagingWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/staging/:id",
+      "sample": "/api/account/staging/11111111-1111-4111-8111-111111111111",
+      "surface": "api",
+      "resource": "staging",
+      "requiredScope": "staging:read",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "site-staging"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/acct-staging-workspace.ts:handleStagingWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/staging/:id/copy",
+      "sample": "/api/account/staging/11111111-1111-4111-8111-111111111111/copy",
+      "surface": "api",
+      "resource": "staging",
+      "requiredScope": "staging:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "site-staging"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/acct-staging-workspace.ts:handleStagingWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/staging/:id/review",
+      "sample": "/api/account/staging/11111111-1111-4111-8111-111111111111/review",
+      "surface": "api",
+      "resource": "staging",
+      "requiredScope": "staging:read",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "site-staging"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/acct-staging-workspace.ts:handleStagingWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/staging/:id/promote",
+      "sample": "/api/account/staging/11111111-1111-4111-8111-111111111111/promote",
+      "surface": "api",
+      "resource": "staging",
+      "requiredScope": "staging:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "site-staging"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/acct-staging-workspace.ts:handleStagingWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/staging/:id/discard",
+      "sample": "/api/account/staging/11111111-1111-4111-8111-111111111111/discard",
+      "surface": "api",
+      "resource": "staging",
+      "requiredScope": "staging:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "site-staging"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/acct-staging-workspace.ts:handleStagingWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/backups/components/:username/inventory",
+      "sample": "/api/backups/components/alice/inventory",
+      "surface": "api",
+      "resource": "backups",
+      "requiredScope": "backups:read",
+      "resellerAcl": "list-accounts",
+      "featureEntitlement": [
+        "file-restore"
+      ],
+      "ownershipSource": "store.accountByUsername + assertCanAccessAccount (root or owning reseller ACL)",
+      "allowedPrincipals": [
+        "root",
+        "reseller"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-restore-workspace.ts:handleComponentRestoreWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/backups/components/:username/preview",
+      "sample": "/api/backups/components/alice/preview",
+      "surface": "api",
+      "resource": "backups",
+      "requiredScope": "backups:read",
+      "resellerAcl": "list-accounts",
+      "featureEntitlement": [
+        "file-restore"
+      ],
+      "ownershipSource": "store.accountByUsername + assertCanAccessAccount (root or owning reseller ACL)",
+      "allowedPrincipals": [
+        "root",
+        "reseller"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-restore-workspace.ts:handleComponentRestoreWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/backups/components/:username/restore",
+      "sample": "/api/backups/components/alice/restore",
+      "surface": "api",
+      "resource": "backups",
+      "requiredScope": "backups:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "file-restore"
+      ],
+      "ownershipSource": "store.accountByUsername + assertCanAccessAccount (root or owning reseller ACL)",
+      "allowedPrincipals": [
+        "root",
+        "reseller"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-restore-workspace.ts:handleComponentRestoreWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/backups/workspace/runs",
+      "sample": "/api/backups/workspace/runs",
+      "surface": "api",
+      "resource": "backups",
+      "requiredScope": "backups:read",
+      "resellerAcl": null,
+      "featureEntitlement": [
+        "backup"
+      ],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xpanel",
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-backup-runs-workspace.ts:createBackupRunsWorkspaceRoutes + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/backups/workspace/runs",
+      "sample": "/api/backups/workspace/runs",
+      "surface": "api",
+      "resource": "backups",
+      "requiredScope": "backups:write",
+      "resellerAcl": null,
+      "featureEntitlement": [
+        "backup"
+      ],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xpanel",
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-backup-runs-workspace.ts:createBackupRunsWorkspaceRoutes + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/backups/workspace/destinations/:id/retention",
+      "sample": "/api/backups/workspace/destinations/11111111-1111-4111-8111-111111111111/retention",
+      "surface": "api",
+      "resource": "backups",
+      "requiredScope": "backups:read",
+      "resellerAcl": null,
+      "featureEntitlement": [
+        "backup"
+      ],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xpanel",
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-backup-runs-workspace.ts:createBackupRunsWorkspaceRoutes + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/backups/workspace/destinations/:id/retention",
+      "sample": "/api/backups/workspace/destinations/11111111-1111-4111-8111-111111111111/retention",
+      "surface": "api",
+      "resource": "backups",
+      "requiredScope": "backups:write",
+      "resellerAcl": null,
+      "featureEntitlement": [
+        "backup"
+      ],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xpanel",
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-backup-runs-workspace.ts:createBackupRunsWorkspaceRoutes + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/backups/workspace/destinations/:id/recover",
+      "sample": "/api/backups/workspace/destinations/11111111-1111-4111-8111-111111111111/recover",
+      "surface": "api",
+      "resource": "backups",
+      "requiredScope": "backups:write",
+      "resellerAcl": null,
+      "featureEntitlement": [
+        "backup"
+      ],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xpanel",
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-backup-runs-workspace.ts:createBackupRunsWorkspaceRoutes + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/transfers/credentials",
+      "sample": "/api/transfers/credentials",
+      "surface": "api",
+      "resource": "lifecycle",
+      "requiredScope": "lifecycle:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-transfer-credentials.ts:handleTransferCredentialsRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/transfers/credentials",
+      "sample": "/api/transfers/credentials",
+      "surface": "api",
+      "resource": "lifecycle",
+      "requiredScope": "lifecycle:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-transfer-credentials.ts:handleTransferCredentialsRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/transfers/credentials/:id",
+      "sample": "/api/transfers/credentials/11111111-1111-4111-8111-111111111111",
+      "surface": "api",
+      "resource": "lifecycle",
+      "requiredScope": "lifecycle:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-transfer-credentials.ts:handleTransferCredentialsRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/transfers/source/inventory",
+      "sample": "/api/transfers/source/inventory",
+      "surface": "api",
+      "resource": "lifecycle",
+      "requiredScope": "lifecycle:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only) with a root API token",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-transfer-source.ts:handleTransferSourceInventoryRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/transfers/source/accounts/:username/backup",
+      "sample": "/api/transfers/source/accounts/alice/backup",
+      "surface": "api",
+      "resource": "lifecycle",
+      "requiredScope": "lifecycle:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only) with a root API token",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-transfer-source.ts:handleTransferSourceBackupRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/transfers/source/accounts/:username/backup/:file",
+      "sample": "/api/transfers/source/accounts/alice/backup/alice.tar.gz",
+      "surface": "api",
+      "resource": "lifecycle",
+      "requiredScope": "lifecycle:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only) with a root API token",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-transfer-source.ts:handleTransferSourceBackupRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/transfers/convert-addon",
+      "sample": "/api/transfers/convert-addon",
+      "surface": "api",
+      "resource": "lifecycle",
+      "requiredScope": "lifecycle:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-convert-addon.ts:handleConvertAddonRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/transfers/convert-addon/preview",
+      "sample": "/api/transfers/convert-addon/preview",
+      "surface": "api",
+      "resource": "lifecycle",
+      "requiredScope": "lifecycle:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-convert-addon.ts:handleConvertAddonRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/transfers/convert-addon/apply",
+      "sample": "/api/transfers/convert-addon/apply",
+      "surface": "api",
+      "resource": "lifecycle",
+      "requiredScope": "lifecycle:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-convert-addon.ts:handleConvertAddonRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/account-templates",
+      "sample": "/api/server/account-templates",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-templates-workspace.ts:handleAccountTemplatesRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/account-templates",
+      "sample": "/api/server/account-templates",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-templates-workspace.ts:handleAccountTemplatesRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/server/account-templates/:id",
+      "sample": "/api/server/account-templates/11111111-1111-4111-8111-111111111111",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-templates-workspace.ts:handleAccountTemplatesRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/server/account-templates/:id",
+      "sample": "/api/server/account-templates/11111111-1111-4111-8111-111111111111",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-templates-workspace.ts:handleAccountTemplatesRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/account-enhancements",
+      "sample": "/api/server/account-enhancements",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-enhancements-workspace.ts:handleAccountEnhancementsRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/server/account-enhancements",
+      "sample": "/api/server/account-enhancements",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/acct-enhancements-workspace.ts:handleAccountEnhancementsRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/databases/engines",
+      "sample": "/api/server/databases/engines",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/db-workspace.ts:handleDbWorkspaceRoute(ROOT) + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/databases/web-clients",
+      "sample": "/api/server/databases/web-clients",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/db-workspace.ts:handleDbWorkspaceRoute(ROOT) + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/databases/upgrade",
+      "sample": "/api/server/databases/upgrade",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/db-workspace.ts:handleDbWorkspaceRoute(ROOT) + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/databases/web-clients/phpmyadmin/sign-on",
+      "sample": "/api/server/databases/web-clients/phpmyadmin/sign-on",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/db-workspace.ts:handleDbWorkspaceRoute(ROOT) + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/databases/upgrade/apply",
+      "sample": "/api/server/databases/upgrade/apply",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/db-workspace.ts:handleDbWorkspaceRoute(ROOT) + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/database-engines/postgresql",
+      "sample": "/api/account/database-engines/postgresql",
+      "surface": "api",
+      "resource": "databases",
+      "requiredScope": "databases:read",
+      "resellerAcl": "list-accounts",
+      "featureEntitlement": [
+        "postgresql-databases"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/db-workspace.ts:handleDbWorkspaceRoute(ACCOUNT) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/database-engines/phpmyadmin",
+      "sample": "/api/account/database-engines/phpmyadmin",
+      "surface": "api",
+      "resource": "databases",
+      "requiredScope": "databases:read",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "phpmyadmin"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/db-workspace.ts:handleDbWorkspaceRoute(ACCOUNT) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/database-engines/phppgadmin",
+      "sample": "/api/account/database-engines/phppgadmin",
+      "surface": "api",
+      "resource": "databases",
+      "requiredScope": "databases:read",
+      "resellerAcl": "list-accounts",
+      "featureEntitlement": [
+        "phppgadmin"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/db-workspace.ts:handleDbWorkspaceRoute(ACCOUNT) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/database-engines/phpmyadmin/sign-on",
+      "sample": "/api/account/database-engines/phpmyadmin/sign-on",
+      "surface": "api",
+      "resource": "databases",
+      "requiredScope": "databases:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "phpmyadmin"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/db-workspace.ts:handleDbWorkspaceRoute(ACCOUNT) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/software/containers",
+      "sample": "/api/server/software/containers",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/sw-containers-workspace.ts:handleSwContainersWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/software/containers/engine",
+      "sample": "/api/server/software/containers/engine",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/sw-containers-workspace.ts:handleSwContainersWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/software/containers/action",
+      "sample": "/api/server/software/containers/action",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/sw-containers-workspace.ts:handleSwContainersWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/software/addon-services",
+      "sample": "/api/server/software/addon-services",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/sw-addon-services-workspace.ts:handleSwAddonServicesWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/software/addon-services/action",
+      "sample": "/api/server/software/addon-services/action",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/sw-addon-services-workspace.ts:handleSwAddonServicesWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/software/deployments",
+      "sample": "/api/server/software/deployments",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/sw-deployments-workspace.ts:handleSwDeploymentsWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/software/deployments/inspect",
+      "sample": "/api/server/software/deployments/inspect",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/sw-deployments-workspace.ts:handleSwDeploymentsWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/software/deployments/pull",
+      "sample": "/api/server/software/deployments/pull",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/sw-deployments-workspace.ts:handleSwDeploymentsWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/optimize",
+      "sample": "/api/account/optimize",
+      "surface": "api",
+      "resource": "optimize",
+      "requiredScope": "optimize:read",
+      "resellerAcl": "list-accounts",
+      "featureEntitlement": [
+        "optimize-website"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/sw-optimize-workspace.ts:handleSwOptimizeWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/applications",
+      "sample": "/api/account/applications",
+      "surface": "api",
+      "resource": "applications",
+      "requiredScope": "applications:read",
+      "resellerAcl": "list-accounts",
+      "featureEntitlement": [
+        "application-manager"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/sw-applications-workspace.ts:handleSwApplicationsWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/applications/jobs",
+      "sample": "/api/account/applications/jobs",
+      "surface": "api",
+      "resource": "applications",
+      "requiredScope": "applications:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "application-manager"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/sw-applications-workspace.ts:handleSwApplicationsWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/file-sharing",
+      "sample": "/api/server/file-sharing",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/ops-file-sharing-workspace.ts:handleFileSharingWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/server/file-sharing",
+      "sample": "/api/server/file-sharing",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/ops-file-sharing-workspace.ts:handleFileSharingWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/file-sharing/apply",
+      "sample": "/api/server/file-sharing/apply",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/ops-file-sharing-workspace.ts:handleFileSharingWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/terminal",
+      "sample": "/api/server/terminal",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/ops-terminal-workspace.ts:handleTerminalWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/terminal",
+      "sample": "/api/server/terminal",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/ops-terminal-workspace.ts:handleTerminalWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/nodes",
+      "sample": "/api/server/nodes",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/ops-nodes-workspace.ts:handleNodesWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/server/nodes",
+      "sample": "/api/server/nodes",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/ops-nodes-workspace.ts:handleNodesWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/nodes/verify",
+      "sample": "/api/server/nodes/verify",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/ops-nodes-workspace.ts:handleNodesWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/integrations",
+      "sample": "/api/server/integrations",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/ops-integrations-workspace.ts:handleIntegrationsWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/server/integrations",
+      "sample": "/api/server/integrations",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/ops-integrations-workspace.ts:handleIntegrationsWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/integrations/test",
+      "sample": "/api/server/integrations/test",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "helpers.assertRoot (root principal only)",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "listeners": [
+        "xwhm"
+      ],
+      "enforcementPoint": "apps/api/src/ops-integrations-workspace.ts:handleIntegrationsWorkspaceRoute + apps/api/src/authorization.ts:assertRequestAuthorized"
     },
     {
       "method": "GET",
@@ -938,114 +2559,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/databases/postgres",
-      "surface": "api",
-      "resource": "databases",
-      "requiredScope": "databases:read",
-      "resellerAcl": "list-accounts",
-      "featureEntitlement": [
-        "postgresql-databases"
-      ],
-      "ownershipSource": "extended/databases/postgres-dbs.json(accountId) -> scopedRecords",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + extended-routes.ts:scopedRecords"
-    },
-    {
-      "method": "POST",
-      "path": "/api/databases/postgres",
-      "surface": "api",
-      "resource": "databases",
-      "requiredScope": "databases:write",
-      "resellerAcl": "edit-account",
-      "featureEntitlement": [
-        "postgresql-databases"
-      ],
-      "ownershipSource": "requireAccountId -> assertAccountAuthorized",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + extended-routes.ts:requireAccountId"
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/databases/postgres/:id",
-      "surface": "api",
-      "resource": "databases",
-      "requiredScope": "databases:write",
-      "resellerAcl": "edit-account",
-      "featureEntitlement": [
-        "postgresql-databases"
-      ],
-      "ownershipSource": "extended/databases/postgres-dbs.json(accountId) -> assertRecordAccount",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + extended-routes.ts:assertRecordAccount"
-    },
-    {
-      "method": "GET",
-      "path": "/api/databases/postgres/users",
-      "surface": "api",
-      "resource": "databases",
-      "requiredScope": "databases:read",
-      "resellerAcl": "list-accounts",
-      "featureEntitlement": [
-        "postgresql-databases"
-      ],
-      "ownershipSource": "extended/databases/postgres-users.json(accountId) -> scopedRecords",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + extended-routes.ts:scopedRecords"
-    },
-    {
-      "method": "POST",
-      "path": "/api/databases/postgres/users",
-      "surface": "api",
-      "resource": "databases",
-      "requiredScope": "databases:write",
-      "resellerAcl": "edit-account",
-      "featureEntitlement": [
-        "postgresql-databases"
-      ],
-      "ownershipSource": "requireAccountId + databaseIds ownership in postgres-dbs.json",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + extended-routes.ts:requireAccountId"
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/databases/postgres/users/:id",
-      "surface": "api",
-      "resource": "databases",
-      "requiredScope": "databases:write",
-      "resellerAcl": "edit-account",
-      "featureEntitlement": [
-        "postgresql-databases"
-      ],
-      "ownershipSource": "extended/databases/postgres-users.json(accountId) -> assertRecordAccount",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + extended-routes.ts:assertRecordAccount"
-    },
-    {
-      "method": "GET",
       "path": "/api/databases/:account/remote-hosts",
       "surface": "api",
       "resource": "databases",
@@ -1115,38 +2628,6 @@
         "user"
       ],
       "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
-    },
-    {
-      "method": "GET",
-      "path": "/api/databases/mongo",
-      "surface": "api",
-      "resource": "databases",
-      "requiredScope": "databases:read",
-      "resellerAcl": "list-accounts",
-      "featureEntitlement": [
-        "mysql-databases"
-      ],
-      "ownershipSource": "rootOnly",
-      "allowedPrincipals": [
-        "root"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly)"
-    },
-    {
-      "method": "POST",
-      "path": "/api/databases/mongo",
-      "surface": "api",
-      "resource": "databases",
-      "requiredScope": "databases:write",
-      "resellerAcl": "edit-account",
-      "featureEntitlement": [
-        "mysql-databases"
-      ],
-      "ownershipSource": "rootOnly",
-      "allowedPrincipals": [
-        "root"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly)"
     },
     {
       "method": "GET",
@@ -1358,35 +2839,321 @@
     },
     {
       "method": "GET",
-      "path": "/api/dns/cluster",
+      "path": "/api/server/sec/waf",
       "surface": "api",
-      "resource": "dns",
-      "requiredScope": "dns:read",
+      "resource": "server",
+      "requiredScope": "server:read",
       "resellerAcl": null,
-      "featureEntitlement": [
-        "zone-editor"
-      ],
+      "featureEntitlement": [],
       "ownershipSource": "rootOnly",
       "allowedPrincipals": [
         "root"
       ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + helpers.assertRoot"
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-workspace.ts:assertRoot"
     },
     {
       "method": "PUT",
-      "path": "/api/dns/cluster",
+      "path": "/api/server/sec/waf",
       "surface": "api",
-      "resource": "dns",
-      "requiredScope": "dns:write",
+      "resource": "server",
+      "requiredScope": "server:write",
       "resellerAcl": null,
-      "featureEntitlement": [
-        "zone-editor"
-      ],
+      "featureEntitlement": [],
       "ownershipSource": "rootOnly",
       "allowedPrincipals": [
         "root"
       ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + helpers.assertRoot"
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-workspace.ts:assertRoot"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/sec/flood",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-workspace.ts:assertRoot"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/server/sec/flood",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-workspace.ts:assertRoot"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/sec/panel-access",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-workspace.ts:assertRoot"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/server/sec/panel-access",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-workspace.ts:assertRoot"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/sec/dns-cluster",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-workspace.ts:assertRoot"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/server/sec/dns-cluster",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-workspace.ts:assertRoot"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/sec/dns-cluster/verify",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-workspace.ts:assertRoot"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/sec/dns-cluster/apply",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-workspace.ts:assertRoot"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/sec/dns-providers",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-cloudflare.ts:assertRoot"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/sec/dns-providers/zone",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-cloudflare.ts:assertRoot"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/sec/dns-providers/accounts",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-cloudflare.ts:assertRoot"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/sec/dns-providers/accounts/remove",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-cloudflare.ts:assertRoot"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/sec/dns-providers/links",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-cloudflare.ts:assertRoot"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/sec/dns-providers/links/remove",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-cloudflare.ts:assertRoot"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/sec/dns-providers/purge",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-cloudflare.ts:assertRoot"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/sec/waf",
+      "surface": "api",
+      "resource": "waf",
+      "requiredScope": null,
+      "resellerAcl": "list-accounts",
+      "featureEntitlement": [
+        "modsecurity"
+      ],
+      "ownershipSource": "session account (authorizeAccountOwner) + owned domain",
+      "allowedPrincipals": [
+        "user"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/sec-workspace.ts:authorizeAccountOwner"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/account/sec/waf",
+      "surface": "api",
+      "resource": "waf",
+      "requiredScope": null,
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "modsecurity"
+      ],
+      "ownershipSource": "session account (authorizeAccountOwner) + owned domain",
+      "allowedPrincipals": [
+        "user"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/sec-workspace.ts:authorizeAccountOwner"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/sec/cloudflare",
+      "surface": "api",
+      "resource": "cloudflare",
+      "requiredScope": null,
+      "resellerAcl": "list-accounts",
+      "featureEntitlement": [
+        "cloudflare-account"
+      ],
+      "ownershipSource": "session account (authorizeAccountOwner) + owned domain",
+      "allowedPrincipals": [
+        "user"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/sec-cloudflare.ts:authorizeAccountOwner"
+    },
+    {
+      "method": "GET",
+      "path": "/api/account/sec/cloudflare/zone",
+      "surface": "api",
+      "resource": "cloudflare",
+      "requiredScope": null,
+      "resellerAcl": "list-accounts",
+      "featureEntitlement": [
+        "cloudflare-account"
+      ],
+      "ownershipSource": "session account (authorizeAccountOwner) + owned domain",
+      "allowedPrincipals": [
+        "user"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/sec-cloudflare.ts:authorizeAccountOwner"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/sec/cloudflare/purge",
+      "surface": "api",
+      "resource": "cloudflare",
+      "requiredScope": null,
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "cloudflare-account"
+      ],
+      "ownershipSource": "session account (authorizeAccountOwner) + owned domain",
+      "allowedPrincipals": [
+        "user"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/sec-cloudflare.ts:authorizeAccountOwner"
     },
     {
       "method": "GET",
@@ -2488,18 +4255,60 @@
       "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + helpers.assertRoot"
     },
     {
-      "method": "POST",
-      "path": "/api/lifecycle/upgrade",
+      "method": "GET",
+      "path": "/api/server/upgrade",
       "surface": "api",
-      "resource": "lifecycle",
-      "requiredScope": "lifecycle:write",
+      "resource": "server",
+      "requiredScope": "server:read",
       "resellerAcl": null,
       "featureEntitlement": [],
       "ownershipSource": "rootOnly",
       "allowedPrincipals": [
         "root"
       ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + assertRoot"
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/upgrade-workspace.ts:assertRoot"
+    },
+    {
+      "method": "GET",
+      "path": "/api/server/upgrade/status",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/upgrade-workspace.ts:assertRoot"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/upgrade/preflight",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/upgrade-workspace.ts:assertRoot"
+    },
+    {
+      "method": "POST",
+      "path": "/api/server/upgrade/start",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/upgrade-workspace.ts:assertRoot"
     },
     {
       "method": "POST",
@@ -3294,8 +5103,6 @@
       ],
       "ownershipSource": "canSeeAccount(principal, account)",
       "allowedPrincipals": [
-        "root",
-        "reseller",
         "user"
       ],
       "enforcementPoint": "apps/api/src/main.ts:createDefaultWebRenderer(/panel)"
@@ -3312,11 +5119,27 @@
       ],
       "ownershipSource": "canSeeAccount(principal, account)",
       "allowedPrincipals": [
-        "root",
-        "reseller",
         "user"
       ],
       "enforcementPoint": "apps/api/src/main.ts:createDefaultWebRenderer(/mail)"
+    },
+    {
+      "method": "POST",
+      "path": "/login/handoff",
+      "surface": "html",
+      "resource": "ui.handoff",
+      "requiredScope": null,
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "db.panel_handoffs: SHA-256 of a 60 s single-use secret for this listener's audience (xPanel or xMail), consumed atomically; Origin must equal the configured issuing panel; issuer and target authority re-read; creates an impersonated session on this listener only",
+      "allowedPrincipals": [
+        "anonymous"
+      ],
+      "listeners": [
+        "xpanel",
+        "xmail"
+      ],
+      "enforcementPoint": "apps/api/src/panel-handoff-routes.ts:consume"
     },
     {
       "method": "CLI",
@@ -3405,7 +5228,7 @@
     },
     {
       "method": "CLI",
-      "path": "xpanel disable-2fa <username>",
+      "path": "xpanel disable-2fa <username> [--confirm]",
       "surface": "cli",
       "resource": "cli.disable-2fa",
       "requiredScope": null,
@@ -3582,6 +5405,153 @@
         "user"
       ],
       "enforcementPoint": "apps/agent/src/server.ts:authenticateService + authenticateCaller + assertAccountCaller"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/database-engines/postgresql/users",
+      "sample": "/api/account/database-engines/postgresql/users",
+      "surface": "api",
+      "resource": "databases",
+      "requiredScope": "databases:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "postgresql-databases"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/db-workspace.ts:handleDbWorkspaceRoute(PG_ROUTE) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/account/database-engines/postgresql/users/:id",
+      "sample": "/api/account/database-engines/postgresql/users/11111111-1111-4111-8111-111111111111",
+      "surface": "api",
+      "resource": "databases",
+      "requiredScope": "databases:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "postgresql-databases"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/db-workspace.ts:handleDbWorkspaceRoute(PG_ROUTE) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/database-engines/postgresql/users/:id/password",
+      "sample": "/api/account/database-engines/postgresql/users/11111111-1111-4111-8111-111111111111/password",
+      "surface": "api",
+      "resource": "databases",
+      "requiredScope": "databases:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "postgresql-databases"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/db-workspace.ts:handleDbWorkspaceRoute(PG_ROUTE) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/database-engines/postgresql/databases",
+      "sample": "/api/account/database-engines/postgresql/databases",
+      "surface": "api",
+      "resource": "databases",
+      "requiredScope": "databases:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "postgresql-databases"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/db-workspace.ts:handleDbWorkspaceRoute(PG_ROUTE) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/account/database-engines/postgresql/databases/:id",
+      "sample": "/api/account/database-engines/postgresql/databases/11111111-1111-4111-8111-111111111111",
+      "surface": "api",
+      "resource": "databases",
+      "requiredScope": "databases:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "postgresql-databases"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/db-workspace.ts:handleDbWorkspaceRoute(PG_ROUTE) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/database-engines/postgresql/databases/:id/trash",
+      "sample": "/api/account/database-engines/postgresql/databases/11111111-1111-4111-8111-111111111111/trash",
+      "surface": "api",
+      "resource": "databases",
+      "requiredScope": "databases:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "postgresql-databases"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/db-workspace.ts:handleDbWorkspaceRoute(PG_ROUTE) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/account/database-engines/postgresql/databases/:id/restore",
+      "sample": "/api/account/database-engines/postgresql/databases/11111111-1111-4111-8111-111111111111/restore",
+      "surface": "api",
+      "resource": "databases",
+      "requiredScope": "databases:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "postgresql-databases"
+      ],
+      "ownershipSource": "caller.principal.accountId (session account; no account selector accepted)",
+      "allowedPrincipals": [
+        "user",
+        "team"
+      ],
+      "listeners": [
+        "xpanel"
+      ],
+      "enforcementPoint": "apps/api/src/db-workspace.ts:handleDbWorkspaceRoute(PG_ROUTE) + apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/team-access.ts:assertTeamRequestAllowed"
     }
   ],
   "evidenceAssessment": "declarative_unaccepted",

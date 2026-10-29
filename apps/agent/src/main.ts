@@ -1,11 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { timingSafeEqual } from 'node:crypto'
-import { chown, mkdir } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { chmod, chown, mkdir } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fail } from '@xpanel/core'
 import type { OsProfile } from '@xpanel/core'
-import { createDb, initializeOperationalMetadata, migrate } from '@xpanel/db'
+import { createDb, initializeOperationalMetadata, migrate, recordHostMetricsSample } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { createProductionAccountFileRunner, DEFAULT_FILE_WORKER_INCIDENT_DIR } from './production-file-runner.ts'
@@ -17,10 +17,17 @@ import { ensureInstalledMail } from './services/local-mail.ts'
 import { enableMailWebsocketProxy } from './services/mail-websocket.ts'
 import { readOpenDkimPublished, writeOpenDkimPublished } from './services/opendkim-live.ts'
 import { HostReconciler } from './reconciler.ts'
+import { HostJobRunner } from './host-jobs.ts'
+import { DATABASE_REMOTE_ACCESS_JOURNAL_DIR, pendingDatabaseRemoteAccessJournals, qualifyDatabaseRemoteAccessNative, recoverPendingDatabaseRemoteAccess } from './db-remote-provider.ts'
+import { createHostJobRun } from './host-job-exec.ts'
+import { createHostMetricsCollector } from './host-metrics.ts'
+import { createS3BackupProvider } from './acct-backup-s3.ts'
+import { createHostBackupRunController, readBackupConfigFiles, readSavedBackupDestination } from './acct-backup-runs.ts'
 import { createAgentApp, listenAgentSocket, loadAgentCredentialFile } from './server.ts'
 import type { AgentApp } from './server.ts'
 import { awaitLifecycleWriterDrain, createLifecycleBackgroundResources, isLifecycleManaged, readLifecyclePublicStatus, startLifecycleWriterParticipant, withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
 import { createMariaDbSqlRunner, DEFAULT_MARIADB_ADMIN_CNF, MariaDbServiceAdapter } from './services/mariadb.ts'
+import { withPostgresqlSqlRunner } from './pg-sql.ts'
 
 export interface AgentDaemonOptions {
   dbPath?: string
@@ -88,12 +95,15 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
     quarantined = true
   }
   let ioResourcePipeline: CanonicalIoResourcePipeline | undefined
+  let hostMetrics: ReturnType<typeof createHostMetricsCollector> | undefined
+  let backupRuns: ReturnType<typeof createHostBackupRunController> | undefined
+  let backupTimer: ReturnType<typeof setInterval> | undefined
   let resourcesFenced = false
   let closeDaemon: (() => Promise<void>) | undefined
   const participant = managed ? await startLifecycleWriterParticipant('agent', {
     // A fenced pipeline stays paused until an inspected process restart. This callback
     // does not establish native host quiescence or authorize barrier retirement.
-    onFence: async () => { resourcesFenced = true; await ioResourcePipeline?.pause() },
+    onFence: async () => { resourcesFenced = true; clearInterval(backupTimer); await hostMetrics?.stop(); await ioResourcePipeline?.pause() },
   }) : undefined
   let participantClosing: Promise<void> | undefined
   const closeParticipant = (): Promise<void> => participantClosing ??= participant?.close() ?? Promise.resolve()
@@ -128,15 +138,26 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
       const runtimeDirectory = dirname(socketPath)
       const createdRuntimeDirectory = await mkdir(runtimeDirectory, { recursive: true, mode: 0o750 })
       if (createdRuntimeDirectory) await chown(runtimeDirectory, 0, socketGid)
+      // Per-account PHP-FPM units create their sockets under <runtime>/fpm/<user>-<version>/.
+      // Traverse-only modes let each account reach its own socket without exposing listings,
+      // while the agent socket remains group-only (0660 root:xpanel-agent).
+      await chmod(runtimeDirectory, 0o711)
+      const fpmRuntimeDirectory = join(runtimeDirectory, 'fpm')
+      await mkdir(fpmRuntimeDirectory, { recursive: true, mode: 0o711 })
+      await chmod(fpmRuntimeDirectory, 0o711)
 
       const dbHandle = createDb(dbPath, dbPath === ':memory:' ? {} : { durability: 'strict' })
       let accountFileRunner: Awaited<ReturnType<typeof createProductionAccountFileRunner>> | undefined
       let listener: Awaited<ReturnType<typeof listenAgentSocket>> | undefined
+      let hostJobs: HostJobRunner | undefined
       let resourcesClosing: Promise<void> | undefined
       let closing: Promise<void> | undefined
       const closeResources = (): Promise<void> => resourcesClosing ??= (async () => {
         const errors: unknown[] = []
         try { await listener?.close() } catch (error) { errors.push(error) }
+        try { hostJobs?.close() } catch (error) { errors.push(error) }
+        try { await hostMetrics?.stop() } catch (error) { errors.push(error) }
+        try { clearInterval(backupTimer); await backupRuns?.idle() } catch (error) { errors.push(error) }
         try { await ioResourcePipeline?.stop() } catch (error) { errors.push(error) }
         try { await accountFileRunner?.close() } catch (error) { errors.push(error) }
         if (errors.length) throw new AggregateError(errors, 'agent resource shutdown requires inspection')
@@ -162,10 +183,18 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         const store = new StateStore(stateDir)
         const mariadbAdminCnfPath =
           opts.mariadbAdminCnfPath ?? process.env.XPANEL_MARIADB_ADMIN_CNF ?? DEFAULT_MARIADB_ADMIN_CNF
-        const sqlRunner = createMariaDbSqlRunner(new MariaDbServiceAdapter({ adminDefaultsFile: mariadbAdminCnfPath }))
+        const mariadbAdmin = new MariaDbServiceAdapter({ adminDefaultsFile: mariadbAdminCnfPath })
+        const sqlRunner = withPostgresqlSqlRunner(createMariaDbSqlRunner(mariadbAdmin))
         const executor = new LinuxHostExecutor({
           trustedHostTargetMatcher: createProductionHostTargetMatcher(),
           sqlRunner,
+        })
+        const readBackupDestination = readSavedBackupDestination(readBackupConfigFiles(stateDir))
+        const backupDestinationProvider = createS3BackupProvider({ readDestination: readBackupDestination })
+        backupRuns = createHostBackupRunController({ executor, stateRoot: stateDir, provider: backupDestinationProvider, listAccounts: async () => (await store.listAccounts()).map(a => ({ id: a.id, username: a.username, home: a.home, uid: a.uid, status: a.status })) })
+        hostMetrics = createHostMetricsCollector({ reader: executor,
+          write: (observation, at) => withLifecycleWriterAdmission(() => recordHostMetricsSample(dbHandle.db, { at, observation })),
+          onError: () => { process.stderr.write('xpanel-agent host metrics: sample could not be recorded\n') },
         })
         const ioAnalytics = new IoAnalyticsEngine()
         const websiteAnalytics = new WebsiteAnalyticsEngine()
@@ -203,6 +232,21 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           process.stderr.write(`xpanel-agent mail websocket: ${error instanceof Error ? error.message : String(error)}\n`)
         })
         await reconciler.recoverInterruptedReconciliation().catch(() => undefined)
+        hostJobs = new HostJobRunner({ db: dbHandle.db, run: createHostJobRun() })
+        await hostJobs.recoverInterrupted().catch((error: unknown) => {
+          process.stderr.write(`xpanel-agent host jobs: ${error instanceof Error ? error.message : String(error)}\n`)
+        })
+        // Remote database access stays unavailable unless the nft sets, the 0700 journal directory and MariaDB admin all qualify.
+        await mkdir(DATABASE_REMOTE_ACCESS_JOURNAL_DIR, { recursive: true, mode: 0o700 }).catch(() => undefined)
+        const databaseRemoteAccessNative = await qualifyDatabaseRemoteAccessNative({
+          mariadb: mariadbAdmin,
+          run: argv => executor.runCommand([...argv]),
+          readAllEntries: async () => (await store.readSnapshot()).accounts.map(account => ({ accountId: account.id, status: account.status, entries: account.databaseRemoteAccess ?? [] })),
+        })
+        if (databaseRemoteAccessNative) {
+          const report = await recoverPendingDatabaseRemoteAccess(databaseRemoteAccessNative, accountId => store.readDatabaseRemoteAccess(accountId)).catch(() => [{ accountId: null, outcome: 'review' as const }])
+          for (const row of report) if (row.outcome === 'review') process.stderr.write(`xpanel-agent remote database recovery: journal ${row.accountId ?? 'unknown'} requires review\n`)
+        } else if (await pendingDatabaseRemoteAccessJournals() !== 0) process.stderr.write('xpanel-agent remote database recovery: pending journals remain; the provider is not qualified\n')
 
         await ensureAcmeWebRoot(executor, os.paths.nginxUser).catch((error: unknown) => {
           process.stderr.write(`xpanel-agent ACME webroot: ${error instanceof Error ? error.message : String(error)}\n`)
@@ -241,12 +285,18 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           db: dbHandle.db,
           executor,
           ...(accountFileRunner ? { accountFileRunner } : {}),
+          ...(hostJobs ? { hostJobs } : {}),
           ioAnalytics,
           ioResourcePipeline,
           websiteAnalytics,
           os: { id: os.id, versionId: os.versionId, family: os.family },
           nginxUser: os.paths.nginxUser,
           agentToken,
+          mariadbAdmin,
+          ...(databaseRemoteAccessNative ? { databaseRemoteAccessNative } : {}),
+          readBackupDestination,
+          backupDestinationProvider,
+          backupRuns,
         })
 
         listener = await createLifecycleBackgroundResources(() => listenAgentSocket(app, socketPath, { gid: socketGid }))
@@ -254,6 +304,8 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         if (recoveryDetected) {
           fail('PRECONDITION_FAILED', 'privileged file worker recovery is required before agent startup')
         }
+        if (!resourcesFenced) createLifecycleBackgroundResources(() => hostMetrics!.start())
+        if (!resourcesFenced) { backupTimer = setInterval(() => { void backupRuns!.tick() }, 60_000); backupTimer.unref() }
         return { app, socketPath, close: closeNormal, recoveryRequired, quarantined: false as const }
       } catch (error) {
         try { await closeResources() } catch (cleanup) { throw new AggregateError([error, cleanup], 'agent startup cleanup requires inspection') }

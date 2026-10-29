@@ -3,12 +3,15 @@ import { navigation } from './data/navigation.ts'
 import type { CatalogTool, NavPage, NavSurface } from './types.ts'
 import { visibleTools, type VisibilityContext } from './visibility.ts'
 
-/** Read-only subdocuments inherit one canonical page's authority and capability placement. */
+/** Subdocuments inherit one canonical page's authority and capability placement. */
 export const registeredDocumentAliases = Object.freeze([
   ...['/software/store', '/software/store/app', '/software/store/install', '/software/store/progress', '/software/store/installed', '/software/store/updates', '/software/store/error']
     .map(route => Object.freeze({ route, parentRoute: '/software/installer' })),
   ...['/whm/software/store', '/whm/software/store/extensions', '/whm/software/store/activity']
     .map(route => Object.freeze({ route, parentRoute: '/whm/software/site-software' })),
+  // Search retains Inbox document authority; its own tool/feature gate stays independent.
+  ...['/mail/sent', '/mail/drafts', '/mail/trash', '/mail/search']
+    .map(route => Object.freeze({ route, parentRoute: '/mail/inbox' })),
 ])
 const canonicalParents = new Map(registeredDocumentAliases.map(row => [row.route, row.parentRoute]))
 export const canonicalNavigationRoute = (route: string): string => canonicalParents.get(route) ?? route
@@ -44,6 +47,57 @@ export const visibleRegisteredNavigation = (
   })).filter(surface => surface.sections.length > 0)
 }
 
+/**
+ * Mounted workspaces that open on their implemented core tool. The page's other tools stay
+ * individually unqualified and the workspace keeps their controls disabled.
+ */
+const WORKSPACE_CORE_TOOLS: Readonly<Record<string, string>> = {
+  // This manager's selected service jobs do not implement the other tools on the page.
+  '/whm/services/more': 'service-manager',
+  '/whm/services/health': 'service-config-health',
+  '/whm/panel/developer': 'api-explorer',
+  '/whm/panel/integrations': 'integrations-hub',
+  '/email/calendars-contacts': 'calendars-contacts-management',
+  '/mail/later': 'webmail-search',
+  '/mail/settings/spam': 'webmail-spam-box',
+  '/whm/software/updates': 'os-update',
+  '/whm/software/catalog': 'software-center',
+  // The software center's component catalog also holds these pages' module and runtime rows.
+  '/whm/software/modules': 'software-center',
+  '/whm/software/runtimes': 'software-center',
+  '/whm/server/upgrade': 'panel-upgrade',
+  // Read-only DNS checks; the bulk DNS record tools on this page stay unqualified.
+  '/whm/email/quality': 'mail-quality',
+  // Manual installation only; CSR generation stays unqualified.
+  '/whm/ssl/install': 'install-ssl',
+  // In-panel announcements only; the email-all tools stay unqualified.
+  '/whm/accounts/announcements': 'panel-news',
+  // Root-only facts and redacted bundle; tweak-support stays unqualified.
+  '/whm/support': 'support-center',
+  // Root-only zone checks and bulk TTL; hostname A record and DNS cleanup stay unqualified.
+  '/whm/dns/more': 'zone-ttl-bulk',
+  '/whm/monitoring/processes': 'process-manager',
+  '/whm/monitoring/logs': 'aapanel-os-log-audit',
+  '/whm/email/delivery': 'mail-delivery-reports',
+  '/whm/email/server': 'mta-basic-editor',
+  // Routing is part of the same root-only Postfix observation; a reseller DNS ACL does not admit it.
+  '/whm/email/routing': 'mta-basic-editor',
+  '/whm/databases': 'databases-admin',
+  '/whm/databases/users': 'db-users-admin',
+  // Server version, status and variables come from the same root MariaDB connection as the process list.
+  '/whm/databases/servers': 'db-process-list',
+  // Read-only MariaDB observations; the full tuning/apply tool remains unqualified.
+  '/whm/databases/tuning': 'db-process-list',
+  '/whm/server/cron': 'aapanel-cron-tasks',
+  '/whm/server/networking': 'change-hostname',
+  '/whm/services/ftp': 'ftp-server-config',
+  '/whm/services/certificates': 'service-ssl-certificates',
+  '/whm/accounts/health': 'account-health',
+  '/whm/panel/notifications': 'notification-center',
+  '/whm/security/antivirus': 'aapanel-clamav',
+  '/whm/security/isolation': 'account-isolation',
+}
+
 /** Pages require their full capability set or an explicitly scoped implemented workspace. */
 export const visibleNavigation = (
   ctx?: VisibilityContext,
@@ -74,7 +128,8 @@ export const visibleNavigation = (
     }
     if (page.route === '/software/php') return allowed.has('domain-php-settings')
     if (page.route === '/domains/zone-editor') return allowed.has('dns-zone-records')
-    return false
+    const core = WORKSPACE_CORE_TOOLS[page.route]
+    return core !== undefined && allowed.has(core)
   }
   return design.map(surface => ({
     ...surface,

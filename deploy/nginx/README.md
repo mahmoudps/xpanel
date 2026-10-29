@@ -11,11 +11,23 @@ ports are xPanel `2083`, xWHM `2087` and xMail `2096`.
 | xWHM | `https://whm.panel.example.test:2087` | `127.0.0.1:12087` | Root or reseller |
 | xMail | `https://mail.panel.example.test:2096` | `127.0.0.1:12096` | Mailbox service user |
 
-xMail accepts the mailbox address and credential through the native mail login
-path. Its sealed mailbox session is bound to the current service user, account,
-enabled mail capabilities and mailbox identity. An account-only control-plane
-session is not a mailbox session. This source contract does not qualify live
+xMail accepts only the mailbox address and credential through the native mail
+login path; owner, reseller and root credentials are refused there. Its sealed
+mailbox session is bound to the current service user, account, enabled mail
+capabilities and mailbox identity. This source contract does not qualify live
 SMTP/IMAP delivery or an installed mail service.
+
+The three panels are separate products. Each listener renders only its own
+origin, with no link, redirect or switcher to another panel. The only crossings
+are the one-time handoffs from xWHM to xPanel ("Log in to xPanel") and from
+xPanel to xMail ("Open webmail"): the issuing panel returns the configured
+target `/login/handoff` action, and the browser posts the single-use secret to
+it in a form body, never a URL. The ingress must pass `POST /login/handoff` and
+the browser's `Origin` header unchanged to xPanel and xMail; the target listener
+refuses any Origin other than the configured issuing panel. Do not add a
+`Referrer-Policy` of `no-referrer` or `same-origin` to the xWHM and xPanel
+pages: browsers then send `Origin: null` on the cross-origin handoff POST, and
+every handoff is refused.
 
 ## Required configuration
 
@@ -35,10 +47,15 @@ XPANEL_INGRESS_SECRET_FILE=/etc/xpanel/ingress.secret
 
 Replace the example names with the exact deployment names. Origins must be
 canonical HTTPS origins, including the required port, without credentials,
-paths, queries, fragments or trailing slashes. Startup validates the entire
+paths, queries, fragments or trailing slashes, on three distinct hostnames.
+Browsers share cookies across the ports of one host, so startup refuses a
+shared hostname. Keep the three names under one registrable domain: after the
+cross-host handoff POST, browsers send `SameSite=Strict` cookies on the
+redirect only when both hosts are the same site. Startup validates the entire
 configuration before opening the database. It fails closed when an origin is
-missing, a port collides, the bind is not explicit loopback, or a production
-backend does not use its fixed reserved port. A failure after a listener binds
+missing, two origins share a hostname, a port collides, the bind is not
+explicit loopback, or a production backend does not use its fixed reserved
+port. A failure after a listener binds
 closes all opened listeners, subscriptions and database resources. It never
 falls back to a shared login server.
 

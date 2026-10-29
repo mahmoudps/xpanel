@@ -280,7 +280,7 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
         await page.goto(host.baseUrl + (state.screen === 'create' ? '/whm/accounts/new?lang=' : '/whm/accounts?lang=') + state.locale + '&theme=' + state.theme)
         await page.evaluate(() => document.fonts.ready)
         assert.equal(await page.locator('html').getAttribute('data-accounts-fixture'), 'synthetic')
-        result.fonts = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
+        result.fonts = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
         if (state.screen === 'create') {
           await createAccountGate(page, host, state, result, destination, expect)
         } else {
@@ -290,7 +290,7 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
         assert.deepEqual([names[1], names[2], names[3], names[8], names[9]], nativeAccountHeaderContract[state.locale])
         assert.equal(await page.locator('[data-account-row]').count(), 2)
         await expect(page.locator('[data-account-dialog]')).not.toBeVisible()
-        result.fonts = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
+        result.fonts = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
         await page.screenshot({ path: join(destination, 'screenshots/' + state.id + '-list.png'), fullPage: true })
         const trigger = page.locator('[data-account-row="beta"] [data-action="terminate-account"]')
@@ -315,7 +315,7 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
         assert.ok(result.geometry.fields.length >= 3)
         for (const field of result.geometry.fields) { assert.ok(Math.abs(field.gap - 8) < 1, 'The actual field gap is 8px: ' + field.label); assert.ok(field.edge < 1); if (field.glyphDelta !== null) assert.ok(field.glyphDelta < 1) }
         for (const control of result.geometry.controls) assert.ok(control.width >= 43.9 && control.height >= 43.9)
-        result.dialogFont = await assertAppliedFont(page, '[data-account-dialog-title]', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
+        result.dialogFont = await assertAppliedFont(page, '[data-account-dialog-title]', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
         await page.screenshot({ path: join(destination, 'screenshots/' + state.id + '-dialog.png'), fullPage: true })
         await page.keyboard.press('Escape'); await expect(dialog).not.toBeVisible(); await expect(trigger).toBeFocused()
         await trigger.click(); await expect(input).toHaveValue('')

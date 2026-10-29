@@ -305,7 +305,7 @@ export async function runMfaRuntimeAcceptance({ output, screenshotBudget = 8, fi
         assert.equal(fonts.ready, true, 'Fonts must settle within 5 seconds.')
         assert.deepEqual(fonts.failed_faces, [])
         row.fonts = fonts
-        row.fonts.heading = await assertAppliedFont(page, state.screen === 'login' ? '.xp-login-shell h1' : '[data-security-page] > h1', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
+        row.fonts.heading = await assertAppliedFont(page, state.screen === 'login' ? '.xp-login-shell h1' : '[data-security-page] > h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
         if (state.screen === 'login') {
           row.fonts.wordmark = await assertAppliedFont(page, '.xp-brand__name', 'IBM Plex Mono', { role: 'login-wordmark' })
           await page.locator('#login-username').fill('root')
@@ -338,7 +338,7 @@ export async function runMfaRuntimeAcceptance({ output, screenshotBudget = 8, fi
           await expect(page.locator('[data-account-security]')).toHaveAttribute('data-mfa-enabled', 'true')
           assert.equal(await page.locator('[data-account-security] .xp-help bdi').count(), 0, 'User cards never render the root recovery command.')
           assert.equal(await page.locator('[data-account-security]').evaluate(card => card.textContent.includes('disable-2fa')), false)
-          row.fonts.status = await assertAppliedFont(page, '[data-account-security] > p[role="status"]', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
+          row.fonts.status = await assertAppliedFont(page, '[data-account-security] > p[role="status"]', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
         }
         row.geometry = await geometry(page)
         if (state.mode === 'optional') row.recovery_command = await recoveryCommandGeometry(page, state.screen === 'recovery-command')

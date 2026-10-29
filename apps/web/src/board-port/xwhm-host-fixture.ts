@@ -1,3 +1,4 @@
+import type { Locale } from '../i18n.ts'
 import { readHostConfigChecks, readHostIdentity } from '../../../agent/src/host-identity.ts'
 import { parseDf, parseDfInodes, parseLoadavg, parseMeminfo } from '../../../agent/src/host-info.ts'
 import { readHostServices, type HostCommandResult } from '../../../agent/src/host-services.ts'
@@ -56,7 +57,7 @@ const serviceText = (unit: string): string => {
 
 /** Dashboard model produced by parsing the lab command output. */
 export const labHostDashboard = async (
-  locale: 'en' | 'ar' = 'en',
+  locale: Locale = 'en',
   served?: { plain: string | null; named: string | null; origin: string | null },
 ): Promise<WhmDashboardModel> => {
   const argv: string[][] = []

@@ -8,7 +8,7 @@ const plan = defaultPlan({ id: 'plan-internal', name: 'Standard', featureListId:
 const account: Account = { id: 'account-internal', username: 'alpha', uid: 20001, gid: 20001, home: '/home/alpha', primaryDomain: 'alpha.example.test', ownerId: 'reseller-internal', planId: plan.id, status: 'active', suspendReason: null, contactEmail: '', ipv4: '192.0.2.1', shell: 'none', createdAt: '2026-10-24T00:00:00Z' }
 const reseller: Reseller = { id: 'reseller-internal', username: 'reseller-alpha', acl: ['list-accounts'], maxAccounts: 8, totalDiskMb: 1024, totalBandwidthMb: 2048, oversell: false, nameservers: [], delegatedIps: [] }
 const owner: ComposedContext = { locale: 'en', route: '/files/web-disk', principal: { kind: 'user', id: 'user-internal', username: 'alpha', accountId: account.id }, account, plan }
-const root: ComposedContext = { locale: 'en', route: '/whm/accounts/health', principal: { kind: 'root', id: 'root-internal', username: 'root' } }
+const root: ComposedContext = { locale: 'en', route: '/whm/accounts/bandwidth', principal: { kind: 'root', id: 'root-internal', username: 'root' } }
 const membership: ServiceUser = { id: 'membership-internal', accountId: account.id, login: 'disk@alpha.example.test', services: { ftp: true, webdisk: true, email: false }, mailboxQuotaMb: 999999, ftpDir: 'public_html' }
 
 describe('additive composed route presentation', () => {
@@ -16,7 +16,37 @@ describe('additive composed route presentation', () => {
     expect(composedRouteSpecs).toHaveLength(135)
     expect(new Set(composedRouteSpecs.map(spec => spec.route)).size).toBe(135)
     expect(new Set(composedRouteSpecs.map(spec => `${spec.surface}/${spec.section}`)).size).toBe(22)
-    expect(composedXpanelRoutes.length + composedXwhmRoutes.length).toBe(118)
+    expect(composedXpanelRoutes.length + composedXwhmRoutes.length).toBe(14)
+    // Workspace routes: specs stay as metadata while their native workspaces render them.
+    for (const route of ['/whm/server/terminal', '/whm/server/file-sharing', '/whm/server/nodes', '/software/apps', '/software/optimize', '/whm/software/addon-services', '/whm/software/containers',
+      '/whm/software/containers/engine', '/whm/software/deployments', '/whm/software/application-projects', '/whm/email/spam', '/whm/email/relay', '/whm/email/bcc', '/whm/email/marketing',
+      '/whm/accounts/templates', '/whm/plans/enhancements', '/whm/backups/restore-more', '/whm/transfers/convert-addon', '/whm/transfers/server', '/domains/staging']) {
+      expect(composedRouteSpecs.some(spec => spec.route === route), route).toBe(true)
+      expect(nativeComposedRoutePaths.has(route), route).toBe(true)
+    }
+    // Workspace (security) routes: their specs stay as metadata while the native WAF, flood, panel access, DNS provider and cluster workspaces render them.
+    for (const route of ['/whm/security/waf', '/whm/security/flood', '/whm/security/panel-access', '/whm/dns/providers', '/whm/dns/cluster', '/security/waf', '/domains/cloudflare']) {
+      expect(composedRouteSpecs.some(spec => spec.route === route), route).toBe(true)
+      expect(nativeComposedRoutePaths.has(route), route).toBe(true)
+    }
+    const nextNativeRoutes = ['/software/packages', '/databases/remote-access', '/advanced/api-shell', '/whm/server/trusted-proxies', '/whm/backups/destinations', '/whm/panel/developer', '/whm/panel/integrations']
+    expect(composedRouteSpecs.filter(spec => nextNativeRoutes.includes(spec.route)).map(spec => spec.route).sort()).toEqual([...nextNativeRoutes].sort())
+    for (const route of nextNativeRoutes) {
+      expect(nativeComposedRoutePaths.has(route), route).toBe(true)
+      expect([...composedXpanelRoutes, ...composedXwhmRoutes].some(spec => spec.route === route), route).toBe(false)
+      expect(renderComposedRoutes(composedRouteSpecs, { ...root, route }), route).toBeUndefined()
+    }
+    for (const route of ['/email/calendars-contacts', '/mail/later', '/mail/settings/spam', '/mail/tools/mailing-lists']) {
+      expect(nativeComposedRoutePaths.has(route), route).toBe(true)
+      expect(composedRouteSpecs.some(spec => spec.route === route), route).toBe(false)
+    }
+    for (const route of ['/whm/services/more', '/whm/services/default-index', '/whm/software/composer', '/whm/monitoring/benchmark', '/whm/monitoring/traffic', '/domains/dynamic-dns', '/domains/site-publisher', '/files/git']) {
+      expect(composedRouteSpecs.some(spec => spec.route === route), route).toBe(true)
+      expect(nativeComposedRoutePaths.has(route), route).toBe(true)
+    }
+    // Encryption has its existing dedicated email registry, not a generic composed spec.
+    expect(composedRouteSpecs.some(spec => spec.route === '/email/encryption')).toBe(false)
+    expect(nativeComposedRoutePaths.has('/email/encryption')).toBe(true)
     // These exact two bodies are covered with their canonical and child views by
     // extensions-acceptance; the generic renderer must not shadow their adapter.
     expect(renderComposedXpanel({ ...owner, route: '/software/installer' })).toBeUndefined()

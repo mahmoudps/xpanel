@@ -717,12 +717,45 @@ describe('D02 — AuthoritativeDnsServiceAdapter (A38)', () => {
 // ============================================================================
 
 describe('D03 — AcmeCertificateServiceAdapter (A39)', () => {
+  // Declared portable fixture only; this is not a real SNI observation or native qualification.
+  const fakeSniVerifier = async ({ servername, expectedFingerprintSha256 }: { servername: string; expectedFingerprintSha256: string }) => ({ servername, ok: true, fingerprintSha256: expectedFingerprintSha256, notAfter: null })
   const now = new Date('2026-10-22T12:00:00Z')
   const aliceDomain: Pick<Domain, 'id' | 'accountId' | 'name'> = {
     id: 'dom-1',
     accountId: 'acc-alice',
     name: 'example.com',
   }
+
+  it('leaves absent SNI verification unverified and refuses installation before CA or host writes', async () => {
+    const executor = new FakeHostExecutor()
+    let orders = 0
+    const adapter = new AcmeCertificateServiceAdapter({ executor, os: UBUNTU_OS,
+      caClient: async () => { orders++; throw new Error('unexpected CA request') } })
+    expect(await adapter.sniVerifier({ servername: 'example.com', expectedFingerprintSha256: 'a'.repeat(64), expectedCertPath: '/unread' })).toMatchObject({ ok: false, fingerprintSha256: null })
+    await expect(adapter.issueOrRenewCertificate({ certId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', accountId: 'acc-alice', callerRole: 'user', names: ['example.com'], challenge: 'http-01', domains: [aliceDomain], now })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: false } })
+    expect(orders).toBe(0); expect(executor.files.size).toBe(0); expect(executor.executedActions).toHaveLength(0)
+    const certId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    await executor.writeFile({ path: '/var/lib/xpanel/acme-orders/' + certId + '.json', content: JSON.stringify({ certId, accountId: 'foreign-account',
+      directoryUrl: 'https://acme-v02.api.letsencrypt.org/directory', challenge: 'http-01', identifiers: ['example.com'], attempts: 1, phase: 'issued', issuedPem: null }), mode: 0o600, owner: 'root', group: 'root' })
+    await expect(adapter.issueOrRenewCertificate({ certId, accountId: 'acc-alice', callerRole: 'user', names: ['example.com'], challenge: 'http-01', domains: [aliceDomain], now, prepareOnly: true })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+    expect(orders).toBe(0)
+  })
+
+  it('prepares immutable fresh files without native reload or SNI success and retains the issued checkpoint', async () => {
+    const executor = new FakeHostExecutor(), bundle = generateTestCertBundle({ dnsNames: ['example.com'] })
+    const adapter = new AcmeCertificateServiceAdapter({ executor, os: UBUNTU_OS, caClient: async () => ({ orderUrl: 'https://acme.test/order/prepared', ...bundle }) })
+    const certId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    const result = await adapter.issueOrRenewCertificate({ certId, accountId: 'acc-alice', callerRole: 'user', names: ['example.com'], challenge: 'http-01', domains: [aliceDomain], now, prepareOnly: true })
+    expect(result.application).toEqual({ status: 'candidate_files_written', servedTlsVerified: false })
+    expect(result.sniObservations).toEqual([]); expect(result.privkeyMode).toBe(0o600); expect(result.privkeyGroup).toBe('root')
+    expect(executor.executedTests).toHaveLength(0)
+    expect(executor.executedActions.some(action => action.kind === 'systemd')).toBe(false)
+    expect((await adapter.readOrderState(certId))?.phase).toBe('issued')
+    expect(JSON.stringify(result)).not.toContain('BEGIN PRIVATE KEY')
+    const before = await executor.readFile(result.fullchainPath)
+    await expect(adapter.issueOrRenewCertificate({ certId, accountId: 'acc-alice', callerRole: 'user', names: ['example.com'], challenge: 'http-01', domains: [aliceDomain], now, prepareOnly: true })).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect(await executor.readFile(result.fullchainPath)).toBe(before)
+  })
 
   it('enforces domain ownership and CAA preflight before placing an ACME order', async () => {
     const executor = new FakeHostExecutor()
@@ -787,12 +820,14 @@ describe('D03 — AcmeCertificateServiceAdapter (A39)', () => {
       executor,
       os: UBUNTU_OS,
       caClient: async ({ onPublishChallenges }) => {
+        // This order fixture's served result is supplied by fakeSniVerifier below.
         await onPublishChallenges([{ identifier: 'example.com', token, keyAuthorization: keyAuth }])
         const staged = await executor.readFile(`/var/www/xpanel-acme/.well-known/acme-challenge/${token}`)
         challengeExistedDuringOrder = staged === keyAuth
         const bundle = generateTestCertBundle({ dnsNames: ['example.com', 'www.example.com'] })
         return { orderUrl: 'https://acme.test/order/http1', ...bundle }
       },
+      sniVerifier: fakeSniVerifier,
     })
 
     const res = await adapter.issueOrRenewCertificate({
@@ -845,6 +880,7 @@ describe('D03 — AcmeCertificateServiceAdapter (A39)', () => {
       executor,
       os: UBUNTU_OS,
       dnsAdapter,
+      sniVerifier: fakeSniVerifier,
       caClient: async ({ onPublishChallenges }) => {
         await onPublishChallenges([
           { identifier: 'example.com', token: tok1, keyAuthorization: ka1 },
@@ -914,6 +950,7 @@ describe('D03 — AcmeCertificateServiceAdapter (A39)', () => {
     const adapter = new AcmeCertificateServiceAdapter({
       executor,
       os: UBUNTU_OS,
+      sniVerifier: fakeSniVerifier,
       caClient: async () => {
         caOrdersCount++
         return {
@@ -1237,10 +1274,17 @@ describe('D05 — AccountProcessServiceAdapter (SSH, Cron Timers & Background Ap
     expect(serviceFile).toContain('Slice=xpanel-1001.slice')
     expect(serviceFile).toContain('Type=oneshot')
     expect(serviceFile).toContain('SocketBindDeny=any')
+    expect(serviceFile).not.toContain('artisan schedule:run')
+    expect(executor.files.get('/etc/xpanel/cron/alice/backup-db.command')).toMatchObject({ content: '/usr/bin/php8.3 artisan schedule:run', mode: 0o640, owner: 'root', group: 'alice' })
+    expect(executor.dirs.get('/etc/xpanel/cron/alice')).toEqual({ mode: 0o750, owner: 'root', group: 'alice' })
+    const notRun = await adapter.observeCronStatus(alice, 'backup-db')
+    expect(notRun).toMatchObject({ lastResult: 'unknown', lastExitCode: null, lastStartedAt: null, durationMs: null, nextRunAt: null })
 
     // Trigger job now -> marks service unit active in FakeHostExecutor
     const triggered = await adapter.triggerCronNow(alice, 'backup-db')
     expect(triggered.serviceRunning).toBe(true)
+    expect(executor.executedCommands).toContainEqual(['/usr/bin/systemctl', 'start', '--no-block', 'xpanel-cron-alice-backup-db.service'])
+    expect(triggered.lastResult).toBe('unknown')
 
     // Overlapping trigger while service is running must be rejected with CONFLICT (409)!
     await expect(adapter.triggerCronNow(alice, 'backup-db')).rejects.toMatchObject({
@@ -1259,6 +1303,42 @@ describe('D05 — AccountProcessServiceAdapter (SSH, Cron Timers & Background Ap
       'xpanel-cron-alice-paused-job.timer',
       'xpanel-cron-alice-paused-job.service',
     ])
+    expect(executor.files.has('/etc/xpanel/cron/alice/paused-job.command')).toBe(false)
+  })
+
+  it('cron observations require successful bounded loaded systemctl evidence and never derive success from fake unit maps', async () => {
+    const executor = new FakeHostExecutor(), alice = makeAccount()
+    const adapter = new AccountProcessServiceAdapter({ executor, os: UBUNTU_OS })
+    executor.units.set('xpanel-cron-alice-missing.service', { active: true, enabled: true, properties: { Result: 'success' } })
+    await expect(adapter.observeCronStatus(alice, 'missing')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: false, observationUnavailable: true } })
+    await adapter.reconcileAccountCronJobs({ account: alice, plan: makePlan(), jobs: [{ id: 'real', schedule: '@daily', command: 'printf synthetic', enabled: true }] })
+    executor.failCommand('show', 0, '', '[jailshell] synthetic no properties\n')
+    await expect(adapter.observeCronStatus(alice, 'real')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+    executor.clearCommandFailures()
+    executor.failCommand('show', 1, 'not available', 'LoadState=loaded\nActiveState=inactive\n')
+    await expect(adapter.observeCronStatus(alice, 'real')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+    executor.clearCommandFailures()
+    executor.failCommand('show', 0, '', 'x'.repeat(32769))
+    await expect(adapter.observeCronStatus(alice, 'real')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+    const count = executor.executedCommands.length
+    await expect(adapter.observeCronStatus(alice, '../escape')).rejects.toMatchObject({ code: 'VALIDATION' })
+    expect(executor.executedCommands).toHaveLength(count)
+  })
+
+  it('cron manual-run failures require review without reporting execution or retrying', async () => {
+    const executor = new FakeHostExecutor(), alice = makeAccount(), adapter = new AccountProcessServiceAdapter({ executor, os: UBUNTU_OS })
+    await adapter.reconcileAccountCronJobs({ account: alice, plan: makePlan(), jobs: [{ id: 'real', schedule: '@daily', command: 'printf synthetic', enabled: true }] })
+    executor.failCommand('start --no-block', 1)
+    await expect(adapter.triggerCronNow(alice, 'real')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { unknownOutcome: true, verificationRequired: true, stateChanged: true } })
+    expect(executor.executedCommands.filter(argv => argv[1] === 'start')).toHaveLength(1)
+  })
+
+  it('cron completed observations use declared timestamps, exit status and monotonic duration only', async () => {
+    const executor = new FakeHostExecutor(), alice = makeAccount(), adapter = new AccountProcessServiceAdapter({ executor, os: UBUNTU_OS })
+    await adapter.reconcileAccountCronJobs({ account: alice, plan: makePlan(), jobs: [{ id: 'real', schedule: '@daily', command: 'printf synthetic', enabled: true }] })
+    executor.units.set('xpanel-cron-alice-real.service', { active: false, enabled: false, properties: { Result: 'exit-code', ExecMainStatus: '7', ExecMainStartTimestamp: 'Mon 2026-10-26 01:00:00 UTC', ExecMainStartTimestampMonotonic: '1000000', ExecMainExitTimestampMonotonic: '1250000' } })
+    executor.units.get('xpanel-cron-alice-real.timer')!.properties.NextElapseUSecRealtime = 'Tue 2026-10-27 00:00:00 UTC'
+    expect(await adapter.observeCronStatus(alice, 'real')).toMatchObject({ lastResult: 'exit-code', lastExitCode: 7, durationMs: 250, nextRunAt: 'Tue 2026-10-27 00:00:00 UTC', serviceRunning: false })
   })
 
   it('allocates per-account loopback app ports, blocks cross-tenant port hijacking, writes 0600 env files with secret redaction, and stops all units on suspension/termination', async () => {
@@ -1287,7 +1367,7 @@ describe('D05 — AccountProcessServiceAdapter (SSH, Cron Timers & Background Ap
           workingDir: '/home/alice/public_html',
           env: {
             DATABASE_URL: 'mysql://alice:SuperSecretDbPass99@localhost/alice_db',
-            JWT_SECRET: 'UltraSecretJwtKey2026',
+            JWT_SECRET: 'synthetic-' + 'jwt-fixture-value',
           },
         },
       ],

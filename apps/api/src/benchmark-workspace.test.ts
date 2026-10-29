@@ -1,0 +1,14 @@
+import { describe, expect, it, vi } from 'vitest'
+import type { AuthenticatedCaller } from './auth.ts'
+import { handleBenchmarkWorkspaceRoute, projectBenchmarkView } from './benchmark-workspace.ts'
+const root = { principal: { kind: 'root', id: 'root-fixture', username: 'root' } } as AuthenticatedCaller
+const view = () => ({ history: { state: 'read', results: [] }, jobsAvailable: true, limits: { cpuSeconds: 5, diskBytes: 67108864, maxRuntimeSeconds: 60 }, network: 'not_measured' })
+const h = () => ({ requireCaller: vi.fn(async () => root), assertRoot: vi.fn(async () => {}), emitAudit: vi.fn(async () => {}), callHost: vi.fn(async () => view() as unknown) })
+const request = (path: string, method = 'GET', body?: unknown) => { const url = new URL('http://h' + path); return [new Request(url, { method, ...(body ? { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } } : {}) }), url, method] as const }
+describe('benchmark API', () => {
+  it('whitelists read output and rechecks root', async () => { const helpers = h(); const response = await handleBenchmarkWorkspaceRoute(...request('/api/server/monitoring/benchmark'), helpers); expect(await response!.json()).toEqual(view()); expect(helpers.assertRoot).toHaveBeenCalledTimes(2) })
+  it('rejects path selectors and extra intent fields', async () => { for (const args of [request('/api/server/monitoring/benchmark?path=/tmp'), request('/api/server/monitoring/benchmark/jobs', 'POST', { confirm: 'RUN', bytes: 1 })]) await expect(handleBenchmarkWorkspaceRoute(...args, h())).rejects.toMatchObject({ code: 'VALIDATION' }) })
+  it('rejects fake complete results', () => { expect(() => projectBenchmarkView({ ...view(), history: { state: 'read', results: [{ state: 'measured' }] } })).toThrow(); expect(() => projectBenchmarkView({ ...view(), network: 'measured' })).toThrow() })
+  it('submits the fixed intent and records audit', async () => { const helpers = h(); helpers.callHost.mockResolvedValue({ job: { id: '11111111-1111-4111-8111-111111111111', kind: 'system.monitoring.benchmark', status: 'queued' } }); const response = await handleBenchmarkWorkspaceRoute(...request('/api/server/monitoring/benchmark/jobs', 'POST', { confirm: 'RUN' }), helpers); expect(response!.status).toBe(202); expect(helpers.callHost).toHaveBeenCalledWith(root, '/host/monitoring/benchmark/jobs', { confirm: 'RUN' }); expect(helpers.emitAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'server.benchmark.run', outcome: 'ok' })) })
+  it('treats unverifiable submission as unknown', async () => { const helpers = h(); helpers.callHost.mockResolvedValue({ job: { id: 'wrong', kind: 'other' } }); await expect(handleBenchmarkWorkspaceRoute(...request('/api/server/monitoring/benchmark/jobs', 'POST', { confirm: 'RUN' }), helpers)).rejects.toMatchObject({ detail: { unknownOutcome: true } }) })
+})

@@ -6,11 +6,14 @@ import type { Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { agentCallerHeaders, loadAgentCredentialFile } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
-import { bindMfaRuntimePolicy, canSeeAccount, captureMfaRuntimePolicy, fail, hasAcl, isXpanelError, type AuditEntry, type MfaRuntimePolicy, type OsProfile } from '@xpanel/core'
+import { bindMfaRuntimePolicy, canSeeAccount, captureMfaRuntimePolicy, fail, hasAcl, isXpanelError, type AuditEntry, type Domain, type MfaRuntimePolicy, type OsProfile, type WebsiteAnalyticsSnapshot } from '@xpanel/core'
 import { canOpenRegisteredRoute, canonicalNavigationRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { mapAgentHostInfo, mapAgentServices } from '../../web/src/board-port/xwhm-dashboard.ts'
+import { parseWebsiteAnalyticsSnapshot, type WebsiteAnalyticsWindow } from '../../web/src/charts.ts'
 import { publicContactEmail } from '../../web/src/display-name.ts'
-import { createDb, initializeOperationalMetadata, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, type AuditQuery, type Db } from '@xpanel/db'
+import { requestLocale } from '../../web/src/i18n.ts'
+import type { WebAppRenderState } from '../../web/src/app.ts'
+import { createDb, getMailboxSession, initializeOperationalMetadata, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, type AuditQuery, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { runCli } from './cli.ts'
@@ -20,9 +23,15 @@ import { loadMailDocument, messageSizeLimitBytes, messageSizeLimitFromPostconf, 
 import { auditActorQuery, auditTargetQuery, createLocalMailboxTransport, mailFolderName, mailboxAddressIndex, rewriteMailboxIds } from './mail/inbox.ts'
 import { createApiApp, ensureRootPrincipal, listenApiServer } from './server.ts'
 import { authenticateRequest } from './auth.ts'
+import { teamToolIds } from './team-access.ts'
+import { teamFileReader, teamMemberResolver } from './team-session.ts'
+import { createHandoffSessionCheck } from './panel-handoff-authority.ts'
+import { readAdminPreferenceValues } from './admin-preferences.ts'
+import { requireMailboxPrincipalAccess } from './authorization.ts'
 import { createAgentClient } from './agent-client.ts'
+import { startAlertScheduler } from './alert-runtime.ts'
 import { classifyCliInvocation, xpanelServiceUid } from './cli-privilege.ts'
-import { ENTRY_POINTS, entryPointAllowsRole, type EntryPoint } from './entry-points.ts'
+import { ENTRY_POINTS, entryPointAdmitsPrincipal, isMailboxPrincipalUsername, type EntryPoint } from './entry-points.ts'
 import { assertStateWritable } from './state-access.ts'
 import { LiveEventHub, WS_AUTHORIZATION_UNAVAILABLE } from './ws.ts'
 import type { ApiApp } from './server.ts'
@@ -39,7 +48,7 @@ import {
 type ApiLifecycleParticipant = Awaited<ReturnType<typeof startLifecycleWriterParticipant>>
 
 /** IPC is established before startup writers; an unsafe canonical namespace is quarantined. */
-const prepareApiLifecycleStartup = async (): Promise<{ managed: boolean; quarantined: boolean; participant?: ApiLifecycleParticipant }> => {
+export const prepareApiLifecycleStartup = async (): Promise<{ managed: boolean; quarantined: boolean; participant?: ApiLifecycleParticipant }> => {
   let managed: boolean
   let quarantined = false
   try { managed = await isLifecycleManaged() }
@@ -60,7 +69,7 @@ const prepareApiLifecycleStartup = async (): Promise<{ managed: boolean; quarant
 }
 
 /** Frozen until restart: no database, state renderer, authentication or promotion callback exists. */
-const createQuarantinedApiApp = (): ApiApp => ({
+export const createQuarantinedApiApp = (): ApiApp => ({
   hub: createLifecycleBackgroundResources(() => new LiveEventHub()),
   fetch: async request => {
     const url = new URL(request.url)
@@ -76,7 +85,7 @@ const createQuarantinedApiApp = (): ApiApp => ({
   watchMailbox: () => {},
 })
 
-const closeApiLifecycleParticipant = async (participant?: ApiLifecycleParticipant): Promise<void> => {
+export const closeApiLifecycleParticipant = async (participant?: ApiLifecycleParticipant): Promise<void> => {
   if (!participant) return
   await awaitLifecycleWriterDrain()
   await participant.close()
@@ -101,7 +110,24 @@ export interface PanelServerOptions {
   webRenderer?: (req: Request) => Promise<Response> | Response
 }
 
-const detectHostOsProfile = async (): Promise<OsProfile> => {
+/** The bounded host-observation reply accepted from the agent account-usage contract. */
+interface AccountUsageObservation {
+  phpVersion: string | null
+  diskBytes: number | null
+  memoryBytes: number | null
+  processCount: number | null
+  bandwidth: 'unmeasured'
+  ioEnforced?: boolean | null
+}
+
+/** Same four windows the agent website-analytics route accepts. */
+const isWebsiteAnalyticsWindow = (value: string | null): value is WebsiteAnalyticsWindow =>
+  value === '1h' || value === '24h' || value === '7d' || value === '30d'
+
+const readUsageNumber = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+
+export const detectHostOsProfile = async (): Promise<OsProfile> => {
   return detectOs((p) => readFileSync(p, 'utf8'))
 }
 
@@ -109,15 +135,6 @@ const detectHostOsProfile = async (): Promise<OsProfile> => {
  * Loads `serveWebUi` from `@xpanel/web` dynamically so visiting `/`, `/login`, `/whm`, `/panel`, `/mail`
  * renders the full bilingual HTML5 UI hydrated with live state from `StateStore` and `Db` when available.
  */
-const suggestedPanel = (pathname: string, current?: EntryPoint): EntryPoint | undefined => {
-  const path = pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
-  const guess: EntryPoint | undefined = path === '/whm' || path.startsWith('/whm/') ? 'xwhm'
-    : path === '/mail' || path.startsWith('/mail/') ? 'xmail'
-    : path === '/panel' || path.startsWith('/panel/') ? 'xpanel'
-    : undefined
-  return guess && guess !== current ? guess : undefined
-}
-
 export const createDefaultWebRenderer = async (deps: {
   store: StateStore
   db: Db
@@ -125,27 +142,77 @@ export const createDefaultWebRenderer = async (deps: {
   /** Internal startup policy, shared with API and WebSocket authentication. */
   mfaRuntimePolicy?: MfaRuntimePolicy
   entryPoint?: EntryPoint
-  /** Exact public origins. Missing origins are not linked. */
-  panels?: Partial<Record<EntryPoint, string>>
+  /** This listener's own exact public origin. A listener renders no other panel's address. */
+  publicOrigin?: string
   /** Connected agent. Implemented tools qualify only when its Linux probes pass. */
   agent?: { fetch: AgentApp['fetch']; token: string } | null
 }): Promise<(req: Request) => Promise<Response> | Response> => {
   const mfaRuntimePolicy = bindMfaRuntimePolicy(deps.mfaRuntimePolicy)
   const { serveWebUi, resolveWebDocumentRoute } = await import('../../web/src/index.ts')
-  const panelLinks = (['xpanel', 'xwhm', 'xmail'] as const).flatMap(surface => {
-    const origin = deps.panels?.[surface]
-    if (!origin) return []
+  const publicOrigin = (() => {
+    if (!deps.publicOrigin) return undefined
+    try { const url = new URL(deps.publicOrigin); return url.protocol === 'https:' && url.origin === deps.publicOrigin ? url.origin : undefined } catch { return undefined }
+  })()
+  /**
+   * The existing agent account-usage contract, shared by /home and /resources.
+   * A missing agent, failed read or unexpected wire shape is no observation (null),
+   * never a zero sample. Bandwidth stays explicitly unmeasured.
+   */
+  const readAccountUsageObservation = async (principalId: string, username: string): Promise<AccountUsageObservation | null> => {
+    if (!deps.agent) return null
     try {
-      const url = new URL(origin)
-      if (url.protocol !== 'https:' || url.origin !== origin) return []
-      return [{ surface, origin: url.origin }]
+      const response = await deps.agent.fetch(new Request(`http://agent.local/host/account-usage?username=${encodeURIComponent(username)}`, {
+        headers: agentCallerHeaders({ principalId, token: deps.agent.token }),
+      }))
+      if (!response.ok) return null
+      const body = await response.json() as {
+        phpVersion?: unknown
+        diskBytes?: unknown
+        memoryBytes?: unknown
+        processCount?: unknown
+        bandwidth?: unknown
+        ioEnforced?: unknown
+      }
+      if (body.bandwidth !== 'unmeasured') return null
+      return {
+        phpVersion: typeof body.phpVersion === 'string' && /^\d+\.\d+$/.test(body.phpVersion) ? body.phpVersion : null,
+        diskBytes: readUsageNumber(body.diskBytes),
+        memoryBytes: readUsageNumber(body.memoryBytes),
+        processCount: readUsageNumber(body.processCount),
+        bandwidth: 'unmeasured' as const,
+        ...(typeof body.ioEnforced === 'boolean' ? { ioEnforced: body.ioEnforced } : {}),
+      }
     } catch {
-      return []
+      return null
     }
-  })
+  }
+  /**
+   * The existing account-scoped website traffic read path (`GET /api/analytics/websites/:id`
+   * and the agent `/analytics/websites/:domainId` query). Server-wide IO is never used here.
+   */
+  const readWebsiteTraffic = async (
+    principalId: string,
+    domain: Pick<Domain, 'id' | 'name' | 'accountId'>,
+    window: WebsiteAnalyticsWindow,
+  ): Promise<WebsiteAnalyticsSnapshot | null> => {
+    if (!deps.agent) return null
+    try {
+      const response = await deps.agent.fetch(new Request(`http://agent.local/analytics/websites/${encodeURIComponent(domain.id)}?window=${window}`, {
+        headers: agentCallerHeaders({ principalId, token: deps.agent.token }),
+      }))
+      if (!response.ok) return null
+      return parseWebsiteAnalyticsSnapshot(await response.json(), { domain: domain.name, accountId: domain.accountId })
+    } catch {
+      return null
+    }
+  }
   return async (req) => {
     const url = new URL(req.url)
     const headers = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }
+    // Every authenticated document of a handed-off session carries the identity banner.
+    let impersonation: { target: string; issuer: string } | undefined
+    const serve = (request: Request, state?: () => Promise<WebAppRenderState>) =>
+      serveWebUi(request, state && (async () => ({ ...await state(), ...(impersonation ? { impersonation } : {}) })))
     let resolvedContact: string | undefined | null = null
     const supportEmail = async (): Promise<string | undefined> => {
       if (resolvedContact !== null) return resolvedContact || undefined
@@ -167,7 +234,6 @@ export const createDefaultWebRenderer = async (deps: {
         visibility?: VisibilityContext
         accountId?: string
         workspaceHref?: string
-        suggested?: EntryPoint
         catalog?: readonly CatalogTool[]
       },
     ) => {
@@ -197,7 +263,7 @@ export const createDefaultWebRenderer = async (deps: {
           if (account?.primaryDomain) hostname = account.primaryDomain
         } catch { /* The brand stays the panel name. */ }
       }
-      return serveWebUi(req, async () => ({
+      return serve(req, async () => ({
         surface: model.surface,
         mfaRuntimeMode: mfaRuntimePolicy.mode,
         activeRoute: url.pathname,
@@ -205,13 +271,11 @@ export const createDefaultWebRenderer = async (deps: {
         ...(catalog ? { catalog } : {}),
         ...(model.accountId ? { accountId: model.accountId } : {}),
         ...(email ? { supportEmail: email } : {}),
-        ...(panelLinks.length ? { panels: panelLinks } : {}),
         error: {
           status,
           surface: model.surface,
           ...(hostname ? { hostname } : {}),
           ...(model.workspaceHref ? { workspaceHref: model.workspaceHref } : {}),
-          ...(model.suggested ? { suggested: model.suggested } : {}),
         },
       }))
     }
@@ -225,75 +289,91 @@ export const createDefaultWebRenderer = async (deps: {
         surface: 'login',
         mfaRuntimeMode: mfaRuntimePolicy.mode,
         ...(email ? { supportEmail: email } : {}),
-        ...(panelLinks.length ? { panels: panelLinks } : {}),
         login: {
           ...(deps.entryPoint ? { audience: deps.entryPoint, targetSurface: deps.entryPoint } : {}),
           ...(email ? { supportEmail: email } : {}),
-          ...(panelLinks.length ? { panels: panelLinks } : {}),
+          ...(publicOrigin ? { publicOrigin } : {}),
+          // A failed handoff lands here with one generic message; the reason is only in the audit trail.
+          ...(url.searchParams.get('handoff') === 'failed' ? { handoffFailed: true } : {}),
         },
       }))
     }
     const documentRoute = resolveWebDocumentRoute(url.pathname)
     // Browser documents require a session; a scoped API token cannot expose an unscoped HTML snapshot.
+    const teamMember = teamMemberResolver(teamFileReader(deps.store.rootDir))
     const caller = await authenticateRequest(deps.db, req, {
-      serverSecret: deps.serverSecret, clientIp: null, mfaRuntimePolicy,
+      serverSecret: deps.serverSecret, clientIp: null, mfaRuntimePolicy, teamMember,
+      handoffAuthority: createHandoffSessionCheck({ db: deps.db, store: deps.store, teamMember }),
       ...(deps.entryPoint ? { entryPoint: deps.entryPoint } : {}),
     })
     const sessionReady = Boolean(caller && caller.mfaVerified && caller.apiTokenId === null && !caller.principalRecord.forcePasswordChange)
     const sessionVisibility = sessionReady && caller
       ? { principal: caller.principal, disabledFeatures: new Set<string>() }
       : undefined
+    if (sessionReady && caller?.impersonator) {
+      const mailbox = isMailboxPrincipalUsername(caller.principal.username) && caller.sessionId ? (await getMailboxSession(deps.db, caller.sessionId))?.mailbox : undefined
+      impersonation = { target: mailbox ?? caller.principal.username, issuer: caller.impersonator.login }
+    }
     if (!documentRoute) {
       return documentStatus(404, {
         surface: deps.entryPoint ?? 'xpanel',
         ...(sessionVisibility ? { visibility: sessionVisibility } : {}),
-        ...(suggestedPanel(url.pathname, deps.entryPoint) ? { suggested: suggestedPanel(url.pathname, deps.entryPoint) } : {}),
       })
     }
     // The listener, never a query parameter or a forwarded header, chooses its HTML surface.
     if (deps.entryPoint && url.pathname !== '/' && documentRoute.surface !== deps.entryPoint) {
-      const suggested = documentRoute.surface !== 'login' && documentRoute.surface !== deps.entryPoint ? documentRoute.surface : suggestedPanel(url.pathname, deps.entryPoint)
-      return documentStatus(404, {
-        surface: deps.entryPoint,
-        ...(suggested ? { suggested } : {}),
-      })
+      return documentStatus(404, { surface: deps.entryPoint })
     }
 
     if (!caller || !sessionReady) {
       return new Response(null, { status: 303, headers: { ...headers, location: '/login' } })
     }
     const principal = caller.principal
+    const savedAppearance = await readAdminPreferenceValues(deps.store.rootDir, principal)
+    const adminAppearance = savedAppearance ? { locale: savedAppearance.language, theme: savedAppearance.theme, density: savedAppearance.density } : {}
     const security = { totpEnabled: caller.principalRecord.totpEnabled }
-    const roleHome: EntryPoint | undefined = principal.kind === 'user' ? 'xpanel' : 'xwhm'
-    const wrongRole = (deps.entryPoint && !entryPointAllowsRole(deps.entryPoint, principal.kind))
+    // Mailbox identities belong to xMail alone, and only they may open it.
+    const mailboxIdentity = principal.kind === 'user' && isMailboxPrincipalUsername(principal.username)
+    const wrongRole = (deps.entryPoint && !entryPointAdmitsPrincipal(deps.entryPoint, caller.principalRecord))
       || (documentRoute.surface === 'xwhm' && principal.kind === 'user')
+      || (documentRoute.surface === 'xmail' && !mailboxIdentity)
+      || (documentRoute.surface === 'xpanel' && mailboxIdentity && url.pathname !== '/')
     if (wrongRole && documentRoute.surface !== 'login') {
       const deniedSurface: EntryPoint = documentRoute.surface === 'xwhm' || documentRoute.surface === 'xmail' ? documentRoute.surface : 'xpanel'
       return documentStatus(403, {
         surface: deps.entryPoint ?? deniedSurface,
         visibility: { principal, disabledFeatures: new Set() },
-        ...(roleHome !== (deps.entryPoint ?? deniedSurface) ? { suggested: roleHome } : {}),
       })
     }
     const surface: EntryPoint = documentRoute.surface === 'xwhm' || documentRoute.surface === 'xmail' ? documentRoute.surface : 'xpanel'
     if (url.pathname === '/') {
-      const target = new URL(deps.entryPoint ? ENTRY_POINTS[deps.entryPoint].home : principal.kind === 'user' ? '/panel' : '/whm', url)
+      const target = new URL(deps.entryPoint ? ENTRY_POINTS[deps.entryPoint].home : mailboxIdentity ? '/mail' : principal.kind === 'user' ? '/panel' : '/whm', url)
       for (const key of ['lang', 'theme', 'density', 'accountId']) if (url.searchParams.has(key)) target.searchParams.set(key, url.searchParams.get(key)!)
       return new Response(null, { status: 303, headers: { ...headers, location: `${target.pathname}${target.search}` } })
     }
     const reseller = principal.kind === 'reseller' ? (await deps.store.getReseller(principal.id)) ?? undefined : undefined
+    // Administrator preferences address only the authenticated principal and require no account-list ACL.
+    if (surface === 'xwhm' && documentRoute.activeRoute === '/whm/preferences') {
+      if (principal.kind === 'reseller' && (!reseller || reseller.id !== principal.id || reseller.username !== principal.username)) return documentStatus(403, { surface, visibility: { principal } })
+      if ([...url.searchParams.keys()].some(key => !['lang', 'theme', 'density'].includes(key))) return documentStatus(400, { surface, visibility: { principal } })
+      const preferenceCatalog = await loadQualifiedCatalog(deps.agent ?? null)
+      return serve(req, async () => ({ surface, ...adminAppearance, mfaRuntimeMode: mfaRuntimePolicy.mode,
+        activeRoute: documentRoute.activeRoute, security, visibility: { principal, ...(reseller ? { reseller } : {}) }, catalog: preferenceCatalog,
+        whm: { principal, activeReseller: reseller ?? null } }))
+    }
     // Self-service factor management is independent of administrative document permissions.
     if (principal.kind === 'reseller' && surface === 'xwhm' && documentRoute.activeRoute === '/whm/security/sign-in') {
       if (!reseller || reseller.id !== principal.id || reseller.username !== principal.username) {
-        return serveWebUi(req, async () => ({
+        return serve(req, async () => ({
           surface,
           mfaRuntimeMode: mfaRuntimePolicy.mode,
           activeRoute: documentRoute.activeRoute,
           error: { status: 403, surface },
         }))
       }
-      return serveWebUi(req, async () => ({
+      return serve(req, async () => ({
         surface,
+        ...adminAppearance,
         mfaRuntimeMode: mfaRuntimePolicy.mode,
         activeRoute: documentRoute.activeRoute,
         security,
@@ -338,6 +418,7 @@ export const createDefaultWebRenderer = async (deps: {
       principal,
       ...(reseller ? { reseller } : {}),
       disabledFeatures: new Set(scoped?.featureList?.disabled ?? []),
+      ...(caller.team ? { allowedToolIds: new Set(teamToolIds(caller.team.roles)) } : {}),
     }
     if (!canOpenRegisteredRoute(documentRoute.activeRoute, scopedVisibility)) {
       return documentStatus(403, {
@@ -355,8 +436,9 @@ export const createDefaultWebRenderer = async (deps: {
       const email = await supportEmail()
       const summaryAccount = principal.kind === 'user' && surface === 'xpanel' ? scoped?.account : null
       const summaryPlan = summaryAccount ? scoped?.plan : null
-      return serveWebUi(req, async () => ({
+      return serve(req, async () => ({
         surface,
+        ...adminAppearance,
         mfaRuntimeMode: mfaRuntimePolicy.mode,
         activeRoute: documentRoute.activeRoute,
         security,
@@ -364,7 +446,6 @@ export const createDefaultWebRenderer = async (deps: {
         ...(qualifiedCatalog ? { catalog: qualifiedCatalog } : {}),
         ...(ownAccountId ? { accountId: ownAccountId } : {}),
         ...(email ? { supportEmail: email } : {}),
-        ...(panelLinks.length ? { panels: panelLinks } : {}),
         workspaceSummary: {
           ...(summaryAccount ? { account: { id: summaryAccount.id, ownerId: summaryAccount.ownerId, username: summaryAccount.username,
             primaryDomain: summaryAccount.primaryDomain, status: summaryAccount.status, planId: summaryAccount.planId } } : {}),
@@ -378,46 +459,17 @@ export const createDefaultWebRenderer = async (deps: {
       const email = await supportEmail()
       const [ownedUsers, sessions, homeAudit, homeDomains, homeDatabaseState, homeUsage] = await Promise.all([
         deps.store.listOwnedServiceUsers(homeAccount.username).catch(() => []),
-        listSessionsForPrincipal(deps.db, principal.id).catch(() => []),
-        listAudit(deps.db, { mentions: homeAccount.username, limit: 8 }).catch(() => []),
+        caller.team ? [] : listSessionsForPrincipal(deps.db, principal.id).catch(() => []),
+        caller.team ? [] : listAudit(deps.db, { mentions: homeAccount.username, limit: 8 }).catch(() => []),
         deps.store.listDomains({ accountId: homeAccount.id }).catch(() => []),
         deps.store.readAccountDatabases(homeAccount.id, { username: homeAccount.username }),
-        (async () => {
-          if (!deps.agent) return null
-          try {
-            const response = await deps.agent.fetch(new Request(`http://agent.local/host/account-usage?username=${encodeURIComponent(homeAccount.username)}`, {
-              headers: agentCallerHeaders({ principalId: principal.id, token: deps.agent.token }),
-            }))
-            if (!response.ok) return null
-            const body = await response.json() as {
-              phpVersion?: unknown
-              diskBytes?: unknown
-              memoryBytes?: unknown
-              processCount?: unknown
-              bandwidth?: unknown
-              ioEnforced?: unknown
-            }
-            if (body.bandwidth !== 'unmeasured') return null
-            const numberOrNull = (value: unknown): number | null =>
-              typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
-            return {
-              phpVersion: typeof body.phpVersion === 'string' && /^\d+\.\d+$/.test(body.phpVersion) ? body.phpVersion : null,
-              diskBytes: numberOrNull(body.diskBytes),
-              memoryBytes: numberOrNull(body.memoryBytes),
-              processCount: numberOrNull(body.processCount),
-              bandwidth: 'unmeasured' as const,
-              ...(typeof body.ioEnforced === 'boolean' ? { ioEnforced: body.ioEnforced } : {}),
-            }
-          } catch {
-            return null
-          }
-        })(),
+        readAccountUsageObservation(principal.id, homeAccount.username),
       ])
       const homeAddresses = mailboxAddressIndex(ownedUsers.flatMap(user => user.services.email && user.login.includes('@') ? [user.login] : []))
       const lastSignInAt = [...sessions]
         .filter(session => session.id !== caller.sessionId)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.createdAt
-      return serveWebUi(req, async () => ({
+      return serve(req, async () => ({
         surface,
         activeRoute: '/home',
         mfaRuntimeMode: mfaRuntimePolicy.mode,
@@ -426,7 +478,6 @@ export const createDefaultWebRenderer = async (deps: {
         ...(qualifiedCatalog ? { catalog: qualifiedCatalog } : {}),
         ...(ownAccountId ? { accountId: ownAccountId } : {}),
         ...(email ? { supportEmail: email } : {}),
-        ...(panelLinks.length ? { panels: panelLinks } : {}),
         panel: {
           account: homeAccount,
           plan: homePlan,
@@ -504,6 +555,44 @@ export const createDefaultWebRenderer = async (deps: {
     const accountDatabases = snap.databases.filter((d) => d.accountId === account?.id)
     const accountDatabaseUsers = snap.databaseUsers.filter((user) => user.accountId === account?.id).map((user) => ({ id: user.id, accountId: user.accountId, name: user.name, grants: user.grants }))
     const accountServiceUsers = snap.serviceUsers.filter((u) => u.accountId === account?.id).map((u) => ({ ...u, passwordHash: '' }))
+    const accountCertificates = account ? snap.certificates.filter(certificate => certificate.accountId === account.id) : []
+    // The owner site-settings page reads the selected domain's custom configuration from the
+    // desired-state store. A domain without a saved record renders empty editable defaults; it is
+    // never presented as a saved configuration and the page keeps its explicit application state.
+    const siteSettingsRoute = surface === 'xpanel' && documentRoute.activeRoute === '/domains/site-settings'
+    const requestedSiteDomain = url.searchParams.get('domainId')
+    const selectedSiteDomain = siteSettingsRoute && account
+      ? (requestedSiteDomain && /^[0-9a-f-]{36}$/i.test(requestedSiteDomain) ? accountDomains.find(domain => domain.id === requestedSiteDomain.toLowerCase()) : undefined)
+        ?? accountDomains.find(domain => domain.kind === 'primary')
+        ?? accountDomains[0]
+      : undefined
+    const domainCustomConfig = selectedSiteDomain ? await deps.store.getDomainCustomConfig(selectedSiteDomain.id).catch(() => null) : null
+    const customConfigView = selectedSiteDomain ? {
+      domainId: selectedSiteDomain.id, accountId: selectedSiteDomain.accountId, domainName: selectedSiteDomain.name,
+      nginxInclude: domainCustomConfig?.nginxInclude ?? '',
+      apacheInclude: domainCustomConfig?.apacheInclude ?? '',
+      userIni: domainCustomConfig?.userIni ?? {},
+      customHeaders: domainCustomConfig?.customHeaders ?? {},
+      cacheBypassPaths: domainCustomConfig?.cacheBypassPaths ?? [],
+      updatedAt: domainCustomConfig?.updatedAt ?? '',
+      updatedBy: domainCustomConfig?.updatedBy ?? 'user',
+    } : undefined
+    // The two approved account pages read their existing account-scoped observations here.
+    // A missing agent, failed read or invalid reply leaves no prop, so the page keeps its
+    // explicit unavailable state instead of fabricating a sample.
+    const resourcesRoute = surface === 'xpanel' && documentRoute.activeRoute === '/resources'
+    const trafficRoute = surface === 'xpanel' && documentRoute.activeRoute === '/metrics/traffic'
+    const requestedWindow = url.searchParams.get('window')
+    const trafficWindow: WebsiteAnalyticsWindow = isWebsiteAnalyticsWindow(requestedWindow) ? requestedWindow : '24h'
+    const trafficDomain = trafficRoute && account
+      ? accountDomains.find(domain => domain.name === account.primaryDomain)
+        ?? accountDomains.find(domain => domain.kind === 'primary')
+        ?? accountDomains[0]
+      : undefined
+    const [resourceUsage, trafficAnalytics] = await Promise.all([
+      resourcesRoute && account ? readAccountUsageObservation(principal.id, account.username) : null,
+      trafficDomain ? readWebsiteTraffic(principal.id, trafficDomain, trafficWindow) : null,
+    ])
     const active = await latestActive(deps.db)
     const dashboardRoute = surface === 'xwhm' && documentRoute.activeRoute === '/whm' && principal.kind === 'root'
     const AUDIT_PAGE_SIZE = 50
@@ -601,21 +690,21 @@ export const createDefaultWebRenderer = async (deps: {
       const checks: Array<[string, number, number | null]> = [
         ['mailboxes', snap.serviceUsers.filter(user => user.accountId === accountRow.id && user.services.email).length, numericCap(accountPlan.caps.mailboxes)],
         ['addon domains', snap.domains.filter(domain => domain.accountId === accountRow.id && domain.kind === 'addon').length, numericCap(accountPlan.caps.addonDomains)],
-        ['databases', snap.databases.filter(database => database.accountId === accountRow.id && !database.trashedAt).length, numericCap(accountPlan.caps.databases)],
+        ['databases', [...snap.databases, ...snap.postgresqlDatabases ?? []].filter(database => database.accountId === accountRow.id && !database.trashedAt).length, numericCap(accountPlan.caps.databases)],
       ]
       return checks.flatMap(([label, used, cap]) => cap !== null && used / cap >= 0.8 ? [{ name: accountRow.username, note: `${used} / ${cap} ${label}` }] : [])
     })
-    return serveWebUi(req, async () => ({
+    return serve(req, async () => ({
       surface,
+      ...adminAppearance,
       activeRoute: documentRoute.activeRoute,
       mfaRuntimeMode: mfaRuntimePolicy.mode,
       security,
-      ...(panelLinks.length ? { panels: panelLinks } : {}),
       ...(url.searchParams.has('accountId') && account ? { accountId: account.id } : {}),
       visibility,
       ...(qualifiedCatalog ? { catalog: qualifiedCatalog } : {}),
       ...(active ? { generationId: active.id } : {}),
-      whm: {
+      ...(surface === 'xwhm' ? { whm: {
         principal,
         activeReseller: reseller ?? null,
         accounts: listedAccounts,
@@ -657,18 +746,27 @@ export const createDefaultWebRenderer = async (deps: {
           ...(hostSample ? { hostSample } : {}),
           ...(serviceRows ? { services: serviceRows } : {}),
         } : {}),
-      },
-      panel: {
+      } } : {}),
+      ...(surface === 'xpanel' ? { panel: {
         ...(account ? { account } : {}),
         ...(plan ? { plan } : {}),
         domains: accountDomains,
+        ...(customConfigView ? { customConfig: customConfigView } : {}),
+        certificates: accountCertificates,
+        ...(resourceUsage ? { usage: resourceUsage } : {}),
+        ...(trafficAnalytics
+          ? { websiteAnalytics: trafficAnalytics, websiteAnalyticsWindow: trafficWindow }
+          : trafficRoute ? { websiteAnalyticsUnavailable: true } : {}),
         databases: accountDatabases,
         databaseUsers: accountDatabaseUsers,
         serviceUsers: accountServiceUsers,
         files: [],
-      },
-      mail: await (async () => {
-        if (surface !== 'xmail') return { mailbox: '' }
+      } } : {}),
+      ...(surface === 'xmail' ? { mail: await (async () => {
+        if (documentRoute.activeRoute === '/mail/contacts') {
+          const access = await requireMailboxPrincipalAccess(deps.store, caller).catch(() => null)
+          return { mailbox: access?.mailbox ?? '' }
+        }
         let postfixMain: string | null = null
         try { postfixMain = readFileSync('/etc/postfix/main.cf', 'utf8') } catch { postfixMain = null }
         let dkimProbe: 'signing' | 'refused' | 'unknown' = 'unknown'
@@ -706,14 +804,16 @@ export const createDefaultWebRenderer = async (deps: {
             if (bytes !== null) postfixMain = `${postfixMain}\nmessage_size_limit = ${bytes}\n`
           } catch { /* The file text stays the only source when postconf cannot run. */ }
         }
-        const requestedFolder = url.searchParams.get('folder')
+        const routeFolder = ({ '/mail/sent': 'Sent', '/mail/drafts': 'Drafts', '/mail/trash': 'Trash' } as Record<string, string | undefined>)[documentRoute.activeRoute]
+        const requestedFolder = routeFolder ?? url.searchParams.get('folder')
         let folder = 'INBOX'
         try { folder = mailFolderName(requestedFolder) } catch { folder = 'INBOX' }
         const mode = url.searchParams.get('mode')
         const replyUid = Number(url.searchParams.get('uid'))
         const replyMode = mode === 'reply' || mode === 'reply-all' || mode === 'forward' ? mode : null
+        const managedFolder = (documentRoute.activeRoute === '/mail/inbox' || routeFolder !== undefined) && ['INBOX', 'Sent', 'Drafts', 'Trash'].includes(folder)
         const loaded = await loadMailDocument({
-          readFirst: req.headers.get('x-xpanel-mail-refresh') !== 'list',
+          readFirst: !managedFolder && req.headers.get('x-xpanel-mail-refresh') !== 'list',
           db: deps.db,
           store: deps.store,
           serverSecret: deps.serverSecret,
@@ -727,7 +827,7 @@ export const createDefaultWebRenderer = async (deps: {
             name: zone.name,
             records: zone.records.map(record => ({ name: record.name, type: record.type, content: record.content })),
           })),
-          locale: url.searchParams.get('lang') === 'ar' ? 'ar' : 'en',
+          locale: requestLocale(url, req),
           ...(replyMode && documentRoute.activeRoute === '/mail/compose' && Number.isInteger(replyUid) && replyUid > 0
             ? { reply: { mode: replyMode, uid: replyUid } }
             : {}),
@@ -748,81 +848,8 @@ export const createDefaultWebRenderer = async (deps: {
           ...(loaded.identitySize ? { identitySize: loaded.identitySize } : {}),
           ...(loaded.composeDraft ? { composeDraft: loaded.composeDraft } : {}),
         }
-      })(),
+      })() } : {}),
     }))
-  }
-}
-
-/**
- * Starts the `xpanel-api` HTTP + WebSocket server with integrated Web UI renderer (`@xpanel/web`).
- */
-export const startPanelServer = async (opts: PanelServerOptions = {}) => {
-  const mfaRuntimePolicy = captureMfaRuntimePolicy()
-  const port = opts.port ?? (Number(process.env.XPANEL_PORT ?? '2087') || 2087)
-  const host = opts.host ?? process.env.XPANEL_HOST ?? '127.0.0.1'
-  const defaultBaseDir = process.platform === 'linux' ? '/var/lib/xpanel' : '.xpanel-data'
-  const dbPath = opts.dbPath ?? process.env.XPANEL_DB_PATH ?? `${defaultBaseDir}/control.db`
-  const stateDir = opts.stateDir ?? process.env.XPANEL_STATE_DIR ?? `${defaultBaseDir}/state`
-  if (!opts.agentApp && (process.platform !== 'linux' || process.getuid?.() === 0)) {
-    fail('PRECONDITION_FAILED', 'the API must run as an unprivileged Linux service with a separate agent')
-  }
-  const lifecycle = await prepareApiLifecycleStartup()
-  let dbHandle: ReturnType<typeof createDb> | undefined
-  let client: ReturnType<typeof createAgentClient> | undefined
-  let listener: Awaited<ReturnType<typeof listenApiServer>> | undefined
-  let closePromise: Promise<void> | undefined
-  const close = (): Promise<void> => {
-    closePromise ??= (async () => {
-      const errors: unknown[] = []
-      try { await listener?.close() } catch (error) { errors.push(error) }
-      try { client?.close() } catch (error) { errors.push(error) }
-      try { await awaitLifecycleWriterDrain() } catch (error) { errors.push(error) }
-      try { await dbHandle?.close() } catch (error) { errors.push(error) }
-      try { await closeApiLifecycleParticipant(lifecycle.participant) } catch (error) { errors.push(error) }
-      if (errors.length) throw new AggregateError(errors, 'API shutdown requires operational inspection')
-    })()
-    return closePromise
-  }
-  try {
-    if (lifecycle.quarantined) {
-      const app = createQuarantinedApiApp()
-      listener = await createLifecycleBackgroundResources(() => listenApiServer(app, { port, host }))
-      return { quarantined: true as const, app, port: listener.port, host, close }
-    }
-    const serverSecret = opts.serverSecret ?? await loadAgentCredentialFile(opts.serverSecretFile ?? process.env.XPANEL_SERVER_SECRET_FILE ?? '/etc/xpanel/server.secret')
-    const agentToken = opts.agentToken ?? await loadAgentCredentialFile(opts.agentTokenFile ?? process.env.XPANEL_AGENT_TOKEN_FILE ?? '/etc/xpanel/agent.token')
-    const os = opts.os ?? await detectHostOsProfile()
-    const handle = await withLifecycleWriterAdmission(async () => {
-      if (dbPath !== ':memory:') await mkdir(dirname(dbPath), { recursive: true })
-      await mkdir(stateDir, { recursive: true })
-      await assertStateWritable(stateDir)
-      const opened = createDb(dbPath, lifecycle.managed ? { durability: 'strict' } : {})
-      dbHandle = opened
-      await migrate(opened.runner)
-      await initializeOperationalMetadata(opened.db)
-      await ensureRootPrincipal(opened.db, { ...(opts.rootPassword ? { password: opts.rootPassword } : {}) })
-      return opened
-    })
-    const store = new StateStore(stateDir)
-    if (!opts.agentApp) client = createLifecycleBackgroundResources(() => createAgentClient({ socketPath: opts.agentSocket ?? process.env.XPANEL_AGENT_SOCKET ?? '/run/xpanel/agent.sock', token: agentToken }))
-    const agentApp = opts.agentApp ?? client!
-    const webRenderer = opts.webRenderer ?? await createDefaultWebRenderer({
-      store, db: handle.db, serverSecret, mfaRuntimePolicy, agent: { fetch: request => agentApp.fetch(request), token: agentToken },
-    })
-    const app = createLifecycleBackgroundResources(() => createApiApp({
-      db: handle.db, store, agentApp, agentToken, os, webRenderer, serverSecret, mfaRuntimePolicy,
-      secureCookies: !opts.agentApp,
-      allowedOrigins: opts.allowedOrigins ?? (process.env.XPANEL_ALLOWED_ORIGINS?.split(',').filter(Boolean) ?? []),
-      trustedProxyAddresses: opts.trustedProxyAddresses ?? (process.env.XPANEL_TRUSTED_PROXIES?.split(',').filter(Boolean) ?? []),
-      ...(opts.homeBaseDir ? { homeBaseDir: opts.homeBaseDir } : {}),
-    }))
-    listener = await createLifecycleBackgroundResources(() => listenApiServer(app, { port, host }))
-    return {
-      quarantined: false as const, app, port: listener.port, host, db: handle.db, store, close,
-    }
-  } catch (error) {
-    await close().catch(() => undefined)
-    throw error
   }
 }
 
@@ -838,6 +865,12 @@ export interface PanelEntrypointsOptions extends Omit<PanelServerOptions, 'port'
 }
 
 const ENTRY_POINT_ORDER: readonly EntryPoint[] = ['xpanel', 'xwhm', 'xmail']
+/** The only crossings: xWHM opens xPanel for an account, xPanel opens xMail for a mailbox. Never rendered. */
+const HANDOFF_ROUTES: Readonly<Record<EntryPoint, (origins: Readonly<Record<EntryPoint, PanelEntryPointConfig>>) => { targetOrigin?: string; issuerOrigin?: string }>> = {
+  xwhm: origins => ({ targetOrigin: origins.xpanel.publicOrigin }),
+  xpanel: origins => ({ targetOrigin: origins.xmail.publicOrigin, issuerOrigin: origins.xwhm.publicOrigin }),
+  xmail: origins => ({ issuerOrigin: origins.xpanel.publicOrigin }),
+}
 const ENTRY_POINT_ENV = {
   xpanel: { origin: 'XPANEL_PANEL_PUBLIC_ORIGIN', port: 'XPANEL_PANEL_PORT', defaultPort: 12083 },
   xwhm: { origin: 'XPANEL_WHM_PUBLIC_ORIGIN', port: 'XPANEL_WHM_PORT', defaultPort: 12087 },
@@ -873,6 +906,10 @@ export const resolvePanelEntrypoints = (
     }
     entryPoints[entryPoint] = Object.freeze({ publicOrigin, port })
   }
+  // Browsers share cookies across the ports of one host; each panel needs its own hostname.
+  if (new Set(ENTRY_POINT_ORDER.map(name => new URL(entryPoints[name].publicOrigin).hostname)).size !== ENTRY_POINT_ORDER.length) {
+    fail('PRECONDITION_FAILED', 'the xPanel, xWHM and xMail origins must use three distinct hostnames')
+  }
   return { host, entryPoints: Object.freeze(entryPoints) }
 }
 
@@ -896,6 +933,7 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
   const lifecycle = await prepareApiLifecycleStartup()
   let dbHandle: ReturnType<typeof createDb> | undefined
   let client: ReturnType<typeof createAgentClient> | undefined
+  let alerts: ReturnType<typeof startAlertScheduler> | undefined
   const listeners: Awaited<ReturnType<typeof listenApiServer>>[] = []
   const agentSubscriptions: (() => void)[] = []
   const sockets = new Set<Socket>()
@@ -905,10 +943,11 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
     closePromise ??= (async () => {
       // HTTP closeAllConnections does not include upgraded WebSocket connections.
       for (const socket of sockets) socket.destroy()
+      const alertResults = await Promise.allSettled([Promise.resolve().then(() => alerts?.stop())])
       const listenerResults = await Promise.allSettled(listeners.map(listener => listener.close()))
       const subscriptionResults = await Promise.allSettled(agentSubscriptions.map(async unsubscribe => unsubscribe()))
       const clientResults = await Promise.allSettled([Promise.resolve().then(() => client?.close())])
-      const errors: unknown[] = [...listenerResults, ...subscriptionResults, ...clientResults].flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+      const errors: unknown[] = [...alertResults, ...listenerResults, ...subscriptionResults, ...clientResults].flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       try { await awaitLifecycleWriterDrain() } catch (error) { errors.push(error) }
       try { await dbHandle?.close() } catch (error) { errors.push(error) }
       try { await closeApiLifecycleParticipant(lifecycle.participant) } catch (error) { errors.push(error) }
@@ -960,14 +999,13 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
     }
     for (const entryPoint of ENTRY_POINT_ORDER) {
       const config = entryPoints[entryPoint]
-      const publicPanels = Object.fromEntries(ENTRY_POINT_ORDER.map(name => [name, entryPoints[name].publicOrigin])) as Record<EntryPoint, string>
       const webRenderer = await createDefaultWebRenderer({
-        store, db: handle.db, serverSecret, mfaRuntimePolicy, entryPoint, panels: publicPanels,
+        store, db: handle.db, serverSecret, mfaRuntimePolicy, entryPoint, publicOrigin: config.publicOrigin,
         agent: { fetch: request => agentApp.fetch(request), token: agentToken },
       })
       const app = createLifecycleBackgroundResources(() => createApiApp({
         db: handle.db, store, agentApp, agentToken, os, serverSecret, mfaRuntimePolicy, webRenderer,
-        entryPoint, publicOrigin: config.publicOrigin, publicPanels, allowedOrigins: [config.publicOrigin],
+        entryPoint, publicOrigin: config.publicOrigin, allowedOrigins: [config.publicOrigin], handoff: HANDOFF_ROUTES[entryPoint](entryPoints),
         ingressSecret, requireSecureCookies: true, requireOriginHeader: true,
         ...(opts.homeBaseDir ? { homeBaseDir: opts.homeBaseDir } : {}),
       }))
@@ -979,6 +1017,8 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
       })
       listeners.push(listener)
     }
+    alerts = createLifecycleBackgroundResources(() => startAlertScheduler({ db: handle.db, store, agentApp, agentToken, admit: withLifecycleWriterAdmission,
+      onError: () => process.stderr.write('xpanel-api: a scheduled alert check did not complete\n') }))
     return {
       quarantined: false as const, apps: Object.freeze(apps), host, entryPoints, db: handle.db, store,
       listeners: Object.freeze(Object.fromEntries(ENTRY_POINT_ORDER.map((name, index) => [name, {

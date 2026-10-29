@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { constants } from 'node:fs'
 import { chmod, chown, lstat, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { assertInt, assertLine, fail } from '@xpanel/core'
@@ -46,6 +47,8 @@ export interface WriterLease {
   rollbackRestoreIntent(): Promise<void>
   rollbackIntent(): Promise<void>
   clearIntent(): Promise<void>
+  /** Preserve externally replaced account bytes and quarantine only the exact remote-access preimage. */
+  quarantineExternalAccountIntent(relativeAccountPath: string, expectedSha256?: string): Promise<void>
   commitAuthority(patch?: { incrementRevision?: boolean; revision?: number; references?: Record<string, number>; allocatedReferences?: Record<string, AllocatedReferenceRecord> }): Promise<StateAuthorityMetadata>
   restorePreAcquireAuthorityIfUncommitted(): Promise<void>
   release(): Promise<void>
@@ -275,6 +278,7 @@ export class WriterLock {
     const authority = await this.readAuthority()
     const journal = await this.validatedIntent(holder)
     if (journal) {
+      if (journal.op === 'databaseRemoteAccess' && journal.leaseId && await readJsonIfExists(join(this.stateDir, '.remote-access-review-' + journal.leaseId + '.json')) !== null) return fail('CONFLICT', 'external account conflict requires stopped-writer review; automatic preimage replay is refused')
       if (authority.fencingToken !== journal.fencingToken) return fail('VALIDATION', 'recovery intent epoch does not match state authority')
       const committed = journal.leaseId !== undefined && authority.committedLeaseId === journal.leaseId
       if (!committed && authority.revision !== journal.baseRevision) return fail('VALIDATION', 'recovery intent commit status is inconsistent; evidence retained')
@@ -378,6 +382,38 @@ export class WriterLock {
           await atomicWriteJson(this.intentFilePath, record, 0o640)
         }),
         rollbackIntent: () => run(() => rollbackCurrent()),
+        quarantineExternalAccountIntent: (relativeAccountPath, expectedSha256) => run(async () => {
+          const authority = await assertCurrent()
+          const journal = await readJsonIfExists<WriteIntentRecord>(this.intentFilePath)
+          if (committed || commitDurabilityUncertain || authority.committedLeaseId === leaseId || !journal || journal.restore
+            || journal.op !== 'databaseRemoteAccess' || journal.leaseId !== leaseId || journal.fencingToken !== fencingToken || authority.revision !== journal.baseRevision
+            || !Array.isArray(journal.createdRelPaths) || journal.createdRelPaths.length !== 0 || !Array.isArray(journal.backups)
+            || journal.backups.length !== 1 || !journal.backups[0] || journal.backups[0].relPath !== relativeAccountPath || journal.backups[0].existed !== true
+            || typeof journal.backups[0].contentBase64 !== 'string' || Buffer.from(journal.backups[0].contentBase64, 'base64').toString('base64') !== journal.backups[0].contentBase64
+            || !/^accounts\/[a-z][a-z0-9_]{0,31}\/account\.json$/.test(relativeAccountPath) || expectedSha256 !== undefined && !/^[0-9a-f]{64}$/.test(expectedSha256)) return fail('CONFLICT', 'only an exact uncommitted external account conflict may be quarantined')
+          const fingerprint = async (): Promise<string> => {
+            const path = await this.confinedPath(relativeAccountPath)
+            const before = await lstat(path, { bigint: true })
+            if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n || before.size > 1024n * 1024n) return fail('CONFLICT', 'external account source requires stopped-writer review')
+            const identity = (value: typeof before) => `${value.dev}:${value.ino}:${value.size}:${value.mtimeNs}:${value.ctimeNs}`
+            const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+            try {
+              const opened = await handle.stat({ bigint: true })
+              const bytes = await handle.readFile(), after = await handle.stat({ bigint: true }), named = await lstat(path, { bigint: true })
+              const digest = createHash('sha256').update(bytes).digest('hex')
+              if (!named.isFile() || named.isSymbolicLink() || identity(opened) !== identity(before) || identity(after) !== identity(before) || identity(named) !== identity(before) || expectedSha256 !== undefined && digest !== expectedSha256) return fail('CONFLICT', 'external account source changed during preservation')
+              return identity(before) + ':' + digest
+            } finally { await handle.close() }
+          }
+          const reviewPath = join(this.stateDir, '.remote-access-review-' + leaseId + '.json')
+          if (await lstat(reviewPath).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })) return fail('CONFLICT', 'remote-access review evidence already exists')
+          await atomicWriteJson(reviewPath, { schemaVersion: 1, reason: 'external_account_source_preserved', expectedSha256: expectedSha256 ?? null, journal }, 0o600, () => assertCurrent())
+          const identity = await fingerprint()
+          await atomicWriteJson(reviewPath, { schemaVersion: 1, reason: 'external_account_source_preserved', preservedFingerprint: identity, journal }, 0o600, () => assertCurrent())
+          if (await fingerprint() !== identity) return fail('CONFLICT', 'external account inode changed before intent quarantine')
+          await rm(this.intentFilePath)
+          await fsyncDir(this.lockDirPath)
+        }),
         rollbackRestoreIntent: () => run(() => rollbackCurrent(true)),
         clearIntent: () => run(async () => {
           await assertCurrent()

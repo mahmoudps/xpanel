@@ -1,0 +1,19 @@
+import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
+/** Mount inside the existing backend card, preserving the settings form and detail cards. */
+export function renderWhmWebServerReadback(input: { locale: Locale; canRead: boolean; canRollback?: boolean }): string {
+  const t = (message: string, values?: MessageValues): string => translator(input.locale)(message, values)
+  return `<div class="xp-whm-web-readback" data-whm-web-readback data-web-can-read="${input.canRead}" data-web-can-rollback="${input.canRollback === true}" lang="${input.locale}" dir="${localeDirection(input.locale)}">
+    <style>.xp-whm-web-readback{display:flex;flex-direction:column;gap:24px;min-inline-size:0}.xp-whm-web-readback :is(p,dl,dd){margin:0}.xp-whm-web-readback__facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:16px}.xp-whm-web-readback__facts>div{display:flex;flex-direction:column;gap:8px;min-inline-size:0}.xp-whm-web-readback__facts dd{overflow-wrap:anywhere}.xp-whm-web-readback .xp-whm-detail-table{min-inline-size:480px!important}.xp-whm-web-readback .xp-whm-detail-table :is(th,td){overflow-wrap:normal;word-break:normal}.xp-whm-web-readback .xp-whm-detail-scroll{min-inline-size:0;max-inline-size:100%;overflow-x:auto}</style>
+    <div class="xp-whm-detail-actions"><button type="button" class="xp-btn" data-whm-web-refresh${input.canRead ? '' : ' disabled'}>${t('Read saved and observed state')}</button></div>
+    <p class="xp-whm-detail-status" data-whm-web-status data-state="unread" role="status">${t('Saved settings, services and generations have not been read.')}</p>
+    <dl class="xp-whm-web-readback__facts"><div><dt>${t('Saved engine')}</dt><dd><bdi dir="ltr" data-whm-web-engine>${t('Not read')}</bdi></dd></div><div><dt>${t('Active generation')}</dt><dd><bdi dir="ltr" data-whm-web-current>${t('Not read')}</bdi></dd></div></dl>
+    <div class="xp-whm-detail-scroll" role="region" tabindex="0" aria-label="${t('Observed web services')}"><table class="xp-table xp-whm-detail-table"><caption class="xp-sr-only">${t('Observed web services')}</caption><thead><tr>${[t('Service'), t('Unit'), t('Observed state')].map(label => `<th scope="col">${label}</th>`).join('')}</tr></thead><tbody data-whm-web-services><tr><td colspan="3">${t('Service observations have not been read.')}</td></tr></tbody></table></div>
+    <p class="xp-help">${t('A saved engine and an active service do not verify served requests, listener ownership, tenant UID or application health. Suggested tuning needs measured host resources; generation restore needs a qualified guarded adapter.')}</p>
+  </div>`
+}
+
+/** Replace the existing disabled generation selector/action, retaining their purpose. */
+export function renderWhmWebGenerationControls(input: { locale: Locale; canRead: boolean; canRollback?: boolean }): string {
+  const rtl = localeDirection(input.locale) === 'rtl', t = (message: string, values?: MessageValues): string => translator(input.locale)(message, values)
+  return `<div class="xp-whm-detail-field"><label for="whm-web-restore-generation">${t('Generation to restore')}</label><select id="whm-web-restore-generation" name="web-restore-generation" data-whm-web-generation dir="ltr" style="text-align:${rtl ? 'right' : 'left'}" disabled><option value="">${t('Not read')}</option></select></div><div class="xp-whm-detail-actions"><button type="button" class="xp-btn" data-whm-web-rollback disabled>${t('Restore selected generation')}</button></div><p class="xp-whm-detail-status" data-whm-web-rollback-admission role="status">${input.canRead && input.canRollback === true ? t('Restore requires fresh current/target checks and typing the persisted target generation number.') : t('Guarded generation restore is unavailable until the server supplies qualified admission. Reading history does not qualify restoration.')}</p>`
+}

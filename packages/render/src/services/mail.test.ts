@@ -11,6 +11,7 @@ import {
   postfixClientServices,
   localDeliveryMainBlock,
   localSubmissionMasterBlock,
+  mailHostnameTls,
   postfixMainSettings,
   probeLocalSubmissionAuth,
   mailboxPostmaster,
@@ -168,13 +169,16 @@ describe('renderPostfixMaps', () => {
   it('lists domains and mailboxes as lookup tables under the profile postfix dir', () => {
     expect(out.files.map((f) => f.path)).toEqual([
       '/etc/postfix/xpanel/virtual_domains',
+      '/etc/postfix/xpanel/virtual_alias_domains',
       '/etc/postfix/xpanel/virtual_mailboxes',
       '/etc/postfix/xpanel/virtual_aliases',
       '/etc/postfix/xpanel/sender_logins',
       '/etc/postfix/xpanel/transport',
       '/etc/postfix/xpanel/recipient_access',
     ])
-    expect(file('virtual_domains')).toContain('example.com\tOK\nshop.test\tOK\n')
+    expect(file('virtual_domains')).toContain('example.com\tOK\n')
+    expect(file('virtual_domains')).not.toContain('shop.test')
+    expect(file('virtual_alias_domains')).toContain('shop.test\tOK\n')
     expect(file('virtual_mailboxes')).toContain('info@example.com\tOK\nsales@example.com\tOK\n')
   })
 
@@ -208,7 +212,7 @@ describe('renderPostfixMaps', () => {
     const lmdb = renderPostfixMaps(rhel, domains, { mapType: 'lmdb' })
     expect(lmdb.actions[0]).toMatchObject({ kind: 'ensure-dir', path: '/opt/test/postfix/xpanel' })
     expect(lmdb.actions[1]).toEqual({ kind: 'exec', argv: ['postmap', 'lmdb:/opt/test/postfix/xpanel/virtual_domains'] })
-    expect(lmdb.actions).toHaveLength(8)
+    expect(lmdb.actions).toHaveLength(9)
     expect(lmdb.actions.at(-1)).toEqual({ kind: 'systemd', verb: 'reload', unit: 'postfix' })
   })
 
@@ -545,5 +549,58 @@ describe('dkimDnsRecord', () => {
     rejects(() => dkimDnsRecord('example.com', 'a.b', 'AAAA'))
     rejects(() => dkimDnsRecord('example.com', 'sel', 'not base64!'))
     rejects(() => dkimDnsRecord('example.com', 'sel', 'AAAA', { keyType: 'dsa' as 'rsa' }))
+  })
+})
+
+describe('managed mail composition', () => {
+  const outbound = { senderMap: '/etc/postfix/xpanel_sender_transports', master: '# generated\nxpanel-smtp-test unix - - y - - smtp\n  -o smtp_bind_address=192.0.2.10\n  -o smtp_bind_address6=2001:db8::10\n  -o smtp_helo_name=mail.example.com\n' }
+  const tls = { certFile: '/etc/xpanel/ssl/mail/fullchain.pem', keyFile: '/etc/xpanel/ssl/mail/privkey.pem' }
+
+  it('composes public TLS submission and sender-dependent transport routing in managed blocks', () => {
+    const main = localDeliveryMainBlock(debian, { tls, outbound })
+    expect(main).toContain('virtual_alias_domains = texthash:/etc/postfix/xpanel/virtual_alias_domains')
+    expect(main).toContain('recipient_delimiter = +')
+    expect(renderDovecotMailboxConf(debian).content).toContain('recipient_delimiter = +')
+    expect(renderDovecotXpanelConf(debian, { postmaster: 'postmaster@example.com' }).content).toContain('recipient_delimiter = +')
+    expect(main).toContain('sender_dependent_default_transport_maps = texthash:/etc/postfix/xpanel_sender_transports')
+    expect(main).toContain('smtpd_tls_cert_file = ' + tls.certFile)
+    const master = localSubmissionMasterBlock(debian, { tls, outbound })
+    expect(master).toContain('587 inet n - n - - smtpd')
+    expect(master).toContain('465 inet n - n - - smtpd')
+    expect(master).not.toContain('127.0.0.1:587')
+    expect(master.match(/smtpd_tls_security_level=encrypt/g)).toHaveLength(2)
+    expect(master.match(/smtpd_client_restrictions=permit_sasl_authenticated,reject/g)).toHaveLength(2)
+    expect(master).toContain('smtpd_tls_wrappermode=yes')
+    expect(master).toContain(outbound.master.trim().split('\n').slice(1).join('\n'))
+    const existing = 'smtp inet n - y - - smtpd\n' + replaceManagedBlock('', 'old-setting = old')
+    const replaced = replaceManagedBlock(existing, main)
+    expect(replaced.match(/# xpanel-managed-begin/g)).toHaveLength(1)
+    expect(replaced).not.toContain('old-setting')
+    expect(replaced).toContain('smtp inet n - y - - smtpd')
+  })
+
+  it('keeps public submission off without valid hostname TLS and rejects unsafe transport content', () => {
+    const master = localSubmissionMasterBlock(debian, { outbound })
+    expect(master).toContain('127.0.0.1:587 inet')
+    expect(master).not.toMatch(/^465 /m)
+    rejects(() => localSubmissionMasterBlock(debian, { outbound: { ...outbound, master: '  -o smtp_bind_address=192.0.2.10' } }))
+    rejects(() => localSubmissionMasterBlock(debian, { outbound: { ...outbound, master: 'evil unix - - n - - pipe\n' } }))
+    rejects(() => localSubmissionMasterBlock(debian, { outbound: { ...outbound, master: outbound.master + '  -o smtp_helo_name=bad;name\n' } }))
+    const cert = { id: 'f3e2d5c4-8888-4444-8888-111111111111', names: ['mail.example.com'], source: 'upload' as const, notAfter: '2030-01-01T00:00:00.000Z' }
+    expect(mailHostnameTls('mail.example.com', [cert], new Date('2026-10-27'))).toBeDefined()
+    expect(mailHostnameTls('mail.example.com', [{ ...cert, source: 'self-signed' }], new Date('2026-10-27'))).toBeUndefined()
+    expect(mailHostnameTls('mail.example.com', [cert], new Date('2031-01-01'))).toBeUndefined()
+    expect(mailHostnameTls('other.example.com', [cert], new Date('2026-10-27'))).toBeUndefined()
+  })
+
+  it('rejects address and domain forwarding loops, including plus-address recursion', () => {
+    const input = (domain: string, forwarders: MailDomainInput['forwarders'] = []): MailDomainInput => ({ domain, account, mailboxes: [], forwarders })
+    rejects(() => renderPostfixMaps(debian, [input('example.com', [{ local: 'a', to: ['b@example.com'] }, { local: 'b', to: ['a@example.com'] }])]), /loop/)
+    rejects(() => renderPostfixMaps(debian, [input('example.com', [{ local: 'a', to: ['a+tag@example.com'] }])]), /loop/)
+    rejects(() => renderPostfixMaps(debian, [{ ...input('example.com', [{ local: 'a', to: ['a+tag@example.com'] }]), mailboxes: [{ local: 'a', passwordHash: ARGON, quotaMb: 100 }] }]), /loop/)
+    rejects(() => renderPostfixMaps(debian, [{ ...input('example.com'), domainForward: 'other.test' }, { ...input('other.test'), domainForward: 'example.com' }]), /loop/)
+    const maps = renderPostfixMaps(debian, [input('example.com', [{ local: 'a', to: ['remote@external.test'] }])])
+    expect(maps.files.find(file => file.path.endsWith('/virtual_alias_domains'))?.content).toContain('example.com\tOK')
+    expect(maps.files.find(file => file.path.endsWith('/virtual_domains'))?.content).not.toContain('example.com')
   })
 })

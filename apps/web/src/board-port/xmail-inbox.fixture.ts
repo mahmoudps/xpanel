@@ -1,6 +1,6 @@
 // Board sample data for tests and the local fidelity script only.
 // Product code must not import this module.
-import type { Locale } from '../i18n.ts'
+import { SOURCE_LOCALE, inlineScriptMessageKeys, localeDirection, renderClientI18nScript, type Locale } from '../i18n.ts'
 import { type FolderLink, type MailCard, type InboxModel, renderInbox, block, xmailInboxFromProps } from './xmail-inbox.ts'
 
 const FIXTURE_MESSAGES: MailCard[] = [
@@ -71,25 +71,26 @@ const fixtureModel = (): InboxModel => ({
     emptyBody: 'Nothing in Inbox fits this filter or search.',
     emptyClear: 'Show all messages',
     undo: 'Undo',
-    moved: 'Moved to ',
+    moved: 'Moved to {folder}: {subject}',
     moveLabel: 'Move to folder',
   },
 })
 
 
-const documentShell = (body: string): string => `<!doctype html>
-<html lang="en" dir="ltr">
+const documentShell = (body: string, locale: Locale = SOURCE_LOCALE): string => `<!doctype html>
+<html lang="${locale}" dir="${localeDirection(locale)}">
 <head>
 <meta charset="utf-8">
 <title>Inbox — xMail</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
 <style>
-body{margin:0;background:#F5F6F8;color:#101828;font-family:'IBM Plex Sans','IBM Plex Sans Arabic',system-ui,sans-serif}
+body{margin:0;background:#F5F6F8;color:#101828;font-family:'IBM Plex Sans',sans-serif}
 *{box-sizing:border-box}
 a{color:#1D5BD6}a:hover{color:#1546A8}
 :focus-visible{outline:2px solid #1D5BD6;outline-offset:2px}
 </style>
+${renderClientI18nScript(locale, inlineScriptMessageKeys(body))}
 </head>
 <body>
 ${body}
@@ -98,4 +99,4 @@ ${body}
 
 export const renderFidelityDocument = (): string => documentShell(renderInbox(fixtureModel()))
 
-export const renderLiveDocument = (locale: Locale = 'en'): string => documentShell(renderInbox(xmailInboxFromProps({ locale, mailbox: 'owner@example.test' })))
+export const renderLiveDocument = (locale: Locale = 'en'): string => documentShell(renderInbox(xmailInboxFromProps({ locale, mailbox: 'owner@example.test' })), locale)

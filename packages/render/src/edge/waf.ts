@@ -26,6 +26,8 @@ export interface WafLists {
 export interface WafGlobalPolicy extends WafLists {
   /** exempt from every rate and connection limit (monitoring, office IPs) */
   trustedIps?: string[]
+  /** answer for denied requests: 403, or 444 (nginx closes the connection without a response) */
+  denyStatus?: 403 | 444
 }
 
 export interface WafRateLimit {
@@ -131,6 +133,7 @@ export interface WafSiteRender {
 export interface WafSiteContext {
   defaultBodyMb: Limit
   modsecurityPresent: boolean
+  denyStatus?: 403 | 444
 }
 
 const bodySize = (mb: Limit): string => {
@@ -140,10 +143,12 @@ const bodySize = (mb: Limit): string => {
 
 export const renderWafSite = (siteName: string, policy: WafSitePolicy | null | undefined, ctx: WafSiteContext): WafSiteRender => {
   const p = policy ?? {}
+  const status = ctx.denyStatus ?? 403
+  if (status !== 403 && status !== 444) invalid('denied response', status, 'must be 403 or 444')
   const server = [
-    'if ($xpanel_waf_deny_ip) { return 403; }',
-    'if ($xpanel_waf_deny_ua) { return 403; }',
-    'if ($xpanel_waf_deny_path) { return 403; }',
+    `if ($xpanel_waf_deny_ip) { return ${status}; }`,
+    `if ($xpanel_waf_deny_ua) { return ${status}; }`,
+    `if ($xpanel_waf_deny_path) { return ${status}; }`,
   ]
   const http: string[] = []
   const enabled = p.enabled !== false
@@ -152,9 +157,9 @@ export const renderWafSite = (siteName: string, policy: WafSitePolicy | null | u
     const id = siteZoneId(siteName)
     for (const ip of cidrs('denied IP', p.denyIps)) server.push(`deny ${ip};`)
     for (const r of regexes('denied user agent', p.denyUserAgents)) {
-      server.push(`if ($http_user_agent ~* ${nginxRegexQuote(r)}) { return 403; }`)
+      server.push(`if ($http_user_agent ~* ${nginxRegexQuote(r)}) { return ${status}; }`)
     }
-    for (const r of regexes('denied path', p.denyPaths)) server.push(`if ($uri ~ ${nginxRegexQuote(r)}) { return 403; }`)
+    for (const r of regexes('denied path', p.denyPaths)) server.push(`if ($uri ~ ${nginxRegexQuote(r)}) { return ${status}; }`)
     if (p.rateLimit) {
       const rl = p.rateLimit
       const n = assertInt('rate limit', rl.requests, 1, 100000)

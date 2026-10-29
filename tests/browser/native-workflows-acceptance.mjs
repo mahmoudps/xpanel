@@ -220,7 +220,7 @@ async function verifyPresentation(page, state, selector, result, axeSource) {
     for (let index = 1; index < group.cards.length; index++) assert.ok(Math.abs(group.cards[index].top - group.cards[index - 1].bottom - 24) < 0.6, 'Actual major card groups stay 24px apart')
   }
   if (g.group24) assert.equal(g.group24, '24px')
-  result.font = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
+  result.font = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
   await page.addScriptTag({ content: axeSource })
   result.accessibility = await page.evaluate(async selector => (await axe.run(selector, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } })).violations.map(item => ({ id: item.id, impact: item.impact, targets: item.nodes.map(node => node.target) })), selector)
   assert.deepEqual(result.accessibility, [])

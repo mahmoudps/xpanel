@@ -1,7 +1,7 @@
 import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
-import { panelLabel, renderSupportNotice, renderUserMenu, safePanelLinks, type DensityChoice, type PanelId, type PanelLink, type ThemeChoice } from './chrome.ts'
+import { panelLabel, renderSupportNotice, renderUserMenu, type DensityChoice, type PanelId, type ThemeChoice } from './chrome.ts'
 import { renderDesignNav } from './design-board.ts'
-import type { Locale } from './i18n.ts'
+import { translator, type Locale } from './i18n.ts'
 import { renderSurfaceShell } from './shell.ts'
 import { escapeHtml } from './tokens.ts'
 
@@ -21,9 +21,6 @@ export interface StatusPageModel {
   /** Same-listener page that will actually open. Omitted when it would fail again. */
   workspaceHref?: string
   retryHref?: string
-  panels?: readonly PanelLink[]
-  /** Another panel that matches this request better than the current listener. */
-  suggested?: PanelId
   supportEmail?: string
   /** Host or primary domain shown under the brand, the same subtitle as the live shell. */
   hostname?: string
@@ -37,34 +34,18 @@ interface Copy {
   explanation: string
 }
 
+const STATUS_COPY: Readonly<Record<StatusCode, Copy>> = {
+  400: { title: msgid('Check the request details'), explanation: msgid('The request contains an invalid value. Correct the filters or date range and try again.') },
+  404: { title: msgid('This page is not here'), explanation: msgid('That address does not match a page on this panel.') },
+  403: { title: msgid('You cannot open this page'), explanation: msgid('This panel is for a different role, or this account cannot view the page.') },
+  421: { title: msgid('Check the panel address'), explanation: msgid('This address does not belong to this panel. Check the address and try again.') },
+  500: { title: msgid('Something went wrong'), explanation: msgid('The panel could not finish loading this page. Try again in a moment.') },
+  503: { title: msgid('The panel is briefly unavailable'), explanation: msgid('Try again in a moment. Nothing was changed.') },
+}
+
 export const statusPageCopy = (status: StatusCode, locale: Locale): Copy => {
-  const ar = locale === 'ar'
-  switch (status) {
-    case 400:
-      return ar
-        ? { title: 'تحقق من بيانات الطلب', explanation: 'يحتوي الطلب على قيمة غير صالحة. صحح المرشحات أو النطاق الزمني وأعد المحاولة.' }
-        : { title: 'Check the request details', explanation: 'The request contains an invalid value. Correct the filters or date range and try again.' }
-    case 404:
-      return ar
-        ? { title: 'هذه الصفحة غير موجودة', explanation: 'العنوان لا يطابق صفحة في هذه اللوحة.' }
-        : { title: 'This page is not here', explanation: 'That address does not match a page on this panel.' }
-    case 403:
-      return ar
-        ? { title: 'لا يمكنك فتح هذه الصفحة', explanation: 'هذه اللوحة لدور مختلف، أو هذا الحساب لا يملك صلاحية عرضها.' }
-        : { title: 'You cannot open this page', explanation: 'This panel is for a different role, or this account cannot view the page.' }
-    case 421:
-      return ar
-        ? { title: 'افتح عنوان اللوحة', explanation: 'هذا العنوان ليس إحدى لوحات الخادم. اختر اللوحة التي تريدها.' }
-        : { title: 'Open a panel address', explanation: 'This address is not one of the panels. Choose the panel you need.' }
-    case 500:
-      return ar
-        ? { title: 'حدث خطأ', explanation: 'تعذر على اللوحة إكمال تحميل هذه الصفحة. أعد المحاولة بعد قليل.' }
-        : { title: 'Something went wrong', explanation: 'The panel could not finish loading this page. Try again in a moment.' }
-    case 503:
-      return ar
-        ? { title: 'اللوحة غير متاحة مؤقتًا', explanation: 'أعد المحاولة بعد قليل. لم يُغيّر شيء.' }
-        : { title: 'The panel is briefly unavailable', explanation: 'Try again in a moment. Nothing was changed.' }
-  }
+  const t = translator(locale), copy = STATUS_COPY[status]
+  return { title: t(copy.title), explanation: t(copy.explanation) }
 }
 
 const backIcon = `<span class="xp-icon-back"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 6 9 12l6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
@@ -79,36 +60,21 @@ const withContext = (href: string, model: StatusPageModel): string => {
   return `${url.pathname}?${url.searchParams.toString()}`
 }
 
-const panelHref = (origin: string, model: StatusPageModel): string => {
-  const url = new URL('/login', origin)
-  url.searchParams.set('lang', model.locale)
-  url.searchParams.set('theme', model.theme)
-  return url.toString()
-}
-
-/** One bilingual status screen. Signed-in viewers get the shell; everyone else gets a standalone page. */
+/** One status screen in the page language. It brands and links only the current panel. */
 export function renderStatusBody(model: StatusPageModel): string {
   const copy = statusPageCopy(model.status, model.locale)
-  const isAr = model.locale === 'ar'
-  const panels = safePanelLinks(model.panels)
+  const t = translator(model.locale)
   const actions: string[] = []
   if (model.workspaceHref) {
-    const label = isAr ? 'العودة إلى مساحة العمل' : 'Back to workspace'
+    const label = t('Back to workspace')
     actions.push(`<a class="xp-btn xp-btn--primary xp-back-link" href="${escapeHtml(withContext(model.workspaceHref, model))}">${backIcon}<span>${escapeHtml(label)}</span></a>`)
   }
   if (model.retryHref && (model.status === 500 || model.status === 503)) {
-    const label = isAr ? 'إعادة المحاولة' : 'Try again'
+    const label = t('Try again')
     actions.push(`<a class="xp-btn" href="${escapeHtml(model.retryHref)}">${escapeHtml(label)}</a>`)
   }
-  const suggested = model.suggested && panels.find(panel => panel.surface === model.suggested)
-  const listed = model.status === 421 ? panels : suggested ? [suggested] : []
-  const panelActions = listed.map(panel => {
-    const name = panelLabel(panel.surface)
-    const label = isAr ? `افتح ${name}` : `Open ${name}`
-    return `<a class="xp-btn${panel === suggested ? ' xp-btn--primary' : ''}" data-panel-link="${panel.surface}" href="${escapeHtml(panelHref(panel.origin, model))}">${escapeHtml(label)}</a>`
-  }).join('')
   if (!model.signedIn && model.status !== 421 && !model.workspaceHref) {
-    const label = isAr ? 'تسجيل الدخول' : 'Sign in'
+    const label = t('Sign in')
     actions.push(`<a class="xp-btn xp-btn--primary" href="${escapeHtml(withContext('/login', model))}">${escapeHtml(label)}</a>`)
   }
   const support = model.status === 404 || model.status === 403 ? renderSupportNotice(model.locale, model.supportEmail) : ''
@@ -117,7 +83,7 @@ export function renderStatusBody(model: StatusPageModel): string {
     <h1 class="xp-page-title">${escapeHtml(copy.title)}</h1>
     <p class="xp-prose">${escapeHtml(copy.explanation)}</p>
     ${support}
-    <div class="xp-status-actions">${actions.join('')}${panelActions}</div>
+    <div class="xp-status-actions">${actions.join('')}</div>
   </section>`
   if (!model.visibility) {
     return `<div class="xp-status-standalone" data-surface="${model.surface}">

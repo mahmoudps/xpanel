@@ -223,7 +223,7 @@ const createLoopbackMailServers = async (store: LoopbackMailStore) => {
       if (!socket.destroyed) socket.write(`${line}\r\n`)
     }
 
-    send('* OK [CAPABILITY IMAP4rev1 LITERAL+ SASL-IR LOGIN-REFERRALS ID ENABLE IDLE MOVE] Dovecot ready.')
+    send('* OK [CAPABILITY IMAP4rev1 LITERAL+ SASL-IR LOGIN-REFERRALS ID ENABLE IDLE MOVE UIDPLUS] Dovecot ready.')
 
     const processBuffer = () => {
       while (true) {
@@ -292,6 +292,9 @@ const createLoopbackMailServers = async (store: LoopbackMailStore) => {
           } else {
             send(`${tag} NO [AUTHENTICATIONFAILED] Authentication failed.`)
           }
+        } else if (upper === 'CAPABILITY') {
+          send('* CAPABILITY IMAP4rev1 LITERAL+ SASL-IR IDLE MOVE UIDPLUS')
+          send(`${tag} OK Capability completed.`)
         } else if (upper.startsWith('LIST ')) {
           if (!authedMailbox) {
             send(`${tag} NO Not authenticated`)
@@ -383,10 +386,12 @@ const createLoopbackMailServers = async (store: LoopbackMailStore) => {
           const srcList = mbxFolders.get(selectedFolder) ?? []
           const dstList = mbxFolders.get(targetFolder) ?? []
           const msgIdx = srcList.findIndex((item) => item.uid === uid)
+          let copyUidText = ''
           if (msgIdx >= 0) {
             const msg = srcList[msgIdx]!
             const uvKey = `${authedMailbox}::${targetFolder}`
             const nextUid = store.nextUidByFolder.get(uvKey) ?? (dstList.length + 1)
+            const validity = store.uidValidityByFolder.get(uvKey) ?? 1001
             store.nextUidByFolder.set(uvKey, nextUid + 1)
             dstList.push({
               uid: nextUid,
@@ -395,11 +400,12 @@ const createLoopbackMailServers = async (store: LoopbackMailStore) => {
               rawMime: msg.rawMime,
             })
             mbxFolders.set(targetFolder, dstList)
+            copyUidText = `[COPYUID ${validity} ${uid} ${nextUid}] `
             if (isMove) {
               srcList.splice(msgIdx, 1)
             }
           }
-          send(`${tag} OK ${isMove ? 'Move' : 'Copy'} completed.`)
+          send(`${tag} OK ${copyUidText}${isMove ? 'Move' : 'Copy'} completed.`)
         } else if (upper.startsWith('UID SEARCH CHARSET UTF-8 TEXT ')) {
           const litMatch = /\{(\d+)\}$/.exec(rest)
           if (litMatch) {
@@ -413,7 +419,20 @@ const createLoopbackMailServers = async (store: LoopbackMailStore) => {
           } else {
             send(`${tag} BAD Missing literal`)
           }
+        } else if (/^UID SEARCH UID [1-9][0-9]*$/.test(upper)) {
+          if (!authedMailbox || !selectedFolder) { send(`${tag} NO Select a folder first`); continue }
+          const uid = Number(upper.slice('UID SEARCH UID '.length))
+          const list = store.foldersByMailbox.get(authedMailbox)?.get(selectedFolder) ?? []
+          send(`* SEARCH${list.some(message => message.uid === uid) ? ' ' + uid : ''}`)
+          send(`${tag} OK Search completed.`)
+        } else if (/^UID EXPUNGE [1-9][0-9]*$/.test(upper)) {
+          if (!authedMailbox || !selectedFolder) { send(`${tag} NO Select a folder first`); continue }
+          const uid = Number(upper.slice('UID EXPUNGE '.length))
+          const folders = store.foldersByMailbox.get(authedMailbox)!, list = folders.get(selectedFolder) ?? []
+          folders.set(selectedFolder, list.filter(message => message.uid !== uid || !message.flags.has('\\Deleted')))
+          send(`${tag} OK UID expunge completed.`)
         } else if (upper === 'UID SEARCH ALL') {
+          if (!authedMailbox || !selectedFolder) { send(`${tag} NO Select a folder first`); continue }
           const list =
             (authedMailbox && selectedFolder
               ? store.foldersByMailbox.get(authedMailbox)?.get(selectedFolder)
@@ -788,11 +807,13 @@ describe('M01–M05 Mail, Webmail, DKIM/Queue Security, Sieve & Personal Data Su
     )
 
     // Store flags & Move message
-    await imapAlice.storeFlagsByUid('INBOX', 1, 'add', ['\\Seen', '\\Flagged'])
+    expect(fetched.state.uidValidityObserved).toBe(true)
+    await imapAlice.storeFlagsByUid('INBOX', 1, 'add', ['\\Seen', '\\Flagged'], 'alice@alpha.example', fetched.state.uidValidity)
     const refetched = await imapAlice.fetchMessagesByUid('INBOX', 1)
     expect(refetched.messages[0]!.flags).toEqual(expect.arrayContaining(['\\Seen', '\\Flagged']))
 
-    await imapAlice.moveOrCopyByUid('INBOX', 1, 'Archive', 'copy')
+    const copiedUid = await imapAlice.moveOrCopyByUid('INBOX', 1, 'Archive', 'copy', 'alice@alpha.example', refetched.state.uidValidity)
+    expect(copiedUid).toBe(1)
     const archiveFetched = await imapAlice.fetchMessagesByUid('Archive', 1)
     expect(archiveFetched.messages).toHaveLength(1)
 

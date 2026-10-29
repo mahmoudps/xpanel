@@ -308,7 +308,7 @@ export async function runExtensionsAcceptance({ output, filter } = {}) {
           validateGeometry(result.geometry, spec, width, locale, theme)
           result.applied_fonts = []
           for (const human of result.geometry.human) {
-            const font = await assertAppliedFont(page, human.selector, locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
+            const font = await assertAppliedFont(page, human.selector, locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
             if (human.new_component) assert.ok(human.role, 'Every new ordinary text element must have an explicit semantic typography role')
             if (human.role === 'caption') {
               assert.equal(spec.family, 'resources')

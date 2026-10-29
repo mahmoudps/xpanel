@@ -3,10 +3,10 @@ import { assertAcl, assertCanSeeAccount, fail, isUuid } from '@xpanel/core'
 import type { Account, ResellerAcl } from '@xpanel/core'
 import type { StateStore } from '@xpanel/state'
 import type { AuthenticatedCaller } from './auth.ts'
-import { isMongoDatabaseRoute } from './entry-points.ts'
 
 export interface RoutePolicy {
   resource: string
+  scopeAccess?: 'read' | 'write'
   acl?: ResellerAcl
   rootOnly?: boolean
   toolIds?: readonly string[]
@@ -111,16 +111,61 @@ export const assertApiScope = (caller: AuthenticatedCaller, scope: string): void
 export const policyForRequest = (pathname: string, method: string): RoutePolicy => {
   const read = readMethods.has(method)
   if (/^\/api\/auth(?:\/|$)/.test(pathname)) return { resource: 'auth' }
+  // Issuance re-checks the exact target account or mailbox; these rows only admit the issuing role and feature.
+  if (pathname === '/api/handoff/xpanel') return { resource: 'handoff', acl: 'edit-account' }
+  if (pathname === '/api/handoff/xmail') return { resource: 'handoff', acl: 'edit-account', toolIds: ['email-accounts'] }
   if (pathname === '/api/events/recent') return { resource: 'events' }
   if (pathname === '/api/catalog') return { resource: 'catalog' }
+  if (pathname === '/api/account/preferences') return { resource: 'account-preferences', toolIds: ['account-preferences'] }
+  if (/^\/api\/account\/collaboration(?:\/calendars(?:\/[0-9a-f]{32})?)?$/.test(pathname)) return { resource: 'webmail', acl: 'edit-account', toolIds: ['email-accounts', 'calendars-contacts-management', 'calendars-contacts-sharing', 'calendars-contacts-config'] }
+  if (pathname === '/api/account/mailx/collections') return { resource: 'webmail', acl: 'edit-account', toolIds: ['email-accounts', 'calendars-contacts-management', 'calendars-contacts-config'] }
+  if (pathname === '/api/account/mailx/mail-tools/lists') return { resource: 'mail', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['email-accounts', 'mailing-lists'] }
+  if (/^\/api\/account\/mailx\/mail-tools(?:\/(?:learn|apply))?$/.test(pathname)) return { resource: 'mail', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['email-accounts', 'spam-filters'] }
+  if (/^\/api\/account\/mailx\/archive(?:\/retention)?$/.test(pathname)) return { resource: 'mail', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['email-accounts', 'email-archive'] }
+  if (pathname === '/api/admin/preferences') return { resource: 'admin-preferences', toolIds: ['aapanel-language-theme'] }
+  if (/^\/api\/account\/backups(?:\/|$)/.test(pathname)) return { resource: 'backups', acl: 'edit-account', toolIds: [/(?:preview|preview\.csv|restore)$/.test(pathname) ? 'backup-restoration' : 'backup'], ...(method === 'POST' && /\/preview$/.test(pathname) ? { scopeAccess: 'read' as const } : {}) }
+  if (/^\/api\/account\/cron(?:\/|$)/.test(pathname)) return { resource: 'cron', acl: 'edit-account', toolIds: ['cron-jobs'] }
+  if (pathname === '/api/account/ssh/keys') return { resource: 'ssh', acl: 'edit-account', toolIds: ['ssh-access'] }
+  if (/^\/api\/account\/dynamic-dns(?:\/|$)/.test(pathname)) return { resource: 'dynamic-dns', acl: 'edit-account', toolIds: ['dynamic-dns'] }
+  if (pathname === '/api/account/optimize') return { resource: 'optimize', acl: 'list-accounts', toolIds: ['optimize-website'], scopeAccess: 'read' }
+  if (pathname === '/api/account/applications' || pathname === '/api/account/applications/jobs') return { resource: 'applications', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['application-manager'] }
+  if (pathname === '/api/account/git') return { resource: 'git', acl: 'edit-account', toolIds: ['git-version-control'] }
+  if (/^\/api\/account\/staging(?:\/|$)/.test(pathname)) return { resource: 'staging', acl: 'edit-account', toolIds: ['site-staging'], ...(method === 'POST' && pathname.endsWith('/review') ? { scopeAccess: 'read' as const } : {}) }
+  if (pathname === '/api/account/packages') return { resource: 'account-packages', acl: 'edit-account', toolIds: ['php-pear-packages'] }
+  if (pathname === '/api/account/database-remote-access') return { resource: 'databases', acl: 'edit-account', toolIds: ['remote-database-access'] }
+  if (/^\/api\/account\/database-engines\/(?:postgresql|phppgadmin)$/.test(pathname)) return { resource: 'databases', acl: 'list-accounts', toolIds: [pathname.endsWith('/postgresql') ? 'postgresql-databases' : 'phppgadmin'] }
+  if (/^\/api\/account\/database-engines\/postgresql\/(?:users|databases)(?:\/|$)/.test(pathname)) return { resource: 'databases', acl: 'edit-account', toolIds: ['postgresql-databases'] }
+  if (/^\/api\/account\/database-engines\/phpmyadmin(?:\/sign-on)?$/.test(pathname)) return { resource: 'databases', acl: 'edit-account', toolIds: ['phpmyadmin'] }
+  if (pathname === '/api/account/developer') return { resource: 'developer', scopeAccess: 'read', toolIds: ['api-shell'] }
+  if (['/api/server/panel/developer', '/api/server/panel/integrations'].includes(pathname)) return { resource: 'server', rootOnly: true, scopeAccess: 'read' }
+  if (/^\/api\/account\/pgp(?:\/|$)/.test(pathname)) return { resource: 'pgp', acl: 'edit-account', toolIds: ['email-encryption'] }
+  if (/^\/api\/domains\/[0-9a-f-]{36}\/site-publisher(?:\/|$)/.test(pathname)) return { resource: 'site-publisher', acl: 'edit-account', toolIds: ['site-publisher'], ...(pathname.endsWith('/preview') ? { scopeAccess: 'read' as const } : {}) }
+  if (/^\/api\/account\/logs\/[0-9a-f-]{36}\/(?:access|error)$/.test(pathname)) return { resource: 'logs', acl: 'list-accounts', toolIds: [pathname.endsWith('/access') ? 'raw-access' : 'errors'] }
+  if (pathname === '/api/account/site-health') return { resource: 'health', acl: 'list-accounts', toolIds: ['account-health-overview'] }
+  if (pathname === '/api/account/sec/waf') return { resource: 'waf', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['modsecurity'] }
+  if (/^\/api\/account\/sec\/cloudflare(?:\/zone|\/purge)?$/.test(pathname)) return { resource: 'cloudflare', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['cloudflare-account'] }
+  if (/^\/api\/account\/announcements(?:\/[0-9a-f-]{36}\/dismiss)?$/.test(pathname)) return { resource: 'accounts' }
+  if (/^\/api\/account\/team(?:\/[0-9a-f-]{36}(?:\/(?:suspend|reinstate|password-link))?)?$/.test(pathname)) return { resource: 'team', acl: 'edit-account', toolIds: ['manage-team'] }
+  if (pathname === '/api/account/database-insights') return { resource: 'database-insights', acl: 'list-accounts', toolIds: ['database-insights'] }
+  if (pathname === '/api/account/virus-scan') return { resource: 'virus-scan', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['virus-scanner'] }
+  if (/^\/api\/account\/network-tools\/(?:dns|ping|traceroute|port)$/.test(pathname)) return { resource: 'network-tools', acl: 'list-accounts', toolIds: ['track-dns'], scopeAccess: 'read' }
+  if (/^\/api\/certificate-workspace(?:\/|$)/.test(pathname)) return { resource: 'tls', acl: 'manage-ssl', toolIds: ['ssl-install'] }
+  if (/^\/api\/security\/(?:workspace|ssh(?:\/keys)?)$/.test(pathname)) return { resource: 'security', rootOnly: true }
   if (pathname === '/api/search') return { resource: 'search', acl: 'list-accounts' }
+  if (pathname === '/api/accounts/health') return { resource: 'accounts', acl: 'list-accounts', scopeAccess: 'read' }
+  if (/^\/api\/jobs(?:\/|$)/.test(pathname)) return { resource: 'jobs', rootOnly: true }
+  if (pathname === '/api/server/mail-quality/check') return { resource: 'server', rootOnly: true, scopeAccess: 'read' }
+  if (/^\/api\/server\/default-index\/[^/]+\/preview$/.test(pathname)) return { resource: 'server', rootOnly: true, scopeAccess: 'read' }
+  if (pathname === '/api/server/upgrade/preflight') return { resource: 'server', rootOnly: true, scopeAccess: 'read' }
+  if (pathname === '/api/server/software-center/preview') return { resource: 'server', rootOnly: true, scopeAccess: 'read' }
+  if (pathname === '/api/server/repair/preview') return { resource: 'server', rootOnly: true, scopeAccess: 'read' }
   if (/^\/api\/(?:server|setup)(?:\/|$)/.test(pathname)) return { resource: 'server', rootOnly: true }
   if (/^\/api\/feature-lists(?:\/|$)/.test(pathname)) return { resource: 'feature-lists', acl: 'manage-feature-lists' }
   if (/^\/api\/plans(?:\/|$)/.test(pathname)) return { resource: 'plans', acl: 'manage-plans' }
   if (/^\/api\/resellers(?:\/|$)/.test(pathname)) return { resource: 'resellers', rootOnly: !read }
   if (/^\/api\/accounts\/[^/]+\/files$/.test(pathname)) return { resource: 'files', acl: 'edit-account', toolIds: ['file-manager'] }
   if (/^\/api\/accounts\/[^/]+\/shell$/.test(pathname)) return { resource: 'shell', acl: 'edit-account', toolIds: ['ssh-access'] }
-  if (/^\/api\/accounts\/[^/]+\/certificates$/.test(pathname)) return { resource: 'accounts', acl: 'manage-ssl', toolIds: ['ssl-install'] }
+  if (/^\/api\/accounts\/[^/]+\/certificates(?:\/(?:install|[0-9a-f-]{36}))?$/.test(pathname)) return { resource: 'accounts', acl: 'manage-ssl', toolIds: ['ssl-install'] }
   if (/^\/api\/accounts(?:\/|$)/.test(pathname)) {
     const acl: ResellerAcl = read ? 'list-accounts'
       : /\/(?:suspend|unsuspend)$/.test(pathname) ? 'suspend-account'
@@ -130,10 +175,15 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   }
   if (/^\/api\/ips(?:\/|$)/.test(pathname)) return { resource: 'ips', rootOnly: !read, acl: 'list-accounts' }
   if (pathname === '/api/mail/ips') return { resource: 'mail', rootOnly: true }
+  if (/^\/api\/domains\/[^/]+\/htaccess(?:\/|$)/.test(pathname)) return { resource: 'files', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['aapanel-url-rewrite'], ...(method === 'POST' && /\/htaccess$/.test(pathname) ? { scopeAccess: 'read' as const } : {}) }
+  if (/^\/api\/domains\/[^/]+\/web-directives\/(?:error-pages|indexes|mime-types|hotlink|ip-blocker|redirects)$/.test(pathname)) return { resource: 'files', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['aapanel-url-rewrite', pathname.endsWith('/hotlink') ? 'hotlink-protection' : pathname.split('/').at(-1)!] }
   if (/^\/api\/domains(?:\/|$)/.test(pathname)) return { resource: 'domains', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['domains'] }
-  if (/^\/api\/databases(?:\/|$)/.test(pathname)) return { resource: 'databases', acl: read ? 'list-accounts' : 'edit-account', ...(isMongoDatabaseRoute(pathname) ? { rootOnly: true } : {}), toolIds: [pathname.includes('/postgres') ? 'postgresql-databases' : 'mysql-databases'] }
+  if (/^\/api\/databases(?:\/|$)/.test(pathname)) return { resource: 'databases', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['mysql-databases'] }
   if (/^\/api\/service-users(?:\/|$)/.test(pathname)) return { resource: 'service-users', acl: read ? 'list-accounts' : 'edit-account' }
   if (/^\/api\/dns(?:\/|$)/.test(pathname)) return { resource: 'dns', acl: 'manage-dns', toolIds: ['zone-editor'] }
+  // Filter routes enforce the exact account-wide or mailbox feature after trusted scope selection.
+  if (/^\/api\/mail\/filters(?:\/|$)/.test(pathname)) return { resource: 'mail', acl: read ? 'list-accounts' : 'edit-account' }
+  if (/^\/api\/mail\/quarantine(?:\/|$)/.test(pathname)) return { resource: 'mail', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['spam-quarantine', 'email-accounts'] }
   if (/^\/api\/mail(?:\/|$)/.test(pathname)) {
     const toolId = pathname.includes('domain-forwarders') ? 'domain-forwarders' : pathname.includes('forwarders') ? 'forwarders' : pathname.includes('mailing-lists') ? 'mailing-lists' : pathname.includes('filters') ? 'email-filters' : 'email-accounts'
     return { resource: 'mail', acl: read ? 'list-accounts' : 'edit-account', toolIds: [toolId] }
@@ -143,9 +193,24 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   if (/^\/api\/webmail\/inbox\/[1-9]\d*$/.test(pathname) && method === 'DELETE') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-message-read'] }
   if (/^\/api\/webmail\/inbox\/[1-9]\d*\/move$/.test(pathname) && method === 'POST') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-message-read'] }
   if (pathname === '/api/webmail/send' && method === 'POST') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-compose'] }
+  if (pathname === '/api/webmail/drafts' && method === 'POST') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-compose'] }
+  if (pathname === '/api/webmail/track-delivery' && method === 'GET') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-track-delivery'] }
+  if (/^\/api\/webmail\/folders(?:\/(?:rename|delete|subscription))?$/.test(pathname) && (method === 'GET' || method === 'POST')) return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-folders'] }
+  if (/^\/api\/webmail\/disk-usage(?:\/(?:preview|cleanup|purge))?$/.test(pathname) && (method === 'GET' || method === 'POST')) return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-disk-cleanup'] }
+  if (/^\/api\/webmail\/connect-devices(?:\/(?:autoconfig\.xml|apple\.mobileconfig))?$/.test(pathname) && method === 'GET') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-mail-client-setup'] }
+  if (pathname === '/api/webmail/forwarders' && (method === 'GET' || method === 'PUT')) return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-forwarders'] }
+  if (pathname === '/api/webmail/preferences' && (method === 'GET' || method === 'PUT')) return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-preferences'] }
+  if (pathname === '/api/webmail/spam-preferences') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-spam-box', 'webmail-spam-autodelete'] }
+  if (/^\/api\/webmail\/mailing-lists(?:\/[^/]+)?$/.test(pathname)) return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-mailing-lists'] }
+  if (/^\/api\/webmail\/(?:search|search-message|attachment-workspace|attachment-download(?:\/[^/]+)?)$/.test(pathname) && method === 'GET') return { resource: 'webmail', acl: 'edit-account', toolIds: ['email-accounts'] }
   if (/^\/api\/webmail(?:\/|$)/.test(pathname)) return { resource: 'webmail', acl: 'edit-account', toolIds: ['email-accounts'] }
+  if (/^\/api\/backups\/files(?:\/[a-z][a-z0-9]{0,15}(?:\/(?:browse|preview|restore))?)?$/.test(pathname)) return { resource: 'backups', acl: pathname.endsWith('/restore') ? 'edit-account' : 'list-accounts', toolIds: ['file-restore'], ...(method === 'POST' && !pathname.endsWith('/restore') ? { scopeAccess: 'read' as const } : {}) }
+  if (/^\/api\/backups\/components\/[a-z][a-z0-9]{0,15}\/(?:inventory|preview|restore)$/.test(pathname)) return { resource: 'backups', acl: pathname.endsWith('/restore') ? 'edit-account' : 'list-accounts', toolIds: ['file-restore'], ...(method === 'POST' && !pathname.endsWith('/restore') ? { scopeAccess: 'read' as const } : {}) }
+  if (/^\/api\/backups\/workspace\/(?:runs|destinations\/[0-9a-f-]{36}\/(?:retention|recover))$/.test(pathname)) return { resource: 'backups', rootOnly: true, toolIds: ['backup'] }
   if (/^\/api\/backups\/accounts\/[a-z][a-z0-9]{0,15}$/.test(pathname)) return { resource: 'backups', rootOnly: true, toolIds: ['backup-restoration'] }
   if (/^\/api\/backups(?:\/|$)/.test(pathname)) return { resource: 'backups', acl: 'transfer', toolIds: ['backup'] }
+  // A destination exports accounts with the same lifecycle read token it uses for the source inventory.
+  if (/^\/api\/transfers\/source\/accounts\/[a-z][a-z0-9]{0,15}\/backup(?:\/[^/]+)?$/.test(pathname)) return { resource: 'lifecycle', rootOnly: true, scopeAccess: 'read' }
   if (/^\/api\/(?:transfers|lifecycle)(?:\/|$)/.test(pathname)) return { resource: 'lifecycle', rootOnly: true }
   if (/^\/api\/web-features(?:\/|$)/.test(pathname)) return { resource: 'files', acl: 'edit-account', toolIds: [pathname.split('/').at(-1) === 'extras' ? 'file-manager' : pathname.split('/').at(-1)!] }
   if (/^\/api\/git(?:\/|$)/.test(pathname)) return { resource: 'git', acl: 'edit-account', toolIds: ['git-version-control'] }
@@ -157,8 +222,9 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   return fail('FORBIDDEN', 'no authorization policy is declared for this route')
 }
 
-export const assertAccountFeatures = async (store: StateStore, caller: AuthenticatedCaller, account: Account, toolIds: readonly string[]): Promise<void> => {
-  if ((caller.principal.kind === 'root' && !isMailboxPrincipal(caller)) || toolIds.length === 0) return
+/** The account plan's own feature policy, independent of who is asking. */
+export const assertAccountPlanFeatures = async (store: StateStore, account: Account, toolIds: readonly string[]): Promise<void> => {
+  if (toolIds.length === 0) return
   const plan = await store.getPlan(account.planId)
   const list = plan ? await store.getFeatureList(plan.featureListId) : null
   if (!list) return fail('FORBIDDEN', 'account feature policy is unavailable')
@@ -169,13 +235,18 @@ export const assertAccountFeatures = async (store: StateStore, caller: Authentic
   }
 }
 
+export const assertAccountFeatures = async (store: StateStore, caller: AuthenticatedCaller, account: Account, toolIds: readonly string[]): Promise<void> => {
+  if (caller.principal.kind === 'root' && !isMailboxPrincipal(caller)) return
+  await assertAccountPlanFeatures(store, account, toolIds)
+}
+
 export const requireMailboxPrincipalAccess = async (store: StateStore, caller: AuthenticatedCaller): Promise<MailboxPrincipalAccess> => {
   const binding = extractMailboxBinding(caller)
   if (!binding) return fail('FORBIDDEN', 'mailbox principal binding is unavailable')
-  const all = await store.readSnapshot()
-  const serviceUser = all.serviceUsers.find(user =>
-    binding.kind === 'id' ? user.id.toLowerCase() === binding.value : user.login.toLowerCase() === binding.value,
-  )
+  // Validated direct reads also support callers holding the authority writer lease.
+  const serviceUser = binding.kind === 'id'
+    ? await store.getServiceUser(binding.value)
+    : await store.getServiceUserByLogin(binding.value)
   if (!serviceUser) return fail('NOT_FOUND', 'mailbox not found')
   if (caller.principal.kind === 'user' && caller.principal.accountId && serviceUser.accountId !== caller.principal.accountId) {
     return fail('NOT_FOUND', 'mailbox not found')
@@ -202,11 +273,11 @@ export const assertRequestAuthorized = async (store: StateStore, caller: Authent
   const method = req.method.toUpperCase()
   const policy = policyForRequest(pathname, method)
   requestPolicies.set(caller, policy)
-  let read = readMethods.has(method)
+  let read = policy.scopeAccess === undefined ? readMethods.has(method) : policy.scopeAccess === 'read'
   if (policy.resource === 'files' && /\/accounts\/[^/]+\/files$/.test(pathname) && method === 'POST') {
     let body: unknown
     try { body = await req.clone().json() } catch { fail('VALIDATION', 'request body must be valid JSON') }
-    read = !!body && typeof body === 'object' && 'op' in body && ['list', 'read', 'list-trash'].includes(String(body.op))
+    read = !!body && typeof body === 'object' && 'op' in body && typeof body.op === 'string' && ['list', 'read', 'list-trash', 'get-bytes'].includes(body.op)
     policy.acl = read ? 'list-accounts' : 'edit-account'
   }
   if (isMailboxPrincipal(caller)) {

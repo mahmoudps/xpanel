@@ -1,6 +1,5 @@
 import type { Account, Domain, Plan, Principal, Reseller, ServiceUser } from '@xpanel/core'
 import type { Locale } from '../../i18n.ts'
-
 /** Read models supplied by the authenticated adapter, never by request query flags.
  * Omitted arrays have not been read; an empty array is a completed empty read.
  * Catalog admission and API authorization remain independent of this presentation guard.

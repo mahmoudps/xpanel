@@ -43,13 +43,15 @@ describe('live truth surfaces', () => {
     assert.match(html, /href="\/mail\/inbox\?folder=Sent"/)
     assert.match(html, /Lina Saleh/)
     assert.match(html, /sam@example.test/)
-    assert.match(html, /plan\.pdf/)
-    assert.match(html, /2,048 B/)
+    // Product attachments are read from native MIME on selection; summary metadata is never offered as a file.
+    assert.match(html, /data-mail-attachments\b[^>]*data-attachment-can-read="false"/)
+    assert.equal(html.includes('plan.pdf'), false)
+    assert.equal(html.includes('data-mail-attachment-download'), false)
     const decoded = renderInbox(xmailInboxFromProps({
       mailbox: 'info@example.test',
       messages: [{ ...message, attachments: [{ name: 'note.txt', sizeBytes: 1240 }] }],
     }))
-    assert.match(decoded, /1,240 B/)
+    assert.equal(decoded.includes('note.txt'), false)
     assert.equal(decoded.includes('1.70 KB'), false)
     assert.match(html, /mode=reply/)
     assert.match(html, /<bdi dir="auto">/)
@@ -78,8 +80,10 @@ describe('live truth surfaces', () => {
     }))
     assert.match(html, /من/)
     assert.match(html, /غير مقروءة/)
-    assert.equal(html.includes(' of '), false)
-    assert.equal(html.includes('Unread.'), false)
+    // Inlined parser source (`for (const k of ...)`) is not page copy.
+    const markup = html.replace(/<script\b[\s\S]*?<\/script>/g, '')
+    assert.equal(markup.includes(' of '), false)
+    assert.equal(markup.includes('Unread.'), false)
   })
 
   it('fills a reply draft and shows the size limit that was read', () => {
@@ -105,7 +109,7 @@ describe('live truth surfaces', () => {
     assert.match(html.bodyHtml, /&gt; See you/)
     assert.match(html.identitySize, /10 MB/)
     assert.match(html.identityDkim, /not signed/)
-    assert.equal(html.vacationStatus, 'Off')
+    assert.match(html.vacationStatus, /Requested off; activation unverified/)
     assert.equal(html.folders.find(folder => folder.label === 'Drafts')?.count?.text, '1')
   })
 

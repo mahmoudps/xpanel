@@ -195,7 +195,7 @@ const rdataOf = (type: ZoneRecordType, t: Token[], origin: string | null, line: 
 export const parseBindZone = (text: string, opts: { origin?: string } = {}): ParsedZone => {
   if (typeof text !== 'string') return invalid('zone file', text, 'must be text')
   if (text.length > BIND_MAX_BYTES) return invalid('zone file', '', `is larger than ${BIND_MAX_BYTES} bytes`)
-  const entries = lex(text.replace(/^﻿/, ''))
+  const entries = lex(text.replace(/^\uFEFF/, ''))
   let origin: string | null = opts.origin ? normalizeZone(opts.origin) : null
   let zone = origin
   let defaultTtl: number | null = null

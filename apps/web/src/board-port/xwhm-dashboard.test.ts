@@ -196,8 +196,25 @@ describe('xWHM dashboard board port', () => {
     })
     assert.match(auditPage, /حفظ منطقة/)
     assert.match(auditPage, /<bdi dir="ltr">DNS<\/bdi>/)
-    assert.match(auditPage, /2026-10-23 17:29:00 UTC/)
+    assert.match(auditPage, /2026-10-23 17:29 UTC/)
     assert.match(auditPage, /lab\.example\.test/)
     assert.doesNotMatch(auditPage, /dns\.zone\.saved/)
+  })
+})
+
+describe('readable live xWHM header instant', () => {
+  it.each(['en', 'ar'] as const)('keeps the %s minute-precision human header and existing machine timestamp behavior separate', locale => {
+    const hostSample = { sampledAt: '2026-10-27T14:00:01.123456+02:00' }
+    const before = { ...hostSample }
+    const model = whmDashboardFromProps({ locale, principal: rootVisibility.principal, visibility: rootVisibility, hostSample })
+    assert.equal(model.ledeTime, '2026-10-27 12:00 UTC')
+    assert.equal(model.ledeDatetime, '2026-10-27T12:00:01.123Z')
+    const html = renderWhmDashboard(model)
+    const time = /<time datetime="([^"]*)">([\s\S]*?)<\/time>/.exec(html)!
+    assert.equal(time[1], '2026-10-27T12:00:01.123Z')
+    assert.equal(time[2]!.replace(/<[^>]*>/g, ''), '2026-10-27 12:00 UTC')
+    if (locale === 'ar') assert.match(time[2]!, /<bdi dir="ltr"[^>]*>2026-10-27 12:00 UTC<\/bdi>/)
+    assert.deepEqual(hostSample, before)
+    assert.doesNotMatch(time[2]!, /[\u0660-\u0669\u06f0-\u06f9]/)
   })
 })

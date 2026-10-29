@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectSnapshotFiles, computeSourceDigest } from '../../scripts/vm/source-snapshot.mjs'
 import { createVisualFixture } from './visual-fixture.mjs'
+import { assertAppliedFont } from './applied-font-contract.mjs'
 
 const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
 const focusable = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]'
@@ -135,7 +136,7 @@ function fontsFromCss(bytes) {
     if (!urls.length) throw fontFailure('font-css-source-missing')
     for (const url of urls) fonts.add(fontAssetUrl(url[1], 'font'))
   }
-  for (const family of ['IBM Plex Sans', 'IBM Plex Sans Arabic', 'IBM Plex Mono']) if (!families.has(family)) throw fontFailure('font-css-family-missing')
+  for (const family of ['IBM Plex Sans', 'IBM Plex Mono']) if (!families.has(family)) throw fontFailure('font-css-family-missing')
   const allUrls = [...css.matchAll(/url\(\s*['"]?([^)'"\s]+)['"]?\s*\)/g)].map(match => fontAssetUrl(match[1], 'font'))
   if (allUrls.some(url => !fonts.has(url))) throw fontFailure('font-css-extra-resource')
   return fonts
@@ -370,19 +371,21 @@ function failureNetworkDiagnostics(page) {
 
 async function fontGate(page, locale) {
   const result = await page.evaluate(async locale => {
-    const family = locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans'
+    const family = locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans'
     const text = locale === 'ar' ? 'الحساب 0123456789' : 'Account 0123456789'
     let ready = false
     await Promise.race([document.fonts.ready.then(() => { ready = true }), new Promise(resolve => setTimeout(resolve, 10000))])
     const faces = [...document.fonts].map(face => ({ family: face.family.replaceAll('"', '').replaceAll("'", ''), status: face.status }))
-    return { ready, status: document.fonts.status, family, glyph_check: document.fonts.check(`14px "${family}"`, text), body_family: getComputedStyle(document.body).fontFamily, faces }
+    return { ready, status: document.fonts.status, family, glyph_check: document.fonts.check(family === 'sans-serif' ? '14px sans-serif' : `14px "${family}"`, text), body_family: getComputedStyle(document.body).fontFamily, faces }
   }, locale)
   assert.equal(result.ready, true, 'Font loading must finish within the recorded observation window')
   assert.equal(result.status, 'loaded')
-  assert.ok(result.faces.some(face => face.family === result.family && face.status === 'loaded'), 'The expected downloadable locale face must actually load')
+  if (locale === 'en') assert.ok(result.faces.some(face => face.family === result.family && face.status === 'loaded'), 'The expected downloadable English locale face must actually load')
   assert.equal(result.glyph_check, true)
-  assert.ok(result.body_family.includes(result.family), 'The locale body must select its intended family')
+  if (locale === 'ar') assert.equal(result.body_family, 'sans-serif', 'Arabic UI must select the literal generic sans-serif family')
+  else assert.ok(result.body_family.includes(result.family), 'The locale body must select its intended family')
   assert.deepEqual(result.faces.filter(face => face.status === 'error'), [])
+  result.applied_ui = await assertAppliedFont(page, 'h1', result.family)
   return result
 }
 
@@ -1405,7 +1408,7 @@ export async function runNavigationAcceptance({ output, filter } = {}) {
   const actions = outcomes.flatMap(outcome => outcome.observations.flatMap(observation => observation.check === 'mobile-overlay' ? [observation.opening, observation.closing] : []))
   const times = actions.map(action => action.event_to_second_frame_ms).filter(Number.isFinite).sort((a, b) => a - b)
   const observations = outcomes.flatMap(outcome => outcome.observations)
-  const measurements = { local_input_events: times.length, event_to_second_frame_ms: { minimum: times[0] ?? null, median: times.length ? times[Math.floor(times.length / 2)] : null, p95: times.length ? times[Math.ceil(times.length * 0.95) - 1] : null, maximum: times.at(-1) ?? null }, observed_layout_shift_entries: actions.reduce((sum, action) => sum + action.shifts.length, 0), layout_shift_value_sum_including_recent_input: actions.reduce((sum, action) => sum + action.shifts.reduce((total, shift) => total + shift.value, 0), 0), fonts_ready: outcomes.filter(outcome => outcome.fonts?.ready).length, actual_locale_font_loaded: outcomes.filter(outcome => outcome.fonts?.faces.some(face => face.family === outcome.fonts.family && face.status === 'loaded')).length, explicit_control_fields: observations.filter(value => value.check === 'explicit-field-alignment').reduce((sum, value) => sum + value.measured, 0), workspace_summary_fields: observations.filter(value => value.check === 'unqualified-workspace-summary').reduce((sum, value) => sum + value.measured_fields, 0) }
+  const measurements = { local_input_events: times.length, event_to_second_frame_ms: { minimum: times[0] ?? null, median: times.length ? times[Math.floor(times.length / 2)] : null, p95: times.length ? times[Math.ceil(times.length * 0.95) - 1] : null, maximum: times.at(-1) ?? null }, observed_layout_shift_entries: actions.reduce((sum, action) => sum + action.shifts.length, 0), layout_shift_value_sum_including_recent_input: actions.reduce((sum, action) => sum + action.shifts.reduce((total, shift) => total + shift.value, 0), 0), fonts_ready: outcomes.filter(outcome => outcome.fonts?.ready).length, actual_locale_font_verified: outcomes.filter(outcome => outcome.fonts?.applied_ui?.rendered_glyphs > 0).length, actual_downloadable_locale_font_loaded: outcomes.filter(outcome => outcome.fonts?.family !== 'sans-serif' && outcome.fonts?.faces.some(face => face.family === outcome.fonts.family && face.status === 'loaded')).length, explicit_control_fields: observations.filter(value => value.check === 'explicit-field-alignment').reduce((sum, value) => sum + value.measured, 0), workspace_summary_fields: observations.filter(value => value.check === 'unqualified-workspace-summary').reduce((sum, value) => sum + value.measured_fields, 0) }
   const report = { schema_version: 1, captured_at: new Date().toISOString(), status: preparationFailure ? 'blocked' : outcomes.length === selected.length && outcomes.every(outcome => outcome.status === 'passed') && drift.length === 0 ? 'passed' : 'failed', font_transport: fontTransport?.report() ?? preparationFailure?.preparation ?? null, prerequisite_failure: preparationFailure, runtime: process.version, environment: { platform: process.platform, browser: browser.version(), headless: true, loopback: true, cpu_throttling: 'none', network_throttling: 'none', external_fonts: true, viewport_emulation_only: true, physical_touch_device: false }, scope: { filter: filter ?? null, full_suite_case_count: states.length, requested_case_count: selected.length, executed_case_count: outcomes.length, initial_widths: [...new Set(selected.map(state => state.width))].sort((a, b) => a - b), initial_heights: [...new Set(selected.map(state => state.height ?? (state.width < 960 ? 800 : 900)))].sort((a, b) => a - b), boundary_widths: [...new Set(selected.flatMap(state => state.kind.startsWith('home-') ? [800, 801] : ['sheet-close', 'toolbar-summary', 'palette-return'].includes(state.kind) ? [959, 960] : []))].sort((a, b) => a - b), locales: [...new Set(selected.map(state => state.locale))], qualified_catalog_test_states: selected.filter(state => !['summary', 'palette-unqualified'].includes(state.kind)).length, original_unqualified_catalog_states: selected.filter(state => ['summary', 'palette-unqualified'].includes(state.kind)).length }, tests: { total: outcomes.length, passed: outcomes.filter(outcome => outcome.status === 'passed').length, failed: outcomes.filter(outcome => outcome.status === 'failed').length }, measurements, duration_ms: preparationFailure ? 0 : Date.now() - started, source: { before_sha256: before.sha256, after_sha256: after.sha256, files: before.files.length, drift }, limits: ['Synthetic catalog and principals are test-only; no authentication, authorization enforcement, host command, hosting service or production qualification.', 'Theme persistence means selected URL context survives document navigation and reload; this suite does not require a browser storage preference absent from the product contract.', 'Input-event-to-second-frame measurements use browser performance.now and requestAnimationFrame. Action-to-second-frame durations also include automation dispatch. Neither is INP. Layout-shift entries include recent-input flags and are not a page CLS qualification.', 'Sampled shell routes, explicit field contracts, two locales and selected breakpoints do not certify every screen or accessibility requirement.', 'Font bytes are freshly prepared over bounded HTTPS and replayed unchanged; case timings qualify ready-font interaction and geometry, not cold CDN latency, availability or offline production.', 'The account Home filter is exercised directly: slash focuses the visible existing search/filter input and preserves native typing. Command-palette access remains separately exercised through its shared keyboard shortcut. The unresolved-account cases exercise only the standalone synthetic summary DTO renderer; real authenticated missing-account HTTP requests remain denied.'], outcomes }
   writeFileSync(join(destination, 'results.json'), `${JSON.stringify(report, null, 2)}\n`)
   writeFileSync(join(destination, 'README.md'), `# Synthetic navigation acceptance\n\n${report.tests.passed}/${report.tests.total} cases passed; source drift: ${drift.length}.\n\nSee [results](results.json). Font faces, field counts, focus observations, action-to-second-frame timings and layout-shift entries are recorded per case.\n\n${report.limits.map(value => `- ${value}`).join('\n')}\n`)

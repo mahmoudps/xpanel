@@ -7,6 +7,8 @@ export interface VisibilityContext {
   disabledFeatures?: ReadonlySet<string>
   /** for 'reseller' principals */
   reseller?: Pick<Reseller, 'acl'>
+  /** A team member session: only these tool ids, on top of the plan feature gate. */
+  allowedToolIds?: ReadonlySet<string>
 }
 
 export const surfacesFor = (p: Principal): Surface[] =>
@@ -23,6 +25,7 @@ export const isVisible = (tool: CatalogTool, ctx: VisibilityContext): boolean =>
       if (tool.rootOnly) return false
       return tool.resellerAcl === null || (ctx.reseller?.acl.includes(tool.resellerAcl) ?? false)
     case 'user':
+      if (ctx.allowedToolIds && !ctx.allowedToolIds.has(tool.id)) return false
       return tool.featureKey === null || (ctx.disabledFeatures !== undefined && !ctx.disabledFeatures.has(tool.featureKey))
   }
 }

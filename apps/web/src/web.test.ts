@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { qualifyHostTools, tools } from '@xpanel/catalog'
 import { SYNTHETIC_WEBSITE_ANALYTICS, SYNTHETIC_WHM_IO_SNAPSHOT } from '../../../tests/fixtures/analytics-snapshots.ts'
 import { LOGIN_CLIENT_SCRIPT } from './login-client.ts'
@@ -8,7 +9,7 @@ import { planEditorRequest } from './plan-editor.ts'
 import {
   BROWSER_REALTIME_SCRIPT,
   createLiveEventStore,
-  dirForLocale,
+  localeDirection,
   getThresholdLevel,
   renderLoginSurface,
   renderMailSurface,
@@ -21,7 +22,7 @@ import {
   renderWebsiteAnalyticsChart,
   renderWhmSurface,
   serveWebUi,
-  t,
+  translator,
   type PanelSurfaceProps,
   type WhmSurfaceProps,
   type MailSurfaceProps,
@@ -40,7 +41,7 @@ const panelFixture: PanelSurfaceProps = {
   account: fixtureAccount, plan: fixturePlan,
   domains: [{ id: 'fixture-domain', accountId: fixtureAccount.id, name: fixtureAccount.primaryDomain, kind: 'primary', parentId: null, docRoot: '/home/alice/public_html', siteType: 'php', upstream: null, redirect: null,
     php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 4, startServers: 1, minSpareServers: 1, maxSpareServers: 2, maxRequests: 500, processIdleTimeoutSec: 10 }, ini: {} }, wildcard: false, certificateId: null, suspended: false, expiresAt: null, pathQuotaMb: 'unlimited', ipv4: fixtureAccount.ipv4, ipv6: fixtureAccount.ipv6 }],
-  customConfig: { domainId: 'fixture-domain', accountId: fixtureAccount.id, domainName: fixtureAccount.primaryDomain, nginxInclude: '# synthetic include', apacheInclude: '# synthetic include', userIni: { memory_limit: '256M' }, customHeaders: {}, cacheBypassPaths: [], updatedAt: fixtureAt, updatedBy: 'user' },
+  customConfig: { domainId: '11111111-1111-4111-8111-111111111111', accountId: fixtureAccount.id, domainName: fixtureAccount.primaryDomain, nginxInclude: '# synthetic include', apacheInclude: '# synthetic include', userIni: { memory_limit: '256M' }, customHeaders: {}, cacheBypassPaths: [], updatedAt: fixtureAt, updatedBy: 'user' },
   websiteAnalytics: SYNTHETIC_WEBSITE_ANALYTICS,
   files: [{ name: 'fixture.txt', path: '/home/alice/public_html/fixture.txt', kind: 'file', sizeBytes: 128, modeOctal: '0640', modifiedAt: fixtureAt }, { name: 'trashed-fixture.txt', path: '/home/alice/.trash/trashed-fixture.txt', kind: 'file', sizeBytes: 64, modeOctal: '0640', modifiedAt: fixtureAt, trashed: true }],
   databases: [{ id: 'fixture-db', accountId: fixtureAccount.id, engine: 'mariadb', name: 'alice_fixture', trashedAt: null }],
@@ -67,6 +68,7 @@ const mailFixture: MailSurfaceProps = {
 const whmAt = (activeRoute: string, props: WhmSurfaceProps = {}): string => renderWhmSurface({ ...whmFixture, ...props, activeRoute })
 const panelAt = (activeRoute: string, props: PanelSurfaceProps = {}): string => renderPanelSurface({ ...panelFixture, ...props, activeRoute })
 const mailAt = (activeRoute: string, props: MailSurfaceProps = {}): string => renderMailSurface({ ...mailFixture, ...props, activeRoute })
+const documentFor = (html: string): Document => new DOMParser().parseFromString(html, 'text/html')
 
 /**
  * Verifies that every `.xp-badge` element in a rendered HTML document contains both an inline
@@ -115,10 +117,10 @@ describe('@xpanel/web — Design Tokens, Threshold Meters, and Bilingual i18n', 
   })
 
   it('provides English LTR and Arabic RTL translations', () => {
-    assert.equal(dirForLocale('en'), 'ltr')
-    assert.equal(dirForLocale('ar'), 'rtl')
-    assert.equal(t('en', 'reconcile.status.applied', { generationId: 142 }), 'Applied in generation #142')
-    assert.match(t('ar', 'reconcile.status.applied', { generationId: 142 }), /#142/)
+    assert.equal(localeDirection('en'), 'ltr')
+    assert.equal(localeDirection('ar'), 'rtl')
+    assert.equal(translator('en')('Applied in generation #{generationId}', { generationId: 142 }), 'Applied in generation #142')
+    assert.match(translator('ar')('Applied in generation #{generationId}', { generationId: 142 }), /#142/)
   })
 })
 
@@ -200,7 +202,7 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     assert.match(whmAt('/whm/audit'), /data-audit-id="fixture-audit"/)
     assert.match(whmAt('/whm/audit'), /Deleted service user/)
     assert.match(whmAt('/whm/audit'), /Synthetic target/)
-    assert.match(whmAt('/whm/audit'), /2026-10-22 14:05:00 UTC/)
+    assert.match(whmAt('/whm/audit'), /2026-10-22 14:05 UTC/)
     assert.doesNotMatch(whmAt('/whm/audit'), /service_user\.deleted/)
     const filtered = whmAt('/whm/audit', {
       auditEntries: [
@@ -242,7 +244,7 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     const create = whmAt('/whm/plans', { ...metadata, planEditorState: { kind: 'create' } })
     const edit = whmAt('/whm/plans', { ...metadata, planEditorState: { kind: 'edit', plan: storedPlan } })
     const nativeForm = (html: string): string => {
-      assert.equal([...html.matchAll(/<form\b[^>]*\bdata-native-plan-editor\b/g)].length, 1)
+      assert.equal(documentFor(html).querySelectorAll('form[data-native-plan-editor]').length, 1)
       assert.doesNotMatch(html, /data-plan-editor-form=|name="ioMaxMbps"/)
       return /<form\b[^>]*\bdata-native-plan-editor\b[\s\S]*?<\/form>/.exec(html)![0]
     }
@@ -281,7 +283,7 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     for (const planEditorState of [{ kind: 'unavailable' as const }, { kind: 'edit' as const, plan: { ...storedPlan, id: '30000000-0000-4000-8000-000000000001' } }]) {
       const unavailable = whmAt('/whm/plans', { ...metadata, planEditorState })
       assert.match(unavailable, /The requested plan is unavailable/)
-      assert.doesNotMatch(unavailable, /\bdata-native-plan-editor\b|data-plan-editor-form=/)
+      assert.equal(documentFor(unavailable).querySelectorAll('[data-native-plan-editor],[data-plan-editor-form]').length, 0)
     }
   })
 
@@ -300,6 +302,9 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     assert.match(html, /nginx -t/)
     assert.match(html, /apachectl configtest/)
     assert.match(html, /SuexecUserGroup/)
+    assert.match(html, /data-domain-custom-config="11111111-1111-4111-8111-111111111111"/)
+    assert.match(html, /data-userdata-status/)
+    assert.doesNotMatch(html, /action="\/api\/xpanel\/domains\/custom-config"/)
     assert.match(html, /AssignUserId/)
     // Website Analytics chart
     assert.match(html, /data-surface-widget="website-analytics"/)
@@ -312,6 +317,8 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     assert.match(html, /data-action="restore-file"[^>]*>Restore<\/button>/)
     // Jailed Shell Terminal
     assert.match(html, /data-terminal-output=""/)
+    assert.match(html, /data-terminal-execution="unavailable"/)
+    assert.doesNotMatch(html, /data-terminal-form/)
     assert.match(html, /No terminal session has started/)
     assertAllBadgesHaveSvgAndLabel(html)
 
@@ -403,14 +410,25 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     assert.match(whmAt('/whm/monitoring/io', { ioSnapshot: undefined }), /data-screen="unavailable"/)
     assert.match(whmAt('/whm/email/outbound', { mailIpConfig: undefined }), /data-screen="unavailable"/)
     const emptyMail = mailAt('/mail/inbox', { messages: [] })
+    // Inert client <template> rows are not rendered observations.
+    const emptyMailRendered = emptyMail.replace(/<template\b[\s\S]*?<\/template>/g, '')
     assert.match(emptyMail, /data-mail-pane="empty"/)
-    assert.doesNotMatch(emptyMail, /data-mail-uid=|Synthetic message/)
+    assert.doesNotMatch(emptyMailRendered, /data-mail-uid=|Synthetic message/)
     const terminal = panelAt('/advanced/terminal')
     assert.match(terminal, /No terminal session has started/)
     assert.doesNotMatch(terminal, /data-terminal-output="[^"\s]+"/)
     const trash = panelAt('/files/trash')
     assert.match(trash, /data-file-path="\/home\/alice\/\.trash\/trashed-fixture\.txt"/)
     assert.doesNotMatch(trash, /data-file-path="\/home\/alice\/public_html\/fixture\.txt"/)
+    assert.match(trash, /data-file-manager="trash"/)
+    assert.match(trash, /Deleted \(UTC\)/)
+    assert.equal(documentFor(trash).querySelectorAll('#jailed-code-editor,[data-chmod-policy-modal]').length, 0)
+    assert.doesNotMatch(trash, /data-action="upload-file"|data-action="new-file"|data-action="new-folder"/)
+    const managerPage = panelAt('/files/manager')
+    const managerDocument = documentFor(managerPage)
+    assert.equal(managerDocument.querySelectorAll('#jailed-code-editor').length, 1)
+    assert.equal(managerDocument.querySelectorAll('[data-chmod-policy-modal]').length, 1)
+    assert.match(managerPage, /data-action="upload-file"/)
     assert.match(panelAt('/databases/mariadb'), /alice_fixture/)
     assert.match(panelAt('/email/accounts'), /info@alice-shop\.com/)
     assert.match(panelAt('/files/ftp'), /info@alice-shop\.com/)
@@ -468,8 +486,109 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     assert.match(BROWSER_REALTIME_SCRIPT, /window\.xpanelSessionRequest/)
     assert.match(BROWSER_REALTIME_SCRIPT, /window\.xpanelShowToast/)
     assert.match(BROWSER_REALTIME_SCRIPT, /window\.xpanelSwitchView/)
-    assert.match(BROWSER_REALTIME_SCRIPT, /\/api\/xpanel\/terminal\/exec/)
-    assert.match(BROWSER_REALTIME_SCRIPT, /\/api\/xpanel\/files\/chmod/)
-    assert.match(BROWSER_REALTIME_SCRIPT, /\/api\/xpanel\/domains\/custom-config/)
+    assert.doesNotMatch(BROWSER_REALTIME_SCRIPT, /\/api\/xpanel\/terminal\/exec/)
+    // File-manager mutations now travel through the validated account-files RPC; the dead
+    // /api/xpanel/files/* handlers were removed so no button can call an unregistered route.
+    assert.match(BROWSER_REALTIME_SCRIPT, /\/api\/accounts\//)
+    assert.match(BROWSER_REALTIME_SCRIPT, /list-trash/)
+    assert.doesNotMatch(BROWSER_REALTIME_SCRIPT, /\/api\/xpanel\/files\//)
+    assert.doesNotMatch(BROWSER_REALTIME_SCRIPT, /\/api\/xpanel\/domains\/custom-config/)
+    assert.match(BROWSER_REALTIME_SCRIPT, /data-domain-custom-config/)
+    assert.match(BROWSER_REALTIME_SCRIPT, /\/custom-config/)
+  })
+})
+
+
+describe('readable chart datetime metadata', () => {
+  const parseChart = (html: string): Document => new DOMParser().parseFromString(html, 'text/html')
+  it.each(['en', 'ar'] as const)('keeps IO observation text human and machine datetime exact in %s', locale => {
+    const snapshot = structuredClone(SYNTHETIC_WHM_IO_SNAPSHOT)
+    snapshot.at = '2026-10-27T12:00:01.123456Z'
+    const before = structuredClone(snapshot), doc = parseChart(renderServerIoMonitorChart(snapshot, locale))
+    const time = doc.querySelector('time')!
+    assert.equal(time.textContent, '2026-10-27 12:00 UTC')
+    assert.equal(time.getAttribute('datetime'), '2026-10-27T12:00:01.123456Z')
+    assert.equal(time.querySelector('bdi')!.getAttribute('dir'), 'ltr')
+    assert.equal(doc.querySelectorAll('[data-resource-observation-state="incomplete"]').length, 1)
+    assert.equal(doc.querySelectorAll('.xp-resource-history-unavailable').length, 1)
+    assert.equal(doc.querySelectorAll('.xp-chart-svg').length, 0)
+    assert.deepEqual(snapshot, before)
+  })
+  it.each(['en', 'ar'] as const)('keeps analytics header and SVG hover time human without changing bucket geometry in %s', locale => {
+    const snapshot = structuredClone(SYNTHETIC_WEBSITE_ANALYTICS)
+    snapshot.at = '2026-10-27T12:00:00.000Z'
+    snapshot.series[0]!.at = '2026-10-22T14:01:00.123456Z'
+    const before = structuredClone(snapshot), doc = parseChart(renderWebsiteAnalyticsChart(snapshot, locale, '24h'))
+    const time = doc.querySelector('time')!
+    assert.equal(time.textContent, '2026-10-27 12:00 UTC')
+    assert.equal(time.getAttribute('datetime'), '2026-10-27T12:00:00.000Z')
+    const expected = '2026-10-22 14:01 UTC — 2xx: 8510, 3xx: 580, 4xx: 98, 5xx: 12 | Hit: 7780, Miss: 1120 | P95: 58.0 ms'
+    const point = doc.querySelector('.xp-chart-svg circle[data-tooltip]')!
+    assert.equal(point.getAttribute('data-tooltip'), expected)
+    assert.equal(point.querySelector('title')!.textContent, expected)
+    const geometry = (document: Document) => [...document.querySelectorAll('.xp-chart-svg :is(polyline,polygon,circle,path)')].map(node => ['cx', 'cy', 'r', 'points', 'd'].map(name => node.getAttribute(name)))
+    const axisText = (document: Document) => [...document.querySelectorAll('.xp-chart-svg text')].map(node => node.textContent)
+    const base = parseChart(renderWebsiteAnalyticsChart(SYNTHETIC_WEBSITE_ANALYTICS, locale, '24h'))
+    assert.deepEqual(geometry(doc), geometry(base))
+    assert.deepEqual(axisText(doc), axisText(base))
+    assert.equal(doc.querySelector('[data-analytics-range]')!.getAttribute('data-analytics-range'), '24h')
+    assert.equal(doc.querySelector('[data-chart-state]')!.getAttribute('data-chart-state'), 'loaded')
+    assert.deepEqual(snapshot, before)
+  })
+  it.each(['en', 'ar'] as const)('keeps empty analytics observation readable with exact ISO attributes in %s', locale => {
+    const snapshot = { ...structuredClone(SYNTHETIC_WEBSITE_ANALYTICS), at: '2026-10-27T12:00:01.123456Z', series: [] }
+    const before = structuredClone(snapshot), doc = parseChart(renderWebsiteAnalyticsChart(snapshot, locale, '7d'))
+    const times = [...doc.querySelectorAll('time')]
+    assert.equal(times.length, 2)
+    assert.deepEqual(times.map(node => node.textContent), ['2026-10-27 12:00 UTC', '2026-10-27 12:00 UTC'])
+    assert.deepEqual(times.map(node => node.getAttribute('datetime')), ['2026-10-27T12:00:01.123456Z', '2026-10-27T12:00:01.123456Z'])
+    assert.equal(doc.querySelector('[data-chart-state]')!.getAttribute('data-chart-state'), 'empty')
+    assert.equal(doc.querySelectorAll('[data-analytics-empty]').length, 1)
+    assert.equal(doc.querySelectorAll('.xp-chart-svg,.xp-kpi-grid').length, 0)
+    assert.deepEqual(snapshot, before)
+  })
+})
+
+describe('readable initial file metadata', () => {
+  it.each([
+    { locale: 'en', route: '/files/manager' }, { locale: 'ar', route: '/files/manager' },
+    { locale: 'en', route: '/files/trash' }, { locale: 'ar', route: '/files/trash' },
+  ] as const)('renders readable UTC file metadata in the retained SSR table ($locale, $route)', ({ locale, route }) => {
+    const rawTime = '2026-10-27T09:01:02.123Z'
+    const file: NonNullable<PanelSurfaceProps['files']>[number] = { name: 'time-review.txt', path: '/home/alice/public_html/time-review.txt', kind: 'file', sizeBytes: 12345, modeOctal: '0640', modifiedAt: rawTime, trashed: route === '/files/trash' }
+    const original = JSON.stringify(file), root = documentFor(panelAt(route, { locale, files: [file] }))
+    const time = root.querySelector<HTMLTimeElement>('[data-file-manager-table] tbody time')
+    assert.ok(time); assert.equal(time.textContent, '2026-10-27 09:01 UTC'); assert.equal(time.getAttribute('datetime'), rawTime)
+    assert.equal(root.querySelector('[data-file-manager-table] tbody tr')!.getAttribute('data-file-path'), file.path)
+    assert.equal(JSON.stringify(file), original)
+  })
+})
+
+describe('readable administrator audit instants', () => {
+  it.each(['en', 'ar'] as const)('keeps the %s human date separate from exact machine, filter and export instants', locale => {
+    const at = '2026-10-27T14:00:01.123456+02:00'
+    const from = '2026-10-27T09:00:00.123456Z'
+    const to = '2026-10-27T11:00:00.654321Z'
+    const auditEntries = [{ id: 'fractional-audit-private-key', at, actor: 'synthetic-root', action: 'auth.login', target: 'preview.example.test', detail: {}, outcome: 'ok' as const }]
+    const before = structuredClone(auditEntries)
+    const html = whmAt('/whm/audit', { locale, theme: 'dark', density: 'compact', auditEntries, auditList: { actor: 'synthetic-root', action: 'auth.login', target: 'preview.example.test', outcome: 'ok', from, to, before: '42', hasMore: true, oldestId: '40' } })
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const time = doc.querySelector('[data-section="audit-log"] tbody tr[data-audit-id="fractional-audit-private-key"] time')!
+    assert.equal(time.getAttribute('datetime'), '2026-10-27T14:00:01.123456+02:00')
+    assert.equal(time.textContent, '2026-10-27 12:00 UTC')
+    assert.equal(time.querySelector('bdi')?.getAttribute('dir'), 'ltr')
+    assert.equal(doc.querySelector('#audit-from')!.getAttribute('value'), '2026-10-27T09:00:00.123456')
+    assert.equal(doc.querySelector('#audit-to')!.getAttribute('value'), '2026-10-27T11:00:00.654321')
+    const older = new URL(doc.querySelector('[data-audit-older]')!.getAttribute('href')!, 'https://synthetic.invalid')
+    for (const [key, value] of Object.entries({ lang: locale, theme: 'dark', density: 'compact', actor: 'synthetic-root', action: 'auth.login', target: 'preview.example.test', outcome: 'ok', from, to, before: '40' })) assert.equal(older.searchParams.get(key), value, key)
+    const jsonHref = doc.querySelector('[data-audit-export] a[download="xpanel-audit-page.json"]')!.getAttribute('href')!
+    const exported = JSON.parse(decodeURIComponent(jsonHref.slice(jsonHref.indexOf(',') + 1))) as Array<Record<string, unknown>>
+    assert.equal(exported[0]!.at, '2026-10-27T14:00:01.123456+02:00')
+    assert.deepEqual(Object.keys(exported[0]!), ['at', 'actor', 'action', 'target', 'outcome'])
+    assert.doesNotMatch(JSON.stringify(exported), /fractional-audit-private-key|"detail"/)
+    const csvHref = doc.querySelector('[data-audit-export] a[download="xpanel-audit-page.csv"]')!.getAttribute('href')!
+    assert.ok(decodeURIComponent(csvHref.slice(csvHref.indexOf(',') + 1)).includes('"2026-10-27T14:00:01.123456+02:00"'))
+    assert.deepEqual(auditEntries, before)
+    assert.doesNotMatch(time.textContent!, /[\u0660-\u0669\u06f0-\u06f9]/)
   })
 })

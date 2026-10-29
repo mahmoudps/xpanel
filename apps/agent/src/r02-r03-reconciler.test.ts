@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { describe, afterEach, beforeEach, it } from 'vitest'
 import { defaultFirewallRules, isXpanelError, suggestServerSettings } from '@xpanel/core'
 import type { HostAction, RenderedFile } from '@xpanel/core'
@@ -8,6 +10,7 @@ import { profileFor } from '@xpanel/os'
 import { createTestStateStore, type TestStateStoreHandle } from '@xpanel/state'
 import { FakeHostExecutor } from './executor.ts'
 import { compileDesiredGeneration, HostReconciler, rollbackReloadAction, sha256Text, type ReconcileJournalPhase } from './reconciler.ts'
+import { readMailForwardingConfiguration } from './mailfx-render.ts'
 import { SERIAL_RE } from './zone-serial.ts'
 
 const ARGON2 =
@@ -117,6 +120,130 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     })
     return { plan, account, fl }
   }
+
+  it('mail composition applies saved forwarding changes without a snapshot revision and repairs merged-file drift', async () => {
+    const { account } = await seedEnvironment()
+    const directory = join(stateHandle.store.rootDir, 'extended', 'mail')
+    await mkdir(directory, { recursive: true })
+    const forwarder = { id: randomUUID(), accountId: account.id, sourceAddress: 'sales@alice.example.com', destinations: ['first@external.test'], createdAt: new Date().toISOString() }
+    await writeFile(join(directory, 'forwarders.json'), JSON.stringify([forwarder]))
+    await writeFile(join(directory, 'domain-forwarders.json'), JSON.stringify([{ id: randomUUID(), accountId: account.id, sourceDomain: 'alice.example.com', targetDomain: 'external.test', createdAt: new Date().toISOString() }]))
+    const before = await stateHandle.store.readSnapshot()
+    const reconciler = new HostReconciler({ store: stateHandle.store, db: dbHandle.db, executor, os })
+    const initial = await reconciler.reconcile({ actor: 'root', mailAuth: null })
+    assert.equal(initial.status, 'applied')
+    assert.ok(initial.generation)
+    assert.match(executor.files.get('/etc/postfix/xpanel/virtual_aliases')!.content, /sales@alice.example.com\tfirst@external.test/)
+    assert.match(executor.files.get('/etc/postfix/xpanel/virtual_aliases')!.content, /@alice.example.com\t@external.test/)
+    assert.match(executor.files.get('/etc/postfix/xpanel/virtual_alias_domains')!.content, /alice.example.com\tOK/)
+    assert.equal((await reconciler.reconcile({ actor: 'root', mailAuth: null })).status, 'noop')
+    await writeFile(join(directory, 'forwarders.json'), JSON.stringify([{ ...forwarder, destinations: ['second@external.test'] }]))
+    assert.equal((await stateHandle.store.readSnapshot()).checksum, before.checksum)
+    const changed = await reconciler.reconcile({ actor: 'root', mailAuth: null })
+    assert.equal(changed.status, 'applied')
+    assert.ok(changed.generation)
+    assert.notEqual(changed.generation.checksum, initial.generation.checksum)
+    assert.match(executor.files.get('/etc/postfix/xpanel/virtual_aliases')!.content, /second@external.test/)
+    const master = executor.files.get('/etc/postfix/master.cf')!
+    executor.files.set(master.path, { ...master, content: '# unrelated service configuration\n' })
+    assert.equal((await reconciler.reconcile({ actor: 'root', mailAuth: null })).status, 'applied')
+    assert.match(executor.files.get(master.path)!.content, /127.0.0.1:587 inet/)
+    assert.match(executor.files.get(master.path)!.content, /# unrelated service configuration/)
+  })
+
+  it('mail composition rejects historical restore when current forwarding differs from target map checksums', async () => {
+    const { account } = await seedEnvironment()
+    const directory = join(stateHandle.store.rootDir, 'extended', 'mail')
+    await mkdir(directory, { recursive: true })
+    const path = join(directory, 'forwarders.json')
+    const row = { id: randomUUID(), accountId: account.id, sourceAddress: 'sales@alice.example.com', destinations: ['first@external.test'], createdAt: new Date().toISOString() }
+    await writeFile(path, JSON.stringify([row]))
+    const reconciler = new HostReconciler({ store: stateHandle.store, db: dbHandle.db, executor, os })
+    const target = await reconciler.reconcile({ actor: 'root', mailAuth: null })
+    assert.ok(target.generation)
+    await writeFile(path, JSON.stringify([{ ...row, destinations: ['second@external.test'] }]))
+    const active = await reconciler.reconcile({ actor: 'root', mailAuth: null })
+    assert.ok(active.generation)
+    const before = await stateHandle.store.readSnapshot()
+    const host = JSON.stringify([...executor.files])
+    await assert.rejects(reconciler.rollbackToGeneration(target.generation.id, 'root', { authorize: async () => undefined, request: {
+      expectedCurrentGenerationId: active.generation.id, expectedCurrentStateRevision: before.revision!, expectedTargetChecksum: target.generation.checksum, confirmation: String(target.generation.id),
+    } }), /Target generation mail forwarding cannot be restored/)
+    assert.equal((await stateHandle.store.readSnapshot()).revision, before.revision)
+    assert.equal((await latestActive(dbHandle.db))?.id, active.generation.id)
+    assert.equal(JSON.stringify([...executor.files]), host)
+  })
+
+  it('mail composition restores all merged files and lookup maps after a failed mail reload', async () => {
+    const { account } = await seedEnvironment()
+    const directory = join(stateHandle.store.rootDir, 'extended', 'mail')
+    await mkdir(directory, { recursive: true })
+    const path = join(directory, 'forwarders.json')
+    const row = { id: randomUUID(), accountId: account.id, sourceAddress: 'sales@alice.example.com', destinations: ['first@external.test'], createdAt: new Date().toISOString() }
+    await writeFile(path, JSON.stringify([row]))
+    let failedGeneration: number | null = null
+    const reconciler = new HostReconciler({ store: stateHandle.store, db: dbHandle.db, executor, os,
+      healthProbe: async (unit, generationId) => ({ ok: unit !== os.services.postfix || generationId !== failedGeneration }),
+    })
+    const initial = await reconciler.reconcile({ actor: 'root', mailAuth: null })
+    assert.ok(initial.generation)
+    const paths = ['/etc/postfix/main.cf', '/etc/postfix/master.cf', '/etc/postfix/xpanel/virtual_aliases', '/etc/dovecot/conf.d/10-auth.conf', '/etc/dovecot/conf.d/15-mailboxes.conf', '/etc/dovecot/conf.d/99-xpanel-quota.conf']
+    const prior = paths.map(path => executor.files.get(path)!.content)
+    await writeFile(path, JSON.stringify([{ ...row, destinations: ['second@external.test'] }]))
+    await stateHandle.store.saveMailIpConfig({ mode: 'server-default', defaultIpv4: '203.0.113.10', defaultIpv6: null, defaultHelo: 'srv1.example.com', domainOverrides: [] })
+    failedGeneration = initial.generation.id + 1
+    const result = await reconciler.reconcile({ actor: 'root', mailAuth: null })
+    assert.equal(result.status, 'failed')
+    assert.ok(result.status === 'failed' && result.rolledBack)
+    for (const [index, path] of paths.entries()) assert.equal(executor.files.get(path)!.content, prior[index])
+    assert.equal((await latestActive(dbHandle.db))?.id, initial.generation.id)
+  })
+
+  it('mail composition rejects malformed and foreign saved records before host actions', async () => {
+    const { account } = await seedEnvironment()
+    const directory = join(stateHandle.store.rootDir, 'extended', 'mail')
+    await mkdir(directory, { recursive: true })
+    const path = join(directory, 'forwarders.json')
+    const row = { id: randomUUID(), accountId: account.id, sourceAddress: 'sales@alice.example.com', destinations: ['out@external.test'], createdAt: new Date().toISOString() }
+    for (const bad of ['{', JSON.stringify([{ ...row, accountId: randomUUID() }]), JSON.stringify([{ ...row, destinations: ['|command'] }]), JSON.stringify([{ ...row, extra: true }])]) {
+      await writeFile(path, bad)
+      await assert.rejects(readMailForwardingConfiguration(stateHandle.store.rootDir, await stateHandle.store.readSnapshot()), /Saved mail forwarding configuration is invalid/)
+    }
+    const reconciler = new HostReconciler({ store: stateHandle.store, db: dbHandle.db, executor, os })
+    await assert.rejects(reconciler.reconcile({ actor: 'root', mailAuth: null }), /Saved mail forwarding configuration is invalid/)
+    assert.equal(executor.files.size, 0)
+    assert.equal(executor.executedActions.length, 0)
+  })
+
+  it('mail composition refuses extended forwarding changed during preflight', async () => {
+    const { account } = await seedEnvironment()
+    const directory = join(stateHandle.store.rootDir, 'extended', 'mail')
+    await mkdir(directory, { recursive: true })
+    const row = { id: randomUUID(), accountId: account.id, sourceAddress: 'sales@alice.example.com', destinations: ['out@external.test'], createdAt: new Date().toISOString() }
+    const original = executor.preflight.bind(executor)
+    executor.preflight = async plan => {
+      await original(plan)
+      await writeFile(join(directory, 'forwarders.json'), JSON.stringify([row]))
+    }
+    const reconciler = new HostReconciler({ store: stateHandle.store, db: dbHandle.db, executor, os })
+    await assert.rejects(reconciler.reconcile({ actor: 'root', mailAuth: null }), /Saved mail forwarding changed/)
+    assert.equal(executor.files.size, 0)
+    assert.equal(executor.executedActions.length, 0)
+  })
+
+  it('mail composition seeds empty maps for outbound-only routing and selects hostname TLS', async () => {
+    await seedEnvironment()
+    const snapshot = await stateHandle.store.readSnapshot()
+    snapshot.mailIpConfig = { mode: 'server-default', defaultIpv4: '203.0.113.10', defaultIpv6: null, defaultHelo: 'srv1.example.com', domainOverrides: [] }
+    const tls = { certFile: '/etc/xpanel/ssl/mail/fullchain.pem', keyFile: '/etc/xpanel/ssl/mail/privkey.pem' }
+    const compiled = compileDesiredGeneration(snapshot, { os, mailTls: tls })
+    assert.ok(compiled.files.find(file => file.path === '/etc/postfix/xpanel/virtual_aliases'))
+    assert.match(compiled.files.find(file => file.path.endsWith('/main.cf.fragment'))!.content, /sender_dependent_default_transport_maps = texthash:/)
+    assert.match(compiled.files.find(file => file.path.endsWith('/master.cf.fragment'))!.content, /^465 inet/m)
+    assert.match(compiled.files.find(file => file.path.endsWith('/master.cf.fragment'))!.content, /smtp_bind_address=203.0.113.10/)
+    assert.equal(compiled.postActions.some(action => action.kind === 'exec' && action.argv.some(arg => arg.includes('postmap'))), false)
+    assert.match(compileDesiredGeneration(snapshot, { os, mailTls: null }).files.find(file => file.path.endsWith('/master.cf.fragment'))!.content, /^127.0.0.1:587 inet/m)
+  })
 
   it('refuses a stale compiled snapshot before live activation and records the pending generation as failed', async () => {
     await seedEnvironment()
@@ -579,6 +706,8 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
       verb: 'reload',
       unit: 'nginx.service',
     })
+    assert.deepEqual(rollbackReloadAction('xpanel-20000.slice'), { kind: 'systemd-daemon-reload' })
+    assert.deepEqual(rollbackReloadAction('user-20000.slice'), { kind: 'systemd-daemon-reload' })
 
     await seedEnvironment()
     const reconciler = new HostReconciler({

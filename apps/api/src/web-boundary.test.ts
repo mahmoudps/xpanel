@@ -353,15 +353,11 @@ describe('production web renderer boundary regressions', () => {
     expect(home).toContain('data-tool-availability="unverified"')
     expect(home).toContain('Coming soon')
     const crossedRender = await createDefaultWebRenderer({
-      store: state.store, db: db.db, serverSecret: SERVER_SECRET, entryPoint: 'xpanel',
-      panels: {
-        xpanel: 'https://panel.example.test:2083',
-        xwhm: 'https://whm.example.test:2087',
-        xmail: 'https://mail.example.test:2096',
-      },
+      store: state.store, db: db.db, serverSecret: SERVER_SECRET, entryPoint: 'xpanel', publicOrigin: 'https://panel.example.test:2083',
     })
+    // A listener renders no other panel: the 404 names neither another origin nor a switch to it.
     const crossed = await observe('route-404:cross-whm', await crossedRender(request('/whm')), 404)
-    expect(crossed).toContain('https://whm.example.test:2087/login')
+    expect(crossed).not.toMatch(/whm\.example\.test|mail\.example\.test|data-panel-link|data-panel-switch/)
     expect(crossed).not.toContain('href="/whm')
     expect(snapshotReads).toBe(0)
   })
@@ -410,7 +406,7 @@ describe('production web renderer boundary regressions', () => {
         expect(panel.databases.map(database => database.name)).toEqual(databases.map(database => database.name))
         expect(panel.databaseUsers).toEqual(databaseUsers.map(user => ({ id: user.id, name: user.name, grants: user.grants })))
         const databaseLabel = locale === 'ar' ? 'قواعد البيانات' : 'Databases'
-        const databaseMeter = new RegExp(`color: #475467">${databaseLabel}</span>([\\s\\S]*?)</div>`).exec(html)?.[1]
+        const databaseMeter = new RegExp(`#475467[^"]*">${databaseLabel}</span>([\\s\\S]*?)</div>`).exec(html)?.[1]
         expect(databaseMeter?.replace(/<[^>]*>/g, '').trim()).toBe(`${databases.length} / 1`)
         for (const value of [otherDatabase.id, otherDatabase.name, otherDatabaseUser.id, otherDatabaseUser.name, trashedDatabase.id, trashedDatabase.name, PUBLIC_DB_AUTH]) {
           expect(JSON.stringify(panel)).not.toContain(value)

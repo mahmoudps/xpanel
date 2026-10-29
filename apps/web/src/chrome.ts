@@ -1,42 +1,18 @@
 import { navigation, type NavSurface } from '@xpanel/catalog'
-import arCatalog from '../../../packages/catalog/src/locales/ar.json' with { type: 'json' }
 import { publicContactEmail } from './display-name.ts'
-import { t, type Locale } from './i18n.ts'
+import { alternateLocales, catalogText, translator, type Locale } from './i18n.ts'
 import { escapeHtml, normalizeAsciiDigits } from './tokens.ts'
 
 export type PanelId = 'xpanel' | 'xwhm' | 'xmail'
 export type ThemeChoice = 'light' | 'dark'
 export type DensityChoice = 'comfortable' | 'compact'
 
-export interface PanelLink {
-  surface: PanelId
-  origin: string
-}
-
 const PANEL_LABEL: Record<PanelId, string> = { xpanel: 'xPanel', xwhm: 'xWHM', xmail: 'xMail' }
-const catalogLabels = arCatalog as Readonly<Record<string, string>>
 
 export const panelLabel = (surface: PanelId): string => PANEL_LABEL[surface]
 
 export const navigationLabel = (surface: PanelId, kind: 'section' | 'page', item: { id: string; name: string }, locale: Locale): string =>
-  locale === 'ar' ? catalogLabels[`nav.${kind}.${surface}.${item.id}.name`] ?? item.name : item.name
-
-/** Keeps only exact HTTPS origins. Paths, credentials and duplicates are dropped. */
-export function safePanelLinks(links: readonly PanelLink[] | undefined): PanelLink[] {
-  if (!links) return []
-  const seen = new Set<PanelId>()
-  const safe: PanelLink[] = []
-  for (const link of links) {
-    if (link.surface !== 'xpanel' && link.surface !== 'xwhm' && link.surface !== 'xmail') continue
-    if (seen.has(link.surface)) continue
-    let url: URL
-    try { url = new URL(link.origin) } catch { continue }
-    if (url.protocol !== 'https:' || url.origin !== link.origin || url.username || url.password || url.hash) continue
-    seen.add(link.surface)
-    safe.push({ surface: link.surface, origin: url.origin })
-  }
-  return safe
-}
+  catalogText(locale, `nav.${kind}.${surface}.${item.id}.name`, item.name)
 
 const surfaceDesign = (surface: PanelId): NavSurface | undefined => navigation.find(item => item.surface === surface)
 
@@ -44,7 +20,7 @@ const surfaceDesign = (surface: PanelId): NavSurface | undefined => navigation.f
 export const accountSecurityRoute = (surface: PanelId): string =>
   surface === 'xwhm' ? '/whm/security/sign-in' : surface === 'xmail' ? '/mail/settings/security' : '/security/account'
 
-export const securityLabel = (locale: Locale): string => locale === 'ar' ? 'الأمان' : 'Security'
+export const securityLabel = (locale: Locale): string => translator(locale)('Security')
 
 export function renderSecurityNavLink(surface: PanelId, locale: Locale, activeRoute: string, alreadyListed = false): string {
   if (alreadyListed) return ''
@@ -57,7 +33,6 @@ export function renderSecurityNavLink(surface: PanelId, locale: Locale, activeRo
 export function renderPlannedNavigation(surface: PanelId, locale: Locale, activeRoute = '', qualified: readonly NavSurface[] = []): string {
   const design = surfaceDesign(surface)
   const live = qualified.find(item => item.surface === surface)
-  const isAr = locale === 'ar'
   const items = (design?.sections ?? []).map(section => {
     const ready = live?.sections.find(item => item.id === section.id)
     const name = navigationLabel(surface, 'section', section, locale)
@@ -69,16 +44,16 @@ export function renderPlannedNavigation(surface: PanelId, locale: Locale, active
       }).join('')
       return `<li class="xp-nav-ready" data-nav-section="${escapeHtml(section.id)}"><span class="xp-nav-ready__name">${escapeHtml(name)}</span><div class="xp-nav-ready__pages">${links}</div></li>`
     }
-    return `<li class="xp-nav-planned__item" data-planned-group="${escapeHtml(section.id)}"><span class="xp-nav-planned__name">${escapeHtml(name)}</span><span class="xp-nav-planned__state">${escapeHtml(isAr ? 'غير متاحة بعد' : 'Not yet available')}</span></li>`
+    return `<li class="xp-nav-planned__item" data-planned-group="${escapeHtml(section.id)}"><span class="xp-nav-planned__name">${escapeHtml(name)}</span><span class="xp-nav-planned__state">${escapeHtml(translator(locale)('Not yet available'))}</span></li>`
   }).join('')
   const waiting = (design?.sections ?? []).some(section => {
     const ready = live?.sections.find(item => item.id === section.id)
     return !ready || ready.pages.length === 0
   })
   const note = waiting
-    ? `<p class="xp-nav-note" data-navigation-empty="true">${escapeHtml(isAr ? 'هذه الأدوات غير متاحة على هذا الخادم بعد.' : 'These tools are not available on this server yet.')}</p>`
+    ? `<p class="xp-nav-note" data-navigation-empty="true">${escapeHtml(translator(locale)('These tools are not available on this server yet.'))}</p>`
     : ''
-  return `<nav class="xp-nav-planned-wrap" aria-label="${escapeHtml(isAr ? 'أدوات الاستضافة' : 'Hosting tools')}">${note}${renderSecurityNavLink(surface, locale, activeRoute)}<ul class="xp-nav-planned">${items}</ul></nav>`
+  return `<nav class="xp-nav-planned-wrap" aria-label="${escapeHtml(translator(locale)('Hosting tools'))}">${note}${renderSecurityNavLink(surface, locale, activeRoute)}<ul class="xp-nav-planned">${items}</ul></nav>`
 }
 
 export interface UserMenuModel {
@@ -91,7 +66,6 @@ export interface UserMenuModel {
   username?: string
   role?: string
   signedIn: boolean
-  links?: readonly PanelLink[]
   activityHref?: string
   menuLinks?: readonly { label: string; href: string }[]
 }
@@ -115,12 +89,8 @@ const localMenuHref = (href: string): string | undefined => {
 }
 
 const renderMenuLinks = (model: UserMenuModel): string => {
-  const params = new URLSearchParams({ lang: model.locale, theme: model.theme, density: model.density })
-  const panelPaths: Record<PanelId, string> = { xpanel: '/home', xwhm: '/whm', xmail: '/mail/inbox' }
-  const panels = safePanelLinks(model.links).filter(link => link.surface !== model.surface).map(link =>
-    `<a class="xp-menu-choice" data-panel-switch="${link.surface}" href="${escapeHtml(`${link.origin}${panelPaths[link.surface]}?${params.toString()}`)}">${panelLabel(link.surface)}</a>`)
   const other = [...(model.menuLinks ?? [])]
-  if (model.activityHref) other.unshift({ label: model.locale === 'ar' ? 'سجل النشاط والمهام' : 'Activity & Jobs', href: model.activityHref })
+  if (model.activityHref) other.unshift({ label: translator(model.locale)('Activity & Jobs'), href: model.activityHref })
   const seen = new Set<string>()
   const local = other.flatMap(link => {
     const href = localMenuHref(link.href)
@@ -128,29 +98,26 @@ const renderMenuLinks = (model: UserMenuModel): string => {
     seen.add(href)
     return [`<a class="xp-menu-choice" href="${escapeHtml(href)}">${escapeHtml(normalizeAsciiDigits(link.label))}</a>`]
   })
-  const links = [...panels, ...local]
-  return links.length ? `<div class="xp-menu-navigation" role="group" aria-label="${model.locale === 'ar' ? 'التنقل' : 'Navigation'}">${links.join('')}</div>` : ''
+  const links = local
+  return links.length ? `<div class="xp-menu-navigation" role="group" aria-label="${translator(model.locale)('Navigation')}">${links.join('')}</div>` : ''
 }
 
 /** Account menu in the top bar: identity, language, theme, row spacing and sign-out. */
 export function renderUserMenu(model: UserMenuModel): string {
-  const isAr = model.locale === 'ar'
-  const nextLocale: Locale = isAr ? 'en' : 'ar'
   const nextTheme: ThemeChoice = model.theme === 'dark' ? 'light' : 'dark'
-  const languageLabel = isAr ? 'English' : 'العربية'
-  const themeLabel = nextTheme === 'dark' ? (isAr ? 'الوضع الداكن' : 'Dark theme') : (isAr ? 'الوضع الفاتح' : 'Light theme')
-  const summaryName = normalizeAsciiDigits(model.signedIn && model.username ? model.username : (isAr ? 'الحساب' : 'Account'))
+  const themeLabel = nextTheme === 'dark' ? (translator(model.locale)('Dark theme')) : (translator(model.locale)('Light theme'))
+  const summaryName = normalizeAsciiDigits(model.signedIn && model.username ? model.username : (translator(model.locale)('Account')))
   const role = model.signedIn && model.role ? model.role : ''
-  const initial = normalizeAsciiDigits(model.username?.trim().charAt(0) || (isAr ? 'ح' : 'a')).toLocaleLowerCase('en')
+  const initial = normalizeAsciiDigits(model.username?.trim().charAt(0) || (translator(model.locale)('a'))).toLocaleLowerCase('en')
   const densityLink = (density: DensityChoice, label: string) => {
     const current = model.density === density
     return `<a class="xp-menu-choice" href="${escapeHtml(surfaceContextHref(model, { density }))}" data-density-option="${density}"${current ? ' aria-current="true"' : ''}>${escapeHtml(label)}</a>`
   }
   const sessionAction = model.signedIn
-    ? `<button type="button" class="xp-btn xp-menu-signout" data-action="logout">${escapeHtml(isAr ? 'تسجيل الخروج' : 'Sign out')}</button>`
-    : `<a class="xp-btn xp-btn--primary" href="${escapeHtml(surfaceContextHref({ ...model, path: '/login' }, {}))}">${escapeHtml(isAr ? 'تسجيل الدخول' : 'Sign in')}</a>`
+    ? `<button type="button" class="xp-btn xp-menu-signout" data-action="logout">${escapeHtml(translator(model.locale)('Sign out'))}</button>`
+    : `<a class="xp-btn xp-btn--primary" href="${escapeHtml(surfaceContextHref({ ...model, path: '/login' }, {}))}">${escapeHtml(translator(model.locale)('Sign in'))}</a>`
   return `<details class="xp-user-menu" data-user-menu>
-    <summary class="xp-user-menu__summary" aria-label="${escapeHtml(`${isAr ? 'قائمة المستخدم' : 'User menu for'} ${initial} ${summaryName}${role ? ` ${role}` : ''}`)}">
+    <summary class="xp-user-menu__summary" aria-label="${escapeHtml(`${translator(model.locale)('User menu for')} ${initial} ${summaryName}${role ? ` ${role}` : ''}`)}">
       <span class="xp-user-menu__avatar" aria-hidden="true">${escapeHtml(initial)}</span>
       <span class="xp-user-menu__identity">
         <span class="xp-user-menu__name"${model.username ? ' dir="ltr"' : ''}>${model.username ? `<bdi dir="ltr">${escapeHtml(summaryName)}</bdi>` : escapeHtml(summaryName)}</span>
@@ -158,11 +125,11 @@ export function renderUserMenu(model: UserMenuModel): string {
       </span>
     </summary>
     <div class="xp-user-menu__panel">
-      <a class="xp-menu-choice" href="${escapeHtml(surfaceContextHref(model, { locale: nextLocale }))}" lang="${nextLocale}" data-lang-switch="${nextLocale}">${escapeHtml(languageLabel)}</a>
+      ${alternateLocales(model.locale).map(info => `<a class="xp-menu-choice" href="${escapeHtml(surfaceContextHref(model, { locale: info.tag }))}" lang="${info.tag}" data-lang-switch="${info.tag}">${escapeHtml(info.nativeName)}</a>`).join('')}
       <a class="xp-menu-choice" href="${escapeHtml(surfaceContextHref(model, { theme: nextTheme }))}" data-theme-toggle="${nextTheme}" title="${escapeHtml(themeLabel)}">${escapeHtml(themeLabel)}</a>
-      <div class="xp-menu-density" role="group" aria-label="${escapeHtml(isAr ? 'تباعد الصفوف' : 'Row spacing')}">
-        ${densityLink('comfortable', t(model.locale, 'common.density.comfortable'))}
-        ${densityLink('compact', t(model.locale, 'common.density.compact'))}
+      <div class="xp-menu-density" role="group" aria-label="${escapeHtml(translator(model.locale)('Row spacing'))}">
+        ${densityLink('comfortable', translator(model.locale)('Comfortable rows'))}
+        ${densityLink('compact', translator(model.locale)('Compact rows'))}
       </div>
       <a class="xp-menu-choice" href="${escapeHtml(surfaceContextHref({ ...model, path: accountSecurityRoute(model.surface ?? (model.path.startsWith('/whm') ? 'xwhm' : model.path.startsWith('/mail') ? 'xmail' : 'xpanel')) }))}" data-security-link="true">${escapeHtml(securityLabel(model.locale))}</a>
       ${renderMenuLinks(model)}
@@ -173,20 +140,16 @@ export function renderUserMenu(model: UserMenuModel): string {
 
 export function renderSupportNotice(locale: Locale, email: string | null | undefined): string {
   const contact = publicContactEmail(email)
-  const isAr = locale === 'ar'
   if (contact) {
-    const lead = isAr ? 'إذا كنت تحتاج أداة الآن، راسل مزوّد الاستضافة على' : 'If you need a tool now, write to your hosting provider at'
+    const lead = translator(locale)('If you need a tool now, write to your hosting provider at')
     return `<p class="xp-prose" data-support-contact="email">${escapeHtml(lead)} <a href="mailto:${escapeHtml(contact)}"><bdi dir="ltr">${escapeHtml(contact)}</bdi></a>.</p>`
   }
-  const fallback = isAr
-    ? 'إذا كنت تحتاج أداة الآن، تواصل مع مزوّد الاستضافة.'
-    : 'If you need a tool now, contact your hosting provider.'
+  const fallback = translator(locale)('If you need a tool now, contact your hosting provider.')
   return `<p class="xp-prose" data-support-contact="provider">${escapeHtml(fallback)}</p>`
 }
 
 export function roleLabel(kind: string, locale: Locale): string {
-  const isAr = locale === 'ar'
-  if (kind === 'root') return isAr ? 'مدير النظام' : 'System administrator'
-  if (kind === 'reseller') return isAr ? 'موزع' : 'Reseller'
-  return isAr ? 'مالك الحساب' : 'Account owner'
+  if (kind === 'root') return translator(locale)('System administrator')
+  if (kind === 'reseller') return translator(locale)(msgctxt('chrome', 'Reseller'))
+  return translator(locale)('Account owner')
 }

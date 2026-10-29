@@ -75,7 +75,7 @@ describe('account file execution boundary', () => {
         restore: () => manager.restoreFromTrash(identifier),
         'empty-trash': () => manager.emptyTrash(),
       }
-      await assert.rejects(actions[operation], code('PRECONDITION_FAILED'))
+      await assert.rejects(actions[operation], (error: unknown) => isXpanelError(error) && error.code === 'PRECONDITION_FAILED' && error.detail?.stateChanged === false)
       assert.equal(await readFile(join(home, 'public_html', 'private.txt'), 'utf8'), 'tenant-content-marker')
       await assert.rejects(() => stat(join(home, 'public_html', 'new-directory')), { code: 'ENOENT' })
     },

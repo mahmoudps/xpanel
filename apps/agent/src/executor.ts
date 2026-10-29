@@ -5,8 +5,13 @@ import { lstat, mkdir, open, readFile, rename, rm, rmdir, stat, unlink } from 'n
 import { dirname, join, posix, win32 } from 'node:path'
 import { fail } from '@xpanel/core'
 import type { ConfigTest, HostAction, RenderedFile } from '@xpanel/core'
-import { assertSafeArgv } from '@xpanel/os'
+import { assertSafeArgv, isPhpInventoryCommand, isSecurityObservationCommand, isMailQuarantineArgv, isMailQueueCommand, isPackageManagerCommand, isRepairCommand, isSoftwareCenterCommand, isMailLogCommand, isFtpLogCommand, isMonitoringCommand, isMailServerCommand, isServiceDetailCommand, isSecurityToolsCommand, isMailboxMaintenanceCommand, isNetworkToolsCommand, isSecHostCommand } from '@xpanel/os'
 import { removePinnedHostTree, withOwnedHostFileHandle, withPinnedHostTargetParent } from './host-target-parent.ts'
+import { isServiceManagerCommand, isBenchmarkCommand, isComposerCommand, isMailxCommand, isDatabaseEngineCommand, isDatabaseRemoteCommand } from '@xpanel/os'
+import { isAccountGitCommand } from './account-git-runner.ts'
+import { isSwContainerCommand } from '../../../packages/os/src/sw-container-command.ts'
+import { isSwAddonServiceCommand } from '../../../packages/os/src/sw-addon-command.ts'
+import { isRpmInstalledIdentityCommand } from '../../../packages/os/src/ops-package-recovery-command.ts'
 
 export interface ConfigTestResult {
   ok: boolean
@@ -59,11 +64,18 @@ export interface FakeQuotaEntry {
   filesystem: string
 }
 
+const isReviewedServiceCommand = (argv: readonly string[]): boolean =>
+  isServiceManagerCommand(argv) || isMailxCommand(argv) || isDatabaseEngineCommand(argv) || isDatabaseRemoteCommand(argv) || isSwContainerCommand(argv) || isSwAddonServiceCommand(argv) || isBenchmarkCommand(argv) || isAccountGitCommand(argv) || isComposerCommand(argv) || isRpmInstalledIdentityCommand(argv) ||
+  isPhpInventoryCommand(argv) || isSecurityObservationCommand(argv) || isMailQuarantineArgv(argv) || isMailQueueCommand(argv) || isPackageManagerCommand(argv) || isRepairCommand(argv) || isSoftwareCenterCommand(argv) || isMailLogCommand(argv) || isFtpLogCommand(argv) || isMonitoringCommand(argv) || isMailServerCommand(argv) || isServiceDetailCommand(argv) || isSecurityToolsCommand(argv) || isMailboxMaintenanceCommand(argv) || isNetworkToolsCommand(argv) || isSecHostCommand(argv)
+
 const assertValidCommandArgv = (argv: readonly string[]): void => {
   const head = Array.isArray(argv) ? argv[0] : undefined
   if (!head) {
     fail('VALIDATION', 'argv must be a non-empty array')
   }
+  // Finite reviewed grammars admit only their literal flags and bounded identities.
+  // Generic SAFE_ARG remains unchanged for all other commands.
+  if (isReviewedServiceCommand(argv)) return
   const normalized = head.startsWith('/') ? [...argv] : [`/usr/sbin/${head}`, ...argv.slice(1)]
   assertSafeArgv(normalized)
 }
@@ -208,6 +220,28 @@ export class FakeHostExecutor implements AgentExecutor {
         }
       }
     }
+    // Declared cron fixture state only: no synthetic completed run or timestamps.
+    if (argv[0] === '/usr/bin/systemctl' && argv[1] === 'show' && /^xpanel-cron-[a-z0-9_-]+\.(?:timer|service)$/.test(argv[2] ?? '') && argv.slice(3).every(value => value.startsWith('--property='))) {
+      const unit = argv[2]!, declared = [...this.files.keys()].some(path => path.endsWith('/' + unit))
+      const current = this.units.get(unit)
+      const values: Record<string, string> = {
+        LoadState: declared ? 'loaded' : 'not-found', ActiveState: current?.active ? 'active' : 'inactive',
+        UnitFileState: current?.enabled ? 'enabled' : 'disabled', SubState: current?.active ? 'running' : 'dead',
+        LastTriggerUSec: '', NextElapseUSecRealtime: '', Result: '', ExecMainStatus: '0',
+        ExecMainStartTimestamp: '', ExecMainStartTimestampMonotonic: '0', ExecMainExitTimestampMonotonic: '0',
+        ...current?.properties,
+      }
+      if (!declared) values.LoadState = 'not-found'
+      return { ok: true, code: 0, stdout: argv.slice(3).map(value => { const key = value.slice('--property='.length); return key + '=' + (values[key] ?? '') }).join('\n') + '\n', stderr: '' }
+    }
+    if (argv.length === 4 && argv[0] === '/usr/bin/systemctl' && argv[1] === 'start' && argv[2] === '--no-block' && /^xpanel-cron-[a-z0-9_-]+\.service$/.test(argv[3] ?? '')) {
+      const unit = argv[3]!
+      if (![...this.files.keys()].some(path => path.endsWith('/' + unit))) return { ok: false, code: 5, stdout: '', stderr: 'declared cron unit not found' }
+      const current = this.units.get(unit) ?? { enabled: false, active: false, properties: {} }
+      current.active = true
+      this.units.set(unit, current)
+      return { ok: true, code: 0, stdout: '', stderr: '' }
+    }
     return {
       ok: true,
       code: 0,
@@ -315,8 +349,11 @@ const SYSTEM_EXACT_TARGETS = new Set<string>([
 /** Read-only host facts. A path is granted only when it is listed here, and no other /proc path is readable. */
 const HOST_MEASUREMENT_READS = new Set<string>([
   '/proc/loadavg', '/proc/meminfo', '/proc/uptime', '/proc/cpuinfo',
+  '/proc/stat', '/proc/net/dev',
   '/proc/self/mountinfo',
   '/etc/os-release', '/usr/lib/os-release', '/opt/xpanel/VERSION',
+  '/etc/hostname', '/etc/resolv.conf',
+  '/run/reboot-required',
   '/sys/fs/cgroup/xpanel.slice/cgroup.subtree_control',
   '/sys/fs/cgroup/cgroup.subtree_control',
 ])
@@ -345,11 +382,31 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
       return operation === 'read' || operation === 'write'
     }
     if (path === '/etc/xpanel/api.env') return operation === 'read'
+    if (path === '/etc/xpanel/cron') return operation === 'ensure-directory'
+    if (/^\/etc\/xpanel\/cron\/[a-z][a-z0-9]{0,15}$/.test(path)) return operation === 'ensure-directory'
+    if (/^\/etc\/xpanel\/cron\/[a-z][a-z0-9]{0,15}\/[A-Za-z0-9_-]{1,64}\.command$/.test(path)) return operation === 'read' || operation === 'write' || operation === 'remove'
+    if (path === '/var/lib/xpanel/backups' || path === '/var/lib/xpanel/backups/account-workspaces'
+      || /^\/var\/lib\/xpanel\/backups\/account-workspaces\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\/[a-z][a-z0-9]{0,15})?$/.test(path)
+      || path === '/run/xpanel/account-restores' || /^\/run\/xpanel\/account-restores\/[a-z][a-z0-9]{0,15}$/.test(path)) return operation === 'ensure-directory'
+    if (/^\/home\/[a-z][a-z0-9]{0,15}\/\.xpanel-backup-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\.tar\.gz$/.test(path)
+      || /^\/run\/xpanel\/account-restores\/[a-z][a-z0-9]{0,15}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tar\.gz$/.test(path)) return operation === 'remove'
+    if (path === '/root/.ssh' || path === '/var/lib/xpanel-agent/security') return operation === 'ensure-directory'
+    if (path === '/root/.ssh/authorized_keys' || path === '/var/lib/xpanel-agent/security/root-managed-keys.json' || path === '/var/lib/xpanel-agent/security/root-key-write.json') return operation === 'read' || operation === 'write' || operation === 'remove'
+    if (/^\/root\/\.ssh\/authorized_keys\.bak\.[0-9]{17}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(path)
+      || /^\/var\/lib\/xpanel-agent\/security\/root-managed-keys\.json\.bak\.[0-9]{17}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(path)) return operation === 'read' || operation === 'write'
+    if (path === '/var/lib/xpanel/mail-quarantine' || /^\/var\/lib\/xpanel\/mail-quarantine\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\/stage)?$/.test(path)) return operation === 'ensure-directory'
+    if (/^\/var\/lib\/xpanel\/mail-quarantine\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/stage\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.eml$/.test(path)) return operation === 'write' || operation === 'read' || operation === 'remove'
+    if (path === '/var/lib/xpanel/acme-account' || path === '/var/lib/xpanel/acme-orders') return operation === 'ensure-directory'
+    if (path === '/var/lib/xpanel/acme-account/account-key.pem' || /^\/var\/lib\/xpanel\/acme-orders\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/.test(path)) return operation === 'read' || operation === 'write'
+    if (path === '/var/lib/xpanel-management-tls/status.json') return operation === 'read'
+    if (/^\/etc\/xpanel\/management-certificates\/[a-f0-9]{64}\/fullchain\.pem$/.test(path)) return operation === 'read'
     if (path === '/home') return operation === 'ensure-directory'
     if (path === '/var/spool/postfix/opendkim') return operation === 'ensure-directory'
     if (path === '/etc/opendkim.conf' || path.startsWith('/etc/opendkim.conf.bak.')) {
       return operation === 'read' || operation === 'write'
     }
+    if (['/etc/rspamd/local.d/actions.conf', '/etc/rspamd/local.d/greylist.conf', '/etc/rspamd/local.d/multimap.conf', '/etc/rspamd/local.d/xpanel_blocked_domains.map', '/etc/rspamd/local.d/settings.conf', '/etc/spamassassin/90-xpanel.cf', '/etc/mail/spamassassin/90-xpanel.cf'].includes(path)) return operation === 'read' || operation === 'write' || operation === 'remove'
+    if (path === '/etc/spamassassin/local.cf' || path === '/etc/mail/spamassassin/local.cf') return operation === 'read'
     if (SYSTEM_EXACT_TARGETS.has(path)) return true
     if (SYSTEM_CONFIG_PREFIXES.some((prefix) => path.startsWith(prefix))) return true
     if (ACCOUNT_HOME_DIR_RE.test(path)) {
@@ -746,7 +803,9 @@ export class LinuxHostExecutor implements AgentExecutor {
         assertValidCommandArgv(['/usr/bin/systemctl', 'set-property', action.unit])
         const pairs = Object.entries(action.properties).map(([k, v]) => {
           const pair = `${k}=${v}`
-          if (!/^[A-Za-z][A-Za-z0-9]*=[A-Za-z0-9%/._ -]*$/.test(pair)) {
+          // systemd accepts device paths (including /dev/block/<major>:<minor>) and comma-separated
+          // CPU lists in these properties; rejecting them stranded valid IO/CPU limits.
+          if (!/^[A-Za-z][A-Za-z0-9]*=[A-Za-z0-9%/._ :,+-]*$/.test(pair)) {
             fail('VALIDATION', 'unsafe systemd property assignment')
           }
           return pair

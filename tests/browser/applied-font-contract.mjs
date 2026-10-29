@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 
-const proportionalFamilies = new Set(['IBM Plex Sans', 'IBM Plex Sans Arabic', 'Noto Sans Arabic'])
+const proportionalFamilies = new Set(['IBM Plex Sans', 'sans-serif'])
 const wordmarkSelectors = {
   'login-wordmark': '.xp-brand__name',
   'mail-wordmark': '[data-mail-layout="reference"] > header > a:first-child > span:last-child',
@@ -81,7 +81,33 @@ export async function assertAppliedFont(page, selector, family, { role = 'ordina
     const active = observation.applied_faces.filter(font => Number.isFinite(font.glyphCount) && font.glyphCount > 0)
     assert.ok(active.length > 0, 'Chromium must report actual rendered glyphs for the font target')
     if (!wordmark) assert.ok(active.every(font => font.normalized_family !== 'IBM Plex Mono'), 'Ordinary interface text and headings must use a proportional font, not Plex Mono')
-    assert.ok(active.every(font => font.isCustomFont === true && font.normalized_family === family), 'All rendered glyphs must use the expected downloadable font family; a fallback font does not pass')
+    if (family === 'sans-serif') {
+      assert.equal(observation.computed.family, 'sans-serif', 'Arabic UI text must select the literal generic sans-serif family')
+      assert.ok(active.every(font => font.isCustomFont === false), 'Generic Arabic UI glyphs must use platform fonts, not downloaded custom faces')
+      observation.platform_proportions = await page.evaluate(({ faces, weight }) => {
+        // Compare the actual CDP-reported families with two distinct fallback
+        // stacks. Equal resolved advances exclude an unresolved family name;
+        // unequal narrow/wide advances exclude a fixed-pitch platform face.
+        const canvas = document.createElement('canvas'), context = canvas.getContext('2d')
+        if (!context) return []
+        context.fontKerning = 'none'
+        return faces.map(face => {
+          const measure = fallback => {
+            context.font = `${weight} 48px ${JSON.stringify(face)}, ${fallback}`
+            return ['iiiiiiii', 'WWWWWWWW'].map(text => context.measureText(text).width)
+          }
+          return { family: face, serif: measure('serif'), monospace: measure('monospace') }
+        })
+      }, { faces: [...new Set(active.map(font => font.familyName))], weight: observation.computed.weight })
+      assert.equal(observation.platform_proportions.length, new Set(active.map(font => font.familyName)).size, 'Each observed platform face must have a measurable proportional contract')
+      assert.ok(observation.platform_proportions.every(face =>
+        !/mono|courier|consolas|fixed|typewriter/i.test(face.family) &&
+        face.serif.every((width, index) => Number.isFinite(width) && width > 0 && Math.abs(width - face.monospace[index]) < 0.01) &&
+        Math.abs(face.serif[0] - face.serif[1]) > 1
+      ), 'Every actual platform face must resolve independently of fallback and have proportional glyph advances')
+    } else {
+      assert.ok(active.every(font => font.isCustomFont === true && font.normalized_family === family), 'All rendered glyphs must use the expected downloadable font family; a fallback font does not pass')
+    }
     observation.rendered_glyphs = active.reduce((total, font) => total + font.glyphCount, 0)
     return observation
   } catch (error) {

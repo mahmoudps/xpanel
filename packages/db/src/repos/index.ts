@@ -1,6 +1,7 @@
 export * from './api-tokens.ts'
 export * from './audit.ts'
 export * from './generations.ts'
+export * from './panel-handoffs.ts'
 export * from './jobs.ts'
 export { initializeOperationalMetadata, requireOperationalIdentity, reserveLegacyJobReferenceRepair, confirmLegacyJobReferenceRepair, type LegacyReferenceRepair } from './official-references.ts'
 export * from './operation-audit-authority.ts'

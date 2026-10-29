@@ -250,7 +250,7 @@ try {
         check('label-padding-is-actual-click-target', initial !== toggled, { initial, toggled, restored: await checkbox.isChecked() })
         check('restoring-unlimited-retains-clean-disabled-save', await page.locator('[data-native-plan-save]').isDisabled(), await page.locator('[data-native-plan-save]').isDisabled())
       }
-      outcome.heading_font = await assertAppliedFont(page, '#main-content h1', sample.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
+      outcome.heading_font = await assertAppliedFont(page, '#main-content h1', sample.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
       check('no-page-console-errors-or-writes', outcome.page_errors.length === 0 && outcome.console_errors.length === 0 && outcome.mutations.length === 0, { page_errors: outcome.page_errors, console_errors: outcome.console_errors, mutations: outcome.mutations })
       outcome.status = outcome.checks.every(c => c.passed) ? 'passed' : 'failed'
     } catch (error) { outcome.status = 'failed'; outcome.error = { name: error.name, message: error.message, applied_font: error.appliedFontObservation } }

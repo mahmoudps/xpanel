@@ -1,3 +1,4 @@
+import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { tools } from '@xpanel/catalog'
 import { RESELLER_ACLS } from '@xpanel/core'
@@ -128,8 +129,7 @@ export function workspaceResellerPatch(current: unknown, values: FormValues, edi
 }
 
 function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
-  const ar = document.documentElement.lang === 'ar'
-  const copy = (en: string, arabic: string) => ar ? arabic : en
+  const copy = (message: string, values?: MessageValues) => xpT(message, values)
   const uuid = (value: string | undefined | null): value is string => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
   const request = (): SessionRequest | undefined => (window as Window & { xpanelSessionRequest?: SessionRequest }).xpanelSessionRequest
   const statusFor = (root: Element): HTMLElement => {
@@ -167,13 +167,15 @@ function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
     if (form.dataset.workspaceBinding === 'true') return
     form.dataset.workspaceBinding = 'true'
     let busy = false, reviewRequired = false
-    form.querySelectorAll<HTMLInputElement>('[data-reseller-unlimited-field]').forEach(toggle => {
-      toggle.addEventListener('change', () => {
-        if (busy || reviewRequired || unavailable(form)) return
-        const field = form.elements.namedItem(toggle.dataset.resellerUnlimitedField ?? '')
-        if (field instanceof HTMLInputElement) { field.disabled = toggle.checked; field.required = !toggle.checked }
-      })
-    })
+    const unlimitedToggles = form.querySelectorAll<HTMLInputElement>('[data-reseller-unlimited-field]')
+    const syncUnlimited = (toggle: HTMLInputElement) => {
+      if (busy || reviewRequired || unavailable(form)) return
+      const field = form.elements.namedItem(toggle.dataset.resellerUnlimitedField ?? '')
+      if (field instanceof HTMLInputElement) { field.disabled = toggle.checked; field.required = !toggle.checked }
+    }
+    unlimitedToggles.forEach(toggle => toggle.addEventListener('change', () => syncUnlimited(toggle)))
+    // A native reset restores checkbox values without firing change; resync once the values are back.
+    if (unlimitedToggles.length) form.addEventListener('reset', () => setTimeout(() => unlimitedToggles.forEach(syncUnlimited)))
     const domainSelect = form.querySelector<HTMLSelectElement>('[data-domain-php-select]')
     if (form.hasAttribute('data-domain-php-form')) form.addEventListener('reset', event => {
       if (busy || reviewRequired) event.preventDefault()
@@ -184,7 +186,7 @@ function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
       const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]')
       if (!uuid(id) || typeof send !== 'function' || !submit) return
       busy = true; submit.disabled = true; domainSelect.disabled = true; form.setAttribute('aria-busy', 'true')
-      note(status, copy('Reading the selected domain configuration…', 'جار قراءة إعدادات النطاق المحدد…'), 'pending')
+      note(status, copy('Reading the selected domain configuration…'), 'pending')
       try {
         const snapshot = await send('GET', '/api/domains')
         const domain = workspaceRecord(snapshot) && Array.isArray(snapshot.domains) ? snapshot.domains.find(item => workspaceRecord(item) && item.id === id) : undefined
@@ -200,11 +202,11 @@ function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
         })
         Array.from(domainSelect.options).forEach(option => { option.defaultSelected = option.value === id })
         form.dataset.domainId = id
-        note(status, copy('Selected domain configuration was read. Changes have not been sent.', 'قُرئت إعدادات النطاق المحدد. لم تُرسل تغييرات.'), 'read')
+        note(status, copy('Selected domain configuration was read. Changes have not been sent.'), 'read')
         submit.disabled = false
       } catch {
         delete form.dataset.domainId
-        note(status, copy('The selected domain could not be read. Saving is unavailable.', 'تعذرت قراءة النطاق المحدد. الحفظ غير متاح.'), 'failed')
+        note(status, copy('The selected domain could not be read. Saving is unavailable.'), 'failed')
       } finally { busy = false; domainSelect.disabled = false; form.removeAttribute('aria-busy') }
     })
     form.addEventListener('submit', async event => {
@@ -213,7 +215,7 @@ function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
       if (busy || reviewRequired || unavailable(form) || !submit || submit.disabled || !form.reportValidity()) return
       const status = statusFor(form)
       const send = request()
-      if (typeof send !== 'function') { note(status, copy('Saving is unavailable. No changes were sent.', 'الحفظ غير متاح. لم تُرسل تغييرات.'), 'failed'); return }
+      if (typeof send !== 'function') { note(status, copy('Saving is unavailable. No changes were sent.'), 'failed'); return }
       const values = enabledValues(form)
       const disabledFeatures = selectedFeatures(form)
       const editableFeatures = Array.from(form.querySelectorAll<HTMLInputElement>('input[name="disabled"]')).filter(input => !input.matches(':disabled')).map(input => input.value)
@@ -223,9 +225,9 @@ function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
       let mutationStarted = false
       let verificationPending = false
       busy = true; form.setAttribute('aria-busy', 'true'); controls.forEach(({ control }) => { control.disabled = true })
-      note(status, copy('Saving the requested configuration…', 'جار حفظ الإعدادات المطلوبة…'), 'pending')
+      note(status, copy('Saving the requested configuration…'), 'pending')
       try {
-        let result: unknown, verified = false, savedMessage = copy('Configuration was stored. Host activation still requires verification.', 'حُفظت الإعدادات. لا يزال تفعيلها على المضيف بحاجة إلى تحقق.')
+        let result: unknown, verified = false, savedMessage = copy('Configuration was stored. Host activation still requires verification.')
         if (form.hasAttribute('data-feature-list-create-form') || form.hasAttribute('data-feature-list-update-form')) {
           const name = typeof values.name === 'string' ? values.name.trim() : ''
           if (!name || name.length > 128 || disabledFeatures.some(key => !key || key.length > 256 || /[\r\n\0]/.test(key))) throw new Error('fields')
@@ -245,7 +247,7 @@ function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
           mutationStarted = true
           result = await send(creating ? 'POST' : 'PATCH', creating ? '/api/feature-lists' : '/api/feature-lists/' + id, payload)
           verified = workspaceFeatureReceipt(result, name, submittedFeatures, id)
-          savedMessage = copy('The feature list was stored. Reload this page to read the updated list.', 'حُفظت قائمة الميزات. أعد تحميل الصفحة لقراءة القائمة المحدثة.')
+          savedMessage = copy('The feature list was stored. Reload this page to read the updated list.')
         } else if (form.hasAttribute('data-server-settings-form')) {
           const snapshot = await send('GET', '/api/server/settings')
           const payload = mergeWorkspaceServerSettings(workspaceRecord(snapshot) ? snapshot.settings : null, values)
@@ -268,24 +270,24 @@ function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
           result = await send('POST', '/api/setup/wizard', payload)
           const savedSettings = workspaceRecord(result) && workspaceRecord(result.settings) ? result.settings : undefined
           verified = workspaceRecord(result) && result.ok === true && savedSettings !== undefined && (payload.primaryIpv4 === undefined || (workspaceRecord(result.primaryIp) && result.primaryIp.address === payload.primaryIpv4 && result.primaryIp.version === 4)) && Object.entries(payload).filter(([key]) => key !== 'initQuotas' && key !== 'quotaFilesystem' && key !== 'primaryIpv4').every(([key, value]) => workspaceValuesMatch(value, savedSettings[key]))
-          savedMessage = copy('Setup configuration was recorded. Filesystem quotas and host activation are not verified by this acknowledgement.', 'سُجلت إعدادات التهيئة. هذا الإقرار لا يثبت تطبيق حصص الملفات أو تفعيل إعدادات المضيف.')
+          savedMessage = copy('Setup configuration was recorded. Filesystem quotas and host activation are not verified by this acknowledgement.')
         } else if (form.hasAttribute('data-account-plan-form')) {
           const username = form.dataset.accountUsername, planId = values.planId
           if (!username || !/^[a-z][a-z0-9]{0,15}$/.test(username) || typeof planId !== 'string' || !uuid(planId)) throw new Error('identity')
           const path = '/api/accounts/' + encodeURIComponent(username)
           const snapshot = await send('GET', path)
           if (!workspaceRecord(snapshot) || !workspaceRecord(snapshot.account) || snapshot.account.username !== username) throw new Error('unread')
-          if (snapshot.account.planId === planId) { note(status, copy('The account already uses this plan. No changes were sent.', 'يستخدم الحساب هذه الخطة بالفعل. لم تُرسل تغييرات.'), 'unchanged'); return }
+          if (snapshot.account.planId === planId) { note(status, copy('The account already uses this plan. No changes were sent.'), 'unchanged'); return }
           if (typeof confirmDelete !== 'function') throw new Error('confirmation')
-          const confirmed = await confirmDelete({ title: copy('Change account plan', 'تغيير خطة الحساب'), body: copy('Type the account username to confirm the plan change: ', 'اكتب اسم الحساب لتأكيد تغيير الخطة: ') + username, input: true, label: copy('Account username', 'اسم الحساب'), confirm: copy('Change plan', 'تغيير الخطة'), danger: true })
-          if (confirmed !== username) { note(status, copy('The plan was not changed.', 'لم تتغير الخطة.'), 'cancelled'); return }
+          const confirmed = await confirmDelete({ title: copy('Change account plan'), body: copy('Type the account username to confirm the plan change: {username}', { username }), input: true, label: copy('Account username'), confirm: copy('Change plan'), danger: true })
+          if (confirmed !== username) { note(status, copy('The plan was not changed.'), 'cancelled'); return }
           mutationStarted = true
           result = await send('PATCH', path, { planId })
           verificationPending = true
           if (!workspaceRecord(result) || !workspaceRecord(result.account) || result.account.username !== username || result.account.planId !== planId) throw new Error('unverified')
           const readback = await send('GET', path)
           verified = workspaceRecord(readback) && workspaceRecord(readback.account) && readback.account.username === username && readback.account.planId === planId
-          savedMessage = copy('The account plan was stored and read back. Hosting changes still require verification.', 'حُفظت خطة الحساب وقُرئت مجددًا. لا تزال تغييرات الاستضافة بحاجة إلى تحقق.')
+          savedMessage = copy('The account plan was stored and read back. Hosting changes still require verification.')
         } else if (form.hasAttribute('data-firewall-port-rule-form')) {
           const action = values.action, protocol = values.protocol, port = values.port
           if (typeof action !== 'string' || !['accept', 'drop', 'reject'].includes(action) || typeof protocol !== 'string' || !['tcp', 'udp', 'both'].includes(protocol) || typeof port !== 'string' || !/^[1-9][0-9]{0,4}(?:-[1-9][0-9]{0,4})?$/.test(port.trim())) throw new Error('rule')
@@ -303,7 +305,7 @@ function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
           const readback = await send('GET', '/api/firewall')
           const stored = workspaceRecord(readback) && Array.isArray(readback.rules) ? readback.rules.find(item => workspaceRecord(item) && item.id === ruleId) : undefined
           verified = workspaceValuesMatch(payload, stored)
-          savedMessage = copy('The firewall rule was stored and read back. Host activation and traffic enforcement are not verified.', 'حُفظت قاعدة الجدار الناري وقُرئت مجددًا. لم يُتحقق من تفعيلها على المضيف أو تطبيقها على حركة البيانات.')
+          savedMessage = copy('The firewall rule was stored and read back. Host activation and traffic enforcement are not verified.')
         } else if (form.hasAttribute('data-reseller-update-form')) {
           const id = form.dataset.resellerId
           if (!uuid(id)) throw new Error('identity')
@@ -320,7 +322,7 @@ function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
           const { acl: expectedAcl, ...expectedFields } = payload
           const observedAcl = workspaceRecord(saved) && Array.isArray(saved.acl) ? saved.acl : undefined
           verified = workspaceValuesMatch(expectedFields, saved) && (expectedAcl === undefined || (Array.isArray(expectedAcl) && observedAcl !== undefined && new Set(expectedAcl).size === new Set(observedAcl).size && expectedAcl.every(value => observedAcl.includes(value))))
-          savedMessage = copy('The reseller privileges and limits were stored and read back. Reload to read updated state.', 'حُفظت صلاحيات الموزع وحدوده وقُرئت مجددًا. أعد تحميل الصفحة لقراءة الحالة المحدثة.')
+          savedMessage = copy('The reseller privileges and limits were stored and read back. Reload to read updated state.')
         } else if (form.hasAttribute('data-reseller-owner-form')) {
           const username = form.dataset.accountUsername
           if (!username || !/^[a-z][a-z0-9_]{0,31}$/.test(username)) throw new Error('identity')
@@ -330,37 +332,39 @@ function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
           const path = '/api/accounts/' + encodeURIComponent(username)
           const snapshot = await send('GET', path)
           if (!workspaceRecord(snapshot) || !workspaceRecord(snapshot.account) || snapshot.account.username !== username) throw new Error('unread')
-          if (snapshot.account.ownerId === payload.ownerId) { note(status, copy('The account already has this owner. No changes were sent.', 'مالك الحساب هو المحدد بالفعل. لم تُرسل تغييرات.'), 'unchanged'); return }
+          if (snapshot.account.ownerId === payload.ownerId) { note(status, copy('The account already has this owner. No changes were sent.'), 'unchanged'); return }
           if (typeof confirmDelete !== 'function') throw new Error('confirmation')
-          const confirmed = await confirmDelete({ title: copy('Change account owner', 'تغيير مالك الحساب'), body: copy('Type the account username to confirm the ownership change: ', 'اكتب اسم الحساب لتأكيد تغيير مالكه: ') + username, input: true, label: copy('Account username', 'اسم الحساب'), confirm: copy('Change owner', 'تغيير المالك'), danger: true })
-          if (confirmed !== username) { note(status, copy('Ownership was not changed.', 'لم يتغير مالك الحساب.'), 'cancelled'); return }
+          const confirmed = await confirmDelete({ title: copy('Change account owner'), body: copy('Type the account username to confirm the ownership change: {username}', { username }), input: true, label: copy('Account username'), confirm: copy('Change owner'), danger: true })
+          if (confirmed !== username) { note(status, copy('Ownership was not changed.'), 'cancelled'); return }
           mutationStarted = true
           result = await send('PATCH', path, payload)
           verificationPending = true
           if (!workspaceRecord(result) || !workspaceRecord(result.account) || result.account.username !== username || result.account.ownerId !== payload.ownerId) throw new Error('unverified')
           const readback = await send('GET', path)
           verified = workspaceRecord(readback) && workspaceRecord(readback.account) && readback.account.username === username && readback.account.ownerId === payload.ownerId
-          savedMessage = copy('The account owner was stored and read back. Dependent host configuration still requires verification.', 'حُفظ مالك الحساب وقُرئ مجددًا. لا تزال إعدادات المضيف التابعة بحاجة إلى تحقق.')
+          savedMessage = copy('The account owner was stored and read back. Dependent host configuration still requires verification.')
         } else {
           const id = form.dataset.domainId
           if (!uuid(id) || (domainSelect && domainSelect.value !== id)) throw new Error('identity')
           const snapshot = await send('GET', '/api/domains')
           const domain = workspaceRecord(snapshot) && Array.isArray(snapshot.domains) ? snapshot.domains.find(item => workspaceRecord(item) && item.id === id) : undefined
+          const revision = workspaceRecord(snapshot) && typeof snapshot.revision === 'string' && /^[0-9a-f]{64}$/.test(snapshot.revision) ? snapshot.revision : null
+          if (!revision) throw new Error('unread')
           const php = mergeWorkspacePhp(workspaceRecord(domain) ? domain.php : null, values)
           mutationStarted = true
-          result = await send('PATCH', '/api/domains/' + id, { php })
+          result = await send('PATCH', '/api/domains/' + id, { php, expectedRevision: revision })
           verified = workspaceRecord(result) && workspaceRecord(result.domain) && result.domain.id === id && workspaceValuesMatch(php, result.domain.php)
         }
-        if (!verified) { reviewRequired = true; note(status, copy('The response could not be verified. Refresh and inspect stored state before retrying.', 'تعذر التحقق من الاستجابة. حدّث الصفحة وافحص الحالة المحفوظة قبل إعادة المحاولة.'), 'uncertain'); return }
+        if (!verified) { reviewRequired = true; note(status, copy('The response could not be verified. Refresh and inspect stored state before retrying.'), 'uncertain'); return }
         reviewRequired = true
         note(status, savedMessage, 'stored')
-        const refresh = document.createElement('a'); refresh.href = window.location.pathname + window.location.search; refresh.textContent = copy('Reload page', 'إعادة تحميل الصفحة'); refresh.className = 'xp-btn'; status.insertAdjacentElement('afterend', refresh)
+        const refresh = document.createElement('a'); refresh.href = window.location.pathname + window.location.search; refresh.textContent = copy('Reload page'); refresh.className = 'xp-btn'; status.insertAdjacentElement('afterend', refresh)
         window.dispatchEvent(new CustomEvent('xpanel:workspace-stored', { detail: { form: form.hasAttribute('data-domain-php-form') ? 'domain-php' : form.hasAttribute('data-server-settings-form') ? 'server-settings' : form.hasAttribute('data-setup-wizard-form') ? 'setup' : form.hasAttribute('data-reseller-update-form') ? 'reseller' : form.hasAttribute('data-reseller-owner-form') ? 'account-owner' : form.hasAttribute('data-account-plan-form') ? 'account-plan' : form.hasAttribute('data-firewall-port-rule-form') ? 'firewall-port-rule' : 'feature-list' } }))
       } catch (error) {
         reviewRequired = mutationStarted && (verificationPending || !definiteRefusal(error))
         note(status, reviewRequired
-          ? copy('The operation outcome is unknown. Inspect stored state before retrying; no automatic retry was sent.', 'نتيجة العملية غير معروفة. افحص الحالة المحفوظة قبل المحاولة؛ لم تُرسل إعادة تلقائية.')
-          : copy('The request was refused or its fields could not be read. No automatic retry was sent.', 'رُفض الطلب أو تعذرت قراءة حقوله. لم تُرسل إعادة تلقائية.'), reviewRequired ? 'uncertain' : 'failed')
+          ? copy('The operation outcome is unknown. Inspect stored state before retrying; no automatic retry was sent.')
+          : copy('The request was refused or its fields could not be read. No automatic retry was sent.'), reviewRequired ? 'uncertain' : 'failed')
       } finally {
         busy = false; form.removeAttribute('aria-busy')
         controls.forEach(({ control, disabled }) => { control.disabled = disabled || reviewRequired })
@@ -378,21 +382,21 @@ function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
       const root = button.closest('[data-feature-list-row],article,section') ?? button.parentElement!
       const status = statusFor(root)
       const send = request()
-      if (!uuid(id) || typeof send !== 'function' || typeof confirmDelete !== 'function') { note(status, copy('Deletion is unavailable. No changes were sent.', 'الحذف غير متاح. لم تُرسل تغييرات.'), 'failed'); return }
+      if (!uuid(id) || typeof send !== 'function' || typeof confirmDelete !== 'function') { note(status, copy('Deletion is unavailable. No changes were sent.'), 'failed'); return }
       busy = true; button.disabled = true
       let mutationStarted = false
       try {
-        const confirmed = await confirmDelete({ title: copy('Delete feature list', 'حذف قائمة الميزات'), body: copy('Delete this feature list? Plans using it may prevent deletion.', 'هل تريد حذف قائمة الميزات؟ قد تمنع الخطط التي تستخدمها الحذف.'), confirm: copy('Delete', 'حذف'), danger: true })
+        const confirmed = await confirmDelete({ title: copy('Delete feature list'), body: copy('Delete this feature list? Plans using it may prevent deletion.'), confirm: copy('Delete'), danger: true })
         if (!confirmed) return
-        note(status, copy('Deleting the requested feature list…', 'جار حذف قائمة الميزات المطلوبة…'), 'pending')
+        note(status, copy('Deleting the requested feature list…'), 'pending')
         mutationStarted = true
         const result = await send('DELETE', '/api/feature-lists/' + id)
         if (!workspaceRecord(result) || result.ok !== true) throw new Error('unverified')
         reviewRequired = true
-        note(status, copy('The feature list was deleted. Reload to read the updated list.', 'حُذفت قائمة الميزات. أعد تحميل الصفحة لقراءة القائمة المحدثة.'), 'stored')
+        note(status, copy('The feature list was deleted. Reload to read the updated list.'), 'stored')
       } catch (error) {
         reviewRequired = mutationStarted && !definiteRefusal(error)
-        note(status, reviewRequired ? copy('The deletion outcome is unknown. Inspect stored state before retrying.', 'نتيجة الحذف غير معروفة. افحص الحالة المحفوظة قبل المحاولة.') : copy('Deletion was refused. The list has not been confirmed deleted.', 'رُفض الحذف. لم يتأكد حذف القائمة.'), reviewRequired ? 'uncertain' : 'failed')
+        note(status, reviewRequired ? copy('The deletion outcome is unknown. Inspect stored state before retrying.') : copy('Deletion was refused. The list has not been confirmed deleted.'), reviewRequired ? 'uncertain' : 'failed')
       } finally { busy = false; button.disabled = reviewRequired }
     })
   })

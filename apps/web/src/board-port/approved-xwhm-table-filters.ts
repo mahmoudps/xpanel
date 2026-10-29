@@ -45,7 +45,6 @@ export function approvedWhmTablePage<T>(rows: readonly T[], requestedPage = 1, r
 
 function bindApprovedWhmTableFilters(): void {
   if (typeof document === 'undefined') return
-  const ar = document.documentElement.lang === 'ar'
   document.querySelectorAll<HTMLElement>('[data-whm-table-workspace]').forEach(scope => {
     if (scope.dataset.whmFiltersBound === 'true') return
     const own = <T extends Element>(selector: string): T[] => Array.from(scope.querySelectorAll<T>(selector)).filter(element => element.closest('[data-whm-table-workspace]') === scope)
@@ -53,12 +52,16 @@ function bindApprovedWhmTableFilters(): void {
     const table = tableRoot?.tagName === 'TABLE' ? tableRoot as HTMLTableElement : tableRoot?.querySelector<HTMLTableElement>('table')
     if (!table || table.closest('[data-whm-table-workspace]') !== scope) return
     scope.dataset.whmFiltersBound = 'true'
-    const records = Array.from(table.querySelectorAll<HTMLTableRowElement>('tbody > tr')).flatMap(row => {
-      if (row.closest('table') !== table || row.closest('[data-whm-table-workspace]') !== scope || row.closest('[hidden],[aria-hidden="true"]')) return []
+    const collect = (previous = new Set<HTMLTableRowElement>()): Array<{ element: HTMLTableRowElement; value: ApprovedWhmTableRow }> => Array.from(table.querySelectorAll<HTMLTableRowElement>('tbody > tr')).flatMap(row => {
+      if (row.closest('table') !== table || row.closest('[data-whm-table-workspace]') !== scope || row.closest('[aria-hidden="true"]') || row.parentElement?.closest('[hidden]') || row.hidden && !previous.has(row)) return []
       const marker = row.cells[0]?.querySelector<HTMLElement>('span[data-whm-filter-row]')
-      if (!marker || marker.closest('tr') !== row || marker.closest('[hidden],[aria-hidden="true"]')) return []
+      const hidden = marker?.closest('[hidden],[aria-hidden="true"]')
+      if (!marker || marker.closest('tr') !== row || hidden && (hidden !== row || !previous.has(row))) return []
       return [{ element: row, value: { kind: marker.dataset.kind, account: marker.dataset.account, ssl: marker.dataset.ssl, php: marker.dataset.php, status: marker.dataset.status, search: marker.dataset.search } }]
     })
+    let records = collect()
+    let observed = records.length > 0
+    const columns = Math.max(1, table.tHead?.rows[0]?.cells.length ?? records[0]?.element.cells.length ?? 1)
     const search = own<HTMLInputElement>('[name="whm-search"]')[0]
     const account = own<HTMLSelectElement>('[name="whm-account"]')[0]
     const ssl = own<HTMLSelectElement>('[name="whm-ssl"]')[0]
@@ -76,7 +79,7 @@ function bindApprovedWhmTableFilters(): void {
     const selected = (control: HTMLInputElement | HTMLSelectElement | undefined): string => control && !control.disabled ? control.value : ''
     const apply = (): void => {
       // A missing observed list is distinct from a filtered empty result: preserve its original empty state.
-      if (records.length === 0) {
+      if (records.length === 0 && !observed) {
         previous.forEach(button => { button.disabled = true })
         next.forEach(button => { button.disabled = true })
         return
@@ -91,10 +94,10 @@ function bindApprovedWhmTableFilters(): void {
         emptyRow = table.ownerDocument.createElement('tr')
         emptyRow.dataset.whmFilterEmpty = 'true'
         const cell = table.ownerDocument.createElement('td')
-        cell.colSpan = Math.max(1, records[0]!.element.cells.length)
-        cell.textContent = scope.dataset.emptyMessage || (ar ? 'لا توجد صفوف مطابقة للتصفية.' : 'No loaded rows match these filters.')
+        cell.colSpan = records[0]?.element.cells.length ?? columns
+        cell.textContent = scope.dataset.emptyMessage || (xpT('No loaded rows match these filters.'))
         emptyRow.appendChild(cell)
-        records[0]!.element.parentElement!.appendChild(emptyRow)
+        table.tBodies[0]?.appendChild(emptyRow)
       }
       if (emptyRow) emptyRow.hidden = page.total !== 0
       previous.forEach(button => { button.disabled = !page.previous })
@@ -104,8 +107,8 @@ function bindApprovedWhmTableFilters(): void {
         pageStatus.setAttribute('role', 'status')
         pageStatus.setAttribute('aria-live', 'polite')
         pageStatus.textContent = page.total === 0
-          ? (ar ? 'لا توجد نتائج مطابقة في الصفوف المحمّلة.' : 'No matching results in the loaded rows.')
-          : ar ? `${page.start}–${page.end} من ${page.total} صفًا محمّلًا · الصفحة ${page.page} من ${page.totalPages}` : `${page.start}–${page.end} of ${page.total} loaded rows · Page ${page.page} of ${page.totalPages}`
+          ? (xpT('No matching results in the loaded rows.'))
+          : xpT('{start}–{end} of {total} loaded rows · Page {page} of {totalPages}', { start: page.start, end: page.end, total: page.total, page: page.page, totalPages: page.totalPages })
       }
     }
     const resetPage = (): void => { currentPage = 1; apply() }
@@ -136,6 +139,16 @@ function bindApprovedWhmTableFilters(): void {
       currentPage += 1
       apply()
     }))
+    const domainPage = scope.closest('[data-whm-detail-route="/whm/domains"]')
+    domainPage?.addEventListener('xpanel:whm-domain-rows-changed', event => {
+      if (!(event.target instanceof Element) || event.target.closest('[data-whm-detail-route]') !== domainPage) return
+      const previous = new Set(records.map(record => record.element))
+      emptyRow?.remove()
+      emptyRow = undefined
+      records = collect(previous)
+      observed = true
+      apply()
+    })
     apply()
   })
 }

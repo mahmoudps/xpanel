@@ -1,9 +1,10 @@
 // Postfix (virtual domains, LMTP to Dovecot) and Dovecot 2.3 (passwd-file per domain,
 // count quota, Pigeonhole Sieve). Mail is stored in the owning account's home and
 // written with the account uid, so the account's disk quota covers it.
-import type { ConfigTest, HostAction, Limit, OsProfile, RenderedFile } from '@xpanel/core'
+import type { Certificate, ConfigTest, HostAction, Limit, OsProfile, RenderedFile } from '@xpanel/core'
 import { MAX_ACCOUNT_UID, MIN_ACCOUNT_UID, isUnlimited } from '@xpanel/core'
 import { DEFAULT_TTL, validateRecord, type ZoneRecord } from './dns.ts'
+import { certFiles, coversHost } from './tls.ts'
 import {
   assertAbsPath,
   assertAccount,
@@ -12,6 +13,8 @@ import {
   assertNoControl,
   assertString,
   assertWellFormed,
+  canonicalIpv4,
+  canonicalIpv6,
   invalid,
   normalizeEmail,
   normalizeHostedEmail,
@@ -47,13 +50,24 @@ export interface MailDomainInput {
   mailboxes: MailboxInput[]
   forwarders?: ForwarderInput[]
   defaultAddress?: DefaultAddress
+  /** cPanel domain forwarder: unmatched local parts go to the same local part at this domain; wins over defaultAddress */
+  domainForward?: string
   /** core suspensionEffects 'mail-login': 'denied' turns every mailbox of the domain to nologin */
   login?: 'allowed' | 'denied'
   /** core suspensionEffects 'mail-delivery': 'defer' answers 450 for the whole domain so senders retry */
   delivery?: 'accept' | 'defer'
+  /** Plain distribution lists: the list address fans out to every member through virtual_alias_maps. */
+  lists?: MailingListInput[]
+}
+
+export interface MailingListInput {
+  local: string
+  members: string[]
 }
 
 export const MAX_FORWARD_TARGETS = 50
+/** Postfix virtual_alias_expansion_limit defaults to 1000 addresses per original recipient (postconf(5)). */
+export const MAX_LIST_MEMBERS = 1000
 export const MAX_MAILBOX_QUOTA_MB = 16 * 1024 * 1024
 
 // ---- password hashes ----------------------------------------------------------------------
@@ -165,6 +179,7 @@ export const postfixMapPaths = (os: OsProfile) => {
   return {
     dir,
     domains: `${dir}/virtual_domains`,
+    aliasDomains: `${dir}/virtual_alias_domains`,
     mailboxes: `${dir}/virtual_mailboxes`,
     aliases: `${dir}/virtual_aliases`,
     senders: `${dir}/sender_logins`,
@@ -182,6 +197,13 @@ const targetsOf = (what: string, to: unknown): string[] => {
   if (!Array.isArray(to) || to.length === 0) return invalid(what, to, 'needs at least one destination')
   if (to.length > MAX_FORWARD_TARGETS) return invalid(what, to.length, `allows at most ${MAX_FORWARD_TARGETS} destinations`)
   return [...new Set(to.map((t) => normalizeEmail(t, `${what} destination`).address))]
+}
+
+/** Normalized, de-duplicated list members in saved order. */
+export const mailingListTargets = (members: unknown): string[] => {
+  if (!Array.isArray(members) || members.length === 0) return invalid('mailing list members', members, 'need at least one address')
+  if (members.length > MAX_LIST_MEMBERS) return invalid('mailing list members', members.length, `allow at most ${MAX_LIST_MEMBERS} addresses`)
+  return [...new Set(members.map((m) => normalizeEmail(m, 'mailing list member').address))]
 }
 
 const renderMap = (entries: Map<string, string>): string =>
@@ -229,19 +251,30 @@ const domainMaps = (input: MailDomainInput): DomainMaps => {
     aliases.set(src, targets.join(','))
     if (!senders.has(src)) senders.set(src, owners.length ? owners.join(',') : NO_SENDER)
   }
+  for (const l of input.lists ?? []) {
+    const src = `${normalizeMailboxLocal(l.local, 'mailing list')}@${domain}`
+    if (mailboxes.has(src) || aliases.has(src)) invalid('mailing list', src, 'uses an address that is already a mailbox or forwarder')
+    aliases.set(src, mailingListTargets(l.members).join(','))
+    senders.set(src, owners.length ? owners.join(',') : NO_SENDER)
+  }
   const def = input.defaultAddress ?? { kind: 'reject' }
+  if (def.kind !== 'reject' && def.kind !== 'forward' && def.kind !== 'discard') {
+    invalid('default address', (def as { kind: unknown }).kind, 'must be reject, forward or discard')
+  }
+  const forward = input.domainForward === undefined ? null : normalizeHostname(input.domainForward, 'domain forwarder target')
+  if (forward === domain) invalid('domain forwarder', forward, 'cannot target its own domain')
   let discards = false
-  if (def.kind === 'forward' || def.kind === 'discard') {
+  if (forward !== null || def.kind !== 'reject') {
     // virtual_alias_maps is consulted before mailbox lookup: without identity entries a
     // catch-all would swallow mail for real mailboxes (Postfix VIRTUAL_README)
     for (const a of owners) if (!aliases.has(a)) aliases.set(a, a)
-    if (def.kind === 'forward') aliases.set(`@${domain}`, targetsOf('default address', def.to).join(','))
+    // virtual(5): a result of the form @otherdomain keeps the user part
+    if (forward !== null) aliases.set(`@${domain}`, `@${forward}`)
+    else if (def.kind === 'forward') aliases.set(`@${domain}`, targetsOf('default address', def.to).join(','))
     else {
       aliases.set(`@${domain}`, DISCARD_ADDRESS)
       discards = true
     }
-  } else if (def.kind !== 'reject') {
-    invalid('default address', (def as { kind: unknown }).kind, 'must be reject, forward or discard')
   }
   senders.set(`@${domain}`, owners.length ? owners.join(',') : NO_SENDER)
   return { domain, mailboxes, aliases, senders, access, discards }
@@ -252,11 +285,88 @@ export interface PostfixMaps {
   actions: HostAction[]
 }
 
+const addressKey = (address: string): string => {
+  const at = address.lastIndexOf('@')
+  return `${address.slice(0, at).split('+')[0]}${address.slice(at)}`
+}
+
+/** Depth-first walk from one address; returns the address that closes a cycle, or null. `state` may be shared across starts. */
+const forwardLoopFrom = (aliases: ReadonlyMap<string, string>, mailboxes: ReadonlySet<string>, start: string, state: Map<string, 'visiting' | 'done'>): string | null => {
+  const stack = [{ address: addressKey(start), exit: false }]
+  while (stack.length) {
+    const entry = stack.pop()!, address = entry.address
+    if (entry.exit) { state.set(address, 'done'); continue }
+    if (state.get(address) === 'done') continue
+    if (state.get(address) === 'visiting') return address
+    if (state.size > 100000) invalid('forwarders', state.size, 'are too large to check for loops')
+    state.set(address, 'visiting')
+    stack.push({ address, exit: true })
+    const at = address.lastIndexOf('@')
+    const targets = aliases.get(address) ?? aliases.get(address.slice(at))
+    if (!targets) continue
+    for (const target of targets.split(',')) {
+      const next = addressKey(target.startsWith('@') ? address.slice(0, at) + target : target)
+      if (target === address && mailboxes.has(address)) continue
+      stack.push({ address: next, exit: false })
+    }
+  }
+  return null
+}
+
+const aliasGraph = (domains: DomainMaps[]) => ({
+  aliases: new Map(domains.flatMap(domain => [...domain.aliases])),
+  mailboxes: new Set(domains.flatMap(domain => [...domain.mailboxes.keys()])),
+})
+
+/** virtual(5) aliases recurse. Identity mailbox entries terminate recursion; other cycles do not. */
+const assertNoForwardLoops = (domains: DomainMaps[]): void => {
+  const { aliases, mailboxes } = aliasGraph(domains)
+  const state = new Map<string, 'visiting' | 'done'>()
+  let probe = 'xpanel-loop-probe'
+  while (domains.some(domain => aliases.has(`${probe}@${domain.domain}`))) probe += '-x'
+  for (const key of aliases.keys()) {
+    const loop = forwardLoopFrom(aliases, mailboxes, key.startsWith('@') ? `${probe}${key}` : key, state)
+    if (loop !== null) invalid('forwarder', loop, 'contains a forwarding loop')
+  }
+}
+
+export interface MailingListCandidate extends MailingListInput {
+  domain: string
+}
+export type MailingListAdmission = 'admitted' | 'invalid' | 'address-in-use' | 'loop'
+
+/**
+ * Decides, in the given order, which saved lists can be added to `domains` without making the
+ * maps invalid: the address must be free and on a listed domain, and its members must close no
+ * forwarding loop. The admitted graph has no cycle, so a new cycle has to pass through the new
+ * list address and one walk from it finds it.
+ */
+export const admitMailingLists = (domains: MailDomainInput[], candidates: readonly MailingListCandidate[]): MailingListAdmission[] => {
+  const all = domains.map(domainMaps)
+  const { aliases, mailboxes } = aliasGraph(all)
+  const hosted = new Set(all.map(domain => domain.domain))
+  return candidates.map((list): MailingListAdmission => {
+    let src: string, targets: string[]
+    try {
+      const domain = normalizeHostname(list.domain, 'mail domain')
+      if (!hosted.has(domain)) return 'invalid'
+      src = `${normalizeMailboxLocal(list.local, 'mailing list')}@${domain}`
+      targets = mailingListTargets(list.members)
+    } catch { return 'invalid' }
+    if (mailboxes.has(src) || aliases.has(src)) return 'address-in-use'
+    aliases.set(src, targets.join(','))
+    if (forwardLoopFrom(aliases, mailboxes, src, new Map()) === null) return 'admitted'
+    aliases.delete(src)
+    return 'loop'
+  })
+}
+
 /** All lookup tables for every hosted mail domain on the server. */
 export const renderPostfixMaps = (os: OsProfile, domains: MailDomainInput[], o: PostfixOptions = {}): PostfixMaps => {
   const type = mapTypeOf(o)
   const p = postfixMapPaths(os)
   const all = domains.map(domainMaps)
+  assertNoForwardLoops(all)
   const names = new Set<string>()
   for (const d of all) {
     if (names.has(d.domain)) invalid('mail domain', d.domain, 'is listed twice')
@@ -276,7 +386,10 @@ export const renderPostfixMaps = (os: OsProfile, domains: MailDomainInput[], o: 
     group,
   })
   const files = [
-    file(p.domains, 'virtual mailbox domains', new Map([...names].map((n) => [n, 'OK']))),
+    file(p.domains, 'virtual mailbox domains', new Map(all.filter((d) => d.mailboxes.size > 0).map((d) => [d.domain, 'OK']))),
+    // Postfix VIRTUAL_README: forwarding-only domains belong to the alias address class,
+    // never both virtual_alias_domains and virtual_mailbox_domains.
+    file(p.aliasDomains, 'virtual alias domains', new Map(all.filter((d) => d.mailboxes.size === 0).map((d) => [d.domain, 'OK']))),
     file(p.mailboxes, 'virtual mailboxes', merge((d) => d.mailboxes)),
     file(p.aliases, 'forwarders and default addresses', merge((d) => d.aliases)),
     file(p.senders, 'sender login ownership', merge((d) => d.senders)),
@@ -296,6 +409,42 @@ export interface PostfixMainOptions extends PostfixOptions {
   /** fullchain/privkey for smtpd; omit to leave TLS settings alone */
   tls?: { certFile: string; keyFile: string }
   messageSizeLimitMb?: number
+  /**
+   * system.renderPostfixOutboundIpTransports output: the sender map path and its master.cf
+   * transport entries, which go into the managed master.cf block (master.cf has no include).
+   */
+  outbound?: { senderMap: string; master: string }
+  /** Spam filter milter listed after OpenDKIM, e.g. the rspamd proxy `inet:localhost:11332`; absent lists OpenDKIM only. */
+  spamMilter?: string
+}
+
+const OPENDKIM_MILTER = 'local:opendkim/opendkim.sock'
+const SPAM_MILTER_RE = /^(?:inet:localhost:[1-9][0-9]{0,4}|local:[a-z0-9_-]+(?:\/[a-z0-9._-]+)+|unix:(?:\/[a-z0-9._-]+)+)$/
+
+const milterList = (o: PostfixMainOptions): string => {
+  if (o.spamMilter === undefined) return OPENDKIM_MILTER
+  const milter = assertString('spam milter', o.spamMilter, 128)
+  if (!SPAM_MILTER_RE.test(milter) || milter.split('/').includes('..')) return invalid('spam milter', milter, 'must be inet:localhost:<port>, local:<queue path> or unix:<absolute path>')
+  return `${OPENDKIM_MILTER}, ${milter}`
+}
+
+/**
+ * smtpd TLS material for the hostname mail clients are given (the saved server hostname): the
+ * latest-expiring issued or uploaded certificate covering it. Self-signed ones are skipped,
+ * since mail clients refuse them.
+ */
+export const mailHostnameTls = (
+  hostname: unknown,
+  certs: readonly Pick<Certificate, 'id' | 'names' | 'source' | 'notAfter'>[],
+  now: Date = new Date(),
+): { certFile: string; keyFile: string } | undefined => {
+  if (typeof hostname !== 'string' || !hostname.includes('.')) return undefined
+  const cert = certs
+    .filter((c) => c.source !== 'self-signed' && Date.parse(c.notAfter) > now.getTime() && coversHost(c.names, hostname))
+    .sort((a, b) => b.notAfter.localeCompare(a.notAfter))[0]
+  if (!cert) return undefined
+  const p = certFiles(cert.id)
+  return { certFile: p.fullchain, keyFile: p.privkey }
 }
 
 /** Postfix's compiled-in mailbox_size_limit; local(8) refuses to start when it is below message_size_limit. */
@@ -308,6 +457,7 @@ export const postfixMainSettings = (os: OsProfile, o: PostfixMainOptions = {}): 
   const size = assertInt('message size limit (MB)', o.messageSizeLimitMb ?? 50, 1, 2048) * 1024 * 1024
   const settings: Record<string, string> = {
     virtual_mailbox_domains: `${t}:${p.domains}`,
+    virtual_alias_domains: `${t}:${p.aliasDomains}`,
     virtual_mailbox_maps: `${t}:${p.mailboxes}`,
     virtual_alias_maps: `${t}:${p.aliases}`,
     virtual_transport: 'lmtp:unix:private/dovecot-lmtp',
@@ -326,9 +476,10 @@ export const postfixMainSettings = (os: OsProfile, o: PostfixMainOptions = {}): 
     // stated explicitly so relaying never depends on the distribution's compatibility_level
     smtpd_relay_restrictions: 'permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination',
     smtpd_recipient_restrictions: `check_recipient_access ${t}:${p.recipientAccess}`,
-    // Relative to the Postfix chroot (/var/spool/postfix). accept keeps mail flowing when the socket is down.
-    smtpd_milters: 'local:opendkim/opendkim.sock',
-    non_smtpd_milters: 'local:opendkim/opendkim.sock',
+    // Relative to the Postfix chroot (/var/spool/postfix). accept keeps mail flowing when a socket is down.
+    // The spam filter follows OpenDKIM, so DKIM signs before the filter adds its own headers.
+    smtpd_milters: milterList(o),
+    non_smtpd_milters: milterList(o),
     milter_protocol: '6',
     milter_default_action: 'accept',
   }
@@ -338,6 +489,8 @@ export const postfixMainSettings = (os: OsProfile, o: PostfixMainOptions = {}): 
     settings.smtpd_tls_security_level = 'may'
     settings.smtpd_tls_auth_only = 'yes'
   }
+  // texthash reads the rendered file itself, so no postmap run or DB library is needed for it
+  if (o.outbound) settings.sender_dependent_default_transport_maps = `texthash:${assertAbsPath('sender transport map', o.outbound.senderMap)}`
   return settings
 }
 
@@ -360,30 +513,38 @@ export const postconfAction = (os: OsProfile, settings: Record<string, string>):
   ],
 })
 
+const SASL_ONLY = 'permit_sasl_authenticated,reject'
+
+/** Submission policy: SASL only after TLS, and only for the sender addresses the login owns. */
+const submissionOptions = (os: OsProfile, o: PostfixOptions, name: string, tlsLevel: 'may' | 'encrypt'): Record<string, string> => ({
+  syslog_name: `postfix/${name}`,
+  smtpd_tls_security_level: tlsLevel,
+  smtpd_tls_auth_only: 'yes',
+  smtpd_sasl_auth_enable: 'yes',
+  smtpd_sasl_type: 'dovecot',
+  smtpd_sasl_path: 'private/auth',
+  smtpd_sender_login_maps: postfixMainSettings(os, o).smtpd_sender_login_maps!,
+  smtpd_sender_restrictions: 'reject_sender_login_mismatch',
+  smtpd_relay_restrictions: SASL_ONLY,
+  smtpd_client_restrictions: SASL_ONLY,
+})
+
+/** RFC 8314: 587 with STARTTLS and 465 with implicit TLS, both SASL-only; port 25 stays for server-to-server mail. */
+const clientServices = (os: OsProfile, o: PostfixOptions): { port: '587' | '465'; options: Record<string, string> }[] => [
+  { port: '587', options: submissionOptions(os, o, 'submission', 'encrypt') },
+  { port: '465', options: { ...submissionOptions(os, o, 'submissions', 'encrypt'), smtpd_tls_wrappermode: 'yes' } },
+]
+
 /**
- * master.cf services for mail clients (RFC 8314): 587 with STARTTLS and 465 with implicit
- * TLS, both SASL-only, while port 25 stays for server-to-server mail. They need the smtpd
- * certificate from postfixMainSettings `tls`, or every client connection is refused.
+ * The mail client services as argv postconf edits. They need the smtpd certificate from
+ * postfixMainSettings `tls`, or every client connection is refused.
  */
 export const postfixClientServices = (os: OsProfile): HostAction[] => {
   const dir = assertAbsPath('postfix dir', os.paths.postfixDir)
-  const saslOnly = 'permit_sasl_authenticated,reject'
-  const service = (port: '587' | '465', name: string, extra: Record<string, string>): HostAction[] => {
-    const params: Record<string, string> = {
-      syslog_name: `postfix/${name}`,
-      smtpd_tls_security_level: 'encrypt',
-      smtpd_sasl_auth_enable: 'yes',
-      smtpd_tls_auth_only: 'yes',
-      smtpd_client_restrictions: saslOnly,
-      smtpd_relay_restrictions: saslOnly,
-      ...extra,
-    }
-    return [
-      { kind: 'exec', argv: ['postconf', '-c', dir, '-e', '-M', `${port}/inet=${port} inet n - n - - smtpd`] },
-      { kind: 'exec', argv: ['postconf', '-c', dir, '-e', '-P', ...Object.entries(params).map(([k, v]) => `${port}/inet/${k}=${v}`)] },
-    ]
-  }
-  return [...service('587', 'submission', {}), ...service('465', 'submissions', { smtpd_tls_wrappermode: 'yes' })]
+  return clientServices(os, {}).flatMap(({ port, options }): HostAction[] => [
+    { kind: 'exec', argv: ['postconf', '-c', dir, '-e', '-M', `${port}/inet=${port} inet n - n - - smtpd`] },
+    { kind: 'exec', argv: ['postconf', '-c', dir, '-e', '-P', ...Object.entries(options).map(([k, v]) => `${port}/inet/${k}=${v}`)] },
+  ])
 }
 
 export const MANAGED_BLOCK_BEGIN = '# xpanel-managed-begin'
@@ -391,10 +552,13 @@ export const MANAGED_BLOCK_END = '# xpanel-managed-end'
 
 const LOCAL_DELIVERY_KEYS = [
   'virtual_mailbox_domains',
+  'virtual_alias_domains',
   'virtual_mailbox_maps',
   'virtual_alias_maps',
   'virtual_transport',
   'transport_maps',
+  // the same delimiter as Dovecot's 90-xpanel.conf, so user+tag@domain reaches user@domain
+  'recipient_delimiter',
   'smtpd_sasl_auth_enable',
   'smtpd_sasl_type',
   'smtpd_sasl_path',
@@ -405,6 +569,8 @@ const LOCAL_DELIVERY_KEYS = [
   'milter_protocol',
   'milter_default_action',
 ] as const
+
+const TLS_KEYS = ['smtpd_tls_cert_file', 'smtpd_tls_key_file', 'smtpd_tls_security_level', 'smtpd_tls_auth_only'] as const
 
 /**
  * Replaces one marked region or appends it. A second call with the same body
@@ -423,32 +589,52 @@ export const replaceManagedBlock = (existing: string, body: string): string => {
 
 /**
  * Virtual mailbox maps and LMTP delivery. Port 25 explicitly disables SASL.
- * Sender mismatch is enforced on submission, not port 25.
+ * Sender mismatch is enforced on submission, not port 25. `tls` adds the hostname
+ * certificate for every smtpd; `outbound` adds the sender-dependent transport map.
  */
 export const localDeliveryMainBlock = (os: OsProfile, o: PostfixMainOptions = {}): string => {
   const settings: Record<string, string> = { ...postfixMainSettings(os, o), smtpd_sasl_auth_enable: 'no' }
-  return LOCAL_DELIVERY_KEYS.map((key) => `${key} = ${settings[key]}`).join('\n')
+  const keys: string[] = [...LOCAL_DELIVERY_KEYS, ...(o.tls ? TLS_KEYS : []), ...(o.outbound ? ['sender_dependent_default_transport_maps'] : [])]
+  return keys.map((key) => `${key} = ${settings[key]}`).join('\n')
+}
+
+const OUTBOUND_SERVICE_RE = /^xpanel-smtp-[a-z0-9-]{1,64} unix - - [yn-] - - smtp$/
+const OUTBOUND_OPTION_RE = /^ {2}-o (smtp_bind_address|smtp_bind_address6|smtp_helo_name)=(\S{1,253})$/
+
+/**
+ * The outbound transport entries are spliced into master.cf, so each line is checked again:
+ * a stray `-o` line would otherwise attach to the submission service rendered before it.
+ */
+const outboundMasterLines = (text: unknown): string[] => {
+  const lines = assertString('outbound transports', text, 256 * 1024).split('\n').filter((l) => l !== '' && !l.startsWith('#'))
+  lines.forEach((line, i) => {
+    const opt = OUTBOUND_OPTION_RE.exec(line)
+    if (opt && i > 0) {
+      const value = opt[2] as string
+      if (opt[1] === 'smtp_bind_address') canonicalIpv4(value, 'outbound bind address')
+      else if (opt[1] === 'smtp_bind_address6') canonicalIpv6(value, 'outbound bind address')
+      else normalizeHostname(value, 'outbound HELO name')
+    } else if (!OUTBOUND_SERVICE_RE.test(line)) {
+      invalid('outbound transport', line, 'is not an xpanel-smtp transport entry')
+    }
+  })
+  return lines
 }
 
 /**
- * Loopback submission. SASL is enabled only here, and only after STARTTLS.
- * Sender login mismatch stays on this service.
+ * Submission and outbound transports. With the hostname certificate (`tls`) mail clients get
+ * public 587 and 465. Without it only loopback 587 for webmail exists: clients would be shown
+ * the distribution's self-signed certificate. Loopback 587 and public 587 would collide on
+ * bind, so exactly one form is rendered; SASL is enabled only on these services.
  */
-export const localSubmissionMasterBlock = (os: OsProfile, o: PostfixOptions = {}): string => {
-  const senders = postfixMainSettings(os, o).smtpd_sender_login_maps
-  return [
-    '127.0.0.1:587 inet n - n - - smtpd',
-    '  -o syslog_name=postfix/submission',
-    '  -o smtpd_tls_security_level=may',
-    '  -o smtpd_tls_auth_only=yes',
-    '  -o smtpd_sasl_auth_enable=yes',
-    '  -o smtpd_sasl_type=dovecot',
-    '  -o smtpd_sasl_path=private/auth',
-    `  -o smtpd_sender_login_maps=${senders}`,
-    '  -o smtpd_sender_restrictions=reject_sender_login_mismatch',
-    '  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject',
-    '  -o smtpd_client_restrictions=permit_sasl_authenticated,reject',
-  ].join('\n')
+export const localSubmissionMasterBlock = (os: OsProfile, o: PostfixMainOptions = {}): string => {
+  const entry = (service: string, options: Record<string, string>): string[] =>
+    [`${service} inet n - n - - smtpd`, ...Object.entries(options).map(([k, v]) => `  -o ${k}=${v}`)]
+  const lines = o.tls
+    ? clientServices(os, o).flatMap(({ port, options }) => entry(port, options))
+    : entry('127.0.0.1:587', submissionOptions(os, o, 'submission', 'may'))
+  if (o.outbound) lines.push(...outboundMasterLines(o.outbound.master))
+  return lines.join('\n')
 }
 
 // ---- Dovecot configuration ------------------------------------------------------------------
@@ -573,6 +759,7 @@ first_valid_uid = ${MIN_ACCOUNT_UID}
 last_valid_uid = ${MAX_ACCOUNT_UID}
 first_valid_gid = ${MIN_ACCOUNT_UID}
 last_valid_gid = ${MAX_ACCOUNT_UID}
+recipient_delimiter = +
 
 passdb {
   driver = passwd-file
@@ -1025,6 +1212,96 @@ export const sieveFile = (account: AccountRef, address: string, script: string):
     owner: a.username,
     group: a.username,
   }
+}
+
+/** Root-owned before-scripts, one per mailbox: `<dovecotDir>/xpanel/sieve/<domain>/<local>.sieve`. */
+export const mailboxPolicySieveDir = (os: OsProfile): string => `${assertAbsPath('dovecot dir', os.paths.dovecotDir)}/xpanel/sieve`
+
+/**
+ * Pigeonhole for LMTP delivery. The mailbox's own script stays at its per-mailbox location and is never
+ * written here; the xPanel policy script runs before it (sieve_before). A mailbox without a policy script
+ * has no before-script, which Pigeonhole skips. fileinto in the policy script cancels the implicit keep,
+ * so spam and blocked senders end the sequence before the mailbox's filters or autoresponder run.
+ */
+export const renderDovecotSieveConf = (os: OsProfile): RenderedFile => ({
+  path: `${assertAbsPath('dovecot dir', os.paths.dovecotDir)}/conf.d/95-xpanel-sieve.conf`,
+  content: `# managed by xPanel: Sieve during delivery, mailbox spam policy before the mailbox's own filters
+protocol lmtp {
+  mail_plugins = $mail_plugins sieve
+}
+
+plugin {
+  sieve = file:~/mail/%Ld/%Ln/sieve;active=~/mail/%Ld/%Ln/.dovecot.sieve
+  sieve_before = ${mailboxPolicySieveDir(os)}/%Ld/%Ln.sieve
+}
+`,
+  mode: 0o644,
+  owner: 'root',
+  group: 'root',
+})
+
+export interface MailboxPolicySieveInput {
+  address: string
+  account: AccountRef
+  /** exact sender addresses filed into Junk */
+  blockedSenders: string[]
+  /** file messages the spam filter flagged into Junk */
+  spamToJunk: boolean
+}
+
+export const MAX_BLOCKED_SENDERS = 1000
+// rspamd's milter proxy adds `X-Spam: Yes` (spam_header); spamass-milter adds `X-Spam-Flag: YES`.
+const SPAM_HEADERS = ['X-Spam', 'X-Spam-Flag']
+
+/** The policy script for one mailbox; null when the mailbox has no Sieve effect. */
+export const renderMailboxPolicySieveScript = (input: Pick<MailboxPolicySieveInput, 'blockedSenders' | 'spamToJunk'>): string | null => {
+  if (!Array.isArray(input.blockedSenders) || input.blockedSenders.length > MAX_BLOCKED_SENDERS) return invalid('blocked senders', input.blockedSenders, `allow at most ${MAX_BLOCKED_SENDERS} addresses`)
+  const senders = [...new Set(input.blockedSenders.map((s) => {
+    const v = assertLine('blocked sender', s, 254).toLowerCase()
+    return /^[\x21-\x7e]+@[a-z0-9.-]+$/.test(v) ? v : invalid('blocked sender', v, 'must be one exact address')
+  }))]
+  if (typeof input.spamToJunk !== 'boolean') return invalid('spam to Junk', input.spamToJunk, 'must be a boolean')
+  if (!senders.length && !input.spamToJunk) return null
+  const junk = ['  fileinto :create "Junk";', '  stop;', '}']
+  return [
+    '# managed by xPanel: mailbox spam policy; the mailbox\'s own filters run after it',
+    'require ["fileinto", "mailbox"];',
+    ...(senders.length ? [`if address :all :is "from" [${senders.map(sieveQuote).join(', ')}] {`, ...junk] : []),
+    ...(input.spamToJunk ? [`if header :is [${SPAM_HEADERS.map(sieveQuote).join(', ')}] "yes" {`, ...junk] : []),
+    '',
+  ].join('\n')
+}
+
+/**
+ * Policy scripts with their directories (group-readable by the owning account only, which LMTP delivers
+ * as) and the sievec compile of each script. Pigeonhole cannot save binaries in this root-owned tree, so
+ * the compiled `.svbin` is made group-readable too; a compile failure fails the generation.
+ */
+export const renderMailboxPolicySieve = (os: OsProfile, inputs: readonly MailboxPolicySieveInput[]): { files: RenderedFile[]; preActions: HostAction[]; postActions: HostAction[] } => {
+  const dir = mailboxPolicySieveDir(os)
+  const files: RenderedFile[] = [], postActions: HostAction[] = []
+  const dirs = new Map<string, string>()
+  for (const input of inputs) {
+    const a = assertAccount(input.account)
+    const { local, domain, address } = normalizeHostedEmail(input.address, 'mailbox')
+    const content = renderMailboxPolicySieveScript(input)
+    if (content === null) continue
+    if (dirs.has(domain) && dirs.get(domain) !== a.username) invalid('mailbox', address, 'belongs to a domain of another account')
+    dirs.set(domain, a.username)
+    const path = `${dir}/${domain}/${local}.sieve`, binary = `${dir}/${domain}/${local}.svbin`
+    if (files.some((f) => f.path === path)) invalid('mailbox', address, 'is listed twice')
+    files.push({ path, content, mode: 0o640, owner: 'root', group: a.username })
+    postActions.push(
+      { kind: 'exec', argv: ['/usr/bin/sievec', path] },
+      { kind: 'exec', argv: ['/usr/bin/chown', `root:${a.username}`, binary] },
+      { kind: 'exec', argv: ['/usr/bin/chmod', '0640', binary] },
+    )
+  }
+  const preActions: HostAction[] = [
+    { kind: 'ensure-dir', path: dir, mode: 0o755, owner: 'root', group: 'root' },
+    ...[...dirs].sort(([x], [y]) => x.localeCompare(y)).map(([domain, group]): HostAction => ({ kind: 'ensure-dir', path: `${dir}/${domain}`, mode: 0o750, owner: 'root', group })),
+  ]
+  return { files, preActions, postActions }
 }
 
 // ---- DKIM -----------------------------------------------------------------------------------

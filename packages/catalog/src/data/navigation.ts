@@ -40,9 +40,7 @@ export const navigation: NavSurface[] = [
               "Search",
               "Quick bar",
               "Getting started",
-              "End-User Overview",
-              "الرئيسية",
-              "لوحة المعلومات"
+              "End-User Overview"
             ],
             "summary": "Start here: what needs attention, your sites, pinned and recent tools, the tool index, general information and usage against your plan."
           },
@@ -76,8 +74,7 @@ export const navigation: NavSurface[] = [
               "Quota",
               "Limits",
               "Limit faults",
-              "Slice",
-              "استهلاك الموارد"
+              "Slice"
             ],
             "summary": "See live and historical CPU, memory, IO and process use of your account against its limits, the limit hits that slowed your sites, and what fills your disk."
           },
@@ -102,8 +99,7 @@ export const navigation: NavSurface[] = [
               "SSL check",
               "DNS check",
               "Mail authentication check",
-              "Backup status",
-              "فحص الصحة"
+              "Backup status"
             ],
             "summary": "Run health checks on every site you own (limits, errors, certificates, DNS, mail authentication, PHP, backups) and fix each finding from one place."
           },
@@ -158,7 +154,7 @@ export const navigation: NavSurface[] = [
               "Create email account",
               "Manage Email Account",
               "Check Email",
-              "Open in xMail",
+              "Open webmail",
               "Connect Devices",
               "Mail Client Configuration",
               "Email Disk Usage",
@@ -335,8 +331,7 @@ export const navigation: NavSurface[] = [
               "Release message",
               "False positive",
               "Not spam",
-              "Mail quality",
-              "حجر"
+              "Mail quality"
             ],
             "summary": "Review mail the spam filter held, release false positives and teach the filter from your corrections."
           },
@@ -450,7 +445,6 @@ export const navigation: NavSurface[] = [
               "Extract",
               "Search file contents",
               "Favorites",
-              "إدارة الملفات",
               "File Browser",
               "Upload and Remote Download",
               "File Operations",
@@ -481,8 +475,7 @@ export const navigation: NavSurface[] = [
               "Recycle Bin",
               "Deleted files",
               "Restore deleted files",
-              "Empty trash",
-              "سلة"
+              "Empty trash"
             ],
             "summary": "Restore deleted files, folders and site roots to their original paths, or purge them, before the retention period ends."
           },
@@ -1802,9 +1795,7 @@ export const navigation: NavSurface[] = [
               "Locale",
               "Interface language",
               "Arabic",
-              "English",
-              "العربية",
-              "اللغة"
+              "English"
             ],
             "summary": "Choose the interface language and how digits are shown; English is the default and Arabic is fully right-to-left."
           },
@@ -4453,8 +4444,7 @@ export const navigation: NavSurface[] = [
             "keywords": [
               "Share link",
               "File Sharing Links",
-              "Directory sharing",
-              "مشاركة الملفات"
+              "Directory sharing"
             ],
             "summary": "Server administrator management of file and directory sharing links; unavailable until the capability and its task screen are qualified."
           },

@@ -73,6 +73,7 @@ interface Sample {
 interface DomBox { left: number; right: number; top: number; bottom: number; width: number; height: number }
 interface DomNode { nodeType: number; nodeValue: string | null; textContent: string | null }
 interface DomEl {
+  closest: (selector: string) => DomEl | null
   textContent: string | null
   nodeType: number
   nodeValue: string | null
@@ -235,9 +236,15 @@ const monoArabic = (): string[] => {
         if (!text) continue
         const font = root.getComputedStyle(el).fontFamily
         const sentence = !latin.test(text)
+        const code = el.closest('code, pre, kbd') !== null
+        const technical = code || el.closest('.xp-mono, [style*="Plex Mono"]') !== null
+        if (/Plex Sans Arabic|Noto Sans Arabic|XP Arabic In Mono/.test(font)) {
+          bad.push(text.slice(0, 48))
+          continue
+        }
         if (sentence) {
-          if (font.includes('Plex Mono') || !font.includes('Plex Sans Arabic')) bad.push(text.slice(0, 48))
-        } else if (font.includes('Plex Mono') && !font.includes('Plex Sans Arabic') && !font.includes('XP Arabic In Mono')) {
+          if (!code && font !== 'sans-serif') bad.push(text.slice(0, 48))
+        } else if (font.includes('Plex Mono') && !technical) {
           bad.push(text.slice(0, 48))
         }
       } else if (node.nodeType === 1) walk(node as DomEl)
@@ -321,7 +328,7 @@ const overflowDiagnostics = () => {
   return {
     viewport: { innerWidth: root.innerWidth, innerHeight: root.innerHeight, clientWidth: root.document.documentElement.clientWidth, scrollWidth: root.document.documentElement.scrollWidth, gutter: root.innerWidth - root.document.documentElement.clientWidth, devicePixelRatio: root.devicePixelRatio, visual: root.visualViewport ? { width: root.visualViewport.width, height: root.visualViewport.height, scale: root.visualViewport.scale } : null },
     engine: { userAgent: root.navigator.userAgent, platform: root.navigator.platform }, html: inspect(root.document.documentElement), body: inspect(root.document.body),
-    fonts: { status: root.document.fonts.status, checks: Object.fromEntries(['16px "IBM Plex Sans Arabic"', '16px "IBM Plex Sans"', '13px "IBM Plex Mono"'].map(font => [font, root.document.fonts.check(font)])), faces: Array.from(root.document.fonts).map(face => ({ family: face.family, status: face.status, weight: face.weight, style: face.style })) },
+    fonts: { status: root.document.fonts.status, checks: Object.fromEntries(['16px sans-serif', '16px "IBM Plex Sans"', '13px "IBM Plex Mono"'].map(font => [font, root.document.fonts.check(font)])), faces: Array.from(root.document.fonts).map(face => ({ family: face.family, status: face.status, weight: face.weight, style: face.style })) },
     candidateCount: candidates.length, candidates: candidates.slice(0, 40),
   }
 }
@@ -427,7 +434,7 @@ const open = async (browser: Browser, html: string): Promise<Page> => {
     const familyName = (face: Face) => face.family.replace(/^["']|["']$/g, '')
     const declared = Array.from(root.document.fonts)
     const results = []
-    for (const family of ['IBM Plex Sans Arabic', 'IBM Plex Sans', 'IBM Plex Mono', 'XP Arabic In Mono']) {
+    for (const family of ['IBM Plex Sans', 'IBM Plex Mono']) {
       if (!declared.some(face => familyName(face) === family)) continue
       const sample = family.includes('Arabic') ? 'العربية' : 'xPanel 123'
       const loaded = await root.document.fonts.load(`400 16px "${family}"`, sample)
@@ -474,7 +481,7 @@ describe('Arabic computed type', () => {
         assert.ok(box.body >= 14.5, `${screen} body ${box.body}px`)
         assert.ok(box.navLine >= 1.7, `${screen} nav line ${box.navLine}`)
         assert.ok(box.bodyLine >= 1.7, `${screen} body line ${box.bodyLine}`)
-        assert.match(box.face, /IBM Plex Sans Arabic/)
+        assert.equal(box.face, 'sans-serif')
       }
       const tool = await home.evaluate(toolName)
       assert.equal(tool.lines, 1)

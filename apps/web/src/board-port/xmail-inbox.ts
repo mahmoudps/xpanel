@@ -1,18 +1,22 @@
-import type { Locale } from '../i18n.ts'
-import { escapeHtml, renderAsyncActionState, type AsyncActionBannerProps } from '../tokens.ts'
-import { renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
+import { LOCALES, localeDirection, translator, type Locale } from '../i18n.ts'
+import { DISPLAY_DATETIME_BINDING, escapeHtml, renderAsyncActionState, type AsyncActionBannerProps } from '../tokens.ts'
+import { renderLiveUpdatesIndicator, renderPageSearchButton, renderMobileNavToggle, renderMobileNavClose, renderMobileNavBackdrop } from '../shell.ts'
 import { formatAttachmentBytes, formatMailboxQuota, formatMailStamp } from './mail-truth.ts'
+import { MAIL_ATTACHMENTS_STYLE, renderMailAttachments } from './xmail-attachments.ts'
+import { mailFolderFlags, mailFolderObject, mailFolderUid, mailFolderUidValidity, mailFolderWriteUncertain, readFolderMessage, readFolderMove, readFolderSummary } from '../mail-folder-workspace-client.ts'
 
 const MONO = "'IBM Plex Mono', monospace"
-const FONT_EN = "'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif"
-const FONT_AR = "'IBM Plex Sans Arabic', 'IBM Plex Sans', system-ui, sans-serif"
+const FONT_EN = "'IBM Plex Sans', sans-serif"
+const FONT_AR = "sans-serif"
 const PORT_CSS = `.xp-board-port{line-height:normal;font-size:16px;font-kerning:auto;font-feature-settings:normal;font-synthesis:weight style small-caps;-webkit-font-smoothing:antialiased}
-.xp-board-port a{color:#1D5BD6}.xp-board-port a:hover{color:#1546A8}
-.xp-board-port :focus-visible{outline:2px solid #1D5BD6;outline-offset:2px}
+.xp-board-port a{color:light-dark(#1D5BD6,var(--xp-accent))}.xp-board-port a:hover{color:light-dark(#1546A8,var(--xp-accent-hover))}
+.xp-board-port :focus-visible{outline:2px solid light-dark(#1D5BD6,var(--xp-accent));outline-offset:2px}
+.xp-board-port[data-board-port="xmail-inbox"][data-locale="ar"] nav > a[data-nav-route="/mail/compose"]{font-size:14px!important;font-weight:600!important;line-height:normal!important;min-inline-size:auto}
 .xp-board-port p{max-inline-size:none}
 .xp-board-port [data-mail-refresh-status]{margin:0;padding:var(--xp-space-field,16px);font-size:14.5px;line-height:1.75}
 @media(min-width:960px){.xp-board-port [data-mail-refresh-status]{padding:var(--xp-space-card,24px)}}
-@media(min-width:960px){.xp-board-port[data-mail-layout="reference"] [data-xp-sidebar]{flex:0 0 200px!important;inline-size:200px}}`
+@media(min-width:960px){.xp-board-port[data-mail-layout="reference"] [data-xp-sidebar]{flex:0 0 200px!important;inline-size:200px;position:static;block-size:auto;overflow:visible}}
+${MAIL_ATTACHMENTS_STYLE}`
 
 const glyph = (inner: string, size = 18): string =>
   `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`
@@ -72,6 +76,7 @@ export interface MailCard {
   snippet: string
   time: string
   datetime: string
+  displayDate?: string
   unread: boolean
   auth: string
   local?: boolean
@@ -83,6 +88,8 @@ export interface MailCard {
 }
 
 export interface InboxModel {
+  folderWorkspace?: boolean
+  attachmentReadEnabled?: boolean
   locale: Locale
   theme?: 'light' | 'dark'
   product: boolean
@@ -116,19 +123,19 @@ export interface InboxModel {
   copy: { emptyTitle: string; emptyBody: string; emptyClear: string; undo: string; moved: string; moveLabel: string }
 }
 
-const tech = (value: string, ar: boolean): string => ar ? `<bdi dir="ltr">${escapeHtml(value)}</bdi>` : escapeHtml(value)
+const tech = (value: string, rtl: boolean): string => rtl ? `<bdi dir="ltr">${escapeHtml(value)}</bdi>` : escapeHtml(value)
 
 const countSpan = (count: { text: string; kind: CountKind }, folderId: string): string => {
   const attr = ` data-mail-count="${escapeHtml(folderId)}"`
-  if (count.kind === 'pill') return `<span${attr} style="min-width: 24px; padding: 1px 8px; border-radius: 999px; background: #1D5BD6; color: #FFFFFF; font-size: 12px; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums">${escapeHtml(count.text)}</span>`
-  if (count.kind === 'muted') return `<span${attr} style="font-size: 12px; color: #475467; font-variant-numeric: tabular-nums">${escapeHtml(count.text)}</span>`
-  return `<span${attr} style="font-size: 12px; font-weight: 600; color: #344054; font-variant-numeric: tabular-nums">${escapeHtml(count.text)}</span>`
+  if (count.kind === 'pill') return `<span${attr} style="min-width: 24px; padding: 1px 8px; border-radius: 999px; background: light-dark(#1D5BD6,var(--xp-accent)); color: light-dark(#FFFFFF,var(--xp-text-on-accent)); font-size: 12px; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums">${escapeHtml(count.text)}</span>`
+  if (count.kind === 'muted') return `<span${attr} style="font-size: 12px; color: light-dark(#475467,var(--xp-text-secondary)); font-variant-numeric: tabular-nums">${escapeHtml(count.text)}</span>`
+  return `<span${attr} style="font-size: 12px; font-weight: 600; color: light-dark(#344054,var(--xp-text-secondary)); font-variant-numeric: tabular-nums">${escapeHtml(count.text)}</span>`
 }
 
 const folderLink = (item: FolderLink, _route: string): string => {
   const style = item.current
-    ? 'display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 600; color: #1D5BD6; background: #E8EFFD; text-decoration: none'
-    : 'display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; font-size: 14px; color: #344054; text-decoration: none'
+    ? 'display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 600; color: light-dark(#1D5BD6,var(--xp-accent)); background: light-dark(#E8EFFD,var(--xp-accent-soft)); text-decoration: none'
+    : 'display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; font-size: 14px; color: light-dark(#344054,var(--xp-text-secondary)); text-decoration: none'
   const current = item.current ? ' aria-current="page"' : ''
   const routeAttr = ` data-nav-route="${escapeHtml(item.href)}"`
   const observed = item.observed ? ` data-mail-folder="${escapeHtml(item.observed)}"` : ''
@@ -144,34 +151,35 @@ const initialsOf = (name: string, local?: boolean): string => {
 
 const fullDate = (datetime: string): string => formatMailStamp(datetime).full
 
-const messageRow = (card: MailCard, selected: boolean, ar: boolean): string => {
+const ATTACHMENTS = msgid('{count, plural, one {{count} attachment} other {{count} attachments}}')
+
+const messageRow = (card: MailCard, selected: boolean, locale: Locale): string => {
+  const rtl = localeDirection(locale) === 'rtl'
   const unread = card.unread
   const weight = unread ? '600' : '400'
-  const dot = unread ? '#1D5BD6' : 'transparent'
-  const bg = selected ? '#F3F7FE' : '#FFFFFF'
-  const bar = selected ? (ar ? 'inset -3px 0 0 #1D5BD6' : 'inset 3px 0 0 #1D5BD6') : 'none'
-  const timeColor = unread ? '#101828' : '#5D6B7E'
+  const dot = unread ? 'light-dark(#1D5BD6,var(--xp-accent))' : 'transparent'
+  const bg = selected ? 'light-dark(#F3F7FE,var(--xp-accent-soft))' : 'light-dark(#FFFFFF,var(--xp-bg-surface))'
+  const bar = selected ? (rtl ? 'inset -3px 0 0 light-dark(#1D5BD6,var(--xp-accent))' : 'inset 3px 0 0 light-dark(#1D5BD6,var(--xp-accent))') : 'none'
+  const timeColor = unread ? 'light-dark(#101828,var(--xp-text-primary))' : 'light-dark(#5D6B7E,var(--xp-text-muted))'
   const attach = card.attachments.length
-  const unreadLabel = ar ? 'غير مقروءة. ' : 'Unread. '
-  const attachLabel = ar
-    ? (attach === 1 ? 'مرفق واحد' : attach === 2 ? 'مرفقان' : `${attach} مرفقات`)
-    : `${attach} ${attach === 1 ? 'attachment' : 'attachments'}`
-  const aria = `${unread ? unreadLabel : ''}${card.fromName}. ${card.subject}. ${card.time}${attach ? `. ${attachLabel}` : ''}`
+  const unreadLabel = translator(locale)('Unread.')
+  const attachLabel = translator(locale)(ATTACHMENTS, { count: attach })
+  const aria = `${unread ? unreadLabel + ' ' : ''}${card.fromName}. ${card.subject}. ${card.time}${attach ? `. ${attachLabel}` : ''}`
   const uid = card.uid !== undefined ? ` data-mail-uid="${card.uid}"` : ''
   const icon = attach ? ICONS.attach : ''
-  return `<li style="border-bottom: 1px solid #EEF0F3"><button type="button" data-mail-open="${escapeHtml(card.id)}" data-unread="${unread ? 'true' : 'false'}" data-attach="${attach > 0 ? '1' : '0'}" data-search="${escapeHtml(`${card.fromName} ${card.fromAddr} ${card.subject} ${card.snippet}`)}"${uid} aria-current="${selected ? 'true' : 'false'}" aria-label="${escapeHtml(aria)}" style="width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; display: flex; gap: 10px; padding: 12px 16px; border: none; background: ${bg}; box-shadow: ${bar}; text-align: start; font-family: inherit; color: #101828; cursor: pointer"><span aria-hidden="true" data-mail-dot="true" style="flex: none; width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; background: ${dot}"></span><span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0"><span data-mail-name="true" style="min-width: 0; font-size: 14px; font-weight: ${weight}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">${tech(card.fromName, ar)}</span><span data-mail-time="true" style="flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: ${weight}; color: ${timeColor}; font-variant-numeric: tabular-nums">${icon}<time datetime="${escapeHtml(card.datetime)}">${tech(card.time, ar)}</time></span></span><span data-mail-subject="true" style="min-width: 0; font-size: 14px; font-weight: ${weight}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis"><bdi dir="auto">${escapeHtml(card.subject)}</bdi></span><span style="min-width: 0; font-size: 13px; color: #475467; white-space: nowrap; overflow: hidden; text-overflow: ellipsis"><bdi dir="auto">${escapeHtml(card.snippet)}</bdi></span></span></button></li>`
+  return `<li style="border-bottom: 1px solid light-dark(#EEF0F3,var(--xp-border))"><button type="button" data-mail-open="${escapeHtml(card.id)}" data-unread="${unread ? 'true' : 'false'}" data-attach="${attach > 0 ? '1' : '0'}" data-search="${escapeHtml(`${card.fromName} ${card.fromAddr} ${card.subject} ${card.snippet}`)}"${uid} aria-current="${selected ? 'true' : 'false'}" aria-label="${escapeHtml(aria)}" style="width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; display: flex; gap: 10px; padding: 12px 16px; border: none; background: ${bg}; box-shadow: ${bar}; text-align: start; font-family: inherit; color: light-dark(#101828,var(--xp-text-primary)); cursor: pointer"><span aria-hidden="true" data-mail-dot="true" style="flex: none; width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; background: ${dot}"></span><span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0"><span data-mail-name="true" style="min-width: 0; font-size: 14px; font-weight: ${weight}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">${tech(card.fromName, rtl)}</span><span data-mail-time="true" style="flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: ${weight}; color: ${timeColor}; font-variant-numeric: tabular-nums">${icon}<time datetime="${escapeHtml(card.datetime)}">${tech(card.time, rtl)}</time></span></span><span data-mail-subject="true" style="min-width: 0; font-size: 14px; font-weight: ${weight}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis"><bdi dir="auto">${escapeHtml(card.subject)}</bdi></span><span data-mail-preview style="min-width: 0; font-size: 13px; color: light-dark(#475467,var(--xp-text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis"><bdi dir="auto">${escapeHtml(card.snippet)}</bdi></span></span></button></li>`
 }
 
-const readingInner = (card: MailCard, model: InboxModel): string => {
-  const ar = model.locale === 'ar'
-  const avatarBg = card.local ? '#101828' : '#E7F5EE'
-  const avatarFg = card.local ? '#FFFFFF' : '#0E7A4E'
+const readingMarkup = (card: MailCard, model: InboxModel): string => {
+  const rtl = localeDirection(model.locale) === 'rtl'
+  const avatarBg = card.local ? 'light-dark(#101828,var(--xp-bg-elevated))' : 'light-dark(#E7F5EE,var(--xp-status-ok-bg))'
+  const avatarFg = card.local ? 'light-dark(#FFFFFF,var(--xp-text-primary))' : 'light-dark(#0E7A4E,var(--xp-status-ok-fg))'
   const authFailed = card.auth.includes(': fail')
-  const authUnknown = card.auth.includes(': —') || card.auth.includes('not checked') || card.auth.includes('غير مفحوص')
-  const authBg = card.local || (authUnknown && !authFailed) ? '#EEF0F3' : (authFailed ? '#FEF3F2' : '#E7F5EE')
-  const authFg = card.local || (authUnknown && !authFailed) ? '#344054' : (authFailed ? '#B42318' : '#0E7A4E')
-  const cc = card.cc
-    ? `<div data-mail-message-field style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; max-width: 100%"><dt>${ar ? 'نسخة' : 'Cc'}</dt><dd data-mail-message-value data-mail-addr="true" style="margin: 0; min-width: 0; font-family: ${MONO}; color: #344054; overflow-wrap: anywhere">${tech(card.cc, ar)}</dd></div>`
+  const authUnknown = card.auth.includes(': —') || card.auth.includes('not checked') || card.auth.includes(translator(model.locale)('not checked'))
+  const authBg = card.local || (authUnknown && !authFailed) ? 'light-dark(#EEF0F3,var(--xp-bg-elevated))' : (authFailed ? 'light-dark(#FEF3F2,var(--xp-status-critical-bg))' : 'light-dark(#E7F5EE,var(--xp-status-ok-bg))')
+  const authFg = card.local || (authUnknown && !authFailed) ? 'light-dark(#344054,var(--xp-text-secondary))' : (authFailed ? 'light-dark(#B42318,var(--xp-status-critical-fg))' : 'light-dark(#0E7A4E,var(--xp-status-ok-fg))')
+  const cc = card.cc || model.product
+    ? `<div data-mail-message-field style="display: ${card.cc ? 'grid' : 'none'}; grid-template-columns: minmax(0, 1fr); gap: var(--xp-space-label, 8px); min-width: 0; max-width: 100%"><dt>${translator(model.locale)('Cc')}</dt><dd data-mail-message-value data-mail-addr="true" style="margin: 0; min-width: 0; font-family: ${MONO}; color: light-dark(#344054,var(--xp-text-secondary)); overflow-wrap: anywhere">${tech(card.cc, rtl)}</dd></div>`
     : ''
   const blocks = card.blocks.map(block => {
     if (block.list) {
@@ -184,24 +192,60 @@ const readingInner = (card: MailCard, model: InboxModel): string => {
     return `<p${pending} dir="auto" style="margin: 0; max-width: 68ch; white-space: pre-line"><bdi dir="auto">${escapeHtml(block.p ?? '')}</bdi></p>`
   }).join('')
   const images = card.remoteImages
-    ? `<div role="note" data-mail-images="true" style="margin: 16px 28px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; border: 1px solid #C7D7F8; background: #F3F7FE; font-size: 13px; line-height: 1.6"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1D5BD6" stroke-width="2" stroke-linecap="round" style="flex: none"><circle cx="12" cy="12" r="9"></circle><path d="M12 8h.01M11 12h1v4h1"></path></svg><span style="flex: 1 1 240px">${ar ? 'الصور البعيدة محجوبة حتى لا يرى المرسل أنك فتحت الرسالة.' : 'Remote images are blocked so the sender can\'t see when you open this message.'}</span><button type="button" data-mail-action="load-images" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 13px; font-weight: 600">${ar ? 'تحميل الصور' : 'Load images'}</button></div>`
+    ? `<div role="note" data-mail-images="true" style="margin: 16px 28px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; border: 1px solid light-dark(#C7D7F8,var(--xp-accent-border)); background: light-dark(#F3F7FE,var(--xp-accent-soft)); font-size: 13px; line-height: 1.6"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="light-dark(#1D5BD6,var(--xp-accent))" stroke-width="2" stroke-linecap="round" style="flex: none"><circle cx="12" cy="12" r="9"></circle><path d="M12 8h.01M11 12h1v4h1"></path></svg><span style="flex: 1 1 240px">${translator(model.locale)("Remote images are blocked so the sender can't see when you open this message.")}</span><button type="button" data-mail-action="load-images" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-text-muted)); background: light-dark(#FFFFFF,var(--xp-bg-surface)); color: light-dark(#101828,var(--xp-text-primary)); font-family: inherit; font-size: 13px; font-weight: 600">${translator(model.locale)('Load images')}</button></div>`
     : ''
-  const attachments = card.attachments.length
-    ? `<section aria-labelledby="att-${escapeHtml(card.id)}" style="padding: 0 28px 28px; display: flex; flex-direction: column; gap: 10px"><h3 id="att-${escapeHtml(card.id)}" style="margin: 0; font-size: 13px; font-weight: 600; color: #344054">${escapeHtml(`${ar ? (card.attachments.length === 1 ? 'مرفق واحد' : card.attachments.length === 2 ? 'مرفقان' : `${card.attachments.length} مرفقات`) : `${card.attachments.length} ${card.attachments.length === 1 ? 'attachment' : 'attachments'}`} · ${card.attachTotal ?? ''}`)}</h3><ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px">${card.attachments.map(file => `<li><button type="button" data-mail-attachment-download="true"${model.product ? ` disabled aria-describedby="mail-attachment-availability-${escapeHtml(card.id)}"` : ''} aria-label="${escapeHtml(`${ar ? 'تنزيل' : 'Download'} ${file.name}, ${file.size}`)}" style="min-height: 52px; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px; border: 1px solid #E2E6EC; background: #FFFFFF; color: #101828; font-family: inherit; text-align: start"><span aria-hidden="true" style="flex: none; width: 34px; height: 34px; border-radius: 8px; background: #EEF0F3; color: #344054; display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 10px; font-weight: 600">${escapeHtml(file.ext)}</span><span style="display: flex; flex-direction: column; gap: 1px; min-width: 0"><span style="font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px">${escapeHtml(file.name)}</span><span style="font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums">${escapeHtml(file.size)}</span></span><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#475467" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-inline-start: 4px"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg></button></li>`).join('')}</ul>${model.product ? `<p id="mail-attachment-availability-${escapeHtml(card.id)}" data-mail-attachment-availability="unavailable" role="note" style="margin:0;font-size:13px;line-height:1.6;color:#475467">${ar ? 'تنزيل المرفقات غير متاح من هذه الواجهة.' : 'Attachment downloads are unavailable from this interface.'}</p>` : ''}</section>`
+  const attachments = model.product
+    ? renderMailAttachments({ lang: model.locale, mailbox: model.mailbox, folder: model.activeFolder, canRead: model.attachmentReadEnabled === true })
+    : card.attachments.length
+    ? `<section aria-labelledby="att-${escapeHtml(card.id)}" style="padding: 0 28px 28px; display: flex; flex-direction: column; gap: 10px"><h3 id="att-${escapeHtml(card.id)}" style="margin: 0; font-size: 13px; font-weight: 600; color: light-dark(#344054,var(--xp-text-secondary))">${escapeHtml(`${translator(model.locale)(ATTACHMENTS, { count: card.attachments.length })} · ${card.attachTotal ?? ''}`)}</h3><ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px">${card.attachments.map(file => `<li><button type="button" data-mail-attachment-download="true"${model.product ? ` disabled aria-describedby="mail-attachment-availability-${escapeHtml(card.id)}"` : ''} aria-label="${escapeHtml(`${translator(model.locale)('Download')} ${file.name}, ${file.size}`)}" style="min-height: 52px; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px; border: 1px solid light-dark(#E2E6EC,var(--xp-border)); background: light-dark(#FFFFFF,var(--xp-bg-surface)); color: light-dark(#101828,var(--xp-text-primary)); font-family: inherit; text-align: start"><span aria-hidden="true" style="flex: none; width: 34px; height: 34px; border-radius: 8px; background: light-dark(#EEF0F3,var(--xp-bg-elevated)); color: light-dark(#344054,var(--xp-text-secondary)); display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 10px; font-weight: 600">${escapeHtml(file.ext)}</span><span style="display: flex; flex-direction: column; gap: 1px; min-width: 0"><span style="font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px">${escapeHtml(file.name)}</span><span style="font-size: 12px; color: light-dark(#5D6B7E,var(--xp-text-muted)); font-variant-numeric: tabular-nums">${escapeHtml(file.size)}</span></span><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="light-dark(#475467,var(--xp-text-secondary))" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-inline-start: 4px"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg></button></li>`).join('')}</ul>${model.product ? `<p id="mail-attachment-availability-${escapeHtml(card.id)}" data-mail-attachment-availability="unavailable" role="note" style="margin:0;font-size:13px;line-height:1.6;color:light-dark(#475467,var(--xp-text-secondary))">${translator(model.locale)('Attachment downloads are unavailable from this interface.')}</p>` : ''}</section>`
     : ''
   const reply = (icon: string, label: string, mode: string): string => {
     const href = `${model.composeHref}?mode=${encodeURIComponent(mode)}&uid=${encodeURIComponent(String(card.uid ?? ''))}&folder=${encodeURIComponent(model.activeFolder)}`
-    return `<a href="${escapeHtml(href)}" data-mail-reply="${escapeHtml(mode)}" style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-size: 14px; font-weight: 600; text-decoration: none">${icon}${escapeHtml(label)}</a>`
+    return `<a href="${escapeHtml(href)}" data-mail-reply="${escapeHtml(mode)}" style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-text-muted)); background: light-dark(#FFFFFF,var(--xp-bg-surface)); color: light-dark(#101828,var(--xp-text-primary)); font-size: 14px; font-weight: 600; text-decoration: none">${icon}${escapeHtml(label)}</a>`
   }
-  return `<div role="toolbar" aria-label="${ar ? 'إجراءات الرسالة' : 'Message actions'}" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 24px; border-bottom: 1px solid #E2E6EC">${reply(ICONS.reply, ar ? 'رد' : 'Reply', 'reply')}${reply(ICONS.replyAll, ar ? 'رد على الكل' : 'Reply all', 'reply-all')}${reply(ICONS.forward, ar ? 'إعادة التوجيه' : 'Forward', 'forward')}<div style="position: relative"><button type="button" data-mail-action="toggle-move" aria-expanded="false" aria-controls="move-list" style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 14px; font-weight: 600">${ICONS.move}${ar ? 'نقل' : 'Move'}${ICONS.chevron}</button></div><span style="flex: 1 1 0"></span><button type="button" data-mail-action="delete" style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 8px; border: 1px solid #F4B8B2; background: #FFFFFF; color: #B42318; font-family: inherit; font-size: 14px; font-weight: 600">${ICONS.trash}${ar ? 'حذف' : 'Delete'}</button></div><div style="padding: 20px 28px; display: flex; flex-direction: column; gap: 14px; border-bottom: 1px solid #EEF0F3"><h2 id="msg-subject" dir="auto" style="margin: 0; font-size: 20px; font-weight: 600; line-height: 1.3"><bdi dir="auto">${escapeHtml(card.subject)}</bdi></h2><div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start"><span aria-hidden="true" style="flex: none; width: 40px; height: 40px; border-radius: 50%; background: ${avatarBg}; color: ${avatarFg}; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600">${escapeHtml(initialsOf(card.fromName, card.local))}</span><div style="flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 4px"><dl style="margin: 0; min-width: 0"><div data-mail-message-field style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0"><dt style="font-size: 13px; color: #475467">${ar ? 'من' : 'From'}</dt><dd data-mail-message-value style="margin: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; min-width: 0; max-width: 100%"><span data-mail-from="true" style="min-width: 0; max-width: 100%; font-size: 14px; font-weight: 600; overflow-wrap: anywhere">${tech(card.fromName, ar)}</span><span data-mail-addr="true" style="min-width: 0; max-width: 100%; font-family: ${MONO}; font-size: 13px; color: #475467; overflow-wrap: anywhere">${ar ? tech(`<${card.fromAddr}>`, true) : `&lt;${escapeHtml(card.fromAddr)}&gt;`}</span></dd></div></dl><dl style="margin: 0; display: flex; flex-wrap: wrap; gap: 2px 16px; min-width: 0; max-width: 100%; font-size: 13px; color: #475467"><div data-mail-message-field style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; max-width: 100%"><dt>${ar ? 'إلى' : 'To'}</dt><dd data-mail-message-value data-mail-addr="true" style="margin: 0; min-width: 0; font-family: ${MONO}; color: #344054; overflow-wrap: anywhere">${tech(card.to, ar)}</dd></div>${cc}</dl></div><div style="flex: none; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; max-width: 100%; min-width: 0"><dl style="margin: 0; min-width: 0"><div data-mail-message-field style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0"><dt style="font-size: 13px; color: #475467">${ar ? 'الاستلام' : 'Received'}</dt><dd data-mail-message-value style="margin: 0"><time datetime="${escapeHtml(card.datetime)}" style="font-size: 13px; color: #475467; font-variant-numeric: tabular-nums"><bdi dir="ltr">${escapeHtml(fullDate(card.datetime))}</bdi></time></dd></div></dl><span style="display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; padding: 4px 10px; border-radius: 999px; background: ${authBg}; color: ${authFg}; font-size: 12px; font-weight: 600; overflow-wrap: anywhere"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: ${authFg}"></span>${tech(card.auth, ar)}</span></div></div></div>${images}<div style="padding: 24px 28px; display: flex; flex-direction: column; gap: 14px; font-size: 14px; line-height: 1.6; color: #101828">${blocks}</div>${attachments}`
+  return `<div role="toolbar" aria-label="${translator(model.locale)('Message actions')}" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 24px; border-bottom: 1px solid light-dark(#E2E6EC,var(--xp-border))">${reply(ICONS.reply, translator(model.locale)('Reply'), 'reply')}${reply(ICONS.replyAll, translator(model.locale)('Reply all'), 'reply-all')}${reply(ICONS.forward, translator(model.locale)('Forward'), 'forward')}<div style="position: relative"><button type="button" data-mail-action="toggle-move" aria-expanded="false" aria-controls="move-list" style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-text-muted)); background: light-dark(#FFFFFF,var(--xp-bg-surface)); color: light-dark(#101828,var(--xp-text-primary)); font-family: inherit; font-size: 14px; font-weight: 600">${ICONS.move}${translator(model.locale)('Move')}${ICONS.chevron}</button></div><span style="flex: 1 1 0"></span><button type="button" data-mail-action="delete" style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 8px; border: 1px solid light-dark(#F4B8B2,var(--xp-status-critical-border)); background: light-dark(#FFFFFF,var(--xp-bg-surface)); color: light-dark(#B42318,var(--xp-status-critical-fg)); font-family: inherit; font-size: 14px; font-weight: 600">${ICONS.trash}${translator(model.locale)('Delete')}</button></div><div style="padding: 20px 28px; display: flex; flex-direction: column; gap: 14px; border-bottom: 1px solid light-dark(#EEF0F3,var(--xp-border))"><h2 id="msg-subject" dir="auto" style="margin: 0; font-size: 20px; font-weight: 600; line-height: 1.3"><bdi dir="auto">${escapeHtml(card.subject)}</bdi></h2><div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start"><span aria-hidden="true" style="flex: none; width: 40px; height: 40px; border-radius: 50%; background: ${avatarBg}; color: ${avatarFg}; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600">${escapeHtml(initialsOf(card.fromName, card.local))}</span><div style="flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 4px"><dl style="margin: 0; min-width: 0"><div data-mail-message-field style="display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--xp-space-label, 8px); min-width: 0"><dt style="font-size: 13px; color: light-dark(#475467,var(--xp-text-secondary))">${translator(model.locale)('From')}</dt><dd data-mail-message-value style="margin: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; min-width: 0; max-width: 100%"><span data-mail-from="true" style="min-width: 0; max-width: 100%; font-size: 14px; font-weight: 600; overflow-wrap: anywhere">${tech(card.fromName, rtl)}</span><span data-mail-addr="true" style="min-width: 0; max-width: 100%; font-family: ${MONO}; font-size: 13px; color: light-dark(#475467,var(--xp-text-secondary)); overflow-wrap: anywhere">${rtl ? tech(`<${card.fromAddr}>`, true) : `&lt;${escapeHtml(card.fromAddr)}&gt;`}</span></dd></div></dl><dl style="margin: 0; display: flex; flex-wrap: wrap; gap: 2px 16px; min-width: 0; max-width: 100%; font-size: 13px; color: light-dark(#475467,var(--xp-text-secondary))"><div data-mail-message-field style="display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--xp-space-label, 8px); min-width: 0; max-width: 100%"><dt>${translator(model.locale)('To')}</dt><dd data-mail-message-value data-mail-addr="true" style="margin: 0; min-width: 0; font-family: ${MONO}; color: light-dark(#344054,var(--xp-text-secondary)); overflow-wrap: anywhere">${tech(card.to, rtl)}</dd></div>${cc}</dl></div><div style="flex: none; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; max-width: 100%; min-width: 0"><dl style="margin: 0; min-width: 0"><div data-mail-message-field style="display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--xp-space-label, 8px); min-width: 0"><dt style="font-size: 13px; color: light-dark(#475467,var(--xp-text-secondary))">${translator(model.locale)('Received')}</dt><dd data-mail-message-value style="margin: 0"><time datetime="${escapeHtml(card.datetime)}" style="font-size: 13px; color: light-dark(#475467,var(--xp-text-secondary)); font-variant-numeric: tabular-nums"><bdi dir="ltr">${escapeHtml(card.displayDate ?? fullDate(card.datetime))}</bdi></time></dd></div></dl><span style="display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; padding: 4px 10px; border-radius: 999px; background: ${authBg}; color: ${authFg}; font-size: 12px; font-weight: 600; overflow-wrap: anywhere"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: ${authFg}"></span>${tech(card.auth, rtl)}</span></div></div></div>${images}<div style="padding: 24px 28px; display: flex; flex-direction: column; gap: 14px; font-size: 14px; line-height: 1.6; color: light-dark(#101828,var(--xp-text-primary))">${blocks}</div>${attachments}`
 }
 
-const emptyReading = (ar: boolean, folderEmpty: boolean): string => `<div data-mail-pane="empty" style="flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 64px 24px; text-align: center"><svg aria-hidden="true" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#5D6B7E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 7l9 6 9-6"></path></svg><h2 style="margin: 0; font-size: 16px; font-weight: 600">${folderEmpty ? (ar ? 'لا توجد رسائل في هذا المجلد.' : 'No messages in this folder.') : (ar ? 'لم تُحدد رسالة' : 'No message selected')}</h2><p style="margin: 0; font-size: 13px; color: #5D6B7E; line-height: 1.6">${folderEmpty ? (ar ? 'صندوق هذا المجلد فارغ.' : 'Nothing in this folder is waiting to be read.') : (ar ? 'اختر رسالة من القائمة لقراءتها هنا.' : 'Choose a message from the list to read it here.')}</p></div>`
+const emptyReading = (locale: Locale, folderEmpty: boolean): string => `<div data-mail-pane="empty" style="flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 64px 24px; text-align: center"><svg aria-hidden="true" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="light-dark(#5D6B7E,var(--xp-text-muted))" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 7l9 6 9-6"></path></svg><h2 style="margin: 0; font-size: 16px; font-weight: 600">${folderEmpty ? (translator(locale)('No messages in this folder.')) : (translator(locale)('No message selected'))}</h2><p style="margin: 0; font-size: 13px; color: light-dark(#5D6B7E,var(--xp-text-muted)); line-height: 1.6">${folderEmpty ? (translator(locale)('Nothing in this folder is waiting to be read.')) : (translator(locale)('Choose a message from the list to read it here.'))}</p></div>`
+
+// The folder workspace fills these hooks from validated mailbox responses.
+// The markup itself remains shared with the default Inbox and its reference fixtures.
+const readingInner = (card: MailCard, model: InboxModel): string => {
+  const html = readingMarkup(card, model)
+  if (!model.folderWorkspace && !model.product) return html
+  let hooked = html
+    .replace('id="msg-subject"', 'id="msg-subject" data-mail-detail-subject')
+    .replace('data-mail-from="true"', 'data-mail-from="true" data-mail-detail-name')
+    .replace('<span data-mail-addr="true"', '<span data-mail-addr="true" data-mail-detail-from')
+    .replace('<dd data-mail-message-value data-mail-addr="true"', '<dd data-mail-message-value data-mail-addr="true" data-mail-detail-to')
+    .replace('<time datetime=', '<time data-mail-detail-date datetime=')
+    .replace('<span aria-hidden="true" style="flex: none; width: 40px;', '<span data-mail-detail-avatar aria-hidden="true" style="flex: none; width: 40px;')
+    .replace('<span style="display: inline-flex; align-items: center; gap: 6px; max-width:', '<span data-mail-detail-auth style="display: inline-flex; align-items: center; gap: 6px; max-width:')
+    .replace('<div style="padding: 24px 28px;', '<div data-mail-detail-body style="padding: 24px 28px;')
+    .replace('<section aria-labelledby="att-', '<section data-mail-detail-attachments aria-labelledby="att-')
+    .replace('<section class="xp-mail-attachments"', '<section data-mail-detail-attachments class="xp-mail-attachments"')
+  // Cc appears before To in the source construction, but after To in the markup.
+  hooked = hooked.replace('<dd data-mail-message-value data-mail-addr="true" style', '<dd data-mail-message-value data-mail-addr="true" data-mail-detail-cc style')
+  if (!model.folderWorkspace) return hooked
+  const action = model.activeFolder === 'Trash' ? 'restore' : 'delete'
+  const label = model.activeFolder === 'Trash' ? (translator(model.locale)('Restore to Inbox')) : (translator(model.locale)('Move to Trash'))
+  return hooked.replace('data-mail-action="delete"', `data-mail-action="${action}"`).replace(`${ICONS.trash}${translator(model.locale)('Delete')}`, `${ICONS.trash}${label}`)
+}
 
 const INBOX_SCRIPT = `<script id="xmail-inbox-client">
 (function () {
   var root = document.querySelector('[data-board-port="xmail-inbox"]')
   if (!root) return
+  if (root.getAttribute('data-mail-folder-workspace') === 'true') return
+  const formatMailDateTime = ${DISPLAY_DATETIME_BINDING}
+  var mailFolderFlags = ${mailFolderFlags.toString()}
+  var mailFolderObject = ${mailFolderObject.toString()}
+  var mailFolderUid = ${mailFolderUid.toString()}
+  var mailFolderUidValidity = ${mailFolderUidValidity.toString()}
+  var mailFolderWriteUncertain = ${mailFolderWriteUncertain.toString()}
+  var readFolderSummary = ${readFolderSummary.toString()}
+  var readFolderMessage = ${readFolderMessage.toString()}
+  var readFolderMove = ${readFolderMove.toString()}
   var list = root.querySelector('[data-mail-list]')
   var pager = root.querySelector('[data-mail-pager]')
   var article = root.querySelector('[data-mail-article]')
@@ -209,8 +253,8 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
   var blank = root.querySelector('#xmail-empty')
   var query = root.querySelector('#xmail-query')
   var filter = 'all'
-  var rtl = root.getAttribute('data-locale') === 'ar'
-  var barOn = rtl ? 'inset -3px 0 0 #1D5BD6' : 'inset 3px 0 0 #1D5BD6'
+  var rtl = root.getAttribute('dir') === 'rtl'
+  var barOn = rtl ? 'inset -3px 0 0 light-dark(#1D5BD6,var(--xp-accent))' : 'inset 3px 0 0 light-dark(#1D5BD6,var(--xp-accent))'
   var text = function (name) { return root.getAttribute(name) || '' }
   var targets = []
   var imagesLoaded = {}
@@ -218,14 +262,46 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
   var refreshQueued = false
   var refreshing = false
   var refreshTimer = null
+  var readGeneration = 0
+  var mutationUncertain = false
+  var pinnedMailbox = root.getAttribute('data-mailbox') || '', pinnedFolder = root.getAttribute('data-mail-folder') || ''
+  var positiveUint32 = function (value) { return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 4294967295 }
+  var observedValidity = function (node, prefix) {
+    if (!node || node.getAttribute(prefix + '-uid-validity-observed') !== 'true') return null
+    var raw = node.getAttribute(prefix + '-uid-validity') || ''
+    if (!/^[1-9][0-9]*$/.test(raw)) return null
+    var value = Number(raw)
+    return positiveUint32(value) ? value : null
+  }
+  var updateMutationControls = function () {
+    if (root.getAttribute('data-product') !== 'true') return
+    var selected = list && list.querySelector('[aria-current="true"]')
+    var undo = root.querySelector('[data-mail-undo]')
+    var buttons = root.querySelectorAll('[data-mail-action="delete"],[data-mail-action="move"],[data-mail-action="toggle-move"],[data-mail-action="undo"]')
+    for (var i = 0; i < buttons.length; i++) buttons[i].disabled = pendingActions > 0 || mutationUncertain || (buttons[i].getAttribute('data-mail-action') === 'undo' ? observedValidity(undo, 'data-undo') === null : observedValidity(selected, 'data-mail') === null)
+  }
+  updateMutationControls()
+  var actionFailure = function (error) {
+    mutationUncertain = mutationUncertain || mailFolderWriteUncertain(error)
+    var stale = root.querySelector('[data-mail-undo]')
+    if (stale) stale.remove()
+    var status = root.querySelector('[data-mail-action-status]')
+    if (!status) {
+      status = document.createElement('p'); status.setAttribute('data-mail-action-status', 'true'); status.setAttribute('role', 'alert')
+      status.style.cssText = 'margin:0;padding:8px 16px;background:light-dark(#FEF3F2,var(--xp-status-critical-bg));color:light-dark(#B42318,var(--xp-status-critical-fg));font-size:13px'
+      var slot = root.querySelector('[data-mail-list-slot]'); if (slot) slot.insertBefore(status, slot.firstChild)
+    }
+    status.textContent = mutationUncertain ? (xpT('The change outcome is unverified. Reload this mailbox to review it before another change.')) : text('data-move-failed')
+    updateMutationControls()
+  }
   try { targets = JSON.parse(root.getAttribute('data-move-targets') || '[]') } catch (e) { targets = [] }
   var paintFilters = function () {
     var filters = root.querySelectorAll('[data-mail-filter]')
     for (var i = 0; i < filters.length; i++) {
       var on = filters[i].getAttribute('data-mail-filter') === filter
       filters[i].setAttribute('aria-pressed', on ? 'true' : 'false')
-      filters[i].style.background = on ? '#FFFFFF' : 'transparent'
-      filters[i].style.color = on ? '#101828' : '#475467'
+      filters[i].style.background = on ? 'light-dark(#FFFFFF,var(--xp-bg-surface))' : 'transparent'
+      filters[i].style.color = on ? 'light-dark(#101828,var(--xp-text-primary))' : 'light-dark(#475467,var(--xp-text-secondary))'
       filters[i].style.fontWeight = on ? '600' : '500'
       filters[i].style.boxShadow = on ? '0 1px 2px rgba(16, 24, 40, 0.08)' : 'none'
     }
@@ -260,9 +336,10 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
       else {
         var loaded = pager.getAttribute('data-loaded') || '0'
         var total = Number(pager.getAttribute('data-total') || loaded)
-        var ofWord = root.getAttribute('data-pager-of') || 'of'
-        var latest = root.getAttribute('data-pager-latest') || 'of the latest'
-        pager.textContent = (!q && filter === 'all') ? ('1\u2013' + shown + ' ' + ofWord + ' ' + (total - removed)) : (shown + ' ' + latest + ' ' + loaded)
+        var fill = function (template, values) { return Object.keys(values).reduce(function (text, key) { return text.split('{' + key + '}').join(String(values[key])) }, template) }
+        var range = root.getAttribute('data-pager-range') || '1\u2013{shown} of {total}'
+        var latest = root.getAttribute('data-pager-latest') || '{shown} of the latest {loaded}'
+        pager.textContent = (!q && filter === 'all') ? fill(range, { shown: shown, total: total - removed }) : fill(latest, { shown: shown, loaded: loaded })
       }
     }
     var empty = root.querySelector('[data-mail-filter-empty]')
@@ -276,12 +353,12 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
       heading.style.cssText = 'margin:0;font-size:16px;font-weight:600'
       heading.textContent = text('data-empty-title')
       var note = document.createElement('p')
-      note.style.cssText = 'margin:0;font-size:13px;color:#5D6B7E;line-height:1.6;max-width:280px'
+      note.style.cssText = 'margin:0;font-size:13px;color:light-dark(#5D6B7E,var(--xp-text-muted));line-height:1.6;max-width:280px'
       note.textContent = text('data-empty-body')
       var clear = document.createElement('button')
       clear.type = 'button'
       clear.setAttribute('data-mail-action', 'clear')
-      clear.style.cssText = 'min-height:44px;padding:0 18px;border-radius:8px;border:1px solid #D0D5DD;background:#FFFFFF;color:#101828;font-family:inherit;font-size:14px;font-weight:600'
+      clear.style.cssText = 'min-height:44px;padding:0 18px;border-radius:8px;border:1px solid light-dark(#D0D5DD,var(--xp-text-muted));background:light-dark(#FFFFFF,var(--xp-bg-surface));color:light-dark(#101828,var(--xp-text-primary));font-family:inherit;font-size:14px;font-weight:600'
       clear.textContent = text('data-empty-clear')
       empty.appendChild(heading)
       empty.appendChild(note)
@@ -311,7 +388,7 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
     var time = button.querySelector('[data-mail-time]')
     if (name) name.style.fontWeight = '400'
     if (subject) subject.style.fontWeight = '400'
-    if (time) { time.style.fontWeight = '400'; time.style.color = '#5D6B7E' }
+    if (time) { time.style.fontWeight = '400'; time.style.color = 'light-dark(#5D6B7E,var(--xp-text-muted))' }
     if ((root.getAttribute('data-mail-folder') || 'INBOX') !== 'INBOX') return
     var dropCount = function (node) {
       if (!node) return
@@ -326,11 +403,11 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
     if (!summary) return
     var nextUnread = Math.max(0, parseInt(summary.getAttribute('data-mail-unread') || '0', 10) - 1)
     summary.setAttribute('data-mail-unread', String(nextUnread))
-    var arabic = root.getAttribute('data-locale') === 'ar'
-    summary.textContent = nextUnread > 0 ? (' · ' + nextUnread + (arabic ? ' غير مقروء' : ' unread')) : ''
+    summary.textContent = nextUnread > 0 ? (' · ' + xpT('{count} unread', { count: nextUnread })) : ''
   }
   var show = function (id) {
     if (!article) return
+    var readToken = ++readGeneration
     var menu = root.querySelector('[data-mail-move]')
     if (menu) menu.remove()
     var toggle = root.querySelector('[data-mail-action="toggle-move"]')
@@ -340,7 +417,7 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
       var rows = list ? list.querySelectorAll('[data-mail-open]') : []
       for (var i = 0; i < rows.length; i++) {
         rows[i].setAttribute('aria-current', 'false')
-        rows[i].style.background = '#FFFFFF'
+        rows[i].style.background = 'light-dark(#FFFFFF,var(--xp-bg-surface))'
         rows[i].style.boxShadow = 'none'
       }
       return
@@ -349,18 +426,50 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
     var pane = store.content.querySelector('[data-reading-id="' + id + '"]')
     if (!pane) return
     article.innerHTML = pane.innerHTML
-    var pendingBody = article.querySelector('[data-mail-body="pending"]')
+    var pendingBody = article.querySelector('[data-mail-body="pending"]') || article.querySelector('[data-mail-detail-body]')
     var opened = list && list.querySelector('[data-mail-open="' + id + '"]')
     var uid = opened && opened.getAttribute('data-mail-uid')
-    if (pendingBody && uid && typeof window.xpanelSessionRequest === 'function') {
-      var folderQuery = encodeURIComponent(root.getAttribute('data-mail-folder') || 'INBOX')
-      window.xpanelSessionRequest('GET', '/api/webmail/inbox/' + uid + '?folder=' + folderQuery).then(function (data) {
-        var message = data && data.message ? data.message : null
-        if (!message || !pendingBody.isConnected) return
-        pendingBody.textContent = message.body || ''
+    if (opened && root.getAttribute('data-product') === 'true') { opened.removeAttribute('data-mail-uid-validity'); opened.setAttribute('data-mail-uid-validity-observed', 'false') }
+    var capturedMailbox = root.getAttribute('data-mailbox') || '', capturedFolder = root.getAttribute('data-mail-folder') || '', capturedUid = Number(uid)
+    if (root.getAttribute('data-product') === 'true' && pendingBody && uid && /^[1-9][0-9]*$/.test(uid) && positiveUint32(capturedUid) && capturedMailbox === pinnedMailbox && capturedFolder === pinnedFolder && capturedMailbox && capturedFolder && typeof window.xpanelSessionRequest === 'function') {
+      window.xpanelSessionRequest('GET', '/api/webmail/inbox/' + uid + '?folder=' + encodeURIComponent(capturedFolder)).then(function (data) {
+        if (readToken !== readGeneration || !pendingBody.isConnected || !article.isConnected || !opened.isConnected || root.getAttribute('data-mailbox') !== capturedMailbox || root.getAttribute('data-mail-folder') !== capturedFolder) return
+        var message = readFolderMessage(data, capturedMailbox, capturedFolder, capturedUid)
+        pendingBody.textContent = message.body
+        pendingBody.style.whiteSpace = 'pre-wrap'; pendingBody.style.overflowWrap = 'anywhere'; pendingBody.dir = 'auto'
         pendingBody.removeAttribute('data-mail-body')
+        var setField = function (selector, value, technical) {
+          var node = article.querySelector(selector)
+          if (!node) return
+          node.textContent = value; node.dir = technical ? 'ltr' : 'auto'; node.style.unicodeBidi = 'isolate'; node.style.textAlign = rtl ? 'right' : 'left'
+        }
+        setField('[data-mail-detail-subject]', message.subject, false)
+        setField('[data-mail-detail-name]', message.fromName || message.from, false)
+        setField('[data-mail-detail-from]', '<' + message.from + '>', true)
+        setField('[data-mail-detail-to]', message.to, true)
+        setField('[data-mail-detail-cc]', message.cc || '', true)
+        setField('[data-mail-detail-avatar]', (message.fromName || message.from).slice(0, 2), false)
+        var cc = article.querySelector('[data-mail-detail-cc]')
+        if (cc && cc.parentElement) { cc.parentElement.hidden = !message.cc; cc.parentElement.style.display = message.cc ? 'grid' : 'none' }
+        var date = new Date(message.receivedAt)
+        var fullMailDate = formatMailDateTime(message.receivedAt)
+        setField('[data-mail-detail-date]', Number.isNaN(date.getTime()) ? message.receivedAt : fullMailDate === '—' ? formatMailDateTime(date) : fullMailDate, true)
+        var dateNode = article.querySelector('[data-mail-detail-date]'); if (dateNode) dateNode.setAttribute('datetime', message.receivedAt)
+        var replies = article.querySelectorAll('[data-mail-reply]')
+        for (var r = 0; r < replies.length; r++) {
+          var mode = replies[r].getAttribute('data-mail-reply')
+          if (['reply','reply-all','forward'].indexOf(mode) === -1) continue
+          var href = new URL('/mail/compose', window.location.href); href.searchParams.set('mode', mode); href.searchParams.set('uid', String(capturedUid)); href.searchParams.set('folder', capturedFolder)
+          replies[r].href = href.pathname + href.search
+        }
+        if (message.unread === false) markRead(opened)
+        if (message.uidValidityObserved === true && positiveUint32(message.uidValidity)) {
+          opened.setAttribute('data-mail-uid-validity', String(message.uidValidity)); opened.setAttribute('data-mail-uid-validity-observed', 'true')
+          article.dispatchEvent(new CustomEvent('xpanel:mail-message-read', { bubbles: true, detail: { mailbox: capturedMailbox, folder: capturedFolder, uid: capturedUid, uidValidity: message.uidValidity, uidValidityObserved: true } }))
+        }
+        updateMutationControls()
       }).catch(function () {
-        if (pendingBody.isConnected) pendingBody.textContent = text('data-body-failed')
+        if (readToken === readGeneration && pendingBody.isConnected) pendingBody.textContent = text('data-body-failed')
       })
     }
     if (imagesLoaded[id]) {
@@ -372,10 +481,11 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
       var button = rows[j]
       var on = button.getAttribute('data-mail-open') === id
       button.setAttribute('aria-current', on ? 'true' : 'false')
-      button.style.background = on ? '#F3F7FE' : '#FFFFFF'
+      button.style.background = on ? 'light-dark(#F3F7FE,var(--xp-accent-soft))' : 'light-dark(#FFFFFF,var(--xp-bg-surface))'
       button.style.boxShadow = on ? barOn : 'none'
-      if (on) markRead(button)
+      if (on && root.getAttribute('data-product') !== 'true') markRead(button)
     }
+    updateMutationControls()
   }
   root.addEventListener('click', function (event) {
     var target = event.target
@@ -416,7 +526,7 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
         menu.id = 'move-list'
         menu.setAttribute('data-mail-move', 'true')
         menu.setAttribute('aria-label', text('data-move-label'))
-        menu.style.cssText = 'position:absolute;top:50px;inset-inline-start:0;z-index:2;list-style:none;margin:0;padding:6px;min-width:200px;border-radius:10px;border:1px solid #E2E6EC;background:#FFFFFF;box-shadow:0 8px 24px rgba(16, 24, 40, 0.12);display:flex;flex-direction:column;gap:2px'
+        menu.style.cssText = 'position:absolute;top:50px;inset-inline-start:0;z-index:2;list-style:none;margin:0;padding:6px;min-width:200px;border-radius:10px;border:1px solid light-dark(#E2E6EC,var(--xp-border));background:light-dark(#FFFFFF,var(--xp-bg-surface));box-shadow:0 8px 24px rgba(16, 24, 40, 0.12);display:flex;flex-direction:column;gap:2px'
         targets.forEach(function (folder) {
           var id = folder && typeof folder === 'object' ? String(folder.id || '') : String(folder || '')
           var label = folder && typeof folder === 'object' ? String(folder.label || id) : String(folder || '')
@@ -427,7 +537,7 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
           button.setAttribute('data-folder', id)
           button.setAttribute('data-folder-label', label)
           button.textContent = label
-          button.style.cssText = 'width:100%;min-height:40px;padding:0 12px;border-radius:8px;border:none;background:transparent;color:#101828;font-family:inherit;font-size:14px;text-align:start'
+          button.style.cssText = 'width:100%;min-height:40px;padding:0 12px;border-radius:8px;border:none;background:transparent;color:light-dark(#101828,var(--xp-text-primary));font-family:inherit;font-size:14px;text-align:start'
           li.appendChild(button)
           menu.appendChild(li)
         })
@@ -460,14 +570,14 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
           bar = document.createElement('div')
           bar.setAttribute('data-mail-undo', 'true')
           bar.setAttribute('role', 'status')
-          bar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 8px 8px 16px;background:#101828;color:#FFFFFF;font-size:13px'
+          bar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 8px 8px 16px;background:light-dark(#101828,var(--xp-bg-elevated));color:light-dark(#FFFFFF,var(--xp-text-primary));font-size:13px'
           var label = document.createElement('span')
           label.setAttribute('data-mail-undo-text', 'true')
           var undo = document.createElement('button')
           undo.type = 'button'
           undo.setAttribute('data-mail-action', 'undo')
           undo.textContent = text('data-undo-label')
-          undo.style.cssText = 'min-height:40px;padding:0 12px;border-radius:8px;border:1px solid #475467;background:transparent;color:#FFFFFF;font-family:inherit;font-size:13px;font-weight:600'
+          undo.style.cssText = 'min-height:40px;padding:0 12px;border-radius:8px;border:1px solid light-dark(#475467,var(--xp-text-secondary));background:transparent;color:light-dark(#FFFFFF,var(--xp-text-primary));font-family:inherit;font-size:13px;font-weight:600'
           if (!showUndo) undo.hidden = true
           bar.appendChild(label)
           bar.appendChild(undo)
@@ -479,7 +589,7 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
         var undoBtn = bar.querySelector('[data-mail-action="undo"]')
         if (undoBtn) undoBtn.hidden = !showUndo
         if (undoText) undoText.textContent = showUndo
-          ? text('data-moved-prefix') + folder + ': ' + (subject ? subject.textContent : '')
+          ? text('data-moved-message').split(/([{]folder[}]|[{]subject[}])/).map(function (part) { return part === '{folder}' ? folder : part === '{subject}' ? (subject ? subject.textContent : '') : part }).join('')
           : text('data-deleted-label')
         bar.setAttribute('data-removed-id', current.getAttribute('data-mail-open') || '')
         if (next) show(next.getAttribute('data-mail-open'))
@@ -487,23 +597,36 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
         paint()
       }
       if (product) {
-        if (!uid || typeof window.xpanelSessionRequest !== 'function') return
+        var uidValidity = observedValidity(current, 'data-mail')
+        var mutationMailbox = root.getAttribute('data-mailbox') || ''
+        if (mutationMailbox !== pinnedMailbox || fromFolder !== pinnedFolder || !uid || !positiveUint32(Number(uid)) || uidValidity === null || pendingActions > 0 || mutationUncertain || typeof window.xpanelSessionRequest !== 'function') return
         var trashNow = name === 'delete' && fromFolder === 'Trash'
         if (trashNow && typeof window.confirm === 'function' && !window.confirm(text('data-trash-confirm'))) return
-        current.parentNode.setAttribute('data-removed', 'true')
-        paint()
         var path = '/api/webmail/inbox/' + encodeURIComponent(uid)
         pendingActions += 1
+        updateMutationControls()
         var pending = name === 'move' || (name === 'delete' && !trashNow)
-          ? window.xpanelSessionRequest('POST', path + '/move', { folder: name === 'delete' ? 'Trash' : folderId, from: fromFolder })
-          : window.xpanelSessionRequest('DELETE', path + '?folder=' + encodeURIComponent(fromFolder) + '&confirm=delete')
+          ? window.xpanelSessionRequest('POST', path + '/move', { folder: name === 'delete' ? 'Trash' : folderId, from: fromFolder, uidValidity: uidValidity })
+          : window.xpanelSessionRequest('DELETE', path + '?folder=' + encodeURIComponent(fromFolder) + '&confirm=delete', { uidValidity: uidValidity })
         pending.then(function (result) {
-          finish(name === 'move' || (name === 'delete' && !trashNow))
+          if (!root.isConnected || !current.isConnected || root.getAttribute('data-mailbox') !== mutationMailbox || root.getAttribute('data-mail-folder') !== fromFolder) return
+          var ack
+          if (trashNow) {
+            if (!result || mailFolderFlags(result) || result.ok !== true || result.uid !== Number(uid) || result.folder !== 'Trash' || result.sourceUidValidity !== uidValidity || result.permanent !== true || result.stateChanged !== true) throw new Error('invalid_delete_receipt')
+          } else {
+            ack = readFolderMove(result, mutationMailbox, fromFolder, Number(uid), name === 'delete' ? 'Trash' : folderId, uidValidity)
+            if (!ack.stateChanged) return
+            if (!ack.destinationUidKnown || ack.uid === null || ack.uidValidityObserved !== true || !positiveUint32(ack.uidValidity)) throw new Error('unverified_destination')
+          }
+          finish(!trashNow)
           var bar = root.querySelector('[data-mail-undo]')
-          if (bar && result && result.uid) {
-            bar.setAttribute('data-undo-uid', String(result.uid))
+          if (bar && ack) {
+            bar.setAttribute('data-undo-uid', String(ack.uid))
             bar.setAttribute('data-undo-from', name === 'delete' ? 'Trash' : folderId)
             bar.setAttribute('data-undo-to', fromFolder)
+            bar.setAttribute('data-undo-uid-validity', String(ack.uidValidity)); bar.setAttribute('data-undo-uid-validity-observed', 'true')
+          } else if (bar) {
+            ['data-undo-uid','data-undo-from','data-undo-to','data-undo-uid-validity','data-undo-uid-validity-observed'].forEach(function (key) { bar.removeAttribute(key) })
           }
         }).catch(function (err) {
           current.parentNode.removeAttribute('data-removed')
@@ -514,13 +637,11 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
             status = document.createElement('p')
             status.setAttribute('data-mail-action-status', 'true')
             status.setAttribute('role', 'alert')
-            status.style.cssText = 'margin:0;padding:8px 16px;background:#FEF3F2;color:#B42318;font-size:13px'
+            status.style.cssText = 'margin:0;padding:8px 16px;background:light-dark(#FEF3F2,var(--xp-status-critical-bg));color:light-dark(#B42318,var(--xp-status-critical-fg));font-size:13px'
             var slot = root.querySelector('[data-mail-list-slot]')
             if (slot) slot.insertBefore(status, slot.firstChild)
           }
-          var arabic = root.getAttribute('data-locale') === 'ar'
-          var detail = err && err.details && arabic && err.details.messageAr ? err.details.messageAr : ''
-          status.textContent = detail || (err && err.message ? err.message : text('data-move-failed'))
+          actionFailure(err)
           paint()
         }).finally(completeAction)
         return
@@ -546,22 +667,32 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
         paint()
       }
       var undoUid = undoBar && undoBar.getAttribute('data-undo-uid')
-      if (root.getAttribute('data-product') === 'true' && undoUid && typeof window.xpanelSessionRequest === 'function') {
+      if (root.getAttribute('data-product') === 'true') {
+        var undoValidity = observedValidity(undoBar, 'data-undo')
+        var undoFrom = undoBar && undoBar.getAttribute('data-undo-from'), undoTo = undoBar && undoBar.getAttribute('data-undo-to')
+        if (root.getAttribute('data-mailbox') !== pinnedMailbox || root.getAttribute('data-mail-folder') !== pinnedFolder || !undoUid || !positiveUint32(Number(undoUid)) || undoValidity === null || !undoFrom || !undoTo || pendingActions > 0 || mutationUncertain || typeof window.xpanelSessionRequest !== 'function') return
         pendingActions += 1
+        updateMutationControls()
         window.xpanelSessionRequest('POST', '/api/webmail/inbox/' + encodeURIComponent(undoUid) + '/move', {
-          folder: undoBar.getAttribute('data-undo-to') || 'INBOX',
-          from: undoBar.getAttribute('data-undo-from') || 'Trash',
-        }).then(restoreRow).catch(function (err) {
+          folder: undoTo,
+          from: undoFrom,
+          uidValidity: undoValidity,
+        }).then(function (result) {
+          if (!root.isConnected || root.getAttribute('data-mailbox') !== pinnedMailbox || root.getAttribute('data-mail-folder') !== pinnedFolder) return
+          var ack = readFolderMove(result, pinnedMailbox, undoFrom, Number(undoUid), undoTo, undoValidity)
+          if (!ack.stateChanged || !ack.destinationUidKnown || ack.uid === null || ack.uidValidityObserved !== true || !positiveUint32(ack.uidValidity)) throw new Error('unverified_undo')
+          restoreRow(ack)
+        }).catch(function (err) {
           var status = root.querySelector('[data-mail-action-status]')
           if (!status) {
             status = document.createElement('p')
             status.setAttribute('data-mail-action-status', 'true')
             status.setAttribute('role', 'alert')
-            status.style.cssText = 'margin:0;padding:8px 16px;background:#FEF3F2;color:#B42318;font-size:13px'
+            status.style.cssText = 'margin:0;padding:8px 16px;background:light-dark(#FEF3F2,var(--xp-status-critical-bg));color:light-dark(#B42318,var(--xp-status-critical-fg));font-size:13px'
             var slot = root.querySelector('[data-mail-list-slot]')
             if (slot) slot.insertBefore(status, slot.firstChild)
           }
-          status.textContent = err && err.message ? err.message : text('data-move-failed')
+          actionFailure(err)
         }).finally(completeAction)
         return
       }
@@ -603,10 +734,11 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
       var slot = root.querySelector('[data-mail-list-slot]')
       if (slot) slot.insertBefore(status, slot.firstChild)
     }
-    status.textContent = rtl ? 'تعذر تحديث البريد. البيانات المعروضة هي آخر بيانات تم تحميلها.' : 'Mail could not be refreshed. Showing the last loaded data.'
+    status.textContent = xpT('Mail could not be refreshed. Showing the last loaded data.')
   }
   var completeAction = function () {
     pendingActions = Math.max(0, pendingActions - 1)
+    updateMutationControls()
     if (refreshQueued) scheduleRefresh()
   }
   var refresh = function () {
@@ -648,8 +780,10 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
         var uid = Number(uidText)
         if (!Number.isInteger(uid) || uid <= 0 || uid > 4294967295 || String(uid) !== uidText || rows[i].getAttribute('data-mail-open') !== 'uid-' + uid) throw new Error('mail refresh unavailable')
         var on = rows[i].getAttribute('data-mail-open') === selectedId
+        // The open message keeps the UIDVALIDITY its actual read observed; every write still sends it for server comparison.
+        if (on && selected.getAttribute('data-mail-uid-validity-observed') === 'true') { rows[i].setAttribute('data-mail-uid-validity', selected.getAttribute('data-mail-uid-validity') || ''); rows[i].setAttribute('data-mail-uid-validity-observed', 'true') }
         rows[i].setAttribute('aria-current', on ? 'true' : 'false')
-        rows[i].style.background = on ? '#F3F7FE' : '#FFFFFF'
+        rows[i].style.background = on ? 'light-dark(#F3F7FE,var(--xp-accent-soft))' : 'light-dark(#FFFFFF,var(--xp-bg-surface))'
         rows[i].style.boxShadow = on ? barOn : 'none'
       }
       removed.forEach(function (row) {
@@ -688,6 +822,7 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
         for (var a = 0; a < anchors.length; a++) { if (anchors[a].getAttribute('data-nav-route') === route) { anchors[a].appendChild(safeClone(observedCounts[n])); break } }
       }
       paint(true)
+      updateMutationControls()
       list.parentNode.scrollTop = scroll
       if (focus) { var focused = list.querySelector('[data-mail-open="' + focus + '"]'); if (focused) focused.focus({ preventScroll: true }) }
       refreshStatus(false)
@@ -713,71 +848,81 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
     } catch (e) { /* Keep the current filter when no document URL is available. */ }
   }
   var opened = list && list.querySelector('[aria-current="true"]')
-  if (opened && opened.parentNode.style.display !== 'none') markRead(opened)
+  // Product rows stay unread until an actual server read observes them as read.
+  if (opened && opened.parentNode.style.display !== 'none' && root.getAttribute('data-product') !== 'true') markRead(opened)
 })()
 </script>`
 
 export const renderInbox = (model: InboxModel): string => {
-  const ar = model.locale === 'ar'
-  const font = ar ? FONT_AR : FONT_EN
+  const rtl = localeDirection(model.locale) === 'rtl'
+  const font = rtl ? FONT_AR : FONT_EN
   const selected = model.messages.find(card => card.id === model.selectedId) ?? null
-  const rows = model.messages.map(card => messageRow(card, card.id === model.selectedId, ar)).join('')
+  const rows = model.messages.map(card => messageRow(card, card.id === model.selectedId, model.locale)).join('')
   const panes = model.messages.map(card => `<div data-reading-id="${escapeHtml(card.id)}">${readingInner(card, model)}</div>`).join('')
   const mailbox = `<bdi dir="ltr">${escapeHtml(model.mailbox)}</bdi>`
-  const quota = tech(model.quotaText, ar)
+  const quota = tech(model.quotaText, rtl)
   const filterBtn = (key: string, label: string, on: boolean): string =>
-    `<button type="button" data-mail-filter="${key}" aria-pressed="${on ? 'true' : 'false'}" style="min-height: 44px; min-width: 44px; padding: 0 12px; border-radius: 8px; border: none; background: ${on ? '#FFFFFF' : 'transparent'}; color: ${on ? '#101828' : '#475467'}; font-family: inherit; font-size: 13px; font-weight: ${on ? '600' : '500'}; box-shadow: ${on ? '0 1px 2px rgba(16, 24, 40, 0.08)' : 'none'}">${escapeHtml(label)}</button>`
+    `<button type="button" data-mail-filter="${key}" aria-pressed="${on ? 'true' : 'false'}" style="min-height: 44px; min-width: 44px; padding: 0 12px; border-radius: 8px; border: none; background: ${on ? 'light-dark(#FFFFFF,var(--xp-bg-surface))' : 'transparent'}; color: ${on ? 'light-dark(#101828,var(--xp-text-primary))' : 'light-dark(#475467,var(--xp-text-secondary))'}; font-family: inherit; font-size: 13px; font-weight: ${on ? '600' : '500'}; box-shadow: ${on ? '0 1px 2px rgba(16, 24, 40, 0.08)' : 'none'}">${escapeHtml(label)}</button>`
   const listEmpty = model.folderEmpty
-    ? `<div data-mail-empty-list="true" style="display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 24px; text-align: center"><h2 style="margin: 0; font-size: 16px; font-weight: 600">${ar ? 'لا توجد رسائل في هذا المجلد.' : 'No messages in this folder.'}</h2><p style="margin: 0; font-size: 13px; color: #5D6B7E; line-height: 1.6; max-width: 280px">${ar ? 'لا رسائل في هذا المجلد.' : 'Nothing in this folder is waiting to be read.'}</p></div>`
+    ? `<div data-mail-empty-list="true" style="display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 24px; text-align: center"><h2 style="margin: 0; font-size: 16px; font-weight: 600">${translator(model.locale)('No messages in this folder.')}</h2><p style="margin: 0; font-size: 13px; color: light-dark(#5D6B7E,var(--xp-text-muted)); line-height: 1.6; max-width: 280px">${translator(model.locale)(msgctxt('xmail-inbox', 'Nothing in this folder is waiting to be read.'))}</p></div>`
     : ''
   const article = selected
-    ? `<article data-mail-pane="reading-pane" data-mail-article="true" aria-label="${ar ? 'لوحة القراءة' : 'Reading pane'}" style="flex: 2.618 1 420px; min-width: 0; background: #FFFFFF; display: flex; flex-direction: column">${readingInner(selected, model)}</article>`
-    : `<article data-mail-pane="reading-pane" data-mail-article="true" aria-label="${ar ? 'لوحة القراءة' : 'Reading pane'}" style="flex: 2.618 1 420px; min-width: 0; background: #FFFFFF; display: flex; flex-direction: column">${emptyReading(ar, model.folderEmpty)}</article>`
+    ? `<article data-mail-pane="reading-pane" data-mail-article="true" aria-label="${translator(model.locale)('Reading pane')}" style="flex: 2.618 1 420px; min-width: 0; background: light-dark(#FFFFFF,var(--xp-bg-surface)); display: flex; flex-direction: column">${readingInner(selected, model)}</article>`
+    : `<article data-mail-pane="reading-pane" data-mail-article="true" aria-label="${translator(model.locale)('Reading pane')}" style="flex: 2.618 1 420px; min-width: 0; background: light-dark(#FFFFFF,var(--xp-bg-surface)); display: flex; flex-direction: column">${emptyReading(model.locale, model.folderEmpty)}</article>`
   const route = model.product ? '/mail/inbox' : ''
   const copy = model.copy
+  // The live count text ends with " · N unread"; that tail is repainted separately when a message is read.
+  const unreadTail = / · (\d+) [^·]+$/.exec(model.countText)
+  const countTail = unreadTail && [`${unreadTail[1]} unread`, translator(model.locale)('{count} unread', { count: Number(unreadTail[1]) })].some(tail => unreadTail[0] === ' · ' + tail) ? unreadTail[0] : ''
+  const templateCard: MailCard = { id: 'folder-current', uid: 1, fromName: '', fromAddr: '', to: '', cc: ' ', subject: '', snippet: '', time: '', datetime: '', unread: false, auth: '', attachments: [{ name: '', ext: '', size: '' }], blocks: [block('')] }
+  const workspaceTemplates = model.folderWorkspace ? `<template data-mail-folder-row-template>${messageRow(templateCard, false, model.locale)}</template><template data-mail-folder-reading-template>${readingInner(templateCard, model)}</template>` : ''
   const listNote = model.listState === 'failed'
-    ? (ar ? 'تعذر قراءة خادم البريد.' : 'The mail server could not be read.')
+    ? (translator(model.locale)('The mail server could not be read.'))
     : model.listState === 'unread'
-      ? (ar ? 'لم تُقرأ الرسائل من خادم البريد بعد.' : 'The inbox has not been read from the mail server.')
+      ? (translator(model.locale)('The inbox has not been read from the mail server.'))
       : ''
-  return `<div class="xp-board-port" data-board-port="xmail-inbox" data-surface="xmail" data-mail-layout="reference" data-product="${model.product ? 'true' : 'false'}" data-mail-folder="${escapeHtml(model.activeFolder)}" data-pager-of="${escapeHtml(ar ? 'من' : 'of')}" data-pager-latest="${escapeHtml(ar ? 'من أصل' : 'of the latest')}" data-mailbox="${escapeHtml(model.mailbox)}" data-locale="${model.locale}" data-list-state="${model.listState}" data-body-failed="${escapeHtml(ar ? 'تعذر قراءة نص الرسالة.' : 'The message body could not be read.')}" data-move-targets="${escapeHtml(JSON.stringify(model.moveTargets))}" data-move-label="${escapeHtml(copy.moveLabel)}" data-empty-title="${escapeHtml(copy.emptyTitle)}" data-empty-body="${escapeHtml(copy.emptyBody)}" data-empty-clear="${escapeHtml(copy.emptyClear)}" data-undo-label="${escapeHtml(copy.undo)}" data-moved-prefix="${escapeHtml(copy.moved)}" data-trash-label="${escapeHtml(ar ? 'المحذوفات' : 'Trash')}" data-trash-confirm="${escapeHtml(ar ? 'حذف هذه الرسالة نهائياً؟' : 'Delete this message permanently?')}" data-deleted-label="${escapeHtml(ar ? 'حُذفت' : 'Deleted')}" data-move-failed="${escapeHtml(ar ? 'تعذر نقل الرسالة.' : 'The message could not be moved.')}"${ar ? ' dir="rtl"' : ''} style="min-height: 100vh; display: flex; flex-direction: column; background: #F5F6F8; font-family: ${font}; color: #101828">
+  return `<div class="xp-board-port xp-shell" data-board-port="xmail-inbox" data-surface="xmail" data-mail-layout="reference" data-product="${model.product ? 'true' : 'false'}"${model.folderWorkspace ? ' data-mail-folder-workspace="true"' : ''} data-mail-folder="${escapeHtml(model.activeFolder)}" data-pager-range="${escapeHtml(translator(model.locale)('1\u2013{shown} of {total}'))}" data-pager-latest="${escapeHtml(translator(model.locale)('{shown} of the latest {loaded}'))}" data-mailbox="${escapeHtml(model.mailbox)}" data-locale="${model.locale}" data-list-state="${model.listState}" data-body-failed="${escapeHtml(translator(model.locale)('The message body could not be read.'))}" data-move-targets="${escapeHtml(JSON.stringify(model.moveTargets))}" data-move-label="${escapeHtml(copy.moveLabel)}" data-empty-title="${escapeHtml(copy.emptyTitle)}" data-empty-body="${escapeHtml(copy.emptyBody)}" data-empty-clear="${escapeHtml(copy.emptyClear)}" data-undo-label="${escapeHtml(copy.undo)}" data-moved-message="${escapeHtml(copy.moved)}" data-trash-label="${escapeHtml(translator(model.locale)(msgctxt('xmail-inbox', 'Trash')))}" data-trash-confirm="${escapeHtml(translator(model.locale)('Delete this message permanently?'))}" data-deleted-label="${escapeHtml(translator(model.locale)(msgctxt('xmail-inbox', 'Deleted')))}" data-move-failed="${escapeHtml(translator(model.locale)('The message could not be moved.'))}"${rtl ? ' dir="rtl"' : ''} style="min-height: 100vh; display: flex; flex-direction: column; background: light-dark(#F5F6F8,var(--xp-bg-canvas)); font-family: ${font}; color: light-dark(#101828,var(--xp-text-primary))">
 <style>${PORT_CSS}</style>
-<a class="xp-skip-link" href="#main-content">${ar ? 'انتقل إلى المحتوى' : 'Skip to content'}</a>
-<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 12px 24px; background: #FFFFFF; border-bottom: 1px solid #E2E6EC">
-  <a href="${escapeHtml(model.inboxHref)}" style="display: flex; align-items: center; gap: 10px; min-height: 44px; text-decoration: none"><span aria-hidden="true" style="width: 36px; height: 36px; border-radius: 8px; background: #0E7A4E; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 18px; font-weight: 600">x</span><span style="font-family: ${MONO}; font-size: 17px; font-weight: 500; color: #0E7A4E">${ar ? `<bdi dir="ltr">xMail</bdi>` : 'xMail'}</span></a>
-  <form role="search" action="${escapeHtml(model.inboxHref)}" method="get" aria-label="${ar ? 'البحث في البريد' : 'Search mail'}" style="flex: 1 1 280px; max-width: 520px; position: relative; display: flex; align-items: center; margin: 0"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5D6B7E" stroke-width="2" stroke-linecap="round" style="position: absolute; inset-inline-start: 12px"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><input type="hidden" name="lang" value="${model.locale}"><input type="hidden" name="theme" value="${model.theme ?? 'light'}"><input type="hidden" name="folder" value="${escapeHtml(model.activeFolder)}"><input id="xmail-query" type="search" name="q" aria-label="${ar ? 'البحث في البريد' : 'Search mail'}" placeholder="${ar ? 'ابحث عن المرسل أو الموضوع أو النص' : 'Search sender, subject or text'}" style="width: 100%; min-height: 44px; padding-inline: 38px 12px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; font-family: inherit; font-size: 14px; color: #101828"></form>
+<a class="xp-skip-link" href="#main-content">${translator(model.locale)('Skip to content')}</a>
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 12px 24px; background: light-dark(#FFFFFF,var(--xp-bg-surface)); border-bottom: 1px solid light-dark(#E2E6EC,var(--xp-border))">${renderMobileNavToggle(model.locale)}
+  <a href="${escapeHtml(model.inboxHref)}" style="display: flex; align-items: center; gap: 10px; min-height: 44px; text-decoration: none"><span aria-hidden="true" style="width: 36px; height: 36px; border-radius: 8px; background: light-dark(#0E7A4E,var(--xp-status-ok-fg)); color: light-dark(#FFFFFF,var(--xp-text-on-accent)); display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 18px; font-weight: 600">x</span><span style="font-family: ${MONO}; font-size: 17px; font-weight: 500; color: light-dark(#0E7A4E,var(--xp-status-ok-fg))">${rtl ? `<bdi dir="ltr">xMail</bdi>` : 'xMail'}</span></a>
+  <form role="search" action="${escapeHtml(model.inboxHref)}" method="get" aria-label="${translator(model.locale)('Search mail')}" style="flex: 1 1 280px; max-width: 520px; position: relative; display: flex; align-items: center; margin: 0"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="light-dark(#5D6B7E,var(--xp-text-muted))" stroke-width="2" stroke-linecap="round" style="position: absolute; inset-inline-start: 12px"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><input type="hidden" name="lang" value="${model.locale}"><input type="hidden" name="theme" value="${model.theme ?? 'light'}"><input type="hidden" name="folder" value="${escapeHtml(model.activeFolder)}"><input id="xmail-query" type="search" name="q" aria-label="${translator(model.locale)('Search mail')}" placeholder="${translator(model.locale)('Search sender, subject or text')}" style="width: 100%; min-height: 44px; padding-inline: 38px 12px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-text-muted)); background: light-dark(#FFFFFF,var(--xp-bg-surface)); font-family: inherit; font-size: 14px; color: light-dark(#101828,var(--xp-text-primary))"></form>
   <span style="flex: 1 1 0; min-width: 0"></span>
-  <div style="display: flex; align-items: center; gap: 8px; min-width: 0"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#475467" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 7l9 6 9-6"></path></svg><span data-mail-mailbox="true" style="min-width: 0; font-family: ${MONO}; font-size: 13px; color: #101828; overflow-wrap: anywhere">${mailbox}</span></div>
-  <div data-mail-quota style="display: flex; flex-direction: column; gap: 4px; min-width: 150px"><div style="display: flex; flex-direction: column; gap: 4px; font-size: 12px"><span data-mail-quota-label style="font-weight: 600; color: #344054">${ar ? 'صندوق البريد' : 'Mailbox'}</span><span data-mail-quota-value style="color: #475467; font-variant-numeric: tabular-nums">${quota}</span></div><div data-quota-ratio="${model.quotaMeasured ? 'measured' : 'unknown'}" aria-hidden="true" style="height: 6px; border-radius: 3px; background: #E9ECF1; overflow: hidden"><div style="height: 6px; width: ${model.quotaPct}%; background: #1D5BD6; border-radius: 3px"></div></div></div>
+  <div style="display: flex; align-items: center; gap: 8px; min-width: 0"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="light-dark(#475467,var(--xp-text-secondary))" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 7l9 6 9-6"></path></svg><span data-mail-mailbox="true" style="min-width: 0; font-family: ${MONO}; font-size: 13px; color: light-dark(#101828,var(--xp-text-primary)); overflow-wrap: anywhere">${mailbox}</span></div>
+  <div data-mail-quota style="display: flex; flex-direction: column; gap: 4px; min-width: 150px"><div style="display: flex; flex-direction: column; gap: 4px; font-size: 12px"><span data-mail-quota-label style="font-weight: 600; color: light-dark(#344054,var(--xp-text-secondary))">${translator(model.locale)('Mailbox')}</span><span data-mail-quota-value style="color: light-dark(#475467,var(--xp-text-secondary)); font-variant-numeric: tabular-nums">${quota}</span></div><div data-quota-ratio="${model.quotaMeasured ? 'measured' : 'unknown'}" aria-hidden="true" style="height: 6px; border-radius: 3px; background: light-dark(#E9ECF1,var(--xp-bg-elevated)); overflow: hidden"><div style="height: 6px; width: ${model.quotaPct}%; background: light-dark(#1D5BD6,var(--xp-accent)); border-radius: 3px"></div></div></div>
   ${renderPageSearchButton(model.locale)}
-  <a href="?lang=${ar ? 'en' : 'ar'}" data-lang-switch="${ar ? 'en' : 'ar'}" lang="${ar ? 'en' : 'ar'}" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; color: #1D5BD6; text-decoration: none">${ar ? 'English' : 'العربية'}</a>
-  <a href="?theme=${model.theme === 'dark' ? 'light' : 'dark'}" data-theme-toggle="${model.theme === 'dark' ? 'light' : 'dark'}" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; color: #1D5BD6; text-decoration: none">${model.theme === 'dark' ? (ar ? 'الوضع الفاتح' : 'Light theme') : (ar ? 'الوضع الداكن' : 'Dark theme')}</a>
+  ${LOCALES.filter(info => info.tag !== model.locale).map(info => `<a href="?lang=${info.tag}" data-lang-switch="${info.tag}" lang="${info.tag}" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; color: light-dark(#1D5BD6,var(--xp-accent)); text-decoration: none">${escapeHtml(info.nativeName)}</a>`).join('')}
+  <a href="?theme=${model.theme === 'dark' ? 'light' : 'dark'}" data-theme-toggle="${model.theme === 'dark' ? 'light' : 'dark'}" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; color: light-dark(#1D5BD6,var(--xp-accent)); text-decoration: none">${model.theme === 'dark' ? (translator(model.locale)('Light theme')) : (translator(model.locale)('Dark theme'))}</a>
   ${model.wsHtml}
-  <button type="button"${model.logoutAttr} style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font-family: inherit; font-size: 14px; font-weight: 600">${ar ? 'تسجيل الخروج' : 'Sign out'}</button>
+  <button type="button"${model.logoutAttr} style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-text-muted)); background: light-dark(#FFFFFF,var(--xp-bg-surface)); color: light-dark(#101828,var(--xp-text-primary)); font-family: inherit; font-size: 14px; font-weight: 600">${translator(model.locale)('Sign out')}</button>
 </header>
 <div data-xp-shell-content="true" style="flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: stretch">
-  <nav aria-label="${ar ? 'مجلدات البريد' : 'Mail folders'}" data-xp-sidebar data-mail-pane="folders" style="flex: 1 1 200px; max-width: 100%; background: #FFFFFF; border-inline-end: 1px solid #E2E6EC; padding: 16px 12px; display: flex; flex-direction: column; gap: 18px">
-    <a href="${escapeHtml(model.composeHref)}" data-nav-route="/mail/compose" style="min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 16px; border-radius: 8px; border: 1px solid #1D5BD6; background: #1D5BD6; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none">${ICONS.compose}${ar ? 'إنشاء رسالة' : 'Compose'}</a>
+  <nav aria-label="${translator(model.locale)('Mail folders')}" class="xp-sidebar" id="xp-sidebar" tabindex="-1" data-xp-sidebar data-mail-pane="folders" style="flex: 1 1 200px; max-width: 100%; background: light-dark(#FFFFFF,var(--xp-bg-surface)); border-inline-end: 1px solid light-dark(#E2E6EC,var(--xp-border)); padding: 16px 12px; display: flex; flex-direction: column; gap: 18px">${renderMobileNavClose(model.locale)}
+    <a href="${escapeHtml(model.composeHref)}" data-nav-route="/mail/compose" style="min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 16px; border-radius: 8px; border: 1px solid light-dark(#1D5BD6,var(--xp-accent)); background: light-dark(#1D5BD6,var(--xp-accent)); color: light-dark(#FFFFFF,var(--xp-text-on-accent)); font-size: 14px; font-weight: 600; text-decoration: none">${ICONS.compose}${translator(model.locale)('Compose')}</a>
     <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px">${model.folders.map(item => folderLink(item, route)).join('')}</ul>
-    <div style="display: flex; flex-direction: column; gap: 2px"><span id="my-folders" style="font-size: 11px; font-weight: 600; color: #5D6B7E; padding: 0 12px 4px">${ar ? 'مجلداتك' : 'Your folders'}</span><ul aria-labelledby="my-folders" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px">${model.custom.map(item => folderLink(item, route)).join('')}</ul><button type="button" data-mail-new-folder="true"${model.product ? ' disabled aria-describedby="mail-folder-availability"' : ''} style="min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: 8px; border: 1px dashed #C9CFD8; background: transparent; color: #1D5BD6; font-family: inherit; font-size: 13px; font-weight: 600; margin-top: 4px"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>${ar ? 'مجلد جديد' : 'New folder'}</button>${model.product ? `<span id="mail-folder-availability" role="note" style="display:block;margin-block-start:8px;font-size:12px;line-height:1.6;color:#475467">${ar ? 'إنشاء المجلدات غير متاح من هذه الواجهة.' : 'Folder creation is unavailable from this interface.'}</span>` : ''}</div>
-    <div style="display: flex; flex-direction: column; gap: 2px; padding-top: 14px; border-top: 1px solid #EEF0F3"><span id="mbx-settings" style="font-size: 11px; font-weight: 600; color: #5D6B7E; padding: 0 12px 4px">${ar ? 'إعدادات الصندوق' : 'Mailbox settings'}</span><ul aria-labelledby="mbx-settings" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px"><li><a href="${escapeHtml(model.vacationHref)}" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; font-size: 14px; color: #344054; text-decoration: none"><span>${ar ? 'الرد التلقائي' : 'Vacation responder'}</span><span style="font-size: 12px; color: #475467">${escapeHtml(model.vacation)}</span></a></li><li><a href="${escapeHtml(model.filtersHref)}" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; font-size: 14px; color: #344054; text-decoration: none"><span>${ar ? 'الفلاتر' : 'Filters'}</span><span style="font-size: 12px; color: #475467">${escapeHtml(model.filters)}</span></a></li></ul></div>
-  </nav>
-  <main id="main-content" tabindex="-1" data-mail-live="true" style="flex: 4.236 1 740px; min-width: 0; display: flex; flex-wrap: wrap; align-items: stretch">
+    <div style="display: flex; flex-direction: column; gap: 2px"><span id="my-folders" style="font-size: 11px; font-weight: 600; color: light-dark(#5D6B7E,var(--xp-text-muted)); padding: 0 12px 4px">${translator(model.locale)('Your folders')}</span><ul aria-labelledby="my-folders" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px">${model.custom.map(item => folderLink(item, route)).join('')}</ul><button type="button" data-mail-new-folder="true"${model.product ? ' disabled aria-describedby="mail-folder-availability"' : ''} style="min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: 8px; border: 1px dashed light-dark(#C9CFD8,var(--xp-border-strong)); background: transparent; color: light-dark(#1D5BD6,var(--xp-accent)); font-family: inherit; font-size: 13px; font-weight: 600; margin-top: 4px"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>${translator(model.locale)('New folder')}</button>${model.product ? `<span id="mail-folder-availability" role="note" style="display:block;margin-block-start:8px;font-size:12px;line-height:1.6;color:light-dark(#475467,var(--xp-text-secondary))">${translator(model.locale)('Folder creation is unavailable from this interface.')}</span>` : ''}</div>
+    <div style="display: flex; flex-direction: column; gap: 2px; padding-top: 14px; border-top: 1px solid light-dark(#EEF0F3,var(--xp-border))"><span id="mbx-settings" style="font-size: 11px; font-weight: 600; color: light-dark(#5D6B7E,var(--xp-text-muted)); padding: 0 12px 4px">${translator(model.locale)('Mailbox settings')}</span><ul aria-labelledby="mbx-settings" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px"><li><a href="${escapeHtml(model.vacationHref)}" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; font-size: 14px; color: light-dark(#344054,var(--xp-text-secondary)); text-decoration: none"><span>${translator(model.locale)('Vacation responder')}</span><span style="font-size: 12px; color: light-dark(#475467,var(--xp-text-secondary))">${escapeHtml(model.vacation)}</span></a></li><li><a href="${escapeHtml(model.filtersHref)}" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; font-size: 14px; color: light-dark(#344054,var(--xp-text-secondary)); text-decoration: none"><span>${translator(model.locale)('Filters')}</span><span style="font-size: 12px; color: light-dark(#475467,var(--xp-text-secondary))">${escapeHtml(model.filters)}</span></a></li></ul></div>
+  </nav>${renderMobileNavBackdrop(model.locale)}
+  <main id="main-content" tabindex="-1" data-mail-live="true" style="flex: 4.236 1 740px; min-width: 0; display: flex; flex-direction: column">
     ${model.actionHtml}
-    <section aria-labelledby="list-title" data-mail-pane="message-list" style="flex: 1.618 1 320px; min-width: 0; background: #FFFFFF; border-inline-end: 1px solid #E2E6EC; display: flex; flex-direction: column">
-      <div style="padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid #E2E6EC">
-        <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap"><h1 id="list-title" style="margin: 0; font-size: 20px; font-weight: 600">${escapeHtml(model.title)}</h1><span data-mail-count-summary="true" style="font-size: 12px; color: #5D6B7E; font-variant-numeric: tabular-nums">${escapeHtml(model.countText.replace(/ · \d+ (?:unread|غير مقروء)$/, ''))}<span data-mail-unread="${model.unreadCount ?? 0}">${escapeHtml((model.unreadCount ?? 0) > 0 ? model.countText.match(/ · \d+ (?:unread|غير مقروء)$/)?.[0] ?? '' : '')}</span></span></div>
-        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><div role="group" aria-label="${ar ? 'عرض' : 'Show'}" style="display: inline-flex; padding: 2px; border-radius: 10px; background: #EEF0F3; gap: 2px">${filterBtn('all', ar ? 'الكل' : 'All', true)}${filterBtn('unread', ar ? 'غير المقروء' : 'Unread', false)}${filterBtn('attachments', ar ? 'مع مرفقات' : 'With attachments', false)}</div><span style="flex: 1 1 0"></span><button type="button" data-mail-action="refresh" aria-label="${ar ? 'التحقق من البريد الجديد' : 'Check for new mail'}" style="width: 44px; height: 44px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 4v7h-7"></path></svg></button></div>
+    ${model.folderWorkspace ? `<div data-mail-folder-feedback style="flex:none;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:16px 24px;border-bottom:1px solid light-dark(#E2E6EC,var(--xp-border));background:light-dark(#FFFFFF,var(--xp-bg-surface))"><p data-mail-folder-status data-state="unread" role="status" aria-live="polite" style="flex:1 1 240px;margin:0;font-size:14px;line-height:1.75">${translator(model.locale)('Folder data has not been read yet.')}</p><button type="button" data-mail-folder-review data-mail-action="review" hidden style="min-height:44px;padding:0 14px;border:1px solid light-dark(#D0D5DD,var(--xp-text-muted));border-radius:8px;background:light-dark(#FFFFFF,var(--xp-bg-surface));color:light-dark(#101828,var(--xp-text-primary));font:inherit">${translator(model.locale)('Review folder')}</button><div data-mail-undo hidden><button type="button" data-mail-action="undo" style="min-height:44px;padding:0 14px;border:1px solid light-dark(#D0D5DD,var(--xp-text-muted));border-radius:8px;background:light-dark(#FFFFFF,var(--xp-bg-surface));color:light-dark(#101828,var(--xp-text-primary));font:inherit">${escapeHtml(copy.undo)}</button></div></div>` : ''}
+    <div data-mail-panes style="flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: stretch">
+    <section aria-labelledby="list-title" data-mail-pane="message-list" style="flex: 1.618 1 320px; min-width: 0; background: light-dark(#FFFFFF,var(--xp-bg-surface)); border-inline-end: 1px solid light-dark(#E2E6EC,var(--xp-border)); display: flex; flex-direction: column">
+      <div style="padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid light-dark(#E2E6EC,var(--xp-border))">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap"><h1 id="list-title" style="margin: 0; font-size: 20px; font-weight: 600">${escapeHtml(model.title)}</h1><span data-mail-count-summary="true" style="font-size: 12px; color: light-dark(#5D6B7E,var(--xp-text-muted)); font-variant-numeric: tabular-nums">${escapeHtml(countTail ? model.countText.slice(0, -countTail.length) : model.countText)}<span data-mail-unread="${model.unreadCount ?? 0}">${escapeHtml((model.unreadCount ?? 0) > 0 ? countTail : '')}</span></span></div>
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><div role="group" aria-label="${translator(model.locale)('Show')}" style="display: inline-flex; padding: 2px; border-radius: 10px; background: light-dark(#EEF0F3,var(--xp-bg-elevated)); gap: 2px">${filterBtn('all', translator(model.locale)('All'), true)}${filterBtn('unread', translator(model.locale)(msgctxt('xmail-inbox', 'Unread')), false)}${filterBtn('attachments', translator(model.locale)('With attachments'), false)}</div><span style="flex: 1 1 0"></span><button type="button" data-mail-action="refresh" aria-label="${translator(model.locale)('Check for new mail')}" style="width: 44px; height: 44px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-text-muted)); background: light-dark(#FFFFFF,var(--xp-bg-surface)); color: light-dark(#344054,var(--xp-text-secondary)); display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 4v7h-7"></path></svg></button></div>
       </div>
       <div data-mail-list-slot="true">
-        <ul data-mail-list="true" aria-label="${ar ? 'الرسائل' : 'Messages'}" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">${rows}</ul>
+        <ul data-mail-list="true" aria-label="${translator(model.locale)('Messages')}" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">${rows}</ul>
         ${listEmpty}${listNote ? `<div role="status" data-mail-list-state="${model.listState}" style="display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 24px; text-align: center"><p style="margin: 0; font-size: 14px; font-weight: 600">${escapeHtml(listNote)}</p></div>` : ''}
       </div>
-      <div style="margin-top: auto; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 16px; font-size: 12px; color: #5D6B7E"><span data-mail-pager="true" data-rest="${escapeHtml(model.pager)}" data-loaded="${model.loaded}" data-total="${model.total}" style="font-variant-numeric: tabular-nums">${escapeHtml(model.pager)}</span><button type="button" data-mail-older="true"${model.product ? ' disabled aria-describedby="mail-pagination-availability"' : ''} style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: #1D5BD6; font-family: inherit; font-size: 13px; font-weight: 600">${ar ? 'رسائل أقدم' : 'Older messages'}</button>${model.product ? `<span id="mail-pagination-availability" role="note" style="font-size:12px;line-height:1.6;color:#475467">${ar ? 'عرض الرسائل الأقدم غير متاح؛ هذه آخر رسائل تم تحميلها.' : 'Older message pagination is unavailable; this is the latest loaded list.'}</span>` : ''}</div>
+      <div style="margin-top: auto; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 16px; font-size: 12px; color: light-dark(#5D6B7E,var(--xp-text-muted))"><span data-mail-pager="true" data-rest="${escapeHtml(model.pager)}" data-loaded="${model.loaded}" data-total="${model.total}" style="font-variant-numeric: tabular-nums">${escapeHtml(model.pager)}</span><button type="button" data-mail-older="true"${model.product ? ' disabled aria-describedby="mail-pagination-availability"' : ''} style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: light-dark(#1D5BD6,var(--xp-accent)); font-family: inherit; font-size: 13px; font-weight: 600">${translator(model.locale)('Older messages')}</button>${model.product ? `<span id="mail-pagination-availability" role="note" style="font-size:12px;line-height:1.6;color:light-dark(#475467,var(--xp-text-secondary))">${translator(model.locale)('Older message pagination is unavailable; this is the latest loaded list.')}</span>` : ''}</div>
     </section>
     ${article}
+    </div>
     <template id="xmail-reading">${panes}</template>
-    <template id="xmail-empty">${emptyReading(ar, false)}</template>
+    <template id="xmail-empty">${emptyReading(model.locale, false)}</template>
+    ${workspaceTemplates}
   </main>
 </div>
 ${INBOX_SCRIPT}
@@ -788,24 +933,16 @@ export const block = (p?: string, pre?: string, list?: string[]): Block => ({ ..
 
 export const renderXmailInbox = (model: InboxModel): string => renderInbox(model)
 
-const STANDARD: ReadonlyArray<{ id: string; en: string; ar: string; icon: IconName }> = [
-  { id: 'INBOX', en: 'Inbox', ar: 'الوارد', icon: 'inbox' },
-  { id: 'Sent', en: 'Sent', ar: 'المرسل', icon: 'sent' },
-  { id: 'Drafts', en: 'Drafts', ar: 'المسودات', icon: 'drafts' },
-  { id: 'Junk', en: 'Junk', ar: 'غير المرغوب', icon: 'junk' },
-  { id: 'Trash', en: 'Trash', ar: 'المحذوفات', icon: 'trash' },
-  { id: 'Archive', en: 'Archive', ar: 'الأرشيف', icon: 'archive' },
+const STANDARD: ReadonlyArray<{ id: string; label: string; icon: IconName }> = [
+  { id: 'INBOX', label: msgid('Inbox'), icon: 'inbox' },
+  { id: 'Sent', label: msgid('Sent'), icon: 'sent' },
+  { id: 'Drafts', label: msgid('Drafts'), icon: 'drafts' },
+  { id: 'Junk', label: msgctxt('xmail-inbox', 'Junk'), icon: 'junk' },
+  { id: 'Trash', label: msgctxt('xmail-inbox', 'Trash'), icon: 'trash' },
+  { id: 'Archive', label: msgid('Archive'), icon: 'archive' },
 ]
 
-const phrase = (count: number, ar: boolean, one: string, two: string, few: string, many: string, en: string, zero = ''): string => {
-  if (!ar) return `${count} ${en}${count === 1 ? '' : 's'}`
-  const rule = new Intl.PluralRules('ar').select(count)
-  if (rule === 'zero') return zero || `لا ${few}`
-  if (rule === 'one') return one
-  if (rule === 'two') return two
-  if (rule === 'few') return `${count} ${few}`
-  return `${count} ${many}`
-}
+const MESSAGES = msgid('{count, plural, one {{count} message} other {{count} messages}}')
 
 export interface XmailInboxMessageInput {
   uid: number
@@ -833,6 +970,8 @@ export interface XmailInboxProps {
   quotaUsedMb?: number
   quotaUsedBytes?: number
   quotaLimitMb?: number | 'unlimited'
+  folderWorkspace?: boolean
+  attachmentReadEnabled?: boolean
   activeFolder?: string
   selectedUid?: number
   messages?: XmailInboxMessageInput[]
@@ -846,13 +985,13 @@ export interface XmailInboxProps {
 
 export const xmailInboxFromProps = (props: XmailInboxProps): InboxModel => {
   const locale = props.locale ?? 'en'
-  const ar = locale === 'ar'
+  const t = translator(locale)
   const activeFolder = props.activeFolder && props.activeFolder.length > 0 ? props.activeFolder : 'INBOX'
   const observedMessages = props.messages !== undefined
   const all = (props.messages ?? []).filter(message => Number.isSafeInteger(message.uid) && message.uid > 0)
   const visible = all.filter(message => message.folder === activeFolder)
   const selected = visible.find(message => message.uid === props.selectedUid) ?? visible[0]
-  const authWord = (value: boolean | undefined): string => value === undefined ? (ar ? 'غير مفحوص' : 'not checked') : (value ? 'pass' : 'fail')
+  const authWord = (value: boolean | undefined): string => value === undefined ? (translator(locale)('not checked')) : (value ? 'pass' : 'fail')
   const fileExt = (name: string): string => {
     const dot = name.lastIndexOf('.')
     const ext = dot > 0 ? name.slice(dot + 1, dot + 5).toUpperCase() : 'FILE'
@@ -875,25 +1014,26 @@ export const xmailInboxFromProps = (props: XmailInboxProps): InboxModel => {
       snippet: message.preview,
       time: stamp.time,
       datetime: stamp.datetime,
+      displayDate: stamp.full,
       unread: message.unread,
       auth,
       attachments: files.map(file => ({ name: file.name, ext: fileExt(file.name), size: formatAttachmentBytes(file.sizeBytes) })),
       ...(files.length ? { attachTotal: formatAttachmentBytes(files.reduce((sum, file) => sum + (Number.isFinite(file.sizeBytes) ? file.sizeBytes : 0), 0)) } : {}),
       bodyPending: pending,
-      blocks: [block(pending ? (ar ? 'لم يُحمّل نص هذه الرسالة بعد.' : 'This message body has not been loaded.') : message.body)],
+      blocks: [block(pending ? (translator(locale)('This message body has not been loaded.')) : message.body)],
     }
   })
   const unreadIn = (folder: string): number => all.filter(message => message.folder === folder && message.unread).length
   const totalIn = (folder: string): number => all.filter(message => message.folder === folder).length
   const observed = new Set(all.map(message => message.folder).filter(folder => folder !== 'INBOX'))
-  const folderHref = (id: string): string => id === 'INBOX' ? '/mail/inbox' : `/mail/inbox?folder=${encodeURIComponent(id)}`
+  const folderHref = (id: string): string => id === 'INBOX' ? '/mail/inbox' : props.folderWorkspace && ['Sent', 'Drafts', 'Trash'].includes(id) ? `/mail/${id.toLowerCase()}` : `/mail/inbox?folder=${encodeURIComponent(id)}`
   const folders: FolderLink[] = STANDARD.map(item => {
     const measured = props.folderCounts?.find(row => row.folder === item.id)
     const count = measured
       ? (item.id === 'INBOX' ? measured.unread : measured.total)
       : (item.id === 'INBOX' ? unreadIn(item.id) : totalIn(item.id))
     const current = item.id === activeFolder
-    const link: FolderLink = { id: item.id, label: ar ? item.ar : item.en, href: folderHref(item.id), icon: item.icon, current }
+    const link: FolderLink = { id: item.id, label: t(item.label), href: folderHref(item.id), icon: item.icon, current }
     if (item.id !== 'INBOX') link.observed = item.id
     if (count > 0) {
       link.count = { text: String(count), kind: item.id === 'INBOX' ? 'pill' : 'strong' }
@@ -909,20 +1049,22 @@ export const xmailInboxFromProps = (props: XmailInboxProps): InboxModel => {
   const unread = visible.filter(message => message.unread).length
   const listState = observedMessages ? (visible.length === 0 ? 'empty' : 'messages') : (props.mailListFailed ? 'failed' : 'unread')
   const countText = listState === 'empty'
-    ? (ar ? '0 رسائل' : '0 messages')
+    ? (t('0 messages'))
     : listState === 'messages'
-      ? `${phrase(visible.length, ar, 'رسالة واحدة', 'رسالتان', 'رسائل', 'رسالة', 'message', 'لا رسائل')}${unread ? ` · ${unread} ${ar ? 'غير مقروء' : 'unread'}` : ''}`
+      ? `${t(MESSAGES, { count: visible.length })}${unread ? ` · ${t('{count} unread', { count: unread })}` : ''}`
       : '—'
   const quota = formatMailboxQuota(props.quotaUsedMb, props.quotaLimitMb, locale, props.quotaUsedBytes)
-  const ofWord = ar ? 'من' : 'of'
-  const pager = listState === 'empty' ? (ar ? '0 من 0' : '0 of 0') : listState === 'messages' ? `1\u2013${visible.length} ${ofWord} ${visible.length}` : '—'
-  const title = STANDARD.find(item => item.id === activeFolder)?.[ar ? 'ar' : 'en'] ?? activeFolder
-  const vacation = props.vacationEnabled === undefined ? '—' : (props.vacationEnabled ? (ar ? 'يعمل' : 'On') : (ar ? 'متوقف' : 'Off'))
-  const filters = props.sieveCount === undefined ? '—' : (ar ? `${props.sieveCount} نشطة` : `${props.sieveCount} active`)
+  const pager = listState === 'empty' ? (t('0 of 0')) : listState === 'messages' ? t('1\u2013{shown} of {total}', { shown: visible.length, total: visible.length }) : '—'
+  const standard = STANDARD.find(item => item.id === activeFolder)
+  const title = standard ? t(standard.label) : activeFolder
+  const vacation = props.vacationEnabled === undefined ? '—' : (props.vacationEnabled ? (t('On')) : (t('Off')))
+  const filters = props.sieveCount === undefined ? '—' : (t('{sieveCount} active', { sieveCount: props.sieveCount }))
   return {
     locale,
     theme: props.theme ?? 'light',
     product: true,
+    folderWorkspace: props.folderWorkspace === true,
+    attachmentReadEnabled: props.attachmentReadEnabled === true,
     mailbox: props.mailbox,
     quotaText: quota.text,
     quotaPct: quota.percent ?? 0,
@@ -950,10 +1092,8 @@ export const xmailInboxFromProps = (props: XmailInboxProps): InboxModel => {
     logoutAttr: ' data-action="logout"',
     activeFolder,
     moveTargets: [...folders, ...custom]
-      .filter(item => !item.current && item.id !== 'INBOX')
+      .filter(item => !item.current && (props.folderWorkspace || item.id !== 'INBOX'))
       .map(item => ({ id: item.id, label: item.label })),
-    copy: ar
-      ? { emptyTitle: 'لا توجد رسائل مطابقة', emptyBody: 'لا شيء في هذا المجلد يطابق عامل التصفية أو البحث.', emptyClear: 'عرض كل الرسائل', undo: 'تراجع', moved: 'نُقلت إلى ', moveLabel: 'نقل إلى مجلد' }
-      : { emptyTitle: 'No messages match', emptyBody: 'Nothing in this folder fits this filter or search.', emptyClear: 'Show all messages', undo: 'Undo', moved: 'Moved to ', moveLabel: 'Move to folder' },
+    copy: { emptyTitle: t('No messages match'), emptyBody: t('Nothing in this folder fits this filter or search.'), emptyClear: t('Show all messages'), undo: t('Undo'), moved: t('Moved to {folder}: {subject}'), moveLabel: t('Move to folder') },
   }
 }

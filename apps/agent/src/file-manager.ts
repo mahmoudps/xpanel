@@ -57,6 +57,8 @@ export type AccountFileRequest =
   | { op: 'list'; path: string; showHidden: boolean }
   | { op: 'read'; path: string }
   | { op: 'write'; path: string; content: string; overwrite: boolean; mode: number }
+  /** Internal compound workflows only; the public file API deliberately rejects it. */
+  | { op: 'write-checked'; path: string; content: string; remove: boolean; expectedExists: boolean; expectedContent: string; expectedMtime: string; mode: number }
   | { op: 'put-bytes'; path: string; contentBase64: string; overwrite: boolean; mode: number }
   | { op: 'get-bytes'; path: string }
   | { op: 'mkdir'; path: string; mode: number }
@@ -65,6 +67,8 @@ export type AccountFileRequest =
   | { op: 'list-trash' }
   | { op: 'restore'; trashId: string; overwrite: boolean }
   | { op: 'empty-trash'; olderThanDays?: number }
+  /** Removes one item permanently; originalPath/deletedAt are the reviewed revision the helper must still observe. */
+  | { op: 'purge-trash'; trashId: string; originalPath: string; deletedAt: string }
 
 /**
  * Runs the entire operation after enforcing tenant identity, descriptor-based
@@ -250,7 +254,7 @@ export class JailedFileManager {
     if (runner && typeof runner.run === 'function') {
       return runner.run(this.context, Object.freeze(request))
     }
-    return fail('PRECONDITION_FAILED', 'confined account file runner is not installed; file operations are unavailable')
+    return fail('PRECONDITION_FAILED', 'confined account file runner is not installed; file operations are unavailable', { stateChanged: false })
   }
 
   async list(path = '', opts: { showHidden?: boolean } = {}): Promise<FileEntry[]> {
@@ -284,6 +288,23 @@ export class JailedFileManager {
     const overwrite = booleanOption(opts.overwrite, true)
     const entry = changedEntry(await this.execute({ op: 'write', path: relative, content, overwrite, mode }), 'write', relative)
     if (entry.kind !== 'file' || entry.mode !== mode || entry.sizeBytes !== Buffer.byteLength(content, 'utf8')) return invalidResult('write')
+    return entry
+  }
+
+  /** Compares the actual preimage under the helper's participating-writer lock. */
+  async writeTextChecked(path: string, content: string | null, expected: FileText | null, mode = MAX_FILE_MODE): Promise<FileEntry | null> {
+    const relative = contentPath(path)
+    for (const value of [content, expected?.content ?? null]) {
+      if (value !== null && (typeof value !== 'string' || !value.isWellFormed())) fail('VALIDATION', 'checked content must be well-formed Unicode text')
+      if (value !== null && Buffer.byteLength(value, 'utf8') > MAX_EDIT_BYTES) fail('LIMIT_EXCEEDED', 'checked content exceeds the 1 MiB editor limit')
+    }
+    if (expected !== null && (expected.path !== relative || expected.sizeBytes !== Buffer.byteLength(expected.content, 'utf8') || !validTimestamp(expected.mtime))) fail('VALIDATION', 'checked preimage must match the target')
+    const safeMode = assertSafeFileMode(mode)
+    const result = await this.execute({ op: 'write-checked', path: relative, content: content ?? '', remove: content === null,
+      expectedExists: expected !== null, expectedContent: expected?.content ?? '', expectedMtime: expected?.mtime ?? '', mode: safeMode })
+    if (content === null) { if (result !== null) return invalidResult('write-checked'); return null }
+    const entry = changedEntry(result, 'write-checked', relative)
+    if (entry.kind !== 'file' || entry.mode !== safeMode || entry.sizeBytes !== Buffer.byteLength(content, 'utf8')) return invalidResult('write-checked')
     return entry
   }
 
@@ -352,6 +373,24 @@ export class JailedFileManager {
     const request: AccountFileRequest = { op: 'empty-trash', ...(days !== undefined && { olderThanDays: days }) }
     const removed = await this.execute(request)
     if (!validByteCount(removed) || removed > MAX_FILE_LIST_ENTRIES) return invalidResult('empty-trash')
+    return removed
+  }
+
+  /**
+   * Deletes one trash item for good. A read first gives a definite, unchanged refusal for a missing or
+   * changed item; the helper re-checks the same revision under its own descriptor before removing it.
+   */
+  async purgeTrash(id: string, expected: { originalPath: string; deletedAt: string }): Promise<TrashItem> {
+    const identifier = trashId(id)
+    const originalPath = contentPath(expected.originalPath)
+    if (!validTimestamp(expected.deletedAt)) fail('VALIDATION', 'deletedAt must be the RFC 3339 UTC time the item was trashed')
+    const current = (await this.listTrash()).find((item) => item.id === identifier)
+    if (!current) return fail('NOT_FOUND', 'trash item not found', { stateChanged: false })
+    if (current.originalPath !== originalPath || current.deletedAt !== expected.deletedAt) {
+      fail('CONFLICT', 'trash item changed since it was read', { stateChanged: false })
+    }
+    const removed = trashItem(await this.execute({ op: 'purge-trash', trashId: identifier, originalPath, deletedAt: expected.deletedAt }), 'purge-trash', originalPath)
+    if (removed.id !== identifier || removed.deletedAt !== expected.deletedAt) return invalidResult('purge-trash')
     return removed
   }
 }

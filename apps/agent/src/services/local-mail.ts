@@ -64,6 +64,7 @@ export const applyPostfixLocalDelivery = async (
   executor: AgentExecutor,
   os: OsProfile,
   owned?: OwnedChecksums,
+  options: services.PostfixMainOptions = {},
 ): Promise<void> => {
   await writeRendered(executor, services.renderDovecotAuthConf(os), owned)
   await writeRendered(executor, services.renderDovecotSpecialUseConf(os), owned)
@@ -71,14 +72,41 @@ export const applyPostfixLocalDelivery = async (
   const paths = managedPaths(os)
   const mainExisting = (await executor.readFile(paths.main)) ?? ''
   const masterExisting = (await executor.readFile(paths.master)) ?? ''
-  const main = services.replaceManagedBlock(mainExisting, services.localDeliveryMainBlock(os))
-  const master = services.replaceManagedBlock(masterExisting, services.localSubmissionMasterBlock(os))
+  let mainBody = services.localDeliveryMainBlock(os, options)
+  let masterBody = services.localSubmissionMasterBlock(os, options)
+  const mainFragment = `${os.paths.postfixDir}/xpanel/main.cf.fragment`
+  const masterFragment = `${os.paths.postfixDir}/xpanel/master.cf.fragment`
+  if (owned?.has(mainFragment) || owned?.has(masterFragment)) {
+    const savedMain = await executor.readFile(mainFragment)
+    const savedMaster = await executor.readFile(masterFragment)
+    // Startup has no desired mail options. Reuse only the active generation's exact
+    // fragments; missing/drifted fragments must never reset TLS or dedicated IPs.
+    if (savedMain === null || savedMaster === null || contentSha(savedMain) !== owned.get(mainFragment)
+      || contentSha(savedMaster) !== owned.get(masterFragment)) return
+    mainBody = savedMain
+    masterBody = savedMaster
+  }
+  const main = services.replaceManagedBlock(mainExisting, mainBody)
+  const master = services.replaceManagedBlock(masterExisting, masterBody)
   if (mayWrite(paths.main, main, mainExisting.length > 0 ? mainExisting : null, owned)) {
     await writeTextIfChanged(executor, paths.main, main)
   }
   if (mayWrite(paths.master, master, masterExisting.length > 0 ? masterExisting : null, owned)) {
     await writeTextIfChanged(executor, paths.master, master)
   }
+}
+
+/** Merged distribution files are deliberately outside the removable manifest. */
+export const localMailNeedsUpdate = async (executor: AgentExecutor, os: OsProfile, options: services.PostfixMainOptions): Promise<boolean> => {
+  const paths = managedPaths(os)
+  for (const [path, body] of [[paths.main, services.localDeliveryMainBlock(os, options)], [paths.master, services.localSubmissionMasterBlock(os, options)]] as const) {
+    const current = (await executor.readFile(path)) ?? ''
+    if (services.replaceManagedBlock(current, body) !== current) return true
+  }
+  for (const file of [services.renderDovecotAuthConf(os), services.renderDovecotSpecialUseConf(os), services.renderDovecotQuotaConf(os)]) {
+    if (await executor.readFile(file.path) !== file.content) return true
+  }
+  return false
 }
 
 /** Removes the managed region after the last mailbox leaves the generation. */

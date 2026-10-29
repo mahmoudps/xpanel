@@ -1,5 +1,5 @@
+import '../i18n.ts'
 /** One wiring point per xWHM page. A disabled action stays on the page as coming soon. */
-
 export interface WiredPageAction {
   enabled: true
   method: 'GET' | 'POST' | 'PUT' | 'DELETE'
@@ -8,12 +8,13 @@ export interface WiredPageAction {
 
 export interface DisabledPageAction {
   enabled: false
-  hint: { en: string; ar: string }
+  /** Source message key; translate with the page translator. */
+  hint: string
 }
 
 export type PageAction = WiredPageAction | DisabledPageAction
 
-const soon: DisabledPageAction = { enabled: false, hint: { en: 'Coming soon', ar: 'قيد التفعيل' } }
+const soon: DisabledPageAction = { enabled: false, hint: msgctxt('xwhm-adapters', 'Coming soon') }
 
 export const xwhmPageAdapters = {
   resellers: {

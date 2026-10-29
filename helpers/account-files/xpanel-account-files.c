@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/prctl.h>
+#include <sys/file.h>
 #include <sys/random.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -1391,9 +1392,57 @@ static void append_base64(StrBuf *sb, const unsigned char *data, size_t len) {
   }
 }
 
+typedef struct {
+  bool exists;
+  const char *content;
+  size_t content_len;
+  const char *mtime;
+  bool remove;
+} WriteCondition;
+
+/* Directory flock serializes participating helper publishers. It is not a
+ * claim of compare-and-swap against uncooperative external filesystem writers. */
+static void check_write_preimage(int parent_fd, const char *base_name, uid_t uid,
+                                 const WriteCondition *condition, bool exists, const struct stat *before) {
+  if (!condition) return;
+  if (exists != condition->exists) respond_error("CONFLICT", EAGAIN, "file preimage changed; reread before writing");
+  if (!exists) return;
+  int fd = xp_openat2(parent_fd, base_name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK, 0, XP_RESOLVE_CONFINED);
+  if (fd < 0) respond_errno(errno, "openat2 checked preimage failed");
+  struct stat opened, after, named;
+  if (fstat(fd, &opened) != 0) { int err = errno; close(fd); respond_errno(err, "fstat checked preimage failed"); }
+  char opened_mtime[32];
+  format_iso8601_utc(&opened.st_mtim, opened_mtime);
+  if (!S_ISREG(opened.st_mode) || opened.st_uid != uid || opened.st_nlink != 1 ||
+      opened.st_dev != before->st_dev || opened.st_ino != before->st_ino ||
+      opened.st_size < 0 || (uint64_t)opened.st_size != (uint64_t)condition->content_len || strcmp(opened_mtime, condition->mtime) != 0) {
+    close(fd); respond_error("CONFLICT", EAGAIN, "file preimage identity changed");
+  }
+  char *bytes = calloc(1, condition->content_len + 1);
+  if (!bytes) _exit(12);
+  size_t count = 0;
+  while (count <= condition->content_len) {
+    ssize_t n = read(fd, bytes + count, condition->content_len + 1 - count);
+    if (n < 0) { if (errno == EINTR) continue; int err = errno; close(fd); free(bytes); respond_errno(err, "read checked preimage failed"); }
+    if (n == 0) break;
+    count += (size_t)n;
+  }
+  bool stat_ok = fstat(fd, &after) == 0 && fstatat(parent_fd, base_name, &named, AT_SYMLINK_NOFOLLOW) == 0;
+  close(fd);
+  bool matches = count == condition->content_len && memcmp(bytes, condition->content, count) == 0;
+  free(bytes);
+  if (!stat_ok || !matches || after.st_dev != opened.st_dev || after.st_ino != opened.st_ino ||
+      after.st_size != opened.st_size || after.st_mtim.tv_sec != opened.st_mtim.tv_sec || after.st_mtim.tv_nsec != opened.st_mtim.tv_nsec ||
+      after.st_ctim.tv_sec != opened.st_ctim.tv_sec || after.st_ctim.tv_nsec != opened.st_ctim.tv_nsec ||
+      named.st_dev != opened.st_dev || named.st_ino != opened.st_ino || named.st_size != opened.st_size ||
+      named.st_mtim.tv_sec != opened.st_mtim.tv_sec || named.st_mtim.tv_nsec != opened.st_mtim.tv_nsec) {
+    respond_error("CONFLICT", EAGAIN, "file preimage changed during comparison");
+  }
+}
+
 static void publish_regular_bytes(int home_dirfd, uid_t uid, const char *path, size_t path_len,
                                   const unsigned char *bytes, size_t nbytes, bool overwrite, int64_t mode,
-                                  int64_t max_file_mode) {
+                                  int64_t max_file_mode, const WriteCondition *condition) {
   assert_safe_rel_path(path, path_len, false);
   if (mode <= 0 || mode > max_file_mode || (mode & ~max_file_mode) != 0) {
     respond_error("VALIDATION", EINVAL, "regular file mode must not exceed 0640");
@@ -1403,9 +1452,16 @@ static void publish_regular_bytes(int home_dirfd, uid_t uid, const char *path, s
   split_rel_path(path, parent_rel, base_name);
 
   int parent_fd = open_confined_dir(home_dirfd, parent_rel, uid);
+  if (flock(parent_fd, LOCK_EX | LOCK_NB) != 0) {
+    int err = errno; close(parent_fd);
+    if (err == EWOULDBLOCK || err == EAGAIN) respond_error("CONFLICT", err, "file publication directory is busy");
+    respond_errno(err, "lock file publication directory failed");
+  }
 
   struct stat existing_st;
+  bool target_exists = false;
   if (fstatat(parent_fd, base_name, &existing_st, AT_SYMLINK_NOFOLLOW) == 0) {
+    target_exists = true;
     if (S_ISLNK(existing_st.st_mode)) {
       close(parent_fd);
       respond_error("FORBIDDEN", ELOOP, "refusing to overwrite symbolic link");
@@ -1434,6 +1490,14 @@ static void publish_regular_bytes(int home_dirfd, uid_t uid, const char *path, s
     int err = errno;
     close(parent_fd);
     respond_errno(err, "fstatat target failed");
+  }
+  check_write_preimage(parent_fd, base_name, uid, condition, target_exists, &existing_st);
+  if (condition && condition->remove) {
+    if (target_exists && unlinkat(parent_fd, base_name, 0) != 0) { int err = errno; close(parent_fd); respond_errno(err, "checked unlink failed"); }
+    if (fsync(parent_fd) != 0) { int err = errno; close(parent_fd); respond_error("SERVICE_UNAVAILABLE", err, "checked removal outcome requires inspection"); }
+    close(parent_fd);
+    respond_success_raw("null");
+    return;
   }
 
   char rand_hex[17];
@@ -1488,7 +1552,21 @@ static void publish_regular_bytes(int home_dirfd, uid_t uid, const char *path, s
   }
   close(tmp_fd);
 
-  unsigned int rename_flags = overwrite ? 0U : RENAME_NOREPLACE;
+  if (condition) {
+    struct stat guarded_st;
+    int guarded_result = fstatat(parent_fd, base_name, &guarded_st, AT_SYMLINK_NOFOLLOW);
+    bool changed = condition->exists
+      ? guarded_result != 0 || guarded_st.st_dev != existing_st.st_dev || guarded_st.st_ino != existing_st.st_ino ||
+        guarded_st.st_size != existing_st.st_size || guarded_st.st_mtim.tv_sec != existing_st.st_mtim.tv_sec ||
+        guarded_st.st_mtim.tv_nsec != existing_st.st_mtim.tv_nsec || guarded_st.st_ctim.tv_sec != existing_st.st_ctim.tv_sec ||
+        guarded_st.st_ctim.tv_nsec != existing_st.st_ctim.tv_nsec
+      : guarded_result == 0 || errno != ENOENT;
+    if (changed) {
+      (void)unlinkat(parent_fd, tmp_name, 0); close(parent_fd);
+      respond_error("CONFLICT", EAGAIN, "checked file changed before publication");
+    }
+  }
+  unsigned int rename_flags = !overwrite || (condition && !condition->exists) ? RENAME_NOREPLACE : 0U;
   if (xp_renameat2(parent_fd, tmp_name, parent_fd, base_name, rename_flags) != 0) {
     int err = errno;
     (void)unlinkat(parent_fd, tmp_name, 0);
@@ -1496,7 +1574,7 @@ static void publish_regular_bytes(int home_dirfd, uid_t uid, const char *path, s
     respond_errno(err, "renameat2 publish failed");
   }
 
-  (void)fsync(parent_fd);
+  if (fsync(parent_fd) != 0 && condition) { int err = errno; close(parent_fd); respond_error("SERVICE_UNAVAILABLE", err, "checked publication outcome requires inspection"); }
   close(parent_fd);
 
   StrBuf sb;
@@ -1525,7 +1603,27 @@ static void op_write(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_
   if ((int64_t)content_len > max_edit_bytes) {
     respond_error("LIMIT_EXCEEDED", EFBIG, "content exceeds the 1 MiB editor limit");
   }
-  publish_regular_bytes(home_dirfd, uid, path, path_len, (const unsigned char *)content, content_len, overwrite, mode, max_file_mode);
+  publish_regular_bytes(home_dirfd, uid, path, path_len, (const unsigned char *)content, content_len, overwrite, mode, max_file_mode, NULL);
+}
+
+static void op_write_checked(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_edit_bytes, int64_t max_file_mode) {
+  const char *path = NULL, *content = NULL, *expected = NULL, *expected_mtime = NULL;
+  size_t path_len = 0, content_len = 0, expected_len = 0, expected_mtime_len = 0;
+  bool remove = false, expected_exists = false;
+  int64_t mode = 0;
+  if (!jv_get_str(req, "path", &path, &path_len) || !jv_get_str(req, "content", &content, &content_len) ||
+      !jv_get_str(req, "expectedContent", &expected, &expected_len) || !jv_get_bool(req, "expectedExists", &expected_exists) ||
+      !jv_get_str(req, "expectedMtime", &expected_mtime, &expected_mtime_len) ||
+      !jv_get_bool(req, "remove", &remove) || !jv_get_int(req, "mode", &mode)) {
+    respond_error("VALIDATION", EINVAL, "write-checked requires the exact preimage and replacement");
+  }
+  if ((!expected_exists && (expected_len != 0 || expected_mtime_len != 0)) || expected_mtime_len >= 32 || expected_mtime_len != strlen(expected_mtime) || (expected_exists && expected_mtime_len == 0) || (remove && content_len != 0) ||
+      !is_valid_utf8(content, content_len) || !is_valid_utf8(expected, expected_len)) {
+    respond_error("VALIDATION", EINVAL, "checked replacement and preimage must be valid UTF-8 text");
+  }
+  if ((int64_t)content_len > max_edit_bytes || (int64_t)expected_len > max_edit_bytes) respond_error("LIMIT_EXCEEDED", EFBIG, "checked text exceeds the editor limit");
+  WriteCondition condition = { .exists = expected_exists, .content = expected, .content_len = expected_len, .mtime = expected_mtime, .remove = remove };
+  publish_regular_bytes(home_dirfd, uid, path, path_len, (const unsigned char *)content, content_len, true, mode, max_file_mode, &condition);
 }
 
 static void op_put_bytes(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_file_mode) {
@@ -1547,7 +1645,7 @@ static void op_put_bytes(int home_dirfd, uid_t uid, const JsonVal *req, int64_t 
     free(bytes);
     respond_error("VALIDATION", EINVAL, "binary content must be canonical base64 within 2 MiB");
   }
-  publish_regular_bytes(home_dirfd, uid, path, path_len, bytes, nbytes, overwrite, mode, max_file_mode);
+  publish_regular_bytes(home_dirfd, uid, path, path_len, bytes, nbytes, overwrite, mode, max_file_mode, NULL);
 }
 
 static void op_get_bytes(int home_dirfd, uid_t uid, const JsonVal *req) {
@@ -2256,6 +2354,48 @@ static void op_empty_trash(int home_dirfd, uid_t uid, const JsonVal *req) {
   respond_success_raw(num_buf);
 }
 
+/* Permanently removes one trash item, only while its metadata still matches the revision the caller reviewed. */
+static void op_purge_trash(int home_dirfd, uid_t uid, const JsonVal *req) {
+  const char *trash_id = NULL, *expected_path = NULL, *expected_deleted_at = NULL;
+  if (!jv_get_str(req, "trashId", &trash_id, NULL) || !jv_get_str(req, "originalPath", &expected_path, NULL) ||
+      !jv_get_str(req, "deletedAt", &expected_deleted_at, NULL)) {
+    respond_error("VALIDATION", EINVAL, "purge-trash requires trashId, originalPath and deletedAt");
+  }
+  if (!validate_uuid_v4(trash_id)) {
+    respond_error("VALIDATION", EINVAL, "invalid trash item identifier");
+  }
+
+  int trash_fd = open_or_create_trash_dir(home_dirfd, uid, false);
+  if (trash_fd < 0) {
+    respond_error("NOT_FOUND", ENOENT, "trash item not found");
+  }
+
+  TrashMeta tm;
+  read_and_validate_trash_meta(trash_fd, uid, trash_id, &tm);
+  if (strcmp(tm.original_path, expected_path) != 0 || strcmp(tm.deleted_at, expected_deleted_at) != 0) {
+    close(trash_fd);
+    respond_error("CONFLICT", ESTALE, "trash item changed since it was read");
+  }
+
+  char item_name[64];
+  char meta_name[64];
+  snprintf(item_name, sizeof(item_name), "%s.item", trash_id);
+  snprintf(meta_name, sizeof(meta_name), "%s.meta", trash_id);
+  remove_tree_at(trash_fd, item_name, uid, 0);
+  if (unlinkat(trash_fd, meta_name, 0) != 0 && errno != ENOENT) {
+    int err = errno;
+    close(trash_fd);
+    respond_errno(err, "unlinkat trash metadata failed");
+  }
+  (void)fsync(trash_fd);
+  close(trash_fd);
+
+  StrBuf sb;
+  sb_init(&sb, 256);
+  append_trash_item_json(&sb, &tm);
+  respond_success_raw(sb.data);
+}
+
 int main(int argc, char **argv) {
   (void)argv;
   close_extra_fds();
@@ -2395,6 +2535,8 @@ int main(int argc, char **argv) {
     op_read(home_dirfd, account_uid, req, max_edit_bytes);
   } else if (strcmp(op, "write") == 0) {
     op_write(home_dirfd, account_uid, req, max_edit_bytes, max_file_mode);
+  } else if (strcmp(op, "write-checked") == 0) {
+    op_write_checked(home_dirfd, account_uid, req, max_edit_bytes, max_file_mode);
   } else if (strcmp(op, "put-bytes") == 0) {
     op_put_bytes(home_dirfd, account_uid, req, max_file_mode);
   } else if (strcmp(op, "get-bytes") == 0) {
@@ -2411,6 +2553,8 @@ int main(int argc, char **argv) {
     op_restore(home_dirfd, account_uid, req, max_file_mode, max_dir_mode);
   } else if (strcmp(op, "empty-trash") == 0) {
     op_empty_trash(home_dirfd, account_uid, req);
+  } else if (strcmp(op, "purge-trash") == 0) {
+    op_purge_trash(home_dirfd, account_uid, req);
   } else {
     respond_error("VALIDATION", EINVAL, "unsupported account file operation");
   }

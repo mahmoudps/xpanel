@@ -173,6 +173,13 @@ export const encodeRfc2047Word = (value: string): string => {
 /**
  * Decodes RFC 2047 encoded-words (`=?charset?B?...?=` and `=?charset?Q?...?=`) into UTF-8.
  */
+const decodeCharsetBytes = (bytes: Buffer, charset: string): string => {
+  const normalized = charset.toLowerCase()
+  if (normalized === 'utf-8' || normalized === 'utf8' || normalized === 'us-ascii') return bytes.toString('utf8')
+  if (normalized === 'iso-8859-1' || normalized === 'latin1') return bytes.toString('latin1')
+  try { return new TextDecoder(normalized).decode(bytes) } catch { return bytes.toString('utf8') }
+}
+
 export const decodeRfc2047 = (raw: string): string => {
   if (!raw.includes('=?')) return raw
   // Remove whitespace between adjacent encoded-words per RFC 2047 section 6.2
@@ -199,17 +206,7 @@ export const decodeRfc2047 = (raw: string): string => {
       }
       bytes = Buffer.from(buf)
     }
-    if (charset === 'utf-8' || charset === 'utf8' || charset === 'us-ascii') {
-      return bytes.toString('utf8')
-    }
-    if (charset === 'iso-8859-1' || charset === 'latin1') {
-      return bytes.toString('latin1')
-    }
-    try {
-      return new TextDecoder(charset).decode(bytes)
-    } catch {
-      return bytes.toString('utf8')
-    }
+    return decodeCharsetBytes(bytes, charset)
   })
 }
 
@@ -710,11 +707,13 @@ export class MimeCodecAndSanitizer {
    * - `multipart/related` (inline `cid:` images)
    * - `multipart/mixed` (file attachments)
    */
-  buildMimeMessage(input: MimeBuildInput): { rawMime: string; messageId: string } {
+  buildMimeMessage(input: MimeBuildInput, options: { allowEmptyTo?: boolean } = {}): { rawMime: string; messageId: string } {
     if (!input.from || !input.from.includes('@')) {
       fail('VALIDATION', 'valid From address is required')
     }
-    if (!Array.isArray(input.to) || input.to.length === 0) {
+    // Trusted callers may build unfinished drafts or validated Cc/Bcc-only envelopes.
+    // This option is never read from public message input.
+    if (!Array.isArray(input.to) || (input.to.length === 0 && options.allowEmptyTo !== true)) {
       fail('VALIDATION', 'at least one To recipient is required')
     }
 
@@ -728,7 +727,7 @@ export class MimeCodecAndSanitizer {
 
     const topHeaders: string[] = [
       `From: ${fromHeader}`,
-      `To: ${input.to.join(', ')}`,
+      ...(input.to.length > 0 ? [`To: ${input.to.join(', ')}`] : []),
       ...(input.cc && input.cc.length > 0 ? [`Cc: ${input.cc.join(', ')}`] : []),
       ...(input.replyTo ? [`Reply-To: ${input.replyTo}`] : []),
       `Subject: ${encodeRfc2047Word(input.subject ?? '')}`,
@@ -853,7 +852,7 @@ export class MimeCodecAndSanitizer {
    * Parses a raw MIME message with strict nesting, part count, header size, and decompression bomb guards,
    * and sanitizes any HTML body and inline CID references.
    */
-  parseMimeMessage(rawInput: string | Buffer, limits: MimeParseLimits = {}): ParsedMimeMessage {
+  parseMimeMessage(rawInput: string | Uint8Array, limits: MimeParseLimits = {}): ParsedMimeMessage {
     const maxTotalBytes = limits.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES
     const maxHeaderBytes = limits.maxHeaderBytes ?? DEFAULT_MAX_HEADER_BYTES
     const maxNestingDepth = limits.maxNestingDepth ?? DEFAULT_MAX_NESTING_DEPTH
@@ -861,12 +860,16 @@ export class MimeCodecAndSanitizer {
     const maxDecompressedBytes = limits.maxDecompressedBytes ?? DEFAULT_MAX_DECOMPRESSED_BYTES
     const maxCompressionRatio = limits.maxCompressionRatio ?? DEFAULT_MAX_COMPRESSION_RATIO
 
-    const rawBuffer = typeof rawInput === 'string' ? Buffer.from(rawInput, 'utf8') : rawInput
-    if (rawBuffer.length > maxTotalBytes) {
-      fail('VALIDATION', `MIME message size (${rawBuffer.length} bytes) exceeds limit (${maxTotalBytes} bytes)`)
+    const byteInput = typeof rawInput !== 'string'
+    const rawLength = typeof rawInput === 'string' ? Buffer.byteLength(rawInput, 'utf8') : rawInput.byteLength
+    if (rawLength > maxTotalBytes) {
+      fail('VALIDATION', `MIME message size (${rawLength} bytes) exceeds limit (${maxTotalBytes} bytes)`)
     }
-
-    const rawString = rawBuffer.toString('utf8')
+    const rawBuffer = typeof rawInput === 'string' ? Buffer.from(rawInput, 'utf8') : Buffer.from(rawInput)
+    // A latin1 structural view is one code unit per wire byte. Headers and text are decoded
+    // separately; raw binary/8bit MIME bodies never pass through a lossy UTF-8 conversion.
+    const sourceEncoding = byteInput ? 'latin1' : 'utf8'
+    const rawString = rawBuffer.toString(sourceEncoding)
     let partsSeen = 0
     const textBodies: string[] = []
     const htmlBodies: string[] = []
@@ -874,19 +877,20 @@ export class MimeCodecAndSanitizer {
     const inlineCidMap: Record<string, string> = {}
 
     const splitHeaderAndBody = (entity: string): { headers: Record<string, string>; body: string } => {
+      const headersFrom = (raw: string) => parseHeaderBlock(byteInput ? Buffer.from(raw, 'latin1').toString('utf8') : raw)
       const crlfMatch = /\r?\n\r?\n/.exec(entity)
       if (!crlfMatch) {
-        if (Buffer.byteLength(entity, 'utf8') > maxHeaderBytes) {
+        if (Buffer.byteLength(entity, sourceEncoding) > maxHeaderBytes) {
           fail('VALIDATION', 'MIME header block exceeds maximum size')
         }
-        return { headers: parseHeaderBlock(entity), body: '' }
+        return { headers: headersFrom(entity), body: '' }
       }
       const headerRaw = entity.slice(0, crlfMatch.index)
-      if (Buffer.byteLength(headerRaw, 'utf8') > maxHeaderBytes) {
+      if (Buffer.byteLength(headerRaw, sourceEncoding) > maxHeaderBytes) {
         fail('VALIDATION', 'MIME header block exceeds maximum size')
       }
       const body = entity.slice(crlfMatch.index + crlfMatch[0].length)
-      return { headers: parseHeaderBlock(headerRaw), body }
+      return { headers: headersFrom(headerRaw), body }
     }
 
     const decodePartBytes = (bodyText: string, transferEncoding: string): Buffer => {
@@ -897,7 +901,7 @@ export class MimeCodecAndSanitizer {
       if (enc === 'quoted-printable') {
         return decodeQuotedPrintableBytes(bodyText)
       }
-      return Buffer.from(bodyText, 'utf8')
+      return Buffer.from(bodyText, sourceEncoding)
     }
 
     const walkEntity = (entity: string, depth: number): Record<string, string> => {
@@ -919,15 +923,19 @@ export class MimeCodecAndSanitizer {
       if (mimeType.startsWith('multipart/')) {
         const boundary = extractHeaderParam(contentTypeRaw, 'boundary')
         if (!boundary) {
-          fail('VALIDATION', 'multipart MIME entity is missing boundary parameter')
+          return fail('VALIDATION', 'multipart MIME entity is missing boundary parameter')
         }
-        const delim = `--${boundary}`
-        const segments = body.split(delim)
+        const canonicalBoundary = boundary
+        const delim = `--${canonicalBoundary}`
+        const segments = byteInput
+          ? body.split(new RegExp('(?:^|\\r?\\n)--' + canonicalBoundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=--[ \\t]*(?:\\r?\\n|$)|[ \\t]*\\r?\\n|$)'))
+          : body.split(delim)
         // First segment is preamble; segments after `--` are epilogue
         for (let i = 1; i < segments.length; i++) {
           const seg = segments[i]!
           if (seg.startsWith('--')) break
-          const cleaned = seg.replace(/^\r?\n/, '').replace(/\r?\n$/, '')
+          const start = seg.replace(byteInput ? /^[ \t]*\r?\n/ : /^\r?\n/, '')
+          const cleaned = byteInput ? start : start.replace(/\r?\n$/, '')
           walkEntity(cleaned, depth + 1)
         }
         return headers
@@ -976,9 +984,9 @@ export class MimeCodecAndSanitizer {
           dangerousExtension,
         })
       } else if (mimeType === 'text/html') {
-        htmlBodies.push(decodedBytes.toString('utf8'))
+        htmlBodies.push(byteInput ? decodeCharsetBytes(decodedBytes, extractHeaderParam(contentTypeRaw, 'charset') ?? 'utf-8') : decodedBytes.toString('utf8'))
       } else {
-        textBodies.push(decodedBytes.toString('utf8'))
+        textBodies.push(byteInput ? decodeCharsetBytes(decodedBytes, extractHeaderParam(contentTypeRaw, 'charset') ?? 'utf-8') : decodedBytes.toString('utf8'))
       }
 
       return headers

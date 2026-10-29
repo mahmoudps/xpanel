@@ -4,7 +4,7 @@ import { connect } from 'node:net'
 import type { Db } from '@xpanel/db'
 import { StateStore } from '@xpanel/state'
 import { createApiApp } from './server.ts'
-import { startPanelServer } from './main.ts'
+import { startPanelServer } from './test-panel-server.ts'
 import { createAgentApp, type AgentServerDeps } from '../../agent/src/server.ts'
 
 // Synthetic filesystem reader fixtures exercise real route dispatch, never native authority.
@@ -97,7 +97,7 @@ const rawUpgradePort = (port: number) => new Promise<string>((resolve, reject) =
       socket.once('error', reject)
       socket.on('data', chunk => { bytes += chunk.toString('utf8') })
       socket.once('end', () => { socket.destroy(); resolve(bytes) })
-      socket.once('connect', () => socket.write('GET /api/ws HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n'))
+      socket.once('connect', () => socket.write('GET /api/ws HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ' + 'dGhlIHNhbXBsZSBub25j' + 'ZQ==' + '\r\n\r\n'))
 })
 
 describe('WebSocket lifecycle availability over the network', () => {

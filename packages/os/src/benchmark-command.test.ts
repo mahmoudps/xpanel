@@ -1,0 +1,8 @@
+import { describe, expect, it } from 'vitest'
+import { benchmarkCommands, isBenchmarkCommand, parseBenchmarkCpu, parseBenchmarkDisk } from './benchmark-command.ts'
+describe('bounded benchmark grammar and parsers', () => {
+  it('admits exactly the fixed low-priority commands', () => { for (const argv of Object.values(benchmarkCommands())) expect(isBenchmarkCommand(argv)).toBe(true); expect(benchmarkCommands().cpu.slice(0, 7)).toEqual(['/usr/bin/nice', '-n', '19', '/usr/bin/ionice', '-c', '3', '/usr/bin/openssl']) })
+  it('refuses arbitrary paths, sizes, priority and shell injection', () => { for (const argv of [benchmarkCommands().write.map(v => v === 'count=64' ? 'count=4096' : v), benchmarkCommands().cleanup.map(v => v.replace('sample.bin', '../secret')), ['/bin/sh', '-c', 'true'], [...benchmarkCommands().cpu, ';'], benchmarkCommands().cpu.map(v => v === '19' ? '-20' : v)]) expect(isBenchmarkCommand(argv)).toBe(false) })
+  it('reads one machine-readable SHA-256 throughput only', () => { expect(parseBenchmarkCpu('+F:25:sha256:12345.60\n')).toBe(12346); for (const value of ['', '+F:25:aes:1234', '+F:25:sha256:NaN', '+F:25:sha256:0', '+F:25:sha256:1\n+F:25:sha256:2']) expect(parseBenchmarkCpu(value)).toBeNull() })
+  it('requires a complete measured 64 MiB transfer', () => { expect(parseBenchmarkDisk('64+0 records in\n64+0 records out\n67108864 bytes (67 MB, 64 MiB) copied, 2 s, 33.6 MB/s\n')).toBe(33554432); for (const v of ['1 bytes copied, 2 s, 1 B/s', '67108864 bytes copied, 0 s, 0 B/s', '67108864 bytes copied, NaN s, 0 B/s']) expect(parseBenchmarkDisk(v)).toBeNull() })
+})

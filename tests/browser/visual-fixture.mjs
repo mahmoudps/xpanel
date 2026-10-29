@@ -76,9 +76,21 @@ const stateFor = (route, qualifiedCatalog) => ({
   },
 })
 
-const markVisualDocument = html => html
-  .replace('<html ', '<html data-visual-fixture="synthetic" ')
-  .replace('<body>', '<body data-visual-fixture="synthetic"><div role="note" data-visual-fixture-watermark style="position:sticky;inset-block-start:0;z-index:2000;padding:5px 12px;text-align:center;background:#f4f6f8;color:#384354;border-block-end:1px solid #d5dce4;font:12px/1.4 sans-serif" dir="ltr">Synthetic visual fixture</div>')
+const markVisualDocument = (html, component = false) => {
+  const scope = component ? ' data-visual-fixture-scope="component"' : ''
+  const note = component ? 'Synthetic component fixture — not a product route' : 'Synthetic visual fixture'
+  return html
+    .replace(/<html\b/i, '<html data-visual-fixture="synthetic"' + scope)
+    .replace(/<body\b([^>]*)>/i, '<body data-visual-fixture="synthetic"' + scope + '$1><div role="note" data-visual-fixture-watermark style="position:sticky;inset-block-start:0;z-index:2000;padding:5px 12px;text-align:center;background:#f4f6f8;color:#384354;border-block-end:1px solid #d5dce4;font:12px/1.4 sans-serif" dir="ltr">' + note + '</div>')
+}
+
+const synchronousFixtureResult = value => {
+  if (value && (typeof value === 'object' || typeof value === 'function') && typeof value.then === 'function') {
+    Promise.resolve(value).catch(() => undefined)
+    throw new Error('The synthetic visual callback must return synchronously.')
+  }
+  return value
+}
 
 /**
  * Loopback-only, read-only visual server. No API authentication, cookies, secrets or host commands.
@@ -86,12 +98,19 @@ const markVisualDocument = html => html
  * resolvedAccount=false exercises the standalone workspace-summary DTO renderer
  * without a loaded account record. It is not an authenticated missing-account HTTP path.
  * Principals and account data remain synthetic in either case.
+ * transformState is trusted synchronous factory-supplied code, never an HTTP option.
+ * componentDocument configures one explicitly labelled component-only document path.
+ * Neither hook grants product-route admission, authenticates or executes host work.
  */
-export async function createVisualFixture({ port = 0, host = '127.0.0.1', qualifiedCatalog = true, resolvedAccount = true } = {}) {
+export async function createVisualFixture({ port = 0, host = '127.0.0.1', qualifiedCatalog = true, resolvedAccount = true, transformState, componentDocument } = {}) {
   if (!['127.0.0.1', '::1', 'localhost'].includes(host)) throw new Error('The visual fixture must bind to loopback.')
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid visual fixture port.')
   if (typeof qualifiedCatalog !== 'boolean') throw new Error('The synthetic catalog selection must be explicit.')
   if (typeof resolvedAccount !== 'boolean') throw new Error('The synthetic account projection must be explicit.')
+  if (transformState !== undefined && typeof transformState !== 'function') throw new Error('The synthetic state projection must be a function.')
+  if (componentDocument !== undefined && (!componentDocument || typeof componentDocument !== 'object' || Array.isArray(componentDocument) || !/^\/__visual-components\/[a-z][a-z0-9-]*$/.test(componentDocument.path) || typeof componentDocument.render !== 'function')) throw new Error('The synthetic component document requires a fixed component path and render function.')
+  const componentPath = componentDocument?.path
+  const renderComponent = componentDocument?.render
   const server = createServer(async (incoming, outgoing) => {
     try {
       if (incoming.method !== 'GET' && incoming.method !== 'HEAD') {
@@ -104,18 +123,24 @@ export async function createVisualFixture({ port = 0, host = '127.0.0.1', qualif
       const origin = `http://${host === '::1' ? '[::1]' : host}:${address.port}`
       const url = new URL(incoming.url ?? '/', origin)
       const route = resolveWebDocumentRoute(url.pathname)
+      const component = url.pathname === componentPath
       const asset = url.pathname === '/favicon.ico' || url.pathname === '/assets' || url.pathname.startsWith('/assets/')
       if (url.pathname === '/api/ips') {
         outgoing.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-visual-fixture': 'synthetic' })
         outgoing.end(incoming.method === 'HEAD' ? undefined : JSON.stringify({ scope: 'desired-state', hostBinding: 'unverified', defaultSharedIpv4: { poolId: 'visual-ip', address: account.ipv4 }, dedicated: { entitled: false, unallocated: [], count: 0 } }))
         return
       }
-      if (!asset && !route) {
+      if (!asset && !route && !component) {
         outgoing.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
         outgoing.end(incoming.method === 'HEAD' ? undefined : 'No synthetic visual document exists here.')
         return
       }
-      const response = await serveWebUi(new Request(url, { method: incoming.method }), route ? () => {
+      let response
+      if (component) {
+        const document = synchronousFixtureResult(renderComponent({ url }))
+        if (typeof document !== 'string' || !/<html\b[^>]*>/i.test(document) || !/<body\b[^>]*>/i.test(document)) throw new Error('The synthetic component renderer must return a complete HTML document.')
+        response = new Response(document, { headers: { 'content-type': 'text/html; charset=utf-8', 'x-content-type-options': 'nosniff', 'x-frame-options': 'SAMEORIGIN' } })
+      } else response = await serveWebUi(new Request(url, { method: incoming.method }), route ? () => {
         const state = stateFor(route, qualifiedCatalog)
         if (!resolvedAccount && route.surface === 'xpanel') {
           state.panel = {}
@@ -124,11 +149,14 @@ export async function createVisualFixture({ port = 0, host = '127.0.0.1', qualif
             plan: { id: plan.id, name: plan.name },
           }
         }
-        return state
+        if (!transformState) return state
+        const projected = synchronousFixtureResult(transformState({ state, route }))
+        if (!projected || typeof projected !== 'object' || Array.isArray(projected)) throw new Error('The synthetic state projection must return a state object.')
+        return projected
       } : undefined)
       const html = response.headers.get('content-type')?.startsWith('text/html')
-      const body = html ? markVisualDocument(await response.text()) : await response.text()
-      outgoing.writeHead(response.status, { ...Object.fromEntries(response.headers), 'cache-control': 'no-store', 'x-visual-fixture': 'synthetic' })
+      const body = html ? markVisualDocument(await response.text(), component) : await response.text()
+      outgoing.writeHead(response.status, { ...Object.fromEntries(response.headers), 'cache-control': 'no-store', 'x-visual-fixture': 'synthetic', ...(component ? { 'x-visual-fixture-scope': 'component' } : {}) })
       outgoing.end(incoming.method === 'HEAD' ? undefined : body)
     } catch {
       if (!outgoing.headersSent) outgoing.writeHead(500, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })

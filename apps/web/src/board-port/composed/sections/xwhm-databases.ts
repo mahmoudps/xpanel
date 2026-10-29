@@ -1,22 +1,13 @@
+import '../../../i18n.ts'
 import type { ComposedRoute } from '../types.ts'
-
 export const xwhm_databases: readonly ComposedRoute[] = [
   {
     "route": "/whm/databases",
     "surface": "xwhm",
     "section": "databases",
-    "group": [
-      "Databases",
-      "قواعد البيانات"
-    ],
-    "title": [
-      "Databases",
-      "قواعد البيانات"
-    ],
-    "lede": [
-      "Databases data has not been read. Related actions remain unavailable.",
-      "لم تُقرأ بيانات قواعد البيانات. تبقى الإجراءات المرتبطة غير متاحة."
-    ],
+    "group": msgid('Databases'),
+    "title": msgid('Databases'),
+    "lede": msgid('Databases data has not been read. Related actions remain unavailable.'),
     "layout": "list",
     "action": null,
     "columns": [],
@@ -27,18 +18,9 @@ export const xwhm_databases: readonly ComposedRoute[] = [
     "route": "/whm/databases/users",
     "surface": "xwhm",
     "section": "databases",
-    "group": [
-      "Databases",
-      "قواعد البيانات"
-    ],
-    "title": [
-      "Database users",
-      "مستخدمو قواعد البيانات"
-    ],
-    "lede": [
-      "Database users data has not been read. Related actions remain unavailable.",
-      "لم تُقرأ بيانات مستخدمو قواعد البيانات. تبقى الإجراءات المرتبطة غير متاحة."
-    ],
+    "group": msgid('Databases'),
+    "title": msgid('Database users'),
+    "lede": msgid('Database users data has not been read. Related actions remain unavailable.'),
     "layout": "list",
     "action": null,
     "columns": [],
@@ -49,18 +31,9 @@ export const xwhm_databases: readonly ComposedRoute[] = [
     "route": "/whm/databases/phpmyadmin",
     "surface": "xwhm",
     "section": "databases",
-    "group": [
-      "Databases",
-      "قواعد البيانات"
-    ],
-    "title": [
-      "phpMyAdmin",
-      "phpMyAdmin"
-    ],
-    "lede": [
-      "The database client is unavailable until the server returns an authorized address.",
-      "لا يتاح عميل قواعد البيانات حتى يعيد الخادم عنوانًا مصرّحًا به."
-    ],
+    "group": msgid('Databases'),
+    "title": "phpMyAdmin",
+    "lede": msgid('The database client is unavailable until the server returns an authorized address.'),
     "layout": "launch",
     "action": null,
     "columns": [],
@@ -71,18 +44,9 @@ export const xwhm_databases: readonly ComposedRoute[] = [
     "route": "/whm/databases/tuning",
     "surface": "xwhm",
     "section": "databases",
-    "group": [
-      "Databases",
-      "قواعد البيانات"
-    ],
-    "title": [
-      "Database tuning",
-      "ضبط قواعد البيانات"
-    ],
-    "lede": [
-      "Database tuning data has not been read. Related actions remain unavailable.",
-      "لم تُقرأ بيانات ضبط قواعد البيانات. تبقى الإجراءات المرتبطة غير متاحة."
-    ],
+    "group": msgid('Databases'),
+    "title": msgid('Database tuning'),
+    "lede": msgid('Database tuning data has not been read. Related actions remain unavailable.'),
     "layout": "settings",
     "action": null,
     "columns": [],
@@ -93,18 +57,9 @@ export const xwhm_databases: readonly ComposedRoute[] = [
     "route": "/whm/databases/processes",
     "surface": "xwhm",
     "section": "databases",
-    "group": [
-      "Databases",
-      "قواعد البيانات"
-    ],
-    "title": [
-      "Database processes",
-      "عمليات قواعد البيانات"
-    ],
-    "lede": [
-      "Database processes data has not been read. Related actions remain unavailable.",
-      "لم تُقرأ بيانات عمليات قواعد البيانات. تبقى الإجراءات المرتبطة غير متاحة."
-    ],
+    "group": msgid('Databases'),
+    "title": msgid('Database processes'),
+    "lede": msgid('Database processes data has not been read. Related actions remain unavailable.'),
     "layout": "list",
     "action": null,
     "columns": [],
@@ -115,18 +70,9 @@ export const xwhm_databases: readonly ComposedRoute[] = [
     "route": "/whm/databases/servers",
     "surface": "xwhm",
     "section": "databases",
-    "group": [
-      "Databases",
-      "قواعد البيانات"
-    ],
-    "title": [
-      "Database servers",
-      "خوادم قواعد البيانات"
-    ],
-    "lede": [
-      "Database servers data has not been read. Related actions remain unavailable.",
-      "لم تُقرأ بيانات خوادم قواعد البيانات. تبقى الإجراءات المرتبطة غير متاحة."
-    ],
+    "group": msgid('Databases'),
+    "title": msgid('Database servers'),
+    "lede": msgid('Database servers data has not been read. Related actions remain unavailable.'),
     "layout": "settings",
     "action": null,
     "columns": [],
@@ -137,18 +83,9 @@ export const xwhm_databases: readonly ComposedRoute[] = [
     "route": "/whm/databases/upgrade",
     "surface": "xwhm",
     "section": "databases",
-    "group": [
-      "Databases",
-      "قواعد البيانات"
-    ],
-    "title": [
-      "Database upgrade",
-      "ترقية محرك قواعد البيانات"
-    ],
-    "lede": [
-      "Database upgrade data has not been read. Related actions remain unavailable.",
-      "لم تُقرأ بيانات ترقية محرك قواعد البيانات. تبقى الإجراءات المرتبطة غير متاحة."
-    ],
+    "group": msgid('Databases'),
+    "title": msgid('Database upgrade'),
+    "lede": msgid('Database upgrade data has not been read. Related actions remain unavailable.'),
     "layout": "list",
     "action": null,
     "columns": [],
@@ -159,18 +96,9 @@ export const xwhm_databases: readonly ComposedRoute[] = [
     "route": "/whm/databases/redis",
     "surface": "xwhm",
     "section": "databases",
-    "group": [
-      "Databases",
-      "قواعد البيانات"
-    ],
-    "title": [
-      "Redis",
-      "Redis"
-    ],
-    "lede": [
-      "Redis data has not been read. Related actions remain unavailable.",
-      "لم تُقرأ بيانات Redis. تبقى الإجراءات المرتبطة غير متاحة."
-    ],
+    "group": msgid('Databases'),
+    "title": "Redis",
+    "lede": msgid('Redis data has not been read. Related actions remain unavailable.'),
     "layout": "list",
     "action": null,
     "columns": [],
@@ -181,18 +109,9 @@ export const xwhm_databases: readonly ComposedRoute[] = [
     "route": "/whm/databases/mongodb",
     "surface": "xwhm",
     "section": "databases",
-    "group": [
-      "Databases",
-      "قواعد البيانات"
-    ],
-    "title": [
-      "MongoDB",
-      "MongoDB"
-    ],
-    "lede": [
-      "MongoDB data has not been read. Related actions remain unavailable.",
-      "لم تُقرأ بيانات MongoDB. تبقى الإجراءات المرتبطة غير متاحة."
-    ],
+    "group": msgid('Databases'),
+    "title": "MongoDB",
+    "lede": msgid('MongoDB data has not been read. Related actions remain unavailable.'),
     "layout": "list",
     "action": null,
     "columns": [],

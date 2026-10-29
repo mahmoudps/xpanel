@@ -1,3 +1,4 @@
+import { SOURCE_LOCALE, localeDirection, translator, type Locale, type MessageValues } from './i18n.ts'
 // xPanel Design System tokens, CSS stylesheet, and accessible status/meter primitives.
 // Follows docs/STANDARDS.md: OKLCH light & dark themes (no pure #000), logical RTL/LTR properties,
 // 1.618:1 main:aside split, compact reference typography, >= 44px ergonomic hit targets,
@@ -21,7 +22,7 @@ export type AsyncActionStateKind =
 
 export interface AsyncActionBannerProps {
   state: AsyncActionStateKind
-  locale?: 'en' | 'ar'
+  locale?: Locale
   title?: string
   message?: string
   jobId?: string
@@ -96,31 +97,54 @@ export function formatAsciiPercent(value: number, decimals = 1): string {
 }
 
 /**
- * Formats an ISO timestamp or Date into `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS UTC` with ASCII digits (`0-9`).
+ * The product's one display form for instants: `YYYY-MM-DD`, or `YYYY-MM-DD HH:mm UTC` with `includeTime`,
+ * ASCII digits in every locale. Readable presentation also rejects anything but an explicit ISO 8601 instant.
+ * Machine formats (APIs, logs, `datetime` attributes) stay ISO 8601.
  */
 export function formatAsciiDate(
   isoOrDate: string | Date,
-  opts: { includeTime?: boolean } = {},
+  opts: { includeTime?: boolean; presentation?: 'readable' } = {},
 ): string {
-  const d = typeof isoOrDate === 'string' ? new Date(isoOrDate) : isoOrDate
+  const readable = opts.presentation === 'readable'
+  const input = readable && typeof isoOrDate === 'string' ? normalizeAsciiDigits(isoOrDate) : isoOrDate
+  const supplied = readable && typeof input === 'string'
+    ? /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.exec(input) : null
+  if (readable && typeof input === 'string' && !supplied) return '—'
+  const d = typeof input === 'string' ? new Date(input) : input
   if (Number.isNaN(d.getTime())) {
-    return normalizeAsciiDigits(typeof isoOrDate === 'string' ? isoOrDate : '')
+    return readable ? '—' : normalizeAsciiDigits(typeof isoOrDate === 'string' ? isoOrDate : '')
+  }
+  if (supplied) {
+    const calendar = new Date(supplied[1] + 'Z')
+    if (Number.isNaN(calendar.getTime()) || calendar.toISOString().slice(0, 19) !== supplied[1]) return '—'
   }
   const iso = d.toISOString()
-  if (opts.includeTime) {
-    return `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`
-  }
-  return iso.slice(0, 10)
+  if (readable && !/^\d{4}-\d{2}-\d{2}T/.test(iso)) return '—'
+  return opts.includeTime ? `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC` : iso.slice(0, 10)
 }
 
+/** Readable presentation only; retain original instants for storage, APIs and arithmetic. */
+export function formatDisplayDateTime(value: string | Date | null | undefined): string {
+  return value === null || value === undefined ? '—' : formatAsciiDate(value, { includeTime: true, presentation: 'readable' })
+}
+
+/** One self-contained browser expression generated from the same server implementation. */
+export const DISPLAY_DATETIME_BINDING = `(()=>{
+const EASTERN_ARABIC_ZERO=${EASTERN_ARABIC_ZERO};
+const EXTENDED_ARABIC_ZERO=${EXTENDED_ARABIC_ZERO};
+const normalizeAsciiDigits=${normalizeAsciiDigits.toString()};
+const formatAsciiDate=${formatAsciiDate.toString()};
+return ${formatDisplayDateTime.toString()};
+})()`
+
 /**
- * UTC clock `HH:MM UTC`. The panel stores instants in UTC and has no chosen zone,
+ * UTC clock `HH:mm UTC`. The panel stores instants in UTC and has no chosen zone,
  * so every server clock uses this label instead of a bare hour.
  */
 export function formatUtcClock(isoOrDate: string | Date): string {
   const full = formatAsciiDate(isoOrDate, { includeTime: true })
-  const clock = /^\d{4}-\d{2}-\d{2} (\d{2}:\d{2}):\d{2} UTC$/.exec(full)
-  return clock ? `${clock[1]} UTC` : full
+  const clock = /^\d{4}-\d{2}-\d{2} (\d{2}:\d{2} UTC)$/.exec(full)
+  return clock ? clock[1]! : full
 }
 
 /** UTC calendar day `YYYY-MM-DD UTC`, the date form of {@link formatUtcClock}. */
@@ -223,7 +247,7 @@ export function renderStatusBadge(status: StatusBadgeKind, label: string): strin
 }
 
 export interface ResourceMeterOptions {
-  locale: 'en' | 'ar'
+  locale: Locale
   label: string
   unit?: string
   /** A desired-state cap is not evidence of effective host enforcement. */
@@ -243,39 +267,39 @@ const meterPercentText = (percent: number, threshold: ThresholdLevel, positiveUs
 export function renderThresholdMeter(used: unknown, limit: unknown, options: ResourceMeterOptions): string {
   if (!options.label.trim()) throw new TypeError('A resource meter requires a nonempty accessible label')
   const usage = resolveResourceUsage(used, limit)
-  const isAr = options.locale === 'ar'
-  const text = (en: string, ar: string): string => isAr ? ar : en
-  const unavailable = text('Unavailable', 'غير متاح')
-  const unlimited = text('Unlimited', 'غير محدود')
+  const rtl = localeDirection(options.locale) === 'rtl'
+  const text = (message: string, values?: MessageValues): string => translator(options.locale)(message, values)
+  const unavailable = text('Unavailable')
+  const unlimited = text('Unlimited')
   const value = (part: ResourceQuantityState): string => part.availability !== 'known' ? unavailable
     : part.value === 'unlimited' ? unlimited : formatAsciiNumber(part.value as number)
   const suffix = options.unit?.trim() ? ` ${normalizeAsciiDigits(options.unit.trim())}` : ''
   const valuesText = `${value(usage.used)} / ${value(usage.limit)}${suffix}`
-  const configured = options.configuredLimit ? `<span class="xp-meter__basis">${text('Configured limit', 'الحد المعيّن')}</span>` : ''
+  const configured = options.configuredLimit ? `<span class="xp-meter__basis">${text('Configured limit')}</span>` : ''
   let word: string, threshold: ThresholdLevel | undefined
   switch (usage.kind) {
     case 'bounded':
       threshold = usage.threshold
-      word = usage.usedValue > usage.limitValue ? text('Limit exceeded', 'تجاوز الحد')
-        : threshold === 'critical' ? text('Critical', 'حرج')
-          : threshold === 'warn' ? text('Warning', 'تحذير') : text('Within limit', 'ضمن الحد')
+      word = usage.usedValue > usage.limitValue ? text('Limit exceeded')
+        : threshold === 'critical' ? text('Critical')
+          : threshold === 'warn' ? text('Warning') : text('Within limit')
       break
     case 'zero-limit':
       threshold = usage.exceeded ? 'critical' : undefined
-      word = usage.exceeded ? text('Limit exceeded', 'تجاوز الحد') : text('No allocation', 'لا تخصيص')
+      word = usage.exceeded ? text('Limit exceeded') : text('No allocation')
       break
-    case 'unbounded-allocation': threshold = 'critical'; word = text('Limit exceeded', 'تجاوز الحد'); break
+    case 'unbounded-allocation': threshold = 'critical'; word = text('Limit exceeded'); break
     case 'unlimited': word = unlimited; break
     case 'unavailable': word = unavailable; break
   }
   const percent = usage.kind === 'bounded' && usage.percent !== null ? meterPercentText(usage.percent, usage.threshold, usage.usedValue > 0) : undefined
-  const partHtml = (part: ResourceQuantityState, key: 'used' | 'limit') => `<bdi dir="${isAr && (part.value === 'unlimited' || part.availability !== 'known') ? 'rtl' : 'ltr'}" data-resource-part="${key}">${escapeHtml(value(part))}</bdi>`
+  const partHtml = (part: ResourceQuantityState, key: 'used' | 'limit') => `<bdi dir="${rtl && (part.value === 'unlimited' || part.availability !== 'known') ? 'rtl' : 'ltr'}" data-resource-part="${key}">${escapeHtml(value(part))}</bdi>`
   const valuesHtml = `<bdi dir="ltr">${partHtml(usage.used, 'used')} / ${partHtml(usage.limit, 'limit')}${suffix ? ` <bdi dir="auto">${escapeHtml(suffix.trim())}</bdi>` : ''}${percent ? ` (${escapeHtml(percent)})` : ''}</bdi>`
   const severity = threshold ? ` xp-meter--${threshold}` : ' xp-meter--neutral'
   const thresholdAttribute = threshold ? ` data-threshold="${threshold}"` : ''
   const icon = threshold && threshold !== 'ok' ? renderStatusSvg(threshold) : ''
   const track = usage.kind === 'bounded'
-    ? `<div class="xp-meter__track" role="meter" aria-label="${escapeHtml(normalizeAsciiDigits(options.label))}" aria-valuemin="0" aria-valuemax="${usage.limitValue}" aria-valuenow="${Math.min(usage.usedValue, usage.limitValue)}" aria-valuetext="${escapeHtml(`${valuesText}${percent ? ` (${percent})` : ''}; ${word}${options.configuredLimit ? `; ${text('Configured limit', 'الحد المعيّن')}` : ''}`)}"><div class="xp-meter__fill xp-meter__fill--${usage.threshold}" style="width: ${usage.fillPercent}%"></div></div>`
+    ? `<div class="xp-meter__track" role="meter" aria-label="${escapeHtml(normalizeAsciiDigits(options.label))}" aria-valuemin="0" aria-valuemax="${usage.limitValue}" aria-valuenow="${Math.min(usage.usedValue, usage.limitValue)}" aria-valuetext="${escapeHtml(`${valuesText}${percent ? ` (${percent})` : ''}; ${word}${options.configuredLimit ? `; ${text('Configured limit')}` : ''}`)}"><div class="xp-meter__fill xp-meter__fill--${usage.threshold}" style="width: ${usage.fillPercent}%"></div></div>`
     : ''
   return `<div class="xp-meter${severity}" data-resource-state="${usage.kind}"${thresholdAttribute} role="group" aria-label="${escapeHtml(normalizeAsciiDigits(options.label))}"><div class="xp-meter__header"><span class="xp-meter__values xp-tabular">${valuesHtml}</span><span class="xp-meter__status">${icon}<span class="xp-meter__word">${escapeHtml(word)}</span></span></div>${track}${configured}</div>`
 }
@@ -332,117 +356,55 @@ export function classifyHttpActionState(input: {
   return 'failed'
 }
 
-const ACTION_STATE_COPY: Record<
-  'en' | 'ar',
-  Record<AsyncActionStateKind, { badge: StatusBadgeKind; badgeText: string; title: string; message: string }>
-> = {
-  en: {
-    idle: {
-      badge: 'ok',
-      badgeText: 'Ready',
-      title: 'Workspace ready',
-      message: 'All verified controls are synchronized with the current generation.',
-    },
-    loading: {
-      badge: 'reconciling',
-      badgeText: 'Loading',
-      title: 'Loading live state...',
-      message: 'Fetching verified host and account state from the control plane.',
-    },
-    pending: {
-      badge: 'reconciling',
-      badgeText: 'Queued / Reconciling',
-      title: 'Operation accepted and pending host verification',
-      message:
-        'Desired state has been recorded, or a background job is queued. Host changes are not yet active until reconciliation and health verification complete.',
-    },
-    succeeded: {
-      badge: 'ok',
-      badgeText: 'Verified & Applied',
-      title: 'Operation verified on host',
-      message: 'Configuration passed syntax and health checks and is now active.',
-    },
-    denied: {
-      badge: 'critical',
-      badgeText: 'Access Denied',
-      title: 'Permission denied for this operation',
-      message: 'Your current role or account scope is not authorized to perform this action.',
-    },
-    failed: {
-      badge: 'critical',
-      badgeText: 'Failed',
-      title: 'Operation failed verification',
-      message:
-        'The host verifier rejected the change and automatically preserved the previous active generation. Your form draft has been retained.',
-    },
-    unavailable: {
-      badge: 'warn',
-      badgeText: 'Unavailable',
-      title: 'Service or runtime dependency unavailable',
-      message:
-        'A required host tool, socket, or backend dependency is currently unverified or unreachable. No changes were applied.',
-    },
-    conflict: {
-      badge: 'warn',
-      badgeText: 'Conflict (HTTP 409)',
-      title: 'Concurrent state modification or lock conflict',
-      message:
-        'Another reconciliation or resource update is currently in progress. Please review the latest state and retry; your draft input is preserved.',
-    },
+// Source messages; renderAsyncActionState translates them for the page locale.
+const ACTION_STATE_COPY: Record<AsyncActionStateKind, { badge: StatusBadgeKind; badgeText: string; title: string; message: string }> = {
+  idle: {
+    badge: 'ok',
+    badgeText: msgid('Ready'),
+    title: msgid('Workspace ready'),
+    message: msgid('All verified controls are synchronized with the current generation.'),
   },
-  ar: {
-    idle: {
-      badge: 'ok',
-      badgeText: 'جاهز',
-      title: 'مساحة العمل جاهزة',
-      message: 'جميع الأدوات الموثقة متزامنة مع الجيل النشط حالياً.',
-    },
-    loading: {
-      badge: 'reconciling',
-      badgeText: 'جارٍ التحميل',
-      title: 'جارٍ تحميل الحالة المباشرة...',
-      message: 'يتم جلب الحالة الموثقة للخادم والحساب من منصة التحكم.',
-    },
-    pending: {
-      badge: 'reconciling',
-      badgeText: 'قيد الانتظار والمطابقة',
-      title: 'تم استلام العملية وهي بانتظار التحقق على الخادم',
-      message:
-        'تم تسجيل الحالة المطلوبة أو جدولة المهمة في الخلفية. لن تصبح التغييرات فعالة على الخادم حتى تكتمل المطابقة وفحوصات الصحة.',
-    },
-    succeeded: {
-      badge: 'ok',
-      badgeText: 'مطبّق ومؤكد',
-      title: 'تم التحقق من العملية وتطبيقها على الخادم',
-      message: 'اجتازت الإعدادات فحوصات الصلاحية والصحة وأصبحت نشطة الآن.',
-    },
-    denied: {
-      badge: 'critical',
-      badgeText: 'مرفوض الصلاحية',
-      title: 'ليست لديك صلاحية لتنفيذ هذه العملية',
-      message: 'الدور الحالي أو نطاق الحساب غير مخوّل لتنفيذ هذا الإجراء.',
-    },
-    failed: {
-      badge: 'critical',
-      badgeText: 'فشل التنفيذ',
-      title: 'فشل التحقق من العملية',
-      message:
-        'رفض مدقق الخادم التغيير وحافظ تلقائياً على الجيل النشط السابق. تم الاحتفاظ بمسودة النموذج الخاصة بك.',
-    },
-    unavailable: {
-      badge: 'warn',
-      badgeText: 'غير متاح',
-      title: 'الخدمة أو الأداة المطلوبة غير متاحة حالياً',
-      message:
-        'إحدى أدوات النظام أو قنوات الاتصال المطلوبة غير موثقة أو غير متاحة حالياً. لم يتم تطبيق أي تغيير.',
-    },
-    conflict: {
-      badge: 'warn',
-      badgeText: 'تعارض (HTTP 409)',
-      title: 'تعارض في تعديل الحالة أو قفل المطابقة',
-      message:
-        'توجد عملية مطابقة أو تحديث آخر قيد التنفيذ حالياً. يرجى مراجعة أحدث حالة وإعادة المحاولة؛ تم الاحتفاظ بمدخلاتك.',
-    },
+  loading: {
+    badge: 'reconciling',
+    badgeText: msgid('Loading'),
+    title: msgid('Loading live state...'),
+    message: msgid('Fetching verified host and account state from the control plane.'),
+  },
+  pending: {
+    badge: 'reconciling',
+    badgeText: msgid('Queued / Reconciling'),
+    title: msgid('Operation accepted and pending host verification'),
+    message: msgid('Desired state has been recorded, or a background job is queued. Host changes are not yet active until reconciliation and health verification complete.'),
+  },
+  succeeded: {
+    badge: 'ok',
+    badgeText: msgid('Verified & Applied'),
+    title: msgid('Operation verified on host'),
+    message: msgid('Configuration passed syntax and health checks and is now active.'),
+  },
+  denied: {
+    badge: 'critical',
+    badgeText: msgid('Access Denied'),
+    title: msgid('Permission denied for this operation'),
+    message: msgid('Your current role or account scope is not authorized to perform this action.'),
+  },
+  failed: {
+    badge: 'critical',
+    badgeText: msgctxt('action-state', 'Failed'),
+    title: msgid('Operation failed verification'),
+    message: msgid('The host verifier rejected the change and automatically preserved the previous active generation. Your form draft has been retained.'),
+  },
+  unavailable: {
+    badge: 'warn',
+    badgeText: msgid('Unavailable'),
+    title: msgid('Service or runtime dependency unavailable'),
+    message: msgid('A required host tool, socket, or backend dependency is currently unverified or unreachable. No changes were applied.'),
+  },
+  conflict: {
+    badge: 'warn',
+    badgeText: msgid('Conflict (HTTP 409)'),
+    title: msgid('Concurrent state modification or lock conflict'),
+    message: msgid('Another reconciliation or resource update is currently in progress. Please review the latest state and retry; your draft input is preserved.'),
   },
 }
 
@@ -452,8 +414,10 @@ const ACTION_STATE_COPY: Record<
  * technical job/generation references and draft-preservation metadata.
  */
 export function renderAsyncActionState(props: AsyncActionBannerProps): string {
-  const locale = props.locale === 'ar' ? 'ar' : 'en'
-  const copy = ACTION_STATE_COPY[locale][props.state] ?? ACTION_STATE_COPY[locale].failed
+  const locale = props.locale ?? SOURCE_LOCALE
+  const tr = translator(locale)
+  const source = ACTION_STATE_COPY[props.state] ?? ACTION_STATE_COPY.failed
+  const copy = { ...source, badgeText: tr(source.badgeText), title: tr(source.title), message: tr(source.message) }
   const isAlert =
     props.state === 'denied' ||
     props.state === 'failed' ||
@@ -469,13 +433,13 @@ export function renderAsyncActionState(props: AsyncActionBannerProps): string {
 
   const metaParts: string[] = []
   if (props.jobId) {
-    const label = locale === 'ar' ? 'معرّف المهمة' : 'Job Ref'
+    const label = translator(locale)('Job Ref')
     metaParts.push(
       `<span>${escapeHtml(label)}: <code class="xp-mono">${renderLtrValue(props.jobId)}</code></span>`,
     )
   }
   if (props.generationId !== undefined && props.generationId > 0) {
-    const label = locale === 'ar' ? 'الجيل' : 'Generation'
+    const label = translator(locale)('Generation')
     metaParts.push(
       `<span>${escapeHtml(label)}: <code class="xp-mono">${renderLtrValue(`#${formatAsciiNumber(props.generationId, { useGrouping: false })}`)}</code></span>`,
     )
@@ -507,9 +471,9 @@ export function renderAsyncActionState(props: AsyncActionBannerProps): string {
  * 2. Every `<th>` inside data tables has `scope="col"` for screen readers.
  * 3. Every numeral across text and attributes uses Western ASCII digits (`0-9`).
  */
-export function ensureAccessibleSurfaceHtml(html: string, locale: 'en' | 'ar' = 'en'): string {
+export function ensureAccessibleSurfaceHtml(html: string, locale: Locale = 'en'): string {
   const defaultRegionLabel =
-    locale === 'ar' ? 'جدول بيانات قابل للتمرير الأفقي' : 'Scrollable data table'
+    translator(locale)('Scrollable data table')
   let regionIndex = 0
 
   const withRegions = html.replace(/<div\b([^>]*)>/g, (full, attrs: string) => {
@@ -681,8 +645,8 @@ export const DESIGN_TOKENS_CSS = /* css */ `
 
 /* Structural layout and spacing tokens; see docs/STANDARDS.md. */
 :root {
-  --xp-font-sans-ltr: 'IBM Plex Sans', 'IBM Plex Sans Arabic', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --xp-font-sans-rtl: 'IBM Plex Sans Arabic', 'IBM Plex Sans', 'Noto Sans Arabic', Tahoma, sans-serif;
+  --xp-font-sans-ltr: 'IBM Plex Sans', sans-serif;
+  --xp-font-sans-rtl: sans-serif;
   --xp-font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   /* Typography roles shared by account, administration, mail and sign-in screens. */
@@ -941,6 +905,21 @@ html[data-surface="xwhm"] .xp-sidebar {
   white-space: nowrap;
   font-size: 12px;
   color: var(--xp-text-muted);
+}
+
+.xp-sidebar__brand > div .xp-mono[dir="ltr"] {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  flex-shrink: 1 !important;
+  overflow: visible !important;
+  text-overflow: clip;
+  text-align: match-parent;
+}
+
+html[dir="rtl"] .xp-sidebar__brand > div .xp-mono[dir="ltr"] {
+  text-align: right;
 }
 
 .xp-sidebar__brand > strong,
@@ -1298,7 +1277,7 @@ html[data-theme="dark"] .xp-board-note { border-color: #3a4d6b; background: #1d2
 .xp-board-stats > div { display: flex; flex-direction: column; gap: var(--xp-space-sm); flex: 1 1 140px; min-inline-size: 0; padding: var(--xp-space-field); border: 1px solid var(--xp-border); border-radius: 12px; background: var(--xp-bg-surface); }
 .xp-board-stats dt { font-size: 12px; color: var(--xp-text-muted); }
 .xp-board-stats dd { margin: 0; font-size: 16px; font-weight: 600; text-align: start; overflow-wrap: anywhere; }
-@media (min-width: 801px) { .xp-board-section, .xp-board-note, .xp-board-stats > div { padding: var(--xp-space-card); } }
+@media (min-width: 601px) { .xp-board-section, .xp-board-note, .xp-board-stats > div { padding: var(--xp-space-card); } }
 .xp-board-dl { margin: 0; }
 .xp-fact { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 9px 20px; }
 .xp-fact + .xp-fact { border-block-start: 1px solid #eef0f3; }
@@ -1969,7 +1948,7 @@ html[dir="rtl"] .xp-login-shell[data-login-audience] .xp-cli-recovery { line-hei
 .xp-workspace-summary > .xp-page-title { margin: 0; }
 .xp-workspace-summary > .xp-card {
   display: grid;
-  gap: 16px;
+  gap: var(--xp-space-group, 24px);
   min-inline-size: 0;
   padding: 24px;
   box-shadow: none;
@@ -2018,7 +1997,7 @@ html[dir="rtl"] .xp-workspace-summary .xp-field-value > bdi[dir="ltr"] { text-al
 .xp-workspace-summary[data-unqualified-route="/domains/reverse-proxy"] > [data-workspace-identity] > .xp-kpi-grid {
   gap: var(--xp-space-field);
 }
-@media (max-width: 800px) {
+@media (max-width: 600px) {
   .xp-workspace-summary[data-unqualified-route="/domains/reverse-proxy"] .xp-design-empty,
   .xp-workspace-summary[data-unqualified-route="/domains/reverse-proxy"] > [data-workspace-identity] {
     padding: var(--xp-space-field);
@@ -2141,6 +2120,10 @@ html[data-surface="xmail"] .xp-account-pill__avatar {
   outline: 2px solid var(--xp-border-focus);
   outline-offset: 2px;
 }
+/* Unavailable/unread screen states: title, explanation and action are sibling groups. */
+.xp-screen-state { display: flex; flex-direction: column; gap: var(--xp-space-group); }
+.xp-screen-state > :where(h1, h2, h3, p) { margin: 0; }
+.xp-screen-state > .xp-btn { align-self: flex-start; }
 .xp-user-menu__identity { display: flex; flex-direction: column; align-items: flex-start; min-inline-size: 0; }
 .xp-user-menu__name { font-size: var(--xp-type-body); font-weight: var(--xp-weight-semibold); line-height: var(--xp-leading-body); }
 .xp-user-menu__role { color: var(--xp-text-muted); font-size: var(--xp-type-caption); line-height: var(--xp-leading-caption); }
@@ -2197,8 +2180,10 @@ html[dir="rtl"] .xp-icon-back { transform: scaleX(-1); }
 .xp-breadcrumb { font-size: var(--xp-type-body); line-height: var(--xp-leading-body); }
 @media (max-width: 640px) {
   .xp-workspace-summary { gap: 16px; }
-  .xp-workspace-summary > .xp-card { padding: 16px; }
   .xp-workspace-summary .xp-kpi-grid { gap: 16px; }
+}
+@media (max-width: 600px) {
+  .xp-workspace-summary > .xp-card { padding: 16px; }
 }
 
 /* Golden ratio 1.618 : 1 split layout for primary workspace + live inspector aside */
@@ -3211,7 +3196,7 @@ html[dir="rtl"] .xp-meter__fill {
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 600px) {
   .xp-card { padding: var(--xp-space-field); }
 }
 
@@ -3235,6 +3220,9 @@ html[dir="rtl"] .xp-meter__fill {
 .xp-accounts { min-inline-size: 0; }
 .xp-accounts--create { inline-size: 100%; max-inline-size: 690px; justify-self: start; }
 .xp-accounts #whm-create-account-drawer { max-inline-size: 640px; }
+[data-audit-entry-detail] dd { margin: 0; }
+[data-audit-filters] > :is(.xp-whm-detail-fields, .xp-plan-editor-actions) { margin-block-start: calc(var(--xp-space-group) - var(--xp-space-field)); }
+#whm-create-account-drawer > :is(.xp-whm-account-components, .xp-card, [data-account-create-status], button[type="submit"]) { margin-block-start: calc(var(--xp-space-group) - var(--xp-space-field)); }
 .xp-accounts #whm-create-account-drawer > button[type="submit"] { inline-size: max-content; min-inline-size: 44px; max-inline-size: 100%; }
 .xp-accounts__header { margin-block-end: 24px; }
 .xp-accounts__table { table-layout: auto; }
@@ -3268,13 +3256,15 @@ html[dir="rtl"] .xp-accounts__technical bdi, html[dir="rtl"] .xp-account-dialog_
 .xp-dialog { position: fixed; inset: 0; margin: auto; }
 .xp-dialog::backdrop,
 .xp-account-dialog::backdrop { background: rgba(16, 24, 40, 0.4); }
-.xp-dialog > form,
+.xp-dialog > form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; min-inline-size: 0; }
 .xp-account-dialog > form { display: grid; gap: 16px; min-inline-size: 0; }
-.xp-dialog__header { display: grid; gap: 8px; }
+.xp-dialog__header { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-inline-size: 0; }
+.xp-dialog__header > :is(h2, p) { min-inline-size: 0; overflow-wrap: anywhere; }
 .xp-dialog__header > h2 { margin: 0; font-size: var(--xp-type-card); line-height: var(--xp-leading-card); font-weight: var(--xp-weight-semibold); }
 .xp-dialog__header > p { margin: 0; color: var(--xp-text-secondary); font-size: var(--xp-type-body); line-height: var(--xp-leading-body); }
 .xp-dialog__footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .xp-dialog__footer > button { min-block-size: 44px; }
+@media (max-width: 600px) { .xp-dialog { padding: 16px; } }
 .xp-accounts > .xp-account-dialog { position: fixed; inset: 0; margin: auto; }
 .xp-account-dialog .xp-accounts__delete { color: var(--xp-status-critical-fg); background-color: var(--xp-status-critical-bg); border-color: var(--xp-status-critical-border); }
 .xp-account-dialog::backdrop { background: rgba(16, 24, 40, .4); }
@@ -3306,7 +3296,7 @@ html[dir="rtl"] .xp-accounts__technical bdi, html[dir="rtl"] .xp-account-dialog_
   html[dir="rtl"] .xp-accounts__domain { text-align: right; }
 }
 @media (max-width: 479px) {
-  .xp-account-dialog { padding: 24px; }
+  .xp-account-dialog { padding: 16px; }
   .xp-account-dialog__identity { grid-template-columns: minmax(0, 1fr); }
   .xp-account-dialog__footer > button { flex: 1 1 auto; }
 }
