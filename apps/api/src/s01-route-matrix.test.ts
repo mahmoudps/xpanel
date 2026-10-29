@@ -1,26 +1,22 @@
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fail } from '@xpanel/core'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Account, PhpSettings } from '@xpanel/core'
 import {
   createApiToken,
   createResellerPrincipal,
   createRootPrincipal,
-  createSession,
   createTestDb,
   createUserPrincipal,
-  listAudit,
   setTotpSecret,
 } from '@xpanel/db'
 import type { TestDbHandle } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
 import type { TestStateStoreHandle } from '@xpanel/state'
-import { authenticateRequest, deriveCsrfToken, hashPasswordArgon2id, sealTotpSecret, sha256Hex } from './auth.ts'
+import { hashPasswordArgon2id, sealTotpSecret, sha256Hex } from './auth.ts'
 import { policyForRequest } from './authorization.ts'
-import { entryPointAllowsApiRoute, sessionCookieName, sessionTokenHash } from './entry-points.ts'
-import { createExtendedApiRouter } from './extended-routes.ts'
+import { entryPointAllowsApiRoute } from './entry-points.ts'
 import { createApiApp } from './server.ts'
 import type { ApiApp } from './server.ts'
 
@@ -264,126 +260,31 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       }),
     )
 
-  it('confines the Mongo route family by segment without treating near-name database paths as Mongo', () => {
-    for (const path of ['/api/databases/mongo', '/api/databases/mongo/', '/api/databases/mongo/record', '/api/databases/mongo/record/child']) {
-      for (const method of ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
-        expect.soft(policyForRequest(path, method).rootOnly, `${method} ${path} root policy`).toBe(true)
-        expect.soft(entryPointAllowsApiRoute('xpanel', path, method), `${method} ${path} xPanel`).toBe(false)
-        expect.soft(entryPointAllowsApiRoute('xwhm', path, method), `${method} ${path} xWHM`).toBe(true)
-        expect.soft(entryPointAllowsApiRoute('xmail', path, method), `${method} ${path} xMail`).toBe(false)
-      }
+  it('confines the PostgreSQL account workspace to its exact owner routes and methods', () => {
+    const id = randomUUID()
+    const routes: [string, string][] = [['/api/account/database-engines/postgresql', 'GET'], ['/api/account/database-engines/postgresql/users', 'POST'], ['/api/account/database-engines/postgresql/databases', 'POST'],
+      [`/api/account/database-engines/postgresql/users/${id}`, 'DELETE'], [`/api/account/database-engines/postgresql/users/${id}/password`, 'POST'], [`/api/account/database-engines/postgresql/databases/${id}`, 'DELETE'],
+      [`/api/account/database-engines/postgresql/databases/${id}/trash`, 'POST'], [`/api/account/database-engines/postgresql/databases/${id}/restore`, 'POST']]
+    for (const [path, method] of routes) {
+      expect.soft(policyForRequest(path, method), `${method} ${path} policy`).toMatchObject({ resource: 'databases', toolIds: ['postgresql-databases'] })
+      expect.soft(policyForRequest(path, method).rootOnly, `${method} ${path} owner route`).not.toBe(true)
+      expect.soft(entryPointAllowsApiRoute('xpanel', path, method), `${method} ${path} xPanel`).toBe(true)
+      for (const other of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].filter(item => item !== method)) expect.soft(entryPointAllowsApiRoute('xpanel', path, other), `${other} ${path} xPanel`).toBe(false)
+      expect.soft(entryPointAllowsApiRoute('xmail', path, method), `${method} ${path} xMail`).toBe(false)
     }
-    for (const path of ['/api/databases/mongodb', '/api/databases/mongodb/record', '/api/databases/mongo-tools', '/api/databases/example/mongo']) {
-      expect.soft(policyForRequest(path, 'DELETE').rootOnly, `${path} is not the Mongo family`).not.toBe(true)
-      expect.soft(entryPointAllowsApiRoute('xpanel', path, 'DELETE'), `${path} keeps its existing profile policy`).toBe(true)
-    }
+    expect.soft(entryPointAllowsApiRoute('xpanel', `/api/account/database-engines/postgresql/users/${id}/trash`, 'POST')).toBe(false)
   })
 
-  it.each(['user', 'reseller', 'mailbox'] as const)('rejects %s Mongo collection and item requests for own and neighboring accounts without metadata, state or audit changes', async (kind) => {
+  it('no longer serves the metadata-only PostgreSQL and MongoDB routes', async () => {
     const rootToken = await tokenFor(rootId, ['*'])
-    const principalId = kind === 'reseller' ? resellerFullId : alicePrincipalId
-    const actorToken = await tokenFor(principalId, kind === 'mailbox' ? [`mailbox:${aliceInboxUserId}`, '*'] : ['*'])
-    const records: { id: string; accountId: string }[] = []
-    for (const account of [alice, bob]) {
-      const response = await request(rootToken, '/api/databases/mongo', 'POST', { accountId: account.id, name: 'guardfixture' })
-      expect(response.status).toBe(201)
-      records.push(((await response.json()) as { database: { id: string; accountId: string } }).database)
-    }
-    const metadataPath = join(state.rootDir, 'extended/databases/mongo-dbs.json')
-    const beforeMetadata = await readFile(metadataPath, 'utf8')
-    const beforeState = await state.store.readSnapshot()
-    const beforeAudit = await listAudit(db.db)
-    for (const record of records) {
-      const probes = [
-        { path: `/api/databases/mongo?accountId=${record.accountId}`, method: 'GET' },
-        { path: '/api/databases/mongo', method: 'POST', body: { accountId: record.accountId, name: 'deniedfixture' } },
-        { path: '/api/databases/mongo', method: 'DELETE', body: { id: record.id } },
-        { path: `/api/databases/mongo/${record.id}`, method: 'GET' },
-        { path: `/api/databases/mongo/${record.id}`, method: 'POST', body: { accountId: record.accountId, name: 'deniedfixture' } },
-        { path: `/api/databases/mongo/${record.id}`, method: 'DELETE' },
-      ]
-      for (const probe of probes) {
-        const response = await request(actorToken, probe.path, probe.method, probe.body)
-        expect.soft(response.status, `${kind} ${probe.method} ${probe.path}`).toBe(403)
-        expect.soft(await readFile(metadataPath, 'utf8'), `${kind} ${probe.method} ${probe.path} metadata`).toBe(beforeMetadata)
-        expect.soft(await state.store.readSnapshot(), `${kind} ${probe.method} ${probe.path} state`).toEqual(beforeState)
-        expect.soft(await listAudit(db.db), `${kind} ${probe.method} ${probe.path} audit`).toEqual(beforeAudit)
-      }
-    }
-  })
-
-  it.each(['user', 'reseller', 'mailbox'] as const)('checks root before any Mongo metadata access in a direct router call for %s', async (kind) => {
-    const principalId = kind === 'reseller' ? resellerFullId : alicePrincipalId
-    const token = await tokenFor(principalId, kind === 'mailbox' ? [`mailbox:${aliceInboxUserId}`, '*'] : ['*'])
-    const authenticated = await authenticateRequest(db.db, new Request('http://localhost/api/databases/mongo', { headers: { authorization: `Bearer ${token}` } }), { serverSecret: SERVER_SECRET })
-    expect(authenticated).not.toBeNull()
-    const caller = authenticated!
-    // Deliberately omit the central request policy: this unit checks the router's own root guard.
-    const assertRoot = vi.fn(async () => { fail('FORBIDDEN', 'root role is required for this operation') })
-    const emitAudit = vi.fn(async () => undefined)
-    const router = createExtendedApiRouter({
-      db: db.db, store: state.store, requireCaller: async () => caller, assertRoot,
-      assertCanAccessAccount: async () => undefined,
-      resolveAccountParam: async () => alice,
-      resolveResellerId: async () => kind === 'reseller' ? resellerFullId : null,
-      emitAudit, triggerReconcile: async () => null,
-    })
-    const read = vi.spyOn(router.ext, 'readOrDefault')
-    const write = vi.spyOn(router.ext, 'write')
-    for (const probe of [
-      { path: '/api/databases/mongo', method: 'GET' },
-      { path: '/api/databases/mongo', method: 'POST' },
-      { path: `/api/databases/mongo/${randomUUID()}`, method: 'DELETE' },
-    ]) {
-      const req = new Request(`http://localhost${probe.path}`, { method: probe.method })
-      await expect.soft(router.handleExtendedRoute(req, new URL(req.url), probe.method)).rejects.toMatchObject({ code: 'FORBIDDEN' })
-    }
-    expect.soft(assertRoot).toHaveBeenCalledTimes(3)
-    for (const call of assertRoot.mock.calls) expect.soft(call).toEqual([caller, 'database.mongo'])
-    expect.soft(read).not.toHaveBeenCalled()
-    expect.soft(write).not.toHaveBeenCalled()
-    expect.soft(emitAudit).not.toHaveBeenCalled()
-  })
-
-  it('returns profile 404 for every Mongo collection and item route with a valid xPanel session', async () => {
-    const rootToken = await tokenFor(rootId, ['*'])
-    const seeded = await request(rootToken, '/api/databases/mongo', 'POST', { accountId: alice.id, name: 'profilefixture' })
-    expect(seeded.status).toBe(201)
-    const record = ((await seeded.json()) as { database: { id: string } }).database
-    const metadataPath = join(state.rootDir, 'extended/databases/mongo-dbs.json')
-    const beforeMetadata = await readFile(metadataPath, 'utf8')
-    const origin = 'https://panel.example.test:2083'
-    const raw = randomUUID()
-    await createSession(db.db, { principalId: alicePrincipalId, tokenHash: sessionTokenHash(raw, 'xpanel'), expiresAt: new Date(Date.now() + 60000).toISOString(), mfaVerified: true })
-    const profileApp = createApiApp({ db: db.db, store: state.store, serverSecret: SERVER_SECRET, entryPoint: 'xpanel', publicOrigin: origin, allowedOrigins: [origin], secureCookies: true })
-    const headers = { cookie: `${sessionCookieName('xpanel', true)}=${raw}`, origin, 'x-csrf-token': deriveCsrfToken(raw, SERVER_SECRET, 'xpanel'), 'content-type': 'application/json' }
-    expect((await profileApp.fetch(new Request(`${origin}/api/auth/me`, { headers }))).status).toBe(200)
-    const beforeState = await state.store.readSnapshot()
-    const beforeAudit = await listAudit(db.db)
-    for (const path of ['/api/databases/mongo', `/api/databases/mongo/${record.id}`, '/api/databases/mongo/record/child']) {
+    const before = await state.store.readSnapshot()
+    for (const path of ['/api/databases/postgres', '/api/databases/postgres/users', `/api/databases/postgres/${randomUUID()}`, '/api/databases/mongo', `/api/databases/mongo/${randomUUID()}`]) {
       for (const method of ['GET', 'POST', 'DELETE']) {
-        const response = await profileApp.fetch(new Request(`${origin}${path}`, { method, headers, ...(method === 'GET' ? {} : { body: '{}' }) }))
-        expect.soft(response.status, `xPanel ${method} ${path}`).toBe(404)
-        expect.soft(await readFile(metadataPath, 'utf8'), `xPanel ${method} ${path} metadata`).toBe(beforeMetadata)
+        const response = await request(rootToken, path, method, method === 'GET' ? undefined : { accountId: alice.id, name: 'legacy' })
+        expect.soft(response.status, `${method} ${path}`).toBe(404)
       }
     }
-    expect(await state.store.readSnapshot()).toEqual(beforeState)
-    expect(await listAudit(db.db)).toEqual(beforeAudit)
-  })
-
-  it('preserves root Mongo metadata CRUD without asserting a real MongoDB service', async () => {
-    const rootToken = await tokenFor(rootId, ['*'])
-    const created = await request(rootToken, '/api/databases/mongo', 'POST', { accountId: alice.id, name: 'metadataonly' })
-    expect(created.status).toBe(201)
-    const record = ((await created.json()) as { database: { id: string; name: string } }).database
-    const listed = await request(rootToken, `/api/databases/mongo?accountId=${alice.id}`)
-    expect(listed.status).toBe(200)
-    expect(((await listed.json()) as { databases: { id: string }[] }).databases.map(item => item.id)).toEqual([record.id])
-    expect((await request(rootToken, `/api/databases/mongo/${record.id}`, 'DELETE')).status).toBe(200)
-    const after = await request(rootToken, '/api/databases/mongo')
-    expect(after.status).toBe(200)
-    expect(((await after.json()) as { databases: unknown[] }).databases).toEqual([])
-    expect((await listAudit(db.db, { action: 'database.mongo.created' })).map(entry => entry.target)).toContain(`mongo:${record.name}`)
+    expect(await state.store.readSnapshot()).toEqual(before)
   })
 
   it('validates that docs/planning/authorization-route-matrix.json covers HTTP, WS, HTML UI, CLI, and Agent surfaces', async () => {
@@ -470,44 +371,6 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
     const aliceToken = await tokenFor(alicePrincipalId, ['*'])
     const bobToken = await tokenFor(bobPrincipalId, ['*'])
 
-    // Create resources for both alice and bob via root
-    expect(
-      (
-        await request(rootToken, '/api/databases/postgres', 'POST', {
-          accountId: alice.id,
-          name: 'analytics',
-        })
-      ).status,
-    ).toBe(201)
-    const bobPgRes = await request(rootToken, '/api/databases/postgres', 'POST', {
-      accountId: bob.id,
-      name: 'secretpg',
-    })
-    expect(bobPgRes.status).toBe(201)
-    const bobPgId = ((await bobPgRes.json()) as { database: { id: string } }).database.id
-
-    const bobMongoRes = await request(rootToken, '/api/databases/mongo', 'POST', {
-      accountId: bob.id,
-      name: 'secretmongo',
-    })
-    expect(bobMongoRes.status).toBe(201)
-    const bobMongoId = ((await bobMongoRes.json()) as { database: { id: string } }).database.id
-
-    // Alice cannot create a Postgres user referencing Bob's Postgres database ID
-    expect(
-      (
-        await request(aliceToken, '/api/databases/postgres/users', 'POST', {
-          username: 'reader',
-          password: 'ValidPgPassword!2026',
-          databaseIds: [bobPgId],
-        })
-      ).status,
-    ).toBe(404)
-
-    // Postgres hides Bob's resource; Mongo rejects Alice before resource ownership lookup.
-    expect((await request(aliceToken, `/api/databases/postgres/${bobPgId}`, 'DELETE')).status).toBe(404)
-    expect((await request(aliceToken, `/api/databases/mongo/${bobMongoId}`, 'DELETE')).status).toBe(403)
-
     // Alice cannot run database maintenance on Bob's account or Bob's database namespace
     expect(
       (
@@ -587,10 +450,10 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       method: string
       path: string
       body?: unknown
+      /** Features that must all be disabled before the route is denied. */
+      disabled?: string[]
     }[] = [
       { feature: 'mysql-databases', method: 'GET', path: '/api/databases' },
-      { feature: 'postgresql-databases', method: 'GET', path: '/api/databases/postgres' },
-      { feature: 'postgresql-databases', method: 'GET', path: '/api/databases/postgres/users' },
       { feature: 'mysql-databases', method: 'GET', path: `/api/databases/${alice.id}/remote-hosts` },
       { feature: 'domains', method: 'GET', path: '/api/domains' },
       { feature: 'zone-editor', method: 'GET', path: '/api/dns/zones' },
@@ -598,7 +461,10 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       { feature: 'domain-forwarders', method: 'GET', path: '/api/mail/domain-forwarders' },
       { feature: 'mailing-lists', method: 'GET', path: '/api/mail/mailing-lists' },
       { feature: 'email-accounts', method: 'GET', path: '/api/mail/spam-settings' },
-      { feature: 'email-filters', method: 'GET', path: '/api/mail/filters' },
+      // The unselected inventory stays readable while either filter feature remains enabled.
+      { feature: 'email-filters', method: 'GET', path: '/api/mail/filters', disabled: ['email-filters', 'global-email-filters'] },
+      { feature: 'email-filters', method: 'GET', path: `/api/mail/filters?accountId=${alice.id}&scope=mailbox&mailbox=${encodeURIComponent(`inbox@${alice.primaryDomain}`)}` },
+      { feature: 'global-email-filters', method: 'GET', path: `/api/mail/filters?accountId=${alice.id}&scope=global` },
       { feature: 'email-accounts', method: 'GET', path: '/api/mail/delivery-reports' },
       { feature: 'email-accounts', method: 'GET', path: `/api/webmail/messages?mailbox=${encodeURIComponent(`inbox@${alice.primaryDomain}`)}` },
       { feature: 'email-accounts', method: 'GET', path: `/api/webmail/calendars?mailbox=${encodeURIComponent(`inbox@${alice.primaryDomain}`)}` },
@@ -619,7 +485,7 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       const allowedRes = await request(aliceToken, testCase.path, testCase.method, testCase.body)
       expect(allowedRes.status, `enabled ${testCase.feature} -> ${testCase.path}`).toBe(200)
 
-      await state.store.updateFeatureList(featureListId, { disabled: [testCase.feature] })
+      await state.store.updateFeatureList(featureListId, { disabled: testCase.disabled ?? [testCase.feature] })
       const deniedRes = await request(aliceToken, testCase.path, testCase.method, testCase.body)
       expect(deniedRes.status, `disabled ${testCase.feature} -> ${testCase.path}`).toBe(403)
     }

@@ -1,6 +1,6 @@
 # xPanel architecture
 
-xPanel has three user surfaces: xPanel for account owners, xWHM for root and resellers, and xMail for account users. Mailbox-specific authentication remains a launch requirement. This document distinguishes current structure from the behavior required for launch. See [status](STATUS.md) for qualification limits and [standards](STANDARDS.md) for engineering requirements.
+xPanel has three user surfaces: xPanel for account owners, xWHM for root and resellers, and xMail for mailbox access. Mailbox credential authentication and sealed mailbox sessions are implemented; installed mail services still require independent qualification. This document distinguishes current structure from the behavior required for launch. See [status](STATUS.md) for qualification limits and [standards](STANDARDS.md) for engineering requirements.
 
 ## Workspace and process boundaries
 
@@ -50,7 +50,19 @@ The executable API entrypoint creates three immutable applications in one unpriv
 |---|---|---|---|---|
 | xPanel | `2083` | `12083` | Account user | `/panel` |
 | xWHM | `2087` | `12087` | Root or reseller | `/whm` |
-| xMail | `2096` | `12096` | Account user | `/mail` |
+| xMail | `2096` | `12096` | Mailbox principal (mailbox-bound user session) | `/mail` |
+
+xMail admits mailbox identities only. A verified `user@domain` login creates a mailbox-bound user principal and a sealed mailbox session; authorization treats that binding as a mailbox principal. Owner, reseller and root credentials and sessions are refused on xMail, and a mailbox identity is refused on xPanel and xWHM.
+
+The three products are separate. Each listener renders only its own public origin: sign-in, status, menu and navigation pages contain no link, redirect, switcher or address of another panel, and the xMail document carries only mailbox data. Production startup requires three distinct hostnames, because browsers share cookies across the ports of one host.
+
+### One-time panel handoff
+
+The only crossings are two server-issued, single-use handoffs: xWHM "Log in to xPanel" (root for any active account, a reseller only for its own accounts with `edit-account`) and xPanel "Open webmail" (the account owner, or a team member whose roles grant email, only for an existing email mailbox of the same active account). Issuance (`POST /api/handoff/xpanel` on xWHM, `POST /api/handoff/xmail` on xPanel) requires a first-hand interactive session, CSRF and the exact Origin, re-reads authority before the write and is audited. It stores only the SHA-256 of a 256-bit secret in `panel_handoffs` (migration `0006_panel_handoffs.sql`) with a 60 second expiry, and answers with the configured target action (`<target origin>/login/handoff`), never an origin taken from page data.
+
+The browser posts the secret once in a hidden `application/x-www-form-urlencoded` form to a new tab, never in a URL. The target listener's `POST /login/handoff` requires the configured issuing panel's exact Origin, consumes the row atomically for its own audience before expiry, re-reads the issuer's and the target's authority, and creates an ordinary session for that listener only (its own cookie and audience-bound hash) that records the issuing principal. Every failure returns to that panel's sign-in page with one generic message; the reason is audited.
+
+A handed-off session shows "Signed in as <target> by <issuer>" with End session, lasts at most one hour, re-reads the issuer's authority over the target on every authenticated request (database and state indexes only; a reseller that loses the account or `edit-account`, a team member that loses the email role or becomes inactive, a suspended account or a removed or mail-disabled mailbox revokes that session row and returns the browser to this panel's sign-in), adds the issuer to every audit entry it writes, and cannot change the target's password, two-factor authentication, API tokens, team or contact identity, nor issue another handoff. A handed-off xMail session carries no mailbox password: state-backed mailbox tools work, while IMAP-backed message reads report that the mailbox's own sign-in is required.
 
 These are three profiles/listeners, not three isolated operating-system processes. Explicit loopback binds and all exact HTTPS origins are validated before database opening; production listeners must use their reserved private ports. A partial startup failure closes already opened listeners, upgraded sockets, subscriptions and shared resources. There is no fallback to a shared login listener.
 
@@ -60,7 +72,7 @@ The public TLS boundary is an independently configured ingress. It must preserve
 
 The page palette is generated from all navigation pages currently available to the authorized surface. Localized text filtering, selected-result announcements, Arrow Up/Down wrapping and Enter use those existing links; Escape restores usable focus. It is page navigation only. It cannot create commands, grant an unavailable capability or replace authorization at the destination. Native input and textarea editing must retain ordinary slash and shortcut text.
 
-The wide mail workspace has three total columns: folders in the shell, then a message list and one reading pane. The composition route uses a bounded editor and optional sender/quota observations. Supplied message data are escaped observations, not evidence of production mailbox authority or delivery. Its Send control is disabled and non-submitting while live delivery is unqualified. A rendering change does not close mail acceptance.
+The wide mail workspace has three total columns: folders in the shell, then a message list and one reading pane. The composition route uses a bounded editor and optional sender/quota observations. Supplied message data are escaped observations, not evidence of production mailbox authority or delivery. Its explicit Send button calls the authenticated mail handler without a native sending form. The client preserves the draft on refusal or uncertain acknowledgement and blocks an immediate retry when the outcome requires review. A rendering change or server acceptance does not close mail delivery acceptance.
 
 Reduced-motion CSS disables transitions and animations instead of merely shortening them. This prevents a visibility transition from leaving a modal hidden when its focus-entry handler runs. Both motion preferences must satisfy the same dialog, focus trap, Escape and focus-return contract.
 
@@ -85,7 +97,7 @@ Customer databases are separate from the panel's SQLite database. The PowerDNS c
 
 Authentication uses Argon2id password verification, persistent sessions, MFA state, recovery controls and hashed scoped API tokens. The policy layer checks principal kind, explicit scope, reseller ACL, account ownership and feature availability. HTML must enforce authority before hydrating hosting state.
 
-For explicit interactive profiles, the listener selects the audience; URL parameters, request headers and requested landing pages cannot select it. Secure session cookie names are distinct, but cookie names/paths alone cannot isolate browser ports. Stored session credential hashes and derived CSRF values also bind the audience. Exact HTTPS origins, required mutation Origin checks, role admission and per-profile HTTP/WebSocket route confinement supplement ordinary ownership/ACL checks. Bearer API tokens do not authenticate these interactive profiles or HTML documents. xMail currently accepts an account control-plane user; it does not supply mailbox principal authentication, a live inbox, or qualified SMTP/IMAP delivery.
+For explicit interactive profiles, the listener selects the audience; URL parameters, request headers and requested landing pages cannot select it. Secure session cookie names are distinct, but cookie names/paths alone cannot isolate browser ports. Stored session credential hashes and derived CSRF values also bind the audience. Exact HTTPS origins, required mutation Origin checks, role admission and per-profile HTTP/WebSocket route confinement supplement ordinary ownership/ACL checks. Bearer API tokens do not authenticate these interactive profiles or HTML documents. On xMail, only a mailbox-address login is accepted; it verifies mailbox credentials through the mail transport and stores a sealed mailbox session. Inbox reads, moves, removal and sending open that session and recheck current account/service policy; a control-plane login alone cannot supply mailbox authority. These source contracts do not qualify installed SMTP/IMAP services or delivery.
 
 WebSocket connections require authenticated, scoped authority, origin/IP policy and continued validity. Session revocation or account changes must affect existing connections as well as future HTTP requests. A trusted socket connection does not itself authorize an arbitrary account operation.
 
@@ -93,13 +105,13 @@ The agent combines protected service credentials, persisted principal authority 
 
 ### Account mutation contracts
 
-The HTTP boundary re-reads the persisted account and current authority before account mutations. State changes use a writer lease and expected-revision checks; bounded host replies are validated before acknowledging global configuration. Credential and file-state updates are not claimed to be one crash-atomic transaction.
+The HTTP boundary reads the persisted account and current authority before account mutations. Host-affecting changes capture the current target under a writer lease and use expected-revision checks; bounded host replies are validated before acknowledging global configuration. Credential and file-state updates are not claimed to be one crash-atomic transaction.
 
 Creation requires a password and an explicit usable IPv4 or an actually configured primary address; no address is invented. Suspension revokes sessions/tokens for all linked account principals through a database transaction. Unsuspension completes access cleanup before making the account active, preserving independent manual disables. Failure or uncertainty requires verification rather than a hosting-success event.
 
 A validated agent response can acknowledge `configuration_applied` with `scope: global_configuration`, `targetVerified: false` and `verificationRequired: true`. It is not a target-bound completion receipt. The client keeps the result pending and prevents duplicate submission when state or host outcome is uncertain.
 
-DELETE authorizes the current target, checks exact username confirmation, re-reads the target and returns HTTP 412 with `target_bound_purge_unavailable`. It does not delete account state, principal identity or host resources. A PATCH containing only contactEmail returns 412 with `metadata_index_update_unqualified` before effects; it does not fall back to a global snapshot/reindex write. A durable account lifecycle/purge executor, operation-specific receipts and recovery remain open requirements.
+DELETE authorizes the current target, checks exact username confirmation and re-reads the target. It returns HTTP 412 with `target_bound_purge_unavailable` before changes unless the agent advertises the `target-bound-userdel` contract. With that contract it marks the account terminating and requests purge; only a positive purge reply permits linked identity and account/index removal. A failed purge returns a verification-required failure and retains the terminating account. A PATCH containing only `contactEmail` writes account metadata and its contact index, with compensating metadata rollback if the index write fails; the failure reports whether state may have changed. Both paths remain administrative operations. These contracts and fixtures do not establish native purge, crash recovery or production account completion.
 
 ## Reconciliation and workload isolation
 

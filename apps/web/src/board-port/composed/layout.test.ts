@@ -3,10 +3,10 @@ import { renderComposedRoutes } from './render.ts'
 import type { ComposedRoute } from './types.ts'
 
 const spec: ComposedRoute = {
-  route: '/configuration-test', surface: 'xwhm', section: 'settings', group: ['Settings', 'الإعدادات'],
-  title: ['Configuration', 'الإعداد'], lede: ['Configuration has not been read.', 'لم يُقرأ الإعداد.'],
-  layout: 'settings', action: ['Save settings', 'حفظ الإعدادات'], columns: [['Key', 'المفتاح'], ['Value', 'القيمة']],
-  fields: [['Host name', 'اسم المضيف'], ['Address', 'العنوان']], bind: 'soon',
+  route: '/configuration-test', surface: 'xwhm', section: 'settings', group: 'Settings',
+  title: 'Configuration', lede: 'Configuration has not been read.',
+  layout: 'settings', action: 'Save settings', columns: ['Key', 'Value'],
+  fields: ['Host name', 'Address'], bind: 'soon',
 }
 const context = { locale: 'en' as const, route: spec.route, principal: { kind: 'root' as const, id: 'root-internal', username: 'root' } }
 

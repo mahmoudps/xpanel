@@ -1,63 +1,74 @@
 import { renderPlannedNavigation, renderUserMenu, surfaceContextHref, type PanelId, type UserMenuModel } from './chrome.ts'
-import type { Locale } from './i18n.ts'
+import { SOURCE_LOCALE, alternateLocales, catalogText, localeInfo, translator, type Locale } from './i18n.ts'
 import { escapeHtml, normalizeAsciiDigits, renderStatusBadge } from './tokens.ts'
-import arCatalog from '../../../packages/catalog/src/locales/ar.json' with { type: 'json' }
 
 type SurfaceKind = SurfaceShellProps['surface']
-type LocalizedTitle = readonly [english: string, arabic: string]
+type LocalizedTitle = string
 
 const surfacePageTitles: Record<SurfaceKind, Readonly<Record<string, LocalizedTitle>>> = {
   xpanel: {
-    overview: ['Home', 'الرئيسية'], resources: ['Resources & quotas', 'الموارد والحصص'],
-    domains: ['Domains', 'النطاقات'], config: ['Site settings', 'إعدادات الموقع'],
-    analytics: ['Metrics', 'القياسات'], files: ['File manager', 'مدير الملفات'],
-    terminal: ['Terminal', 'الطرفية'], databases: ['MariaDB', 'MariaDB'],
-    users: ['Email and service users', 'البريد ومستخدمو الخدمة'], dns: ['Zone editor', 'محرر المنطقة'],
-    ssl: ['SSL/TLS', 'SSL/TLS'], security: ['Account security', 'أمان الحساب'],
+    overview: msgid('Home'), resources: msgid('Resources & quotas'),
+    domains: msgid('Domains'), config: msgid('Site settings'),
+    analytics: msgctxt('shell', 'Metrics'), files: msgid('File manager'),
+    terminal: msgid('Terminal'), databases: 'MariaDB',
+    users: msgid('Email and service users'), dns: msgid('Zone editor'),
+    ssl: 'SSL/TLS', security: msgid('Account security'),
   },
   xwhm: {
-    overview: ['Server dashboard', 'لوحة الخادم'], io: ['Disk I/O', 'عمليات القرص'],
-    services: ['Services', 'الخدمات'], accounts: ['Accounts', 'الحسابات'],
-    dns: ['DNS zones', 'مناطق DNS'], backups: ['Account backups', 'نسخ الحسابات'],
-    'server-info': ['Server information', 'معلومات الخادم'],
-    'create-account': ['Create account', 'إنشاء حساب'], plans: ['Plans', 'الخطط'],
-    resellers: ['Resellers', 'الموزعون'], ips: ['IP addresses', 'عناوين IP'],
-    'mail-ips': ['Outbound mail routing', 'توجيه البريد الصادر'], firewall: ['Firewall', 'جدار الحماية'],
-    audit: ['Audit log', 'سجل التدقيق'], generations: ['Configuration history', 'سجل الإعدادات'],
-    upgrade: ['Upgrade', 'الترقية'], transfer: ['Transfer tool', 'أداة النقل'],
-    security: ['Sign-in security', 'أمان تسجيل الدخول'],
+    overview: msgid('Server dashboard'), io: msgid('Disk I/O'),
+    services: msgid('Services'), accounts: msgid('Accounts'),
+    dns: msgid('DNS zones'), backups: msgid('Account backups'),
+    'server-info': msgid('Server information'),
+    'create-account': msgid('Create account'), plans: msgid('Plans'),
+    resellers: msgid('Resellers'), ips: msgid('IP addresses'),
+    'mail-ips': msgid('Outbound mail routing'), firewall: msgctxt('shell', 'Firewall'),
+    audit: msgid('Audit log'), generations: msgid('Configuration history'),
+    upgrade: msgid('Upgrade'), transfer: msgid('Transfer tool'),
+    security: msgid('Sign-in security'),
   },
   xmail: {
-    inbox: ['Inbox', 'البريد الوارد'], compose: ['Compose message', 'إنشاء رسالة'],
-    filters: ['Mail filters', 'مرشحات البريد'], autoresponder: ['Auto-responder', 'الرد التلقائي'],
-    overview: ['Mail overview', 'نظرة عامة على البريد'],
-    security: ['Mail security', 'أمان البريد'],
+    inbox: msgctxt('shell', 'Inbox'), compose: msgid('Compose message'),
+    filters: msgid('Mail filters'), autoresponder: msgid('Auto-responder'),
+    identities: msgid('Identities & signatures'),
+    overview: msgid('Mail overview'),
+    security: msgid('Mail security'),
   },
 }
 
 const routePageTitles: Readonly<Record<string, LocalizedTitle>> = {
-  '/files/trash': ['Trash', 'المهملات'], '/files/ftp': ['FTP accounts', 'حسابات FTP'],
-  '/security/ssl/issue': ['Issue certificate', 'إصدار شهادة'],
-  '/whm/plans/features': ['Feature lists', 'قوائم الميزات'],
-  '/whm/backups': ['Server backups', 'نسخ الخادم'],
-  '/whm/resellers/privileges': ['Reseller privileges', 'صلاحيات الموزعين'],
-  '/mail/folders': ['Folders', 'المجلدات'],
+  '/files/trash': msgctxt('shell', 'Trash'), '/files/ftp': msgid('FTP accounts'),
+  '/security/ssl/issue': msgid('Issue certificate'),
+  '/whm/plans/features': msgid('Feature lists'),
+  '/whm/preferences': msgid('My preferences'),
+  '/whm/backups': msgid('Server backups'),
+  '/whm/resellers/privileges': msgid('Reseller privileges'),
+  '/mail/folders': msgid('Folders'),
+  '/mail/search': msgid('Search mail'),
+  '/mail/calendar': msgid('Calendar'),
+  '/mail/settings/calendars': msgid('Calendars and events'),
+  '/mail/tools/disk-usage': msgctxt('shell', 'Disk usage'),
+  '/mail/tools/connect-devices': msgid('Connect devices'),
+  '/mail/tools/track-delivery': msgid('Track delivery'),
+  '/mail/settings/forwarders': msgctxt('shell', 'Forwarders'),
+  '/mail/settings/preferences': msgid('Preferences'),
 }
 
+export const hasRoutePageTitle = (activeRoute: string): boolean => Object.hasOwn(routePageTitles, activeRoute)
+
 export const getSurfacePageTitle = (surface: SurfaceKind, section: string | undefined, locale: Locale, activeRoute: string): string => {
-  const title = routePageTitles[activeRoute] ?? surfacePageTitles[surface][section ?? ''] ?? ['Page unavailable', 'الصفحة غير متاحة']
-  return title[locale === 'ar' ? 1 : 0]
+  const title = routePageTitles[activeRoute] ?? surfacePageTitles[surface][section ?? ''] ?? msgid('Page unavailable')
+  return translator(locale)(title)
 }
 
 export const getSurfaceNavigationLabel = (surface: SurfaceKind, kind: 'section' | 'page', item: { id: string; name: string }, locale: Locale): string =>
-  locale === 'ar' ? (arCatalog as Readonly<Record<string, string>>)[`nav.${kind}.${surface}.${item.id}.name`] ?? item.name : item.name
+  catalogText(locale, `nav.${kind}.${surface}.${item.id}.name`, item.name)
 
 export const normalizeSurfaceRoute = (surface: SurfaceKind, activeRoute: string): string =>
   surface === 'xpanel' && activeRoute === '/panel' ? '/home' : surface === 'xmail' && activeRoute === '/mail' ? '/mail/inbox' : activeRoute
 
 export const renderPageSearchButton = (locale: Locale): string => {
-  const label = locale === 'ar' ? 'ابحث عن صفحة' : 'Find a page'
-  const font = locale === 'ar' ? "'IBM Plex Sans Arabic', 'IBM Plex Sans', system-ui, sans-serif" : "'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif"
+  const label = translator(locale)(msgctxt('shell', 'Find a page'))
+  const font = localeInfo(locale).script === 'Arab' ? 'sans-serif' : "'IBM Plex Sans', sans-serif"
   return `<button type="button" class="xp-btn xp-page-search" style="font-family: ${font}" data-action="open-cmdk" aria-keyshortcuts="Control+K Meta+K" aria-label="${label} Ctrl K" title="${label} (Ctrl K)">
     <svg class="xp-page-search__icon" aria-hidden="true" focusable="false" viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8.5" cy="8.5" r="5.5" /><path d="m12.5 12.5 4 4" /></svg>
     <span class="xp-page-search__label">${label}</span><kbd class="xp-mono">Ctrl K</kbd>
@@ -66,9 +77,9 @@ export const renderPageSearchButton = (locale: Locale): string => {
 
 export const renderLiveUpdatesIndicator = (locale: Locale, realtimeEnabled: boolean): string => {
   const label = realtimeEnabled
-    ? (locale === 'ar' ? 'جار الاتصال' : 'Connecting')
-    : (locale === 'ar' ? 'التحديثات المباشرة غير متاحة' : 'Live updates unavailable')
-  const visibleLabel = realtimeEnabled ? label : (locale === 'ar' ? 'التحديث متوقف' : 'Live off')
+    ? (translator(locale)('Connecting'))
+    : (translator(locale)('Live updates unavailable'))
+  const visibleLabel = realtimeEnabled ? label : (translator(locale)('Live off'))
   const description = realtimeEnabled ? '' : ` aria-label="${label}" title="${label}"`
   return `<span data-ws-indicator="${realtimeEnabled ? 'disconnected' : 'unavailable'}" role="status"${description}>${renderStatusBadge('suspended', visibleLabel)}</span>`
 }
@@ -81,13 +92,11 @@ export interface SurfaceToolbarProps extends UserMenuModel {
 
 /** Shared account tools retain their actions while leaving room for the page search. */
 export const renderSurfaceToolbarEnd = (props: SurfaceToolbarProps): string => {
-  const isAr = props.locale === 'ar'
-  const nextLocale = isAr ? 'en' : 'ar'
-  const languageHref = surfaceContextHref(props, { locale: nextLocale })
+  const languageLinks = alternateLocales(props.locale ?? SOURCE_LOCALE).map(info => `<a href="${escapeHtml(surfaceContextHref(props, { locale: info.tag }))}" class="xp-btn xp-btn--quiet xp-toolbar-language" lang="${info.tag}" data-lang-switch="${info.tag}">${escapeHtml(info.nativeName)}</a>`).join('')
   const generation = Number.isSafeInteger(props.generationId) && props.generationId! > 0
-    ? `<span data-generation-chip="${props.generationId}">${renderStatusBadge('ok', `Gen #${props.generationId}`)}</span>` : ''
+    ? `<span data-generation-chip="${props.generationId}">${renderStatusBadge('ok', translator(props.locale ?? SOURCE_LOCALE)('Generation {generationId}', { generationId: props.generationId! }))}</span>` : ''
   const version = props.version ? `<span class="xp-toolbar-version xp-mono"><bdi dir="ltr">${escapeHtml(normalizeAsciiDigits(props.version))}</bdi></span>` : ''
-  return `<div class="xp-topbar__end">${renderLiveUpdatesIndicator(props.locale, props.realtimeEnabled === true)}${generation}${version}<a href="${escapeHtml(languageHref)}" class="xp-btn xp-btn--quiet xp-toolbar-language" lang="${nextLocale}" data-lang-switch="${nextLocale}">${isAr ? 'English' : 'العربية'}</a>${renderUserMenu(props)}</div>`
+  return `<div class="xp-topbar__end">${renderLiveUpdatesIndicator(props.locale, props.realtimeEnabled === true)}${generation}${version}${languageLinks}${renderUserMenu(props)}</div>`
 }
 
 export const renderSurfaceToolbar = (props: SurfaceToolbarProps & { leadingHtml?: string }): string =>
@@ -122,8 +131,9 @@ const surfaceSections: Record<SurfaceShellProps['surface'], Readonly<Record<stri
     '/whm/security/ssh': 'design',
   },
   xmail: {
-    '/mail': 'inbox', '/mail/inbox': 'inbox', '/mail/folders': 'inbox', '/mail/compose': 'compose',
+    '/mail': 'inbox', '/mail/inbox': 'inbox', '/mail/compose': 'compose',
     '/mail/settings/filters': 'filters', '/mail/settings/autoresponder': 'autoresponder',
+    '/mail/settings/identities': 'identities',
     '/mail/settings/security': 'security',
     '/mail/overview': 'overview',
   },
@@ -135,14 +145,14 @@ export const resolveSurfaceSection = (surface: SurfaceShellProps['surface'], act
 
 export const renderMobileNavToggle = (locale: Locale): string => `
 <button type="button" class="xp-btn xp-mobile-nav-toggle" data-action="toggle-mobile-nav" aria-controls="xp-sidebar" aria-expanded="false">
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>${locale === 'ar' ? 'القائمة' : 'Menu'}</span>
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>${translator(locale)('Menu')}</span>
 </button>`
 
 export const renderMobileNavBackdrop = (locale: Locale): string => `
-<button type="button" class="xp-nav-backdrop" data-action="close-mobile-nav" data-xp-nav-backdrop hidden tabindex="-1" aria-label="${locale === 'ar' ? 'إغلاق القائمة' : 'Close navigation'}"></button>`
+<button type="button" class="xp-nav-backdrop" data-action="close-mobile-nav" data-xp-nav-backdrop hidden tabindex="-1" aria-label="${translator(locale)(msgctxt('shell', 'Close navigation'))}"></button>`
 
 export const renderMobileNavClose = (locale: Locale): string => `
-<button type="button" class="xp-btn xp-mobile-nav-close" data-action="close-mobile-nav" aria-controls="xp-sidebar">${locale === 'ar' ? 'إغلاق القائمة' : 'Close navigation'}</button>`
+<button type="button" class="xp-btn xp-mobile-nav-close" data-action="close-mobile-nav" aria-controls="xp-sidebar">${translator(locale)(msgctxt('shell', 'Close navigation'))}</button>`
 
 export interface SurfaceShellProps {
   surface: 'xpanel' | 'xwhm' | 'xmail'
@@ -155,8 +165,8 @@ export interface SurfaceShellProps {
 
 export const renderSurfaceShell = (props: SurfaceShellProps): string => `
 <div class="xp-shell" data-surface="${props.surface}" ${props.attributes ?? ''}>
-  <a class="xp-skip-link" href="#main-content">${props.locale === 'ar' ? 'انتقل إلى المحتوى' : 'Skip to content'}</a>
-  <aside class="xp-sidebar" id="xp-sidebar" data-xp-sidebar tabindex="-1" aria-label="${props.surface === 'xwhm' ? 'xWHM' : props.surface === 'xmail' ? 'xMail' : 'xPanel'} ${props.locale === 'ar' ? 'التنقل' : 'navigation'}">
+  <a class="xp-skip-link" href="#main-content">${translator(props.locale)('Skip to content')}</a>
+  <aside class="xp-sidebar" id="xp-sidebar" data-xp-sidebar tabindex="-1" aria-label="${props.surface === 'xwhm' ? 'xWHM' : props.surface === 'xmail' ? 'xMail' : 'xPanel'} ${translator(props.locale)('navigation')}">
     ${renderMobileNavClose(props.locale)}
     ${props.sidebar}
   </aside>
@@ -166,7 +176,7 @@ export const renderSurfaceShell = (props: SurfaceShellProps): string => `
       ${renderMobileNavToggle(props.locale)}
       <strong class="xp-mobile-brand">${props.surface === 'xwhm' ? 'xWHM' : props.surface === 'xmail' ? 'xMail' : 'xPanel'}</strong>
       <details class="xp-toolbar-options" open data-xp-toolbar-options>
-        <summary class="xp-btn">${props.locale === 'ar' ? 'البحث والحساب' : 'Search & account'}</summary>
+        <summary class="xp-btn">${translator(props.locale)('Search & account')}</summary>
         <div class="xp-toolbar-options__content">${props.topbar}</div>
       </details>
     </header>
@@ -178,9 +188,9 @@ const backIcon = `<span class="xp-icon-back"><svg width="18" height="18" viewBox
 
 export const renderSurfaceUnavailable = (locale: Locale, homeRoute: string): string => `
 <section class="xp-card xp-screen-state" data-screen="unavailable" role="status">
-  <h1 class="xp-page-title">${locale === 'ar' ? 'هذه الصفحة غير متاحة' : 'This page is unavailable'}</h1>
-  <p class="xp-prose">${locale === 'ar' ? 'لم تتوفر واجهة مؤهلة لهذه المهمة بعد. يمكنك العودة إلى نظرة عامة.' : 'A qualified screen for this task is not available yet. You can return to the overview.'}</p>
-  <a class="xp-btn xp-back-link" href="${escapeHtml(homeRoute)}">${backIcon}<span>${locale === 'ar' ? 'العودة إلى النظرة العامة' : 'Back to overview'}</span></a>
+  <h1 class="xp-page-title">${translator(locale)('This page is unavailable')}</h1>
+  <p class="xp-prose">${translator(locale)('A qualified screen for this task is not available yet. You can return to the overview.')}</p>
+  <a class="xp-btn xp-back-link" href="${escapeHtml(homeRoute)}">${backIcon}<span>${translator(locale)('Back to overview')}</span></a>
 </section>`
 
 export const renderUnavailableSurfaceShell = (surface: SurfaceShellProps['surface'], locale: Locale): string => renderSurfaceShell({

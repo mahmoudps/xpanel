@@ -11,6 +11,8 @@ import { sha256Hex, verifyPasswordArgon2id } from './auth.ts'
 import { createApiApp, listenApiServer } from './server.ts'
 import { sessionCookieName } from './entry-points.ts'
 import type { MailboxTransport } from './mail/inbox.ts'
+import { MimeCodecAndSanitizer } from './mail/mime.ts'
+import type { MailSearchClient } from './mail/search-workspace.ts'
 
 const SECRET = 'native-mailbox-rest-synthetic-server-secret-32'
 const ORIGIN = 'https://mail.example.test:2096'
@@ -43,7 +45,19 @@ const fixture = async () => {
     },
     async list() { return [] }, async read() { return fail('NOT_FOUND', 'message not found') }, async remove() {}, async send() { return { messageId: '<synthetic@example.test>' } },
   }
-  const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: 'xmail', publicOrigin: ORIGIN, allowedOrigins: [ORIGIN], secureCookies: true, requireOriginHeader: true, mailboxTransport: transport })
+  // Declared native IMAP fixture; legacy metadata JSON is never the sealed search source.
+  const searchClient = (): MailSearchClient => {
+    let address = ''
+    const selected = (folder: string) => ({ folder, exists: 1, recent: 0, uidValidity: 17, uidValidityObserved: true, uidNext: 8, flags: [], resynced: false, previousUidValidity: null })
+    return { async connect() { return '* OK synthetic native search' }, async logout() {}, async login(mailbox, password) { await transport.verify(mailbox,password); address = mailbox },
+      async selectFolder(folder) { return selected(folder) }, async searchByUtf8Query() { return [7] },
+      async fetchMessagesByUid(folder, uid) {
+        const rawMime = 'From: sender@example.test\r\nTo: ' + address + '\r\nSubject: Native search marker\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n' + (address === own.login ? 'OWN_MAILBOX_MARKER' : 'SIBLING_MAILBOX_MARKER')
+        return { state: selected(folder), messages: Number(uid) === 7 ? [{ mailbox: address, folder, uid: 7, uidValidity: 17, flags: [], internalDate: null, sizeBytes: Buffer.byteLength(rawMime), rawMime, rawMimeBytes: Buffer.from(rawMime), rfc822SizeObserved: true, bodyComplete: true, parsed: new MimeCodecAndSanitizer().parseMimeMessage(rawMime), attachmentTokens: [] }] : [] }
+      },
+    }
+  }
+  const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: 'xmail', publicOrigin: ORIGIN, allowedOrigins: [ORIGIN], secureCookies: true, requireOriginHeader: true, mailboxTransport: transport, mailSearchClientFactory: searchClient })
   const listener = await listenApiServer(app)
   cleanup.push(async () => { listener.server.closeAllConnections(); await listener.close() })
   const call = (path: string, method = 'GET', body?: unknown, session?: { cookie: string; csrf: string }, extra: Record<string, string> = {}): Promise<Response> => new Promise((resolve, reject) => {
@@ -99,13 +113,13 @@ describe('native interactive mailbox REST authority', () => {
   })
   it('binds actual address login to one mailbox instead of account-owner authority', async () => {
     const f = await fixture(), session = await f.login()
-    const own = await f.call('/api/webmail/search?q=MARKER&mailbox=' + encodeURIComponent(f.own.login), 'GET', undefined, session)
+    const own = await f.call('/api/webmail/search?q=MARKER', 'GET', undefined, session)
     expect(own.status).toBe(200)
     expect(await own.text()).toContain('OWN_MAILBOX_MARKER')
     const before = await f.snapshot()
     for (const path of ['/api/webmail/search?q=MARKER&mailbox=', '/api/webmail/messages?mailbox=', '/api/webmail/identities?mailbox=', '/api/webmail/calendars?mailbox=']) {
       const response = await f.call(path + encodeURIComponent(f.sibling.login), 'GET', undefined, session)
-      expect.soft(response.status).toBe(404)
+      expect.soft(response.status).toBe(path.startsWith('/api/webmail/search?') || path.startsWith('/api/webmail/calendars?') ? 422 : 404)
       expect.soft(await response.text()).not.toContain('SIBLING_MAILBOX_MARKER')
     }
     expect(await f.snapshot()).toEqual(before)
@@ -116,7 +130,7 @@ describe('native interactive mailbox REST authority', () => {
     const identity = await f.call('/api/webmail/identities', 'POST', { mailbox: f.sibling.login, email: f.sibling.login, displayName: 'Unauthorized replacement' }, session)
     expect.soft(identity.status).toBe(404)
     const calendar = await f.call(`/api/webmail/calendars/${f.calendarId}/share`, 'POST', { principal: f.own.login, permission: 'read-write', mailbox: f.sibling.login }, session)
-    expect.soft(calendar.status).toBe(404)
+    expect.soft(calendar.status).toBe(422)
     expect.soft((await f.call('/api/mail/filters', 'POST', { mailbox: f.sibling.login, scope: 'mailbox', name: 'Unauthorized filter', conditions: [], action: { type: 'keep' } }, session)).status).toBe(404)
     expect(await f.snapshot()).toEqual(before)
   })

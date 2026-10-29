@@ -1,6 +1,9 @@
+// @vitest-environment jsdom
 import { runInNewContext } from 'node:vm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { LOGIN_CLIENT_SCRIPT } from './login-client.ts'
+import { translator, type MessageValues } from './i18n.ts'
+import { renderLoginSurface } from './surfaces/login.ts'
 
 class Element {
   attrs = new Map<string, string>()
@@ -37,6 +40,9 @@ const harness = (options: { disabled?: boolean; state?: string; ar?: boolean } =
   const destinations: string[] = []
   const window = { location: { href: 'https://whm.example.test:2087/login', origin: 'https://whm.example.test:2087', assign: (url: string) => destinations.push(url), reload: () => undefined } }
   runInNewContext(LOGIN_CLIENT_SCRIPT, {
+    // The page's client translator follows the document language.
+    xpT: (message: string, values?: MessageValues) => translator(options.ar ? 'ar' : 'en')(message, values),
+    msgid, msgctxt,
     document: {
       documentElement: { lang: options.ar ? 'ar' : 'en', dir: options.ar ? 'rtl' : 'ltr', getAttribute: () => options.disabled ? 'disabled' : 'optional' },
       querySelector: (selector: string) => selectors[selector] ?? null,
@@ -149,5 +155,124 @@ describe('approved factor selectors use the real challenge flow', () => {
     await h.click('toggle-login-factor')
     expect(h.toggle.textContent).toBe('استخدم رمز استرداد')
     expect(h.destinations).toEqual([])
+  })
+})
+
+describe('server lockout timestamp presentation', () => {
+  it.each([
+    { name: 'client clock behind', skew: -300000, deadline: '2030-02-03T04:05:06.789Z', display: '2030-02-03 04:05 UTC', delay: 3900000 },
+    { name: 'client clock ahead', skew: 300000, deadline: '2030-02-03T04:05:06.789Z', display: '2030-02-03 04:05 UTC', delay: 3300000 },
+    { name: 'long pause timer clamp', skew: 0, deadline: '2099-01-01T00:00:00.000Z', display: '2099-01-01 00:00 UTC', delay: 2147483647 },
+    { name: 'original microsecond precision', skew: 0, deadline: '2030-02-03T04:05:06.123456Z', display: '2030-02-03 04:05 UTC', delay: 3599334 },
+  ])('preserves exact server time and existing pause semantics with $name', async ({ skew, deadline, display, delay }) => {
+    for (const locale of ['en', 'ar'] as const) {
+      document.documentElement.lang = locale
+      document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'
+      document.documentElement.setAttribute('data-mfa-mode', 'optional')
+      document.body.innerHTML = renderLoginSurface({ audience: 'xwhm', locale, theme: 'light', mfaMode: 'optional' })
+      const documentListeners: { name: string; listener: EventListenerOrEventListenerObject }[] = []
+      const addListener = document.addEventListener.bind(document)
+      const listenerSpy = vi.spyOn(document, 'addEventListener').mockImplementation((name, listener, options) => {
+        documentListeners.push({ name, listener }); addListener(name, listener, options)
+      })
+      try {
+        const window = { document, location: { href: 'https://whm.example.test:2087/login', origin: 'https://whm.example.test:2087' } }
+        let clientNow = Date.parse('2030-02-03T03:05:06.789Z') + skew
+        class ClientDate extends Date { static override now() { return clientNow } }
+        const timers: { id: number; delay: number; run: () => void }[] = []
+        const cleared = new Set<number>()
+        const setTimeout = (run: () => void, timeout: number) => {
+          const id = timers.length + 1
+          timers.push({ id, delay: timeout, run })
+          return id
+        }
+        const clearTimeout = (id: number) => cleared.add(id)
+        const requests: { method: string; path: string }[] = []
+        const fetch = async (url: string, init: RequestInit) => {
+          requests.push({ method: init.method ?? 'GET', path: new URL(url).pathname })
+          return new Response(JSON.stringify({ message: '<img src=x onerror=syntheticFailure()>', details: { lockedOut: true, lockedUntil: deadline } }), {
+            status: 401, headers: { 'content-type': 'application/json' },
+          })
+        }
+        runInNewContext(LOGIN_CLIENT_SCRIPT, { xpT, msgid, msgctxt, document, window, URL, AbortController, Date: ClientDate, setTimeout, clearTimeout, fetch })
+        const username = window.document.querySelector<HTMLInputElement>('#login-username')!
+        const password = window.document.querySelector<HTMLInputElement>('#login-password')!
+        const submit = window.document.querySelector<HTMLButtonElement>('[data-login-form] button[type="submit"]')!
+        username.value = 'synthetic-root'
+        password.value = 'synthetic-password'
+        submit.click()
+        const shell = window.document.querySelector('[data-auth-state]')!
+        await vi.waitFor(() => expect(shell.getAttribute('data-auth-state')).toBe('locked'))
+        const error = window.document.querySelector<HTMLElement>('[data-auth-error]')!
+        const value = error.querySelector('bdi')!
+        expect(value).not.toBeNull()
+        expect(value.getAttribute('dir')).toBe('ltr')
+        expect(value.classList.contains('xp-mono')).toBe(true)
+        expect(value.textContent).toBe(display)
+        expect(error.textContent).toBe((locale === 'ar' ? 'تسجيل الدخول مقفل مؤقتًا. موعد إعادة المحاولة: ' : 'Sign-in is temporarily locked. Retry after: ') + display)
+        const instant = value.querySelector('time')!
+        expect(instant).not.toBeNull()
+        expect(instant.getAttribute('datetime')).toBe(deadline)
+        expect(instant.textContent).toBe(display)
+        expect(error.querySelectorAll('time')).toHaveLength(1)
+        expect(value.textContent).not.toMatch(/\d{4}-\d{2}-\d{2}T|Z\b/)
+        expect(value.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+        const serverDocument = document.implementation.createHTMLDocument('Synthetic paused sign-in')
+        serverDocument.body.innerHTML = renderLoginSurface({ audience: 'xwhm', locale, theme: 'light', mfaMode: 'optional', lockout: { locked: true, lockedUntil: deadline } })
+        const recorded = serverDocument.querySelector('[data-observed-lockout-until] bdi')!
+        expect(recorded.textContent).toBe(display)
+        expect(recorded.querySelector('time')!.getAttribute('datetime')).toBe(deadline)
+        expect(recorded.textContent).toBe(value.textContent)
+        expect(error.querySelectorAll('bdi')).toHaveLength(1)
+        expect(error.querySelector('img, script, [onerror]')).toBeNull()
+        expect(error.hidden).toBe(false)
+        expect(submit.disabled).toBe(true)
+        expect(shell.getAttribute('data-login-audience')).toBe('xwhm')
+        expect(requests).toEqual([{ method: 'POST', path: '/api/auth/login' }])
+        const active = timers.filter(timer => !cleared.has(timer.id))
+        expect(active).toHaveLength(1)
+        expect(active[0]!.delay).toBe(delay)
+        submit.click()
+        expect(requests).toHaveLength(1)
+        clientNow = Date.parse(deadline)
+        active[0]!.run()
+        expect(shell.getAttribute('data-auth-state')).toBe('credentials')
+        expect(error.getAttribute('data-lockout-state')).toBe('unknown')
+        expect(error.hidden).toBe(true)
+        expect(submit.disabled).toBe(false)
+        expect(requests).toHaveLength(1)
+      } finally {
+        for (const { name, listener } of documentListeners) document.removeEventListener(name, listener)
+        listenerSpy.mockRestore()
+        document.body.replaceChildren()
+      }
+    }
+  })
+})
+
+describe('SSR readable lockout time', () => {
+  it.each([
+    { locale: 'en', deadline: '2099-01-01T00:00:00.000Z', display: '2099-01-01 00:00 UTC' },
+    { locale: 'ar', deadline: '2099-01-01T00:00:00.000Z', display: '2099-01-01 00:00 UTC' },
+    { locale: 'en', deadline: '2030-02-03T04:05:06.123456Z', display: '2030-02-03 04:05 UTC' },
+    { locale: 'ar', deadline: '2030-02-03T04:05:06.123456Z', display: '2030-02-03 04:05 UTC' },
+  ] as const)('keeps readable $locale text and original machine time for $deadline', ({ locale, deadline, display }) => {
+    for (const audience of ['xpanel', 'xwhm', 'xmail'] as const) {
+      const serverDocument = document.implementation.createHTMLDocument('Synthetic paused sign-in')
+      serverDocument.body.innerHTML = renderLoginSurface({ audience, locale, theme: 'light', mfaMode: 'optional', lockout: { locked: true, lockedUntil: deadline } })
+      const recorded = serverDocument.querySelector('[data-observed-lockout-until] bdi')!
+      expect(recorded).not.toBeNull()
+      expect(recorded.textContent).toBe(display)
+      expect(recorded.getAttribute('dir')).toBe('ltr')
+      const instant = recorded.querySelector('time')!
+      expect(instant).not.toBeNull()
+      expect(instant.getAttribute('datetime')).toBe(deadline)
+      expect(instant.textContent).toBe(display)
+      expect(recorded.textContent).not.toMatch(/\d{4}-\d{2}-\d{2}T|Z\b/)
+      expect(recorded.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+      expect(serverDocument.querySelector('[data-auth-state]')!.getAttribute('data-locked-until')).toBe(deadline)
+      expect(serverDocument.querySelector('[data-auth-state]')!.getAttribute('data-login-audience')).toBe(audience)
+      expect(serverDocument.querySelector('script, [onerror]')).toBeNull()
+    }
   })
 })

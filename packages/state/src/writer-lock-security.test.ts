@@ -131,6 +131,8 @@ const childWriter = async (mode: 'hold' | 'reclaim') => {
     if(${JSON.stringify(mode)}==='hold'){
       await lease.recordIntent({op:'child-write',createdRelPaths:['partial.json'],backups:[]});
       await writeFile(join(root,'partial.json'),JSON.stringify({partial:true}));
+      // Keep the native SQLite connection alive until the deliberately killed writer exits.
+      globalThis.__heldWriterLease=lease;
       process.send({ready:true,token:lease.fencingToken});setInterval(()=>{},1000);
     }else{
       const meta=await lease.commitAuthority();await lease.release();process.send({done:true,token:lease.fencingToken,revision:meta.revision});process.disconnect();
@@ -210,6 +212,8 @@ describe('writer OS mutex and recovery', () => {
   it('recovers a real killed writer and serializes simultaneous reclaimers', async () => {
     const held = await childWriter('hold')
     expect(held.result.ready).toBe(true)
+    expect(held.child.exitCode).toBeNull()
+    expect(held.child.signalCode).toBeNull()
     let ticks = 0
     const interval = setInterval(() => { ticks++ }, 5)
     try { await expect(lock().forceRecoverLease()).rejects.toMatchObject({ code: 'CONFLICT' }) } finally { clearInterval(interval) }

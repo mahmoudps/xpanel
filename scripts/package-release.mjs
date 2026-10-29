@@ -235,9 +235,9 @@ const isIncludedRuntimeSource = (relPath) => {
   if (REQUIRED_SYSTEMD_UNITS.includes(relPath)) return true
   if (/^(?:apps|packages)\/[^/]+\/package\.json$/.test(relPath)) return true
   if (/^packages\/db\/src\/migrations\/\d{4}_[a-z0-9_]+\.sql$/.test(relPath)) return true
-  if (/^(?:apps|packages)\/[^/]+\/src\/.+\.(?:ts|js|mjs|css|html|json)$/.test(relPath)) {
+  if (/^(?:apps|packages)\/[^/]+\/src\/.+\.(?:ts|js|mjs|css|html|json|po)$/.test(relPath)) {
     if (/\.test\.ts$|\.spec\.ts$|\.linux\.test\.ts$/.test(relPath)) return false
-    if (/\/fixtures\.ts$/.test(relPath)) return false
+    if (/\/fixtures\.ts$|[-.]fixture\.ts$/.test(relPath)) return false
     return true
   }
   return false
@@ -258,7 +258,7 @@ const PRIVACY_SKIP_DIRS = new Set([
   'tmp',
 ])
 
-const PRIVACY_TEXT_EXTENSIONS = new Set(['.md', '.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.css', '.html', '.yml', '.yaml', '.sh', '.c', '.sql', '.txt'])
+const PRIVACY_TEXT_EXTENSIONS = new Set(['.md', '.po', '.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.css', '.html', '.yml', '.yaml', '.sh', '.c', '.sql', '.txt'])
 
 /**
  * Names the release privacy scan may see in this checkout. The build runner reads this

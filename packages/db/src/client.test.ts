@@ -32,8 +32,8 @@ describe('createDb', () => {
       expect(jm?.journal_mode.toLowerCase()).toBe('wal')
 
       const first = await migrate(h.runner)
-      expect(first.applied).toEqual(['0001_init.sql', '0002_mailbox_sessions.sql', '0003_job_references_reconcile.sql'])
-      expect(await currentSchemaVersion(h.runner)).toBe(3)
+      expect(first.applied).toEqual(['0001_init.sql', '0002_mailbox_sessions.sql', '0003_job_references_reconcile.sql', '0004_host_metrics_observations.sql', '0005_team_sign_in.sql', '0006_panel_handoffs.sql'])
+      expect(await currentSchemaVersion(h.runner)).toBe(6)
 
       const root = await createRootPrincipal(h.db, { username: 'root', passwordHash: ARGON2 })
       const sealed = Uint8Array.from({ length: 32 }, (_, i) => 255 - i)

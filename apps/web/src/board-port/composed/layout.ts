@@ -1,7 +1,7 @@
 import { escapeHtml } from '../../tokens.ts'
 import type { ComposedContext } from './context.ts'
 import { copyOf, type ComposedLayout, type ComposedRoute, type Copy } from './types.ts'
-
+import { translator, type MessageValues } from '../../i18n.ts'
 interface LayoutContent {
   state: 'unread' | 'empty' | 'loaded' | 'denied' | 'unavailable' | 'failed'
   message: string
@@ -9,25 +9,25 @@ interface LayoutContent {
   table: string
 }
 
-const text = (context: ComposedContext, en: string, ar: string): string => escapeHtml(context.locale === 'ar' ? ar : en)
+const text = (context: ComposedContext, message: string, values?: MessageValues): string => escapeHtml(translator(context.locale)(message, values))
 const groupTitles: Record<ComposedLayout, Copy> = {
-  files: ['Files and access', 'الملفات والوصول'],
-  site: ['Site configuration', 'إعدادات الموقع'],
-  database: ['Database configuration', 'إعدادات قاعدة البيانات'],
-  metrics: ['Measurements', 'القياسات'],
-  ssl: ['Certificate configuration', 'إعدادات الشهادة'],
-  security: ['Security policy', 'سياسة الأمان'],
-  php: ['PHP configuration', 'إعدادات PHP'],
-  cron: ['Schedule and command', 'الجدول والأمر'],
-  editor: ['File editor', 'محرر الملف'],
-  launch: ['Connection details', 'تفاصيل الاتصال'],
-  list: ['Records', 'السجلات'],
-  settings: ['Configuration', 'الإعدادات'],
-  dashboard: ['Overview', 'نظرة عامة'],
-  log: ['Log filters', 'تصفية السجل'],
-  wizard: ['Configuration', 'الإعدادات'],
-  matrix: ['Policies and assignments', 'السياسات والتعيينات'],
-  terminal: ['Terminal session', 'جلسة الطرفية'],
+  files: msgid('Files and access'),
+  site: msgid('Site configuration'),
+  database: msgid('Database configuration'),
+  metrics: msgid('Measurements'),
+  ssl: msgid('Certificate configuration'),
+  security: msgid('Security policy'),
+  php: msgid('PHP configuration'),
+  cron: msgid('Schedule and command'),
+  editor: msgid('File editor'),
+  launch: msgid('Connection details'),
+  list: msgid('Records'),
+  settings: msgctxt('layout', 'Configuration'),
+  dashboard: msgid('Overview'),
+  log: msgid('Log filters'),
+  wizard: msgctxt('layout', 'Configuration'),
+  matrix: msgid('Policies and assignments'),
+  terminal: msgid('Terminal session'),
 }
 
 const editorLayouts = new Set<ComposedLayout>(['editor', 'terminal'])
@@ -53,33 +53,33 @@ const action = (spec: ComposedRoute, context: ComposedContext, reasonId: string)
 export const renderComposedLayout = (spec: ComposedRoute, context: ComposedContext, content: LayoutContent): string => {
   const id = fieldId(spec.route, 0)
   const status = `<p class="xp-composed-state" id="${id}-state" role="status">${escapeHtml(content.message)}</p>`
-  if (content.state === 'denied') return panel(`${id}-access`, text(context, 'Access required', 'يلزم تصريح بالوصول'), status)
+  if (content.state === 'denied') return panel(`${id}-access`, text(context, 'Access required'), status)
 
   const reasonId = `${id}-reason`
-  const reason = `<p id="${reasonId}" class="xp-help">${text(context, 'Changes are unavailable on this screen. No operation will be submitted.', 'التغييرات غير متاحة من هذه الشاشة. لن تُرسل أي عملية.')}</p>`
+  const reason = `<p id="${reasonId}" class="xp-help">${text(context, 'Changes are unavailable on this screen. No operation will be submitted.')}</p>`
   const fields = controls(spec, context, reasonId)
   const title = escapeHtml(copyOf(groupTitles[spec.layout], context.locale))
-  const recordsTitle = text(context, spec.layout === 'log' ? 'Events' : 'Records', spec.layout === 'log' ? 'الأحداث' : 'السجلات')
+  const recordsTitle = spec.layout === 'log' ? text(context, 'Events') : text(context, 'Records')
   const records = content.table ? panel(`${id}-records`, recordsTitle, content.table, ' data-composed-records') : ''
-  const facts = content.facts ? panel(`${id}-facts`, text(context, 'Stored information', 'المعلومات المحفوظة'), content.facts) : ''
+  const facts = content.facts ? panel(`${id}-facts`, text(context, 'Stored information'), content.facts) : ''
   const state = `<div class="xp-composed-state-group">${status}${reason}</div>`
 
   if (editorLayouts.has(spec.layout)) {
     const editorId = `${id}-editor`
-    const editor = `<div class="xp-composed-field"><label for="${editorId}">${text(context, spec.layout === 'terminal' ? 'Session output' : 'File contents', spec.layout === 'terminal' ? 'ناتج الجلسة' : 'محتوى الملف')}</label><textarea class="xp-composed-editor" id="${editorId}" rows="12" dir="ltr" readonly disabled data-wiring="unavailable" aria-describedby="${reasonId}"></textarea></div>`
+    const editor = `<div class="xp-composed-field"><label for="${editorId}">${spec.layout === 'terminal' ? text(context, 'Session output') : text(context, 'File contents')}</label><textarea class="xp-composed-editor" id="${editorId}" rows="12" dir="ltr" readonly disabled data-wiring="unavailable" aria-describedby="${reasonId}"></textarea></div>`
     return `${panel(`${id}-configuration`, title, `${state}${fields}${editor}${action(spec, context, reasonId)}`, ' data-composed-editor')}${facts}${records}`
   }
 
   if (spec.layout === 'wizard') {
-    const steps: readonly Copy[] = [['Configure', 'الإعداد'], ['Review changes', 'مراجعة التغييرات'], ['Apply', 'التطبيق']]
-    const workflow = `<ol class="xp-composed-steps" aria-label="${text(context, 'Workflow', 'مراحل العمل')}">${steps.map((step, index) => `<li${index === 0 ? ' aria-current="step"' : ''}><span class="xp-composed-step-number" aria-hidden="true">${index + 1}</span><span>${escapeHtml(copyOf(step, context.locale))}</span></li>`).join('')}</ol>`
+    const steps: readonly Copy[] = [msgctxt('layout', 'Configure'), msgid('Review changes'), msgid('Apply')]
+    const workflow = `<ol class="xp-composed-steps" aria-label="${text(context, 'Workflow')}">${steps.map((step, index) => `<li${index === 0 ? ' aria-current="step"' : ''}><span class="xp-composed-step-number" aria-hidden="true">${index + 1}</span><span>${escapeHtml(copyOf(step, context.locale))}</span></li>`).join('')}</ol>`
     return `${workflow}${panel(`${id}-configuration`, title, `${state}${fields}${action(spec, context, reasonId)}`)}${facts}${records}`
   }
 
   if (readLayouts.has(spec.layout)) {
     const filters = fields ? panel(`${id}-filters`, title, `${fields}${reason}`) : ''
-    const statusPanel = panel(`${id}-overview`, text(context, 'Read status', 'حالة القراءة'), status)
-    return `${filters}${statusPanel}${facts}${records}${spec.action ? panel(`${id}-actions`, text(context, 'Actions', 'الإجراءات'), `${filters ? '' : reason}${action(spec, context, reasonId)}`) : ''}`
+    const statusPanel = panel(`${id}-overview`, text(context, 'Read status'), status)
+    return `${filters}${statusPanel}${facts}${records}${spec.action ? panel(`${id}-actions`, text(context, 'Actions'), `${filters ? '' : reason}${action(spec, context, reasonId)}`) : ''}`
   }
 
   const matrix = spec.layout === 'matrix' ? ' data-composed-matrix' : ''

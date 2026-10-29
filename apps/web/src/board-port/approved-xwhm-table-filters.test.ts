@@ -176,3 +176,55 @@ describe('scoped authorized DOM row binding', () => {
     expect(status()).toBe('لا توجد نتائج مطابقة في الصفوف المحمّلة.')
   })
 })
+
+describe('domain row change recollection', () => {
+  const domain = (body: string) => `<main data-whm-detail-route="/whm/domains"><div data-domain-editor></div>${workspace('a', body)}</main>`
+  const changed = (source: Element = document.querySelector('[data-domain-editor]')!) => source.dispatchEvent(new Event('xpanel:whm-domain-rows-changed', { bubbles: true }))
+
+  it('preserves current query, kind and page then clamps after actual domain rows are removed', () => {
+    document.body.innerHTML = domain(Array.from({ length: 45 }, (_, index) => row(index)).join(''))
+    bind(); change('whm-search', 'Owner1'); change('whm-account', 'owner1'); click('[data-kind="addon"]'); change('whm-page-size', '10'); click('[data-whm-page="next"]'); click('[data-whm-page="next"]')
+    root().querySelector('tbody')!.insertAdjacentHTML('beforeend', row(45)); changed()
+    expect(shown()).toEqual(['41', '43', '45']); expect(status()).toContain('Page 3 of 3')
+    root().querySelector('tbody')!.innerHTML = row(1) + row(3); changed()
+    expect(shown()).toEqual(['1', '3']); expect(status()).toContain('Page 1 of 1')
+    expect(control('whm-search').value).toBe('Owner1'); expect(control('whm-account').value).toBe('owner1')
+    expect(root().querySelector('[data-kind="addon"]')!.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('retains filter-hidden authorized rows while excluding new hidden and unmarked rows', () => {
+    document.body.innerHTML = domain(row(1) + row(2) + row(5).replace('<tr ', '<tr hidden '))
+    bind(); change('whm-search', 'Site2')
+    root().querySelector('tbody')!.insertAdjacentHTML('beforeend', row(3) + row(4).replace('<tr ', '<tr hidden ') + '<tr data-test-row="9"><td>No marker</td></tr>')
+    changed(); expect(shown()).toEqual(['2', '9'])
+    click('[data-whm-clear-filters]')
+    expect(shown().filter(value => value !== '9')).toEqual(['1', '2', '3'])
+    expect(status()).toContain('3 loaded rows')
+  })
+
+  it('replaces the generated empty state after a verified domain change without stale totals', () => {
+    document.body.innerHTML = domain(row(1)); bind(); change('whm-search', 'missing')
+    root().querySelector('tbody')!.innerHTML = ''; changed()
+    expect(status()).toBe('No matching results in the loaded rows.')
+    expect(root().querySelectorAll('[data-whm-filter-empty]')).toHaveLength(1)
+    const previousEmpty = root().querySelector('[data-whm-filter-empty]')!
+    root().querySelector('tbody')!.insertAdjacentHTML('beforeend', row(2)); changed(); click('[data-whm-clear-filters]')
+    expect(shown()).toEqual(['2']); expect(status()).toContain('1 loaded rows')
+    expect(previousEmpty.isConnected).toBe(false)
+    expect(root().querySelectorAll('[data-whm-filter-empty]')).toHaveLength(1)
+    expect(root().querySelector<HTMLTableRowElement>('[data-whm-filter-empty]')!.hidden).toBe(true)
+  })
+
+  it('does not recollect on another route or duplicate listeners on repeated binding', () => {
+    document.body.innerHTML = domain(row(1)) + workspace('b', row(2))
+    const page = document.querySelector('[data-whm-detail-route]')!
+    page.insertAdjacentHTML('beforeend', '<div data-whm-detail-route="/whm/ssl" data-foreign-editor></div>')
+    bind(); bind()
+    root().querySelector('tbody')!.insertAdjacentHTML('beforeend', row(3)); changed(document.querySelector('[data-foreign-editor]')!)
+    expect(status()).toContain('1 loaded rows')
+    root('b').querySelector('tbody')!.insertAdjacentHTML('beforeend', row(4)); changed(root('b')); click('[data-whm-clear-filters]', 'b')
+    expect(status('b')).toContain('1 loaded rows')
+    changed(); expect(status()).toContain('2 loaded rows')
+    expect(shown()).toEqual(['1', '3'])
+  })
+})

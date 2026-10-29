@@ -1,6 +1,6 @@
 import { posix } from 'node:path'
 import { fail, suspensionEffects } from '@xpanel/core'
-import type { Account, OsProfile, Plan } from '@xpanel/core'
+import type { Account, OsProfile, Plan, CronExecutionStatus } from '@xpanel/core'
 import { system } from '@xpanel/render'
 import type { AgentExecutor } from '../executor.ts'
 import { JailedFileManager } from '../file-manager.ts'
@@ -32,19 +32,7 @@ export interface ValidatedSshPublicKey {
   canonicalLine: string
 }
 
-export interface CronExecutionStatus {
-  username: string
-  jobId: string
-  timerUnit: string
-  serviceUnit: string
-  slice: string
-  timerEnabled: boolean
-  timerActive: boolean
-  serviceRunning: boolean
-  lastTriggerAt: string | null
-  lastExitCode: number | null
-  lastResult: string
-}
+export type { CronExecutionStatus } from '@xpanel/core'
 
 export interface ReconcileAccountCronInput {
   account: Account
@@ -349,15 +337,21 @@ export class AccountProcessServiceAdapter {
     const stoppedTimers: string[] = []
     const removedUnits: string[] = []
     const currentJobIds = new Set<string>()
-
-    for (const job of input.jobs) {
-      const rendered = system.renderCronUnits(input.account, job, this.os)
+    const renderedJobs = input.jobs.map(job => ({ job, rendered: system.renderCronUnits(input.account, job, this.os) }))
+    if (new Set(input.jobs.map(job => job.id)).size !== input.jobs.length) fail('VALIDATION', 'cron job identities may not repeat')
+    const oldCommandPaths = new Map((input.existingJobIds ?? []).map(jobId => [jobId, system.cronCommandPath(id.username, jobId)]))
+    if (input.jobs.length > 0) {
+      await this.executor.runAction({ kind: 'ensure-dir', path: system.CRON_COMMAND_ROOT, mode: 0o755, owner: 'root', group: 'root' })
+      await this.executor.runAction({ kind: 'ensure-dir', path: system.cronCommandDir(id.username), mode: 0o750, owner: 'root', group: id.username })
+    }
+    for (const { job, rendered } of renderedJobs) {
       currentJobIds.add(job.id)
+      await this.executor.writeFile(rendered.commandFile)
       await this.executor.writeFile(rendered.service)
       await this.executor.writeFile(rendered.timer)
     }
 
-    for (const oldId of input.existingJobIds ?? []) {
+    for (const [oldId, commandPath] of oldCommandPaths) {
       if (!currentJobIds.has(oldId)) {
         const names = system.cronUnitNames(id.username, oldId)
         await this.executor.runAction({ kind: 'systemd', verb: 'stop', unit: names.timer })
@@ -365,6 +359,7 @@ export class AccountProcessServiceAdapter {
         await this.executor.runAction({ kind: 'systemd', verb: 'stop', unit: names.service })
         await this.executor.removePath(`${systemdDir}/${names.timer}`)
         await this.executor.removePath(`${systemdDir}/${names.service}`)
+        await this.executor.removePath(commandPath)
         removedUnits.push(names.timer, names.service)
       }
     }
@@ -399,57 +394,66 @@ export class AccountProcessServiceAdapter {
    */
   async observeCronStatus(account: Pick<Account, 'username' | 'uid' | 'gid'>, jobId: string): Promise<CronExecutionStatus> {
     const id = assertAccountIdentity(account, this.os)
+    system.cronCommandPath(id.username, jobId)
     const names = system.cronUnitNames(id.username, jobId)
     const slice = system.accountSliceName(id.uid)
-
+    const unavailable = (): never => fail('PRECONDITION_FAILED', 'Cron host observation is unavailable or incomplete', { stateChanged: false, observationUnavailable: true })
     const [timerRes, serviceRes] = await Promise.all([
       this.executor.runCommand([
         '/usr/bin/systemctl',
         'show',
         names.timer,
+        '--property=LoadState',
         '--property=ActiveState',
         '--property=UnitFileState',
         '--property=LastTriggerUSec',
+        '--property=NextElapseUSecRealtime',
       ]),
       this.executor.runCommand([
         '/usr/bin/systemctl',
         'show',
         names.service,
+        '--property=LoadState',
         '--property=ActiveState',
         '--property=SubState',
         '--property=Result',
         '--property=ExecMainStatus',
+        '--property=ExecMainStartTimestamp',
+        '--property=ExecMainStartTimestampMonotonic',
+        '--property=ExecMainExitTimestampMonotonic',
       ]),
-    ])
-
-    const timerProps = parseSystemctlShow(timerRes.stdout)
-    const serviceProps = parseSystemctlShow(serviceRes.stdout)
-
-    const fakeUnits = (this.executor as unknown as {
-      units?: Map<string, { enabled: boolean; active: boolean; properties: Record<string, string> }>
-    }).units
-    const fakeTimer = fakeUnits?.get(names.timer)
-    const fakeService = fakeUnits?.get(names.service)
-
-    const timerActive =
-      timerProps.get('ActiveState') === 'active' || (fakeTimer?.active ?? false)
-    const timerEnabled =
-      timerProps.get('UnitFileState') === 'enabled' || (fakeTimer?.enabled ?? false)
-    const serviceActiveState = serviceProps.get('ActiveState') ?? (fakeService?.active ? 'active' : 'inactive')
-    const serviceSubState = serviceProps.get('SubState') ?? ''
-    const serviceRunning =
-      serviceActiveState === 'activating' ||
-      serviceActiveState === 'active' ||
-      serviceSubState === 'running' ||
-      serviceSubState === 'start'
-
-    const rawTrigger = timerProps.get('LastTriggerUSec') ?? fakeTimer?.properties.LastTriggerUSec ?? ''
-    const lastTriggerAt =
-      rawTrigger && rawTrigger !== 'n/a' && rawTrigger !== '0' ? rawTrigger : null
-    const rawStatus = serviceProps.get('ExecMainStatus') ?? fakeService?.properties.ExecMainStatus
-    const lastExitCode =
-      rawStatus !== undefined && /^\d+$/.test(rawStatus) ? Number(rawStatus) : null
-    const lastResult = serviceProps.get('Result') ?? fakeService?.properties.Result ?? 'success'
+    ]).catch(unavailable)
+    const properties = (result: typeof timerRes, required: readonly string[]): Map<string, string> => {
+      if (!result.ok || result.code !== 0 || result.stdout.length > 32768) return unavailable()
+      const props = new Map<string, string>()
+      for (const line of result.stdout.split(/\r?\n/).filter(Boolean)) {
+        const equal = line.indexOf('=')
+        if (equal < 1 || /[\u0000-\u001f\u007f-\u009f]/u.test(line) || line.length > 1024) return unavailable()
+        const key = line.slice(0, equal)
+        if (props.has(key)) return unavailable()
+        props.set(key, line.slice(equal + 1))
+      }
+      if (props.get('LoadState') !== 'loaded' || required.some(key => !props.has(key))) return unavailable()
+      return props
+    }
+    const timerProps = properties(timerRes, ['ActiveState', 'UnitFileState', 'LastTriggerUSec', 'NextElapseUSecRealtime'])
+    const serviceProps = properties(serviceRes, ['ActiveState', 'SubState', 'Result', 'ExecMainStatus', 'ExecMainStartTimestamp', 'ExecMainStartTimestampMonotonic', 'ExecMainExitTimestampMonotonic'])
+    const activeStates = new Set(['active', 'reloading', 'inactive', 'failed', 'activating', 'deactivating', 'maintenance', 'refreshing'])
+    const timerState = timerProps.get('ActiveState')!, serviceState = serviceProps.get('ActiveState')!
+    const unitState = timerProps.get('UnitFileState')!
+    if (!activeStates.has(timerState) || !activeStates.has(serviceState) || !['enabled', 'enabled-runtime', 'linked', 'linked-runtime', 'alias', 'masked', 'masked-runtime', 'static', 'disabled', 'indirect', 'generated', 'transient', 'bad'].includes(unitState)) return unavailable()
+    const timestamp = (value: string): string | null => value && value !== 'n/a' && value !== '0' ? value : null
+    const monotonic = (value: string): number => {
+      if (!/^[0-9]{1,16}$/.test(value) || !Number.isSafeInteger(Number(value))) return unavailable()
+      return Number(value)
+    }
+    const started = monotonic(serviceProps.get('ExecMainStartTimestampMonotonic')!), exited = monotonic(serviceProps.get('ExecMainExitTimestampMonotonic')!)
+    const lastStartedAt = timestamp(serviceProps.get('ExecMainStartTimestamp')!)
+    const rawStatus = serviceProps.get('ExecMainStatus')!
+    if (rawStatus && (!/^[0-9]{1,3}$/.test(rawStatus) || Number(rawStatus) > 255)) return unavailable()
+    const serviceRunning = !['inactive', 'failed'].includes(serviceState)
+    const lastExitCode = lastStartedAt !== null && !serviceRunning && rawStatus !== '' ? Number(rawStatus) : null
+    const lastResult = lastStartedAt !== null ? serviceProps.get('Result') || 'unknown' : 'unknown'
 
     return {
       username: id.username,
@@ -457,10 +461,13 @@ export class AccountProcessServiceAdapter {
       timerUnit: names.timer,
       serviceUnit: names.service,
       slice,
-      timerEnabled,
-      timerActive,
+      timerEnabled: unitState === 'enabled' || unitState === 'enabled-runtime',
+      timerActive: timerState === 'active',
       serviceRunning,
-      lastTriggerAt,
+      lastTriggerAt: timestamp(timerProps.get('LastTriggerUSec')!),
+      lastStartedAt,
+      nextRunAt: timestamp(timerProps.get('NextElapseUSecRealtime')!),
+      durationMs: !serviceRunning && started > 0 && exited >= started ? (exited - started) / 1000 : null,
       lastExitCode,
       lastResult,
     }
@@ -482,8 +489,13 @@ export class AccountProcessServiceAdapter {
         serviceUnit: status.serviceUnit,
       })
     }
-    await this.executor.runAction({ kind: 'systemd', verb: 'start', unit: status.serviceUnit })
-    return this.observeCronStatus(account, jobId)
+    try {
+      const result = await this.executor.runCommand(['/usr/bin/systemctl', 'start', '--no-block', status.serviceUnit])
+      if (!result.ok || result.code !== 0) throw new Error('cron_start_not_accepted')
+      return await this.observeCronStatus(account, jobId)
+    } catch {
+      return fail('PRECONDITION_FAILED', 'The manual-run outcome requires host review before any retry', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
+    }
   }
 
   /**

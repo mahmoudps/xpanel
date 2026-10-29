@@ -192,6 +192,7 @@ const parseEnvelope = (rawStdout: string, expectedOp: AccountFileRequest['op']):
     return fail('CONFIG_TEST_FAILED', 'confined file helper response must be a JSON object', { operation: expectedOp })
   }
   const obj = parsed as Record<string, unknown>
+  if (expectedOp === 'write-checked' && Object.keys(obj).some(key => !['protocolVersion', 'ok', 'op', 'worker', 'result', 'error'].includes(key))) return fail('CONFIG_TEST_FAILED', 'checked file helper response has unexpected fields', { operation: expectedOp })
   if (obj.protocolVersion !== ACCOUNT_FILE_HELPER_PROTOCOL_VERSION) {
     return fail('CONFIG_TEST_FAILED', 'confined file helper returned an unsupported protocol version', {
       operation: expectedOp,
@@ -311,6 +312,25 @@ export class NativeAccountFileRunner implements AccountFileRunner {
   }
 
   async run(context: Readonly<AccountFileContext>, request: Readonly<AccountFileRequest>): Promise<unknown> {
+    if (request.op === 'write-checked') {
+      const fields = ['op', 'path', 'content', 'remove', 'expectedExists', 'expectedContent', 'expectedMtime', 'mode']
+      if (Object.keys(request).length !== fields.length || Object.keys(request).some(key => !fields.includes(key)) ||
+          typeof request.path !== 'string' || request.path.startsWith('/') || /[\\\u0000-\u001f\u007f]/.test(request.path) || request.path.split('/').some(part => !part || part === '.' || part === '..' || part === '.trash') ||
+          typeof request.content !== 'string' || !request.content.isWellFormed() || typeof request.expectedContent !== 'string' || !request.expectedContent.isWellFormed() ||
+          Buffer.byteLength(request.content) > context.maxEditBytes || Buffer.byteLength(request.expectedContent) > context.maxEditBytes ||
+          typeof request.remove !== 'boolean' || typeof request.expectedExists !== 'boolean' || typeof request.expectedMtime !== 'string' || request.expectedMtime.length >= 32 ||
+          request.remove && request.content !== '' || !request.expectedExists && (request.expectedContent !== '' || request.expectedMtime !== '') ||
+          request.expectedExists && !Number.isFinite(Date.parse(request.expectedMtime)) ||
+          !Number.isSafeInteger(request.mode) || request.mode <= 0 || request.mode > context.maxFileMode || (request.mode & ~context.maxFileMode) !== 0) return fail('VALIDATION', 'checked file operation requires its exact bounded preimage', { stateChanged: false })
+    }
+    try { return await this.runConfined(context, request) }
+    catch (error) {
+      if (request.op !== 'write-checked' || isXpanelError(error) && error.detail?.stateChanged === false) throw error
+      return fail('SERVICE_UNAVAILABLE', 'checked file outcome requires inspection', { operation: request.op, stateChanged: true, verificationRequired: true, unknownOutcome: true })
+    }
+  }
+
+  private async runConfined(context: Readonly<AccountFileContext>, request: Readonly<AccountFileRequest>): Promise<unknown> {
     assertConfinedAccountIdentity(context.account)
     if (typeof context.homeRoot !== 'string' || !isAbsolute(context.homeRoot) || /[\u0000-\u001f\u007f]/.test(context.homeRoot)) {
       fail('VALIDATION', 'an absolute trusted homeRoot is required')
@@ -433,6 +453,7 @@ export class NativeAccountFileRunner implements AccountFileRunner {
       this.onObservation?.(observation)
       return fail(mappedCode, errPayload.message, {
         operation: request.op,
+        ...(request.op === 'write-checked' && ['VALIDATION', 'CONFLICT', 'FORBIDDEN', 'NOT_FOUND', 'LIMIT_EXCEEDED', 'PRECONDITION_FAILED'].includes(mappedCode) ? { stateChanged: false } : {}),
         errno: errPayload.errno,
         errnoName: errPayload.errnoName,
         workerUid: envelope.worker.uid,
@@ -449,6 +470,12 @@ export class NativeAccountFileRunner implements AccountFileRunner {
     }
 
     assertWorkerTelemetry(envelope)
+
+    if (request.op === 'write-checked') {
+      const entry = envelope.result
+      const value = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : null
+      if (request.remove ? entry !== null : !value || Object.keys(value).some(key => !['name', 'path', 'kind', 'sizeBytes', 'mode', 'mtime'].includes(key)) || value.path !== request.path || value.name !== request.path.split('/').at(-1) || value.kind !== 'file' || value.mode !== request.mode || value.sizeBytes !== Buffer.byteLength(request.content) || typeof value.mtime !== 'string' || !Number.isFinite(Date.parse(value.mtime))) return fail('CONFIG_TEST_FAILED', 'checked file helper acknowledgement is invalid', { operation: request.op })
+    }
 
     const observation: HelperExecutionObservation = {
       ...envelope.worker,

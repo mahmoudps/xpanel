@@ -1,3 +1,4 @@
+import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 type ConfirmRestart = (options: Record<string, unknown>) => Promise<string | boolean | null>
 type HostRow = { id: string; label: string; unit: string | null; state: string }
@@ -11,8 +12,7 @@ function bindApprovedHostServices(confirmRestart?: ConfirmRestart): void {
   const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   if (!rows || !status || typeof request !== 'function') return
   root.dataset.serviceBinding = 'true'
-  const ar = document.documentElement.lang === 'ar'
-  const copy = (en: string, arabic: string) => ar ? arabic : en
+  const copy = (message: string, values?: MessageValues) => xpT(message, values)
   const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
   const parseRows = (value: unknown): HostRow[] => {
     if (!record(value) || !Array.isArray(value.services)) throw new Error('unread')
@@ -40,23 +40,23 @@ function bindApprovedHostServices(confirmRestart?: ConfirmRestart): void {
     rows.replaceChildren()
     services.forEach(service => {
       const row = document.createElement('tr')
-      for (const value of [service.label, service.unit || copy('Not installed', 'غير مثبتة'), service.state]) {
+      for (const value of [service.label, service.unit || copy('Not installed'), service.state]) {
         const cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell)
       }
       const action = document.createElement('td')
       if (service.unit) {
         const button = document.createElement('button')
         button.type = 'button'; button.className = 'xp-btn'; button.dataset.serviceId = service.id
-        button.textContent = copy('Restart', 'إعادة تشغيل')
+        button.textContent = copy('Restart')
         button.addEventListener('click', async () => {
           if (busy || review.has(service.id) || button.disabled || root.closest(unavailable)) return
-          if (typeof confirmRestart !== 'function') { note(copy('Restart confirmation is unavailable. No restart was sent.', 'تأكيد إعادة التشغيل غير متاح. لم يُرسل طلب إعادة تشغيل.'), 'failed'); return }
+          if (typeof confirmRestart !== 'function') { note(copy('Restart confirmation is unavailable. No restart was sent.'), 'failed'); return }
           busy = true; lockButtons()
           let mutationStarted = false, verificationPending = false
           try {
-            const confirmed = await confirmRestart({ title: copy('Restart service', 'إعادة تشغيل الخدمة'), body: copy('Restart this service? Active connections may be interrupted: ', 'هل تريد إعادة تشغيل الخدمة؟ قد تتوقف الاتصالات النشطة: ') + service.label, confirm: copy('Restart', 'إعادة تشغيل'), danger: true })
-            if (!confirmed) { note(copy('Restart cancelled. No restart request was sent.', 'أُلغيت إعادة التشغيل. لم يُرسل طلب إعادة تشغيل.'), 'cancelled'); return }
-            note(copy('Restarting the selected service…', 'جار إعادة تشغيل الخدمة المحددة…'), 'pending')
+            const confirmed = await confirmRestart({ title: copy('Restart service'), body: copy('Restart this service? Active connections may be interrupted: {service}', { service: service.label }), confirm: copy('Restart'), danger: true })
+            if (!confirmed) { note(copy('Restart cancelled. No restart request was sent.'), 'cancelled'); return }
+            note(copy('Restarting the selected service…'), 'pending')
             mutationStarted = true
             const result = await request('POST', '/api/server/services/' + service.id + '/restart', {})
             verificationPending = true
@@ -65,11 +65,11 @@ function bindApprovedHostServices(confirmRestart?: ConfirmRestart): void {
             const observed = services.find(item => item.id === service.id)
             if (!observed?.unit || observed.state !== 'active') throw new Error('unverified')
             paint(services)
-            note(copy('The restart completed and the service was read back as active.', 'اكتملت إعادة التشغيل وقُرئت الخدمة في حالة نشطة.'), 'active')
+            note(copy('The restart completed and the service was read back as active.'), 'active')
           } catch (error) {
             const uncertain = mutationStarted && (verificationPending || !definiteRefusal(error))
             if (uncertain) review.add(service.id)
-            note(uncertain ? copy('The restart outcome is unverified. Inspect the service before retrying.', 'نتيجة إعادة التشغيل غير متحققة. افحص الخدمة قبل المحاولة مجددًا.') : copy('The restart was refused or could not be prepared. No automatic retry was sent.', 'رُفضت إعادة التشغيل أو تعذر تحضيرها. لم تُرسل إعادة تلقائية.'), uncertain ? 'uncertain' : 'failed')
+            note(uncertain ? copy('The restart outcome is unverified. Inspect the service before retrying.') : copy('The restart was refused or could not be prepared. No automatic retry was sent.'), uncertain ? 'uncertain' : 'failed')
           } finally { busy = false; lockButtons() }
         })
         action.appendChild(button)
@@ -78,7 +78,11 @@ function bindApprovedHostServices(confirmRestart?: ConfirmRestart): void {
     })
     lockButtons()
   }
-  request('GET', '/api/server/services').then(value => paint(parseRows(value))).catch(() => note(copy('Service status could not be read.', 'تعذرت قراءة حالة الخدمات.'), 'failed'))
+  request('GET', '/api/server/services').then(value => {
+    const services = parseRows(value)
+    paint(services)
+    if (!services.length) note(copy('No services were reported by the host.'), 'empty')
+  }).catch(() => { rows.replaceChildren(); note(copy('Service status could not be read.'), 'failed') })
 }
 
 export const APPROVED_HOST_SERVICES_CLIENT = bindApprovedHostServices.toString()

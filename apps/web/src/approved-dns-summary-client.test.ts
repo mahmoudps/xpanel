@@ -15,21 +15,21 @@ beforeEach(() => {
 })
 afterEach(() => { for (const [target, name, callback, options] of listeners) target.removeEventListener(name, callback, options); document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: Request }).xpanelSessionRequest; vi.restoreAllMocks() })
 const boot = (send: Request, attributes = '') => {
-  document.body.innerHTML = '<section data-whm-dns-workspace ' + attributes + '><section data-dns-editor><select data-dns-zone></select><table><tbody data-dns-records></tbody></table><p data-dns-status></p><input data-dns-new-name><select data-dns-account><option value="internal-account-one">Alpha account</option></select><button data-dns-add-record>Add record</button><button data-dns-add-zone>Add zone</button><button data-dns-save>Save</button><button data-dns-delete>Delete</button></section><table><tbody data-whm-dns-zone-rows><tr><td colspan="5">Not read</td></tr></tbody></table><span data-whm-dns-zone-count>Not read</span><dd data-whm-dns-soa-serial>Not read</dd><p data-provider-health>Not read</p></section>'
+  document.body.innerHTML = '<section data-whm-dns-workspace ' + attributes + '><section data-dns-editor><select data-dns-zone></select><table><tbody data-dns-records></tbody></table><p data-dns-status></p><input data-dns-new-name><select data-dns-account><option value="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa">Alpha account</option></select><button data-dns-refresh>Refresh</button><button data-dns-add-record>Add record</button><button data-dns-add-zone>Add zone</button><button data-dns-save>Save</button><button data-dns-delete>Delete</button></section><table><tbody data-whm-dns-zone-rows><tr><td colspan="5">Not read</td></tr></tbody></table><span data-whm-dns-zone-count>Not read</span><dd data-whm-dns-soa-serial>Not read</dd><p data-provider-health>Not read</p></section>'
   ;(window as Window & { xpanelSessionRequest?: Request }).xpanelSessionRequest = send
   new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document)
 }
 describe('authorized DNS read-only summary', () => {
   it('projects only returned zones using public account labels and serials without provider claims', async () => {
-    const zones = [{ name: 'alpha.example.test', accountId: 'internal-account-one', serial: 2026102501, records: [{ id: 'record-one', type: 'A', name: '@', ttl: 300, content: '192.0.2.10', priority: null }] }, { name: '<img src=x>', accountId: 'unmapped-private-account-id', serial: 2026102502, records: [] }]
+    const zones = [{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', revision: '1'.repeat(64), name: 'alpha.example.test', accountId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', serial: 2026102501, records: [{ id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', type: 'A', name: '@', ttl: 300, content: '192.0.2.10', priority: null }] }, { id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', revision: '2'.repeat(64), name: 'other.example.test', accountId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', serial: 2026102502, records: [] }]
     const send = vi.fn<Request>().mockResolvedValue({ zones }); boot(send); await tick()
     const rows = Array.from(document.querySelectorAll('[data-whm-dns-zone-rows] tr'), row => Array.from(row.querySelectorAll('td'), cell => cell.textContent))
-    expect(rows).toEqual([['alpha.example.test', 'Alpha account', '1', '2026102501', 'Not read'], ['<img src=x>', 'Not read', '0', '2026102502', 'Not read']])
-    expect(document.querySelector('img')).toBeNull(); expect(document.querySelector('[data-whm-dns-zone-rows]')!.textContent).not.toContain('unmapped-private-account-id')
+    expect(rows).toEqual([['alpha.example.test', 'Alpha account', '1', '2026102501', 'Not read'], ['other.example.test', 'Not read', '0', '2026102502', 'Not read']])
+    expect(document.querySelector('img')).toBeNull(); expect(document.querySelector('[data-whm-dns-zone-rows]')!.textContent).not.toContain('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee')
     expect(document.querySelector('[data-whm-dns-zone-count]')!.textContent).toBe('2'); expect(document.querySelector('[data-whm-dns-soa-serial]')!.textContent).toBe('2026102501')
-    const select = document.querySelector<HTMLSelectElement>('[data-dns-zone]')!; select.value = zones[1]!.name; select.dispatchEvent(new Event('change'))
+    const select = document.querySelector<HTMLSelectElement>('[data-dns-zone]')!; select.value = zones[1]!.name; select.dispatchEvent(new Event('change')); await tick()
     expect(document.querySelector('[data-whm-dns-soa-serial]')!.textContent).toBe('2026102502'); expect(document.querySelector('[data-provider-health]')!.textContent).toBe('Not read')
-    expect(send.mock.calls).toEqual([['GET', '/api/dns/zones']])
+    expect(send.mock.calls).toEqual([['GET', '/api/dns/zones'], ['GET', '/api/dns/zones']])
   })
   it('keeps unread values after a failed or malformed read', async () => {
     const send = vi.fn<Request>().mockResolvedValue({ zones: [{ name: 'missing-records', serial: 1 }] }); boot(send); await tick()

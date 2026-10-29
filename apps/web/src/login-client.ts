@@ -1,30 +1,23 @@
+import './i18n.ts'
+import { DISPLAY_DATETIME_BINDING } from './tokens.ts'
+
 /** Shared JSON session transport and the interactive sign-in flow. Secrets stay in this page only. */
 export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
 (function () {
   'use strict';
-  var ar = document.documentElement.lang === 'ar';
-  var copy = ar ? {
-    failed: 'تعذر إكمال الطلب. حاول مجددًا.', invalid: 'اسم المستخدم أو كلمة المرور غير صحيحة.',
-    code: 'رمز التحقق غير صحيح أو لم يعد صالحًا.', recovery: 'رمز الاسترداد غير صالح.',
-    pending: 'جارٍ التحقق…', mfa: 'أدخل رمز التحقق أو رمز استرداد واحدًا.',
-    both: 'أدخل رمز تحقق أو رمز استرداد واحدًا فقط.', locked: 'تسجيل الدخول مقفل مؤقتًا. موعد إعادة المحاولة: ',
-    enrollment: 'التحقق الثنائي اختياري. أكّد كلمة المرور للبدء.', confirm: 'أدخل الرمز الذي يولده تطبيق المصادقة.',
-    codes: 'تم تفعيل التحقق الثنائي. احفظ رموز الاسترداد قبل المتابعة.',
-    mismatch: 'كلمتا المرور الجديدتان غير متطابقتين.', changed: 'تم تغيير كلمة المرور. سجل الدخول مجددًا.',
-    session: 'تعذر التحقق من الجلسة. سجل الدخول مجددًا.', unexpected: 'استجابة غير متوقعة من الخادم.',
-    show: 'إظهار كلمة المرور', hide: 'إخفاء كلمة المرور', required: 'يلزم تغيير كلمة المرور.',
-    timeout: 'انتهت مهلة الطلب. حاول مجددًا.', recoverySwitch: 'استخدم رمز استرداد', authenticatorSwitch: 'استخدم رمز تطبيق المصادقة'
-  } : {
-    failed: 'The request could not be completed. Try again.', invalid: 'Invalid username or password.',
-    code: 'The verification code is invalid or no longer usable.', recovery: 'The recovery code is invalid.',
-    pending: 'Verifying…', mfa: 'Enter an authenticator code or one recovery code.',
-    both: 'Enter either an authenticator code or one recovery code.', locked: 'Sign-in is temporarily locked. Retry after: ',
-    enrollment: 'Two-factor authentication is optional. Confirm your password to begin.', confirm: 'Enter the code from your authenticator app.',
-    codes: 'Two-factor authentication is enabled. Save your recovery codes before continuing.',
-    mismatch: 'The new passwords do not match.', changed: 'Password changed. Sign in again.',
-    session: 'The session could not be verified. Sign in again.', unexpected: 'Unexpected server response.',
-    show: 'Show password', hide: 'Hide password', required: 'A password change is required.',
-    timeout: 'The request timed out. Try again.', recoverySwitch: 'Use a recovery code', authenticatorSwitch: 'Use an authenticator code'
+  var formatDisplayDateTime = ${DISPLAY_DATETIME_BINDING};
+  var lang = document.documentElement.lang || 'en';
+  var copy = {
+    failed: xpT('The request could not be completed. Try again.'), invalid: xpT('Invalid username or password.'),
+    code: xpT('The verification code is invalid or no longer usable.'), recovery: xpT('The recovery code is invalid.'),
+    pending: xpT('Verifying…'), mfa: xpT('Enter an authenticator code or one recovery code.'),
+    both: xpT('Enter either an authenticator code or one recovery code.'), locked: xpT('Sign-in is temporarily locked. Retry after: {time}'),
+    enrollment: xpT('Two-factor authentication is optional. Confirm your password to begin.'), confirm: xpT('Enter the code from your authenticator app.'),
+    codes: xpT('Two-factor authentication is enabled. Save your recovery codes before continuing.'),
+    mismatch: xpT('The new passwords do not match.'), changed: xpT('Password changed. Sign in again.'),
+    session: xpT('The session could not be verified. Sign in again.'), unexpected: xpT('Unexpected server response.'),
+    show: xpT('Show password'), hide: xpT('Hide password'), required: xpT('A password change is required.'),
+    timeout: xpT('The request timed out. Try again.'), recoverySwitch: xpT(msgctxt('login', 'Use a recovery code')), authenticatorSwitch: xpT('Use an authenticator code')
   };
   var csrfToken = null;
   var principal = null;
@@ -90,7 +83,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     if (csrf) headers['x-csrf-token'] = csrf;
     var controller = new AbortController();
     init.signal = controller.signal;
-    var timer = setTimeout(function () { controller.abort(); }, /\/certificates$|\/api\/backups\/accounts\/|\/restart$/.test(path) ? 180000 : 20000);
+    var timer = setTimeout(function () { controller.abort(); }, /\/certificates$|\/api\/backups\/accounts\/|\/api\/backups\/files\/|\/restart$|\/api\/server\/updates\/plan$|\/api\/server\/repair\/|\/api\/server\/software-center\/(?:preview|apply)$|\/api\/server\/security-tools\/intrusion$|\/api\/webmail\/disk-usage|\/api\/server\/mail-maintenance\?mailbox=|\/api\/server\/support\/bundle|\/api\/server\/dns-tools\//.test(path) ? 180000 : 20000);
     try {
       var response = await fetch(endpoint.href, init);
       var data = await response.json().catch(function () { return null; });
@@ -124,13 +117,28 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     if (error.message === 'invalid username or password') return copy.invalid;
     if (/invalid (two-factor|TOTP)/i.test(error.message)) return copy.code;
     if (error.message === 'invalid recovery code') return copy.recovery;
-    return ar && error.status ? copy.failed + ' (' + error.status + ')' : error.message || copy.failed;
+    // Server error text is English source text, so other locales show the translated generic failure.
+    return lang !== 'en' && error.status ? copy.failed + ' (' + error.status + ')' : error.message || copy.failed;
   }
-  function lock(deadline) {
+  function lock(deadline, originalTimestamp) {
     lockedUntil = deadline;
     step('locked');
     if (errorBox) errorBox.setAttribute('data-lockout-state', 'locked');
-    message(copy.locked + new Date(deadline).toISOString() + ' UTC', true);
+    var retryIso = originalTimestamp || new Date(deadline).toISOString();
+    // One message; the retry time node goes where {time} stands.
+    var lockedText = copy.locked.split('{time}');
+    message(lockedText[0], true);
+    if (errorBox) {
+      var retryValue = document.createElement('bdi');
+      retryValue.setAttribute('dir', 'ltr');
+      retryValue.className = 'xp-mono';
+      var retryTime = document.createElement('time');
+      retryTime.setAttribute('datetime', retryIso);
+      retryTime.textContent = formatDisplayDateTime(retryIso);
+      retryValue.appendChild(retryTime);
+      errorBox.appendChild(retryValue);
+      if (lockedText[1]) errorBox.appendChild(document.createTextNode(lockedText[1]));
+    }
     if (login) busy(login, false);
     clearTimeout(lockTimer);
     lockTimer = setTimeout(function () {
@@ -171,7 +179,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
   function authError(error) {
     var details = error.details || {};
     if (details.lockedOut && typeof details.lockedUntil === 'string' && Date.parse(details.lockedUntil) > Date.now()) {
-      lock(Date.parse(details.lockedUntil)); return;
+      lock(Date.parse(details.lockedUntil), details.lockedUntil); return;
     }
     if (details.mfaRequired === true && !mfaDisabled) {
       step('mfa-required'); show('[data-auth-mfa-fields]', true);
@@ -182,21 +190,22 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
   }
   function redirectToWorkspace() {
     clearCredentials(); clearEnrollment();
-    if (!principal || ['root', 'reseller', 'user'].indexOf(principal.kind) === -1) { message(copy.unexpected, true); return; }
+    if (!principal || ['root', 'reseller', 'user', 'team'].indexOf(principal.kind) === -1) { message(copy.unexpected, true); return; }
     var audience = shell && shell.getAttribute('data-login-audience');
-    var destinations = { xpanel: { path: '/panel', roles: ['user'] }, xwhm: { path: '/whm', roles: ['root', 'reseller'] }, xmail: { path: '/mail/inbox', roles: ['user'] } };
+    var destinations = { xpanel: { path: '/panel', roles: ['user', 'team'] }, xwhm: { path: '/whm', roles: ['root', 'reseller'] }, xmail: { path: '/mail/inbox', roles: ['user'] } };
     var destination = audience && Object.prototype.hasOwnProperty.call(destinations, audience) ? destinations[audience] : null;
     if (audience && (!destination || destination.roles.indexOf(principal.kind) === -1)) { message(copy.unexpected, true); return; }
-    var path = destination ? destination.path : (principal.kind === 'user' ? '/panel' : '/whm');
-    window.location.assign(path + '?lang=' + (ar ? 'ar' : 'en'));
+    var path = destination ? destination.path : (principal.kind === 'user' || principal.kind === 'team' ? '/panel' : '/whm');
+    window.location.assign(path + '?lang=' + lang);
   }
 
   if (login) {
     busy(login, false);
-    var deadline = Date.parse(shell.getAttribute('data-locked-until') || '');
+    var originalTimestamp = shell.getAttribute('data-locked-until') || '';
+    var deadline = Date.parse(originalTimestamp);
     var retry = Number(shell.getAttribute('data-retry-after'));
     if (shell.getAttribute('data-auth-state') === 'locked') {
-      if (Number.isFinite(deadline) && deadline > Date.now()) lock(deadline);
+      if (Number.isFinite(deadline) && deadline > Date.now()) lock(deadline, originalTimestamp);
       else if (retry > 0) lock(Date.now() + retry * 1000);
       else { lockedUntil = Infinity; busy(login, false); }
     }
@@ -282,7 +291,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
       var label = button.querySelector('[data-password-label]');
       if (showIcon) showIcon.toggleAttribute('hidden', visible);
       if (hideIcon) hideIcon.toggleAttribute('hidden', !visible);
-      if (label) label.textContent = visible ? (ar ? 'إخفاء' : 'Hide') : (ar ? 'إظهار' : 'Show');
+      if (label) label.textContent = visible ? (xpT('Hide')) : (xpT(msgctxt('login-client', 'Show')));
       if (typeof start === 'number' && typeof end === 'number') input.setSelectionRange(start, end, direction || 'none');
       // Revealing a longer LTR value must keep its caret-end view on the RTL field edge.
       if (visible && document.documentElement.dir === 'rtl' && getComputedStyle(input).textAlign === 'right' && start === end && end === input.value.length) input.scrollLeft = input.scrollWidth;
@@ -309,9 +318,9 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
           } catch (ignored) { /* A missing token still attempts sign-out. */ }
         }
         await requestJson('POST', '/api/auth/logout', {}, csrfToken || undefined);
-        csrfToken = null; principal = null; clearCredentials(); clearEnrollment(); window.location.assign('/login?lang=' + (ar ? 'ar' : 'en'));
+        csrfToken = null; principal = null; clearCredentials(); clearEnrollment(); window.location.assign('/login?lang=' + lang);
       } catch (error) {
-        if (error.status === 401) window.location.assign('/login?lang=' + (ar ? 'ar' : 'en'));
+        if (error.status === 401) window.location.assign('/login?lang=' + lang);
         else { message(localizedError(error), true); button.disabled = false; }
       }
     }

@@ -9,7 +9,8 @@ import { defaultPlan } from '@xpanel/core'
 import { profileFor } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { CSRF_HEADER_NAME, hashPasswordArgon2id, parseCookies, SESSION_COOKIE_NAME } from './auth.ts'
-import { startPanelServer } from './main.ts'
+import { startPanelServer } from './test-panel-server.ts'
+import { ExtendedFeaturesStore, type InstalledAppRecord } from './extended-routes.ts'
 import * as mailDocuments from './mail/document.ts'
 import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
 
@@ -199,7 +200,13 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
         assert.match(homeHtml, /data-board-port="xpanel-home"/)
         assert.ok(homeHtml.includes(account.primaryDomain))
         assert.ok(homeHtml.includes(plan.name))
-        for (const path of ['/panel/domains', '/mail']) {
+        // xMail opens only for a mailbox identity; the hosting owner gets its denial without account data.
+        const mail = await owner.request(`/mail?lang=${locale}&theme=light`)
+        assert.equal(mail.status, 403)
+        const mailHtml = await mail.text()
+        assert.match(mailHtml, /data-status-page="403"/)
+        for (const value of [account.id, account.primaryDomain, account.home, account.ipv4, account.contactEmail, plan.name, passwordHash]) assert.ok(!mailHtml.includes(value))
+        for (const path of ['/panel/domains']) {
           const document = await owner.request(`${path}?lang=${locale}&theme=light`)
           assert.equal(document.status, 200)
           assert.match(document.headers.get('content-type') ?? '', /text\/html/)
@@ -207,7 +214,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
           assert.ok(html.includes(`lang="${locale}"`))
           assert.ok(html.includes(`dir="${locale === 'ar' ? 'rtl' : 'ltr'}"`))
           assert.match(html, /data-theme="light"/)
-          assert.ok(html.includes(`data-surface="${path === '/mail' ? 'xmail' : 'xpanel'}"`))
+          assert.ok(html.includes('data-surface="xpanel"'))
           assert.match(html, /data-tool-availability="unverified"/)
           const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
           const workspaceStart = markup.search(/<section\b[^>]*\bdata-tool-availability="unverified"[^>]*>/i)
@@ -221,22 +228,10 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
           assert.doesNotMatch(workspace, /<a\b[^>]*\s(?:data-action|onclick|onsubmit)\s*=/i)
           assert.match(html, /<html\b[^>]*data-realtime-enabled="false"/)
           assert.doesNotMatch(html, /data-status-page="404"|data-board-port="xpanel-home"/)
-          if (path === '/mail') {
-            // An unavailable mailbox retains its approved layout, never provider data or actions.
-            assert.match(markup, /data-mail-read-only="true"/)
-            assert.match(markup, /data-mail-unavailable="inbox"/)
-            assert.match(markup, /data-mail-list-state="unread"/)
-            assert.match(markup, /data-quota-ratio="unknown"/)
-            assert.doesNotMatch(markup, /\sdata-(?:mailbox|mail-uid|mail-open|mail-action|mail-send|compose-form)\s*=/)
-            assert.doesNotMatch(markup, /<(?:button|input|textarea|div)\b[^>]*\scontenteditable="true"/i)
-          } else {
-            assert.doesNotMatch(markup, /<(?:div|section|main)\b[^>]*data-mail-layout=/)
-          }
+          assert.doesNotMatch(markup, /<(?:div|section|main)\b[^>]*data-mail-layout=/)
           for (const value of [account.id, plan.id, featureList.id, user.id, account.home, account.ipv4, account.contactEmail, password, passwordHash]) assert.ok(!html.includes(value), 'Unqualified documents must not expose full account or authentication data')
-          if (path === '/panel/domains') {
-            assert.ok(html.includes(account.primaryDomain))
-            assert.ok(html.includes(plan.name))
-          }
+          assert.ok(html.includes(account.primaryDomain))
+          assert.ok(html.includes(plan.name))
           assert.equal(snapshotReads, 0, 'Unqualified documents do not hydrate a full hosting snapshot')
           assert.equal(mailRead.mock.calls.length, 0, 'Unqualified mail documents do not enter the provider-backed mail loader')
         }
@@ -549,16 +544,6 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.ok(cleanupBody.removedZones.includes('orphan-legacy.test'))
     assert.ok(cleanupBody.keptZones.includes('nebula.test'))
 
-    const dnsClusterRes = await root.request('/api/dns/cluster', {
-      method: 'PUT',
-      body: {
-        enabled: true,
-        provider: 'cloudflare',
-        cloudflareZoneMap: { 'nebula.test': 'cf-zone-998877' },
-      },
-    })
-    assert.equal(dnsClusterRes.status, 200)
-
     // ---- Step E: Backups, Single-File Granular Restore, Transfers & cPanel Import ----
     const destRes = await root.request('/api/backups/destinations', {
       method: 'POST',
@@ -573,16 +558,31 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.equal(destRes.status, 201)
     const destId = ((await destRes.json()) as { destination: { id: string } }).destination.id
 
+    const scheduleBeforeRes = await root.request('/api/backups/schedule')
+    assert.equal(scheduleBeforeRes.status, 200)
+    const scheduleBefore = await scheduleBeforeRes.json()
+    const requestedSchedule = {
+      enabled: true,
+      frequency: 'daily',
+      retentionCount: 14,
+      destinationIds: [destId],
+    }
+    const enabledScheduleRes = await root.request('/api/backups/schedule', {
+      method: 'PUT', body: requestedSchedule,
+    })
+    assert.equal(enabledScheduleRes.status, 422)
+    const scheduleAfterRefusalRes = await root.request('/api/backups/schedule')
+    assert.equal(scheduleAfterRefusalRes.status, 200)
+    assert.deepEqual(await scheduleAfterRefusalRes.json(), scheduleBefore)
     const schedRes = await root.request('/api/backups/schedule', {
-      method: 'PUT',
-      body: {
-        enabled: true,
-        frequency: 'daily',
-        retentionCount: 14,
-        destinationIds: [destId],
-      },
+      method: 'PUT', body: { ...requestedSchedule, enabled: false },
     })
     assert.equal(schedRes.status, 200)
+    const savedSchedule = await schedRes.json() as { schedule: typeof requestedSchedule }
+    assert.deepEqual(savedSchedule.schedule.destinationIds, requestedSchedule.destinationIds)
+    assert.equal(savedSchedule.schedule.enabled, false)
+    assert.equal(savedSchedule.schedule.frequency, requestedSchedule.frequency)
+    assert.equal(savedSchedule.schedule.retentionCount, requestedSchedule.retentionCount)
 
     // This fixture has no confined file runner; snapshot metadata is not a filesystem backup proof.
     const writeOrig = await root.request('/api/accounts/nebula/files', {
@@ -650,7 +650,12 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
         planId,
       },
     })
-    assert.equal(cpImportRes.status, 201)
+    // Import is refused until archive custody and a qualified adapter exist; it never synthesizes an account.
+    assert.equal(cpImportRes.status, 412)
+    const cpImport = (await cpImportRes.json()) as { code: string; details: unknown }
+    assert.equal(cpImport.code, 'PRECONDITION_FAILED')
+    assert.deepEqual(cpImport.details, { stateChanged: false, nativeApplied: false })
+    assert.equal(await serverHandle.store.getAccountByUsername('legacyshop'), null)
 
     // ---- Step F: Extended File Isolation & Web Extras + Git Push-to-Deploy ----
     const dirPrivRes = await root.request(`/api/web-features/${account.id}/directory-privacy`, {
@@ -725,25 +730,11 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.equal(gitDeployBody.deployment.commitSha, 'a1b2c3d4e5f6')
     assert.equal(gitDeployBody.deployment.status, 'deployed')
 
-    // ---- Step G: Databases Beyond MariaDB & Private Per-Account Cache ----
-    const pgDbRes = await root.request('/api/databases/postgres', {
-      method: 'POST',
-      body: { accountId: account.id, name: 'analytics', extensions: ['pg_stat_statements'] },
-    })
-    assert.equal(pgDbRes.status, 201)
-    const pgDbBody = (await pgDbRes.json()) as { database: { id: string; name: string; compiledSql: string } }
-    assert.equal(pgDbBody.database.name, 'nebula_analytics')
-    assert.match(pgDbBody.database.compiledSql, /CREATE DATABASE "nebula_analytics"/)
-
-    const pgUserRes = await root.request('/api/databases/postgres/users', {
-      method: 'POST',
-      body: { accountId: account.id, username: 'reporter', password: 'ReporterPassword!2026', databaseIds: [pgDbBody.database.id] },
-    })
-    assert.equal(pgUserRes.status, 201)
-    const pgUserBody = (await pgUserRes.json()) as { user: { username: string } }
-    assert.equal(pgUserBody.user.username, 'nebula_reporter')
-    assert.ok(!('scramHash' in pgUserBody.user))
-    assert.ok(!('compiledSql' in pgUserBody.user))
+    // ---- Step G: Database remote hosts, maintenance & private per-account cache ----
+    // The metadata-only PostgreSQL and MongoDB routes are gone; PostgreSQL lives under /api/account/database-engines/postgresql.
+    for (const path of ['/api/databases/postgres', '/api/databases/postgres/users', '/api/databases/mongo']) {
+      assert.equal((await root.request(path, { method: 'POST', body: { accountId: account.id, name: 'analytics' } })).status, 404)
+    }
 
     const remoteHostRes = await root.request(`/api/databases/${account.id}/remote-hosts`, {
       method: 'PUT',
@@ -765,12 +756,6 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.equal(maintRes.status, 200)
     const maintBody = (await maintRes.json()) as { status: string }
     assert.equal(maintBody.status, 'healthy')
-
-    const mongoRes = await root.request('/api/databases/mongo', {
-      method: 'POST',
-      body: { accountId: account.id, name: 'events' },
-    })
-    assert.equal(mongoRes.status, 201)
 
     const cacheRes = await root.request(`/api/cache/${account.id}`, {
       method: 'PUT',
@@ -824,32 +809,44 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.equal(containerBody.container.slice, `xpanel-${account.uid}.slice`)
     assert.match(containerBody.container.systemdUnit, /Slice=xpanel-/)
 
-    const wpRes = await root.request(`/api/apps/${account.id}`, {
-      method: 'POST',
-      body: {
-        appType: 'wordpress',
-        domain: 'nebula.test',
-        title: 'Nebula Commerce',
-      },
-    })
-    assert.equal(wpRes.status, 201)
-    const wpAppId = ((await wpRes.json()) as { app: { id: string } }).app.id
-
-    const cloneRes = await root.request(`/api/apps/${account.id}/${wpAppId}/staging-clone`, {
-      method: 'POST',
-      body: { stagingDomain: 'staging.nebula.test' },
-    })
-    assert.equal(cloneRes.status, 201)
-    const stagingAppId = ((await cloneRes.json()) as { stagingApp: { id: string } }).stagingApp.id
-
-    const pushRes = await root.request(`/api/apps/${account.id}/${stagingAppId}/staging-push`, {
-      method: 'POST',
-      body: {},
-    })
-    assert.equal(pushRes.status, 200)
-    const pushBody = (await pushRes.json()) as { ok: boolean; productionApp: { id: string } }
-    assert.equal(pushBody.ok, true)
-    assert.equal(pushBody.productionApp.id, wpAppId)
+    const storedAccount = await serverHandle.store.getAccount(account.id)
+    assert.ok(storedAccount)
+    const appMetadata = new ExtendedFeaturesStore(serverHandle.store.rootDir)
+    const savedAt = '2026-10-01T09:10:11.123Z'
+    const storedProduction: InstalledAppRecord = {
+      id: '11111111-1111-4111-8111-111111111111', accountId: account.id,
+      appType: 'wordpress', domain: 'nebula.test', path: '/',
+      docRoot: `${storedAccount.home}/domains/nebula.test/public_html`,
+      title: 'Stored application metadata', adminUser: 'storedadmin', adminEmail: 'owner@nebula.test',
+      version: '6.7.2-stored', databaseName: 'nebula_stored', environment: 'production', parentAppId: null,
+      createdAt: savedAt, updatedAt: savedAt,
+    }
+    const storedStaging: InstalledAppRecord = {
+      ...storedProduction, id: '22222222-2222-4222-8222-222222222222',
+      domain: 'staging.nebula.test', path: '/staging', docRoot: `${storedAccount.home}/domains/staging.nebula.test/public_html`,
+      version: '6.8.0-stored', databaseName: 'nebula_stored_stg', environment: 'staging', parentAppId: storedProduction.id,
+    }
+    const storedApps = [storedProduction, storedStaging]
+    await appMetadata.write(`apps/${account.id}.json`, storedApps)
+    const appListBefore = await root.request(`/api/apps/${account.id}`)
+    assert.equal(appListBefore.status, 200)
+    assert.deepEqual(await appListBefore.json(), { apps: storedApps })
+    const appMutations = [
+      { path: `/api/apps/${account.id}`, method: 'POST', body: { appType: 'wordpress', domain: 'nebula.test', title: 'Requested application' } },
+      { path: `/api/apps/${account.id}/${storedProduction.id}/staging-clone`, method: 'POST', body: { stagingDomain: 'staging.nebula.test' } },
+      { path: `/api/apps/${account.id}/${storedStaging.id}/staging-push`, method: 'POST', body: {} },
+      { path: `/api/apps/${account.id}/${storedProduction.id}`, method: 'DELETE', body: {} },
+    ]
+    for (const mutation of appMutations) {
+      const response = await root.request(mutation.path, { method: mutation.method, body: mutation.body })
+      assert.equal(response.status, 412)
+      const refusal = await response.json() as { code: string; details: { reason: string; stateChanged: boolean; nativeApplied: boolean } }
+      assert.equal(refusal.code, 'PRECONDITION_FAILED')
+      assert.deepEqual(refusal.details, { reason: 'application_provider_unavailable', stateChanged: false, nativeApplied: false })
+    }
+    const appListAfter = await root.request(`/api/apps/${account.id}`)
+    assert.equal(appListAfter.status, 200)
+    assert.deepEqual(await appListAfter.json(), { apps: storedApps })
 
     const nodeRes = await root.request('/api/cluster/nodes', {
       method: 'POST',
@@ -915,9 +912,9 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.ok(actions.has('dns.email_auth.batch_provisioned'))
     assert.ok(!audits.some(a => a.action === 'backup.snapshot.restore_file' && a.outcome === 'ok'))
     assert.ok(actions.has('git.repo.deployed'))
-    assert.ok(actions.has('database.postgres.created'))
     assert.ok(actions.has('cache.updated'))
-    assert.ok(actions.has('app.staging.cloned'))
-    assert.ok(actions.has('app.staging.pushed'))
+    assert.ok(!actions.has('app.installed'))
+    assert.ok(!actions.has('app.staging.cloned'))
+    assert.ok(!actions.has('app.staging.pushed'))
   })
 })

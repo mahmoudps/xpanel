@@ -139,7 +139,14 @@ describe('account certificate issuance', () => {
 
   it('keeps issuance on the account entry points and the ssl-install policy', () => {
     expect(entryPointAllowsApiRoute('xpanel', '/api/accounts/alice/certificates', 'POST')).toBe(true)
-    expect(entryPointAllowsApiRoute('xpanel', '/api/accounts/alice/certificates', 'GET')).toBe(false)
+    expect(entryPointAllowsApiRoute('xpanel', '/api/accounts/alice/certificates', 'GET')).toBe(true)
+    expect(entryPointAllowsApiRoute('xpanel', '/api/accounts/alice/certificates', 'DELETE')).toBe(false)
+    expect(entryPointAllowsApiRoute('xpanel', '/api/accounts/alice/certificates/install', 'POST')).toBe(true)
+    expect(entryPointAllowsApiRoute('xpanel', '/api/accounts/alice/certificates/install', 'GET')).toBe(false)
+    expect(entryPointAllowsApiRoute('xpanel', '/api/accounts/alice/certificates/aaaaaaaa-aaaa-4aaa-8aaa-000000000003', 'DELETE')).toBe(true)
+    expect(entryPointAllowsApiRoute('xpanel', '/api/accounts/alice/certificates/aaaaaaaa-aaaa-4aaa-8aaa-000000000003', 'POST')).toBe(false)
+    expect(entryPointAllowsApiRoute('xmail', '/api/accounts/alice/certificates/install', 'POST')).toBe(false)
+    expect(policyForRequest('/api/accounts/alice/certificates/install', 'POST')).toMatchObject({ acl: 'manage-ssl', toolIds: ['ssl-install'] })
     expect(entryPointAllowsApiRoute('xwhm', '/api/accounts/alice/certificates', 'POST')).toBe(true)
     expect(entryPointAllowsApiRoute('xmail', '/api/accounts/alice/certificates', 'POST')).toBe(false)
     expect(policyForRequest('/api/accounts/alice/certificates', 'POST')).toMatchObject({ acl: 'manage-ssl', toolIds: ['ssl-install'] })

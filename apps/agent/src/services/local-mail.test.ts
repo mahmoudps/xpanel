@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { OsProfile } from '@xpanel/core'
 import { services } from '@xpanel/render'
 import { FakeHostExecutor } from '../executor.ts'
-import { applyPostfixLocalDelivery, ensureInstalledMail } from './local-mail.ts'
+import { applyPostfixLocalDelivery, ensureInstalledMail, localMailNeedsUpdate } from './local-mail.ts'
 
 const os = {
   family: 'debian',
@@ -28,6 +28,39 @@ const backups = (executor: FakeHostExecutor, path: string): string[] =>
   [...executor.files.keys()].filter((key) => key.startsWith(`${path}.bak.`))
 
 describe('live mail writer', () => {
+  it('preserves active-generation TLS and outbound transports across startup and repairs merged-file drift', async () => {
+    const executor = new FakeHostExecutor()
+    const options = { tls: { certFile: '/etc/xpanel/ssl/mail/fullchain.pem', keyFile: '/etc/xpanel/ssl/mail/privkey.pem' }, outbound: { senderMap: '/etc/postfix/xpanel_sender_transports', master: 'xpanel-smtp-dedicated unix - - y - - smtp\n  -o smtp_bind_address=192.0.2.20\n  -o smtp_helo_name=mail.example.test\n' } }
+    const fragments = new Map([
+      ['/etc/postfix/xpanel/main.cf.fragment', services.localDeliveryMainBlock(os, options) + '\n'],
+      ['/etc/postfix/xpanel/master.cf.fragment', services.localSubmissionMasterBlock(os, options) + '\n'],
+    ])
+    const owned = new Map<string, string>()
+    for (const [path, content] of fragments) {
+      seed(executor, path, content)
+      owned.set(path, createHash('sha256').update(content).digest('hex'))
+    }
+    await applyPostfixLocalDelivery(executor, os, undefined, options)
+    expect(await localMailNeedsUpdate(executor, os, options)).toBe(false)
+    const main = executor.files.get('/etc/postfix/main.cf')!.content
+    const master = executor.files.get('/etc/postfix/master.cf')!.content
+    await ensureInstalledMail(executor, os, 'mail.example.test', owned)
+    expect(executor.files.get('/etc/postfix/main.cf')!.content).toBe(main)
+    expect(executor.files.get('/etc/postfix/master.cf')!.content).toBe(master)
+    seed(executor, '/etc/postfix/master.cf', '# distribution settings\n')
+    expect(await localMailNeedsUpdate(executor, os, options)).toBe(true)
+    await applyPostfixLocalDelivery(executor, os, owned)
+    expect(executor.files.get('/etc/postfix/master.cf')!.content).toContain('465 inet')
+    expect(executor.files.get('/etc/postfix/master.cf')!.content).toContain('smtp_bind_address=192.0.2.20')
+    seed(executor, '/etc/postfix/xpanel/master.cf.fragment', 'drifted\n')
+    await applyPostfixLocalDelivery(executor, os, owned)
+    expect(executor.files.get('/etc/postfix/main.cf')!.content).toBe(main)
+    expect(executor.files.get('/etc/postfix/master.cf')!.content).toContain('465 inet')
+    executor.files.delete('/etc/postfix/xpanel/main.cf.fragment')
+    await applyPostfixLocalDelivery(executor, os, owned)
+    expect(executor.files.get('/etc/postfix/main.cf')!.content).toBe(main)
+  })
+
   it('writes the OpenDKIM milter and special-use folders through applyPostfixLocalDelivery', async () => {
     const executor = new FakeHostExecutor()
     const main = '/etc/postfix/main.cf'

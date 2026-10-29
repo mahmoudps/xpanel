@@ -6,7 +6,7 @@ import { cidrContains, formatCidr, parseCidr, parseIp } from './rules/firewall.t
 import { validateDomainName } from './rules/naming.ts'
 import { PHP_HANDLERS, sanitizePhpIni, validateFpm } from './rules/php.ts'
 import { validateApacheWorkers, validateNginxWorkers } from './rules/workers.ts'
-import type { ApacheMpm, Engine, Limit, PhpSettings, ResellerAcl, ServerSettings } from './types.ts'
+import type { ApacheMpm, DefaultSitePolicy, Engine, Limit, PhpSettings, ResellerAcl, ServerSettings } from './types.ts'
 
 const bad = (what: string, value: unknown, why: string): never =>
   fail('VALIDATION', `invalid ${what}: ${why}`, { what, value: typeof value === 'string' ? value.slice(0, 256) : value })
@@ -251,6 +251,25 @@ const NAMESERVERS_MAX = 8
 const port = (v: unknown, what: string): number => assertInt(v, 1, 65535, what)
 
 /** Workers follow core's nginx/Apache rules; ports must be distinct and off 80/443. */
+export const validateDefaultSitePolicy = (raw: unknown): DefaultSitePolicy => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail('VALIDATION', 'default site policy must be an object')
+  const input = raw as Record<string, unknown>
+  if (Object.keys(input).some(key => !['response', 'redirectTo', 'refuseHttps'].includes(key))) return fail('VALIDATION', 'unsupported default site policy fields')
+  if (input.response !== 'reject' && input.response !== 'redirect') return fail('VALIDATION', 'invalid default site response')
+  if (typeof input.refuseHttps !== 'boolean') return fail('VALIDATION', 'default site HTTPS refusal must be a boolean')
+  if (input.response === 'reject') {
+    if (input.redirectTo !== undefined && input.redirectTo !== null) return fail('VALIDATION', 'a rejecting default site has no redirect target')
+    return { response: 'reject', redirectTo: null, refuseHttps: input.refuseHttps }
+  }
+  const target = input.redirectTo
+  if (typeof target !== 'string' || !target || target.length > 2048 || !target.isWellFormed()
+    || /[\u0000-\u0020\u007f-\u009f\\$]/.test(target)) return fail('VALIDATION', 'default site redirect must be a fixed HTTP or HTTPS URL')
+  let url: URL
+  try { url = new URL(target) } catch { return fail('VALIDATION', 'default site redirect must be an absolute URL') }
+  if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password || url.href.length > 2048) return fail('VALIDATION', 'default site redirect must be a bounded fixed HTTP or HTTPS URL without credentials')
+  return { response: 'redirect', redirectTo: url.href, refuseHttps: input.refuseHttps }
+}
+
 export const validateServerSettings = (s: ServerSettings): ServerSettings => {
   if (typeof s !== 'object' || s === null) return fail('VALIDATION', 'settings must be an object')
   if (!Array.isArray(s.nameservers) || s.nameservers.length > NAMESERVERS_MAX) fail('VALIDATION', `at most ${NAMESERVERS_MAX} nameservers`)
@@ -273,6 +292,7 @@ export const validateServerSettings = (s: ServerSettings): ServerSettings => {
     ...ports,
     nginx: validateNginxWorkers(s.nginx),
     apache: validateApacheWorkers(s.apache),
+    ...(s.defaultSite !== undefined ? { defaultSite: validateDefaultSitePolicy(s.defaultSite) } : {}),
   }
 }
 

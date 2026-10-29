@@ -30,6 +30,8 @@ export const RESERVED_USERNAMES: ReadonlySet<string> = new Set([
   'root', 'toor', 'admin', 'administrator', 'all', 'test', 'www', 'wwwdata', 'web', 'webmaster',
   'hostmaster', 'postmaster', 'abuse', 'noc', 'security', 'support', 'info', 'nobody', 'nogroup',
   'nfsnobody', 'anonymous', 'guest', 'default', 'public', 'system', 'virtfs', 'shared',
+  // fixed API path segments under /api/accounts/
+  'health',
   // debian/rhel base users
   'bin', 'daemon', 'sys', 'sync', 'games', 'man', 'lp', 'mail', 'news', 'uucp', 'proxy', 'backup',
   'list', 'irc', 'gnats', 'operator', 'halt', 'shutdown', 'adm', 'ftp', 'ftpuser', 'sshd', 'ssh',

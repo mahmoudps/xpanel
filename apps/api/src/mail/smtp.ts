@@ -1,6 +1,7 @@
+import '../../../web/src/i18n.ts'
 import net from 'node:net'
 import tls from 'node:tls'
-import { fail, type ErrorCode } from '@xpanel/core'
+import { fail, msgid, type ErrorCode } from '@xpanel/core'
 import { MimeCodecAndSanitizer } from './mime.ts'
 import type { MimeAttachmentInput } from './mime.ts'
 
@@ -74,35 +75,26 @@ export const tlsConnectOptions = (host: string, extra: tls.ConnectionOptions): t
   return servername === undefined ? extra : { ...extra, servername }
 }
 
-export interface SmtpHumanCopy {
-  en: string
-  ar: string
-}
-
-/** A stable sentence for the person sending mail. The raw SMTP or TLS text stays off the response. */
-export const smtpHumanCopy = (raw: string): SmtpHumanCopy => {
+/** A stable English source sentence for the person sending mail; the web UI translates it. The raw SMTP or TLS text stays off the response. */
+export const smtpHumanCopy = (raw: string): string => {
   const text = raw.toLowerCase()
   if (text.includes('servername') && text.includes('ip address')) {
-    return {
-      en: 'A secure mail connection cannot use an IP address as the server name.',
-      ar: 'لا يمكن لاتصال البريد الآمن أن يستخدم عنوان IP كاسم للخادم.',
-    }
+    return msgid('A secure mail connection cannot use an IP address as the server name.')
   }
   if (/timed out|econnrefused|econnreset|enotfound|ehostunreach|enetunreach|socket closed|econn/.test(text)) {
-    return { en: 'the mail server could not be reached.', ar: 'تعذر الوصول إلى خادم البريد.' }
+    return msgid('the mail server could not be reached.')
   }
   if (/\bauth\b/.test(text)) {
-    return { en: 'The mailbox could not sign in to send mail.', ar: 'تعذر تسجيل دخول صندوق البريد لإرسال البريد.' }
+    return msgid('The mailbox could not sign in to send mail.')
   }
   if (/mail from|rcpt|recipient|rejected|starttls|ehlo|greeting|\bdata\b/.test(text)) {
-    return { en: 'The mail server refused the message.', ar: 'رفض خادم البريد الرسالة.' }
+    return msgid('The mail server refused the message.')
   }
-  return { en: 'The message could not be sent.', ar: 'تعذر إرسال الرسالة.' }
+  return msgid('The message could not be sent.')
 }
 
 const smtpFail = (code: ErrorCode, raw: string, detail?: Record<string, unknown>): never => {
-  const copy = smtpHumanCopy(raw)
-  return fail(code, copy.en, { ...detail, messageAr: copy.ar })
+  return fail(code, smtpHumanCopy(raw), { ...detail })
 }
 
 const extractAddress = (raw: string): string => {
@@ -225,13 +217,17 @@ export class SmtpSubmissionClient {
       }
     }
 
-    const allRecipients = [
-      ...input.to,
-      ...(input.cc ?? []),
-      ...(input.bcc ?? []),
-    ]
-      .map((r) => extractAddress(r))
-      .filter(Boolean)
+    const canonicalRecipients = (values: readonly string[]): string[] => {
+      if (!Array.isArray(values)) return fail('VALIDATION', 'recipient addresses must be an array')
+      return values.map(value => {
+        if (typeof value !== 'string' || !value.isWellFormed() || /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069\ufeff]/.test(value)) return fail('VALIDATION', 'recipient address contains invalid characters')
+        const address = extractAddress(value)
+        if (!address || address.length > 254 || !/^[^\s@<>(),;:"\\[\]/]+@[^\s@<>(),;:"\\[\]/]+$/.test(address)) return fail('VALIDATION', 'recipient address is invalid')
+        return address
+      })
+    }
+    const toRecipients = canonicalRecipients(input.to), ccRecipients = canonicalRecipients(input.cc ?? []), bccRecipients = canonicalRecipients(input.bcc ?? [])
+    const allRecipients = [...toRecipients, ...ccRecipients, ...bccRecipients]
 
     if (allRecipients.length === 0) {
       fail('VALIDATION', 'at least one recipient is required')
@@ -246,14 +242,14 @@ export class SmtpSubmissionClient {
       from: senderAddress,
       fromName: input.fromName,
       replyTo: input.replyTo,
-      to: input.to,
-      cc: input.cc,
+      to: toRecipients,
+      cc: ccRecipients,
       subject: input.subject,
       textBody: input.textBody,
       htmlBody: input.htmlBody,
       attachments: input.attachments,
       messageId: input.messageId,
-    })
+    }, { allowEmptyTo: toRecipients.length === 0 })
 
     // Double-check the built MIME From header matches senderAddress
     const parsedCheck = this.mime.parseMimeMessage(built.rawMime)

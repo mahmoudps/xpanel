@@ -4,7 +4,7 @@ import { lstat, mkdir, open, readFile, readlink, readdir, rename, rm, statfs, sy
 import type { FileHandle } from 'node:fs/promises'
 import { basename, dirname, posix } from 'node:path'
 import type { HostAction, Principal } from '@xpanel/core'
-import { createDb, getPrincipal, getStrictOperationDatabaseOrigin, latestActive, loadMigrations } from '@xpanel/db'
+import { createDb, getDurableJob, getPrincipal, getStrictOperationDatabaseOrigin, latestActive, loadMigrations } from '@xpanel/db'
 import { recoverUpgrade, runUpgrade } from '@xpanel/lifecycle'
 import type { FsPort, HostPort, ReleaseInfo, UpgradePorts } from '@xpanel/lifecycle'
 import { detectOs, parseOsRelease } from '@xpanel/os'
@@ -13,7 +13,13 @@ import { createProductionHostTargetMatcher, LinuxHostExecutor } from '../executo
 import type { AgentExecutor } from '../executor.ts'
 import { observeHostLimits } from '../limit-gaps.ts'
 import { HostReconciler } from '../reconciler.ts'
-import { createProductionUpgradePorts } from './upgrade-runner.ts'
+import { createProductionUpgradePorts, verifySignedManifestForRelease } from './upgrade-runner.ts'
+import type { ReleaseVerificationKey } from './upgrade-runner.ts'
+import { signedReleaseManifestDigest } from './upgrade-runner.ts'
+import { parseUpgradeProcessBinding, readUpgradeIntentJob } from '../upgrade-coordinator-contract.ts'
+import type { UpgradeProcessBinding } from '../upgrade-coordinator-contract.ts'
+import { assertUpgradeIntentCurrent } from '../upgrade-coordinator-validation.ts'
+import { loadTrustedReleaseKeys, readReleaseManifestFor } from '../upgrade-observation.ts'
 import { assertCurrentLifecycleEffect, assertNativeLifecyclePrerequisites, createNativeUpgradeSafety, readNativeReleaseTrust, verifyCurrentLifecycleWriterReadiness } from '../../../../scripts/lifecycle-root-safety.mjs'
 import { verifyAuthenticatedReleaseArchive } from '../../../../scripts/release-verifier.mjs'
 
@@ -131,7 +137,7 @@ const guardedExecutor = (executor: LinuxHostExecutor): AgentExecutor => {
   return { preflight: plan => effect(() => executor.preflight(plan), 'service.observe'), writeFile: file => effect(() => executor.writeFile(file)), readFile: path => effect(() => executor.readFile(path), 'service.observe'), removePath: path => effect(() => executor.removePath(path)), runTest: test => effect(() => executor.runTest(test)), runAction: action => effect(async () => { if (action.kind === 'systemd') { const result = await executor.runCommand(['/usr/bin/systemctl', action.verb, action.unit]); if (result.code !== 0) return deny('LIFECYCLE_SERVICE_COMMAND_FAILED'); return } await executor.runAction(action) }), runCommand: argv => effect(() => executor.runCommand(argv)), readSliceMetrics: uid => effect(() => executor.readSliceMetrics(uid), 'service.observe') }
 }
 
-const composition = async (db: ReturnType<typeof createDb>['db'], actor: Principal, owner: Owner): Promise<{ ports: UpgradePorts; store: StateStore; os: Awaited<ReturnType<typeof detectOs>> }> => {
+const composition = async (db: ReturnType<typeof createDb>['db'], actor: Principal, owner: Owner): Promise<{ ports: UpgradePorts; store: StateStore; os: Awaited<ReturnType<typeof detectOs>>; releaseKeys: readonly ReleaseVerificationKey[] }> => {
   const os = detectOs(path => readFileSync(path, 'utf8'))
   const store = new StateStore(STATE)
   await store.getAuthorityMetadata()
@@ -153,7 +159,9 @@ const composition = async (db: ReturnType<typeof createDb>['db'], actor: Princip
     await assertCurrentLifecycleEffect(kind)
     return { code: 0, stdout: '', stderr: '' }
   } }
-  const ports = createProductionUpgradePorts({ db, fs: nativeFilesystem(owner), host, clock: { now: () => new Date(), sleep: ms => new Promise(resolve => setTimeout(resolve, ms)) }, trustedReleaseKeys: [],
+  // Root-held Ed25519 publisher keys only; missing, unsafe or HMAC trust yields an empty list that refuses upgrades.
+  const releaseKeys = (await loadTrustedReleaseKeys()).keys
+  const ports = createProductionUpgradePorts({ db, fs: nativeFilesystem(owner), host, clock: { now: () => new Date(), sleep: ms => new Promise(resolve => setTimeout(resolve, ms)) }, trustedReleaseKeys: releaseKeys,
     loadReleaseMigrations: root => loadMigrations(posix.join(root, 'packages/db/src/migrations')),
     probeFreeBytes: async path => { await assertCurrentLifecycleEffect('service.observe'); const value = await statfs(path, { bigint: true }); const bytes = value.bavail * value.bsize; if (bytes > BigInt(Number.MAX_SAFE_INTEGER)) return Number.MAX_SAFE_INTEGER; return Number(bytes) },
     probeOsRelease: async () => parseOsRelease(await readFile('/etc/os-release', 'utf8')),
@@ -169,12 +177,14 @@ const composition = async (db: ReturnType<typeof createDb>['db'], actor: Princip
       identities: async () => { const snapshot = await store.readSnapshot(); if (snapshot.accounts.length && (await observeHostLimits(executor, snapshot.accounts, snapshot.plans, '/home')).status !== 'verified') return deny('LIFECYCLE_ASSIGNED_LIMITS_UNVERIFIED'); return Promise.all(snapshot.accounts.map(async account => { const [uid, gid] = await Promise.all([executor.runCommand(['/usr/bin/id', '-u', '--', account.username]), executor.runCommand(['/usr/bin/id', '-g', '--', account.username])]); if (!uid.ok || !gid.ok || uid.stdout.trim() !== String(account.uid) || gid.stdout.trim() !== String(account.gid)) return deny('LIFECYCLE_ACCOUNT_IDENTITY_CHANGED'); const plan = snapshot.plans.find(plan => plan.id === account.planId); if (!plan) return deny('LIFECYCLE_ASSIGNED_PLAN_UNAVAILABLE'); return { username: account.username, uid: account.uid, gid: account.gid, slice: `xpanel-${account.uid}.slice`, quotas: { ...plan.resources } } })) },
     },
   })
-  return { ports, store, os: resolvedOs }
+  return { ports, store, os: resolvedOs, releaseKeys }
 }
 
 /** Real composition only. No request, environment or callback supplies a principal or readiness. */
-export const runNativeLifecycleCommand = async (input: unknown) => {
+export const runNativeLifecycleCommand = async (input: unknown, processBinding?: UpgradeProcessBinding) => {
   const request = validateNativeLifecycleRequest(input)
+  const binding = processBinding === undefined ? null : parseUpgradeProcessBinding(processBinding)
+  if (binding && request.command !== 'upgrade') return deny('LIFECYCLE_HANDOFF_COMMAND_MISMATCH')
   if (process.platform !== 'linux' || process.getuid?.() !== 0 || process.geteuid?.() !== 0) return deny('LIFECYCLE_ROOT_LINUX_REQUIRED')
   if (process.version !== 'v26.12.1' || process.env.NODE_OPTIONS || process.env.NODE_PATH) return deny('LIFECYCLE_PINNED_RUNTIME_REQUIRED')
   await assertNativeLifecyclePrerequisites()
@@ -191,7 +201,9 @@ export const runNativeLifecycleCommand = async (input: unknown) => {
     const root = await getPrincipal(handle.db, rows[0]!.id)
     if (!root || root.kind !== 'root' || root.disabled) return deny('LIFECYCLE_ROOT_PRINCIPAL_REQUIRED')
     const actor: Principal = { kind: 'root', id: root.id, username: root.username }
-    const { ports, store, os } = await composition(handle.db, actor, await panelOwner())
+    const handoff = binding ? readUpgradeIntentJob(await getDurableJob(handle.db, binding.jobId), binding) : null
+    if (handoff && (handoff.job.checkpointStep !== 'native-consumed' || handoff.intent.principalId !== actor.id || handoff.intent.actor !== actor.username)) return deny('LIFECYCLE_HANDOFF_ACTOR_MISMATCH')
+    const { ports, store, os, releaseKeys } = await composition(handle.db, actor, await panelOwner())
     // No real hosted-request UID producer exists yet. Refuse before any service/FS effects.
     if ((await store.readSnapshot()).accounts.length !== 0) return deny('LIFECYCLE_HOSTED_UID_PROBE_UNAVAILABLE')
     if (request.command === 'recover') {
@@ -204,6 +216,16 @@ export const runNativeLifecycleCommand = async (input: unknown) => {
     if (artifact.keyId !== trust.keyId) return deny('LIFECYCLE_ROOT_TRUST_MISMATCH')
     const report: unknown = await verifyAuthenticatedReleaseArchive(artifact.path, { ...trust, expectedArchiveSha256: artifact.expectedArchiveSha256 })
     const release = releaseInfoFromAuthenticatedReport(report, artifact)
+    if (releaseKeys.length === 0) return deny('LIFECYCLE_NO_TRUSTED_RELEASE_KEYS')
+    // The publisher-signed manifest beside the archive is independently re-verified here; agent observations are not authority.
+    const signedManifest = await readReleaseManifestFor(artifact.path)
+    try { verifySignedManifestForRelease(signedManifest, release, releaseKeys) } catch { return deny('LIFECYCLE_RELEASE_MANIFEST_UNVERIFIED') }
+    if (handoff) {
+      if (JSON.stringify(handoff.intent.release) !== JSON.stringify(release) || handoff.intent.manifestDigest !== signedReleaseManifestDigest(signedManifest)) return deny('LIFECYCLE_HANDOFF_RELEASE_MISMATCH')
+      await assertUpgradeIntentCurrent(handle.db, handoff.intent)
+      const current = readUpgradeIntentJob(await getDurableJob(handle.db, binding!.jobId), binding!)
+      if (current.job.checkpointStep !== 'native-consumed' || current.intent.principalId !== actor.id || current.intent.actor !== actor.username) return deny('LIFECYCLE_HANDOFF_CHANGED')
+    }
     const currentTarget = await readlink('/opt/xpanel/current')
     const currentVersion = basename(currentTarget)
     if (!VERSION.test(currentVersion) || dirname(currentTarget) !== '/opt/xpanel/releases') return deny('LIFECYCLE_CURRENT_RELEASE_INVALID')
@@ -211,7 +233,7 @@ export const runNativeLifecycleCommand = async (input: unknown) => {
     const safety = await createNativeUpgradeSafety({ db: handle.db, actorId: actor.id, operation: 'upgrade', release })
     const result = await runUpgrade({ ...ports, safety }, { actor, os, release, canary: null })
     return result.outcome === 'succeeded'
-      ? { exitCode: 0, code: 'LIFECYCLE_NATIVE_COMMITTED', outcome: 'committed', details: { currentVersion: release.version, changed: true } }
+      ? { exitCode: 0, code: 'LIFECYCLE_NATIVE_COMMITTED', outcome: 'committed', details: { currentVersion: release.version, changed: true, upgradeId: result.recordId } }
       : { exitCode: result.outcome === 'refused' ? 3 : 6, code: result.outcome === 'refused' ? 'LIFECYCLE_UPGRADE_REFUSED' : 'LIFECYCLE_RETIREMENT_PENDING', outcome: result.outcome === 'refused' ? 'blocked' : 'attention', details: { phase: 'retirement_pending', qualified: false } }
   } finally { try { if (handle) await handle.close() } finally { await databasePin.close() } }
 }

@@ -45,18 +45,14 @@ describe('shared workspace toolbar', () => {
     expect(renderSurfaceToolbarEnd({ ...operator, generationId })).not.toContain('data-generation-chip=')
   })
 
-  it('preserves additional controls without accepting external or executable menu links', () => {
-    const html = renderUserMenu({ ...operator, links: [
-      { surface: 'xmail', origin: 'https://mail.example.test:2096' },
-      { surface: 'xpanel', origin: 'https://panel.example.test:2083/path' },
-    ], menuLinks: [
+  it('preserves additional local controls without any panel switch or external or executable menu link', () => {
+    const html = renderUserMenu({ ...operator, menuLinks: [
       { label: '<Active>', href: '/whm/jobs?state=active' },
       { label: 'Unsafe absolute', href: 'https://unapproved.example.test' },
       { label: 'Unsafe host', href: '//unapproved.example.test' },
       { label: 'Unsafe scheme', href: 'javascript:alert(1)' },
     ] })
-    expect(html).toContain('data-panel-switch="xmail"')
-    expect(html).toContain('https://mail.example.test:2096/mail/inbox?lang=ar&amp;theme=light&amp;density=comfortable')
+    expect(html).not.toMatch(/data-panel-switch|https:\/\//)
     expect(html).toContain('&lt;Active&gt;')
     expect(html).not.toContain('unapproved.example.test')
     expect(html).not.toContain('javascript:')

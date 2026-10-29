@@ -24,6 +24,10 @@ const rootFace = /class="xp-board-port"[^>]*style="[^"]*font-family:/
 
 describe('Arabic typography layer', () => {
   it('keeps the Arabic scale off the LTR tracking values', () => {
+    assert.equal(BOARD_SANS_RTL, 'sans-serif')
+    assert.equal(BOARD_SANS_LTR, "'IBM Plex Sans', sans-serif")
+    assert.doesNotMatch(ARABIC_TYPE_CSS, /IBM Plex Sans Arabic|Noto Sans Arabic|XP Arabic In Mono/)
+    assert.match(DESIGN_TOKENS_CSS, /--xp-font-sans-rtl:\s*sans-serif;/)
     assert.ok(ARABIC_TYPE_CSS.includes(BOARD_SANS_RTL))
     assert.ok(ARABIC_TYPE_CSS.includes('font-size: 16px !important'))
     assert.ok(ARABIC_TYPE_CSS.includes('line-height: 1.75 !important'))
@@ -48,7 +52,8 @@ describe('Arabic typography layer', () => {
     for (const html of [renderHome('ltr'), renderHome('phone'), renderDashboard('ltr')]) {
       assert.equal(rootFace.test(html), false)
       assert.ok(html.includes(BOARD_SANS_LTR))
-      assert.equal(html.includes('dir="rtl"'), false)
+      const markup = html.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+      assert.equal(markup.includes('dir="rtl"'), false)
     }
     for (const html of [renderHome('ar'), renderDashboard('rtl')]) {
       assert.equal(rootFace.test(html), false)
@@ -124,7 +129,8 @@ describe('Arabic typography layer', () => {
     for (const locale of ['en', 'ar'] as const) {
       const html = renderInbox(xmailInboxFromProps({ locale, mailbox: 'owner@department.alice-shop.example.test', messages: [message] }))
       assert.match(html, /data-mail-name="true" style="min-width: 0/)
-      assert.match(html, /data-mail-addr="true" style="min-width: 0; max-width: 100%[^"]*overflow-wrap: anywhere/)
+      // Product reading panes add data-mail-detail-* fill hooks between the marker and its style.
+      assert.match(html, /data-mail-addr="true"(?: data-mail-detail-[a-z]+)? style="min-width: 0; max-width: 100%[^"]*overflow-wrap: anywhere/)
       assert.match(html, /data-mail-mailbox="true" style="min-width: 0[^"]*overflow-wrap: anywhere/)
     }
     assert.match(ARABIC_TYPE_CSS, /data-mail-addr/)

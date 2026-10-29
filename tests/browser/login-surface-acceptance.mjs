@@ -141,10 +141,8 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
         await expect(approved).toHaveCount(1)
         await expect(approved.locator(':scope > header.xp-login-topbar')).toBeVisible()
         await expect(approved.locator(':scope > main.xp-login-main > .xp-login-entry > section.xp-login-card')).toBeVisible()
-        const profiles = approved.locator('.xp-login-profile-tabs [data-login-profile]')
-        await expect(profiles).toHaveCount(3)
-        await expect(approved.locator('.xp-login-profile-tabs [aria-current="page"]')).toHaveAttribute('data-login-profile', state.audience)
-        await expect(approved.locator('.xp-login-profile-tabs [aria-disabled="true"]')).toHaveCount(2)
+        // Each sign-in page shows only its own panel: no profile tabs or links to another panel.
+        await expect(approved.locator('.xp-login-profile-tabs, [data-login-profile], [data-panel-link]')).toHaveCount(0)
         const context = approved.locator(':scope > main.xp-login-main > aside.xp-login-aside')
         await expect(context).toBeVisible()
         await expect(context.locator(':scope > .xp-login-context-card')).toHaveCount(2)
@@ -155,7 +153,9 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
         const footer = approved.locator(':scope > footer.xp-login-footer')
         await expect(footer).toBeVisible()
         await expect(footer.locator(':scope > span')).toHaveCount(2)
-        await expect(footer.locator(':scope > span').first()).toHaveText('xPanel · xWHM · xMail')
+        // The footer names only this panel; the other two panels are not mentioned anywhere on the page.
+        await expect(footer.locator(':scope > span').first()).toHaveText(audiences[state.audience])
+        for (const [other, name] of Object.entries(audiences)) if (other !== state.audience) await expect(page.locator('body')).not.toContainText(name)
         await expect(footer.locator(':scope > span').last()).toHaveText(state.locale === 'ar' ? 'العربية والإنجليزية · دخول آمن' : 'English & Arabic · Secure sign in')
         await expect(page.locator('[data-auth-submit]')).toBeEnabled()
         outcome.metrics = await inspect(page)
@@ -172,9 +172,9 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
         assert.equal(metrics.fonts.ready, true, 'Fonts must settle within 5 seconds')
         assert.ok(metrics.fonts.loaded_faces.length > 0, 'Downloadable font faces must actually load')
         assert.equal(metrics.fonts.failed_faces.length, 0)
-        assert.ok(metrics.fonts.loaded_faces.some(face => face.family.includes(state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')), 'The locale font must actually load')
+        if (state.locale === 'en') assert.ok(metrics.fonts.loaded_faces.some(face => face.family.includes('IBM Plex Sans')), 'The English locale font must actually load')
         metrics.fonts.applied_roles = {}
-        for (const [role, selector, family, typographyRole] of [['brand', '.xp-brand__name', 'IBM Plex Mono', 'login-wordmark'], ['heading', '.xp-login-shell h1', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans', 'ordinary']]) {
+        for (const [role, selector, family, typographyRole] of [['brand', '.xp-brand__name', 'IBM Plex Mono', 'login-wordmark'], ['heading', '.xp-login-shell h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans', 'ordinary']]) {
           try { metrics.fonts.applied_roles[role] = await assertAppliedFont(page, selector, family, { role: typographyRole }) }
           catch (error) { if (error.appliedFontObservation) metrics.fonts.applied_roles[role] = error.appliedFontObservation; throw error }
         }
@@ -252,7 +252,7 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
   } finally { await browser.close(); await Promise.all(fixtures.map(fixture => fixture.close())) }
   const after = fingerprint(), drift = before.filter((file, index) => file.sha256 !== after[index].sha256).map(file => file.path)
   const report = { schema_version: 1, at: new Date().toISOString(), status: outcomes.every(value => value.status === 'passed') && drift.length === 0 ? 'passed' : 'failed', runtime: process.version, browser: { name: 'Chromium', version: browser.version(), headless: true }, environment: { platform: process.platform, architecture: process.arch }, duration_ms: Date.now() - started,
-    scope: '60 synthetic login states: 3 server-selected audiences, 2 locales, 2 themes, 5 widths (320/360/390/768/1440). Keyboard, toggle, focus, reduced motion, geometry and actual applied custom IBM Plex Mono wordmark and proportional IBM Plex Sans/IBM Plex Sans Arabic heading glyph faces on all states; long error wrapping on all 12 narrow states.',
+    scope: '60 synthetic login states: 3 server-selected audiences, 2 locales, 2 themes, 5 widths (320/360/390/768/1440). Keyboard, toggle, focus, reduced motion, geometry and actual applied custom IBM Plex Mono wordmark and proportional IBM Plex Sans or Arabic UI generic sans-serif heading glyph faces on all states; long error wrapping on all 12 narrow states.',
     fixture: { synthetic: true, listeners: 3, loopback_only: true, read_only: true, credentials_submitted: 0, live_authentication: false, tls_qualification: false, production_ports_qualification: false },
     tests: { total: outcomes.length, passed: outcomes.filter(value => value.status === 'passed').length, failed: outcomes.filter(value => value.status === 'failed').length },
     source: { before, after, drift },

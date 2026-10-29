@@ -16,10 +16,31 @@ const SOURCES = [
   'apps/agent/src/lifecycle/transfer-runner.ts',
   'packages/db/src/identity-recovery.ts',
   'packages/lifecycle/src/upgrade/machine.ts',
+  'apps/agent/src/upgrade-routes.ts',
+  'apps/api/src/upgrade-workspace.ts',
+  'apps/api/src/panel-tokens-workspace.ts',
+  'apps/api/src/panel-notifications.ts',
+  'apps/api/src/monitoring-alerts.ts',
+  'apps/api/src/announcements-workspace.ts',
+  'apps/api/src/support-workspace.ts',
+  'apps/agent/src/dns-tools-routes.ts',
+  'apps/api/src/admin-preferences.ts',
+  'apps/api/src/default-index-workspace.ts',
+  'apps/api/src/dynamic-dns.ts',
+  'apps/agent/src/service-manager-routes.ts',
+  'apps/agent/src/account-git.ts',
+  'apps/agent/src/account-pgp.ts',
+  'apps/agent/src/site-publisher-routes.ts',
 ]
 
 /** Templates whose concrete actions are written at runtime. */
 const EXPANSIONS = [
+  'server.benchmark.run',
+  'server.default_index.updated', 'server.default_index.reset',
+  'dns.dynamic.created', 'dns.dynamic.rotated', 'dns.dynamic.deleted', 'dns.dynamic.updated',
+  'account.git.init', 'account.git.clone', 'account.git.pull', 'account.git.checkout', 'account.git.remove',
+  'account.pgp.generate', 'account.pgp.import', 'account.pgp.delete',
+  'domain.site_publisher.publish', 'domain.site_publisher.rollback',
   'account.create.configuration_failed',
   'account.suspend.configuration_failed',
   'account.unsuspend.configuration_failed',
@@ -57,12 +78,12 @@ describe('audit action copy', () => {
     for (const action of EXPANSIONS) seen.add(action)
     const missing = [...seen].filter(action => !AUDIT_LABELS[action]).sort()
     assert.deepEqual(missing, [])
-    for (const [action, copy] of Object.entries(AUDIT_LABELS)) {
-      assert.equal(copy.en.includes(action), false, action)
-      assert.equal(copy.ar.includes(action), false, action)
-      assert.match(copy.ar, /[\u0600-\u06FF]/, action)
-      assert.equal(auditActionLabel(action, 'en'), copy.en)
-      assert.equal(auditActionLabel(action, 'ar'), copy.ar)
+    for (const [action, message] of Object.entries(AUDIT_LABELS)) {
+      const english = auditActionLabel(action, 'en'), arabic = auditActionLabel(action, 'ar')
+      assert.equal(english, message.slice(message.indexOf('\u0004') + 1))
+      assert.equal(english.includes(action), false, action)
+      assert.equal(arabic.includes(action), false, action)
+      assert.match(arabic, /[\u0600-\u06FF]/, action)
     }
     assert.equal(auditActionLabel('service_user.deleted', 'en'), 'Deleted service user')
     assert.equal(auditActionLabel('service_user.deleted', 'ar'), 'حذف مستخدم خدمة')

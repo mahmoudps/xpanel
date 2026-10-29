@@ -6,7 +6,7 @@ import { isReviewedOperationalMigrationSet, matchesReviewedOperationalMigrations
 import { enqueueDurableJob, getDurableJob } from './repos/jobs.ts'
 import { initializeOperationalMetadata } from './repos/official-references.ts'
 import { createRootPrincipal } from './repos/principals.ts'
-import { createSession, findActiveSessionByTokenHash } from './repos/sessions.ts'
+import { findActiveSessionByTokenHash } from './repos/sessions.ts'
 import { getMailboxSession, saveMailboxSession } from './repos/mailbox-sessions.ts'
 import { ARGON2 } from './testing.ts'
 
@@ -52,15 +52,18 @@ describe('permanent job reference consolidation', () => {
       const beforeMigrations = await handle.db.query('SELECT * FROM xpanel_schema_migrations ORDER BY version')
       const principal = await createRootPrincipal(handle.db, { username: 'root', passwordHash: ARGON2 })
       const tokenHash = 'a'.repeat(64)
-      const session = await createSession(handle.db, { principalId: principal.id, tokenHash, expiresAt: new Date(Date.now() + 60_000).toISOString() })
+      // Schema 2 has no impersonation columns, so the legacy session row uses that schema's own column set.
+      const [legacy] = await handle.db.query<{ id: string }>(`INSERT INTO sessions (id, principal_id, token_hash, expires_at) VALUES ($1, $2, $3, $4) RETURNING id`,
+        [randomUUID(), principal.id, tokenHash, new Date(Date.now() + 60_000).toISOString()])
+      const session = { id: legacy!.id }
       const mailbox = await saveMailboxSession(handle.db, { sessionId: session.id, mailbox: 'owner@example.test', serviceUserId: randomUUID(), accountId: randomUUID(), sealedPassword: new Uint8Array(32).fill(7) })
       const result = await migrate(handle.db)
-      expect(result.applied).toEqual(['0003_job_references_reconcile.sql'])
+      expect(result.applied).toEqual(['0003_job_references_reconcile.sql', '0004_host_metrics_observations.sql', '0005_team_sign_in.sql', '0006_panel_handoffs.sql'])
       const first = await initializeOperationalMetadata(handle.db)
       expect(await initializeOperationalMetadata(handle.db)).toEqual({ issuerId: first.issuerId, imported: 0 })
       expect(await handle.db.query('SELECT * FROM xpanel_schema_migrations WHERE version<=2 ORDER BY version')).toEqual(beforeMigrations)
       expect(await getMailboxSession(handle.db, session.id)).toEqual(mailbox)
-      expect(await findActiveSessionByTokenHash(handle.db, tokenHash)).toEqual(session)
+      expect(await findActiveSessionByTokenHash(handle.db, tokenHash)).toMatchObject({ id: session.id, principalId: principal.id, impersonatorPrincipalId: null, impersonatorLogin: null })
       const [identity] = await handle.db.query<{ schema_version: number; migration_checksums_json: string }>('SELECT schema_version,migration_checksums_json FROM operational_identity')
       expect(identity?.schema_version).toBe(3)
       const applied = await handle.db.query('SELECT version,name,checksum FROM xpanel_schema_migrations ORDER BY version')
@@ -72,7 +75,7 @@ describe('permanent job reference consolidation', () => {
   it('rejects malformed, old, future and fabricated checksum receipts against the actual reviewed source', async () => {
     const migrations = (await loadMigrations()).map(({ version, name, checksum }) => ({ version, name, checksum }))
     expect(isReviewedOperationalMigrationSet(migrations)).toBe(true)
-    for (const invalid of [null, [], migrations.slice(0, 2), [...migrations, { version: 4, name: '0004_future.sql', checksum: 'f'.repeat(64) }], migrations.map(row => ({ ...row, checksum: 'f'.repeat(64) }))]) {
+    for (const invalid of [null, [], migrations.slice(0, 2), [...migrations, { version: 5, name: '0005_future.sql', checksum: 'f'.repeat(64) }], migrations.map(row => ({ ...row, checksum: 'f'.repeat(64) }))]) {
       expect(isReviewedOperationalMigrationSet(invalid)).toBe(false)
       expect(matchesReviewedOperationalMigrations(JSON.stringify(invalid), invalid)).toBe(false)
     }

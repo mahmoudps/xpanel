@@ -102,7 +102,8 @@ describe('design board routes', () => {
     expect(componentsAr).toContain('قيد التفعيل')
     expect(componentsAr).not.toContain('Coming soon')
     const map = withDesignPages(() => renderDesignMain('/design/navigation', 'en'))
-    expect(map).toContain('href="/whm/security/ssh"')
+    expect(map).toContain('data-reference-route="/whm/security/ssh"')
+    expect(map).not.toContain('href=')
     expect(map).not.toMatch(/\b187\b/)
     const tools = renderHomeToolGrid('en', new Set(['/files/manager']))
     expect(tools).toContain('File manager')
@@ -168,7 +169,9 @@ describe('design board routes', () => {
 
   it('maps every registered destination rather than only the selected bespoke screens', () => {
     const map = withDesignPages(() => renderDesignMain('/design/navigation', 'en'))
-    for (const route of ['/whm/software/modules', '/mail/settings/calendars', '/whm/security/ssh']) expect(map).toContain(`href="${route}"`)
+    // The map lists every panel's routes as text; one panel's page never links into another panel.
+    for (const route of ['/whm/software/modules', '/mail/settings/calendars', '/whm/security/ssh']) expect(map).toContain(`data-reference-route="${route}"`)
+    expect(map).not.toContain('href=')
     expect(map).toContain('Route registration does not grant access')
     expect(map).toContain('Additional document destinations')
     const routes = [...map.matchAll(/data-reference-route="([^"]+)"/g)].map(match => match[1])

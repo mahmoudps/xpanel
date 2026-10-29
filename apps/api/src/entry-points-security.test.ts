@@ -36,6 +36,8 @@ const fixture = async () => {
   const user = await createUserPrincipal(database.db, { username: 'alice', passwordHash: HASH, accountId: account.id })
   await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
   await createResellerPrincipal(database.db, { username: 'reseller', passwordHash: HASH })
+  // xMail admits mailbox addresses only; the hosting account owner signs in on xPanel.
+  const mailbox = await state.store.createServiceUser({ accountId: account.id, login: 'inbox@alice.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: HASH })
   // A disposable silent listener prevents a watch from reaching any installed mail service.
   const imapSockets = new Set<Socket>()
   const imap = createNetServer(socket => { imapSockets.add(socket); socket.on('error', () => {}); socket.once('close', () => imapSockets.delete(socket)) })
@@ -76,7 +78,7 @@ const fixture = async () => {
     req.on('error', reject)
     req.end(options.body !== undefined ? JSON.stringify(options.body) : undefined)
   })
-  const login = async (profile: EntryPoint, username = 'alice') => {
+  const login = async (profile: EntryPoint, username = profile === 'xmail' ? mailbox.login : 'alice') => {
     const response = await request(profile, '/api/auth/login', { method: 'POST', body: { username, password: PASSWORD } })
     const data = await response.json() as { csrfToken?: string; home?: string; mfaEnrollmentRequired?: boolean }
     const cookie = response.headers.get('set-cookie')?.split(';')[0] ?? ''
@@ -88,7 +90,7 @@ const fixture = async () => {
     ws.once('unexpected-response', (_req, response) => { response.resume(); ws.terminate(); resolve(response.statusCode!) })
     ws.on('error', error => { if (!String(error).includes('closed before')) reject(error) })
   })
-  return { database, state, account, feature, user, servers, request, login, websocketStatus }
+  return { database, state, account, feature, user, mailbox, servers, request, login, websocketStatus }
 }
 
 describe('interactive entry point isolation on real HTTP and WebSocket listeners', () => {
@@ -112,7 +114,7 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
 
   it('rejects cross-profile raw-token replay even when renamed to the destination cookie', async () => {
     for (const source of profiles) {
-      const session = await f.login(source, source === 'xwhm' ? 'root' : 'alice')
+      const session = await f.login(source, source === 'xwhm' ? 'root' : undefined)
       assert.equal(session.response.status, 200)
       for (const destination of profiles.filter(value => value !== source)) {
         const replay = `${sessionCookieName(destination, true)}=${session.raw}`
@@ -122,7 +124,7 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
   })
 
   it('rejects valid credentials for the wrong role without issuing any cookie', async () => {
-    for (const [profile, username] of [['xpanel', 'root'], ['xpanel', 'reseller'], ['xmail', 'root'], ['xmail', 'reseller'], ['xwhm', 'alice']] as const) {
+    for (const [profile, username] of [['xpanel', 'root'], ['xpanel', 'reseller'], ['xmail', 'root'], ['xmail', 'reseller'], ['xmail', 'alice'], ['xwhm', 'alice'], ['xpanel', 'inbox@alice.example.test'], ['xwhm', 'inbox@alice.example.test']] as const) {
       const session = await f.login(profile, username)
       assert.equal(session.response.status, 401); assert.equal(session.response.headers.get('set-cookie'), null)
     }
@@ -145,8 +147,10 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
     for (const path of ['/api/server/settings', '/api/lifecycle/upgrade', '/api/mail/ips', '/api/firewall', '/api/setup/wizard', '/api/webmail/folders']) assert.equal((await f.request('xpanel', path, { cookie: panel.cookie })).status, 404)
     assert.equal((await f.request('xwhm', '/api/webmail/folders')).status, 404)
     assert.equal((await f.request('xpanel', '/api/accounts', { method: 'POST', cookie: panel.cookie, csrf: panel.data.csrfToken, body: {} })).status, 404)
-    // Account workspace sessions never become mailbox principals or an empty successful mailbox.
-    assert.notEqual((await f.request('xmail', '/api/webmail/folders', { cookie: mail.cookie })).status, 200)
+    // An account owner session never authenticates on xMail, so it can never act as a mailbox.
+    const raw = 'owner-session-replayed-on-xmail-fixture'
+    await createSession(f.database.db, { principalId: f.user.id, tokenHash: sessionTokenHash(raw, 'xmail'), mfaVerified: true, expiresAt: new Date(Date.now() + 60_000).toISOString() })
+    assert.equal((await f.request('xmail', '/api/webmail/folders', { cookie: `${sessionCookieName('xmail', true)}=${raw}` })).status, 401)
   })
 
   it('rejects another port origin, missing origin and a mismatched public Host', async () => {
@@ -178,35 +182,35 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
     assert.equal((await f.request('xpanel', '/api/auth/me', { cookie: kept.cookie })).status, 200)
   })
 
-  it('logs out only the current profile session but credential changes revoke every profile session', async () => {
+  it('logs out only the current profile session, and an owner credential change never touches the separate mailbox identity', async () => {
     const panel = await f.login('xpanel'); const mail = await f.login('xmail')
     const logout = await f.request('xpanel', '/api/auth/logout', { method: 'POST', cookie: panel.cookie, csrf: panel.data.csrfToken })
     assert.equal(logout.status, 200); assert.match(logout.headers.get('set-cookie')!, /^__Host-xpanel_session=;/)
     assert.equal((await f.request('xpanel', '/api/auth/me', { cookie: panel.cookie })).status, 401)
     assert.equal((await f.request('xmail', '/api/auth/me', { cookie: mail.cookie })).status, 200)
-    const secondPanel = await f.login('xpanel')
-    const changed = await f.request('xmail', '/api/auth/change-password', { method: 'POST', cookie: mail.cookie, csrf: mail.data.csrfToken, body: { currentPassword: PASSWORD, newPassword: 'New-password-fixture-2026' } })
+    const secondPanel = await f.login('xpanel'); const thirdPanel = await f.login('xpanel')
+    const changed = await f.request('xpanel', '/api/auth/change-password', { method: 'POST', cookie: secondPanel.cookie, csrf: secondPanel.data.csrfToken, body: { currentPassword: PASSWORD, newPassword: 'New-password-fixture-2026' } })
     assert.equal(changed.status, 200)
-    assert.match(changed.headers.get('set-cookie')!, /^__Host-xmail_session=;/)
-    assert.equal((await f.request('xmail', '/api/auth/me', { cookie: mail.cookie })).status, 401)
-    assert.equal((await f.request('xpanel', '/api/auth/me', { cookie: secondPanel.cookie })).status, 401)
+    assert.match(changed.headers.get('set-cookie')!, /^__Host-xpanel_session=;/)
+    assert.equal((await f.request('xpanel', '/api/auth/me', { cookie: thirdPanel.cookie })).status, 401)
+    assert.equal((await f.request('xmail', '/api/auth/me', { cookie: mail.cookie })).status, 200)
   })
 
   it('denies bearer API keys on every interactive listener even alongside a valid cookie', async () => {
     const raw = 'xp_public_fixture_interactive_audience_denial'
     await createApiToken(f.database.db, { principalId: f.user.id, name: 'fixture', tokenHash: sha256Hex(raw), scopes: ['*'], allowedIps: [], expiresAt: new Date(Date.now() + 3600000).toISOString() })
     for (const profile of profiles) {
-      const session = await f.login(profile, profile === 'xwhm' ? 'root' : 'alice')
+      const session = await f.login(profile, profile === 'xwhm' ? 'root' : undefined)
       assert.equal((await f.request(profile, '/api/auth/me', { cookie: session.cookie, headers: { authorization: `Bearer ${raw}` } })).status, 401)
     }
   })
 
   it('authorizes same-profile WebSockets, including xMail, and denies renamed replay and a wrong origin', async () => {
     const panel = await f.login('xpanel')
-    const accountMail = await f.login('xmail')
-    assert.equal(accountMail.response.status, 200)
-    assert.equal(await f.websocketStatus('xmail', accountMail.cookie), 401)
-    const serviceUser = await f.state.store.createServiceUser({ accountId: f.account.id, login: 'inbox@alice.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: HASH })
+    const accountMail = await f.login('xmail', 'alice')
+    assert.equal(accountMail.response.status, 401)
+    assert.equal(accountMail.response.headers.get('set-cookie'), null)
+    const serviceUser = f.mailbox
     const mail = await f.login('xmail', serviceUser.login)
     assert.equal(mail.response.status, 200)
     assert.ok(mail.cookie.startsWith('__Host-xmail_session='))
@@ -314,7 +318,7 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
     assert.deepEqual(await ext.readOrDefault('mail/filters.json', []), seeded)
     assert.equal((await request(`/api/mail/filters/${serverWide.id}`, 'DELETE')).status, 403)
     assert.deepEqual(await ext.readOrDefault('mail/filters.json', []), seeded)
-    const allowed = await request('/api/mail/filters', 'POST', { accountId: f.account.id, scope: 'global', name: 'Owned account-wide rule' })
+    const allowed = await request('/api/mail/filters', 'POST', { accountId: f.account.id, scope: 'global', name: 'Owned account-wide rule', conditions: [], action: { type: 'keep' } })
     assert.equal(allowed.status, 201)
   })
 })

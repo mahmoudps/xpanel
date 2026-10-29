@@ -184,9 +184,19 @@ describe('account backups', () => {
     await expect(createAccountBackup({ executor, account, now: stamp, readSize: async () => MAX_BACKUP_BYTES + 1 })).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED' })
     executor.clearCommandFailures()
     executor.failCommand('/usr/bin/tar', 0, '', 'public_html/index.html\n')
-    await expect(restoreAccountBackup({ executor, account, file: archiveName })).resolves.toEqual({ file: archiveName })
+    // The fake executor has no source inode; only this fixture supplies an inspection port.
+    await expect(restoreAccountBackup({ executor, account, file: archiveName, inspectSource: async () => {} })).resolves.toEqual({ file: archiveName })
     const extract = executor.executedActions.find(action => action.kind === 'exec' && action.argv.includes('--extract'))
     expect(extract).toMatchObject({ kind: 'exec', runAsUser: 'alice' })
+    expect(extract?.kind === 'exec' && extract.argv.some(arg => arg.startsWith('--exclude='))).toBe(false)
+    // The existing strict FakeHostExecutor argv validator also checks the home-only variant.
+    const beforeHomeRestore = executor.executedActions.length
+    await expect(restoreAccountBackup({ executor, account, file: archiveName, preserveMail: true, inspectSource: async () => {} })).resolves.toEqual({ file: archiveName })
+    const homeExtract = executor.executedActions.slice(beforeHomeRestore).find(action => action.kind === 'exec' && action.argv.includes('--extract'))
+    expect(homeExtract?.kind === 'exec' && homeExtract.argv.includes('--exclude=./mail') && homeExtract.argv.includes('--exclude=./etc') && !homeExtract.argv.some(arg => arg.includes('*'))).toBe(true)
+    expect(executor.executedActions.some(action => action.kind === 'ensure-dir' && action.path === '/run/xpanel/account-restores/alice' && action.owner === 'root' && action.mode === 0o710)).toBe(true)
+    expect(executor.executedActions.some(action => action.kind === 'exec' && action.argv[0] === '/bin/chown' && action.argv[1] === 'root:alice')).toBe(true)
+    expect(executor.executedActions.some(action => action.kind === 'exec' && action.argv[0] === '/usr/bin/cp' && action.argv.at(-1)?.startsWith('/home/alice/'))).toBe(false)
   })
 
   it('lists only regular archives named for that account', async () => {

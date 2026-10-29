@@ -29,6 +29,27 @@ node scripts/toolchain.mjs pnpm test --reporter=json --outputFile=test-results/p
 
 Create the output parent directory first if required by your reporting setup. Keep results separate per run and do not overwrite a failed run when recording a retry.
 
+## Complete browser partitions
+
+CI runs the same browser acceptance inventory in 3 isolated partitions. Each partition runs its commands serially; at most 3 CI machines run in parallel. The original required Chromium check remains an aggregate gate. It requires every partition to succeed and validates all command receipts against the same source, manifest, runtime, platform and run ID. Missing, cancelled, failed, duplicate or incomplete evidence cannot pass. The original 18 commands remain; 8 workspace regressions (forwarding, email filters, files, account contact, domains, databases, mail folders and mail contacts) bring the inventory to 26.
+
+Inspect coverage without launching browsers:
+
+```bash
+node scripts/toolchain.mjs node scripts/browser-acceptance-runner.mjs --validate
+node scripts/toolchain.mjs node scripts/browser-acceptance-runner.mjs --list
+```
+
+For a complete local run, use a fresh run ID and run the partitions sequentially on a shared workstation:
+
+```bash
+node scripts/toolchain.mjs node scripts/browser-acceptance-runner.mjs --shard=1/3 --run-id=local-001
+node scripts/toolchain.mjs node scripts/browser-acceptance-runner.mjs --shard=2/3 --run-id=local-001
+node scripts/toolchain.mjs node scripts/browser-acceptance-runner.mjs --shard=3/3 --run-id=local-001
+node scripts/toolchain.mjs node scripts/browser-acceptance-runner.mjs --aggregate=test-results/browser-acceptance-local-001 --run-id=local-001
+```
+
+Outputs are separated by partition and command. Existing output directories are not overwritten. Temporary fixture directories are isolated and removed after each partition. CI transfers only the small partition receipts to the aggregate job; it does not cache authenticated browser state. Frozen dependency installation and Chromium system prerequisites remain mandatory. Partitioning does not establish a new CI wall time until measured on the actual workflow; receipt durations separate command execution from external queue latency.
 ## Real Chromium application acceptance
 
 Install matching Chromium into the cache used by the harness. In a POSIX shell:
@@ -91,7 +112,7 @@ These tests cover declared local contracts with disposable stores and fake host 
 node scripts/toolchain.mjs node tests/browser/navigation-acceptance.mjs --output=test-results/navigation-ui
 ```
 
-Use a new output directory for every run. This independent suite defines 84 cases. It exercises Forward as well as Back, actual theme and language links, active-route uniqueness, responsive focus return including the 959/960px boundary, long-form scroll, keyboard shortcuts, reduced motion and local interaction timing. The page-palette cases cover localized filtering, no matches and clearing, complete available-page enumeration, Arrow Up/Down wrapping, Enter navigation, constrained list scrolling, preserved native input/textarea typing and surface-specific shortcut context. They compare the palette with available navigation and require its absence when the catalog exposes no qualified tools. Audit cases additionally measure actual field, group and card spacing and desktop header/value glyph edges.
+Use a new output directory for every run. This independent suite defines 88 cases. It exercises Forward as well as Back, actual theme and language links, active-route uniqueness, responsive focus return including the 959/960px boundary, long-form scroll, keyboard shortcuts, reduced motion and local interaction timing. The page-palette cases cover localized filtering, no matches and clearing, complete available-page enumeration, Arrow Up/Down wrapping, Enter navigation, constrained list scrolling, preserved native input/textarea typing and surface-specific shortcut context. They compare the palette with the authorized navigation in each fixture, including its unqualified state. Audit cases additionally measure actual field, group and card spacing and desktop header/value glyph edges.
 
 Final full-suite results must be bound to the exact export. The suite also checks actual text-node edges for a nonempty bounded workspace summary against the unqualified catalog, with explicitly synthetic account data. The existing application and HTTP tests establish their own authentication and ownership assertions; the visual fixture does not authenticate users or execute hosting operations.
 
@@ -130,9 +151,9 @@ Keep the before-fix failures and their screenshots. Click-to-render samples, doc
 node scripts/toolchain.mjs node tests/browser/mail-layout-acceptance.mjs --output=test-results/mail-layout
 ```
 
-Use a new repository-relative output directory. The [mail harness](../tests/browser/mail-layout-acceptance.mjs) defines 24 Inbox/Compose states across EN/AR, light/dark and 360/768/1440px. It checks loaded fonts, the actual applied brand/heading glyph faces, responsive pane geometry, actual text edges, mixed English/Arabic input direction, quota glyph order, keyboard landmarks, modal focus, the explicit unavailable transport state and the absence of submission. Source fingerprints and previous failures remain part of the evidence.
+Use a new repository-relative output directory. The [mail harness](../tests/browser/mail-layout-acceptance.mjs) defines 24 Inbox/Compose states across EN/AR, light/dark and 360/768/1440px. It checks loaded fonts, the actual applied brand/heading glyph faces, responsive pane geometry, actual text edges, mixed English/Arabic input direction, quota glyph order, keyboard landmarks and modal focus. The fixture exposes an enabled explicit Send button without a native sending form. The harness never clicks Send, checks that Enter in composition does not submit and rejects mutation requests. Source fingerprints and previous failures remain part of the evidence.
 
-The mail renderer displays folder navigation, a message list and one reading pane on wide screens, with an adapted composition editor on smaller screens. Send is disabled and has no form submission or mutation path. Synthetic inbox messages and supplied mailbox observations do not establish mailbox authority, live message selection, draft persistence, SMTP submission or IMAP synchronization. Mailbox authentication and real delivery require separate production-connected acceptance.
+The mail renderer displays folder navigation, a message list and one reading pane on wide screens, with an adapted composition editor on smaller screens. The product Send client calls `POST /api/webmail/send`, validates the acknowledgement and preserves the draft on refused or uncertain outcomes. Focused client and HTTP tests exercise that contract with synthetic transports; they remain separate from this layout runner. Synthetic inbox messages and supplied mailbox observations do not establish installed mailbox authority, draft persistence, SMTP submission or IMAP synchronization. Actual SMTP/IMAP behavior and recipient delivery require separate native and external-observer acceptance.
 
 ## Account interaction and mutation acceptance
 
@@ -153,7 +174,7 @@ node scripts/toolchain.mjs node scripts/test-suite.mjs portable \
   packages/db/src/repos/account-access-security.test.ts
 ```
 
-API regressions use local requests, disposable state/SQLite and declared agent fixtures to check current authority/targets, expected revisions, failed/noop/unknown/malformed replies, global-only acknowledgements and no requested effects on refused deletion/contact-only updates. Database regressions cover linked aliases, unrelated principals and transactional revocation rollback. Table-wrapper tests retain region names, keyboard reachability and header scope with multiple CSS class tokens. These do not qualify live Linux lifecycle behavior.
+API regressions use local requests, disposable state/SQLite and declared agent fixtures to check current authority/targets, expected revisions, failed/noop/unknown/malformed replies and global-only acknowledgements. The [target-bound regression](../apps/api/src/contact-delete-target-security.test.ts) separately covers refusal before effects without a purge contract, retained terminating state on purge failure and identity removal only after a positive fixture purge reply. Contact-only updates exercise metadata/index writes and compensating rollback. Database regressions cover linked aliases, unrelated principals and transactional revocation rollback. Table-wrapper tests retain region names, keyboard reachability and header scope with multiple CSS class tokens. These do not qualify live Linux lifecycle behavior.
 
 Neither a safety refusal nor `configuration_applied` with `targetVerified: false` closes account delivery. Retain failed attempts and bind results to the exact exported source.
 
@@ -218,10 +239,57 @@ The acknowledgement is not proof that the environment is suitable. Snapshot the 
 
 The [suite runner](../scripts/test-suite.mjs) separates portable, unit, HTTP, browser and Linux layers. Browser/Linux preflight exits with status `2` when blocked; ordinary failures use a nonzero result. Portable output explicitly reports that browser and Linux checks were not run. `pnpm test:all` still requires the independent browser and disposable-Linux prerequisites; it is not a portable substitute.
 
-Earlier published and intermediate results apply only to their exact source revisions. Windows-only named-pipe cases can produce different portable totals from Ubuntu. This update adds security, mail-rendering and browser scopes. Use clean-checkout results and the CI run attached to the exact commit. The 60-state login visual, 76-case navigation and 24-state mail harness definitions describe scope, not successful execution or final product acceptance. Test counts are not completion percentages.
+Earlier published and intermediate results apply only to their exact source revisions. Windows-only named-pipe cases can produce different portable totals from Ubuntu. This update adds security, mail-rendering and browser scopes. Use clean-checkout results and the CI run attached to the exact commit. The 60-state login visual, 88-case navigation and 24-state mail harness definitions describe scope, not successful execution or final product acceptance. Test counts are not completion percentages.
 
 For feature or release acceptance, use the [acceptance matrix](planning/ACCEPTANCE-MATRIX.md) and [scenario mapping](planning/acceptance-scenario-mapping.json). Record commands, timestamps, source/artifact identity, environment, outcome, observed effects and cleanup. Missing harnesses and prerequisites remain open. Security, real services, authenticated scale, recovery and the 30-60 day pilot are separate production gates described in [STATUS.md](STATUS.md).
 
 ## Safe reports
 
 Do not place real passwords, MFA enrollment material, tokens, private keys, session cookies, databases or customer content in reports, screenshots or public CI artifacts. Review the content before uploading it. Use isolated synthetic fixtures, redact sensitive failure output and keep previous run outcomes intact.
+
+## Email filter configuration
+
+The account filter workspace manages account-wide and individual mailbox configuration through `/api/mail/filters`. Selected reads return a context-bound revision and an explicit `configuration_only` application state. PATCH, DELETE and reorder require the current `expectedRevision`; create checks it when supplied. Reorder accepts the exact selected ID set. Account-wide and mailbox feature permissions are checked separately, alongside existing tenant, reseller and token boundaries. The xMail listener's API confinement is unchanged.
+
+Run the affected checks with the pinned runtime and one test worker during iteration:
+
+```bash
+node scripts/test-suite.mjs portable apps/api/src/mail/filter-validation.test.ts apps/api/src/completion-security-email-filters.test.ts --maxWorkers=1
+node scripts/test-suite.mjs unit apps/web/src/account-filters-client.test.ts apps/web/src/board-port/extensions/account-filters.test.ts scripts/test-browser-acceptance.test.ts --maxWorkers=1
+node scripts/toolchain.mjs node tests/browser/completion-email-filters.mjs
+```
+
+The browser harness exercises the actual renderer, client and confirmation dialogs in English and Arabic on desktop and phone. Its session/HTTP transport is simulated explicitly; API authorization is tested separately with isolated HTTP fixtures. It checks stale edits, uncertain writes, account/scope response binding, malformed saved configuration, preview escaping, action ordering and actual field/card geometry. The canonical browser manifest includes this harness in its required partition inventory.
+
+Saved Sieve previews are bounded, validated serialization. They do not prove native parser acceptance, installation, activation or message delivery. Native Sieve/forwarding activation, delivery, mixed-expression editing, multiple actions, PCRE and execution tracing remain open; none is qualified by these portable or browser fixtures. Retain the full release and native-service gates above.
+## File workspace request and result boundaries
+
+The existing file workspace uses `POST /api/accounts/:username/files`. List, read, list-trash and get-bytes require file read authority; mutations retain file write authority. POST session CSRF remains required. The API validates operation fields and bounds, rechecks credentials and the current account before transport, and validates bounded agent replies against the captured path and operation. Agent diagnostics are not copied into browser errors. Disconnected services are refused before dispatch; uncertain dispatched mutations require explicit current-state review.
+
+The browser controller preserves browse, edit, save, upload, download, create, folder and trash operations under one state owner. File and directory generations prevent late replies from replacing a newer selection or draft. Create and upload use `overwrite:false`. Saves compare a fresh read with the opened baseline, validate the exact acknowledgement and read back the submitted text before reporting success. This is not atomic conditional writing: another writer can change a file between the pre-read and write. Atomic external-writer exclusion and native filesystem qualification remain open.
+
+Focused iteration commands:
+
+```bash
+node scripts/test-suite.mjs portable apps/api/src/file-workspace-validation.test.ts apps/api/src/completion-file-workspace-security.test.ts --maxWorkers=1
+node scripts/test-suite.mjs unit apps/web/src/file-workspace-client.test.ts scripts/test-browser-acceptance.test.ts --maxWorkers=1
+node scripts/toolchain.mjs node tests/browser/completion-file-workspace.mjs
+```
+
+The browser harness uses the real renderer, client and dialogs with explicitly simulated session/file RPC. It covers English/Arabic phone/desktop behavior, stale reads, dirty navigation, captured targets, refusal/uncertainty/readback, bounds, existing operations and applicable geometry. Code contents retain LTR direction and whitespace; ordinary translated form fields retain their RTL alignment. The canonical required browser partition includes this harness. These results do not prove actual jailed UID/GID execution, descriptor confinement, kernel quotas, native operations, recovery or complete reference parity. Keep the disposable Linux qualification and full release gates separate.
+
+## Account contact metadata
+
+`GET/PATCH /api/account/preferences` derives its account from the authenticated active hosting owner. It accepts no account selectors or unrelated settings. Tokens require `account-preferences:read` or `account-preferences:write`; account feature checks, listener confinement, session CSRF and current authorization remain required. Administrative account PATCH retains its existing permissions.
+
+PATCH requires the current contact representation tag. This fixed projection includes account ID, canonical contact email, plan, owner, status and creation time. It is current-value CAS: changing those values away and back restores the same tag. It is not a monotonic counter or an authorization grant. Email validation preserves local-part case and never trims the submitted address.
+
+Contact writes recheck authorization and the tag under the StateStore writer lease, then synchronize the derived contact/search index before committing authority. Synchronous compensation restores the exact account-file preimage and target index/search rows under that lease. Failed restoration retains recovery evidence and reports an uncertain outcome. The SQL checkpoint is in-process; this does not establish durable cross-store crash recovery. Post-commit audit failures report changed state requiring verification. Review flags take precedence over an unchanged-contact receipt.
+
+```bash
+node scripts/test-suite.mjs portable packages/core/src/account-contact.test.ts packages/state/src/account-contact.test.ts packages/db/src/repos/account-contact-checkpoint.test.ts packages/db/src/sql-runner-metadata.test.ts apps/api/src/completion-account-contact-security.test.ts --maxWorkers=1
+node scripts/test-suite.mjs unit apps/web/src/account-contact-client.test.ts apps/web/src/board-port/extensions/account-contact.test.ts scripts/test-browser-acceptance.test.ts --maxWorkers=1
+node scripts/toolchain.mjs node tests/browser/completion-account-contact.mjs
+```
+
+The browser acceptance uses real rendering and client code with simulated session/API transport in English and Arabic, on phone and desktop. It checks account binding, draft preservation, stale/uncertain saves, explicit reload and applicable geometry. It is part of the required browser partition inventory. Contact metadata does not verify an email address, change login or MFA, provision mail, or demonstrate delivery. Full release, native-service and recovery gates remain separate.

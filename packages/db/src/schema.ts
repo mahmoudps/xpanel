@@ -2,14 +2,18 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { checksumOf, MIGRATIONS_DIR } from './migrate.ts'
 
-export const OPERATIONAL_MIGRATION_NAMES = ['0001_init.sql', '0002_mailbox_sessions.sql', '0003_job_references_reconcile.sql'] as const
-export const OPERATIONAL_SCHEMA_VERSION = OPERATIONAL_MIGRATION_NAMES.length
+export const OPERATIONAL_MIGRATION_NAMES = ['0001_init.sql', '0002_mailbox_sessions.sql', '0003_job_references_reconcile.sql', '0004_host_metrics_observations.sql', '0005_team_sign_in.sql', '0006_panel_handoffs.sql'] as const
+// The reference/identity contract remains version 3; additive metric, team and handoff migrations do not reissue identities.
+export const OPERATIONAL_SCHEMA_VERSION = 3
 
 const reviewedMigrations = OPERATIONAL_MIGRATION_NAMES.map((name, index) => Object.freeze({
   version: index + 1, name, checksum: checksumOf(readFileSync(join(MIGRATIONS_DIR, name), 'utf8')),
 }))
 
-/** The initializer receipt and applied rows must match this build's exact reviewed source. */
+/** Immutable reference identity schema 3 predates additive host metrics migration 4. */
+export const OPERATIONAL_IDENTITY_MIGRATIONS_JSON = JSON.stringify(reviewedMigrations.slice(0, OPERATIONAL_SCHEMA_VERSION))
+
+/** Applied rows must match every name, version and checksum in this build's complete reviewed set. */
 export const isReviewedOperationalMigrationSet = (value: unknown): boolean => Array.isArray(value)
   && value.length === reviewedMigrations.length
   && value.every((row: unknown, index: number) => {
@@ -21,8 +25,12 @@ export const isReviewedOperationalMigrationSet = (value: unknown): boolean => Ar
   })
 
 export const matchesReviewedOperationalMigrations = (receipt: unknown, applied: unknown): boolean => {
+  // Never filter applied rows: missing/extra versions and any checksum mismatch fail here.
   if (typeof receipt !== 'string' || !isReviewedOperationalMigrationSet(applied)) return false
-  try { return isReviewedOperationalMigrationSet(JSON.parse(receipt)) && JSON.stringify(applied) === receipt } catch { return false }
+  const exactAppliedReceipt = JSON.stringify(applied)
+  // The immutable issuing identity keeps its exact reviewed schema 3 receipt.
+  // Private schema 4 receipts remain valid only with exact full applied evidence.
+  return receipt === OPERATIONAL_IDENTITY_MIGRATIONS_JSON || receipt === exactAppliedReceipt
 }
 
 export const UPGRADE_STATUSES = ['pending', 'running', 'succeeded', 'failed', 'rolled_back'] as const
@@ -35,11 +43,15 @@ export const OPERATIONAL_TABLES = [
   'principals',
   'sessions',
   'mailbox_sessions',
+  'handoff_mailbox_sessions',
   'totp_enrollments',
   'api_tokens',
   'login_attempts',
   'lockouts',
   'login_failure_counters',
+  'team_credentials',
+  'team_sessions',
+  'panel_handoffs',
   'config_generations',
   'upgrades',
   'jobs',

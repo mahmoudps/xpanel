@@ -11,22 +11,28 @@ import {
   parseCidr,
   parseIp,
 } from '@xpanel/core'
-import type { MfaRuntimePolicy, Principal } from '@xpanel/core'
+import type { MfaRuntimePolicy, Principal, TeamPrincipal, TeamRole } from '@xpanel/core'
 import {
   findActiveApiTokenByHash,
   findActiveSessionByTokenHash,
   getPrincipal,
+  recordApiTokenUse,
+  revokeSession,
   touchSession,
 } from '@xpanel/db'
-import type { Db, PrincipalRecord } from '@xpanel/db'
-import { entryPointAllowsRole, sessionCookieName, sessionTokenHash } from './entry-points.ts'
+import type { Db, PrincipalRecord, SessionRecord } from '@xpanel/db'
+import { entryPointAdmitsPrincipal, sessionCookieName, sessionTokenHash } from './entry-points.ts'
 import type { EntryPoint } from './entry-points.ts'
+import { assertTeamRequestAllowed } from './team-access.ts'
+import { findActiveTeamSession, revokeTeamSession, touchTeamSession } from './team-store.ts'
 
 export const SESSION_COOKIE_NAME = 'xpanel_session'
 export const HOST_SESSION_COOKIE_NAME = '__Host-xpanel_session'
 export const CSRF_HEADER_NAME = 'x-csrf-token'
 export { SESSION_IDLE_TIMEOUT_MS, SESSION_ABSOLUTE_TIMEOUT_MS } from '@xpanel/core'
 export const MAX_PASSWORD_DERIVATIONS = 1
+/** Verified when a sign-in name is unknown, so a miss costs the same derivation as a wrong password. */
+export const DUMMY_PASSWORD_HASH = '$argon2id$v=19$m=65536,t=3,p=4$QkJCQkJCQkJCQkJCQkJCQg$02+8XtfLLaSCZqlfA84rmzJ5VytASY+ko8Y0KCBMjk8'
 export const MAX_PENDING_PASSWORD_DERIVATIONS = 16
 
 const MAX_PASSWORD_BYTES = 1024
@@ -424,7 +430,17 @@ export interface AuthenticatedCaller {
   scopes: string[]
   csrfValid: boolean
   mfaVerified: boolean
+  /** Present only for a team member session: `principal` is then the owning account's user, narrowed to these roles. */
+  team?: TeamPrincipal
+  /** Present only for a session opened through a one-time panel handoff: the issuing identity acting as `principal`. */
+  impersonator?: Readonly<{ principalId: string; login: string }>
 }
+
+/**
+ * Current team file state of a member. Resolves null when the member is deleted, suspended or expired;
+ * rejects when the team file cannot be read, so a read failure never ends a session.
+ */
+export type TeamMemberResolver = (accountId: string, memberId: string) => Promise<{ username: string; roles: TeamRole[] } | null>
 
 export const principalRecordToPrincipal = (record: PrincipalRecord): Principal => {
   switch (record.kind) {
@@ -458,7 +474,11 @@ const isClientIpAllowed = (allowedIps: readonly string[], clientIp: string | nul
 export const authenticateRequest = async (
   db: Db,
   req: Request,
-  opts: { serverSecret: string; clientIp?: string | null; touchSession?: boolean; entryPoint?: EntryPoint; mfaRuntimePolicy?: MfaRuntimePolicy },
+  opts: {
+    serverSecret: string; clientIp?: string | null; touchSession?: boolean; entryPoint?: EntryPoint; mfaRuntimePolicy?: MfaRuntimePolicy; teamMember?: TeamMemberResolver
+    /** Current issuer authority over a handed-off session's target. Without it such a session never authenticates. */
+    handoffAuthority?: (session: SessionRecord, principal: PrincipalRecord) => Promise<boolean>
+  },
 ): Promise<AuthenticatedCaller | null> => {
   const authHeader = req.headers.get('authorization')
   if (authHeader) {
@@ -475,8 +495,10 @@ export const authenticateRequest = async (
     }
     const principalRecord = await getPrincipal(db, apiToken.principalId)
     if (!principalRecord || principalRecord.disabled) return null
+    const principal = principalRecordToPrincipal(principalRecord)
+    await recordApiTokenUse(db, apiToken.id, parseIp(opts.clientIp) ? opts.clientIp! : null)
     return {
-      principal: principalRecordToPrincipal(principalRecord),
+      principal,
       principalRecord,
       sessionId: null,
       sessionToken: null,
@@ -495,7 +517,7 @@ export const authenticateRequest = async (
 
   const tokenHash = sessionTokenHash(sessionToken, opts.entryPoint)
   const session = await findActiveSessionByTokenHash(db, tokenHash)
-  if (!session) return null
+  if (!session) return opts.teamMember ? authenticateTeamSession(db, req, sessionToken, tokenHash, opts.teamMember, opts) : null
   const now = Date.now()
   const createdAt = Date.parse(session.createdAt)
   const lastSeenAt = Date.parse(session.lastSeenAt)
@@ -504,7 +526,20 @@ export const authenticateRequest = async (
 
   const principalRecord = await getPrincipal(db, session.principalId)
   if (!principalRecord || principalRecord.disabled) return null
-  if (opts.entryPoint && !entryPointAllowsRole(opts.entryPoint, principalRecord.kind)) return null
+  if (opts.entryPoint && !entryPointAdmitsPrincipal(opts.entryPoint, principalRecord)) return null
+  // A handed-off session lives only while its issuer still holds authority over its target. A lost authority
+  // revokes this session row; an unreadable authority only denies this request.
+  let impersonator: Readonly<{ principalId: string; login: string }> | null = null
+  if (session.impersonatorPrincipalId !== null) {
+    if (!session.impersonatorLogin || !opts.handoffAuthority) return null
+    let holds: boolean
+    try { holds = await opts.handoffAuthority(session, principalRecord) } catch { return null }
+    if (!holds) {
+      await revokeSession(db, session.id)
+      return null
+    }
+    impersonator = Object.freeze({ principalId: session.impersonatorPrincipalId, login: session.impersonatorLogin })
+  }
 
   if (opts.touchSession !== false) await touchSession(db, session.id)
   const csrfHeader = req.headers.get(CSRF_HEADER_NAME) ?? req.headers.get('x-xsrf-token')
@@ -522,5 +557,47 @@ export const authenticateRequest = async (
     scopes: mfaSatisfied ? ['*'] : ['mfa:verify'],
     csrfValid,
     mfaVerified: mfaSatisfied,
+    ...(impersonator ? { impersonator } : {}),
+  }
+}
+
+/**
+ * A team session authenticates as the owning account's user principal, narrowed to the member's current roles.
+ * Every /api request is checked against those roles here, so no route can receive a team caller it does not admit.
+ */
+const authenticateTeamSession = async (
+  db: Db, req: Request, sessionToken: string, tokenHash: string, resolve: TeamMemberResolver,
+  opts: { serverSecret: string; touchSession?: boolean; entryPoint?: EntryPoint },
+): Promise<AuthenticatedCaller | null> => {
+  if (opts.entryPoint !== undefined && opts.entryPoint !== 'xpanel') return null
+  const now = new Date()
+  const session = await findActiveTeamSession(db, tokenHash, now)
+  if (!session) return null
+  const createdAt = Date.parse(session.createdAt), lastSeenAt = Date.parse(session.lastSeenAt)
+  if (!Number.isFinite(createdAt) || !Number.isFinite(lastSeenAt) ||
+      now.getTime() - createdAt >= SESSION_ABSOLUTE_TIMEOUT_MS || now.getTime() - lastSeenAt >= SESSION_IDLE_TIMEOUT_MS) return null
+  let member: Awaited<ReturnType<TeamMemberResolver>>
+  try { member = await resolve(session.accountId, session.memberId) } catch { return null }
+  const owner = await getPrincipal(db, session.ownerPrincipalId)
+  if (!member || !owner || owner.disabled || owner.kind !== 'user' || owner.accountId !== session.accountId || owner.forcePasswordChange) {
+    await revokeTeamSession(db, session.id, now)
+    return null
+  }
+  const team: TeamPrincipal = Object.freeze({ kind: 'team', id: session.memberId, username: member.username, login: session.login, accountId: session.accountId, roles: Object.freeze([...member.roles]) })
+  const pathname = new URL(req.url).pathname
+  if (pathname.startsWith('/api/')) assertTeamRequestAllowed(team, pathname, req.method.toUpperCase())
+  if (opts.touchSession !== false) await touchTeamSession(db, session.id, now)
+  const csrfHeader = req.headers.get(CSRF_HEADER_NAME) ?? req.headers.get('x-xsrf-token')
+  return {
+    principal: principalRecordToPrincipal(owner),
+    principalRecord: owner,
+    sessionId: session.id,
+    sessionToken,
+    apiTokenId: null,
+    scopes: ['*'],
+    csrfValid: verifyCsrfToken(sessionToken, csrfHeader, opts.serverSecret, opts.entryPoint),
+    // Team sign-in has no second factor of its own; the owner's factor never applies to a member.
+    mfaVerified: true,
+    team,
   }
 }

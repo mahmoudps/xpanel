@@ -1,3 +1,4 @@
+import { type MessageValues, translator, type Locale } from './i18n.ts'
 /// <reference lib="dom" />
 import { assertResellerCapacity, hasAcl, isXpanelError, type Account, type Plan, type Principal, type Reseller } from '@xpanel/core'
 import { escapeHtml } from './tokens.ts'
@@ -43,20 +44,19 @@ export function accountListRowAttributes(account: Account): string {
   return `data-list-search="${escapeHtml(`${account.username} ${account.primaryDomain}`.toLowerCase())}" data-list-owner="${escapeHtml(account.ownerId ?? '')}" data-list-plan="${escapeHtml(account.planId)}" data-list-state="${escapeHtml(account.status)}"`
 }
 
-export function renderAccountListControls(model: AccountListModel, locale: 'en' | 'ar' = 'en'): string {
-  const ar = locale === 'ar'
-  const copy = (en: string, arabic: string) => escapeHtml(ar ? arabic : en)
-  if (model.state === 'forbidden') return `<p class="xp-help">${copy('Account listing is not permitted.', 'عرض الحسابات غير مسموح.')}</p>`
-  if (model.state === 'unavailable') return `<p class="xp-help">${copy('The account list is unavailable.', 'قائمة الحسابات غير متاحة.')}</p>`
+export function renderAccountListControls(model: AccountListModel, locale: Locale = 'en'): string {
+  const copy = (message: string, values?: MessageValues) => escapeHtml(translator(locale)(message, values))
+  if (model.state === 'forbidden') return `<p class="xp-help">${copy('Account listing is not permitted.')}</p>`
+  if (model.state === 'unavailable') return `<p class="xp-help">${copy('The account list is unavailable.')}</p>`
   const options = (items: readonly { value: string; label: string }[]) => items.map(item => `<option value="${escapeHtml(item.value === '' ? 'root' : item.value)}">${escapeHtml(item.label)}</option>`).join('')
   return `<div class="xp-form-group" data-account-list-controls data-list-page-size="20">
-    <div class="xp-field"><label class="xp-label" for="account-list-search">${copy('Search loaded accounts', 'بحث في الحسابات المحملة')}</label><input id="account-list-search" class="xp-input" type="search" data-list-search-input autocomplete="off" /></div>
-    <div class="xp-field"><label class="xp-label" for="account-list-owner">${copy('Owner', 'المالك')}</label><select id="account-list-owner" class="xp-select" data-list-owner-filter><option value="">${copy('All owners', 'كل المالكين')}</option>${options(model.owners)}</select></div>
-    <div class="xp-field"><label class="xp-label" for="account-list-plan">${copy('Plan', 'الخطة')}</label><select id="account-list-plan" class="xp-select" data-list-plan-filter><option value="">${copy('All plans', 'كل الخطط')}</option>${options(model.plans)}</select></div>
-    <div class="xp-field"><label class="xp-label" for="account-list-state">${copy('Status', 'الحالة')}</label><select id="account-list-state" class="xp-select" data-list-state-filter><option value="">${copy('All statuses', 'كل الحالات')}</option><option value="active">${copy('Active', 'نشط')}</option><option value="suspended">${copy('Suspended', 'معلق')}</option><option value="terminating">${copy('Terminating', 'قيد الإنهاء')}</option></select></div>
+    <div class="xp-field"><label class="xp-label" for="account-list-search">${copy('Search loaded accounts')}</label><input id="account-list-search" class="xp-input" type="search" data-list-search-input autocomplete="off" /></div>
+    <div class="xp-field"><label class="xp-label" for="account-list-owner">${copy('Owner')}</label><select id="account-list-owner" class="xp-select" data-list-owner-filter><option value="">${copy('All owners')}</option>${options(model.owners)}</select></div>
+    <div class="xp-field"><label class="xp-label" for="account-list-plan">${copy('Plan')}</label><select id="account-list-plan" class="xp-select" data-list-plan-filter><option value="">${copy('All plans')}</option>${options(model.plans)}</select></div>
+    <div class="xp-field"><label class="xp-label" for="account-list-state">${copy('Status')}</label><select id="account-list-state" class="xp-select" data-list-state-filter><option value="">${copy('All statuses')}</option><option value="active">${copy('Active')}</option><option value="suspended">${copy('Suspended')}</option><option value="terminating">${copy('Terminating')}</option></select></div>
     <p class="xp-help" data-list-count role="status" aria-live="polite"></p>
-    <p class="xp-help" data-list-empty hidden>${copy('No accounts match these filters.', 'لا توجد حسابات تطابق التصفية.')}</p>
-    <nav class="xp-plan-editor-actions" data-list-pages aria-label="${copy('Loaded account pages', 'صفحات الحسابات المحملة')}" hidden><button type="button" class="xp-btn" data-list-previous>${copy('Previous', 'السابق')}</button><span class="xp-tabular" data-list-page></span><button type="button" class="xp-btn" data-list-next>${copy('Next', 'التالي')}</button></nav>
+    <p class="xp-help" data-list-empty hidden>${copy('No accounts match these filters.')}</p>
+    <nav class="xp-plan-editor-actions" data-list-pages aria-label="${copy('Loaded account pages')}" hidden><button type="button" class="xp-btn" data-list-previous>${copy('Previous')}</button><span class="xp-tabular" data-list-page></span><button type="button" class="xp-btn" data-list-next>${copy('Next')}</button></nav>
   </div>`
 }
 
@@ -82,11 +82,10 @@ export function accountPlanPreviewModel(input: AccountListInput): AccountPlanPre
   }) }
 }
 
-export function renderAccountPlanPreview(model: AccountPlanPreview, locale: 'en' | 'ar' = 'en'): string {
-  const ar = locale === 'ar'
-  const copy = (en: string, arabic: string) => escapeHtml(ar ? arabic : en)
+export function renderAccountPlanPreview(model: AccountPlanPreview, locale: Locale = 'en'): string {
+  const copy = (message: string, values?: MessageValues) => escapeHtml(translator(locale)(message, values))
   const json = JSON.stringify(model).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e').replaceAll('&', '\\u0026')
-  return `<section class="xp-card xp-form-group" data-create-plan-preview><h2 class="xp-section-title">${copy('Selected plan', 'الخطة المختارة')}</h2><script type="application/json" data-plan-preview-model>${json}</script><dl class="xp-accounts__technical"><div class="xp-field"><dt>${copy('Plan', 'الخطة')}</dt><dd data-preview-plan-name></dd></div><div class="xp-field"><dt>${copy('Disk (MiB)', 'القرص (MiB)')}</dt><dd><bdi dir="ltr" data-preview-plan-disk></bdi></dd></div><div class="xp-field"><dt>${copy('Memory (MiB)', 'الذاكرة (MiB)')}</dt><dd><bdi dir="ltr" data-preview-plan-memory></bdi></dd></div><div class="xp-field"><dt>${copy('CPU (%)', 'المعالج (%)')}</dt><dd><bdi dir="ltr" data-preview-plan-cpu></bdi></dd></div></dl><p class="xp-help" data-preview-plan-capacity role="status" aria-live="polite"></p><p class="xp-help">${copy('Preview only. The server checks capacity, permissions and address availability when submitted.', 'هذه معاينة فقط. يفحص الخادم السعة والصلاحيات وتوفر العنوان عند الإرسال.')}</p></section>`
+  return `<section class="xp-card xp-form-group" style="gap:var(--xp-space-group,24px)" data-create-plan-preview><h2 class="xp-section-title" style="margin:0">${copy('Selected plan')}</h2><script type="application/json" data-plan-preview-model>${json}</script><dl class="xp-accounts__technical" style="margin:0"><div class="xp-field"><dt>${copy('Plan')}</dt><dd data-preview-plan-name></dd></div><div class="xp-field"><dt>${copy('Disk (MiB)')}</dt><dd><bdi dir="ltr" data-preview-plan-disk></bdi></dd></div><div class="xp-field"><dt>${copy('Memory (MiB)')}</dt><dd><bdi dir="ltr" data-preview-plan-memory></bdi></dd></div><div class="xp-field"><dt>${copy('CPU (%)')}</dt><dd><bdi dir="ltr" data-preview-plan-cpu></bdi></dd></div></dl><p class="xp-help" data-preview-plan-capacity role="status" aria-live="polite"></p><p class="xp-help">${copy('Preview only. The server checks capacity, permissions and address availability when submitted.')}</p></section>`
 }
 
 function bindAccountPlanPreviews(): void {
@@ -98,16 +97,15 @@ function bindAccountPlanPreviews(): void {
     let model: AccountPlanPreview
     try { model = JSON.parse(source.textContent || '{}') as AccountPlanPreview } catch { return }
     if (!Array.isArray(model.plans)) return
-    const ar = document.documentElement.lang === 'ar'
     const refresh = () => {
       const plan = model.plans.find(item => item.id === select.value)
       const text = (selector: string, value: string) => { const node = preview.querySelector(selector); if (node) node.textContent = value }
-      text('[data-preview-plan-name]', plan?.name ?? (ar ? 'غير متاح' : 'Unavailable'))
-      for (const key of ['disk', 'memory', 'cpu'] as const) text('[data-preview-plan-' + key + ']', plan?.[key] === 'unlimited' ? (ar ? 'غير محدود' : 'Unlimited') : plan?.[key] ?? '—')
-      const message = plan?.capacity === 'fits' ? (ar ? 'تناسب الخطة السعة المحملة. يُعاد الفحص عند الإرسال.' : 'Fits the loaded capacity. Checked again when submitted.')
-        : plan?.capacity === 'exceeds' ? (ar ? 'تتجاوز الخطة السعة المحملة. راجع الخطة قبل الإرسال.' : 'Exceeds the loaded capacity. Review the plan before submitting.')
-        : plan?.capacity === 'server-check' ? (ar ? 'يفحص الخادم السعة عند الإرسال.' : 'The server checks capacity when submitted.')
-        : (ar ? 'فحص السعة غير متاح.' : 'Capacity preview is unavailable.')
+      text('[data-preview-plan-name]', plan?.name ?? (xpT('Unavailable')))
+      for (const key of ['disk', 'memory', 'cpu'] as const) text('[data-preview-plan-' + key + ']', plan?.[key] === 'unlimited' ? (xpT('Unlimited')) : plan?.[key] ?? '—')
+      const message = plan?.capacity === 'fits' ? (xpT('Fits the loaded capacity. Checked again when submitted.'))
+        : plan?.capacity === 'exceeds' ? (xpT('Exceeds the loaded capacity. Review the plan before submitting.'))
+        : plan?.capacity === 'server-check' ? (xpT('The server checks capacity when submitted.'))
+        : (xpT('Capacity preview is unavailable.'))
       text('[data-preview-plan-capacity]', message)
     }
     select.addEventListener('change', refresh); refresh()
@@ -131,7 +129,6 @@ function bindAccountLists(): void {
     const current = controls.querySelector<HTMLElement>('[data-list-page]')
     if (!search || !owner || !plan || !state || !count || !empty || !pages || !previous || !next || !current) return
     const pageSize = Math.min(100, Math.max(1, Number(controls.dataset.listPageSize) || 20))
-    const ar = document.documentElement.lang === 'ar'
     let page = 1
     const paint = () => {
       const term = search.value.trim().toLowerCase()
@@ -145,7 +142,7 @@ function bindAccountLists(): void {
       pages.hidden = totalPages < 2
       previous.disabled = page === 1; next.disabled = page === totalPages
       current.textContent = `${page} / ${totalPages}`
-      count.textContent = ar ? `عرض ${matched.length ? start + 1 : 0}-${Math.min(start + pageSize, matched.length)} من ${matched.length} حساب محمل` : `Showing ${matched.length ? start + 1 : 0}-${Math.min(start + pageSize, matched.length)} of ${matched.length} loaded accounts`
+      count.textContent = xpT('Showing {value}-{value2} of {length} loaded accounts', { value: matched.length ? start + 1 : 0, value2: Math.min(start + pageSize, matched.length), length: matched.length })
     }
     search.addEventListener('input', () => { page = 1; paint() })
     ;[owner, plan, state].forEach(control => control.addEventListener('change', () => { page = 1; paint() }))

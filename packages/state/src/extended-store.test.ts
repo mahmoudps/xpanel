@@ -289,16 +289,6 @@ describe('ExtendedFeaturesStore', () => {
 
       const cleanup = await store.cleanupDnsZones(['keep.example.com'])
       expect(cleanup.removedZones).toEqual(['orphan1.example.com', 'orphan2.example.com'])
-
-      const cluster = await store.saveExternalDnsClusterConfig({
-        enabled: true,
-        provider: 'cloudflare',
-        endpoint: 'https://api.cloudflare.com/client/v4',
-        syncRole: 'bidirectional',
-        lastSyncedAt: '2026-10-22T06:00:00Z',
-      })
-      expect(cluster.provider).toBe('cloudflare')
-      expect((await store.getExternalDnsClusterConfig()).enabled).toBe(true)
     })
   })
 
@@ -425,29 +415,10 @@ describe('ExtendedFeaturesStore', () => {
   describe('6. Databases Beyond MariaDB', () => {
     const accId = 'acc-db-01'
 
-    it('manages PostgreSQL databases/users, remote DB access hosts, DB maintenance, MongoDB, and Redis/Memcached sockets', async () => {
-      const pgDb = await store.createPostgresDatabase(accId, 'alice_analytics')
-      expect(pgDb.encoding).toBe('UTF8')
-      expect(await store.listPostgresDatabases(accId)).toHaveLength(1)
-
-      const pgUser = await store.createPostgresUser(accId, 'alice_pg', 'scram-sha-256$4096:salt$key')
-      expect(pgUser.name).toBe('alice_pg')
-      expect(await store.listPostgresUsers(accId)).toHaveLength(1)
-
+    it('manages remote DB access hosts and Redis/Memcached sockets', async () => {
       const hosts = await store.saveRemoteDbHosts(accId, ['192.0.2.50', '10.10.0.0/16'])
       expect(hosts).toEqual(['192.0.2.50', '10.10.0.0/16'])
       expect(await store.listRemoteDbHosts(accId)).toHaveLength(2)
-
-      const maint = await store.runDatabaseMaintenance(accId, 'alice_analytics', 'postgresql', 'optimize')
-      expect(maint.status).toBe('ok')
-      expect(maint.summary).toContain('POSTGRESQL optimize')
-
-      const mongo = await store.saveMongoDatabase(accId, {
-        name: 'alice_catalog',
-        users: ['alice_mongo_rw'],
-      })
-      expect(mongo.name).toBe('alice_catalog')
-      expect(await store.listMongoDatabases(accId)).toHaveLength(1)
 
       const cache = await store.saveAccountCacheConfig(accId, {
         redisEnabled: true,
@@ -459,9 +430,6 @@ describe('ExtendedFeaturesStore', () => {
       })
       expect(cache.redisMemoryMb).toBe(256)
       expect((await store.getAccountCacheConfig(accId)).redisEnabled).toBe(true)
-
-      expect(await store.deletePostgresDatabase(accId, pgDb.id)).toBe(true)
-      expect(await store.listPostgresDatabases(accId)).toHaveLength(0)
     })
   })
 

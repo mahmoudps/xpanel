@@ -1,3 +1,4 @@
+import './i18n.ts'
 /// <reference lib="dom" />
 
 /** A local creation aid: this value is never applied to an existing credential. */
@@ -38,8 +39,7 @@ function bindMailboxPasswordGenerator(): void {
       const reveal = target.type === 'password'
       target.type = reveal ? 'text' : 'password'
       button.setAttribute('aria-pressed', String(reveal))
-      const ar = document.documentElement.lang === 'ar'
-      const label = reveal ? (ar ? 'إخفاء كلمة المرور' : 'Hide password') : (ar ? 'إظهار كلمة المرور' : 'Reveal password')
+      const label = reveal ? (xpT('Hide password')) : (xpT('Reveal password'))
       button.textContent = label; button.title = label; button.setAttribute('aria-label', label)
       target.focus()
     })
@@ -56,16 +56,15 @@ function bindMailboxPasswordGenerator(): void {
       const target = targetId ? document.getElementById(targetId) : null
       if (!(target instanceof HTMLInputElement) || target.form !== form || !['password', 'text'].includes(target.type) || target.name !== 'password' || target.readOnly || target.matches(':disabled') || target.closest(unavailable) || target.autocomplete !== 'new-password') return
       const status = form.querySelector<HTMLElement>(accountCreation ? '[data-account-create-status]' : '[data-mailbox-status]')
-      const ar = document.documentElement.lang === 'ar'
       try {
         const password = generateMailboxPassword()
         if ((target.maxLength > 0 && target.maxLength < password.length) || target.minLength > password.length) return
         target.value = password
         target.dispatchEvent(new Event('input', { bubbles: true }))
         target.focus()
-        if (status) { status.hidden = false; status.textContent = ar ? 'تم توليد كلمة المرور محليًا. لم تُرسل تغييرات.' : 'Password generated locally. No changes have been sent.'; status.dataset.state = 'idle' }
+        if (status) { status.hidden = false; status.textContent = xpT(msgctxt('password-generate-client', 'Password generated locally. No changes have been sent.')); status.dataset.state = 'idle' }
       } catch {
-        if (status) { status.hidden = false; status.textContent = ar ? 'تعذر التوليد الآمن. أدخل كلمة المرور بنفسك.' : 'Secure generation is unavailable. Enter a password yourself.'; status.dataset.state = 'failed' }
+        if (status) { status.hidden = false; status.textContent = xpT(msgctxt('password-generate-client', 'Secure generation is unavailable. Enter a password yourself.')); status.dataset.state = 'failed' }
       }
     })
   })

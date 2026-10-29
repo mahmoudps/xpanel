@@ -3,11 +3,14 @@ import { tools } from './data/index.ts'
 import { navigation } from './data/navigation.ts'
 import { canonicalNavigationRoute, registeredDocumentAliases, canOpenRegisteredRoute, visibleNavigation, visibleRegisteredNavigation } from './navigation.ts'
 import type { VisibilityContext } from './visibility.ts'
-import { catalogKeys } from './i18n.ts'
+import { CATALOG_LOCALE_DIR, catalogKeys } from './i18n.ts'
 import type { NavSurfaceId, Surface } from './types.ts'
-import arCatalog from './locales/ar.json' with { type: 'json' }
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { catalogFromEntries, catalogKey, parsePo } from '@xpanel/core'
 
-const ar: Record<string, string> = arCatalog
+const arCatalog = catalogFromEntries(parsePo(readFileSync(join(CATALOG_LOCALE_DIR, 'ar.po'), 'utf8')).entries)
+const ar = (key: string, source: string): string | undefined => arCatalog.get(catalogKey(source, key)) ?? arCatalog.get(source)
 const ACLS = new Set([
   'create-account', 'edit-account', 'suspend-account', 'terminate-account', 'change-plan', 'manage-plans',
   'manage-feature-lists', 'manage-dns', 'manage-ssl', 'change-password', 'list-accounts', 'allow-unlimited-plans',
@@ -16,9 +19,9 @@ const ACLS = new Set([
 const pages = navigation.flatMap(s => s.sections.flatMap(sec => sec.pages.map(p => ({ surface: s.surface, section: sec, page: p }))))
 
 describe('navigation', () => {
-  it('binds store subdocuments to existing capability pages without duplicating tools or changing roles', () => {
-    expect(registeredDocumentAliases).toHaveLength(10)
-    expect(new Set(registeredDocumentAliases.map(row => row.route)).size).toBe(10)
+  it('binds store and mail subdocuments to existing capability pages without duplicating tools or changing roles', () => {
+    expect(registeredDocumentAliases).toHaveLength(14)
+    expect(new Set(registeredDocumentAliases.map(row => row.route)).size).toBe(14)
     const owner: VisibilityContext = { principal: { kind: 'user', id: 'owner', username: 'owner', accountId: 'account' }, disabledFeatures: new Set() }
     const root: VisibilityContext = { principal: { kind: 'root', id: 'root', username: 'root' }, disabledFeatures: new Set() }
     const reseller: VisibilityContext = { principal: { kind: 'reseller', id: 'reseller', username: 'reseller' }, reseller: { acl: ['list-accounts'] }, disabledFeatures: new Set() }
@@ -110,9 +113,9 @@ describe('navigation', () => {
 
   it('translates every section and page name', () => {
     const missing = navigation.flatMap(s => s.sections.flatMap(sec => [
-      catalogKeys.sectionName(s.surface, sec.id),
-      ...sec.pages.map(p => catalogKeys.pageName(s.surface, p.id)),
-    ])).filter(key => !ar[key]?.trim())
+      [catalogKeys.sectionName(s.surface, sec.id), sec.name] as const,
+      ...sec.pages.map(p => [catalogKeys.pageName(s.surface, p.id), p.name] as const),
+    ])).filter(([key, name]) => !ar(key, name)?.trim()).map(([key]) => key)
     expect(missing).toEqual([])
   })
 

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, vi } from 'vitest'
+import { join } from 'node:path'
 import { isXpanelError } from '@xpanel/core'
 
 const harness = vi.hoisted(() => ({
@@ -11,14 +12,23 @@ const harness = vi.hoisted(() => ({
   pipelineStart: vi.fn(async (): Promise<void> => undefined),
   pipelinePause: vi.fn(async (): Promise<void> => undefined),
   pipelineStop: vi.fn(async (): Promise<void> => undefined),
+  metricsStart: vi.fn(),
+  metricsStop: vi.fn(async (): Promise<void> => undefined),
+  recordMetrics: vi.fn(async () => undefined),
+  metricOptions: undefined as { write: (observation: Record<string, number | null>, at: string) => Promise<unknown> } | undefined,
+  lifecycleManaged: false,
+  onFence: undefined as (() => Promise<void>) | undefined,
+  writerEntries: 0,
   pipelines: 0,
   listens: 0,
+  chmods: [] as Array<[string, number]>,
 }))
 
 // Exercise the actual daemon composition and lifetime; host/DB/socket boundaries
 // are isolated. These tests do not qualify the Linux daemon or systemd itself.
-vi.mock('node:fs/promises', async (importOriginal) => ({ ...await importOriginal<typeof import('node:fs/promises')>(), mkdir: async () => undefined, chown: async () => undefined }))
-vi.mock('@xpanel/db', () => ({ createDb: () => ({ db: {}, runner: {}, close: harness.dbClose }), migrate: async () => undefined, initializeOperationalMetadata: async () => undefined }))
+// chmod joined the isolated boundary when the runtime directory became traverse-only 0711 (fa7748a).
+vi.mock('node:fs/promises', async (importOriginal) => ({ ...await importOriginal<typeof import('node:fs/promises')>(), mkdir: async () => undefined, chown: async () => undefined, chmod: async (path: string, mode: number) => { harness.chmods.push([path, mode]) } }))
+vi.mock('@xpanel/db', () => ({ createDb: () => ({ db: {}, runner: {}, close: harness.dbClose }), migrate: async () => undefined, initializeOperationalMetadata: async () => undefined, recordHostMetricsSample: harness.recordMetrics }))
 vi.mock('@xpanel/os', () => ({ detectOs: async () => ({ id: 'ubuntu', versionId: '24.04', family: 'debian', paths: { nginxUser: 'nginx' } }) }))
 vi.mock('@xpanel/state', () => ({ StateStore: class {} }))
 vi.mock('./production-file-runner.ts', () => ({
@@ -38,15 +48,19 @@ vi.mock('./analytics.ts', () => ({
     stop = harness.pipelineStop
   },
 }))
+vi.mock('./host-metrics.ts', () => ({ createHostMetricsCollector: (options: NonNullable<typeof harness.metricOptions>) => {
+  harness.metricOptions = options
+  return { start: harness.metricsStart, stop: harness.metricsStop }
+} }))
 // Modeled absent lifecycle namespace for composition diagnostics only. The actual
 // production admission/participant producers are not replaced by runtime options.
 vi.mock('../../../scripts/lifecycle-admission.mjs', () => ({
   awaitLifecycleWriterDrain: async () => undefined,
   createLifecycleBackgroundResources: <T>(callback: () => T): T => callback(),
-  isLifecycleManaged: async () => false,
+  isLifecycleManaged: async () => harness.lifecycleManaged,
   readLifecyclePublicStatus: async () => ({ active: false, reference: null, phase: 'normal' }),
-  startLifecycleWriterParticipant: async () => ({ close: async () => undefined }),
-  withLifecycleWriterAdmission: async <T>(callback: () => Promise<T>): Promise<T> => callback(),
+  startLifecycleWriterParticipant: async (_role: string, options: { onFence: () => Promise<void> }) => { harness.onFence = options.onFence; return { close: async () => undefined } },
+  withLifecycleWriterAdmission: async <T>(callback: () => Promise<T>): Promise<T> => { harness.writerEntries++; return callback() },
 }))
 vi.mock('./agent-origin.ts', () => ({ syncRuntimePublicOrigin: async () => undefined }))
 vi.mock('./host-access.ts', () => ({ ensureAcmeWebRoot: async () => undefined }))
@@ -76,6 +90,7 @@ beforeEach(() => {
   harness.options = undefined
   harness.factoryFatal = false
   harness.listens = 0
+  harness.chmods = []
   harness.pipelines = 0
   harness.runnerClose.mockReset().mockResolvedValue(undefined)
   harness.listenerClose.mockReset().mockResolvedValue(undefined)
@@ -83,6 +98,13 @@ beforeEach(() => {
   harness.pipelineStart.mockReset().mockResolvedValue(undefined)
   harness.pipelinePause.mockReset().mockResolvedValue(undefined)
   harness.pipelineStop.mockReset().mockResolvedValue(undefined)
+  harness.metricsStart.mockReset()
+  harness.metricsStop.mockReset().mockResolvedValue(undefined)
+  harness.recordMetrics.mockReset().mockResolvedValue(undefined)
+  harness.metricOptions = undefined
+  harness.lifecycleManaged = false
+  harness.onFence = undefined
+  harness.writerEntries = 0
 })
 
 afterEach(() => {
@@ -97,6 +119,7 @@ describe('privileged worker readiness in actual agent composition', () => {
   it('uses the root-only persistent sibling independently of the shared state path', async () => {
     const daemon = await start()
     assert.equal(harness.options?.incidentDir, '/var/lib/xpanel-agent/file-worker-incidents')
+    assert.deepEqual(harness.chmods, [['/lab/run', 0o711], [join('/lab/run', 'fpm'), 0o711]])
     await daemon.close()
   })
 
@@ -118,6 +141,33 @@ describe('privileged worker readiness in actual agent composition', () => {
     assert.equal(harness.pipelines, 1)
     assert.equal(harness.pipelineStart.mock.calls.length, 1)
     assert.equal(harness.pipelineStop.mock.calls.length, 1)
+    assert.equal(harness.metricsStart.mock.calls.length, 1)
+    assert.equal(harness.metricsStop.mock.calls.length, 1)
+    assert.ok(harness.metricsStop.mock.invocationCallOrder[0]! < harness.dbClose.mock.invocationCallOrder[0]!)
+  })
+
+  it('drains an in-flight host sample before the database closes', async () => {
+    const stopped = deferred()
+    harness.metricsStop.mockImplementation(() => stopped.promise)
+    const daemon = await start(), closing = daemon.close()
+    await flush()
+    assert.equal(harness.metricsStop.mock.calls.length, 1)
+    assert.equal(harness.dbClose.mock.calls.length, 0)
+    stopped.resolve(); await closing
+    assert.equal(harness.dbClose.mock.calls.length, 1)
+  })
+
+  it('fences the native host collector and admits each sample through the writer boundary', async () => {
+    harness.lifecycleManaged = true
+    const daemon = await start(), entries = harness.writerEntries
+    await harness.metricOptions!.write({ load1: 1 }, '2026-10-27T00:00:00.000Z')
+    assert.equal(harness.writerEntries, entries + 1)
+    assert.equal(harness.recordMetrics.mock.calls.length, 1)
+    await harness.onFence!()
+    assert.equal(harness.metricsStop.mock.calls.length, 1)
+    assert.equal(harness.pipelinePause.mock.calls.length, 1)
+    assert.ok(harness.metricsStop.mock.invocationCallOrder[0]! < harness.pipelinePause.mock.invocationCallOrder[0]!)
+    await daemon.close()
   })
 
   it('stops IPC admission on recovery failure without awaiting its reporting operation', async () => {

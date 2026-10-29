@@ -1,7 +1,12 @@
-/** Arabic-only type layer. LTR keeps the board stack, sizes, and tracking. */
+/** Arabic-script type layer. LTR keeps the board stack, sizes, and tracking. */
+import { LOCALES } from '@xpanel/core'
 
-export const BOARD_SANS_LTR = "'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif"
-export const BOARD_SANS_RTL = "'IBM Plex Sans Arabic', 'IBM Plex Sans', system-ui, sans-serif"
+// Arabic-script locales from the registry; their pages and lang-tagged fragments use this layer.
+const ARABIC_LANG = `:is(${LOCALES.filter(info => info.script === 'Arab').map(info => `[lang="${info.tag}"]`).join(', ')})`
+const ARABIC_HTML = `html${ARABIC_LANG}`
+
+export const BOARD_SANS_LTR = "'IBM Plex Sans', sans-serif"
+export const BOARD_SANS_RTL = 'sans-serif'
 
 const ARABIC_LETTER = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFC]/
 
@@ -17,7 +22,7 @@ const ar = (selector: string): string => {
   const onPort = selector.startsWith(port)
     ? `.xp-board-port[dir=rtl]${selector.slice(port.length)}`
     : `[dir=rtl] ${selector}`
-  return [`html[lang="ar"] ${selector}`, `html[dir=rtl] ${selector}`, onPort].join(',\n')
+  return [`${ARABIC_HTML} ${selector}`, `html[dir=rtl] ${selector}`, onPort].join(',\n')
 }
 
 const size = (px: string): string => `[style*="font-size: ${px}"], [style*="font-size:${px}"]`
@@ -33,31 +38,15 @@ const heading = (px: string, next: string): string => `${ar(`:is(h1, h2, h3, h4,
   line-height: 1.5 !important;
 }`
 
-const ARABIC_RANGE = 'U+0600-06FF, U+0750-077F, U+0870-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC'
-
-/** Arabic glyphs only, so a mono run keeps IBM Plex Mono for identifiers and numbers. */
-const arabicFace = (weight: number, file: string): string => `@font-face {
-  font-family: 'XP Arabic In Mono';
-  font-style: normal;
-  font-weight: ${weight};
-  font-display: swap;
-  src: url(https://fonts.gstatic.com/s/ibmplexsansarabic/v15/${file}.woff2) format('woff2');
-  unicode-range: ${ARABIC_RANGE};
-}`
-
 export const ARABIC_TYPE_CSS = `
-${arabicFace(400, 'Qw3CZRtWPQCuHme67tEYUIx3Kh0PHR9N6Ys43PWrfQ')}
-${arabicFace(500, 'Qw3NZRtWPQCuHme67tEYUIx3Kh0PHR9N6YPO_-CRXMR5Kw')}
-${arabicFace(600, 'Qw3NZRtWPQCuHme67tEYUIx3Kh0PHR9N6YPi-OCRXMR5Kw')}
-${arabicFace(700, 'Qw3NZRtWPQCuHme67tEYUIx3Kh0PHR9N6YOG-eCRXMR5Kw')}
 .xp-board-port { font-family: ${BOARD_SANS_LTR}; }
-html[lang="ar"] .xp-board-port,
+${ARABIC_HTML} .xp-board-port,
 html[dir=rtl] .xp-board-port,
 .xp-board-port[dir=rtl] { font-family: ${BOARD_SANS_RTL}; }
-html[lang="ar"] body,
+${ARABIC_HTML} body,
 html[dir=rtl] body { font-family: ${BOARD_SANS_RTL}; }
 ${ar('*')},
-html[lang="ar"],
+${ARABIC_HTML},
 html[dir=rtl],
 [dir=rtl] { letter-spacing: 0 !important; }
 ${ar(caption)} {
@@ -138,11 +127,18 @@ ${ar('[data-meta-value]')} {
   flex: none !important;
   min-inline-size: max-content !important;
 }
+/* LTR values keep their intrinsic width but break when a constrained field cannot hold them. */
 ${ar('bdi[dir="ltr"]')} {
   flex-shrink: 0 !important;
-  white-space: nowrap !important;
+  white-space: normal !important;
+  overflow-wrap: break-word !important;
   overflow: visible !important;
   text-overflow: clip !important;
+}
+/* Technical table tokens stay whole; their table region scrolls instead. */
+${ar('bdi[dir="ltr"]:is(.xp-chart-technical-value, .xp-plan-resource-value, .xp-technical-token)')} {
+  white-space: nowrap !important;
+  overflow-wrap: normal !important;
 }
 ${ar('bdi[dir="ltr"][style*="overflow-wrap: anywhere"]')},
 ${ar('[aria-labelledby="host-title"] dd bdi[dir="ltr"]')} {
@@ -158,9 +154,10 @@ ${ar('[aria-labelledby="host-title"] dd bdi[dir="ltr"]')} {
 ${ar('[style*="Plex Mono"]')},
 ${ar('.xp-mono')},
 ${ar('code')} {
-  font-family: 'XP Arabic In Mono', 'IBM Plex Mono', monospace !important;
+  font-family: 'IBM Plex Mono', monospace !important;
 }
-${ar('.xp-ar-sentence')} {
+.xp-ar-sentence,
+${ARABIC_LANG}:not(code):not(pre):not(kbd):not(.xp-mono) {
   font-family: ${BOARD_SANS_RTL} !important;
 }
 ${ar('a[data-usage-link]')} {
@@ -184,19 +181,26 @@ ${ar('[data-mail-name] bdi[dir="ltr"]')} {
 }
 ${ar('table')} {
   width: 100% !important;
-  min-width: 0 !important;
   table-layout: auto;
 }
-${ar('table :is(th, td)')} {
-  line-height: 1.4 !important;
+/* Table text follows the typography roles: headers use the label role, cells the body role. */
+${ar('table th')} {
+  line-height: var(--xp-leading-label) !important;
+}
+${ar('table td')} {
+  line-height: var(--xp-leading-body) !important;
 }
 ${ar('th')} {
   white-space: nowrap !important;
   overflow-wrap: normal !important;
 }
-${ar('table span[style*="overflow-wrap: anywhere"] bdi[dir="ltr"]:not(.xp-chart-technical-value):not(.xp-plan-resource-value)')},
-${ar('table div[style*="align-items: flex-start"] span bdi[dir="ltr"]:not(.xp-chart-technical-value):not(.xp-plan-resource-value)')},
-${ar('.xp-table td bdi[dir="ltr"]:not(.xp-chart-technical-value):not(.xp-plan-resource-value)')} {
+/* Tokens in scrolling native tables stay on one line; .xp-table cells opt into wrapping below. */
+${ar('table:not(.xp-table) td bdi[dir="ltr"]:not([style*="overflow-wrap: anywhere"])')} {
+  white-space: nowrap !important;
+}
+${ar('table span[style*="overflow-wrap: anywhere"] bdi[dir="ltr"]:not(.xp-chart-technical-value):not(.xp-plan-resource-value):not(.xp-technical-token)')},
+${ar('table div[style*="align-items: flex-start"] span bdi[dir="ltr"]:not(.xp-chart-technical-value):not(.xp-plan-resource-value):not(.xp-technical-token)')},
+${ar('.xp-table td bdi[dir="ltr"]:not(.xp-chart-technical-value):not(.xp-plan-resource-value):not(.xp-technical-token)')} {
   white-space: normal !important;
   overflow-wrap: anywhere !important;
   flex-shrink: 1 !important;
@@ -228,7 +232,7 @@ ${ar('.xp-badge')} {
   white-space: normal;
   overflow-wrap: anywhere;
 }
-html[lang="ar"] .xp-board-port[data-home-phone="true"],
+${ARABIC_HTML} .xp-board-port[data-home-phone="true"],
 .xp-board-port[dir=rtl][data-home-phone="true"] {
   overflow-x: hidden !important;
   overflow-y: auto !important;
@@ -296,7 +300,7 @@ ${ar('[data-section="audit-log"] .xp-audit-mobile-label')} {
     padding: 0;
     font-size: 16px;
   }
-  [data-section="audit-log"] td.xp-mono .xp-audit-value { font-size: 14px; }
+  [data-section="audit-log"] .xp-audit-value > :is(time, bdi.xp-mono) { font-size: 14px; }
   [data-section="audit-log"] .xp-audit-mobile-label { display: block; }
   ${ar(':is(table, thead, tbody, tr, th, td):not(.xp-table):not(.xp-table *):not(.xp-accounts__table):not(.xp-accounts__table *)')} {
     display: block !important;

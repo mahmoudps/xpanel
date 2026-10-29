@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tools } from '../../packages/catalog/src/index.ts'
 import { defaultPlan } from '../../packages/core/src/index.ts'
-import { renderWebApp } from '../../apps/web/src/app.ts'
+import { renderWebApp, serveStaticAsset } from '../../apps/web/src/app.ts'
 import { collectSnapshotFiles, computeSourceDigest } from '../../scripts/vm/source-snapshot.mjs'
 import { assertAppliedFont } from './applied-font-contract.mjs'
 
@@ -54,6 +54,9 @@ async function fixture() {
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://127.0.0.1')
+      // Pages load their client runtime from /assets; serve the product's own immutable assets.
+      const asset = serveStaticAsset(url.pathname)
+      if (asset) { res.writeHead(asset.status, Object.fromEntries(asset.headers)); res.end(Buffer.from(await asset.arrayBuffer())); return }
       if (url.pathname.startsWith('/api/')) {
         res.setHeader('content-type', 'application/json')
         if (url.pathname === '/api/auth/me') { res.end(JSON.stringify({ csrfToken: 'synthetic-ip-diagnostic-csrf' })); return }
@@ -167,7 +170,7 @@ try {
       await expect(selector).toHaveValue('shared')
       if (state.kind === 'native') {
         await ready(page); await page.evaluate(() => document.fonts.ready)
-        result.font = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
+        result.font = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
         const options = await selector.locator('option').evaluateAll(elements => elements.map(element => ({ value: element.value, text: element.textContent, disabled: element.disabled })))
         assert.equal(options.length, 4); assert.equal(options.some(option => option.text.includes(':')), false, 'Dedicated IPv6 inventory must not appear as a primary IPv4 choice')
         assert.equal(options.some(option => option.text.includes(ids.first) || option.text.includes(ids.second)), false)

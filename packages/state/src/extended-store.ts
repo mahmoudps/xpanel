@@ -1,20 +1,6 @@
 import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto'
 import { basename, join } from 'node:path'
-import {
-  assertBool,
-  assertEmail,
-  assertInt,
-  assertIpv4,
-  assertLine,
-  assertName,
-  assertRelPath,
-  fail,
-  isUuid,
-  oneOf,
-  validateDomainName,
-  validateIpList,
-  validateUsername,
-} from '@xpanel/core'
+import { assertBool, assertEmail, assertInt, assertIpv4, assertLine, assertName, assertRelPath, fail, isUuid, oneOf, validateDomainName, validateIpList, validateUsername, type Locale } from '@xpanel/core'
 import { AsyncMutex, atomicRemove, atomicWriteJson, listJsonFiles, listSubdirs, readJsonIfExists } from './atomic.ts'
 import { StateStore } from './store.ts'
 import type { WriterLease } from './writer-lock.ts'
@@ -248,15 +234,6 @@ export interface EmailAuthProvisionRecord {
   provisionedAt: string
 }
 
-export interface ExternalDnsClusterConfig {
-  enabled: boolean
-  provider: 'powerdns-axfr' | 'cloudflare' | 'route53'
-  endpoint: string
-  syncRole: 'push' | 'bidirectional'
-  lastSyncedAt?: string | null
-  updatedAt: string
-}
-
 // ---------------------------------------------------------------------------
 // Types — 4. Complete Backups & Transfers
 // ---------------------------------------------------------------------------
@@ -395,42 +372,6 @@ export interface WebExtrasConfig {
 // ---------------------------------------------------------------------------
 // Types — 6. Databases Beyond MariaDB
 // ---------------------------------------------------------------------------
-
-export interface PostgresDatabaseRecord {
-  id: string
-  accountId: string
-  name: string
-  encoding: string
-  createdAt: string
-}
-
-export interface PostgresUserRecord {
-  id: string
-  accountId: string
-  name: string
-  passwordHash: string
-  createdAt: string
-}
-
-export interface DatabaseMaintenanceResult {
-  id: string
-  accountId: string
-  dbName: string
-  engine: 'mariadb' | 'postgresql'
-  operation: 'check' | 'repair' | 'optimize'
-  status: 'ok'
-  summary: string
-  tablesChecked: number
-  executedAt: string
-}
-
-export interface MongoDatabaseRecord {
-  id: string
-  accountId: string
-  name: string
-  users: string[]
-  updatedAt: string
-}
 
 export interface AccountCacheConfig {
   accountId: string
@@ -1590,40 +1531,6 @@ export class ExtendedFeaturesStore {
     })
   }
 
-  async getExternalDnsClusterConfig(): Promise<ExternalDnsClusterConfig> {
-    const stored = await readJsonIfExists<ExternalDnsClusterConfig>(this.extPath('dns', 'cluster-config.json'))
-    if (stored) return stored
-    return {
-      enabled: false,
-      provider: 'powerdns-axfr',
-      endpoint: 'https://ns-cluster.local.test:8081',
-      syncRole: 'push',
-      lastSyncedAt: null,
-      updatedAt: new Date(0).toISOString(),
-    }
-  }
-
-  saveExternalDnsClusterConfig(config: {
-    enabled: boolean
-    provider: 'powerdns-axfr' | 'cloudflare' | 'route53'
-    endpoint: string
-    syncRole: 'push' | 'bidirectional'
-    lastSyncedAt?: string | null
-  }): Promise<ExternalDnsClusterConfig> {
-    return this.mutex.run(async () => {
-      const next: ExternalDnsClusterConfig = {
-        enabled: assertBool(config.enabled, 'enabled'),
-        provider: oneOf(config.provider, ['powerdns-axfr', 'cloudflare', 'route53'] as const, 'provider'),
-        endpoint: assertLine(config.endpoint, 512, 'endpoint', { allowEmpty: false }),
-        syncRole: oneOf(config.syncRole, ['push', 'bidirectional'] as const, 'syncRole'),
-        lastSyncedAt: config.lastSyncedAt ?? null,
-        updatedAt: new Date().toISOString(),
-      }
-      await atomicWriteJson(this.extPath('dns', 'cluster-config.json'), next)
-      return next
-    })
-  }
-
   // =========================================================================
   // 4. Complete Backups & Transfers
   // =========================================================================
@@ -2051,73 +1958,6 @@ export class ExtendedFeaturesStore {
   // 6. Databases Beyond MariaDB
   // =========================================================================
 
-  async listPostgresDatabases(accountId: string): Promise<PostgresDatabaseRecord[]> {
-    const safeAcc = safeSlug(accountId, 'accountId')
-    const files = await listJsonFiles(this.extPath('databases', 'postgres-dbs', safeAcc))
-    const rows = await Promise.all(files.map((f) => readJsonIfExists<PostgresDatabaseRecord>(f)))
-    return rows
-      .filter((r): r is PostgresDatabaseRecord => r !== null)
-      .sort((a, b) => a.name.localeCompare(b.name))
-  }
-
-  createPostgresDatabase(accountId: string, name: string): Promise<PostgresDatabaseRecord> {
-    return this.mutex.run(async () => {
-      const safeAcc = safeSlug(accountId, 'accountId')
-      const dbName = safeSlug(name, 'database name')
-      const existing = await this.listPostgresDatabases(accountId)
-      if (existing.some((d) => d.name === dbName)) {
-        fail('CONFLICT', `PostgreSQL database "${dbName}" already exists`, { name: dbName })
-      }
-      const id = randomUUID()
-      const record: PostgresDatabaseRecord = {
-        id,
-        accountId,
-        name: dbName,
-        encoding: 'UTF8',
-        createdAt: new Date().toISOString(),
-      }
-      await atomicWriteJson(this.extPath('databases', 'postgres-dbs', safeAcc, `${id}.json`), record)
-      return record
-    })
-  }
-
-  deletePostgresDatabase(accountId: string, id: string): Promise<boolean> {
-    return this.mutex.run(async () => {
-      const safeAcc = safeSlug(accountId, 'accountId')
-      const safeId = ensureId(id)
-      return atomicRemove(this.extPath('databases', 'postgres-dbs', safeAcc, `${safeId}.json`))
-    })
-  }
-
-  async listPostgresUsers(accountId: string): Promise<PostgresUserRecord[]> {
-    const safeAcc = safeSlug(accountId, 'accountId')
-    const files = await listJsonFiles(this.extPath('databases', 'postgres-users', safeAcc))
-    const rows = await Promise.all(files.map((f) => readJsonIfExists<PostgresUserRecord>(f)))
-    return rows.filter((r): r is PostgresUserRecord => r !== null).sort((a, b) => a.name.localeCompare(b.name))
-  }
-
-  createPostgresUser(accountId: string, name: string, passwordHash: string): Promise<PostgresUserRecord> {
-    return this.mutex.run(async () => {
-      const safeAcc = safeSlug(accountId, 'accountId')
-      const userName = safeSlug(name, 'database user')
-      const hash = assertLine(passwordHash, 512, 'passwordHash', { allowEmpty: false })
-      const existing = await this.listPostgresUsers(accountId)
-      if (existing.some((u) => u.name === userName)) {
-        fail('CONFLICT', `PostgreSQL user "${userName}" already exists`, { name: userName })
-      }
-      const id = randomUUID()
-      const record: PostgresUserRecord = {
-        id,
-        accountId,
-        name: userName,
-        passwordHash: hash,
-        createdAt: new Date().toISOString(),
-      }
-      await atomicWriteJson(this.extPath('databases', 'postgres-users', safeAcc, `${id}.json`), record)
-      return record
-    })
-  }
-
   async listRemoteDbHosts(accountId: string): Promise<string[]> {
     const safeAcc = safeSlug(accountId, 'accountId')
     const stored = await readJsonIfExists<{ hosts: string[] }>(
@@ -2137,60 +1977,6 @@ export class ExtendedFeaturesStore {
         updatedAt: new Date().toISOString(),
       })
       return validated
-    })
-  }
-
-  runDatabaseMaintenance(
-    accountId: string,
-    dbName: string,
-    engine: 'mariadb' | 'postgresql',
-    operation: 'check' | 'repair' | 'optimize',
-  ): Promise<DatabaseMaintenanceResult> {
-    return this.mutex.run(async () => {
-      const safeAcc = safeSlug(accountId, 'accountId')
-      const cleanDb = safeSlug(dbName, 'dbName')
-      const validEngine = oneOf(engine, ['mariadb', 'postgresql'] as const, 'engine')
-      const validOp = oneOf(operation, ['check', 'repair', 'optimize'] as const, 'operation')
-      const id = randomUUID()
-      const result: DatabaseMaintenanceResult = {
-        id,
-        accountId,
-        dbName: cleanDb,
-        engine: validEngine,
-        operation: validOp,
-        status: 'ok',
-        summary: `${validEngine.toUpperCase()} ${validOp} completed cleanly on ${cleanDb}`,
-        tablesChecked: 12,
-        executedAt: new Date().toISOString(),
-      }
-      await atomicWriteJson(this.extPath('databases', 'maintenance', safeAcc, `${id}.json`), result)
-      return result
-    })
-  }
-
-  async listMongoDatabases(accountId: string): Promise<MongoDatabaseRecord[]> {
-    const safeAcc = safeSlug(accountId, 'accountId')
-    const files = await listJsonFiles(this.extPath('databases', 'mongodb', safeAcc))
-    const rows = await Promise.all(files.map((f) => readJsonIfExists<MongoDatabaseRecord>(f)))
-    return rows.filter((r): r is MongoDatabaseRecord => r !== null).sort((a, b) => a.name.localeCompare(b.name))
-  }
-
-  saveMongoDatabase(
-    accountId: string,
-    db: { id?: string; name: string; users: string[] },
-  ): Promise<MongoDatabaseRecord> {
-    return this.mutex.run(async () => {
-      const safeAcc = safeSlug(accountId, 'accountId')
-      const id = ensureId(db.id)
-      const record: MongoDatabaseRecord = {
-        id,
-        accountId,
-        name: safeSlug(db.name, 'mongodb name'),
-        users: (db.users ?? []).map((u) => safeSlug(u, 'mongodb user')),
-        updatedAt: new Date().toISOString(),
-      }
-      await atomicWriteJson(this.extPath('databases', 'mongodb', safeAcc, `${id}.json`), record)
-      return record
     })
   }
 
@@ -2617,7 +2403,7 @@ export class ExtendedFeaturesStore {
   }
 
   saveLanguageOverrides(
-    locale: 'en' | 'ar',
+    locale: Locale,
     overrides: Record<string, string>,
   ): Promise<LanguageOverridesState> {
     return this.mutex.run(async () => {

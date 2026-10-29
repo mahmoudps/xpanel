@@ -1,3 +1,4 @@
+import { generateKeyPairSync, sign } from 'node:crypto'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { defaultPlan, validateUsername, type Account, type PhpSettings } from '@xpanel/core'
 import { createResellerPrincipal, createRootPrincipal, createTestDb, createUserPrincipal } from '@xpanel/db'
@@ -10,6 +11,22 @@ import { HostReconciler } from './reconciler.ts'
 import { agentCallerHeaders, createAgentApp } from './server.ts'
 
 const names = ['a', 'ab', 'abc', 'abcdefghijklmnop'] as const
+const der = (tag: number, ...parts: Buffer[]): Buffer => {
+  const body = Buffer.concat(parts), length: number[] = []
+  if (body.length > 127) for (let value = body.length; value; value >>>= 8) length.unshift(value & 255)
+  return Buffer.concat([Buffer.from([tag]), Buffer.from(length.length ? [128 | length.length, ...length] : [body.length]), body])
+}
+const seq = (...parts: Buffer[]) => der(0x30, ...parts), oid = (hex: string) => der(0x06, Buffer.from(hex, 'hex'))
+/** Runtime-generated self-signed EC P-256 leaf for the given DNS names; a portable fixture only. */
+const selfSigned = (...hosts: string[]) => {
+  const pair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }), alg = seq(oid('2a8648ce3d040302'))
+  const name = seq(der(0x31, seq(oid('550403'), der(0x0c, Buffer.from('Portable upload fixture')))))
+  const tbs = seq(der(0xa0, der(0x02, Buffer.from([2]))), der(0x02, Buffer.from([5])), alg, name, seq(der(0x17, Buffer.from('250101000000Z')), der(0x17, Buffer.from('280101000000Z'))),
+    name, pair.publicKey.export({ format: 'der', type: 'spki' }), der(0xa3, seq(seq(oid('551d11'), der(0x04, seq(...hosts.map(host => der(0x82, Buffer.from(host)))))))))
+  const bytes = seq(tbs, alg, der(0x03, Buffer.concat([Buffer.from([0]), sign('sha256', tbs, pair.privateKey)])))
+  return { fullchainPem: '-----BEGIN CERTIFICATE-----\n' + bytes.toString('base64').match(/.{1,64}/g)!.join('\n') + '\n-----END CERTIFICATE-----\n',
+    privateKeyPem: pair.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString() }
+}
 const hash = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const token = 'a'.repeat(64)
 const php: PhpSettings = { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} }
@@ -77,6 +94,17 @@ describe('short username agent dispatch retains target and privilege authority',
       expect(response.status).toBe(403)
     }
     expect(fileTargets).toEqual([]); expect(executor.executedCommands).toEqual([])
+  })
+  it('lets an account owner write manual certificate candidates for an owned domain only', async () => {
+    const own = await call(principalIds.get('abc')!, '/accounts/abc/certificates', 'POST', { operation: 'install', domain: 'abc.example.test', ...selfSigned('abc.example.test') })
+    const text = await own.text()
+    expect(own.status, text).toBe(200)
+    expect(text).not.toContain('PRIVATE KEY')
+    expect(JSON.parse(text)).toMatchObject({ certificate: { source: 'upload', autoRenew: false, names: ['abc.example.test'] }, application: { status: 'candidate_files_written', nativeApplied: false } })
+    const written = executor.files.size
+    expect((await call(principalIds.get('a')!, '/accounts/ab/certificates', 'POST', { operation: 'install', domain: 'ab.example.test', ...selfSigned('ab.example.test') })).status).toBe(403)
+    expect((await call(principalIds.get('abc')!, '/accounts/abc/certificates', 'POST', { operation: 'install', domain: 'abc.example.test', ...selfSigned('abc.example.test', 'ab.example.test') })).status).toBe(403)
+    expect(executor.files.size).toBe(written)
   })
   it.each(names)('keeps archive names account-bound for %s', username => {
     const file = backupFileName(username, '20261024T120000Z')

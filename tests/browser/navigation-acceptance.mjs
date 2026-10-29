@@ -9,11 +9,12 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectSnapshotFiles, computeSourceDigest } from '../../scripts/vm/source-snapshot.mjs'
 import { createVisualFixture } from './visual-fixture.mjs'
+import { assertAppliedFont } from './applied-font-contract.mjs'
 
 const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
 const focusable = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]'
 const routes = [
-  { path: '/home', to: '/domains', marker: '[data-board-port="xpanel-home"]', target: '[data-domains-table]' },
+  { path: '/home', to: '/domains', marker: '[data-board-port="xpanel-home"]', target: '[data-approved-xpanel-workspace="/domains"] [data-domain-workspace] [data-domain-table]' },
   { path: '/whm', to: '/whm/accounts', marker: '[data-section="overview-attention"]', target: '[data-section="accounts-isolation"]' },
   { path: '/mail/inbox', to: '/mail/compose', marker: '[data-mail-pane="message-list"]', target: '[data-compose-form]' },
   { path: '/files/manager', to: '/home', marker: '[data-file-manager-table]', target: '[data-board-port="xpanel-home"]' },
@@ -135,7 +136,7 @@ function fontsFromCss(bytes) {
     if (!urls.length) throw fontFailure('font-css-source-missing')
     for (const url of urls) fonts.add(fontAssetUrl(url[1], 'font'))
   }
-  for (const family of ['IBM Plex Sans', 'IBM Plex Sans Arabic', 'IBM Plex Mono']) if (!families.has(family)) throw fontFailure('font-css-family-missing')
+  for (const family of ['IBM Plex Sans', 'IBM Plex Mono']) if (!families.has(family)) throw fontFailure('font-css-family-missing')
   const allUrls = [...css.matchAll(/url\(\s*['"]?([^)'"\s]+)['"]?\s*\)/g)].map(match => fontAssetUrl(match[1], 'font'))
   if (allUrls.some(url => !fonts.has(url))) throw fontFailure('font-css-extra-resource')
   return fonts
@@ -276,7 +277,8 @@ async function prepareNavigationFontTransport(browser, fixture, unqualifiedFixtu
       for (const value of input.css) { cssUrls.add(value); addProvenance(value, { kind: 'rendered-stylesheet-link', path, locale, document_sha256: documentHash }) }
       for (const value of input.fonts) { fontUrls.add(value); inlineFontUrls.add(value); addProvenance(value, { kind: 'rendered-inline-font-face', path, locale, document_sha256: documentHash }) }
     }
-    if (cssUrls.size !== NAV_FONT_LIMITS.cssUrls || fontUrls.size !== 4) throw fontFailure('font-inventory-source-changed')
+    // Arabic uses the generic sans-serif family, so no rendered document declares an inline web font face.
+    if (cssUrls.size !== NAV_FONT_LIMITS.cssUrls || fontUrls.size !== 0) throw fontFailure('font-inventory-source-changed')
     for (const target of [fixture, unqualifiedFixture]) await probe(target.baseUrl, 'en', false)
     if (!profiles.css.length) throw fontFailure('font-css-header-profile-missing')
     phase = 'css-fetch'
@@ -370,19 +372,22 @@ function failureNetworkDiagnostics(page) {
 
 async function fontGate(page, locale) {
   const result = await page.evaluate(async locale => {
-    const family = locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans'
+    const family = locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans'
     const text = locale === 'ar' ? 'الحساب 0123456789' : 'Account 0123456789'
     let ready = false
     await Promise.race([document.fonts.ready.then(() => { ready = true }), new Promise(resolve => setTimeout(resolve, 10000))])
     const faces = [...document.fonts].map(face => ({ family: face.family.replaceAll('"', '').replaceAll("'", ''), status: face.status }))
-    return { ready, status: document.fonts.status, family, glyph_check: document.fonts.check(`14px "${family}"`, text), body_family: getComputedStyle(document.body).fontFamily, faces }
+    return { ready, status: document.fonts.status, family, glyph_check: document.fonts.check(family === 'sans-serif' ? '14px sans-serif' : `14px "${family}"`, text), body_family: getComputedStyle(document.body).fontFamily, faces }
   }, locale)
   assert.equal(result.ready, true, 'Font loading must finish within the recorded observation window')
   assert.equal(result.status, 'loaded')
-  assert.ok(result.faces.some(face => face.family === result.family && face.status === 'loaded'), 'The expected downloadable locale face must actually load')
+  if (locale === 'en') assert.ok(result.faces.some(face => face.family === result.family && face.status === 'loaded'), 'The expected downloadable English locale face must actually load')
   assert.equal(result.glyph_check, true)
-  assert.ok(result.body_family.includes(result.family), 'The locale body must select its intended family')
+  if (locale === 'ar') assert.equal(result.body_family, 'sans-serif', 'Arabic UI must select the literal generic sans-serif family')
+  else assert.ok(result.body_family.includes(result.family), 'The locale body must select its intended family')
   assert.deepEqual(result.faces.filter(face => face.status === 'error'), [])
+  // Home on a phone shows its level-1 heading as role=heading; the desktop h1 is then hidden.
+  result.applied_ui = await assertAppliedFont(page, await page.locator('h1').first().isVisible() ? 'h1' : '[role="heading"][aria-level="1"]', result.family)
   return result
 }
 
@@ -446,6 +451,13 @@ async function mobileOverlay(page, expect, observations, { requireLongScroll = f
   }
   const sidebar = page.locator(phone ? '#m-drawer' : '[data-xp-sidebar]')
   const background = page.locator(phone ? '[data-home-phone] > main' : '[data-xp-shell-content]')
+  // The shell content is the inert background; in xMail the folder sidebar sits inside it, so every other child must be inert.
+  const backgroundInert = () => background.evaluate(element => {
+    const sidebar = element.querySelector(':scope > [data-xp-sidebar]')
+    if (!sidebar) return element.inert
+    const others = [...element.children].filter(child => child !== sidebar && !child.hasAttribute('data-xp-nav-backdrop') && !['STYLE', 'SCRIPT'].includes(child.tagName))
+    return others.length > 0 && others.every(child => child.inert)
+  })
   await page.evaluate(long => window.scrollTo(0, long ? Math.min(180, document.documentElement.scrollHeight - innerHeight) : 0), requireLongScroll)
   await frames(page)
   const before = await page.evaluate(() => ({ y: scrollY, maximum: document.documentElement.scrollHeight - innerHeight, scroll_height: document.documentElement.scrollHeight, client_height: document.documentElement.clientHeight, body_height: document.body.getBoundingClientRect().height }))
@@ -453,7 +465,7 @@ async function mobileOverlay(page, expect, observations, { requireLongScroll = f
   const opening = await observeAction(page, () => toggle.click())
   await expect(sidebar).toHaveAttribute('role', 'dialog')
   await expect(sidebar).toHaveAttribute('aria-modal', 'true')
-  assert.equal(await background.evaluate(element => element.inert), true)
+  assert.equal(await backgroundInert(), true)
   if (phone) assert.equal(await page.locator('[data-home-phone] > header').evaluate(element => element.inert), true)
   assert.equal(await sidebar.evaluate(element => element.contains(document.activeElement)), true)
   const trace = []
@@ -478,7 +490,7 @@ async function mobileOverlay(page, expect, observations, { requireLongScroll = f
   const closing = await observeAction(page, () => page.keyboard.press('Escape'), 'keydown')
   await expect(toggle).toHaveAttribute('aria-expanded', 'false')
   await expect(toggle).toBeFocused()
-  assert.equal(await background.evaluate(element => element.inert), false)
+  assert.equal(await backgroundInert(), false)
   if (phone) assert.equal(await page.locator('[data-home-phone] > header').evaluate(element => element.inert), false)
   const after = await page.evaluate(() => scrollY)
   observations.push({ check: 'mobile-overlay', surface: phone ? 'home' : 'shared', focus_destinations: endpoints.count, long_form_scroll: requireLongScroll, scroll_maximum: before.maximum, scroll_before: before.y, scroll_before_escape: beforeClosing, scroll_after: after, opening, closing })
@@ -973,7 +985,7 @@ async function paletteAlias(page, state, expect, observations) {
   assertContext(new URL(href, page.url()).href, state, { path: '/domains' })
   await page.keyboard.press('Enter')
   await page.waitForURL(url => url.pathname === '/domains')
-  await expect(page.locator('[data-domains-table]')).toBeVisible()
+  await expect(page.locator('[data-approved-xpanel-workspace="/domains"] [data-domain-workspace] [data-domain-table]')).toBeVisible()
   await currentPage(page, '/domains', expect)
   assertContext(page.url(), state, { path: '/domains' })
   observations.push({ check: 'authorized-alias-search-and-keyboard-navigation', alias: 'Addon Domains', destination: '/domains', visible_label_unchanged: true, actual_enter_navigation: true, opening_motion: openingMotion, ...geometry })
@@ -1163,7 +1175,8 @@ export async function measureAuditGeometry(page) {
         if (!label) throw new Error('The actual select label text must be visible')
         return [{ id: control.id, label_edge: rtl ? label.right : label.left, selected_text: control.selectedOptions[0]?.textContent.trim() ?? '', control_visible: visible(control), control_rect: { left: box.left, right: box.right, top: box.top, bottom: box.bottom }, edge_basis: 'pending-native-select-text-range' }]
       }),
-      label_input_edges: fields.map(field => { const label = glyph(field.querySelector('label')), control = rect(controlFor(field)); return label ? Math.abs(rtl ? label.right - control.right : label.left - control.left) : null }),
+      // Label text aligns with the control's text edge (outer edge plus border and padding), as select text is measured below.
+      label_input_edges: fields.map(field => { const label = glyph(field.querySelector('label')), element = controlFor(field), control = rect(element), style = getComputedStyle(element); const content = rtl ? control.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight) : control.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft); return label ? Math.abs((rtl ? label.right : label.left) - content) : null }),
       last_field_to_submit: fields.length ? submit.top - rect(fields.at(-1)).bottom : null, action_siblings: siblingGaps(actions),
       controls: [...formElement.querySelectorAll('input:not([type="hidden"]),select,button[type="submit"],a[data-audit-clear]')].map(control => ({ id: control.id || (control.hasAttribute('data-audit-clear') ? 'filter-clear' : 'filter-submit'), tag: control.tagName, width: rect(control).width, height: rect(control).height })),
       pager_groups: pagerGroups.length, pager_links: pagerLinks.length, empty_pager_groups: pagerGroups.filter(group => !group.querySelector('a[href]')).length,
@@ -1212,13 +1225,14 @@ export function assertAuditGeometry(metrics, state) {
   assert.equal(metrics.form_to_table, 24, 'Audit filters and table must have a 24px group gap')
   assert.deepEqual(metrics.field_ids, ['audit-actor', 'audit-action', 'audit-target', 'audit-outcome', 'audit-from', 'audit-to'], 'All six current audit inputs/selects must be measured')
   assert.deepEqual(metrics.label_to_input, [8, 8, 8, 8, 8, 8], 'Each real filter input/select must sit 8px below its label')
-  assert.deepEqual(metrics.field_siblings, [16, 16, 16, 16, 16], 'All adjacent filter fields retain 16px gaps across their actual parent/grid hierarchy')
-  assert.equal(metrics.last_field_to_submit, 16, 'The action group must remain 16px after the last field')
+  // Sibling fields keep 16px; the nested outcome/date group and the action group start a new group 24px below the previous one.
+  assert.deepEqual(metrics.field_siblings, [16, 16, 16, 16, 24], 'Sibling filter fields keep 16px gaps and the nested field group starts 24px below them')
+  assert.equal(metrics.last_field_to_submit, 24, 'The action group starts 24px after the last field')
   assert.deepEqual(metrics.action_siblings, [16], 'Clear and Apply retain the 16px sibling-control gap')
   assert.deepEqual(metrics.label_control_outer_edges, [0, 0, 0, 0, 0, 0], 'All filter labels and control borders retain the separate outer grid invariant')
   assert.equal(metrics.label_input_edges.length, 6)
   assert.equal(metrics.select_alignment.length, 1)
-  assert.deepEqual(metrics.label_input_edges.filter((_delta, index) => !metrics.select_alignment.some(value => value.id === metrics.field_ids[index])), [0, 0, 0, 0, 0], 'Unchanged bare input fields retain their existing label/control alignment')
+  assert.deepEqual(metrics.label_input_edges.filter((_delta, index) => !metrics.select_alignment.some(value => value.id === metrics.field_ids[index])), [0, 0, 0, 0, 0], 'Bare input labels align with their control text edge')
   for (const value of metrics.select_alignment) {
     assert.equal(value.control_visible, true)
     assert.equal(value.edge_basis, 'actual-native-select-text-range')
@@ -1405,7 +1419,7 @@ export async function runNavigationAcceptance({ output, filter } = {}) {
   const actions = outcomes.flatMap(outcome => outcome.observations.flatMap(observation => observation.check === 'mobile-overlay' ? [observation.opening, observation.closing] : []))
   const times = actions.map(action => action.event_to_second_frame_ms).filter(Number.isFinite).sort((a, b) => a - b)
   const observations = outcomes.flatMap(outcome => outcome.observations)
-  const measurements = { local_input_events: times.length, event_to_second_frame_ms: { minimum: times[0] ?? null, median: times.length ? times[Math.floor(times.length / 2)] : null, p95: times.length ? times[Math.ceil(times.length * 0.95) - 1] : null, maximum: times.at(-1) ?? null }, observed_layout_shift_entries: actions.reduce((sum, action) => sum + action.shifts.length, 0), layout_shift_value_sum_including_recent_input: actions.reduce((sum, action) => sum + action.shifts.reduce((total, shift) => total + shift.value, 0), 0), fonts_ready: outcomes.filter(outcome => outcome.fonts?.ready).length, actual_locale_font_loaded: outcomes.filter(outcome => outcome.fonts?.faces.some(face => face.family === outcome.fonts.family && face.status === 'loaded')).length, explicit_control_fields: observations.filter(value => value.check === 'explicit-field-alignment').reduce((sum, value) => sum + value.measured, 0), workspace_summary_fields: observations.filter(value => value.check === 'unqualified-workspace-summary').reduce((sum, value) => sum + value.measured_fields, 0) }
+  const measurements = { local_input_events: times.length, event_to_second_frame_ms: { minimum: times[0] ?? null, median: times.length ? times[Math.floor(times.length / 2)] : null, p95: times.length ? times[Math.ceil(times.length * 0.95) - 1] : null, maximum: times.at(-1) ?? null }, observed_layout_shift_entries: actions.reduce((sum, action) => sum + action.shifts.length, 0), layout_shift_value_sum_including_recent_input: actions.reduce((sum, action) => sum + action.shifts.reduce((total, shift) => total + shift.value, 0), 0), fonts_ready: outcomes.filter(outcome => outcome.fonts?.ready).length, actual_locale_font_verified: outcomes.filter(outcome => outcome.fonts?.applied_ui?.rendered_glyphs > 0).length, actual_downloadable_locale_font_loaded: outcomes.filter(outcome => outcome.fonts?.family !== 'sans-serif' && outcome.fonts?.faces.some(face => face.family === outcome.fonts.family && face.status === 'loaded')).length, explicit_control_fields: observations.filter(value => value.check === 'explicit-field-alignment').reduce((sum, value) => sum + value.measured, 0), workspace_summary_fields: observations.filter(value => value.check === 'unqualified-workspace-summary').reduce((sum, value) => sum + value.measured_fields, 0) }
   const report = { schema_version: 1, captured_at: new Date().toISOString(), status: preparationFailure ? 'blocked' : outcomes.length === selected.length && outcomes.every(outcome => outcome.status === 'passed') && drift.length === 0 ? 'passed' : 'failed', font_transport: fontTransport?.report() ?? preparationFailure?.preparation ?? null, prerequisite_failure: preparationFailure, runtime: process.version, environment: { platform: process.platform, browser: browser.version(), headless: true, loopback: true, cpu_throttling: 'none', network_throttling: 'none', external_fonts: true, viewport_emulation_only: true, physical_touch_device: false }, scope: { filter: filter ?? null, full_suite_case_count: states.length, requested_case_count: selected.length, executed_case_count: outcomes.length, initial_widths: [...new Set(selected.map(state => state.width))].sort((a, b) => a - b), initial_heights: [...new Set(selected.map(state => state.height ?? (state.width < 960 ? 800 : 900)))].sort((a, b) => a - b), boundary_widths: [...new Set(selected.flatMap(state => state.kind.startsWith('home-') ? [800, 801] : ['sheet-close', 'toolbar-summary', 'palette-return'].includes(state.kind) ? [959, 960] : []))].sort((a, b) => a - b), locales: [...new Set(selected.map(state => state.locale))], qualified_catalog_test_states: selected.filter(state => !['summary', 'palette-unqualified'].includes(state.kind)).length, original_unqualified_catalog_states: selected.filter(state => ['summary', 'palette-unqualified'].includes(state.kind)).length }, tests: { total: outcomes.length, passed: outcomes.filter(outcome => outcome.status === 'passed').length, failed: outcomes.filter(outcome => outcome.status === 'failed').length }, measurements, duration_ms: preparationFailure ? 0 : Date.now() - started, source: { before_sha256: before.sha256, after_sha256: after.sha256, files: before.files.length, drift }, limits: ['Synthetic catalog and principals are test-only; no authentication, authorization enforcement, host command, hosting service or production qualification.', 'Theme persistence means selected URL context survives document navigation and reload; this suite does not require a browser storage preference absent from the product contract.', 'Input-event-to-second-frame measurements use browser performance.now and requestAnimationFrame. Action-to-second-frame durations also include automation dispatch. Neither is INP. Layout-shift entries include recent-input flags and are not a page CLS qualification.', 'Sampled shell routes, explicit field contracts, two locales and selected breakpoints do not certify every screen or accessibility requirement.', 'Font bytes are freshly prepared over bounded HTTPS and replayed unchanged; case timings qualify ready-font interaction and geometry, not cold CDN latency, availability or offline production.', 'The account Home filter is exercised directly: slash focuses the visible existing search/filter input and preserves native typing. Command-palette access remains separately exercised through its shared keyboard shortcut. The unresolved-account cases exercise only the standalone synthetic summary DTO renderer; real authenticated missing-account HTTP requests remain denied.'], outcomes }
   writeFileSync(join(destination, 'results.json'), `${JSON.stringify(report, null, 2)}\n`)
   writeFileSync(join(destination, 'README.md'), `# Synthetic navigation acceptance\n\n${report.tests.passed}/${report.tests.total} cases passed; source drift: ${drift.length}.\n\nSee [results](results.json). Font faces, field counts, focus observations, action-to-second-frame timings and layout-shift entries are recorded per case.\n\n${report.limits.map(value => `- ${value}`).join('\n')}\n`)

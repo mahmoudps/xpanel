@@ -151,17 +151,20 @@ describe('approved follow-up component and native validation boundaries', () => 
                     kind: 'user', id: 'principal', username: account.username, accountId: account.id
                 }, disabledFeatures: new Set()
             }, catalog: tools.map(tool => ['domains', 'create-domain'].includes(tool.id) ? {
-                ...tool, status: 'verified' as const
+                // Visibility requires both the implementation and its delivery to be verified.
+                ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const }
             } : tool)
         });
-        const native = document.querySelector<HTMLFormElement>('form[data-domain-form]')!;
+        // The connected domain workspace owns the single create form; its submit is gated until scoped records are read.
+        const native = document.querySelector<HTMLFormElement>('form[data-domain-create]')!;
         expect(native).not.toBeNull();
-        expect(native.querySelector('button[type="submit"]:not([disabled])')).not.toBeNull();
-        expect(document.querySelectorAll('form[data-domain-form]')).toHaveLength(1);
-        const extra = document.querySelector('[data-workspace-section="domain-create-details"]')!;
-        for (const label of ['Alias name', 'Subdomain', 'Under', 'Document root', 'PHP version', 'Site type', 'Create DNS records', 'Issue a TLS certificate'])
-            expect(extra.textContent).toContain(label);
-        expect(extra.querySelector('form,input:not([disabled]),select:not([disabled])')).toBeNull();
+        expect(document.querySelector('[data-domain-workspace]')?.getAttribute('data-domain-manage')).toBe('true');
+        expect(native.querySelector<HTMLButtonElement>('button[type="submit"][data-domain-create-submit]')?.disabled).toBe(true);
+        expect(document.querySelectorAll('form[data-domain-create]')).toHaveLength(1);
+        for (const label of ['Addon domain', 'Subdomain', 'Alias', 'Under / parent domain', 'Document root', 'PHP version', 'Site type', 'Create DNS records', 'Issue a TLS certificate'])
+            expect(native.textContent).toContain(label);
+        expect(native.querySelectorAll('[data-domain-native-options] input')).toHaveLength(2);
+        expect(native.querySelector('[data-domain-native-options] input:not([disabled])')).toBeNull();
         expect(document.querySelector('[data-workspace-section="domain-create-unread"]')).toBeNull();
         expect(document.querySelectorAll('h1')).toHaveLength(1);
         expectUniqueIds();
@@ -180,14 +183,16 @@ describe('approved follow-up component and native validation boundaries', () => 
                     kind: 'user', id: 'principal', username: account.username, accountId: account.id
                 }, disabledFeatures: new Set()
             }, catalog: tools.map(tool => ['mysql-databases', 'mysql-users'].includes(tool.id) ? {
-                ...tool, status: 'verified' as const
+                ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const }
             } : tool)
         });
-        const native = document.querySelector<HTMLFormElement>('form[data-database-form]')!;
+        // The connected database workspace reads scoped records itself; creation is gated until that read.
+        const native = document.querySelector<HTMLFormElement>('form[data-db-create]')!;
         expect(native).not.toBeNull();
-        expect(native.querySelector('button[type="submit"]:not([disabled])')).not.toBeNull();
-        const extra = document.querySelector('[data-workspace-table="database-list-details"]')!;
-        for (const label of ['Database', 'Size', 'Tables', 'Users with access', 'Collation', 'Last write', 'owner_app', 'Not read'])
+        expect(document.querySelector('[data-database-workspace]')?.getAttribute('data-db-manage')).toBe('true');
+        expect(native.querySelector<HTMLButtonElement>('button[type="submit"][data-db-create-submit]')?.disabled).toBe(true);
+        const extra = document.querySelector('table[data-database-table]')!;
+        for (const label of ['Database', 'Size', 'Tables', 'Users with access', 'Collation', 'Last write', 'Records have not been read.'])
             expect(extra.textContent).toContain(label);
         expect(document.querySelector('[data-workspace-section="database-list-details"] form')).toBeNull();
         expect(document.querySelector('[data-workspace-section="database-list-unread"]')).toBeNull();

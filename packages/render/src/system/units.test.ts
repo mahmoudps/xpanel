@@ -7,6 +7,8 @@ import {
   quoteExecArg,
   renderAppUnit,
   renderCronUnits,
+  CRON_COMMAND_RUNNER,
+  cronCommandPath,
   renderFpmUnit,
   renderLoginSliceDropin,
   type AppSpec,
@@ -218,7 +220,9 @@ describe('renderCronUnits', () => {
     expect(unitValues(cron.service.content, 'Type')).toEqual(['oneshot'])
     expect(unitValues(cron.service.content, 'User')).toEqual(['alice'])
     expect(unitValues(cron.service.content, 'Slice')).toEqual(['xpanel-1001.slice'])
-    expect(unitValues(cron.service.content, 'ExecStart')).toEqual(['/bin/sh -c "tar czf ~/b-$$(date +%%F).tgz \\"$$HOME/public_html\\""'])
+    expect(unitValues(cron.service.content, 'ExecStart')).toEqual([`/bin/sh -c ${quoteExecArg(CRON_COMMAND_RUNNER)} ${quoteExecArg('/bin/sh')} ${quoteExecArg(cron.commandFile.path)}`])
+    expect(unitValues(cron.service.content, 'StandardInput')).toEqual(['null'])
+    expect(cron.commandFile).toEqual({ path: '/etc/xpanel/cron/alice/backup.command', content: 'tar czf ~/b-$(date +%F).tgz "$HOME/public_html"', mode: 0o640, owner: 'root', group: 'alice' })
     expect(unitValues(cron.service.content, 'TimeoutStartSec')).toEqual(['infinity'])
     expect(unitValues(cron.service.content, 'ProtectSystem')).toEqual(['strict'])
     expect(cron.service.content).not.toContain('[Install]')
@@ -232,6 +236,24 @@ describe('renderCronUnits', () => {
   it('caps runtime when asked', () => {
     const c = renderCronUnits(account, { id: 'x', schedule: '@hourly', command: 'true', maxRuntimeSec: 600 }, rhelOs)
     expect(unitValues(c.service.content, 'TimeoutStartSec')).toEqual(['600s'])
+  })
+
+  it('keeps every public unit property and executable argv independent of the private command', () => {
+    const command = '  printf "%s" "SYNTHETIC_PRIVATE_CRON_VALUE_%_$HOME"  '
+    const first = renderCronUnits(account, { id: 'private', schedule: '@daily', command }, debianOs)
+    const second = renderCronUnits(account, { id: 'private', schedule: '@daily', command: 'printf other' }, debianOs)
+    expect(first.service).toEqual(second.service)
+    expect(first.timer).toEqual(second.timer)
+    expect(first.service.content + first.timer.content).not.toContain('SYNTHETIC_PRIVATE_CRON_VALUE')
+    expect(Buffer.from(first.commandFile.content, 'utf8')).toEqual(Buffer.from(command, 'utf8'))
+    expect(first.commandFile.mode & 0o007).toBe(0)
+    expect(first.commandFile.mode & 0o070).toBe(0o040)
+    expect(first.commandFile.owner).toBe('root')
+    expect(first.commandFile.group).toBe(account.username)
+    const other = renderCronUnits(makeAccount({ username: 'bob', home: '/home/bob', uid: 1002, gid: 1002 }), { id: 'private', schedule: '@daily', command: 'true' }, debianOs)
+    expect(other.commandFile.group).toBe('bob')
+    expect(other.commandFile.path).not.toBe(first.commandFile.path)
+    expect(() => cronCommandPath('alice', '../../etc/shadow')).toThrowError(XpanelError)
   })
 
   it.each([

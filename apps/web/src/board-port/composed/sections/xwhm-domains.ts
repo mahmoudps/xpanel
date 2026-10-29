@@ -1,22 +1,13 @@
+import '../../../i18n.ts'
 import type { ComposedRoute } from '../types.ts'
-
 export const xwhm_domains: readonly ComposedRoute[] = [
   {
     "route": "/whm/dns/more",
     "surface": "xwhm",
     "section": "domains",
-    "group": [
-      "Domains, DNS & SSL",
-      "النطاقات وDNS وSSL"
-    ],
-    "title": [
-      "More DNS tools",
-      "أدوات DNS إضافية"
-    ],
-    "lede": [
-      "More DNS tools data has not been read. Related actions remain unavailable.",
-      "لم تُقرأ بيانات أدوات DNS إضافية. تبقى الإجراءات المرتبطة غير متاحة."
-    ],
+    "group": msgid('Domains, DNS & SSL'),
+    "title": msgid('More DNS tools'),
+    "lede": msgid('More DNS tools data has not been read. Related actions remain unavailable.'),
     "layout": "list",
     "action": null,
     "columns": [],
@@ -27,18 +18,9 @@ export const xwhm_domains: readonly ComposedRoute[] = [
     "route": "/whm/ssl/install",
     "surface": "xwhm",
     "section": "domains",
-    "group": [
-      "Domains, DNS & SSL",
-      "النطاقات وDNS وSSL"
-    ],
-    "title": [
-      "Install certificate",
-      "تثبيت شهادة"
-    ],
-    "lede": [
-      "Install certificate data has not been read. Related actions remain unavailable.",
-      "لم تُقرأ بيانات تثبيت شهادة. تبقى الإجراءات المرتبطة غير متاحة."
-    ],
+    "group": msgid('Domains, DNS & SSL'),
+    "title": msgctxt('xwhm-domains', 'Install certificate'),
+    "lede": msgid('Install certificate data has not been read. Related actions remain unavailable.'),
     "layout": "ssl",
     "action": null,
     "columns": [],
@@ -49,18 +31,9 @@ export const xwhm_domains: readonly ComposedRoute[] = [
     "route": "/whm/dns/providers",
     "surface": "xwhm",
     "section": "domains",
-    "group": [
-      "Domains, DNS & SSL",
-      "النطاقات وDNS وSSL"
-    ],
-    "title": [
-      "Cloudflare & DNS providers",
-      "Cloudflare ومزوّدو DNS"
-    ],
-    "lede": [
-      "Cloudflare & DNS providers data has not been read. Related actions remain unavailable.",
-      "لم تُقرأ بيانات Cloudflare ومزوّدو DNS. تبقى الإجراءات المرتبطة غير متاحة."
-    ],
+    "group": msgid('Domains, DNS & SSL'),
+    "title": msgid('Cloudflare & DNS providers'),
+    "lede": msgid('Cloudflare & DNS providers data has not been read. Related actions remain unavailable.'),
     "layout": "list",
     "action": null,
     "columns": [],
@@ -71,18 +44,9 @@ export const xwhm_domains: readonly ComposedRoute[] = [
     "route": "/whm/dns/cluster",
     "surface": "xwhm",
     "section": "domains",
-    "group": [
-      "Domains, DNS & SSL",
-      "النطاقات وDNS وSSL"
-    ],
-    "title": [
-      "DNS cluster",
-      "عنقود DNS"
-    ],
-    "lede": [
-      "DNS cluster data has not been read. Related actions remain unavailable.",
-      "لم تُقرأ بيانات عنقود DNS. تبقى الإجراءات المرتبطة غير متاحة."
-    ],
+    "group": msgid('Domains, DNS & SSL'),
+    "title": msgid('DNS cluster'),
+    "lede": msgid('DNS cluster data has not been read. Related actions remain unavailable.'),
     "layout": "list",
     "action": null,
     "columns": [],

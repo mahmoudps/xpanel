@@ -7,6 +7,11 @@ import { renderPanelSurface } from './surfaces/xpanel.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
 import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
 import type { Account, Plan, Principal } from '@xpanel/core'
+import { composedRouteSpecs, nativeComposedRoutePaths } from './board-port/composed/all.ts'
+import { renderComposedRoutes } from './board-port/composed/render.ts'
+import { approvedXpanelWorkspaceRoutes } from './board-port/approved-xpanel-workspaces.ts'
+
+const unavailableProviderRead = (): never => { throw new Error('unqualified_provider_read') }
 
 const summaryAccount: Account = {
   id: 'private-account-id', username: 'owner7', uid: 9123456, gid: 9123457,
@@ -23,6 +28,62 @@ const summaryPlan: Plan = {
 const summaryOwner: Principal = { kind: 'user', id: 'private-principal-id', username: 'owner7', accountId: summaryAccount.id }
 
 describe('verified production availability', () => {
+  it.each(composedRouteSpecs.filter(row => !nativeComposedRoutePaths.has(row.route)))('retains an inert composed layout without provider reads on $route', spec => {
+    for (const locale of ['en', 'ar'] as const) {
+      const html = renderWebApp({
+        surface: spec.surface, activeRoute: spec.route, locale, catalog: [],
+        visibility: { principal: spec.surface === 'xwhm' ? { kind: 'root', id: 'root', username: 'administrator7' } : summaryOwner },
+        panel: { account: summaryAccount, get domains() { return unavailableProviderRead() }, get serviceUsers() { return unavailableProviderRead() } },
+      })
+      if (spec.surface === 'xpanel' && approvedXpanelWorkspaceRoutes.has(spec.route)) {
+        expect(html).toContain(`data-approved-xpanel-workspace="${spec.route}"`)
+        expect(html).toContain('data-workspace-mode="read-only"')
+      } else {
+        expect(html).toContain(`data-composed-route="${spec.route}"`)
+        expect(html).toContain('data-read-state="unavailable"')
+      }
+      expect(html).toContain('data-tool-availability="unverified"')
+      expect(html).not.toMatch(/<form\b|data-read-state="(?:loaded|empty)"/)
+      const staticOnly = renderComposedRoutes([spec], {
+        locale, route: spec.route,
+        get account() { return unavailableProviderRead() },
+        get accounts() { return unavailableProviderRead() },
+        get domains() { return unavailableProviderRead() },
+        get serviceUsers() { return unavailableProviderRead() },
+      }, true)
+      expect(staticOnly).toContain('data-read-state="unavailable"')
+      expect(staticOnly).not.toMatch(/<form\b|data-read-state="(?:loaded|empty)"/)
+    }
+  })
+
+  it.each([
+    '/software/installer', '/software/store', '/software/store/app', '/software/store/install',
+    '/software/store/progress', '/software/store/installed', '/software/store/updates', '/software/store/error',
+    '/whm/software/site-software', '/whm/software/store', '/whm/software/store/extensions', '/whm/software/store/activity',
+  ])('retains disabled store components without unqualified provider data on %s', route => {
+    const root = route.startsWith('/whm/')
+    const html = renderWebApp({
+      surface: root ? 'xwhm' : 'xpanel', activeRoute: route, catalog: [],
+      visibility: { principal: root ? { kind: 'root', id: 'root', username: 'administrator7' } : summaryOwner },
+      panel: { account: summaryAccount, domains: [{ accountId: summaryAccount.id, name: 'private-store-domain-marker' } as never] },
+    })
+    expect(html).toContain('data-extension-view')
+    expect(html).toContain('data-installer-state="unavailable"')
+    expect(html).toContain('data-tool-availability="unverified"')
+    expect(html).toMatch(/<button\b[^>]*disabled[^>]*data-wiring="unavailable"/)
+    expect(html).not.toMatch(/<form\b|data-installer-progress="(?:running|complete)"/)
+    for (const marker of ['private-store-domain-marker', '/private-home-marker', 'private-contact-marker']) expect(html).not.toContain(marker)
+  })
+
+  it.each(['foreign', 'suspended', 'missing'] as const)('does not expose an unavailable store layout for a %s account', kind => {
+    const html = renderWebApp({
+      surface: 'xpanel', activeRoute: '/software/installer', catalog: [], visibility: { principal: summaryOwner },
+      ...(kind === 'missing' ? {} : { panel: { account: { ...summaryAccount, ...(kind === 'foreign' ? { id: 'foreign-account' } : { status: 'suspended' as const }) } } }),
+    })
+    expect(html).not.toContain('data-extension-view')
+    expect(html).not.toMatch(/<form\b/)
+  })
+
   it.each(['xwhm', 'xpanel', 'xmail'] as const)('keeps an anonymous %s workspace unavailable without admitting registered navigation', surface => {
     const html = renderWebApp({
       surface, locale: 'en',
@@ -178,8 +239,10 @@ describe('verified production availability', () => {
     expect(html).toContain('قيد التفعيل')
     expect(html).toContain('<h1 class="xp-page-title">الرئيسية</h1>')
     expect(html).toContain('<title>الرئيسية — xPanel</title>')
-    expect(html).not.toContain('مساحة العمل')
-    expect(html).not.toContain('tool groups planned')
+    // Inline client bindings carry their own error strings; the generic workspace card is page markup.
+    const markup = html.replace(/<script\b[\s\S]*?<\/script>/g, '')
+    expect(markup).not.toContain('مساحة العمل')
+    expect(markup).not.toContain('tool groups planned')
     expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
   })
 

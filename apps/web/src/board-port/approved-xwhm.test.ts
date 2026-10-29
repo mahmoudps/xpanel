@@ -1,9 +1,12 @@
+// @vitest-environment jsdom
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import { qualifyHostTools, tools } from '@xpanel/catalog'
 import { defaultPlan, type Account, type ServerSettings } from '@xpanel/core'
 import { renderWhmSurface } from '../surfaces/xwhm.ts'
 import { renderWhmAuditExports, renderWhmAuditSupplement, renderWhmDetailPage, renderWhmDnsSupplement, whmDetailRoutes } from './approved-xwhm.ts'
+import { WHM_SSL_CLIENT_BINDING } from '../whm-ssl-client.ts'
+import { WHM_SSH_CLIENT_BINDING } from '../whm-ssh-client.ts'
 
 const root = { kind: 'root' as const, id: 'synthetic-root', username: 'synthetic-root' }
 const readyCatalog = tools.map(tool => ['feature-list-crud', 'server-settings-edit'].includes(tool.id) ? { ...tool, status: 'verified' as const } : tool)
@@ -118,7 +121,8 @@ describe('detailed administrator workspaces', () => {
     assert.equal([...html.matchAll(/<h1\b/g)].length, 1)
     for (const section of sections) assert.ok(html.includes(`data-whm-detail-section="${section}"`), section)
     for (const label of labels) assert.ok(html.includes(label), label)
-    for (const element of html.matchAll(/<(?:input|select|textarea|button)\b[^>]*>/g)) assert.match(element[0], /\bdisabled\b/)
+    // The root inventory read is an observation, not one of the unsupported operations.
+    for (const element of html.matchAll(/<(?:input|select|textarea|button)\b[^>]*>/g)) if (!/\sdata-whm-php-refresh\b/.test(element[0])) assert.match(element[0], /\bdisabled\b/)
     assert.doesNotMatch(html, /<form\b|value="(?:8\.1|8\.3|1\.5\.0|srv0\.xpanel\.test)"/)
     const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map(match => match[1]!)
     assert.equal(new Set(ids).size, ids.length)
@@ -127,7 +131,8 @@ describe('detailed administrator workspaces', () => {
   it('appends DNS import/export, SOA, history and health without replacing native CRUD', () => {
     const catalog = qualifyHostTools(tools, { executor: 'linux', probes: { 'control-plane': 'passed' } })
     const html = renderWhmSurface({ principal: root, activeRoute: '/whm/dns', catalog, accounts: [] })
-    for (const marker of ['data-dns-editor="true"', 'data-dns-add-zone="true"', 'data-dns-add-record="true"', 'data-dns-save="true"', 'data-dns-delete="true"', 'data-approved-whm-dns-supplement']) assert.equal(html.split(marker).length - 1, 1, marker)
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    for (const selector of ['[data-dns-editor="true"]', '[data-dns-add-zone="true"]', '[data-dns-add-record="true"]', '[data-dns-save="true"]', '[data-dns-delete="true"]', '[data-approved-whm-dns-supplement]']) assert.equal(doc.querySelectorAll(selector).length, 1, selector)
     assert.equal([...html.matchAll(/<h1\b/g)].length, 1)
     for (const label of ['Import BIND zone', 'Export zone file', 'SOA serial', 'Zone change history', 'PowerDNS API']) assert.ok(html.includes(label), label)
     assert.equal(renderWhmDnsSupplement({ principal: { kind: 'user', id: 'user', username: 'root', accountId: 'account' } }), '')
@@ -151,12 +156,14 @@ describe('detailed administrator workspaces', () => {
   it.each([
     ['/whm/domains', ['Domain kind', 'SSL assignment', 'PHP version', 'Clear filters', 'Site type', 'Wildcard', 'Unbound requests', 'Save default site', 'Discard']],
     ['/whm/ssl', ['Challenge', 'Auto-renew', 'Retry', 'Replace', 'Renewal queue', 'Next attempt (UTC)', 'Validation', 'Save AutoSSL settings', 'Discard']],
-    ['/whm/security/ssh', ['Keys and password', 'Added (UTC)', 'Last used (UTC)', 'Remove key', 'Last 24 hours', 'Method', 'Count', 'Result', 'Banned by SSH', 'Unban selected address', 'Discard']],
+    ['/whm/security/ssh', ['Keys and password', 'Added (UTC)', 'Last used (UTC)', 'Remove managed key', 'Last 24 hours', 'Method', 'Count', 'Result', 'Banned by SSH', 'Unban selected address', 'Discard']],
     ['/whm/services/web', ['client_max_body_size', 'Use suggested values', 'Unlimited child lifetime', 'Pending configuration difference', 'Proposed', 'Discard pending change', 'Restore selected generation']],
     ['/whm/security', ['Enable secret entrance path', 'Enable IP allowlist', 'By IP address', 'Block the address for', 'No expiry', 'Cancel', 'Unlimited request rate', 'Unlimited burst', 'Unlimited request body', 'Save and apply', 'Discard']],
   ] as const)('keeps all final reference microstates in %s with unique controls', (activeRoute, labels) => {
     const html = renderWhmDetailPage({ activeRoute, principal: root, catalog: readyCatalog, serverSettings: settings, domains: [], certificates: [{ names: ['synthetic.example.test'], notAfter: '2027-01-01T00:00:00.000Z' }] })!
-    for (const label of labels) assert.ok(html.includes(label), label)
+    // Certificate and key rows are rendered by the client from observed data; their controls live there.
+    const surface = html + (activeRoute === '/whm/ssl' ? WHM_SSL_CLIENT_BINDING : activeRoute === '/whm/security/ssh' ? WHM_SSH_CLIENT_BINDING : '')
+    for (const label of labels) assert.ok(surface.includes(label), label)
     assert.equal([...html.matchAll(/<h1\b/g)].length, 1)
     const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map(match => match[1]!)
     assert.equal(new Set(ids).size, ids.length, activeRoute)
@@ -216,7 +223,7 @@ describe('detailed administrator workspaces', () => {
 
   it('does not represent desired engine or PHP compatibility as installed package evidence', () => {
     const html = renderWhmDetailPage({ activeRoute: '/whm/software/php', principal: root })!
-    assert.match(html, /does not establish that the package is installed/)
+    assert.match(html, /kept separate from installed package and runtime evidence/)
     assert.match(html, /Installed versions/)
     assert.match(html, /Configure a version/)
     assert.match(html, /Dangerous functions/)
@@ -292,5 +299,32 @@ describe('administrator audit fidelity and data boundaries', () => {
     const href = /href="(data:text\/csv[^"]+)"/.exec(html)![1]!
     const csv = decodeURIComponent(href.split(',')[1]!)
     assert.ok(csv.includes("'=SUM(1,1)"))
+  })
+})
+
+describe('readable administrator audit and generation presentation', () => {
+  it.each(['en', 'ar'] as const)('uses minute-precision human dates in %s without changing audit export or generation inputs', locale => {
+    const at = '2026-10-27T14:00:01.123456+02:00'
+    const auditEntries = [{ ...rows[0]!, at }]
+    const generations = [{ generationId: 42, at, actor: 'synthetic-root', summary: 'Synthetic saved generation', stateChecksum: 'a'.repeat(64), filesCount: 7, durationMs: 5, status: 'superseded' as const }]
+    const original = JSON.stringify({ auditEntries, generations })
+    const supplement = renderWhmAuditSupplement({ locale, auditEntries, generations })
+    const summary = /<details data-audit-entry-detail><summary>([\s\S]*?)<\/summary>/.exec(supplement)![1]!
+    assert.ok(summary.includes('2026-10-27 12:00 UTC'))
+    const auditGenerations = supplement.split('data-whm-detail-section="audit-config-generations"')[1]!.split('</section>')[0]!
+    assert.ok(auditGenerations.includes('>2026-10-27 12:00 UTC<'))
+    const web = renderWhmDetailPage({ activeRoute: '/whm/services/web', locale, principal: root, serverSettings: settings, catalog: readyCatalog, generations })!
+    const webGenerations = web.split('data-whm-detail-section="web-generations"')[1]!.split('</section>')[0]!
+    assert.ok(webGenerations.includes('>2026-10-27 12:00 UTC<'))
+    const exportsHtml = renderWhmAuditExports({ locale, auditEntries })
+    const jsonHref = /href="(data:application\/json[^"]+)"/.exec(exportsHtml)![1]!
+    const exported = JSON.parse(decodeURIComponent(jsonHref.slice(jsonHref.indexOf(',') + 1))) as Array<Record<string, unknown>>
+    assert.equal(exported[0]!.at, '2026-10-27T14:00:01.123456+02:00')
+    assert.deepEqual(Object.keys(exported[0]!), ['at', 'actor', 'action', 'target', 'outcome'])
+    assert.doesNotMatch(JSON.stringify(exported), /synthetic-private-audit-key|must-never-be-exported|apiToken/)
+    const csvHref = /href="(data:text\/csv[^"]+)"/.exec(exportsHtml)![1]!
+    assert.ok(decodeURIComponent(csvHref.slice(csvHref.indexOf(',') + 1)).includes('"2026-10-27T14:00:01.123456+02:00"'))
+    assert.equal(JSON.stringify({ auditEntries, generations }), original)
+    assert.doesNotMatch(summary + auditGenerations + webGenerations, /[\u0660-\u0669\u06f0-\u06f9]/)
   })
 })

@@ -1,0 +1,42 @@
+import { describe, expect, it } from 'vitest'
+import { renderWhmMailQueueWorkspace } from './whm-mail-queue-workspace.ts'
+
+describe('WHM mail queue workspace renderer', () => {
+  it('renders the English workspace with summary, filters, bulk bar and an unread table', () => {
+    const html = renderWhmMailQueueWorkspace({ locale: 'en', canRead: true, canManage: true })
+    expect(html).toContain('dir="ltr"')
+    expect(html).toContain('data-mail-queue-can-read="true"')
+    expect(html).toContain('data-mail-queue-can-manage="true"')
+    for (const key of ['incoming', 'active', 'deferred', 'hold', 'maildrop']) expect(html).toContain(`data-whm-mail-queue-count="${key}"`)
+    for (const key of ['queue', 'text', 'age']) expect(html).toContain(`data-whm-mail-queue-filter="${key}"`)
+    for (const key of ['deliver', 'hold', 'release', 'delete']) expect(html).toMatch(new RegExp(`data-whm-mail-queue-bulk="${key}" disabled`))
+    expect(html).toContain('Retry now')
+    expect(html).toContain('The mail queue has not been read.')
+    expect(html).toContain('up to 50 messages')
+    expect(html).toContain('Message content and headers are never read here.')
+    expect(html).not.toContain('Queue management requires root authorization.')
+    expect(html).toMatch(/padding:16px/)
+    expect(html).toMatch(/@media\(min-width:601px\)\{\.xp-whm-mail-queue__card\{padding:24px\}\}/)
+    expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+  })
+  it('renders Arabic RTL copy with technical values isolated left-to-right', () => {
+    const html = renderWhmMailQueueWorkspace({ locale: 'ar', canRead: true, canManage: true })
+    expect(html).toContain('dir="rtl"')
+    expect(html).toContain('lang="ar"')
+    expect(html).toContain('ملخص الطابور')
+    expect(html).toContain('إعادة المحاولة الآن')
+    expect(html).toContain('لم يُقرأ طابور البريد.')
+    expect(html).toContain('<bdi dir="ltr" data-whm-mail-queue-observed-at>')
+    expect(html).toContain('dir="ltr" maxlength="254"')
+    expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+    expect(html).not.toMatch(/Queue summary|Retry now/)
+  })
+  it('keeps the layout but withholds management without root authorization', () => {
+    const html = renderWhmMailQueueWorkspace({ locale: 'en', canRead: false, canManage: true })
+    expect(html).toContain('data-mail-queue-can-read="false"')
+    expect(html).toContain('data-mail-queue-can-manage="false"')
+    expect(html).toContain('data-whm-mail-queue-refresh disabled')
+    expect(html).toContain('Queue management requires root authorization.')
+    expect(html).toContain('data-whm-mail-queue-rows')
+  })
+})

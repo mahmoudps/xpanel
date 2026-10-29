@@ -2,30 +2,26 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import { renderLoginSurface, type LoginSurfaceProps } from './surfaces/login.ts'
 
-const origins = [
-  { surface: 'xpanel', origin: 'https://panel.example.test:2083' },
-  { surface: 'xwhm', origin: 'https://whm.example.test:2087' },
-  { surface: 'xmail', origin: 'https://mail.example.test:2096' },
-] as const
+const origins = { xpanel: 'https://panel.example.test:2083', xwhm: 'https://whm.example.test:2087', xmail: 'https://mail.example.test:2096' } as const
 
 describe('approved sign-in composition with real authentication boundaries', () => {
   for (const audience of ['xpanel', 'xwhm', 'xmail'] as const) {
     for (const locale of ['en', 'ar'] as const) {
-      it(`retains the approved profile selector and contextual layout for ${audience}/${locale}`, () => {
-        const html = renderLoginSurface({ audience, locale, theme: 'light', panels: origins })
+      it(`shows only its own panel and keeps the contextual layout for ${audience}/${locale}`, () => {
+        const html = renderLoginSurface({ audience, locale, theme: 'light', publicOrigin: origins[audience] })
         assert.match(html, /data-login-design="approved"/)
         assert.match(html, /class="xp-login-entry"/)
         assert.match(html, /<aside class="xp-login-aside"/)
         assert.match(html, /<footer class="xp-login-footer" role="contentinfo"/)
-        const profiles = html.match(/<nav class="xp-login-profile-tabs"[\s\S]*?<\/nav>/)?.[0]
-        assert.ok(profiles)
-        assert.equal((profiles.match(/data-login-profile=/g) ?? []).length, 3)
-        assert.equal((profiles.match(/aria-current="page"/g) ?? []).length, 1)
-        assert.match(profiles, new RegExp(`data-login-profile="${audience}" aria-current="page"`))
-        assert.equal((profiles.match(/<a\b/g) ?? []).length, 2)
-        assert.doesNotMatch(profiles, /<button\b|name="(?:role|audience|targetSurface)"|\?target=/)
-        for (const destination of origins.filter(panel => panel.surface !== audience)) {
-          assert.ok(profiles.includes(`href="${destination.origin}/login?lang=${locale}&amp;theme=light"`))
+        // A sign-in page has no switcher, tab, link or name of another panel.
+        assert.doesNotMatch(html, /xp-login-profile-tabs|data-login-profile=|data-panel-link=|name="(?:role|audience|targetSurface)"/)
+        const own = new URL(origins[audience]).host
+        assert.ok(html.includes(`<span class="xp-brand__sub" dir="ltr">${own}</span>`))
+        assert.ok(html.includes(`<bdi dir="ltr">${own}</bdi>`))
+        const visible = html.replace(/<style>[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, ' ')
+        for (const other of (['xpanel', 'xwhm', 'xmail'] as const).filter(surface => surface !== audience)) {
+          assert.ok(!html.includes(new URL(origins[other]).host), other)
+          assert.ok(!visible.includes({ xpanel: 'xPanel', xwhm: 'xWHM', xmail: 'xMail' }[other]), other)
         }
         assert.equal((html.match(/<main\b/g) ?? []).length, 1)
         assert.equal((html.match(/<h1\b/g) ?? []).length, 1)
@@ -38,26 +34,24 @@ describe('approved sign-in composition with real authentication boundaries', () 
     }
   }
 
-  it('shows unconfigured profiles honestly and never uses a query target as listener identity', () => {
+  it('never uses a query target as listener identity', () => {
     const html = renderLoginSurface({ targetSurface: 'xwhm' })
-    const profiles = html.match(/<nav class="xp-login-profile-tabs"[\s\S]*?<\/nav>/)?.[0]
-    assert.ok(profiles)
-    assert.match(profiles, /data-login-profile="xpanel" aria-current="page"/)
-    assert.equal((profiles.match(/aria-disabled="true"/g) ?? []).length, 2)
-    assert.doesNotMatch(profiles, /<a\b/)
-    assert.doesNotMatch(html, /data-login-audience=/)
+    assert.doesNotMatch(html, /data-login-audience=|class="xp-login-profile-tabs"|class="xp-brand__sub"/)
     assert.match(html, /Sign in to xPanel/)
   })
 
-  it('does not turn unsafe origins into profile links or leak embedded credentials', () => {
-    const html = renderLoginSurface({ audience: 'xpanel', panels: [
-      { surface: 'xwhm', origin: 'https://user:do-not-render@whm.example.test:2087' },
-      { surface: 'xmail', origin: 'http://mail.example.test:2096' },
-    ] })
-    assert.doesNotMatch(html, /data-panel-link=|do-not-render|http:\/\/mail/)
-    const profiles = html.match(/<nav class="xp-login-profile-tabs"[\s\S]*?<\/nav>/)?.[0]
-    assert.ok(profiles)
-    assert.equal((profiles.match(/aria-disabled="true"/g) ?? []).length, 2)
+  it('renders no host for an inexact or credential-bearing own origin', () => {
+    for (const publicOrigin of ['https://user:do-not-render@panel.example.test:2083', 'http://panel.example.test:2083', 'https://panel.example.test:2083/login']) {
+      const html = renderLoginSurface({ audience: 'xpanel', publicOrigin })
+      assert.doesNotMatch(html, /do-not-render|panel\.example\.test|class="xp-brand__sub"/)
+    }
+  })
+
+  it('shows one generic message after a failed handoff, keeping the sign-in form', () => {
+    const html = renderLoginSurface({ audience: 'xmail', handoffFailed: true })
+    assert.match(html, /data-auth-error data-lockout-state="unknown" data-handoff-failed >This sign-in link is invalid or has expired\./)
+    assert.match(html, /data-login-form/)
+    assert.doesNotMatch(renderLoginSurface({ audience: 'xmail' }), /data-handoff-failed/)
   })
 
   it('retains optional factor fields only behind the actual server challenge', () => {

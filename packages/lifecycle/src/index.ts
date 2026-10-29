@@ -18,6 +18,7 @@ export type {
   WriteFileStep,
 } from './steps.ts'
 export type { ByteSource, Body } from './archive/reader.ts'
+export { walkTar, hashing } from './archive/reader.ts'
 export type { FileRef, ImportSink, SinkItem, SinkPart } from './archive/sink.ts'
 export type { EntryType, GuardOptions } from './archive/guard.ts'
 

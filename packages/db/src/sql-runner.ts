@@ -166,6 +166,9 @@ const runQuery = <T extends Row = Row>(db: DatabaseSync, text: string, params: r
     const rows = Reflect.apply(nativeAll, stmt, bound) as Record<string, unknown>[]
     return rows.map((r) => ({ ...r }) as T)
   }
+  // Mutation metadata is discarded. Read its rowid as bigint so a previous
+  // 64-bit insert cannot make otherwise successful non-returning DML throw.
+  stmt.setReadBigInts(true)
   Reflect.apply(nativeRun, stmt, bound)
   return []
 }

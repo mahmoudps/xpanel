@@ -36,7 +36,7 @@ export interface CapabilityDelivery {
   evidence: readonly CapabilityEvidence[]
 }
 
-/** Display text is the English source string; translations live in `locales/<lang>.json` under `catalogKeys`. */
+/** Display text is the English source string (the gettext msgid); translations live in `locales/<lang>.po`. */
 export interface CatalogGroup {
   id: string
   surface: Surface

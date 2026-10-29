@@ -134,7 +134,7 @@ describe('contact metadata DELETE target contracts on real local HTTP', () => {
     }
   })
 
-  it('rejects conflicting item selectors with 400 instead of silently deleting path A or body/query B', async () => {
+  it('rejects sealed item selectors with 422 instead of silently deleting path A or body/query B', async () => {
     const before = await snapshot()
     const probes = [
       { query: `?id=${sameAccount.id}` },
@@ -145,10 +145,10 @@ describe('contact metadata DELETE target contracts on real local HTTP', () => {
     ]
     for (const probe of probes) {
       const response = await request('mailbox', `/api/webmail/contacts/${own.id}${probe.query}`, 'DELETE', probe.body)
-      expect.soft(response.status).toBe(400)
+      expect.soft(response.status).toBe(422)
       const problem = await response.json() as { code?: string; detail?: string }
       expect.soft(problem.code).toBe('VALIDATION')
-      expect.soft(problem.detail).toMatch(/conflict/i)
+      expect.soft(problem.detail).toMatch(/revision|selector|unsupported/i)
       await expectUnchanged(before)
     }
   })
@@ -174,25 +174,29 @@ describe('contact metadata DELETE target contracts on real local HTTP', () => {
   })
 
   it.each(actors)('deletes rightful item A once for %s while preserving same-account B and the neighbor', async actor => {
-    const response = await request(actor, `/api/webmail/contacts/${own.id}?id=${own.id}`, 'DELETE', { id: own.id })
+    const listed = actor === 'mailbox' ? await (await request(actor, '/api/webmail/contacts', 'GET')).json() as { contacts: Array<{ id: string; revision: string }> } : null
+    const expectedRevision = listed?.contacts.find(contact => contact.id === own.id)?.revision
+    const response = actor === 'mailbox' ? await request(actor, `/api/webmail/contacts/${own.id}`, 'DELETE', { expectedRevision }) : await request(actor, `/api/webmail/contacts/${own.id}?id=${own.id}`, 'DELETE', { id: own.id })
     expect(response.status).toBe(200)
     const contacts = JSON.parse(await readFile(metadataPath, 'utf8')) as Contact[]
     expect(contacts.map(contact => contact.id)).toEqual([sameAccount.id, neighbor.id])
-    expect((await request(actor, `/api/webmail/contacts/${own.id}`)).status).toBe(404)
+    expect((await request(actor, `/api/webmail/contacts/${own.id}`, 'DELETE', actor === 'mailbox' ? { expectedRevision } : undefined)).status).toBe(404)
   })
 
-  it.each(['query', 'body', 'matching', 'duplicate-matching'] as const)('preserves the supported collection DELETE alias using %s selectors', async mode => {
+  it.each(['query', 'body', 'matching', 'duplicate-matching'] as const)('refuses the sealed collection DELETE alias using %s selectors without a current item revision', async mode => {
     const query = mode === 'body' ? '' : mode === 'duplicate-matching' ? `?id=${own.id}&id=${own.id}` : `?id=${own.id}`
     const body = mode === 'body' || mode === 'matching' ? { id: own.id } : undefined
-    expect((await request('mailbox', `/api/webmail/contacts${query}`, 'DELETE', body)).status).toBe(200)
-    expect((JSON.parse(await readFile(metadataPath, 'utf8')) as Contact[]).map(contact => contact.id)).toEqual([sameAccount.id, neighbor.id])
+    const before = await snapshot()
+    expect((await request('mailbox', `/api/webmail/contacts${query}`, 'DELETE', body)).status).toBe(422)
+    await expectUnchanged(before)
   })
 
   it.each(['reseller', 'user', 'mailbox'] as const)('keeps neighboring and nonexistent supported DELETE targets unchanged for %s', async actor => {
     const before = await snapshot()
     for (const id of [neighbor.id, randomUUID()]) {
       for (const path of [`/api/webmail/contacts/${id}`, `/api/webmail/contacts?id=${id}`]) {
-        expect.soft((await request(actor, path)).status).toBe(404)
+        const response = await request(actor, path, 'DELETE', actor === 'mailbox' && !path.includes('?') ? { expectedRevision: '0'.repeat(64) } : undefined)
+        expect.soft(response.status).toBe(actor === 'mailbox' && path.includes('?') ? 422 : 404)
         await expectUnchanged(before)
       }
     }

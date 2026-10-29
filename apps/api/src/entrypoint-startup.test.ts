@@ -82,6 +82,14 @@ describe('three entrypoint production startup configuration', () => {
     expect(() => resolvePanelEntrypoints({}, { ...env, XPANEL_PANEL_PUBLIC_ORIGIN: origin })).toThrow(/HTTPS origin/)
   })
 
+  it.each([
+    ['XPANEL_WHM_PUBLIC_ORIGIN', 'https://panel.example.test:2087'],
+    ['XPANEL_MAIL_PUBLIC_ORIGIN', 'https://panel.example.test:2096'],
+    ['XPANEL_MAIL_PUBLIC_ORIGIN', 'https://whm.panel.example.test:2096'],
+  ])('requires three distinct hostnames: %s=%s', (name, origin) => {
+    expect(() => resolvePanelEntrypoints({}, { ...env, [name]: origin })).toThrow(/three distinct hostnames/)
+  })
+
   it.each(['0.0.0.0', '::', 'localhost', '192.0.2.10'])('rejects a non-explicit loopback bind %s', host => {
     expect(() => resolvePanelEntrypoints({ host }, env)).toThrow(/loopback/)
   })
@@ -130,9 +138,15 @@ describe('three real HTTP listeners with a fixture host agent, not public TLS qu
       const html = await login.text()
       expect(html).toContain(`data-login-audience="${name}"`)
       expect(html).not.toContain('data-action="switch-surface"')
+      // A listener renders its own address only: no other panel's origin appears on any of its pages.
+      expect(html).toContain(new URL(origins[name]).host)
+      for (const other of names.filter(candidate => candidate !== name)) expect(html).not.toContain(new URL(origins[other]).host)
       expect((await request(name, '/')).headers.get('location')).toBe('/login')
       for (const other of names.filter(candidate => candidate !== name)) {
-        expect((await request(name, ENTRY_POINTS[other].home)).status).toBe(404)
+        const crossed = await request(name, ENTRY_POINTS[other].home, { accept: 'text/html' })
+        expect(crossed.status).toBe(404)
+        const page = await crossed.text()
+        for (const origin of Object.values(origins)) expect(page).not.toContain(new URL(origin).host)
       }
       expect((await request(name, '/login', { host: 'attacker.example.test:2083' })).status).toBe(421)
       const misdirected = await request(name, '/login?lang=ar', { host: '192.0.2.10', accept: 'text/html' })
@@ -141,7 +155,8 @@ describe('three real HTTP listeners with a fixture host agent, not public TLS qu
       const misdirectedHtml = await misdirected.text()
       expect(misdirectedHtml).toContain('data-status-page="421"')
       expect(misdirectedHtml).toContain('dir="rtl"')
-      for (const origin of Object.values(origins)) expect(misdirectedHtml).toContain(origin)
+      for (const origin of Object.values(origins)) expect(misdirectedHtml).not.toContain(new URL(origin).host)
+      expect(misdirectedHtml).toContain(`data-surface="${name}"`)
       expect(misdirectedHtml).not.toContain('MISDIRECTED_REQUEST')
     }
     expect(readSnapshot).not.toHaveBeenCalled()
@@ -157,6 +172,10 @@ describe('three real HTTP listeners with a fixture host agent, not public TLS qu
       expect((await request(name, '/', { cookie: `${sessionCookieName(name, true)}=${token}` })).headers.get('location')).toBe('/login')
     }
     expect(readSnapshot).not.toHaveBeenCalled()
+    const signedIn = await (await request('xwhm', '/whm', { cookie, accept: 'text/html' })).text()
+    expect(signedIn).toContain('data-user-menu')
+    for (const other of ['xpanel', 'xmail'] as const) expect(signedIn).not.toContain(new URL(origins[other]).host)
+    expect(signedIn).not.toContain('data-panel-switch')
     await Promise.all([server.close(), server.close()])
     expect(subscriptions.closed).toBe(3)
     for (const name of names) {

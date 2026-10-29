@@ -1,0 +1,42 @@
+import { describe, expect, it } from 'vitest'
+import { renderWhmMailQualityWorkspace } from './whm-mail-quality-workspace.ts'
+
+describe('WHM mail quality workspace renderer', () => {
+  it('renders the English workspace with identity facts, bulk check bar and an unread table, without a form', () => {
+    const html = renderWhmMailQualityWorkspace({ locale: 'en', canRead: true })
+    expect(html).toContain('dir="ltr"')
+    expect(html).toContain('data-mail-quality-can-read="true"')
+    for (const key of ['hostname', 'helo', 'addresses', 'checked', 'problems', 'unavailable', 'checked-at']) expect(html).toContain(`data-whm-mail-quality-fact="${key}"`)
+    expect(html).toContain('data-whm-mail-quality-refresh>Reload domains')
+    expect(html).toContain('data-whm-mail-quality-check disabled')
+    expect(html).toContain('data-whm-mail-quality-select-all aria-label="Select the first 50 domains" disabled')
+    for (const header of ['MX', 'SPF', 'DKIM', 'DMARC', 'Reverse DNS', 'Checked (UTC)']) expect(html).toContain(`<th scope="col">${header}</th>`)
+    expect(html).toContain('<a href="/whm/dns">DNS zones</a>')
+    expect(html).toContain('<a href="/whm/email/server">Mail server</a>')
+    expect(html).toContain('include: and redirect= are followed one level')
+    expect(html).toContain('Hosted mail domains have not been read.')
+    expect(html).not.toContain('<form')
+    expect(html).not.toContain('Mail quality checks require root authorization.')
+    expect(html).toMatch(/padding:16px/)
+    expect(html).toMatch(/@media\(min-width:601px\)\{\.xp-whm-mail-quality__card\{padding:24px\}\}/)
+    expect(html).not.toMatch(/[٠-٩۰-۹]/)
+  })
+  it('renders Arabic RTL copy with technical values isolated left-to-right', () => {
+    const html = renderWhmMailQualityWorkspace({ locale: 'ar', canRead: true })
+    expect(html).toContain('dir="rtl"')
+    expect(html).toContain('lang="ar"')
+    for (const text of ['هوية الإرسال', 'نطاقات البريد المستضافة', 'فحص المحدد', 'إعادة تحميل النطاقات', 'لم تُقرأ نطاقات البريد المستضافة.', 'DNS العكسي']) expect(html).toContain(text)
+    expect(html).toContain('<bdi dir="ltr" data-whm-mail-quality-fact="hostname">')
+    expect(html).not.toMatch(/[٠-٩۰-۹]/)
+    expect(html).not.toMatch(/Sending identity|Check selected|Reload domains/)
+  })
+  it('keeps the layout with every control disabled when not authorized', () => {
+    const html = renderWhmMailQualityWorkspace({ locale: 'en', canRead: false })
+    expect(html).toContain('data-mail-quality-can-read="false"')
+    expect(html).toContain('data-whm-mail-quality-refresh disabled')
+    expect(html).toContain('data-whm-mail-quality-check disabled')
+    expect(html).toContain('Mail quality checks require root authorization.')
+    expect(html).toContain('data-whm-mail-quality-rows')
+    expect(html).not.toContain('<form')
+  })
+})

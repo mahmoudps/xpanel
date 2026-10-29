@@ -6,7 +6,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tools } from '../../packages/catalog/src/index.ts'
 import { defaultPlan } from '../../packages/core/src/index.ts'
-import { renderWebApp } from '../../apps/web/src/app.ts'
+import { renderWebApp, serveStaticAsset } from '../../apps/web/src/app.ts'
 import { collectSnapshotFiles, computeSourceDigest } from '../../scripts/vm/source-snapshot.mjs'
 import { assertAppliedFont } from './applied-font-contract.mjs'
 
@@ -50,6 +50,9 @@ async function fixture() {
   let pendingCreate = null
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1')
+    // Pages load their client runtime from /assets; serve the product's own immutable assets.
+    const asset = serveStaticAsset(url.pathname)
+    if (asset) { res.writeHead(asset.status, Object.fromEntries(asset.headers)); res.end(Buffer.from(await asset.arrayBuffer())); return }
     if (url.pathname.startsWith('/api/')) {
       res.setHeader('content-type', 'application/json')
       if (url.pathname === '/api/auth/me') { res.end(JSON.stringify({ csrfToken: 'synthetic-ui-fixture-csrf' })); return }
@@ -280,7 +283,7 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
         await page.goto(host.baseUrl + (state.screen === 'create' ? '/whm/accounts/new?lang=' : '/whm/accounts?lang=') + state.locale + '&theme=' + state.theme)
         await page.evaluate(() => document.fonts.ready)
         assert.equal(await page.locator('html').getAttribute('data-accounts-fixture'), 'synthetic')
-        result.fonts = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
+        result.fonts = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
         if (state.screen === 'create') {
           await createAccountGate(page, host, state, result, destination, expect)
         } else {
@@ -290,7 +293,7 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
         assert.deepEqual([names[1], names[2], names[3], names[8], names[9]], nativeAccountHeaderContract[state.locale])
         assert.equal(await page.locator('[data-account-row]').count(), 2)
         await expect(page.locator('[data-account-dialog]')).not.toBeVisible()
-        result.fonts = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
+        result.fonts = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
         await page.screenshot({ path: join(destination, 'screenshots/' + state.id + '-list.png'), fullPage: true })
         const trigger = page.locator('[data-account-row="beta"] [data-action="terminate-account"]')
@@ -315,7 +318,7 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
         assert.ok(result.geometry.fields.length >= 3)
         for (const field of result.geometry.fields) { assert.ok(Math.abs(field.gap - 8) < 1, 'The actual field gap is 8px: ' + field.label); assert.ok(field.edge < 1); if (field.glyphDelta !== null) assert.ok(field.glyphDelta < 1) }
         for (const control of result.geometry.controls) assert.ok(control.width >= 43.9 && control.height >= 43.9)
-        result.dialogFont = await assertAppliedFont(page, '[data-account-dialog-title]', state.locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
+        result.dialogFont = await assertAppliedFont(page, '[data-account-dialog-title]', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
         await page.screenshot({ path: join(destination, 'screenshots/' + state.id + '-dialog.png'), fullPage: true })
         await page.keyboard.press('Escape'); await expect(dialog).not.toBeVisible(); await expect(trigger).toBeFocused()
         await trigger.click(); await expect(input).toHaveValue('')

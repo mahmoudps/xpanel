@@ -1,98 +1,102 @@
 // Board sample data for tests and the local fidelity script only.
 // Product code must not import this module; xpanel-home.test.ts enforces that.
 import {
-  HOME_SCRIPT, MONO, groupViews, infoRows, mono, monoSpan, navViews, num, plain, renderDesktop, renderPhone,
-  renderXpanelHome, totalCount, word, xpanelHomeFromProps,
+  HOME_SCRIPT, MONO, groupViews, homeLede, infoRows, mono, monoSpan, navViews, num, plain, renderDesktop, renderPhone,
+  renderXpanelHome, totalCount, xpanelHomeFromProps,
   type Hint, type HomeChange, type HomeDesktopModel, type HomeMeter, type HomePhoneModel, type ToolDef,
 } from './xpanel-home.ts'
-
-const SAMPLE_HINTS: Record<string, [desk: Hint, phone: Hint, ar: Hint]> = {
-  'files.manager': [mono('/home/alice'), plain(''), mono('/home/alice')],
-  'files.backup': [plain('Last 2026-10-21'), plain('2026-10-21'), word('آخر نسخة 2026-10-21')],
-  'files.ftp': [plain('2 users'), plain('2'), word('مستخدمان')],
-  'files.disk': [plain('3.2 / 10 GB'), plain('3.2 / 10 GB'), num('3.2 / 10 GB')],
-  'files.trash': [plain('6 items'), plain('6 items'), word('6 عناصر')],
-  'db.list': [plain('3 / 5'), plain('3 / 5'), num('3 / 5')],
-  'db.users': [plain('2 users'), plain('2'), word('مستخدمان')],
-  'db.trash': [plain('Empty'), plain('Empty'), word('فارغة')],
-  'domains.list': [plain('2 / 5 addon'), plain('2 / 5'), num('2 / 5')],
-  'domains.site': [plain('3 sites'), plain('3 sites'), word('3 مواقع')],
-  'domains.zone': [plain('3 zones'), plain('3 zones'), word('3 مناطق')],
-  'domains.redirect': [plain('1 active'), plain('1'), word('تحويل واحد')],
-  'email.accounts': [plain('7 / 25'), plain('7 / 25'), num('7 / 25')],
-  'email.forward': [plain('4'), plain('4'), num('4')],
-  'email.filters': [plain('2'), plain('2'), num('2')],
-  'email.webmail': [plain('Open'), plain(''), word('افتح')],
-  'metrics.visitors': [plain('1,431 today'), plain('1,431 today'), word('1,431 اليوم')],
-  'metrics.errors': [plain(''), plain(''), word('')],
-  'metrics.bandwidth': [plain('86 / 100 GB'), plain('86 / 100 GB'), num('86 / 100 GB')],
-  'metrics.logs': [plain('30 days'), plain(''), word('30 يومًا')],
-  'security.ssl': [plain('AutoSSL on'), plain('AutoSSL on'), word('AutoSSL مفعّل')],
-  'security.2fa': [plain('On'), plain('On'), word('مفعّلة')],
-  'security.api': [plain('1 token'), plain('1'), word('رمز واحد')],
-  'security.path': [plain('None'), plain(''), word('لا يوجد')],
-  'software.php': [mono('8.3 · FPM'), mono('8.3'), mono('8.3 · FPM')],
-  'software.ini': [mono('.user.ini'), plain(''), mono('.user.ini')],
-  'software.htaccess': [plain(''), plain(''), word('')],
-  'software.apps': [plain('1 app'), plain('1'), word('تطبيق واحد')],
-  'advanced.cron': [plain('3 jobs'), plain('3'), word('3 مهام')],
-  'advanced.resources': [plain(''), plain(''), word('')],
-  'advanced.processes': [plain('38 / 128'), plain('38 / 128'), num('38 / 128')],
-  'advanced.logs': [plain(''), plain(''), word('')],
-  'prefs.language': [plain('English'), plain('English'), word('العربية')],
-  'prefs.password': [plain(''), plain(''), word('')],
-  'prefs.contact': [plain('Verified'), plain(''), word('مُوثَّق')],
+import { inlineScriptMessageKeys, localeDirection, localeInfo, renderClientI18nScript, translator, type Locale } from '../i18n.ts'
+const sampleHints = (locale: Locale, phone: boolean) => {
+  const t = translator(locale)
+  const dir = localeDirection(locale)
+  // Sample words read in the page language and direction; numbers and paths stay LTR.
+  const say = (message: string): Hint => ({ text: t(message), mono: false, dir })
+  const blank: Hint = { text: '', mono: false, dir }
+  const hints: Record<string, [desk: Hint, phone: Hint]> = {
+    'files.manager': [mono('/home/alice'), plain('')],
+    'files.backup': [say(msgid('Last 2026-10-21')), plain('2026-10-21')],
+    'files.ftp': [say(msgid('2 users')), plain('2')],
+    'files.disk': [plain('3.2 / 10 GB'), plain('3.2 / 10 GB')],
+    'files.trash': [say(msgid('6 items')), say(msgid('6 items'))],
+    'db.list': [plain('3 / 5'), plain('3 / 5')],
+    'db.users': [say(msgid('2 users')), plain('2')],
+    'db.trash': [say(msgctxt('xpanel-home.fixture', 'Empty')), say(msgctxt('xpanel-home.fixture', 'Empty'))],
+    'domains.list': [num(t(msgid('2 / 5 addon'))), plain('2 / 5')],
+    'domains.site': [say(msgid('3 sites')), say(msgid('3 sites'))],
+    'domains.zone': [say(msgid('3 zones')), say(msgid('3 zones'))],
+    'domains.redirect': [say(msgid('1 active')), plain('1')],
+    'email.accounts': [plain('7 / 25'), plain('7 / 25')],
+    'email.forward': [plain('4'), plain('4')],
+    'email.filters': [plain('2'), plain('2')],
+    'email.webmail': [say(msgctxt('xpanel-home', 'Open')), plain('')],
+    'metrics.visitors': [say(msgid('1,431 today')), say(msgid('1,431 today'))],
+    'metrics.errors': [blank, blank],
+    'metrics.bandwidth': [plain('86 / 100 GB'), plain('86 / 100 GB')],
+    'metrics.logs': [say(msgid('30 days')), plain('')],
+    'security.ssl': [say(msgid('AutoSSL on')), say(msgid('AutoSSL on'))],
+    'security.2fa': [say(msgctxt('xpanel-home.fixture', 'On')), say(msgctxt('xpanel-home.fixture', 'On'))],
+    'security.api': [say(msgid('1 token')), plain('1')],
+    'security.path': [say(msgid('None')), plain('')],
+    'software.php': [mono('8.3 · FPM'), mono('8.3')],
+    'software.ini': [mono('.user.ini'), plain('')],
+    'software.htaccess': [blank, blank],
+    'software.apps': [say(msgid('1 app')), plain('1')],
+    'advanced.cron': [say(msgid('3 jobs')), plain('3')],
+    'advanced.resources': [blank, blank],
+    'advanced.processes': [plain('38 / 128'), plain('38 / 128')],
+    'advanced.logs': [blank, blank],
+    'prefs.language': [{ text: localeInfo(locale).nativeName, mono: false, dir }, { text: localeInfo(locale).nativeName, mono: false, dir }],
+    'prefs.password': [blank, blank],
+    'prefs.contact': [say(msgctxt('xpanel-home.fixture', 'Verified')), plain('')],
+  }
+  return (item: ToolDef): Hint => {
+    const hint = hints[item.id]
+    if (!hint) throw new Error(`no sample hint for ${item.id}`)
+    return phone ? hint[1] : hint[0]
+  }
 }
 
-const sampleHints = (ar: boolean, phone: boolean) => (item: ToolDef): Hint => {
-  const hint = SAMPLE_HINTS[item.id]
-  if (!hint) throw new Error(`no sample hint for ${item.id}`)
-  return ar ? hint[2] : phone ? hint[1] : hint[0]
+/** Wraps an LTR value in an isolate on RTL pages; on LTR pages it keeps the plain styled span. */
+const isolator = (locale: Locale) => (html: string, style = ''): string => localeDirection(locale) === 'rtl'
+  ? `<bdi dir="ltr"${style ? ` style="${style}"` : ''}>${html}</bdi>`
+  : style ? `<span style="${style}">${html}</span>` : html
+
+const signInSample = (locale: Locale): string => {
+  const iso = isolator(locale)
+  return `${iso('2026-10-22 13:41 UTC', 'font-size: 13px; font-variant-numeric: tabular-nums')}<span style="font-size: 12px; color: #5D6B7E">${translator(locale)('from {address}', { address: iso('198.51.100.24', `font-family: ${MONO}`) })}</span>`
 }
 
-const signInSample = (ar: boolean): string => ar
-  ? `<bdi dir="ltr" style="font-size: 13px; font-variant-numeric: tabular-nums">2026-10-22 13:41 UTC</bdi><span style="font-size: 12px; color: #5D6B7E">من <bdi dir="ltr" style="font-family: ${MONO}">198.51.100.24</bdi></span>`
-  : `<span style="font-size: 13px; font-variant-numeric: tabular-nums">2026-10-22 13:41 UTC</span><span style="font-size: 12px; color: #5D6B7E">from <span style="font-family: ${MONO}">198.51.100.24</span></span>`
+const sampleChanges = (locale: Locale): HomeChange[] => {
+  const t = translator(locale)
+  const iso = isolator(locale)
+  const name = (value: string): string => iso(value, `font-family: ${MONO}; font-size: 13px`)
+  const configtest = `<code style="font-family: ${MONO}">apachectl configtest</code>`
+  const applied = t(msgctxt('xpanel-home.fixture', 'Applied'))
+  return [
+    { pill: applied, pillBg: '#E7F5EE', pillFg: '#0E7A4E', titleHtml: t('{php} for {domain}', { php: iso('PHP 8.3'), domain: name('alice-blog.net') }), detailHtml: t('Generation {id} · {command} passed · {time}', { id: 142, command: iso(configtest), time: iso('2026-10-22 13:52 UTC') }) },
+    { pill: applied, pillBg: '#E7F5EE', pillFg: '#0E7A4E', titleHtml: t('Mailbox {address} created', { address: name('orders@alice-shop.com') }), detailHtml: t('Generation {id} · {time}', { id: 141, time: iso('2026-10-21 18:07 UTC') }) },
+    { pill: t('Test failed'), pillBg: '#FDECEA', pillFg: '#B42318', titleHtml: t('Rewrite rule for {domain}', { domain: name('alice-studio.org') }), detailHtml: t('{error}. Generation {id} stayed active, nothing was reloaded · {time}', { error: iso(`${configtest}: RewriteRule: bad flag delimiters`), id: 140, time: iso('2026-10-20 09:14 UTC') }), actionHref: '/domains/site-settings', actionLabel: t('Fix the rule in site settings') },
+  ]
+}
 
-const sampleChanges = (ar: boolean): HomeChange[] => ar
-  ? [
-      { pill: 'مُطبَّق', pillBg: '#E7F5EE', pillFg: '#0E7A4E', titleHtml: `<bdi dir="ltr">PHP 8.3</bdi> للنطاق <bdi dir="ltr" style="font-family: ${MONO}; font-size: 13px">alice-blog.net</bdi>`, detailHtml: `الجيل 142 · نجح <bdi dir="ltr"><code style="font-family: ${MONO}">apachectl configtest</code></bdi> · <bdi dir="ltr">2026-10-22 13:52 UTC</bdi>` },
-      { pill: 'مُطبَّق', pillBg: '#E7F5EE', pillFg: '#0E7A4E', titleHtml: `إنشاء الصندوق <bdi dir="ltr" style="font-family: ${MONO}; font-size: 13px">orders@alice-shop.com</bdi>`, detailHtml: `الجيل 141 · <bdi dir="ltr">2026-10-21 18:07 UTC</bdi>` },
-      { pill: 'فشل الاختبار', pillBg: '#FDECEA', pillFg: '#B42318', titleHtml: `قاعدة إعادة كتابة للنطاق <bdi dir="ltr" style="font-family: ${MONO}; font-size: 13px">alice-studio.org</bdi>`, detailHtml: `<bdi dir="ltr"><code style="font-family: ${MONO}">apachectl configtest</code>: RewriteRule: bad flag delimiters</bdi>. بقي الجيل 140 فعّالًا ولم يُعَد تحميل أي خدمة · <bdi dir="ltr">2026-10-20 09:14 UTC</bdi>`, actionHref: '/domains/site-settings', actionLabel: 'أصلح القاعدة في إعدادات الموقع' },
-    ]
-  : [
-      { pill: 'Applied', pillBg: '#E7F5EE', pillFg: '#0E7A4E', titleHtml: `PHP 8.3 for <span style="font-family: ${MONO}; font-size: 13px">alice-blog.net</span>`, detailHtml: `Generation 142 · <code style="font-family: ${MONO}">apachectl configtest</code> passed · 2026-10-22 13:52 UTC` },
-      { pill: 'Applied', pillBg: '#E7F5EE', pillFg: '#0E7A4E', titleHtml: `Mailbox <span style="font-family: ${MONO}; font-size: 13px">orders@alice-shop.com</span> created`, detailHtml: 'Generation 141 · 2026-10-21 18:07 UTC' },
-      { pill: 'Test failed', pillBg: '#FDECEA', pillFg: '#B42318', titleHtml: `Rewrite rule for <span style="font-family: ${MONO}; font-size: 13px">alice-studio.org</span>`, detailHtml: `<code style="font-family: ${MONO}">apachectl configtest</code>: RewriteRule: bad flag delimiters. Generation 140 stayed active, nothing was reloaded · 2026-10-20 09:14 UTC`, actionHref: '/domains/site-settings', actionLabel: 'Fix the rule in site settings' },
-    ]
+const sampleBanner = (locale: Locale): string => {
+  const iso = isolator(locale)
+  return translator(locale)('You have used {used} of {limit} monthly bandwidth. The counter resets on {time}.', { used: iso('86'), limit: iso('100 GB'), time: iso('2026-11-01 00:00 UTC') })
+}
 
-const sampleBanner = (ar: boolean): string => ar
-  ? 'استهلكت <bdi dir="ltr">86</bdi> من <bdi dir="ltr">100 GB</bdi> من حركة البيانات الشهرية. يُصفَّر العدّاد في <bdi dir="ltr">2026-11-01 00:00 UTC</bdi>.'
-  : 'You have used 86 of 100 GB monthly bandwidth. The counter resets on 2026-11-01 00:00 UTC.'
-
-const sampleMeters = (ar: boolean): HomeMeter[] => {
-  const rows: Array<[string, string, string, number, string]> = ar
-    ? [
-        ['القرص', '3.2 / 10 GB', '3.2 / 10 GB', 32, 'حصة نظام الملفات مطبّقة'],
-        ['حركة البيانات الشهرية', '86 / 100 GB', '86 / 100 GB', 86, 'تجاوزت 80% · تُصفَّر في 2026-11-01'],
-        ['سقف الكتابة على القرص', '20 MB/s', '20 MB/s', 21, 'الكتابة الآن 4.1 MB/s · io.max على شريحتك'],
-        ['الذاكرة', '412 / 1024 MB', '412 / 1024 MB', 40, 'MemoryMax على شريحتك'],
-        ['العمليات', '38 / 128', '38 / 128', 30, 'TasksMax على شريحتك · الخيوط محسوبة'],
-        ['النطاقات الإضافية', '2 / 5', '2 / 5', 40, 'يمكنك إضافة 3 نطاقات'],
-        ['صناديق البريد', '7 / 25', '7 / 25', 28, 'يمكنك إضافة 18 صندوقًا'],
-        ['قواعد البيانات', '3 / 5', '3 / 5', 60, 'يمكنك إضافة قاعدتين'],
-      ]
-    : [
-        ['Disk', '3.2 / 10 GB', '3.2 / 10 GB', 32, 'Filesystem quota enforced'],
-        ['Monthly bandwidth', '86 / 100 GB', '86 / 100 GB', 86, 'Over 80% · resets 2026-11-01'],
-        ['IO write cap', '20 MB/s', '20 MB/s', 21, 'Writing 4.1 MB/s now · io.max on your slice'],
-        ['Memory', '412 / 1024 MB', '412 / 1024 MB', 40, 'MemoryMax on your slice'],
-        ['Processes', '38 / 128', '38 / 128', 30, 'TasksMax on your slice · threads count'],
-        ['Addon domains', '2 / 5', '2 / 5', 40, '3 more allowed'],
-        ['Mailboxes', '7 / 25', '7 / 25', 28, '18 more allowed'],
-        ['Databases', '3 / 5', '3 / 5', 60, '2 more allowed'],
-      ]
-  return rows.map(row => ({ label: row[0], value: row[1], pct: row[3], note: row[4] }))
+const sampleMeters = (locale: Locale): HomeMeter[] => {
+  const t = translator(locale)
+  const rows: Array<[label: string, value: string, pct: number, note: string]> = [
+    [msgid('Disk'), '3.2 / 10 GB', 32, msgid('Filesystem quota enforced')],
+    [msgid('Monthly bandwidth'), '86 / 100 GB', 86, msgid('Over 80% · resets 2026-11-01')],
+    [msgid('IO write cap'), '20 MB/s', 21, msgid('Writing 4.1 MB/s now · io.max on your slice')],
+    [msgid('Memory'), '412 / 1024 MB', 40, msgid('MemoryMax on your slice')],
+    [msgid('Processes'), '38 / 128', 30, msgid('TasksMax on your slice · threads count')],
+    [msgid('Addon domains'), '2 / 5', 40, msgid('3 more allowed')],
+    [msgid('Mailboxes'), '7 / 25', 28, msgid('18 more allowed')],
+    [msgid('Databases'), '3 / 5', 60, msgid('2 more allowed')],
+  ]
+  return rows.map(([label, value, pct, note]) => ({ label: t(label), value, pct, note: t(note) }))
 }
 
 const samplePhoneMeters = (): HomeMeter[] => [
@@ -105,79 +109,67 @@ const samplePhoneMeters = (): HomeMeter[] => [
   { label: 'Addon domains', value: '2 / 5', pct: 40, note: '3 more allowed' },
 ]
 
-const ledeSample = (ar: boolean): string => ar
-  ? `أدوات ${monoSpan('alice-shop.com', true)} ونطاقين إضافيين. قائمة ميزات خطتك تحدد الأدوات التي تظهر هنا.`
-  : `Tools for ${monoSpan('alice-shop.com', false)} and 2 addon domains. Your plan’s feature list decides which tools appear here.`
+const generationSample = (locale: Locale): string => {
+  const t = translator(locale)
+  return localeDirection(locale) === 'rtl'
+    ? `<span>${t('Generation {id} · {time}', { id: 142, time: '<bdi dir="ltr" style="font-variant-numeric: tabular-nums">2026-10-22 13:52 UTC</bdi>' })}</span>`
+    : `<span style="font-variant-numeric: tabular-nums">${t('Generation {id} · {time}', { id: 142, time: '2026-10-22 13:52 UTC' })}</span>`
+}
 
 const phoneLedeSample = (): string =>
   `${monoSpan('alice-shop.com', false)} · Business plan · ${monoSpan('uid 20014', false)}`
 
-export const xpanelHomeFixture = (): HomeDesktopModel => {
-  const groups = groupViews(false, false, sampleHints(false, false))
+const desktopFixture = (locale: Locale): HomeDesktopModel => {
+  const t = translator(locale)
+  const groups = groupViews(locale, false, sampleHints(locale, false))
   return {
-    ar: false,
+    locale,
     username: 'alice', domain: 'alice-shop.com', planLabel: 'Business',
-    diskLabel: 'Disk', diskValue: '3.2 / 10 GB', diskPct: 32,
-    procLabel: 'Processes', procValue: '38 / 128', procPct: 30,
-    nav: navViews(false, 'nav-group-'),
-    title: 'Home', ledeHtml: ledeSample(false),
-    pill: { label: 'Applied', bg: '#E7F5EE', fg: '#0E7A4E' },
-    generationHtml: '<span style="font-variant-numeric: tabular-nums">Generation 142 · 2026-10-22 13:52 UTC</span>',
-    bannerHtml: sampleBanner(false), bannerHref: '/metrics/traffic', bannerLabel: 'See bandwidth by domain',
-    countText: totalCount(groups, false, false), groups,
-    infoTitle: 'General information',
-    info: infoRows({ ar: false, username: 'alice', uid: 20014, domain: 'alice-shop.com', home: '/home/alice', ipv4: '10.0.0.12', plan: 'Business', php: '8.3 · PHP-FPM', slice: 'xpanel-20014.slice', signInHtml: signInSample(false) }),
-    usageTitle: 'Resource usage', usageLink: 'Details', meters: sampleMeters(false),
-    changesTitle: 'Recent changes', changes: sampleChanges(false), emptyChanges: '',
+    diskLabel: t('Disk'), diskValue: '3.2 / 10 GB', diskPct: 32,
+    procLabel: t('Processes'), procValue: '38 / 128', procPct: 30,
+    nav: navViews(locale, 'nav-group-'),
+    title: t('Home'), ledeHtml: homeLede(locale, monoSpan('alice-shop.com', localeDirection(locale) === 'rtl'), 2),
+    pill: { label: t(msgctxt('xpanel-home.fixture', 'Applied')), bg: '#E7F5EE', fg: '#0E7A4E' },
+    generationHtml: generationSample(locale),
+    bannerHtml: sampleBanner(locale), bannerHref: '/metrics/traffic', bannerLabel: t('See bandwidth by domain'),
+    countText: totalCount(groups, locale, false), groups,
+    infoTitle: t('General information'),
+    info: infoRows({ locale, username: 'alice', uid: 20014, domain: 'alice-shop.com', home: '/home/alice', ipv4: '10.0.0.12', plan: 'Business', php: '8.3 · PHP-FPM', slice: 'xpanel-20014.slice', signInHtml: signInSample(locale) }),
+    usageTitle: t('Resource usage'), usageLink: t('Details'), meters: sampleMeters(locale),
+    changesTitle: t('Recent changes'), changes: sampleChanges(locale), emptyChanges: '',
     metricsUnavailable: false, actionHtml: '',
   }
 }
 
-export const xpanelHomeFixtureAr = (): HomeDesktopModel => {
-  const groups = groupViews(true, false, sampleHints(true, false))
-  return {
-    ar: true,
-    username: 'alice', domain: 'alice-shop.com', planLabel: 'Business',
-    diskLabel: 'القرص', diskValue: '3.2 / 10 GB', diskPct: 32,
-    procLabel: 'العمليات', procValue: '38 / 128', procPct: 30,
-    nav: navViews(true, 'nav-group-'),
-    title: 'الرئيسية', ledeHtml: ledeSample(true),
-    pill: { label: 'مُطبَّق', bg: '#E7F5EE', fg: '#0E7A4E' },
-    generationHtml: `<span>الجيل 142 · <bdi dir="ltr" style="font-variant-numeric: tabular-nums">2026-10-22 13:52 UTC</bdi></span>`,
-    bannerHtml: sampleBanner(true), bannerHref: '/metrics/traffic', bannerLabel: 'اعرض الاستهلاك لكل نطاق',
-    countText: totalCount(groups, true, false), groups,
-    infoTitle: 'معلومات عامة',
-    info: infoRows({ ar: true, username: 'alice', uid: 20014, domain: 'alice-shop.com', home: '/home/alice', ipv4: '10.0.0.12', plan: 'Business', php: '8.3 · PHP-FPM', slice: 'xpanel-20014.slice', signInHtml: signInSample(true) }),
-    usageTitle: 'استخدام الموارد', usageLink: 'التفاصيل', meters: sampleMeters(true),
-    changesTitle: 'آخر التغييرات', changes: sampleChanges(true), emptyChanges: '',
-    metricsUnavailable: false, actionHtml: '',
-  }
-}
+export const xpanelHomeFixture = (): HomeDesktopModel => desktopFixture('en')
+
+export const xpanelHomeFixtureAr = (): HomeDesktopModel => desktopFixture('ar')
 
 export const xpanelHomeFixturePhone = (): HomePhoneModel => {
-  const groups = groupViews(false, true, sampleHints(false, true)).map((group, index) => ({ ...group, open: index === 0 }))
+  const groups = groupViews('en', true, sampleHints('en', true)).map((group, index) => ({ ...group, open: index === 0 }))
   return {
-    ar: false, username: 'alice', domain: 'alice-shop.com', planLabel: 'Business',
+    locale: 'en', username: 'alice', domain: 'alice-shop.com', planLabel: 'Business',
     title: 'Home', titleTag: 'h1', ledeHtml: phoneLedeSample(),
-    countText: totalCount(groups, false, true), groups, meters: samplePhoneMeters(),
-    nav: navViews(false, 'm-nav-group-'), metricsUnavailable: false, actionHtml: '',
+    countText: totalCount(groups, 'en', true), groups, meters: samplePhoneMeters(),
+    nav: navViews('en', 'm-nav-group-'), metricsUnavailable: false, actionHtml: '',
   }
 }
 
-const documentShell = (body: string, locale: 'en' | 'ar', title: string): string => {
+const documentShell = (body: string, locale: Locale, title: string): string => {
   return `<!doctype html>
-<html lang="${locale}" dir="${locale === 'ar' ? 'rtl' : 'ltr'}">
+<html lang="${locale}" dir="${localeDirection(locale)}">
 <head>
 <meta charset="utf-8">
 <title>${title}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
 <style>
-body{margin:0;background:#F5F6F8;color:#101828;font-family:'IBM Plex Sans','IBM Plex Sans Arabic',system-ui,sans-serif}
+body{margin:0;background:#F5F6F8;color:#101828;font-family:'IBM Plex Sans',sans-serif}
 *{box-sizing:border-box}
 a{color:#1D5BD6}a:hover{color:#1546A8}
 :focus-visible{outline:2px solid #1D5BD6;outline-offset:2px}
 </style>
+${renderClientI18nScript(locale, inlineScriptMessageKeys(body))}
 </head>
 <body>
 ${body}
@@ -187,16 +179,16 @@ ${body}
 
 export const renderFidelityDocument = (kind: 'ltr' | 'ar' | 'phone' = 'ltr'): string => {
   if (kind === 'phone') return documentShell(`${renderPhone(xpanelHomeFixturePhone())}${HOME_SCRIPT}`, 'en', 'Home on phone — xPanel')
-  if (kind === 'ar') return documentShell(`${renderDesktop(xpanelHomeFixtureAr())}${HOME_SCRIPT}`, 'ar', 'الرئيسية — xPanel')
+  if (kind === 'ar') return documentShell(`${renderDesktop(xpanelHomeFixtureAr())}${HOME_SCRIPT}`, 'ar', translator('ar')('Home — xPanel'))
   return documentShell(`${renderDesktop(xpanelHomeFixture())}${HOME_SCRIPT}`, 'en', 'Home — xPanel')
 }
 
 export const renderLiveDocument = (kind: 'ltr' | 'ar' | 'phone' = 'ltr'): string => {
-  const locale = kind === 'ar' ? 'ar' : 'en'
+  const locale: Locale = kind === 'ar' ? 'ar' : 'en'
   const model = xpanelHomeFromProps({
     locale,
     account: { username: 'owner', uid: 1000, home: '/home/owner', primaryDomain: 'example.test', ipv4: '192.0.2.10' },
   })
   if (kind === 'phone') return documentShell(`${renderPhone({ ...model.phone, titleTag: 'h1' })}${HOME_SCRIPT}`, 'en', 'Home on phone — xPanel')
-  return documentShell(renderXpanelHome(model), locale, locale === 'ar' ? 'الرئيسية — xPanel' : 'Home — xPanel')
+  return documentShell(renderXpanelHome(model), locale, translator(locale)('Home — xPanel'))
 }

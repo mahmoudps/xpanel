@@ -1,22 +1,13 @@
+import '../../../i18n.ts'
 import type { ComposedRoute } from '../types.ts'
-
 export const xpanel_databases: readonly ComposedRoute[] = [
   {
     "route": "/databases/phpmyadmin",
     "surface": "xpanel",
     "section": "databases",
-    "group": [
-      "Databases",
-      "قواعد البيانات"
-    ],
-    "title": [
-      "phpMyAdmin",
-      "phpMyAdmin"
-    ],
-    "lede": [
-      "phpMyAdmin is unavailable. No operation has been started and no result has been read.",
-      "phpMyAdmin غير متاح. لم تبدأ أي عملية ولم تُقرأ نتيجة."
-    ],
+    "group": msgid('Databases'),
+    "title": "phpMyAdmin",
+    "lede": msgid('phpMyAdmin is unavailable. No operation has been started and no result has been read.'),
     "layout": "settings",
     "action": null,
     "columns": [],
@@ -27,18 +18,9 @@ export const xpanel_databases: readonly ComposedRoute[] = [
     "route": "/databases/insights",
     "surface": "xpanel",
     "section": "databases",
-    "group": [
-      "Databases",
-      "قواعد البيانات"
-    ],
-    "title": [
-      "Database insights",
-      "تحليل قواعد البيانات"
-    ],
-    "lede": [
-      "Database insights is unavailable. No operation has been started and no result has been read.",
-      "تحليل قواعد البيانات غير متاح. لم تبدأ أي عملية ولم تُقرأ نتيجة."
-    ],
+    "group": msgid('Databases'),
+    "title": msgid('Database insights'),
+    "lede": msgid('Database insights is unavailable. No operation has been started and no result has been read.'),
     "layout": "settings",
     "action": null,
     "columns": [],
@@ -49,18 +31,9 @@ export const xpanel_databases: readonly ComposedRoute[] = [
     "route": "/databases/remote-access",
     "surface": "xpanel",
     "section": "databases",
-    "group": [
-      "Databases",
-      "قواعد البيانات"
-    ],
-    "title": [
-      "Remote database access",
-      "الوصول البعيد إلى قواعد البيانات"
-    ],
-    "lede": [
-      "Remote database access is unavailable. No operation has been started and no result has been read.",
-      "الوصول البعيد إلى قواعد البيانات غير متاح. لم تبدأ أي عملية ولم تُقرأ نتيجة."
-    ],
+    "group": msgid('Databases'),
+    "title": msgctxt('xpanel-databases', 'Remote database access'),
+    "lede": msgid('Remote database access is unavailable. No operation has been started and no result has been read.'),
     "layout": "settings",
     "action": null,
     "columns": [],
@@ -71,18 +44,9 @@ export const xpanel_databases: readonly ComposedRoute[] = [
     "route": "/databases/postgresql",
     "surface": "xpanel",
     "section": "databases",
-    "group": [
-      "Databases",
-      "قواعد البيانات"
-    ],
-    "title": [
-      "PostgreSQL databases",
-      "قواعد بيانات PostgreSQL"
-    ],
-    "lede": [
-      "PostgreSQL databases is unavailable. No operation has been started and no result has been read.",
-      "قواعد بيانات PostgreSQL غير متاح. لم تبدأ أي عملية ولم تُقرأ نتيجة."
-    ],
+    "group": msgid('Databases'),
+    "title": msgid('PostgreSQL databases'),
+    "lede": msgid('PostgreSQL database management is unavailable. No operation has been started and no result has been read.'),
     "layout": "settings",
     "action": null,
     "columns": [],
@@ -93,18 +57,9 @@ export const xpanel_databases: readonly ComposedRoute[] = [
     "route": "/databases/phppgadmin",
     "surface": "xpanel",
     "section": "databases",
-    "group": [
-      "Databases",
-      "قواعد البيانات"
-    ],
-    "title": [
-      "phpPgAdmin",
-      "phpPgAdmin"
-    ],
-    "lede": [
-      "phpPgAdmin is unavailable. No operation has been started and no result has been read.",
-      "phpPgAdmin غير متاح. لم تبدأ أي عملية ولم تُقرأ نتيجة."
-    ],
+    "group": msgid('Databases'),
+    "title": "phpPgAdmin",
+    "lede": msgid('phpPgAdmin is unavailable. No operation has been started and no result has been read.'),
     "layout": "settings",
     "action": null,
     "columns": [],

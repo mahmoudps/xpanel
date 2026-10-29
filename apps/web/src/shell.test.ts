@@ -73,7 +73,7 @@ describe('explicit surface screen selection', () => {
     expect(getSurfacePageTitle('xwhm', 'create-account', 'ar', '/whm/accounts/new')).toBe('إنشاء حساب')
     expect(getSurfacePageTitle('xmail', 'compose', 'en', '/mail/compose')).toBe('Compose message')
     expect(getSurfaceNavigationLabel('xpanel', 'section', { id: 'domains', name: 'Domains' }, 'ar')).toBe('النطاقات')
-    expect(getSurfaceNavigationLabel('xmail', 'page', { id: 'compose', name: 'Compose message' }, 'ar')).toBe('إنشاء رسالة')
+    expect(getSurfaceNavigationLabel('xmail', 'page', { id: 'compose', name: 'Compose' }, 'ar')).toBe('إنشاء رسالة')
   })
   it('separates account creation, IP tasks, and mail settings from their list screens', () => {
     expect(resolveSurfaceSection('xwhm', '/whm/accounts')).toBe('accounts')

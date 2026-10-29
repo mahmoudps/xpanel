@@ -1,0 +1,3298 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: xPanel catalog\n"
+"Language: ar\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Message-Format: ICU MessageFormat\n"
+
+#. nav.page.xpanel.htaccess.name
+msgid ".htaccess editor"
+msgstr "محرر .htaccess"
+
+#. catalog.group.aapanel-ai.name
+msgid "AI Assistant"
+msgstr "المساعد الذكي"
+
+#. catalog.tool.aapanel-ai-chatops.name
+msgid "AI ChatOps Bots"
+msgstr "روبوتات المحادثة التشغيلية"
+
+#. catalog.tool.aapanel-ai-assistant.name
+msgid "AI Server Assistant"
+msgstr "المساعد الذكي للخادم"
+
+#. catalog.tool.api-explorer.name
+msgid "API & CLI"
+msgstr "الواجهة البرمجية وسطر الأوامر"
+
+#. catalog.tool.api-shell.name
+msgid "API Shell"
+msgstr "واجهة أوامر API"
+
+#. catalog.tool.xwhm-api-shell.name
+msgctxt "catalog.tool.xwhm-api-shell.name"
+msgid "API Shell"
+msgstr "واجهة تجربة API"
+
+#. catalog.tool.xwhm-api-tokens.name
+msgid "API Tokens"
+msgstr "رموز الوصول البرمجي"
+
+#. nav.page.xpanel.api-shell.name
+msgid "API shell"
+msgstr "وحدة تحكم API"
+
+#. nav.page.xwhm.api-tokens.name
+msgid "API tokens"
+msgstr "رموز API"
+
+#. catalog.tool.cloudlinux-acceleratewp-xray.name
+msgid "AccelerateWP / X-Ray App (CloudLinux)"
+msgstr "تسريع ووردبريس / X-Ray"
+
+#. catalog.tool.aapanel-log-security-analysis.name
+msgid "Access Log Security Analysis"
+msgstr "التحليل الأمني لسجلات الوصول"
+
+#. nav.section.xmail.account.name
+msgid "Account"
+msgstr "الحساب"
+
+#. catalog.tool.account-enhancements.name
+msgid "Account Enhancements"
+msgstr "الميزات الإضافية للحساب"
+
+#. catalog.group.whm-account-functions.name
+msgid "Account Functions"
+msgstr "وظائف الحسابات"
+
+#. catalog.group.whm-account-information.name
+msgid "Account Information"
+msgstr "معلومات الحسابات"
+
+#. catalog.tool.account-preferences.name
+msgid "Account Preferences"
+msgstr "تفضيلات الحساب"
+
+#. catalog.tool.account-restore-progress.name
+msgid "Account Restore (progress view)"
+msgstr "متابعة استعادة الحساب"
+
+#. catalog.group.xmail-account-security.name
+msgid "Account Settings and Security"
+msgstr "إعدادات الحساب والأمان"
+
+#. catalog.tool.account-transfer-progress.name
+msgid "Account Transfer (progress view)"
+msgstr "متابعة عملية النقل"
+
+#. catalog.tool.account-usage-stats.name
+msgid "Account Usage Statistics"
+msgstr "إحصائيات استخدام الحساب"
+
+#. nav.page.xwhm.account-enhancements.name
+msgid "Account enhancements"
+msgstr "المزايا الإضافية للحسابات"
+
+#. catalog.tool.account-health.name
+msgid "Account health"
+msgstr "صحة الحسابات"
+
+#. nav.page.xwhm.account-health.name
+msgid "Account health & repair"
+msgstr "صحة الحسابات وإصلاحها"
+
+#. catalog.tool.account-isolation.name nav.page.xwhm.account-isolation.name
+msgid "Account isolation"
+msgstr "عزل الحسابات"
+
+#. nav.page.xpanel.account-preferences.name
+msgid "Account preferences"
+msgstr "تفضيلات الحساب"
+
+#. catalog.tool.account-repair.name
+msgid "Account repair"
+msgstr "إصلاح الحساب"
+
+#. nav.page.xpanel.account-security.name
+msgid "Account security"
+msgstr "أمان الحساب"
+
+#. nav.page.xwhm.accounts.name nav.section.xwhm.accounts.name
+msgid "Accounts"
+msgstr "الحسابات"
+
+#. catalog.tool.add-dns-zone.name
+msgid "Add DNS Zone"
+msgstr "إضافة منطقة DNS"
+
+#. catalog.tool.hostname-a-record.name
+msgid "Add Hostname A Record"
+msgstr "إضافة سجل A لاسم المضيف"
+
+#. catalog.tool.add-ip.name
+msgid "Add IP Addresses"
+msgstr "إضافة عناوين IP"
+
+#. catalog.tool.add-package.name
+msgid "Add a Package"
+msgstr "إضافة باقة"
+
+#. nav.page.xwhm.addon-services.name
+msgid "Add-on services"
+msgstr "الخدمات الإضافية"
+
+#. catalog.tool.webmail-address-book.name
+msgid "Address Book"
+msgstr "دفتر العناوين"
+
+#. catalog.tool.address-importer.name
+msgid "Address Importer"
+msgstr "استيراد العناوين"
+
+#. catalog.group.whm-interface.name
+msgid "Admin Interface"
+msgstr "واجهة الإدارة"
+
+#. catalog.tool.whm-notifications.name
+msgid "Admin Notifications"
+msgstr "إشعارات المسؤول"
+
+#. catalog.group.advanced.name nav.section.xpanel.advanced.name
+msgid "Advanced"
+msgstr "متقدم"
+
+#. catalog.group.whm-tweak-settings.name
+msgid "Advanced Server Settings"
+msgstr "الإعدادات المتقدمة"
+
+#. catalog.tool.advanced-settings-browser.name
+msgid "Advanced Settings Browser"
+msgstr "متصفح الإعدادات المتقدمة"
+
+#. catalog.tool.alert-rules.name nav.page.xwhm.alerts.name
+msgid "Alerts"
+msgstr "التنبيهات"
+
+#. catalog.tool.web-stats-analog.name
+msgid "Analog Reports"
+msgstr "تقارير Analog"
+
+#. nav.page.xwhm.announcements.name
+msgid "Announcements"
+msgstr "الإعلانات"
+
+#. catalog.tool.aapanel-abnormal-push.name
+msgid "Anomaly Alerts"
+msgstr "تنبيهات الحالات غير الطبيعية"
+
+#. catalog.tool.anonymous-ftp.name
+msgid "Anonymous FTP"
+msgstr "FTP المجهول"
+
+#. catalog.tool.aapanel-anti-intrusion.name
+msgid "Anti-Intrusion"
+msgstr "منع التسلل"
+
+#. catalog.tool.aapanel-anti-spam-gateway.name
+msgid "Anti-Spam Gateway (legacy)"
+msgstr "بوابة مكافحة البريد المزعج (قديمة)"
+
+#. nav.page.xwhm.antivirus.name
+msgid "Antivirus"
+msgstr "مكافحة الفيروسات"
+
+#. catalog.tool.aapanel-clamav.name
+msgid "Antivirus Scanner"
+msgstr "فاحص الفيروسات"
+
+#. catalog.tool.antivirus-scanner-config.name
+msgid "Antivirus Scanner Configuration"
+msgstr "إعدادات فاحص الفيروسات"
+
+#. catalog.tool.apache-handlers.name
+msgid "Apache Handlers"
+msgstr "معالجات Apache"
+
+#. nav.page.xpanel.apache-handlers.name
+msgid "Apache handlers"
+msgstr "معالجات Apache"
+
+#. catalog.group.aapanel-app-store.name
+msgid "App Store and Services"
+msgstr "متجر التطبيقات والخدمات"
+
+#. catalog.tool.app-installer.name nav.page.xpanel.app-installer.name
+msgid "App installer"
+msgstr "مثبّت التطبيقات"
+
+#. nav.page.xwhm.app-runtimes.name
+msgid "App runtimes"
+msgstr "بيئات تشغيل التطبيقات"
+
+#. catalog.tool.application-manager.name
+msgid "Application Manager"
+msgstr "مدير التطبيقات"
+
+#. nav.page.xwhm.application-deployments.name
+msgid "Application deployments"
+msgstr "نشر التطبيقات الإدارية"
+
+#. nav.page.xpanel.applications.name
+msgid "Applications"
+msgstr "التطبيقات"
+
+#. catalog.tool.assign-ipv6.name
+msgid "Assign IPv6 to Accounts"
+msgstr "تعيين عناوين IPv6"
+
+#. catalog.tool.webmail-attachments.name
+msgid "Attachments"
+msgstr "المرفقات"
+
+#. catalog.tool.audit-log.name nav.page.xwhm.audit-log.name
+msgid "Audit log"
+msgstr "سجل التدقيق"
+
+#. catalog.tool.auto-ssl.name
+msgid "Automatic Certificates"
+msgstr "الشهادات التلقائية"
+
+#. catalog.tool.aapanel-auto-dns-on-site-create.name
+msgid "Automatic DNS on Site Creation"
+msgstr "إنشاء سجلات DNS تلقائياً عند إنشاء موقع"
+
+#. nav.page.xmail.autoresponder.name
+msgid "Autoresponder"
+msgstr "الرد التلقائي"
+
+#. catalog.tool.webmail-autoresponder.name
+msgid "Autoresponder (Vacation Reply)"
+msgstr "الرد التلقائي"
+
+#. catalog.tool.autoresponders.name
+msgid "Autoresponders"
+msgstr "الردود التلقائية"
+
+#. catalog.tool.locale-list.name
+msgid "Available Locales"
+msgstr "اللغات المتاحة"
+
+#. catalog.tool.background-process-killer.name
+msgid "Background Process Killer"
+msgstr "إنهاء العمليات الخلفية المحظورة"
+
+#. catalog.group.whm-backup.name catalog.tool.backup.name nav.page.xpanel.backup.name
+msgid "Backup"
+msgstr "النسخ الاحتياطي"
+
+#. catalog.tool.backup-config.name
+msgid "Backup Configuration"
+msgstr "إعدادات النسخ الاحتياطي"
+
+#. catalog.tool.backup-destinations.name
+msgid "Backup Destinations"
+msgstr "وجهات النسخ الاحتياطي"
+
+#. catalog.tool.backup-restoration.name
+msgid "Backup Restoration"
+msgstr "استعادة النسخ الاحتياطية"
+
+#. catalog.tool.backup-user-selection.name
+msgid "Backup User Selection"
+msgstr "اختيار المستخدمين للنسخ الاحتياطي"
+
+#. nav.page.xwhm.backup-destinations.name
+msgid "Backup destinations"
+msgstr "وجهات النسخ الاحتياطي"
+
+#. nav.page.xwhm.backups.name
+msgid "Backups"
+msgstr "النسخ الاحتياطية"
+
+#. nav.section.xwhm.backups.name
+msgid "Backups & transfers"
+msgstr "النسخ الاحتياطي والنقل"
+
+#. catalog.tool.bandwidth.name
+msgid "Bandwidth"
+msgstr "استهلاك النطاق الترددي"
+
+#. nav.page.xwhm.bandwidth.name
+msgctxt "nav.page.xwhm.bandwidth.name"
+msgid "Bandwidth"
+msgstr "النطاق الترددي"
+
+#. catalog.tool.basic-server-setup.name
+msgid "Basic Server Setup"
+msgstr "الإعداد الأساسي للخادم"
+
+#. catalog.tool.aapanel-icmp-block.name
+msgid "Block Ping (ICMP)"
+msgstr "حظر Ping"
+
+#. nav.page.xwhm.branding.name
+msgid "Branding & themes"
+msgstr "الهوية البصرية والسمات"
+
+#. catalog.tool.aapanel-site-bulk-actions.name
+msgid "Bulk Site Actions"
+msgstr "عمليات جماعية على المواقع"
+
+#. catalog.tool.cpu-concurrent-connections.name
+msgid "CPU and Concurrent Connection Usage"
+msgstr "استخدام المعالج والاتصالات المتزامنة"
+
+#. nav.page.xmail.calendar.name
+msgid "Calendar"
+msgstr "التقويم"
+
+#. nav.section.xmail.calendar-contacts.name
+msgid "Calendar & contacts"
+msgstr "التقويم وجهات الاتصال"
+
+#. nav.page.xmail.calendar-contact-settings.name
+msgid "Calendars & address books"
+msgstr "التقويمات ودفاتر العناوين"
+
+#. nav.page.xpanel.calendars-contacts.name
+msgid "Calendars & contacts"
+msgstr "التقويمات وجهات الاتصال"
+
+#. catalog.tool.calendars-contacts-config.name
+msgid "Calendars and Contacts Configuration"
+msgstr "إعداد التقويمات وجهات الاتصال"
+
+#. catalog.tool.webmail-dav-config.name
+msgctxt "catalog.tool.webmail-dav-config.name"
+msgid "Calendars and Contacts Configuration"
+msgstr "إعداد مزامنة التقويم وجهات الاتصال"
+
+#. catalog.tool.calendars-contacts-management.name catalog.tool.webmail-dav-collections.name
+msgid "Calendars and Contacts Management"
+msgstr "إدارة التقويمات وجهات الاتصال"
+
+#. catalog.tool.calendars-contacts-sharing.name catalog.tool.webmail-dav-sharing.name
+msgid "Calendars and Contacts Sharing"
+msgstr "مشاركة التقويمات وجهات الاتصال"
+
+#. catalog.tool.ssl-csrs.name
+msgid "Certificate Signing Requests"
+msgstr "طلبات توقيع الشهادات"
+
+#. nav.page.xpanel.certificate-files.name
+msgid "Certificate files"
+msgstr "ملفات الشهادات"
+
+#. catalog.tool.webmail-boxtrapper.name
+msgid "Challenge-Response Spam Trap"
+msgstr "مصيدة التحقق من المرسل"
+
+#. catalog.tool.change-hostname.name
+msgid "Change Hostname"
+msgstr "تغيير اسم المضيف"
+
+#. catalog.tool.change-language.name
+msgid "Change Language"
+msgstr "تغيير اللغة"
+
+#. catalog.tool.change-multiple-sites-ip.name
+msgid "Change Multiple Sites' IP Addresses"
+msgstr "تغيير عناوين IP لعدة مواقع"
+
+#. catalog.tool.change-ownership-multiple-accounts.name
+msgid "Change Ownership of Multiple Accounts"
+msgstr "تغيير ملكية عدة حسابات"
+
+#. catalog.tool.change-root-password.name
+msgid "Change Root Password"
+msgstr "تغيير كلمة مرور الجذر"
+
+#. catalog.tool.change-site-ip.name
+msgid "Change Site's IP Address"
+msgstr "تغيير عنوان IP للموقع"
+
+#. catalog.tool.change-style.name
+msgid "Change Style / Theme Switching"
+msgstr "تغيير المظهر"
+
+#. catalog.tool.cloudflare-account.name catalog.tool.cloudflare-integration.name nav.page.xpanel.cloudflare.name
+msgid "Cloudflare"
+msgstr "Cloudflare"
+
+#. nav.page.xwhm.cloudflare-dns-providers.name
+msgid "Cloudflare & DNS providers"
+msgstr "Cloudflare ومزوّدو DNS"
+
+#. catalog.group.whm-clusters.name
+msgid "Clusters"
+msgstr "العناقيد"
+
+#. catalog.tool.aapanel-business-ssl.name
+msgid "Commercial Certificates"
+msgstr "الشهادات التجارية"
+
+#. catalog.tool.compiler-access.name
+msgid "Compiler Access"
+msgstr "الوصول إلى المترجمات"
+
+#. nav.page.xmail.compose.name
+msgid "Compose"
+msgstr "إنشاء رسالة"
+
+#. catalog.tool.webmail-compose.name
+msgid "Compose Message"
+msgstr "إنشاء رسالة"
+
+#. catalog.tool.aapanel-docker-compose.name
+msgid "Compose Stacks and Templates"
+msgstr "حزم التركيب والقوالب"
+
+#. catalog.tool.aapanel-composer.name
+msgid "Composer"
+msgstr "Composer"
+
+#. nav.page.xwhm.composer.name
+msgctxt "nav.page.xwhm.composer.name"
+msgid "Composer"
+msgstr "إدارة Composer"
+
+#. catalog.tool.tweak-compression.name
+msgid "Compression Settings"
+msgstr "إعدادات الضغط"
+
+#. catalog.tool.configuration-cluster.name
+msgid "Configuration Cluster"
+msgstr "عنقود الإعدادات"
+
+#. catalog.tool.config-as-code.name
+msgid "Configuration as code"
+msgstr "الإعداد كرمز"
+
+#. nav.page.xwhm.config-health.name
+msgid "Configuration health"
+msgstr "صحة إعداد الخدمات"
+
+#. catalog.tool.application-locales.name
+msgid "Configure Application Locales"
+msgstr "تهيئة لغات التطبيقات"
+
+#. catalog.tool.webmail-mail-client-setup.name
+msgid "Configure Mail Client"
+msgstr "إعداد برنامج البريد"
+
+#. catalog.tool.connect-devices.name
+msgid "Connect Devices (Mail Client Setup)"
+msgstr "ربط الأجهزة بالبريد"
+
+#. nav.page.xmail.connect-devices.name
+msgid "Connect devices"
+msgstr "ربط الأجهزة"
+
+#. catalog.tool.flood-protection.name
+msgid "Connection & flood protection"
+msgstr "الحماية من الإغراق"
+
+#. catalog.tool.webmail-contact-info.name
+msgid "Contact Information and Login Alerts"
+msgstr "معلومات الاتصال وتنبيهات الدخول"
+
+#. nav.page.xmail.contacts.name
+msgid "Contacts"
+msgstr "جهات الاتصال"
+
+#. catalog.group.xmail-contacts-calendars.name
+msgid "Contacts and Calendars"
+msgstr "جهات الاتصال والتقويمات"
+
+#. catalog.tool.aapanel-docker-container-detail.name
+msgid "Container Details"
+msgstr "تفاصيل الحاوية"
+
+#. catalog.tool.aapanel-docker-settings.name
+msgid "Container Engine Settings"
+msgstr "إعدادات محرك الحاويات"
+
+#. catalog.tool.aapanel-docker-images.name
+msgid "Container Images"
+msgstr "صور الحاويات"
+
+#. catalog.tool.aapanel-docker-networks.name
+msgid "Container Networks"
+msgstr "شبكات الحاويات"
+
+#. catalog.tool.virtuozzo-quotas.name
+msgid "Container Quotas on Virtuozzo"
+msgstr "تفعيل الحصص على Virtuozzo"
+
+#. catalog.tool.aapanel-docker-overview.name
+msgid "Container Resource Overview"
+msgstr "نظرة عامة على موارد الحاويات"
+
+#. catalog.tool.aapanel-docker-volumes.name
+msgid "Container Volumes"
+msgstr "وحدات تخزين الحاويات"
+
+#. nav.page.xwhm.container-engine.name
+msgid "Container engine"
+msgstr "محرك الحاويات"
+
+#. catalog.group.aapanel-docker.name catalog.tool.aapanel-docker-containers.name catalog.tool.account-containers.name nav.page.xpanel.containers.name nav.page.xwhm.containers.name
+msgid "Containers"
+msgstr "الحاويات"
+
+#. catalog.tool.convert-addon-to-account.name
+msgid "Convert Addon Domain to Account"
+msgstr "تحويل نطاق إضافي إلى حساب مستقل"
+
+#. nav.page.xwhm.convert-addon.name
+msgid "Convert addon domain"
+msgstr "تحويل نطاق إضافي إلى حساب"
+
+#. catalog.tool.locale-copy.name
+msgid "Copy a Locale"
+msgstr "نسخ لغة"
+
+#. catalog.tool.email-account-create.name
+msgid "Create Email Account"
+msgstr "إنشاء حساب بريد"
+
+#. catalog.tool.create-support-ticket.name
+msgid "Create Vendor Support Ticket"
+msgstr "فتح تذكرة دعم لدى المورّد"
+
+#. catalog.tool.create-account.name
+msgid "Create a New Account"
+msgstr "إنشاء حساب جديد"
+
+#. catalog.tool.create-domain.name
+msgid "Create a New Domain"
+msgstr "إنشاء نطاق"
+
+#. nav.page.xwhm.create-account.name
+msgid "Create account"
+msgstr "إنشاء حساب"
+
+#. catalog.tool.feature-list-crud.summary
+msgid "Create, rename, update disabled feature keys and delete unused feature lists within the caller’s ownership."
+msgstr "إنشاء قوائم الميزات وتعديلها وحذف غير المستخدم منها ضمن صلاحيات المالك."
+
+#. catalog.tool.cron-jobs.name
+msgid "Cron Jobs"
+msgstr "المهام المجدولة"
+
+#. nav.page.xpanel.cron.name
+msgid "Cron jobs"
+msgstr "مهام Cron"
+
+#. catalog.tool.aapanel-node-file-transfer.name
+msgid "Cross-Node File Transfer"
+msgstr "نقل الملفات بين العُقد"
+
+#. catalog.tool.current-disk-usage.name
+msgid "Current Disk Usage"
+msgstr "استخدام الأقراص الحالي"
+
+#. catalog.tool.dns-cluster.name
+msgid "DNS Cluster"
+msgstr "عنقود DNS"
+
+#. catalog.tool.dns-config-cleanup.name
+msgid "DNS Config Cleanup"
+msgstr "تنظيف إعدادات DNS"
+
+#. catalog.group.whm-dns-functions.name
+msgid "DNS Functions"
+msgstr "وظائف DNS"
+
+#. catalog.tool.aapanel-dns-provider-accounts.name
+msgid "DNS Provider Accounts"
+msgstr "حسابات مزوّدي DNS"
+
+#. catalog.tool.nameserver-selection.name
+msgid "DNS Server Selection"
+msgstr "اختيار خادم الأسماء"
+
+#. catalog.tool.dns-zone-manager.name
+msgid "DNS Zone Manager"
+msgstr "مدير مناطق DNS"
+
+#. nav.page.xwhm.dns-cluster.name
+msgid "DNS cluster"
+msgstr "عنقود DNS"
+
+#. nav.page.xwhm.dns-server.name
+msgid "DNS server"
+msgstr "خادم DNS"
+
+#. catalog.tool.dns-zone-records.name
+msgid "DNS zone records"
+msgstr "سجلات منطقة DNS"
+
+#. nav.page.xwhm.dns-zones.name
+msgid "DNS zones"
+msgstr "مناطق DNS"
+
+#. catalog.tool.dnssec.name
+msgid "DNSSEC"
+msgstr "أمان DNS (DNSSEC)"
+
+#. catalog.tool.daily-process-log.name
+msgid "Daily Process Log"
+msgstr "سجل العمليات اليومي"
+
+#. catalog.group.aapanel-home.name nav.page.xwhm.dashboard.name
+msgid "Dashboard"
+msgstr "لوحة المعلومات"
+
+#. catalog.tool.db-access-hosts.name
+msgid "Database Access Hosts"
+msgstr "مضيفو الوصول لقواعد البيانات"
+
+#. catalog.tool.db-engine-upgrade.name
+msgid "Database Engine Upgrade"
+msgstr "ترقية MySQL/MariaDB"
+
+#. catalog.tool.db-ownership-map.name
+msgid "Database Ownership Map"
+msgstr "أداة ربط قواعد البيانات"
+
+#. catalog.tool.db-process-list.name
+msgid "Database Processes"
+msgstr "عمليات قاعدة البيانات"
+
+#. catalog.tool.aapanel-db-quota.name
+msgid "Database Quota"
+msgstr "حصة قاعدة البيانات"
+
+#. catalog.tool.db-root-password.name
+msgid "Database Root Password"
+msgstr "كلمة مرور جذر قاعدة البيانات"
+
+#. catalog.tool.db-server-profiles.name
+msgid "Database Server Profiles"
+msgstr "ملفات اتصال خادم قواعد البيانات"
+
+#. catalog.group.whm-sql-services.name
+msgid "Database Services"
+msgstr "خدمات قواعد البيانات"
+
+#. catalog.tool.tweak-sql.name
+msgid "Database Settings"
+msgstr "إعدادات قواعد البيانات"
+
+#. catalog.tool.database-wizard.name
+msgid "Database Wizard"
+msgstr "معالج قواعد البيانات"
+
+#. catalog.tool.database-insights.name nav.page.xpanel.database-insights.name
+msgid "Database insights"
+msgstr "تحليل قواعد البيانات"
+
+#. nav.page.xwhm.database-processes.name
+msgid "Database processes"
+msgstr "عمليات قواعد البيانات"
+
+#. nav.page.xwhm.database-servers.name
+msgid "Database servers"
+msgstr "خوادم قواعد البيانات"
+
+#. catalog.tool.database-tuning.name nav.page.xwhm.database-tuning.name
+msgid "Database tuning"
+msgstr "ضبط قواعد البيانات"
+
+#. nav.page.xwhm.database-upgrade.name
+msgid "Database upgrade"
+msgstr "ترقية محرك قواعد البيانات"
+
+#. nav.page.xwhm.database-users.name
+msgid "Database users"
+msgstr "مستخدمو قواعد البيانات"
+
+#. catalog.group.aapanel-databases.name catalog.group.databases.name nav.page.xwhm.databases.name nav.section.xpanel.databases.name nav.section.xwhm.databases.name
+msgid "Databases"
+msgstr "قواعد البيانات"
+
+#. catalog.tool.default-address.name
+msgid "Default Address (Catch-all)"
+msgstr "العنوان الافتراضي"
+
+#. catalog.tool.aapanel-default-index.name
+msgid "Default Index Files"
+msgstr "ملفات الفهرس الافتراضية"
+
+#. catalog.tool.default-key-type.name
+msgid "Default Key Type"
+msgstr "نوع المفتاح الافتراضي"
+
+#. catalog.tool.aapanel-default-site.name
+msgid "Default Site"
+msgstr "الموقع الافتراضي"
+
+#. nav.page.xwhm.default-index.name
+msgid "Default index files"
+msgstr "ملفات الفهرس الافتراضية"
+
+#. catalog.tool.delete-dns-zone.name
+msgid "Delete DNS Zones"
+msgstr "حذف مناطق DNS"
+
+#. catalog.tool.locale-delete.name
+msgid "Delete a Locale"
+msgstr "حذف لغة"
+
+#. catalog.tool.delete-package.name
+msgid "Delete a Package"
+msgstr "حذف باقة"
+
+#. nav.page.xpanel.deliverability.name
+msgid "Deliverability & routing"
+msgstr "قابلية التسليم وتوجيه البريد"
+
+#. nav.page.xwhm.delivery-reports.name
+msgid "Delivery reports"
+msgstr "تقارير التسليم"
+
+#. catalog.tool.aapanel-deny-access.name
+msgid "Deny File Access"
+msgstr "منع الوصول إلى الملفات"
+
+#. catalog.tool.tweak-development.name
+msgid "Developer Debug Settings"
+msgstr "إعدادات تصحيح الأخطاء"
+
+#. nav.page.xwhm.developer-tools.name
+msgid "Developer tools"
+msgstr "أدوات المطورين"
+
+#. catalog.group.whm-development.name
+msgid "Development"
+msgstr "أدوات التطوير"
+
+#. catalog.tool.directory-index-priority.name
+msgid "Directory Index Priority"
+msgstr "أولوية ملفات الفهرس"
+
+#. catalog.tool.directory-privacy.name
+msgid "Directory Privacy"
+msgstr "حماية المجلدات"
+
+#. nav.page.xpanel.indexes.name
+msgid "Directory indexes"
+msgstr "فهارس المجلدات"
+
+#. nav.page.xpanel.directory-privacy.name
+msgid "Directory privacy"
+msgstr "حماية المجلدات"
+
+#. catalog.tool.disk-quota-setup.name
+msgid "Disk Quota Setup"
+msgstr "تهيئة حصص القرص"
+
+#. catalog.tool.aapanel-disk-analysis.name
+msgid "Disk Space Analyzer"
+msgstr "محلل مساحة القرص"
+
+#. catalog.tool.disk-usage.name
+msgid "Disk Usage"
+msgstr "استخدام القرص"
+
+#. nav.page.xmail.disk-usage.name
+msgid "Disk usage"
+msgstr "مساحة البريد"
+
+#. nav.page.xwhm.disk-usage.name
+msgctxt "nav.page.xwhm.disk-usage.name"
+msgid "Disk usage"
+msgstr "استخدام القرص"
+
+#. catalog.tool.tweak-display.name
+msgid "Display Settings"
+msgstr "إعدادات العرض"
+
+#. catalog.tool.webmail-preferences.name
+msgid "Display and Compose Preferences"
+msgstr "تفضيلات العرض والكتابة"
+
+#. catalog.tool.aapanel-mongodb-service.name
+msgid "Document Database Service"
+msgstr "خدمة قاعدة البيانات المستندية"
+
+#. catalog.tool.domain-forwarders.name
+msgid "Domain Forwarders"
+msgstr "إعادة توجيه النطاق"
+
+#. catalog.tool.domain-forwarding.name
+msgid "Domain Forwarding"
+msgstr "إعادة توجيه النطاقات"
+
+#. catalog.tool.domain-php-settings.name
+msgid "Domain PHP settings"
+msgstr "إعدادات PHP للنطاق"
+
+#. catalog.tool.tweak-domains.name
+msgid "Domain Settings"
+msgstr "إعدادات النطاقات"
+
+#. catalog.group.aapanel-domains.name catalog.group.domains.name catalog.tool.domains.name nav.page.xpanel.domains.name nav.page.xwhm.domains.name nav.section.xpanel.domains.name
+msgid "Domains"
+msgstr "النطاقات"
+
+#. nav.section.xwhm.domains.name
+msgid "Domains, DNS & SSL"
+msgstr "النطاقات وDNS وSSL"
+
+#. catalog.tool.dynamic-dns.name nav.page.xpanel.dynamic-dns.name
+msgid "Dynamic DNS"
+msgstr "DNS الديناميكي"
+
+#. catalog.tool.aapanel-ddns.name
+msgid "Dynamic DNS Updater"
+msgstr "محدّث DNS الديناميكي"
+
+#. catalog.tool.reseller-privileges.name
+msgid "Edit Reseller Privileges (ACL)"
+msgstr "صلاحيات الموزع"
+
+#. catalog.tool.locale-edit.name
+msgid "Edit a Locale"
+msgstr "تعديل لغة"
+
+#. catalog.tool.edit-package.name
+msgid "Edit a Package"
+msgstr "تعديل باقة"
+
+#. catalog.group.email.name catalog.group.whm-email.name nav.section.xpanel.email.name nav.section.xwhm.email.name
+msgid "Email"
+msgstr "البريد الإلكتروني"
+
+#. catalog.tool.email-accounts.name
+msgid "Email Accounts"
+msgstr "حسابات البريد"
+
+#. catalog.tool.email-all-resellers.name
+msgid "Email All Resellers"
+msgstr "مراسلة جميع الموزعين"
+
+#. catalog.tool.email-all-users.name
+msgid "Email All Users"
+msgstr "مراسلة جميع المستخدمين"
+
+#. catalog.tool.email-archive.name
+msgid "Email Archive"
+msgstr "أرشيف البريد"
+
+#. catalog.tool.email-dns-records.name
+msgid "Email DNS Records"
+msgstr "سجلات DNS للبريد"
+
+#. catalog.tool.email-deliverability.name
+msgid "Email Deliverability"
+msgstr "قابلية تسليم البريد"
+
+#. catalog.tool.email-disk-usage.name
+msgid "Email Disk Usage"
+msgstr "استخدام مساحة البريد"
+
+#. catalog.tool.email-filters.name catalog.tool.webmail-email-filters.name
+msgid "Email Filters"
+msgstr "عوامل تصفية البريد"
+
+#. catalog.tool.email-routing.name catalog.tool.xwhm-email-routing.name
+msgid "Email Routing"
+msgstr "توجيه البريد"
+
+#. nav.page.xpanel.email-accounts.name
+msgid "Email accounts"
+msgstr "حسابات البريد"
+
+#. nav.page.xpanel.email-archive.name
+msgid "Email archive"
+msgstr "أرشيف البريد"
+
+#. nav.page.xmail.filters.name nav.page.xpanel.email-filters.name
+msgid "Email filters"
+msgstr "مرشحات البريد"
+
+#. catalog.tool.dkim-spf-bulk.name
+msgid "Enable DKIM and SPF for All"
+msgstr "تفعيل DKIM وSPF لجميع النطاقات"
+
+#. nav.page.xpanel.encryption.name
+msgid "Encryption"
+msgstr "التشفير (GnuPG)"
+
+#. catalog.tool.email-encryption.name
+msgid "Encryption (GnuPG Keys)"
+msgstr "تشفير البريد (GnuPG)"
+
+#. catalog.tool.error-pages.name
+msgid "Error Pages"
+msgstr "صفحات الأخطاء"
+
+#. nav.page.xpanel.error-pages.name
+msgid "Error pages"
+msgstr "صفحات الأخطاء"
+
+#. catalog.tool.error-reporting.name
+msgid "Error reporting (Sentry)"
+msgstr "تقارير الأخطاء (Sentry)"
+
+#. catalog.tool.errors.name
+msgid "Errors"
+msgstr "الأخطاء"
+
+#. catalog.tool.locale-xml-export.name
+msgid "Export Locale File"
+msgstr "تصدير ملف اللغة"
+
+#. catalog.tool.external-authentication.name
+msgid "External Authentication"
+msgstr "المصادقة الخارجية"
+
+#. catalog.group.aapanel-ftp.name
+msgid "FTP"
+msgstr "FTP"
+
+#. catalog.tool.ftp-accounts.name
+msgid "FTP Accounts"
+msgstr "حسابات FTP"
+
+#. catalog.tool.ftp-connections.name
+msgid "FTP Connections"
+msgstr "اتصالات FTP"
+
+#. catalog.tool.aapanel-ftp-logs.name
+msgid "FTP Logs and Log Analysis"
+msgstr "سجلات FTP وتحليلها"
+
+#. catalog.tool.ftp-server-selection.name
+msgid "FTP Server Selection"
+msgstr "اختيار خادم FTP"
+
+#. catalog.tool.ftp-server-config.name
+msgid "FTP Server Settings"
+msgstr "إعدادات خادم FTP"
+
+#. catalog.tool.web-stats-ftp.name
+msgid "FTP Statistics"
+msgstr "إحصائيات FTP"
+
+#. nav.page.xpanel.ftp.name
+msgid "FTP accounts"
+msgstr "حسابات FTP"
+
+#. nav.page.xwhm.ftp-log-analysis.name
+msgid "FTP log analysis"
+msgstr "تحليل سجلات FTP"
+
+#. nav.page.xwhm.ftp-server.name
+msgid "FTP server"
+msgstr "خادم FTP"
+
+#. catalog.tool.feature-manager.name
+msgid "Feature Manager"
+msgstr "مدير الميزات"
+
+#. catalog.tool.whm-global-search.name
+msgid "Feature and Account Search"
+msgstr "البحث عن الميزات والحسابات"
+
+#. catalog.tool.feature-list-crud.name
+msgid "Feature list records"
+msgstr "سجلات قوائم الميزات"
+
+#. nav.page.xwhm.feature-lists.name
+msgid "Feature lists"
+msgstr "قوائم الميزات"
+
+#. catalog.tool.aapanel-file-monitor.name
+msgid "File Change Monitor"
+msgstr "مراقبة تغييرات الملفات"
+
+#. catalog.tool.file-text-editor.name
+msgid "File Editor"
+msgstr "محرر الملفات"
+
+#. catalog.tool.file-manager.name
+msgid "File Manager"
+msgstr "مدير الملفات"
+
+#. catalog.tool.aapanel-file-share.name
+msgid "File Sharing Links"
+msgstr "روابط مشاركة الملفات"
+
+#. catalog.tool.aapanel-files-sync.name
+msgid "File Synchronization"
+msgstr "مزامنة الملفات"
+
+#. catalog.tool.file-restoration.name
+msgid "File and Directory Restoration"
+msgstr "استعادة الملفات والمجلدات"
+
+#. catalog.tool.file-restore.name
+msgid "File and Directory Restore"
+msgstr "استعادة الملفات والمجلدات"
+
+#. nav.page.xpanel.file-manager.name
+msgid "File manager"
+msgstr "مدير الملفات"
+
+#. nav.page.xwhm.file-sharing.name
+msgid "File sharing links"
+msgstr "روابط مشاركة الملفات"
+
+#. catalog.group.aapanel-files.name catalog.group.files.name nav.section.xpanel.files.name
+msgid "Files"
+msgstr "الملفات"
+
+#. catalog.tool.incoming-mail-country-filter.name
+msgid "Filter Incoming Mail by Country"
+msgstr "تصفية البريد الوارد حسب الدولة"
+
+#. catalog.tool.incoming-mail-domain-filter.name
+msgid "Filter Incoming Mail by Domain"
+msgstr "تصفية البريد الوارد حسب النطاق"
+
+#. catalog.tool.webmail-filter-test.name
+msgid "Filter Test"
+msgstr "اختبار عوامل التصفية"
+
+#. nav.page.xwhm.firewall.name
+msgid "Firewall"
+msgstr "جدار الحماية"
+
+#. catalog.tool.aapanel-firewall-switch.name
+msgid "Firewall On/Off"
+msgstr "تشغيل جدار الحماية"
+
+#. catalog.tool.waf-vendors.name
+msgid "Firewall Rule Vendors"
+msgstr "مزودو قواعد الجدار"
+
+#. catalog.tool.waf-rules.name
+msgid "Firewall Rules and Hits"
+msgstr "قواعد الجدار وسجل الإصابات"
+
+#. nav.page.xwhm.flood-protection.name
+msgid "Flood protection"
+msgstr "الحماية من الإغراق"
+
+#. catalog.tool.webmail-folders.name
+msgid "Folder Management"
+msgstr "إدارة المجلدات"
+
+#. nav.page.xmail.folders.name
+msgid "Folders"
+msgstr "المجلدات"
+
+#. catalog.tool.force-https-redirect.name
+msgid "Force HTTPS Redirect"
+msgstr "فرض HTTPS"
+
+#. catalog.tool.force-password-change.name
+msgid "Force Password Change"
+msgstr "فرض تغيير كلمة المرور"
+
+#. catalog.tool.forwarders.name
+msgid "Forwarders"
+msgstr "إعادة توجيه البريد"
+
+#. nav.page.xmail.forwarders.name
+msgctxt "nav.page.xmail.forwarders.name"
+msgid "Forwarders"
+msgstr "تحويل البريد"
+
+#. nav.page.xpanel.forwarders.name
+msgid "Forwarders & autoresponders"
+msgstr "التحويل والردود التلقائية"
+
+#. nav.section.xpanel.general.name
+msgid "General"
+msgstr "عام"
+
+#. catalog.tool.xpanel-general-info.name
+msgid "General Information Panel"
+msgstr "معلومات عامة"
+
+#. catalog.tool.aapanel-panel-general.name
+msgid "General Panel Settings"
+msgstr "الإعدادات العامة للوحة"
+
+#. catalog.tool.generate-csr.name
+msgid "Generate Certificate and CSR"
+msgstr "إنشاء شهادة وطلب توقيع"
+
+#. catalog.tool.xpanel-onboarding-assistant.name
+msgid "Getting Started Assistant"
+msgstr "مساعد البدء"
+
+#. nav.page.xpanel.git.name
+msgid "Git & deployments"
+msgstr "Git والنشر"
+
+#. catalog.tool.gitweb.name
+msgid "Git History Browser"
+msgstr "سجل مستودعات Git"
+
+#. catalog.tool.git-version-control.name
+msgid "Git Version Control"
+msgstr "إدارة إصدارات Git"
+
+#. catalog.tool.git-deployments.name
+msgid "Git deployments"
+msgstr "النشر من Git"
+
+#. catalog.tool.global-email-filters.name
+msgid "Global Email Filters"
+msgstr "عوامل التصفية العامة"
+
+#. nav.page.xwhm.application-projects.name
+msgid "Go & Java projects"
+msgstr "مشاريع Go وJava"
+
+#. catalog.tool.aapanel-go-project.name
+msgid "Go Projects"
+msgstr "مشاريع Go"
+
+#. catalog.tool.aapanel-go-sdk.name
+msgid "Go SDK Manager"
+msgstr "إدارة حزم تطوير Go"
+
+#. catalog.tool.grant-support-access.name
+msgid "Grant Vendor Support Access"
+msgstr "منح المورّد صلاحية الوصول للدعم"
+
+#. catalog.tool.greylisting.name
+msgid "Greylisting"
+msgstr "القائمة الرمادية"
+
+#. catalog.tool.whm-greylisting.name
+msgid "Greylisting (Server)"
+msgstr "القائمة الرمادية للخادم"
+
+#. catalog.tool.html-editor.name
+msgid "HTML Editor"
+msgstr "محرر HTML"
+
+#. catalog.tool.aapanel-https-protection.name
+msgid "HTTPS Cross-Site Protection"
+msgstr "حماية HTTPS من التداخل"
+
+#. nav.page.xpanel.home.name nav.section.xwhm.home.name
+msgid "Home"
+msgstr "الرئيسية"
+
+#. catalog.tool.whm-home-favorites.name
+msgid "Home and Favorites"
+msgstr "الرئيسية والمفضلة"
+
+#. catalog.tool.hooks-manager.name
+msgid "Hooks Manager"
+msgstr "إدارة الخطافات"
+
+#. catalog.tool.host-access-control.name
+msgid "Host Access Control"
+msgstr "التحكم في وصول المضيفين"
+
+#. catalog.group.aapanel-accounts.name
+msgid "Hosting Accounts (Sub-Panel)"
+msgstr "حسابات الاستضافة (اللوحة الفرعية)"
+
+#. catalog.tool.hotlink-protection.name
+msgid "Hotlink Protection"
+msgstr "الحماية من الربط المباشر"
+
+#. nav.page.xpanel.hotlink-protection.name
+msgid "Hotlink protection"
+msgstr "الحماية من الربط المباشر"
+
+#. catalog.tool.io-monitor.name nav.page.xwhm.io-monitor.name
+msgid "IO monitor"
+msgstr "مراقبة الإدخال والإخراج"
+
+#. catalog.tool.ip-addresses-list.name
+msgid "IP Addresses"
+msgstr "عرض وحذف عناوين IP"
+
+#. catalog.tool.ip-blocker.name
+msgid "IP Blocker"
+msgstr "حظر عناوين IP"
+
+#. catalog.group.whm-ip-functions.name
+msgid "IP Functions"
+msgstr "إدارة عناوين IP"
+
+#. catalog.tool.ip-migration-wizard.name
+msgid "IP Migration Wizard"
+msgstr "معالج ترحيل العناوين"
+
+#. catalog.tool.aapanel-ip-rules.name
+msgid "IP Rules"
+msgstr "قواعد عناوين IP"
+
+#. catalog.tool.ip-usage-report.name
+msgid "IP Usage"
+msgstr "استخدام عناوين IP"
+
+#. nav.page.xwhm.ip-addresses.name
+msgid "IP addresses"
+msgstr "عناوين IP"
+
+#. nav.page.xpanel.ip-blocker.name
+msgid "IP blocker"
+msgstr "حظر عناوين IP"
+
+#. nav.page.xwhm.reseller-ips-nameservers.name
+msgid "IPs & nameservers"
+msgstr "عناوين IP وخوادم الأسماء"
+
+#. catalog.tool.ipv6-ranges.name
+msgid "IPv6 Ranges"
+msgstr "نطاقات IPv6"
+
+#. nav.page.xmail.identities.name
+msgid "Identities & signatures"
+msgstr "الهويات والتواقيع"
+
+#. catalog.tool.webmail-identities.name
+msgid "Identities and Signatures"
+msgstr "الهويات والتواقيع"
+
+#. catalog.tool.aapanel-docker-registries.name
+msgid "Image Registries"
+msgstr "مستودعات الصور"
+
+#. catalog.tool.images.name
+msgid "Images"
+msgstr "الصور"
+
+#. catalog.tool.locale-xml-import.name
+msgid "Import Locale File"
+msgstr "استيراد ملف اللغة"
+
+#. catalog.tool.aapanel-third-party-plugin-import.name
+msgid "Import Third-Party Plugin"
+msgstr "استيراد إضافة خارجية"
+
+#. catalog.tool.aapanel-firewall-import-export.name
+msgid "Import and Export Rules"
+msgstr "استيراد القواعد وتصديرها"
+
+#. catalog.tool.imunify360.name catalog.tool.xwhm-imunify360.name
+msgid "Imunify360"
+msgstr "Imunify360"
+
+#. nav.page.xwhm.inbound-spam.name
+msgid "Inbound spam protection"
+msgstr "الحماية من البريد المزعج الوارد"
+
+#. nav.page.xmail.inbox.name
+msgid "Inbox"
+msgstr "الوارد"
+
+#. catalog.group.xmail-inbox-rules.name
+msgid "Inbox Rules and Automation"
+msgstr "قواعد صندوق الوارد والأتمتة"
+
+#. catalog.tool.indexes.name
+msgid "Indexes"
+msgstr "فهارس المجلدات"
+
+#. catalog.tool.initial-setup-wizard.name
+msgid "Initial Setup Wizard"
+msgstr "معالج الإعداد الأولي"
+
+#. catalog.tool.install-ssl.name
+msgid "Install SSL on a Domain"
+msgstr "تثبيت شهادة SSL على نطاق"
+
+#. catalog.tool.ssl-install.name
+msgid "Install and Manage SSL for Sites"
+msgstr "تثبيت SSL للمواقع"
+
+#. nav.page.xwhm.install-ssl.name
+msgid "Install certificate"
+msgstr "تثبيت شهادة"
+
+#. catalog.tool.installatron.name
+msgid "Installatron"
+msgstr "مثبّت Installatron"
+
+#. catalog.tool.xwhm-installatron.name
+msgctxt "catalog.tool.xwhm-installatron.name"
+msgid "Installatron"
+msgstr "Installatron"
+
+#. catalog.tool.site-software-instances.name
+msgid "Installed Site Software"
+msgstr "البرمجيات المثبتة على المواقع"
+
+#. catalog.tool.integrations-hub.name nav.page.xwhm.integrations.name
+msgid "Integrations"
+msgstr "التكاملات"
+
+#. catalog.group.interface.name
+msgid "Interface"
+msgstr "الواجهة"
+
+#. catalog.tool.interface-analytics-consent.name
+msgid "Interface Analytics Consent"
+msgstr "الموافقة على تحليلات الواجهة"
+
+#. catalog.tool.intrusion-detection.name nav.page.xwhm.intrusion-detection.name
+msgid "Intrusion detection"
+msgstr "كشف التسلل"
+
+#. nav.page.xpanel.issue-certificate.name
+msgid "Issue certificate"
+msgstr "إصدار شهادة"
+
+#. catalog.tool.aapanel-java-project.name
+msgid "Java Projects"
+msgstr "مشاريع Java"
+
+#. nav.page.xwhm.jobs.name
+msgid "Jobs"
+msgstr "المهام"
+
+#. catalog.tool.aapanel-redis-keys.name
+msgid "Key-Value Store Browser"
+msgstr "مستعرض مخزن المفاتيح"
+
+#. catalog.tool.aapanel-redis-service.name
+msgid "Key-Value Store Service"
+msgstr "خدمة مخزن المفاتيح"
+
+#. nav.page.xpanel.language.name
+msgid "Language"
+msgstr "اللغة"
+
+#. catalog.tool.aapanel-language-theme.name
+msgid "Language and Dark Mode"
+msgstr "اللغة والوضع الداكن"
+
+#. nav.page.xwhm.languages.name
+msgid "Languages"
+msgstr "اللغات"
+
+#. catalog.tool.leech-protection.name
+msgid "Leech Protection"
+msgstr "منع مشاركة بيانات الدخول"
+
+#. catalog.tool.backup-legacy-migration.name
+msgid "Legacy Backup Migration"
+msgstr "ترحيل النسخ الاحتياطي القديم"
+
+#. catalog.tool.remote-access-key.name
+msgid "Legacy Remote Access Key"
+msgstr "مفتاح الوصول البعيد القديم"
+
+#. catalog.tool.aapanel-license-voucher.name
+msgid "License and Voucher Redemption"
+msgstr "الترخيص واسترداد القسائم"
+
+#. catalog.tool.limit-bandwidth-usage.name
+msgid "Limit Bandwidth Usage"
+msgstr "تحديد حد النطاق الترددي"
+
+#. catalog.tool.webmail-external-auth.name
+msgid "Linked External Logins"
+msgstr "تسجيلات الدخول الخارجية"
+
+#. catalog.tool.linked-server-nodes.name
+msgid "Linked Server Nodes"
+msgstr "ربط عُقد الخوادم"
+
+#. catalog.tool.aapanel-linux-tools.name
+msgid "Linux System Tools"
+msgstr "أدوات نظام لينكس"
+
+#. catalog.tool.list-accounts.name
+msgid "List Accounts"
+msgstr "قائمة الحسابات"
+
+#. catalog.tool.list-parked-domains.name
+msgid "List Parked Domains"
+msgstr "قائمة النطاقات المستعارة"
+
+#. catalog.tool.list-subdomains.name
+msgid "List Subdomains"
+msgstr "قائمة النطاقات الفرعية"
+
+#. catalog.tool.list-suspended-accounts.name
+msgid "List Suspended Accounts"
+msgstr "الحسابات الموقوفة"
+
+#. catalog.tool.live-transfer.name
+msgid "Live Transfer"
+msgstr "النقل الحي"
+
+#. catalog.tool.traffic-monitor-account.name
+msgid "Live traffic"
+msgstr "الحركة المباشرة"
+
+#. catalog.tool.aapanel-load-balance.name
+msgid "Load Balancer"
+msgstr "موازن الأحمال"
+
+#. catalog.tool.tweak-status.name
+msgid "Load Threshold"
+msgstr "عتبة الحمل الحرجة"
+
+#. catalog.group.whm-locales.name
+msgid "Locales"
+msgstr "اللغات المحلية"
+
+#. catalog.tool.aapanel-log-cleanup.name
+msgid "Log Cleanup"
+msgstr "تنظيف السجلات"
+
+#. catalog.tool.tweak-logging.name
+msgid "Logging Settings"
+msgstr "إعدادات التسجيل"
+
+#. catalog.group.aapanel-logs.name nav.page.xpanel.logs.name nav.page.xwhm.logs.name
+msgid "Logs"
+msgstr "السجلات"
+
+#. catalog.tool.mime-types.name
+msgid "MIME Types"
+msgstr "أنواع MIME"
+
+#. nav.page.xpanel.mime-types.name
+msgid "MIME types"
+msgstr "أنواع MIME"
+
+#. catalog.tool.mta-config-manager.name
+msgid "MTA Configuration Manager"
+msgstr "مدير إعدادات خادم البريد"
+
+#. nav.section.xmail.mail.name
+msgid "Mail"
+msgstr "البريد"
+
+#. catalog.tool.aapanel-mail-automation.name
+msgid "Mail Automation Flows"
+msgstr "تدفقات البريد الآلية"
+
+#. catalog.tool.aapanel-mail-bcc.name
+msgid "Mail BCC Copies"
+msgstr "نسخ مخفية للبريد"
+
+#. nav.page.xwhm.mail-bcc.name
+msgid "Mail BCC copies"
+msgstr "نسخ البريد الإدارية BCC"
+
+#. catalog.tool.aapanel-mail-campaigns.name
+msgid "Mail Campaigns and Templates"
+msgstr "الحملات البريدية والقوالب"
+
+#. catalog.tool.mail-delivery-reports.name
+msgid "Mail Delivery Reports"
+msgstr "تقارير تسليم البريد"
+
+#. catalog.tool.mail-queue-manager.name
+msgid "Mail Queue Manager"
+msgstr "إدارة طابور البريد"
+
+#. catalog.tool.view-relayers.name
+msgid "Mail Relayers Report"
+msgstr "تقرير مرحّلي البريد"
+
+#. catalog.tool.mail-troubleshooter.name
+msgid "Mail Route Troubleshooter"
+msgstr "تشخيص مسار البريد"
+
+#. catalog.tool.webmail-search.name
+msgid "Mail Search"
+msgstr "البحث في البريد"
+
+#. catalog.group.aapanel-mail.name
+msgid "Mail Server"
+msgstr "خادم البريد"
+
+#. catalog.tool.tweak-mail.name
+msgid "Mail Settings"
+msgstr "إعدادات البريد"
+
+#. catalog.tool.mta-basic-editor.name
+msgid "Mail Transfer Agent Settings"
+msgstr "إعدادات خادم إرسال البريد"
+
+#. nav.page.xwhm.mail-marketing.name
+msgid "Mail campaigns & automation"
+msgstr "حملات البريد والأتمتة"
+
+#. catalog.tool.mail-monitor.name nav.page.xwhm.mail-monitor.name
+msgid "Mail monitor"
+msgstr "مراقبة البريد"
+
+#. catalog.tool.mail-quality.name nav.page.xwhm.mail-quality.name
+msgid "Mail quality"
+msgstr "جودة البريد"
+
+#. nav.page.xwhm.mail-queue.name
+msgid "Mail queue"
+msgstr "طابور البريد"
+
+#. nav.page.xwhm.mail-routing.name
+msgid "Mail routing"
+msgstr "توجيه البريد"
+
+#. nav.page.xwhm.mail-server.name
+msgid "Mail server"
+msgstr "خادم البريد"
+
+#. nav.section.xmail.mailbox.name
+msgid "Mailbox"
+msgstr "صندوق البريد"
+
+#. catalog.tool.mailbox-format-conversion.name
+msgid "Mailbox Format Conversion"
+msgstr "تحويل صيغة صناديق البريد"
+
+#. catalog.tool.webmail-forwarders.name
+msgid "Mailbox Forwarders"
+msgstr "إعادة توجيه البريد"
+
+#. catalog.tool.mailbox-server-config.name
+msgid "Mailbox Server Settings"
+msgstr "إعدادات خادم صناديق البريد"
+
+#. catalog.group.xmail-tools.name
+msgid "Mailbox Tools"
+msgstr "أدوات صندوق البريد"
+
+#. catalog.group.xmail-mailbox.name
+msgid "Mailbox and Messages"
+msgstr "صندوق البريد والرسائل"
+
+#. nav.page.xwhm.mailbox-maintenance.name
+msgid "Mailbox maintenance"
+msgstr "صيانة صناديق البريد"
+
+#. catalog.tool.mailing-lists.name catalog.tool.webmail-mailing-lists.name
+msgid "Mailing Lists"
+msgstr "القوائم البريدية"
+
+#. nav.page.xmail.mailing-lists.name nav.page.xpanel.mailing-lists.name
+msgid "Mailing lists"
+msgstr "القوائم البريدية"
+
+#. catalog.tool.api-tokens.name
+msgid "Manage API Tokens"
+msgstr "إدارة رموز API"
+
+#. catalog.tool.manage-account-suspension.name
+msgid "Manage Account Suspension"
+msgstr "إدارة إيقاف الحسابات"
+
+#. catalog.tool.db-users-admin.name
+msgid "Manage Database Users"
+msgstr "إدارة مستخدمي قواعد البيانات"
+
+#. catalog.tool.databases-admin.name
+msgid "Manage Databases"
+msgstr "إدارة قواعد البيانات"
+
+#. catalog.tool.manage-demo-mode.name
+msgid "Manage Demo Mode"
+msgstr "إدارة الوضع التجريبي"
+
+#. catalog.tool.webmail-disk-cleanup.name
+msgid "Manage Disk Usage"
+msgstr "إدارة مساحة البريد"
+
+#. catalog.tool.email-account-manage.name
+msgid "Manage Email Account"
+msgstr "إدارة حساب البريد"
+
+#. catalog.tool.manage-reseller-ip-delegation.name
+msgid "Manage Reseller's IP Delegation"
+msgstr "تفويض عناوين IP للموزع"
+
+#. catalog.tool.manage-reseller-shared-ip.name
+msgid "Manage Reseller's Shared IP"
+msgstr "عنوان IP المشترك للموزع"
+
+#. catalog.tool.manage-shell-access.name
+msgid "Manage Shell Access"
+msgstr "إدارة الوصول إلى الطرفية (SSH)"
+
+#. catalog.tool.manage-team.name
+msgid "Manage Team"
+msgstr "إدارة الفريق"
+
+#. nav.page.xpanel.manage-team.name
+msgid "Manage team"
+msgstr "إدارة الفريق"
+
+#. catalog.tool.manage-domain.name
+msgid "Manage the Domain"
+msgstr "إدارة النطاق"
+
+#. nav.page.xpanel.mariadb.name
+msgid "MariaDB databases"
+msgstr "قواعد بيانات MariaDB"
+
+#. catalog.tool.webmail-spam-marking.name
+msgid "Mark as Junk"
+msgstr "تمييز البريد المزعج"
+
+#. catalog.group.whm-market.name
+msgid "Market"
+msgstr "السوق"
+
+#. catalog.tool.market-provider-manager.name
+msgid "Market Provider Manager"
+msgstr "إدارة مزوّدي السوق"
+
+#. catalog.tool.aapanel-memcached-manager.name
+msgid "Memory Cache Service"
+msgstr "خدمة التخزين المؤقت في الذاكرة"
+
+#. catalog.tool.webmail-message-list.name
+msgid "Message List and Threads"
+msgstr "قائمة الرسائل"
+
+#. catalog.tool.aapanel-rabbitmq-manager.name
+msgid "Message Queue Service"
+msgstr "خدمة طوابير الرسائل"
+
+#. catalog.group.metrics.name nav.section.xpanel.metrics.name
+msgid "Metrics"
+msgstr "المقاييس"
+
+#. catalog.tool.metrics-editor.name
+msgid "Metrics Editor"
+msgstr "محرر المقاييس"
+
+#. catalog.tool.metrics-export.name
+msgid "Metrics endpoint"
+msgstr "نقطة المقاييس"
+
+#. catalog.tool.aapanel-mobile-app.name
+msgid "Mobile Companion App"
+msgstr "تطبيق الهاتف المرافق"
+
+#. catalog.tool.modsecurity.name
+msgid "ModSecurity (Web Application Firewall)"
+msgstr "جدار حماية تطبيقات الويب"
+
+#. catalog.tool.modify-account.name
+msgid "Modify an Account"
+msgstr "تعديل حساب"
+
+#. catalog.tool.modify-upgrade-multiple-accounts.name
+msgid "Modify/Upgrade Multiple Accounts"
+msgstr "تعديل أو ترقية عدة حسابات"
+
+#. catalog.tool.module-installers.name
+msgid "Module Installers"
+msgstr "مثبتات الوحدات"
+
+#. nav.page.xwhm.module-installers.name
+msgid "Module installers"
+msgstr "مثبّتات الوحدات"
+
+#. nav.page.xwhm.mongodb.name
+msgid "MongoDB"
+msgstr "MongoDB"
+
+#. catalog.tool.aapanel-mongodb.name
+msgid "MongoDB Databases"
+msgstr "قواعد بيانات MongoDB"
+
+#. catalog.group.aapanel-monitor.name
+msgid "Monitor"
+msgstr "المراقبة"
+
+#. nav.section.xwhm.monitoring.name
+msgid "Monitoring"
+msgstr "المراقبة"
+
+#. nav.page.xwhm.dns-more.name
+msgid "More DNS tools"
+msgstr "أدوات DNS إضافية"
+
+#. nav.page.xmail.mail-later.name
+msgid "More mail tools"
+msgstr "أدوات بريد إضافية"
+
+#. nav.page.xwhm.resellers-more.name
+msgid "More reseller tools"
+msgstr "أدوات الموزعين الإضافية"
+
+#. nav.page.xwhm.restore-more.name
+msgid "More restore tools"
+msgstr "أدوات استعادة إضافية"
+
+#. nav.page.xwhm.services-more.name
+msgid "More service tools"
+msgstr "خدمات إضافية"
+
+#. catalog.group.whm-multi-account-functions.name
+msgid "Multi Account Functions"
+msgstr "عمليات الحسابات المتعددة"
+
+#. catalog.tool.aapanel-node-management.name
+msgid "Multi-Server Nodes"
+msgstr "إدارة الخوادم المتعددة"
+
+#. catalog.tool.aapanel-platform-ops.name
+msgid "Multi-Server Operations"
+msgstr "العمليات متعددة الخوادم"
+
+#. catalog.tool.multiphp-ini-editor.name
+msgid "MultiPHP INI Editor"
+msgstr "محرر إعدادات PHP"
+
+#. nav.page.xwhm.my-preferences.name
+msgid "My preferences"
+msgstr "تفضيلاتي"
+
+#. catalog.tool.mysql-databases.name
+msgid "MySQL Databases"
+msgstr "قواعد بيانات MySQL"
+
+#. catalog.tool.mysql-manager.name
+msgid "MySQL Manager (experimental)"
+msgstr "مدير MySQL التجريبي"
+
+#. catalog.tool.aapanel-mysql-service.name
+msgid "MySQL Server Management"
+msgstr "إدارة خادم MySQL"
+
+#. catalog.tool.mysql-users.name
+msgid "MySQL Users and Privileges"
+msgstr "مستخدمو قواعد البيانات"
+
+#. catalog.tool.nginx-proxy-manager.name
+msgid "NGINX Reverse Proxy Manager"
+msgstr "مدير NGINX"
+
+#. catalog.tool.nameserver-report.name
+msgid "Nameserver Report"
+msgstr "تقرير خوادم الأسماء"
+
+#. catalog.tool.aapanel-nfs-manager.name
+msgid "Network Share Manager"
+msgstr "إدارة مشاركات الشبكة"
+
+#. nav.page.xpanel.network-tools.name
+msgid "Network tools"
+msgstr "أدوات الشبكة"
+
+#. nav.page.xwhm.networking.name
+msgid "Networking"
+msgstr "الشبكة"
+
+#. catalog.group.whm-networking-setup.name
+msgid "Networking Setup"
+msgstr "إعداد الشبكة"
+
+#. catalog.tool.aapanel-nodejs-versions.name
+msgid "Node.js Version Manager"
+msgstr "إدارة إصدارات Node.js"
+
+#. catalog.tool.nodejs-apps.name
+msgid "Node.js apps"
+msgstr "تطبيقات Node.js"
+
+#. catalog.group.aapanel-nodes.name
+msgid "Nodes"
+msgstr "العُقد"
+
+#. catalog.tool.notification-center.name
+msgid "Notification Center"
+msgstr "مركز الإشعارات"
+
+#. catalog.tool.tweak-notifications.name
+msgid "Notification Thresholds"
+msgstr "عتبات الإشعارات"
+
+#. catalog.tool.notification-channels.name
+msgid "Notification channels"
+msgstr "قنوات الإشعارات"
+
+#. catalog.tool.notification-templates.name
+msgid "Notification templates"
+msgstr "قوالب الإشعارات"
+
+#. catalog.tool.xpanel-notifications.name nav.page.xwhm.notifications.name
+msgid "Notifications"
+msgstr "الإشعارات"
+
+#. catalog.tool.aapanel-os-log-audit.name
+msgid "OS Log Audit"
+msgstr "تدقيق سجلات النظام"
+
+#. catalog.tool.distro-packages.name
+msgid "OS Package Installer"
+msgstr "تثبيت حزم النظام"
+
+#. catalog.tool.aapanel-one-click-deploy.name
+msgid "One-Click App Deploy"
+msgstr "النشر بنقرة واحدة"
+
+#. catalog.tool.aapanel-docker-apps.name
+msgid "One-Click Container Apps"
+msgstr "تطبيقات الحاويات بنقرة واحدة"
+
+#. catalog.tool.only-transfer-ip-address.name
+msgid "Only Transfer IP Address (license IP move)"
+msgstr "نقل عنوان IP للخادم فقط"
+
+#. catalog.tool.optimize-website.name
+msgid "Optimize Website"
+msgstr "تحسين الموقع"
+
+#. nav.page.xpanel.optimize-website.name
+msgid "Optimize website"
+msgstr "تحسين الموقع"
+
+#. catalog.tool.view-sent-summary.name
+msgid "Outbound Mail Summary"
+msgstr "ملخص البريد الصادر"
+
+#. catalog.tool.smtp-restrictions.name
+msgid "Outbound SMTP Restrictions"
+msgstr "قيود SMTP الصادرة"
+
+#. catalog.tool.outbound-spam-protection.name nav.page.xwhm.outbound-spam.name
+msgid "Outbound spam protection"
+msgstr "الحماية من البريد المزعج الصادر"
+
+#. nav.page.xmail.overview.name
+msgid "Overview"
+msgstr "نظرة عامة"
+
+#. nav.page.xpanel.php.name nav.page.xwhm.php.name
+msgid "PHP"
+msgstr "PHP"
+
+#. catalog.tool.php-ini-editor.name
+msgid "PHP INI Editor"
+msgstr "محرر إعدادات PHP"
+
+#. catalog.tool.pear-packages.name catalog.tool.php-pear-packages.name
+msgid "PHP PEAR Packages"
+msgstr "حزم PHP PEAR"
+
+#. catalog.tool.pecl-extensions.name
+msgid "PHP PECL Extensions"
+msgstr "امتدادات PHP PECL"
+
+#. catalog.tool.aapanel-php-code-security.name
+msgid "PHP Runtime Protection"
+msgstr "حماية تشغيل PHP"
+
+#. catalog.tool.php-manager-domains.name
+msgid "PHP Version Manager - Domains"
+msgstr "مدير إصدارات PHP - النطاقات"
+
+#. catalog.tool.php-manager-system.name
+msgid "PHP Version Manager - System"
+msgstr "مدير إصدارات PHP - النظام"
+
+#. catalog.tool.aapanel-php-guardian.name
+msgid "PHP Worker Guardian"
+msgstr "حارس عمليات PHP"
+
+#. catalog.tool.php-version-selector.name
+msgid "PHP version and extensions"
+msgstr "إصدار PHP وامتداداته"
+
+#. catalog.tool.php-fpm-service.name
+msgid "PHP-FPM Service Settings"
+msgstr "إعدادات خدمة PHP-FPM"
+
+#. catalog.group.whm-packages.name
+msgid "Packages"
+msgstr "الباقات"
+
+#. nav.page.xpanel.packages.name
+msgid "Packages & modules"
+msgstr "الحزم والوحدات"
+
+#. nav.section.xwhm.panel.name
+msgid "Panel & integrations"
+msgstr "اللوحة والتكاملات"
+
+#. catalog.tool.aapanel-panel-backup-restore.name
+msgid "Panel Backup and Restore"
+msgstr "النسخ الاحتياطي للوحة واستعادتها"
+
+#. catalog.tool.aapanel-basic-auth.name
+msgid "Panel BasicAuth"
+msgstr "المصادقة الأساسية للوحة"
+
+#. catalog.tool.panel-change-log.name
+msgid "Panel Change Log"
+msgstr "سجل تغييرات اللوحة"
+
+#. catalog.tool.aapanel-panel-domain.name
+msgid "Panel Domain Binding"
+msgstr "ربط نطاق باللوحة"
+
+#. catalog.tool.tweak-panel-php.name
+msgid "Panel Internal PHP"
+msgstr "إعدادات PHP الداخلية للوحة"
+
+#. catalog.tool.panel-log-rotation.name
+msgid "Panel Log Rotation"
+msgstr "تدوير سجلات اللوحة"
+
+#. catalog.tool.panel-news.name
+msgid "Panel News"
+msgstr "أخبار اللوحة"
+
+#. catalog.tool.aapanel-panel-port.name
+msgid "Panel Port"
+msgstr "منفذ اللوحة"
+
+#. catalog.group.aapanel-panel-security.name
+msgid "Panel Security and Access"
+msgstr "أمان اللوحة والوصول إليها"
+
+#. catalog.tool.panel-web-tls.name
+msgid "Panel Services TLS Settings"
+msgstr "إعدادات TLS لخدمات اللوحة"
+
+#. catalog.group.aapanel-settings.name
+msgid "Panel Settings"
+msgstr "إعدادات اللوحة"
+
+#. catalog.tool.aapanel-panel-user-manager.name
+msgid "Panel Sub-Admin Users"
+msgstr "مستخدمو اللوحة الفرعيون"
+
+#. nav.page.xwhm.panel-access.name
+msgid "Panel access"
+msgstr "الوصول إلى اللوحة"
+
+#. catalog.tool.aapanel-panel-logs.name
+msgid "Panel and Operation Logs"
+msgstr "سجلات اللوحة والعمليات"
+
+#. nav.page.xwhm.panel-data.name
+msgid "Panel data & recovery"
+msgstr "بيانات اللوحة واستعادتها"
+
+#. nav.page.xwhm.panel-settings.name
+msgid "Panel settings"
+msgstr "إعدادات اللوحة"
+
+#. catalog.tool.park-domain.name
+msgid "Park Domain"
+msgstr "ركن نطاق"
+
+#. catalog.tool.password-security.name
+msgid "Password & Security"
+msgstr "كلمة المرور والأمان"
+
+#. nav.page.xmail.security.name
+msgid "Password & security"
+msgstr "كلمة المرور والأمان"
+
+#. catalog.tool.password-modification.name
+msgid "Password Modification"
+msgstr "تغيير كلمة مرور الحساب"
+
+#. catalog.tool.password-strength.name
+msgid "Password Strength Policy"
+msgstr "قوة كلمات المرور"
+
+#. catalog.tool.webmail-password.name
+msgid "Password and Security"
+msgstr "كلمة المرور والأمان"
+
+#. catalog.tool.aapanel-performance-test.name
+msgid "Performance Benchmark"
+msgstr "اختبار الأداء"
+
+#. nav.page.xwhm.performance-benchmark.name
+msgid "Performance benchmark"
+msgstr "اختبار الأداء"
+
+#. nav.page.xwhm.performance-history.name
+msgid "Performance history"
+msgstr "سجل الأداء"
+
+#. catalog.tool.perl-modules.name catalog.tool.xwhm-perl-modules.name
+msgid "Perl Modules"
+msgstr "وحدات Perl"
+
+#. catalog.tool.piped-logging.name
+msgid "Piped Web Logging"
+msgstr "التسجيل عبر الأنابيب"
+
+#. catalog.tool.tweak-packages.name
+msgid "Plan Defaults"
+msgstr "افتراضيات الخطط"
+
+#. nav.page.xwhm.plans.name nav.section.xwhm.plans.name
+msgid "Plans"
+msgstr "الخطط"
+
+#. catalog.group.whm-plugins.name
+msgid "Plugins"
+msgstr "الإضافات"
+
+#. catalog.tool.webmail-plus-addressing.name
+msgid "Plus Addressing Preferences"
+msgstr "تفضيلات عناوين الإضافة (+)"
+
+#. catalog.tool.aapanel-port-forward.name
+msgid "Port Forwarding"
+msgstr "إعادة توجيه المنافذ"
+
+#. catalog.tool.aapanel-port-rules.name
+msgid "Port Rules"
+msgstr "قواعد المنافذ"
+
+#. catalog.tool.postgresql-database-wizard.name
+msgid "PostgreSQL Database Wizard"
+msgstr "معالج PostgreSQL"
+
+#. catalog.tool.postgresql-databases.name
+msgid "PostgreSQL Databases"
+msgstr "قواعد بيانات PostgreSQL"
+
+#. catalog.tool.aapanel-postgresql-service.name
+msgid "PostgreSQL Server Management"
+msgstr "إدارة خادم PostgreSQL"
+
+#. catalog.tool.postgresql-setup.name
+msgid "PostgreSQL Setup"
+msgstr "إعداد PostgreSQL"
+
+#. nav.page.xpanel.postgresql.name
+msgid "PostgreSQL databases"
+msgstr "قواعد بيانات PostgreSQL"
+
+#. catalog.group.preferences.name nav.page.xmail.preferences.name nav.section.xpanel.preferences.name
+msgid "Preferences"
+msgstr "التفضيلات"
+
+#. catalog.tool.process-manager.name
+msgid "Process Manager"
+msgstr "إدارة العمليات"
+
+#. catalog.tool.aapanel-supervisor.name
+msgid "Process Supervisor"
+msgstr "مشرف العمليات"
+
+#. nav.page.xwhm.processes.name
+msgid "Processes"
+msgstr "العمليات"
+
+#. catalog.group.aapanel-professional.name
+msgid "Professional Add-ons"
+msgstr "الإضافات الاحترافية"
+
+#. catalog.tool.aapanel-provider-dns-records.name
+msgid "Provider DNS Records"
+msgstr "سجلات DNS لدى المزوّد"
+
+#. catalog.tool.aapanel-provider-domains.name
+msgid "Provider Domains"
+msgstr "نطاقات المزوّد"
+
+#. catalog.tool.aapanel-proxy-project.name
+msgid "Proxy Project"
+msgstr "مشاريع الوكيل"
+
+#. catalog.tool.purchase-ssl.name
+msgid "Purchase SSL Certificate"
+msgstr "شراء شهادة SSL"
+
+#. catalog.tool.domain-purchase.name
+msgid "Purchase a Domain"
+msgstr "شراء نطاق"
+
+#. catalog.tool.aapanel-python-versions.name
+msgid "Python Versions and Virtual Environments"
+msgstr "إصدارات Python والبيئات الافتراضية"
+
+#. catalog.tool.python-apps.name
+msgid "Python apps"
+msgstr "تطبيقات Python"
+
+#. catalog.tool.webmail-quota.name
+msgid "Quota Indicator"
+msgstr "مؤشر حصة التخزين"
+
+#. catalog.tool.quota-modification.name
+msgid "Quota Modification"
+msgstr "تعديل حصة القرص"
+
+#. catalog.tool.raw-access.name
+msgid "Raw Access Logs"
+msgstr "سجلات الوصول الخام"
+
+#. catalog.tool.raw-apache-log-download.name
+msgid "Raw Apache Log Download"
+msgstr "تنزيل سجلات Apache الخام"
+
+#. catalog.tool.raw-ftp-log-download.name
+msgid "Raw FTP Log Download"
+msgstr "تنزيل سجلات FTP الخام"
+
+#. catalog.tool.raw-nginx-log-download.name
+msgid "Raw NGINX Log Download"
+msgstr "تنزيل سجلات NGINX الخام"
+
+#. catalog.tool.webmail-message-read.name
+msgid "Read Message"
+msgstr "قراءة الرسالة"
+
+#. catalog.tool.dns-zone-records.summary
+msgid "Read and replace supported DNS records for an accessible zone through the existing zone editor."
+msgstr "قراءة سجلات منطقة DNS المتاحة وتعديلها دون إدارة DNSSEC."
+
+#. catalog.tool.server-settings-edit.summary
+msgid "Read and store the supported server settings and setup values; host activation requires separate verification."
+msgstr "قراءة قيم إعدادات الخادم المدعومة وحفظها؛ تفعيلها على الخادم يحتاج تحققًا مستقلًا."
+
+#. catalog.tool.domain-php-settings.summary
+msgid "Read and update the desired PHP version, handler, FPM settings and INI values of an accessible domain."
+msgstr "قراءة إعدادات PHP المطلوبة للنطاق وحفظها مع الحفاظ على القيم غير المعدلة."
+
+#. catalog.tool.rearrange-account.name
+msgid "Rearrange an Account"
+msgstr "نقل الحساب إلى قسم قرص آخر"
+
+#. catalog.tool.rebuild-ip-pool.name
+msgid "Rebuild IP Pool"
+msgstr "إعادة بناء مجمّع العناوين"
+
+#. catalog.tool.package-db-rebuild.name
+msgid "Rebuild Package Database"
+msgstr "إعادة بناء قاعدة بيانات الحزم"
+
+#. catalog.tool.tweak-redirection.name
+msgid "Redirection Settings"
+msgstr "إعدادات إعادة التوجيه"
+
+#. catalog.tool.redirects.name nav.page.xpanel.redirects.name
+msgid "Redirects"
+msgstr "إعادة التوجيه"
+
+#. nav.page.xwhm.redis.name
+msgid "Redis"
+msgstr "Redis"
+
+#. catalog.tool.account-cache-services.name nav.page.xpanel.cache.name
+msgid "Redis & Memcached"
+msgstr "Redis وMemcached"
+
+#. catalog.tool.aapanel-region-rules.name
+msgid "Region Blocking"
+msgstr "الحظر الجغرافي"
+
+#. catalog.tool.registered-apps.name
+msgid "Registered Applications"
+msgstr "التطبيقات المسجلة"
+
+#. catalog.tool.remote-database-access.name
+msgid "Remote Database Access"
+msgstr "الوصول البعيد لقواعد البيانات"
+
+#. catalog.tool.aapanel-sqlserver-remote.name
+msgid "Remote SQL Server Databases"
+msgstr "قواعد بيانات SQL Server البعيدة"
+
+#. catalog.tool.remote-service-ips.name
+msgid "Remote Service IPs"
+msgstr "عناوين الخدمات البعيدة"
+
+#. nav.page.xpanel.remote-database-access.name
+msgid "Remote database access"
+msgstr "الوصول البعيد إلى قواعد البيانات"
+
+#. catalog.tool.db-repair.name
+msgid "Repair Database"
+msgstr "إصلاح قاعدة بيانات"
+
+#. catalog.tool.repair-mailbox-permissions.name
+msgid "Repair Mailbox Permissions"
+msgstr "إصلاح أذونات صناديق البريد"
+
+#. catalog.tool.server-repair.name nav.page.xwhm.repair-center.name
+msgid "Repair center"
+msgstr "مركز الإصلاح"
+
+#. catalog.tool.webmail-reply-forward.name
+msgid "Reply and Forward"
+msgstr "الرد وإعادة التوجيه"
+
+#. catalog.tool.reseller-account-limits.name
+msgid "Reseller Account and Resource Limits (Overselling)"
+msgstr "حدود الموزع وتجاوز التخصيص"
+
+#. catalog.tool.reseller-center.name
+msgid "Reseller Center"
+msgstr "مركز الموزعين"
+
+#. catalog.tool.reseller-nameservers.name
+msgid "Reseller Nameservers"
+msgstr "خوادم الأسماء للموزع"
+
+#. catalog.tool.reseller-package-limits.name
+msgid "Reseller Package Limits"
+msgstr "تقييد الباقات المتاحة للموزع"
+
+#. nav.page.xwhm.reseller-privileges.name
+msgid "Reseller privileges"
+msgstr "صلاحيات الموزعين"
+
+#. catalog.group.whm-resellers.name nav.page.xwhm.resellers.name nav.section.xwhm.resellers.name
+msgid "Resellers"
+msgstr "الموزعون"
+
+#. catalog.tool.reserved-ips.name
+msgid "Reserved IPs"
+msgstr "العناوين المحجوزة"
+
+#. catalog.tool.reset-account-bandwidth-limit.name
+msgid "Reset Account Bandwidth Limit"
+msgstr "إعادة حد النطاق الترددي إلى قيمة الباقة"
+
+#. catalog.tool.mailing-list-password-reset.name
+msgid "Reset Mailing List Admin Password"
+msgstr "إعادة تعيين كلمة مرور مشرف القائمة البريدية"
+
+#. catalog.tool.reset-resellers.name
+msgid "Reset Resellers"
+msgstr "إعادة ضبط الموزعين"
+
+#. catalog.tool.resolver-configuration.name
+msgid "Resolver Configuration"
+msgstr "إعداد محللات DNS"
+
+#. nav.page.xwhm.resource-limits.name
+msgid "Resource limits"
+msgstr "حدود الموارد"
+
+#. catalog.tool.resource-limits-manager.name
+msgid "Resource limits manager"
+msgstr "إدارة حدود الموارد"
+
+#. catalog.tool.resource-usage.name
+msgid "Resource usage"
+msgstr "استهلاك الموارد"
+
+#. nav.page.xpanel.resources.name
+msgid "Resources & quotas"
+msgstr "الموارد والحصص"
+
+#. catalog.tool.restart-dns.name
+msgid "Restart DNS Server"
+msgstr "إعادة تشغيل خادم DNS"
+
+#. catalog.tool.restart-ftp.name
+msgid "Restart FTP Server"
+msgstr "إعادة تشغيل خادم FTP"
+
+#. catalog.tool.restart-imap.name
+msgid "Restart IMAP/POP Server"
+msgstr "إعادة تشغيل خادم IMAP"
+
+#. catalog.tool.restart-mta.name
+msgid "Restart Mail Server"
+msgstr "إعادة تشغيل خادم البريد"
+
+#. catalog.tool.restart-mailing-lists.name
+msgid "Restart Mailing List Manager"
+msgstr "إعادة تشغيل مدير القوائم البريدية"
+
+#. catalog.tool.restart-mysql.name
+msgid "Restart MySQL/MariaDB"
+msgstr "إعادة تشغيل MySQL"
+
+#. catalog.tool.restart-php-fpm.name
+msgid "Restart PHP-FPM"
+msgstr "إعادة تشغيل PHP-FPM"
+
+#. catalog.tool.restart-postgresql.name
+msgid "Restart PostgreSQL"
+msgstr "إعادة تشغيل PostgreSQL"
+
+#. catalog.tool.restart-ssh.name
+msgid "Restart SSH Server"
+msgstr "إعادة تشغيل خادم SSH"
+
+#. catalog.group.whm-restart-services.name
+msgid "Restart Services"
+msgstr "إعادة تشغيل الخدمات"
+
+#. catalog.tool.restart-web.name
+msgid "Restart Web Server"
+msgstr "إعادة تشغيل خادم الويب"
+
+#. nav.page.xwhm.restore-accounts.name
+msgid "Restore accounts"
+msgstr "استعادة الحسابات"
+
+#. nav.page.xwhm.restore-files.name
+msgid "Restore files"
+msgstr "استعادة الملفات"
+
+#. catalog.tool.aapanel-event-triggers.name
+msgid "Result Event Triggers"
+msgstr "مشغّلات الأحداث حسب النتيجة"
+
+#. catalog.tool.aapanel-site-reverse-proxy.name
+msgid "Reverse Proxy"
+msgstr "الوكيل العكسي"
+
+#. catalog.tool.aapanel-frp-manager.name
+msgid "Reverse Tunnel Manager"
+msgstr "إدارة الأنفاق العكسية"
+
+#. nav.page.xpanel.reverse-proxy.name
+msgid "Reverse proxy"
+msgstr "الوكيل العكسي"
+
+#. catalog.tool.nginx-cache-control.name
+msgid "Reverse-Proxy Cache Control"
+msgstr "ذاكرة التخزين المؤقت للوكيل العكسي"
+
+#. catalog.tool.review-transfers-and-restores.name
+msgid "Review Transfers and Restores"
+msgstr "مراجعة عمليات النقل والاستعادة"
+
+#. catalog.tool.aapanel-recovery-cli.name
+msgid "Root Recovery Commands"
+msgstr "أوامر الاسترداد"
+
+#. catalog.tool.root-ssh-keys.name
+msgid "Root SSH Keys"
+msgstr "مفاتيح SSH للجذر"
+
+#. catalog.tool.root-web-terminal.name
+msgid "Root Web Terminal"
+msgstr "الطرفية"
+
+#. catalog.tool.ruby-gems.name
+msgid "Ruby Gems"
+msgstr "حزم Ruby"
+
+#. catalog.tool.ruby-apps.name
+msgid "Ruby apps"
+msgstr "تطبيقات Ruby"
+
+#. catalog.tool.ruby-on-rails.name
+msgid "Ruby on Rails"
+msgstr "تطبيقات Ruby on Rails"
+
+#. catalog.tool.rubygems.name
+msgid "RubyGems"
+msgstr "حزم Ruby"
+
+#. nav.section.xmail.rules-spam.name
+msgid "Rules & spam"
+msgstr "القواعد والبريد المزعج"
+
+#. nav.page.xwhm.smtp-relay.name
+msgid "SMTP relay"
+msgstr "مرحّل SMTP"
+
+#. catalog.tool.smtp-relay.name
+msgid "SMTP relay (smarthost)"
+msgstr "مرحّل SMTP"
+
+#. nav.page.xwhm.ssh.name
+msgid "SSH"
+msgstr "SSH"
+
+#. catalog.tool.ssh-access.name
+msgid "SSH Access (Key Manager)"
+msgstr "الوصول عبر SSH"
+
+#. catalog.tool.aapanel-ssh-login-alarm.name
+msgid "SSH Login Alert"
+msgstr "تنبيه دخول SSH"
+
+#. catalog.tool.aapanel-ssh-login-logs.name
+msgid "SSH Login Log"
+msgstr "سجل دخول SSH"
+
+#. catalog.tool.aapanel-ssh-settings.name
+msgid "SSH Login Settings"
+msgstr "إعدادات دخول SSH"
+
+#. catalog.tool.aapanel-ssh-service.name
+msgid "SSH Service"
+msgstr "خدمة SSH"
+
+#. nav.page.xpanel.ssh-access.name
+msgid "SSH access"
+msgstr "الوصول عبر SSH"
+
+#. catalog.group.aapanel-ssh-protection.name
+msgid "SSH and Intrusion Protection"
+msgstr "إدارة SSH والحماية من الاختراق"
+
+#. catalog.tool.ssl-certificates.name
+msgid "SSL Certificates"
+msgstr "شهادات SSL"
+
+#. catalog.tool.ssl-hosts.name
+msgid "SSL Hosts"
+msgstr "مواقع SSL المثبتة"
+
+#. catalog.tool.ssl-private-keys.name
+msgid "SSL Private Keys"
+msgstr "المفاتيح الخاصة لـ SSL"
+
+#. catalog.tool.ssl-storage.name
+msgid "SSL Storage"
+msgstr "مخزن SSL"
+
+#. nav.page.xwhm.ssl-certificates.name
+msgid "SSL certificates"
+msgstr "شهادات SSL"
+
+#. catalog.group.whm-ssl-tls.name
+msgid "SSL/TLS"
+msgstr "شهادات SSL/TLS"
+
+#. nav.page.xpanel.ssl.name
+msgctxt "nav.page.xpanel.ssl.name"
+msgid "SSL/TLS"
+msgstr "SSL/TLS"
+
+#. catalog.tool.ssl-tls-status.name
+msgid "SSL/TLS Status"
+msgstr "حالة SSL/TLS"
+
+#. catalog.tool.ssl-tls-wizard.name
+msgid "SSL/TLS Wizard (certificate purchase)"
+msgstr "معالج شراء شهادات SSL"
+
+#. catalog.tool.aapanel-saved-commands.name
+msgid "Saved Commands"
+msgstr "الأوامر المحفوظة"
+
+#. catalog.tool.reseller-acl-lists.name
+msgid "Saved Privilege Lists"
+msgstr "قوائم الصلاحيات المحفوظة"
+
+#. catalog.group.aapanel-cron.name catalog.tool.aapanel-cron-tasks.name
+msgid "Scheduled Tasks"
+msgstr "المهام المجدولة"
+
+#. nav.page.xwhm.scheduled-tasks.name
+msgid "Scheduled tasks"
+msgstr "المهام المجدولة"
+
+#. catalog.tool.aapanel-script-library.name
+msgid "Script Library"
+msgstr "مكتبة السكربتات"
+
+#. catalog.tool.seo-audit.name
+msgid "Search Engine Optimization"
+msgstr "تحسين محركات البحث"
+
+#. catalog.tool.aapanel-elasticsearch-manager.name
+msgid "Search Engine Service"
+msgstr "خدمة محرك البحث"
+
+#. catalog.tool.webmail-search-index.name
+msgid "Search Index Rebuild"
+msgstr "إعادة بناء فهرس البحث"
+
+#. catalog.group.security.name nav.section.xpanel.security.name
+msgid "Security"
+msgstr "الأمان"
+
+#. catalog.tool.security-advisor.name
+msgid "Security Advisor"
+msgstr "مستشار الأمان"
+
+#. catalog.group.whm-security-center.name
+msgid "Security Center"
+msgstr "مركز الأمان"
+
+#. catalog.tool.aapanel-security-entrance.name
+msgid "Security Entrance Path"
+msgstr "مسار مدخل الأمان"
+
+#. catalog.tool.security-policies.name
+msgid "Security Policies"
+msgstr "سياسات الأمان"
+
+#. catalog.tool.security-policy.name
+msgid "Security Policy"
+msgstr "سياسة الأمان"
+
+#. catalog.tool.security-questions.name
+msgid "Security Questions"
+msgstr "أسئلة الأمان"
+
+#. catalog.tool.tweak-security.name
+msgid "Security Settings"
+msgstr "إعدادات الأمان"
+
+#. nav.page.xwhm.security-advisor.name
+msgid "Security advisor"
+msgstr "مستشار الأمان"
+
+#. nav.section.xwhm.security.name
+msgid "Security center"
+msgstr "مركز الأمان"
+
+#. catalog.tool.transfer-tool-selection.name
+msgid "Select What to Transfer"
+msgstr "تحديد عناصر النقل"
+
+#. catalog.tool.aapanel-website-analytics.name
+msgid "Self-Hosted Web Analytics"
+msgstr "تحليلات الويب ذاتية الاستضافة"
+
+#. catalog.tool.sender-verification.name
+msgid "Sender Verification (challenge-response)"
+msgstr "التحقق من المرسل"
+
+#. nav.section.xwhm.server.name
+msgid "Server"
+msgstr "الخادم"
+
+#. catalog.group.whm-server-configuration.name
+msgid "Server Configuration"
+msgstr "إعدادات الخادم"
+
+#. catalog.group.whm-server-contacts.name
+msgid "Server Contacts"
+msgstr "جهات اتصال الخادم"
+
+#. catalog.tool.aapanel-dashboard.name
+msgid "Server Dashboard"
+msgstr "لوحة الخادم"
+
+#. catalog.tool.server-information.name catalog.tool.xpanel-server-information.name
+msgid "Server Information"
+msgstr "معلومات الخادم"
+
+#. catalog.tool.server-role-profile.name
+msgid "Server Role Profile"
+msgstr "ملف دور الخادم"
+
+#. catalog.group.whm-server-status.name
+msgid "Server Status"
+msgstr "حالة الخادم"
+
+#. catalog.tool.server-health.name nav.page.xwhm.server-health.name
+msgid "Server health"
+msgstr "صحة الخادم"
+
+#. nav.page.xpanel.server-information.name nav.page.xwhm.server-information.name
+msgid "Server information"
+msgstr "معلومات الخادم"
+
+#. nav.page.xwhm.server-migration.name
+msgid "Server migration"
+msgstr "ترحيل الخادم"
+
+#. nav.page.xwhm.server-nodes.name
+msgid "Server nodes"
+msgstr "عُقد الخوادم"
+
+#. nav.page.xwhm.server-role.name
+msgid "Server role"
+msgstr "دور الخادم"
+
+#. catalog.group.whm-service-configuration.name
+msgid "Service Configuration"
+msgstr "إعداد الخدمات"
+
+#. catalog.tool.aapanel-software-logs.name
+msgid "Service Logs"
+msgstr "سجلات الخدمات"
+
+#. catalog.tool.service-manager.name
+msgid "Service Manager"
+msgstr "مدير الخدمات"
+
+#. catalog.tool.service-ssl-certificates.name
+msgid "Service SSL Certificates"
+msgstr "شهادات SSL للخدمات"
+
+#. nav.page.xwhm.service-certificates.name
+msgid "Service certificates"
+msgstr "شهادات الخدمات"
+
+#. catalog.tool.service-config-health.name
+msgid "Service configuration health"
+msgstr "صحة إعداد الخدمات"
+
+#. catalog.tool.service-watchdog.name
+msgid "Service watchdog"
+msgstr "مراقب الخدمات"
+
+#. nav.page.xwhm.services.name nav.section.xwhm.services.name
+msgid "Services"
+msgstr "الخدمات"
+
+#. catalog.tool.zone-ttl-bulk.name
+msgid "Set Zone TTL"
+msgstr "ضبط مدة بقاء المناطق"
+
+#. nav.page.xwhm.setup.name
+msgid "Setup & settings"
+msgstr "التهيئة والإعدادات"
+
+#. catalog.tool.fork-bomb-protection.name
+msgid "Shell Fork Bomb Protection"
+msgstr "الحماية من قنابل التفرع"
+
+#. catalog.tool.show-accounts-over-quota.name
+msgid "Show Accounts Over Quota"
+msgstr "الحسابات المتجاوزة لحصة القرص"
+
+#. catalog.tool.show-reseller-accounts.name
+msgid "Show Reseller Accounts"
+msgstr "عرض حسابات الموزعين"
+
+#. nav.page.xwhm.sign-in.name
+msgid "Sign-in & 2FA"
+msgstr "تسجيل الدخول والتحقق بخطوتين"
+
+#. catalog.tool.aapanel-site-config-editor.name
+msgid "Site Config File"
+msgstr "ملف إعدادات الموقع"
+
+#. catalog.tool.aapanel-site-directory.name
+msgid "Site Directory Settings"
+msgstr "إعدادات دليل الموقع"
+
+#. catalog.tool.aapanel-site-quota.name
+msgid "Site Disk Quota"
+msgstr "حصة مساحة الموقع"
+
+#. catalog.tool.aapanel-site-expiry.name
+msgid "Site Expiry Date"
+msgstr "تاريخ انتهاء الموقع"
+
+#. catalog.tool.aapanel-site-list.name
+msgid "Site List"
+msgstr "قائمة المواقع"
+
+#. catalog.tool.site-publisher.name
+msgid "Site Publisher"
+msgstr "ناشر المواقع"
+
+#. catalog.tool.site-quality-monitoring.name
+msgid "Site Quality Monitoring"
+msgstr "مراقبة جودة الموقع"
+
+#. catalog.tool.site-software.name
+msgid "Site Software (cPAddons)"
+msgstr "برامج الموقع"
+
+#. catalog.tool.site-software-catalog.name
+msgid "Site Software Catalog"
+msgstr "كتالوج برمجيات المواقع"
+
+#. catalog.tool.tweak-site-software.name
+msgid "Site Software Catalog Settings"
+msgstr "إعدادات كتالوج تطبيقات المواقع"
+
+#. catalog.tool.aapanel-site-waf.name
+msgid "Site WAF"
+msgstr "جدار حماية تطبيقات الويب"
+
+#. catalog.tool.account-health-overview.name
+msgid "Site health"
+msgstr "صحة الموقع"
+
+#. nav.page.xpanel.site-health.name
+msgctxt "nav.page.xpanel.site-health.name"
+msgid "Site health"
+msgstr "صحة المواقع"
+
+#. nav.page.xpanel.site-publisher.name
+msgid "Site publisher"
+msgstr "ناشر المواقع"
+
+#. nav.page.xpanel.site-settings.name
+msgid "Site settings"
+msgstr "إعدادات الموقع"
+
+#. nav.page.xwhm.site-software.name
+msgid "Site software"
+msgstr "برمجيات المواقع"
+
+#. catalog.tool.sitejet-builder.name
+msgid "Sitejet Builder"
+msgstr "منشئ Sitejet"
+
+#. catalog.tool.skeleton-directory.name
+msgid "Skeleton Directory"
+msgstr "مجلد الهيكل الافتراضي للحسابات"
+
+#. catalog.tool.social-media-management.name
+msgid "Social Media Management"
+msgstr "إدارة وسائل التواصل"
+
+#. catalog.tool.xwhm-softaculous.name
+msgid "Softaculous"
+msgstr "Softaculous"
+
+#. catalog.tool.softaculous.name
+msgid "Softaculous Apps Installer"
+msgstr "مثبّت تطبيقات Softaculous"
+
+#. catalog.group.software.name catalog.group.whm-software.name nav.section.xpanel.software.name nav.section.xwhm.software.name
+msgid "Software"
+msgstr "البرمجيات"
+
+#. catalog.tool.aapanel-app-catalog.name
+msgid "Software Catalog"
+msgstr "كتالوج البرمجيات"
+
+#. catalog.tool.tweak-software.name
+msgid "Software Settings"
+msgstr "إعدادات البرمجيات"
+
+#. catalog.tool.software-center.name nav.page.xwhm.software-catalog.name
+msgid "Software center"
+msgstr "مركز البرمجيات"
+
+#. catalog.tool.webmail-spam-autodelete.name
+msgid "Spam Auto-Delete Threshold"
+msgstr "الحذف التلقائي للبريد المزعج"
+
+#. catalog.tool.spam-filters.name
+msgid "Spam Filters"
+msgstr "مرشحات البريد العشوائي"
+
+#. catalog.tool.webmail-spam-box.name
+msgid "Spam Folder Delivery"
+msgstr "توجيه المزعج إلى مجلد Junk"
+
+#. catalog.group.xmail-spam.name
+msgid "Spam Protection"
+msgstr "الحماية من البريد المزعج"
+
+#. catalog.tool.spam-daemon-startup.name
+msgid "Spam Scanner Daemon Startup"
+msgstr "إعدادات تشغيل خدمة فحص البريد المزعج"
+
+#. nav.page.xmail.spam.name nav.page.xpanel.spam-filters.name
+msgid "Spam filters"
+msgstr "مرشحات البريد المزعج"
+
+#. catalog.tool.spam-quarantine.name nav.page.xpanel.spam-quarantine.name
+msgid "Spam quarantine"
+msgstr "حجر البريد المزعج"
+
+#. catalog.tool.site-staging.name nav.page.xpanel.staging.name
+msgid "Staging sites"
+msgstr "مواقع التجهيز"
+
+#. catalog.tool.aapanel-site-start-stop.name
+msgid "Start and Stop Site"
+msgstr "تشغيل الموقع وإيقافه"
+
+#. catalog.tool.aapanel-boot-items.name
+msgid "Startup Items and Services"
+msgstr "عناصر الإقلاع والخدمات"
+
+#. catalog.tool.tweak-stats-logs.name
+msgid "Stats and Log Settings"
+msgstr "إعدادات الإحصاءات والسجلات"
+
+#. catalog.tool.server-settings-edit.name
+msgid "Stored server settings"
+msgstr "إعدادات الخادم المحفوظة"
+
+#. catalog.tool.aapanel-subpanel-service.name
+msgid "Sub-Panel Service Settings"
+msgstr "إعدادات خدمة اللوحة الفرعية"
+
+#. catalog.tool.aapanel-mail-subscribers.name
+msgid "Subscribers and Suppression List"
+msgstr "المشتركون وقائمة الإيقاف"
+
+#. catalog.tool.sudo-group-users.name
+msgid "Sudo Group Members"
+msgstr "أعضاء مجموعة sudo"
+
+#. catalog.group.whm-support.name nav.page.xwhm.support.name
+msgid "Support"
+msgstr "الدعم"
+
+#. catalog.tool.support-center.name
+msgid "Support Center"
+msgstr "مركز الدعم"
+
+#. catalog.tool.tweak-support.name
+msgid "Support Settings"
+msgstr "إعدادات الدعم"
+
+#. catalog.tool.dns-cluster-sync.name
+msgid "Synchronize DNS Records"
+msgstr "مزامنة سجلات DNS"
+
+#. catalog.group.aapanel-firewall.name
+msgid "System Firewall"
+msgstr "جدار حماية النظام"
+
+#. catalog.tool.aapanel-system-hardening.name
+msgid "System Hardening"
+msgstr "تقوية النظام"
+
+#. catalog.group.whm-system-health.name
+msgid "System Health"
+msgstr "صحة النظام"
+
+#. catalog.tool.system-mail-forwarding.name
+msgid "System Mailbox Forwarding"
+msgstr "توجيه بريد حسابات النظام"
+
+#. catalog.tool.system-maintenance-schedule.name
+msgid "System Maintenance Schedule"
+msgstr "جدولة مهام الصيانة"
+
+#. catalog.tool.aapanel-system-monitor.name
+msgid "System Monitor"
+msgstr "مراقب النظام"
+
+#. catalog.tool.system-reboot.name
+msgid "System Reboot"
+msgstr "إعادة تشغيل الخادم"
+
+#. catalog.tool.tweak-system.name
+msgid "System Settings"
+msgstr "إعدادات النظام"
+
+#. catalog.tool.aapanel-task-manager.name
+msgid "System Task Manager"
+msgstr "مدير مهام النظام"
+
+#. catalog.tool.os-update.name
+msgid "System Update"
+msgstr "تحديث النظام"
+
+#. nav.page.xwhm.system-updates.name
+msgid "System updates"
+msgstr "تحديثات النظام"
+
+#. catalog.tool.task-queue-monitor.name
+msgid "Task Queue Monitor"
+msgstr "مراقبة طابور المهام"
+
+#. catalog.tool.aapanel-task-chaining.name
+msgid "Task Scheduling Chains"
+msgstr "سلاسل جدولة المهام"
+
+#. catalog.tool.aapanel-task-messages.name
+msgid "Task and Message Box"
+msgstr "صندوق المهام والرسائل"
+
+#. catalog.tool.team-audit-log.name
+msgid "Team Audit Log"
+msgstr "سجل تدقيق الفريق"
+
+#. nav.page.xwhm.templates.name
+msgid "Templates"
+msgstr "القوالب"
+
+#. catalog.tool.aapanel-temporary-login.name
+msgid "Temporary Login"
+msgstr "دخول مؤقت"
+
+#. catalog.group.aapanel-terminal.name catalog.tool.terminal.name nav.page.xpanel.terminal.name nav.page.xwhm.terminal.name
+msgid "Terminal"
+msgstr "الطرفية"
+
+#. catalog.tool.terminate-accounts.name
+msgid "Terminate Accounts"
+msgstr "إنهاء الحسابات"
+
+#. catalog.tool.theme-manager.name
+msgid "Theme Manager"
+msgstr "إدارة السمات"
+
+#. catalog.tool.comet-backup.name
+msgid "Third-party Backup Agent"
+msgstr "وكيل نسخ احتياطي خارجي"
+
+#. catalog.tool.xpanel-global-search.name
+msgid "Tool Search"
+msgstr "البحث في الأدوات"
+
+#. catalog.tool.xpanel-tools-home.name
+msgid "Tools Home"
+msgstr "الصفحة الرئيسية للأدوات"
+
+#. catalog.group.aapanel-tools.name
+msgid "Tools and Plugins"
+msgstr "الأدوات والإضافات"
+
+#. catalog.tool.traceroute-toggle.name
+msgid "Traceroute Access"
+msgstr "تفعيل أداة traceroute"
+
+#. catalog.tool.track-dns.name
+msgid "Track DNS"
+msgstr "تتبع DNS"
+
+#. catalog.tool.track-delivery.name catalog.tool.webmail-track-delivery.name
+msgid "Track Delivery"
+msgstr "تتبع التسليم"
+
+#. nav.page.xmail.track-delivery.name
+msgid "Track delivery"
+msgstr "تتبع التسليم"
+
+#. nav.page.xpanel.traffic.name
+msgid "Traffic & bandwidth"
+msgstr "الحركة والنطاق الترددي"
+
+#. catalog.tool.aapanel-traffic-control.name
+msgid "Traffic Control"
+msgstr "التحكم في حركة المرور"
+
+#. catalog.tool.traffic-monitor.name nav.page.xwhm.traffic-monitor.name
+msgid "Traffic monitor"
+msgstr "مراقبة الحركة"
+
+#. catalog.tool.transfer-tool.name
+msgid "Transfer Tool"
+msgstr "أداة النقل"
+
+#. catalog.tool.transfer-or-restore-account.name
+msgid "Transfer or Restore a cPanel Account"
+msgstr "نقل أو استعادة حساب"
+
+#. nav.page.xwhm.transfer-tool.name
+msgid "Transfer tool"
+msgstr "أداة النقل"
+
+#. catalog.group.whm-transfers.name
+msgid "Transfers"
+msgstr "النقل والاستعادة"
+
+#. catalog.tool.file-trash.name nav.page.xpanel.trash.name
+msgid "Trash"
+msgstr "سلة المحذوفات"
+
+#. catalog.tool.trusted-proxies.name nav.page.xwhm.trusted-proxies.name
+msgid "Trusted proxies"
+msgstr "الوكلاء الموثوقون"
+
+#. catalog.tool.two-factor-auth.name catalog.tool.webmail-two-factor.name catalog.tool.xwhm-two-factor-auth.name
+msgid "Two-Factor Authentication"
+msgstr "المصادقة الثنائية"
+
+#. catalog.tool.aapanel-url-rewrite.name
+msgid "URL Rewrite"
+msgstr "إعادة كتابة الروابط"
+
+#. catalog.tool.aapanel-unauth-response.name
+msgid "Unauthenticated Response"
+msgstr "استجابة الزوار غير المسجلين"
+
+#. catalog.tool.unsuspend-bandwidth-exceeders.name
+msgid "Unsuspend Bandwidth Exceeders"
+msgstr "رفع الإيقاف عن متجاوزي النطاق الترددي"
+
+#. catalog.tool.server-software-update.name
+msgid "Update Panel Dependencies"
+msgstr "تحديث برمجيات الخادم"
+
+#. catalog.tool.update-preferences.name
+msgid "Update Preferences"
+msgstr "تفضيلات التحديث"
+
+#. nav.page.xwhm.upgrade.name
+msgid "Upgrade"
+msgstr "الترقية"
+
+#. catalog.tool.panel-upgrade.name
+msgid "Upgrade Panel"
+msgstr "الترقية إلى أحدث إصدار"
+
+#. catalog.tool.upgrade-downgrade-account.name
+msgid "Upgrade/Downgrade an Account"
+msgstr "ترقية أو تخفيض باقة الحساب"
+
+#. catalog.tool.xpanel-usage-stats-panel.name
+msgid "Usage Statistics Panel"
+msgstr "لوحة إحصاءات الاستخدام"
+
+#. catalog.tool.userdir-protection.name
+msgid "User Directory URL Protection"
+msgstr "حماية روابط مجلد المستخدم"
+
+#. catalog.tool.user-manager.name
+msgid "User Manager"
+msgstr "مدير المستخدمين"
+
+#. catalog.tool.panel-branding.name
+msgid "User Panel Branding"
+msgstr "تخصيص هوية لوحة المستخدم"
+
+#. catalog.group.whm-cpanel.name
+msgid "User Panel Management"
+msgstr "إدارة لوحة المستخدم"
+
+#. catalog.tool.plugin-generator.name
+msgid "User Panel Plugin Generator"
+msgstr "مولد إضافات لوحة المستخدم"
+
+#. nav.page.xpanel.user-manager.name
+msgid "User manager"
+msgstr "مدير المستخدمين"
+
+#. catalog.tool.aapanel-bind-account.name
+msgid "Vendor Account Binding"
+msgstr "ربط حساب المورّد"
+
+#. catalog.tool.webmail-analytics-consent.name
+msgid "Vendor Analytics Consent"
+msgstr "الموافقة على التحليلات"
+
+#. catalog.tool.webpros-dashboard.name
+msgid "Vendor Dashboard"
+msgstr "لوحة المورّد"
+
+#. catalog.tool.vendor-feature-entries.name
+msgid "Vendor Feature Entries (Sitejet, WP Toolkit, Nova, Imunify360, Market, CloudLinux)"
+msgstr "ميزات المورّدين الخارجيين"
+
+#. catalog.tool.vendor-marketplace.name
+msgid "Vendor Marketplace"
+msgstr "السوق"
+
+#. catalog.tool.server-monitoring-360.name
+msgid "Vendor Server Monitoring"
+msgstr "مراقبة الخادم من المورّد"
+
+#. catalog.tool.vendor-usage-analytics.name
+msgid "Vendor Usage Analytics"
+msgstr "تحليلات الاستخدام"
+
+#. catalog.tool.view-bandwidth-usage.name
+msgid "View Bandwidth Usage"
+msgstr "استهلاك النطاق الترددي"
+
+#. catalog.tool.view-reseller-usage-and-account-status.name
+msgid "View Reseller Usage and Manage Account Status"
+msgstr "استهلاك الموزع وحالة حساباته"
+
+#. catalog.tool.virus-scanner.name
+msgid "Virus Scanner"
+msgstr "فاحص الفيروسات"
+
+#. nav.page.xpanel.virus-scanner.name
+msgid "Virus scanner"
+msgstr "فاحص الفيروسات"
+
+#. catalog.tool.visitors.name
+msgid "Visitors"
+msgstr "الزوار"
+
+#. catalog.tool.whmcs-integration.name nav.page.xwhm.whmcs.name
+msgid "WHMCS"
+msgstr "WHMCS"
+
+#. catalog.tool.aapanel-wp-toolkit.name catalog.tool.wp-toolkit.name
+msgid "WP Toolkit"
+msgstr "أدوات ووردبريس"
+
+#. catalog.tool.xwhm-wp-toolkit.name
+msgctxt "catalog.tool.xwhm-wp-toolkit.name"
+msgid "WP Toolkit"
+msgstr "أداة ووردبريس"
+
+#. catalog.tool.waf-settings.name
+msgid "Web Application Firewall Settings"
+msgstr "إعدادات جدار حماية التطبيقات"
+
+#. catalog.tool.web-apps.name
+msgid "Web Apps"
+msgstr "تطبيقات الويب"
+
+#. catalog.tool.webmail-calendar.name
+msgid "Web Calendar"
+msgstr "التقويم"
+
+#. catalog.tool.web-disk.name nav.page.xpanel.web-disk.name
+msgid "Web Disk"
+msgstr "القرص الشبكي"
+
+#. catalog.tool.webdisk-tls.name
+msgid "Web Disk TLS Settings"
+msgstr "إعدادات TLS للقرص الشبكي"
+
+#. catalog.tool.web-log-retention.name
+msgid "Web Log Retention"
+msgstr "مدة الاحتفاظ بسجلات الويب"
+
+#. catalog.tool.web-log-rotation.name
+msgid "Web Log Rotation"
+msgstr "تدوير سجلات خادم الويب"
+
+#. catalog.tool.process-memory-limit.name
+msgid "Web Process Memory Limit"
+msgstr "حد ذاكرة عمليات الويب"
+
+#. catalog.tool.aapanel-phpmyadmin-access.name
+msgid "Web SQL Client Access Settings"
+msgstr "إعدادات الوصول لعميل SQL على الويب"
+
+#. catalog.tool.aapanel-web-terminal.name
+msgid "Web SSH Terminal"
+msgstr "طرفية SSH عبر الويب"
+
+#. catalog.tool.apache-global-config.name
+msgid "Web Server Global Configuration"
+msgstr "الإعدادات العامة لخادم الويب"
+
+#. catalog.tool.web-config-includes.name
+msgid "Web Server Include Editor"
+msgstr "محرر ملفات التضمين"
+
+#. catalog.tool.aapanel-openlitespeed-manager.name
+msgid "Web Server Manager (OpenLiteSpeed)"
+msgstr "إدارة خادم الويب (OpenLiteSpeed)"
+
+#. catalog.tool.web-server-status.name
+msgid "Web Server Status"
+msgstr "حالة خادم الويب"
+
+#. catalog.tool.web-stack-builder.name
+msgid "Web Stack Builder"
+msgstr "باني حزم خادم الويب"
+
+#. catalog.tool.web-stats-awstats.name
+msgid "Web Statistics (AWStats)"
+msgstr "إحصائيات الموقع (AWStats)"
+
+#. catalog.tool.web-stats-engines.name
+msgid "Web Statistics Engines"
+msgstr "إعداد برامج الإحصاءات"
+
+#. catalog.tool.web-template-editor.name
+msgid "Web Template Editor"
+msgstr "محرر قوالب الصفحات الافتراضية"
+
+#. nav.page.xpanel.waf.name nav.page.xwhm.waf.name
+msgid "Web application firewall"
+msgstr "جدار حماية تطبيقات الويب"
+
+#. nav.page.xwhm.web-server.name
+msgid "Web server"
+msgstr "خادم الويب"
+
+#. nav.page.xpanel.web-statistics.name
+msgid "Web statistics"
+msgstr "إحصاءات الويب"
+
+#. catalog.tool.web-stats-webalizer.name
+msgid "Webalizer Reports"
+msgstr "تقارير Webalizer"
+
+#. catalog.tool.aapanel-webhook.name
+msgid "Webhooks"
+msgstr "خطافات الويب"
+
+#. catalog.tool.webmail-home.name
+msgid "Webmail Home Dashboard"
+msgstr "الصفحة الرئيسية للبريد"
+
+#. catalog.tool.webmail-signin.name
+msgid "Webmail Sign-in and Session"
+msgstr "تسجيل الدخول إلى البريد"
+
+#. catalog.tool.website-backups.name
+msgid "Website Backups"
+msgstr "نسخ المواقع"
+
+#. catalog.group.aapanel-websites.name
+msgid "Website Management"
+msgstr "إدارة المواقع"
+
+#. catalog.tool.aapanel-site-stats.name
+msgid "Website Statistics"
+msgstr "إحصاءات الموقع"
+
+#. catalog.tool.aapanel-tamper-proof.name
+msgid "Website Tamper-Proof"
+msgstr "منع العبث بالملفات"
+
+#. catalog.tool.wheel-group-users.name
+msgid "Wheel Group Members"
+msgstr "أعضاء مجموعة wheel"
+
+#. catalog.tool.aapanel-server-migrate.name
+msgid "Whole-Server Migration"
+msgstr "ترحيل الخادم بالكامل"
+
+#. catalog.tool.zone-editor.name
+msgid "Zone Editor"
+msgstr "محرر مناطق DNS"
+
+#. catalog.tool.zone-templates.name
+msgid "Zone Templates"
+msgstr "قوالب مناطق DNS"
+
+#. nav.page.xpanel.zone-editor.name
+msgid "Zone editor"
+msgstr "محرر مناطق DNS"
+
+#. catalog.tool.phpmyadmin.name nav.page.xpanel.phpmyadmin.name nav.page.xwhm.phpmyadmin.name
+msgid "phpMyAdmin"
+msgstr "phpMyAdmin"
+
+#. catalog.tool.phppgadmin.name nav.page.xpanel.phppgadmin.name
+msgid "phpPgAdmin"
+msgstr "phpPgAdmin"
+
+#. Extra search keywords for this page in the target language, comma separated
+msgctxt "nav.page.xpanel.home.keywords"
+msgid "keywords"
+msgstr "الرئيسية, لوحة المعلومات"
+
+#. Extra search keywords for this page in the target language, comma separated
+msgctxt "nav.page.xpanel.resources.keywords"
+msgid "keywords"
+msgstr "استهلاك الموارد"
+
+#. Extra search keywords for this page in the target language, comma separated
+msgctxt "nav.page.xpanel.site-health.keywords"
+msgid "keywords"
+msgstr "فحص الصحة"
+
+#. Extra search keywords for this page in the target language, comma separated
+msgctxt "nav.page.xpanel.spam-quarantine.keywords"
+msgid "keywords"
+msgstr "حجر"
+
+#. Extra search keywords for this page in the target language, comma separated
+msgctxt "nav.page.xpanel.file-manager.keywords"
+msgid "keywords"
+msgstr "إدارة الملفات"
+
+#. Extra search keywords for this page in the target language, comma separated
+msgctxt "nav.page.xpanel.trash.keywords"
+msgid "keywords"
+msgstr "سلة"
+
+#. Extra search keywords for this page in the target language, comma separated
+msgctxt "nav.page.xpanel.language.keywords"
+msgid "keywords"
+msgstr "العربية, اللغة"
+
+#. Extra search keywords for this page in the target language, comma separated
+msgctxt "nav.page.xwhm.file-sharing.keywords"
+msgid "keywords"
+msgstr "مشاركة الملفات"

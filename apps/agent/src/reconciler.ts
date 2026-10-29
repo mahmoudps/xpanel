@@ -2,7 +2,7 @@ import { withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admissi
 import { randomUUID } from 'node:crypto'
 import { chmod, mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { fail, suspensionEffects } from '@xpanel/core'
+import { cronJobUnitId, fail, suspensionEffects } from '@xpanel/core'
 import type {
   ConfigTest,
   HostAction,
@@ -13,6 +13,7 @@ import type {
   PhpSettings,
   ReconcileStage,
   RenderedFile,
+  ServerSettings,
 } from '@xpanel/core'
 import {
   activate,
@@ -29,12 +30,21 @@ import {
 import type { ConfigGeneration, Db } from '@xpanel/db'
 import { edge, services, system } from '@xpanel/render'
 import type { StateSnapshot, StateStore } from '@xpanel/state'
+import { assertGenerationRollbackPreconditions, generationSourceIsLinked, isStateDirectoryDurabilityError, parseGenerationRollbackRequest, withGenerationReconciliationLease } from '@xpanel/state'
+import type { GenerationRollbackRequest } from '@xpanel/state'
 import type { AgentExecutor } from './executor.ts'
-import { applyPostfixLocalDelivery, retirePostfixLocalDelivery } from './services/local-mail.ts'
+import { applyPostfixLocalDelivery, localMailNeedsUpdate, retirePostfixLocalDelivery } from './services/local-mail.ts'
 import { ensureOpenDkimSigning, mailAuthZoneAdditions, type OpenDkimSigning } from './services/opendkim-live.ts'
 import { removedMaildirPaths } from './services/mail.ts'
 import { chooseZoneSerial, stampZoneContent } from './zone-serial.ts'
 import { resolveAccountIoDevices } from './io-device.ts'
+import { databaseUserRemoteSqlHosts, databaseUserSqlHosts } from './db-remote-provider.ts'
+import { postgresqlAccountStatements, postgresqlSqlAction } from './pg-sql.ts'
+import { readSecEdgeConfiguration } from './sec-waf.ts'
+import { readMailForwardingConfiguration, readMailfxRenderInput, type MailForwardingConfiguration, type MailfxRenderInput } from './mailfx-render.ts'
+import type { SecEdgeConfiguration } from './sec-waf.ts'
+import { secIngressRenderAuthorityNative } from './sec-ingress-provider.ts'
+import type { TrustedProxyRenderAuthority } from '../../../packages/core/src/trusted-proxies.ts'
 import {
   buildGenerationManifest,
   computeFilesChecksum,
@@ -62,6 +72,7 @@ export interface CompiledGeneration {
   terminatingAccounts: { id: Id; username: string }[]
   /** Postfix main.cf and master.cf are merged outside the owned file list. */
   localMail: boolean
+  localMailOptions: services.PostfixMainOptions
 }
 
 export interface CompileOptions {
@@ -75,6 +86,16 @@ export interface CompileOptions {
   mailAuth?: OpenDkimSigning | null
   /** Existing zone files, keyed by absolute path. Absent keeps each zone's state serial. */
   previousZones?: ReadonlyMap<string, string>
+  /** Strictly parsed extended mail records, read from the same StateStore root. */
+  mailForwarding?: MailForwardingConfiguration
+  /** Spam filter milter and mailbox Sieve policy scripts (mailfx-render.ts). Absent renders neither. */
+  mailFx?: MailfxRenderInput
+  /** Null when saved hostname TLS material is absent on the host. */
+  mailTls?: { certFile: string; keyFile: string } | null
+  /** sec: saved WAF, flood and per-site switches (sec-waf.ts). Absent renders the previous defaults. */
+  secEdge?: SecEdgeConfiguration
+  /** sec: activated trusted-proxy policy, re-admitted against protected ingress evidence (sec-ingress-provider.ts). */
+  trustedProxyAuthority?: TrustedProxyRenderAuthority
 }
 
 const DEFAULT_ZONE_DIR = '/var/lib/powerdns/zones'
@@ -96,6 +117,8 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   const postActions: HostAction[] = []
   const terminatingAccounts: { id: Id; username: string }[] = []
   let localMail = false
+  const localMailOptions: services.PostfixMainOptions = {}
+  const mailForwarding = opts.mailForwarding ?? { forwarders: [], domainForwarders: [], lists: [] }
 
   const seenTests = new Set<string>()
   const addTest = (t: ConfigTest): void => {
@@ -118,7 +141,10 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     postActions.push(...system.symlinkProtectionActions())
 
     preActions.push(...edge.nginxEdgeDirs(os))
-    files.push(edge.renderNginxMain(settings, os))
+    // sec: WAF edge input and trusted-proxy authority
+    const secEdgeSettings = opts.secEdge ? { ...settings, edge: opts.secEdge.edge } as ServerSettings : settings
+    files.push(edge.renderNginxMain(secEdgeSettings, os, opts.trustedProxyAuthority))
+    if (opts.secEdge?.edge.modsecurity) files.push(edge.renderModsecurityMain(opts.secEdge.edge.modsecurity))
     files.push(edge.defaultSiteFile(os, { settings }))
     addTest(edge.nginxConfigTest(os))
 
@@ -140,6 +166,8 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       const nftSettings = system.nftSettingsFromServer(settings, {
         prefixLists,
         banTimeoutSec: 3600,
+        databaseRemoteSources: snapshot.accounts.filter((a) => a.status === 'active').flatMap((a) => (a.databaseRemoteAccess ?? []).map((e) => e.host)),
+        flood: opts.secEdge?.flood ?? null, // sec: flood limits
       })
       const nftFile = system.renderNftables(snapshot.firewall.rules, nftSettings, os)
       files.push(nftFile)
@@ -206,7 +234,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
         sqlStatements.push(...services.dropDatabase(db.name, account.username))
       }
       for (const dbu of accountDbUsers) {
-        sqlStatements.push(...services.dropUser(dbu.name, account.username, ['localhost']))
+        for (const host of ['localhost', ...databaseUserRemoteSqlHosts(account)]) sqlStatements.push(...services.dropUser(dbu.name, account.username, [host]))
       }
       terminatingAccounts.push({ id: account.id, username: account.username })
       continue
@@ -250,7 +278,8 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     // Edge & backend vhosts + PHP-FPM pools
     if (snapshot.server && accountDomains.length > 0) {
       const settings = snapshot.server.settings
-      files.push(edge.nginxSiteFile(account, accountDomains, settings, os, certs, { now }))
+      // sec: per-site WAF limits and ModSecurity switches
+      files.push(edge.nginxSiteFile(account, accountDomains, opts.secEdge ? { ...settings, edge: opts.secEdge.edge } as ServerSettings : settings, os, certs, { now, ...(opts.secEdge ? { waf: opts.secEdge.sites } : {}) }))
 
       // Per-domain custom configuration drop-in files (cPanel userdata style) + .user.ini
       if (snapshot.domainCustomConfigs && snapshot.domainCustomConfigs.length > 0) {
@@ -313,14 +342,19 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     }
 
     // Cron jobs as systemd timers inside xpanel-<uid>.slice
+    if (new Set(accountCrons.map(cron => cronJobUnitId(cron.id))).size !== accountCrons.length) fail('PRECONDITION_FAILED', 'Saved cron unit identities collide; review configuration before reconciliation')
+    if (accountCrons.length > 0) preActions.push(
+      { kind: 'ensure-dir', path: system.CRON_COMMAND_ROOT, mode: 0o755, owner: 'root', group: 'root' },
+      { kind: 'ensure-dir', path: system.cronCommandDir(account.username), mode: 0o750, owner: 'root', group: account.username },
+    )
     for (const cron of accountCrons) {
-      const shortId = cron.id.replace(/[^a-z0-9]/gi, '').slice(0, 16) || 'job'
+      const shortId = cronJobUnitId(cron.id)
       const rendered = system.renderCronUnits(
         account,
-        { id: shortId, schedule: cron.schedule, command: cron.command },
+        { id: shortId, schedule: cron.schedule, command: cron.command, ...(cron.maxRuntimeSec !== undefined ? { maxRuntimeSec: cron.maxRuntimeSec } : {}) },
         os,
       )
-      files.push(rendered.service, rendered.timer)
+      files.push(rendered.commandFile, rendered.service, rendered.timer)
       if (cron.enabled && cronEnabled) {
         postActions.push(
           { kind: 'systemd', verb: 'enable', unit: rendered.timerName },
@@ -337,21 +371,31 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     // Mail (Dovecot per-domain passwd files)
     for (const dom of accountDomains) {
       const mailUsers = accountUsers.filter((u) => u.domainId === dom.id && u.services.email)
-      if (mailUsers.length > 0) {
+      const forwarders = mailForwarding.forwarders.filter(item => item.accountId === account.id && item.sourceAddress.endsWith(`@${dom.name}`))
+        .map(item => ({ local: item.sourceAddress.slice(0, item.sourceAddress.lastIndexOf('@')), to: item.destinations }))
+      const domainForward = mailForwarding.domainForwarders.find(item => item.accountId === account.id && item.sourceDomain === dom.name)?.targetDomain
+      const lists = mailForwarding.lists.filter(item => item.accountId === account.id && item.address.endsWith(`@${dom.name}`))
+        .map(item => ({ local: item.address.slice(0, item.address.lastIndexOf('@')), members: item.members }))
+      if (mailUsers.length > 0 || forwarders.length > 0 || lists.length > 0 || domainForward !== undefined) {
         const mailboxes = mailUsers.map((u) => ({
           local: u.localPart,
           passwordHash: u.passwordHash,
           quotaMb: u.mailboxQuotaMb,
           suspendLogin: mailLogin === 'denied',
         }))
-        const domainInput = {
+        const domainInput: services.MailDomainInput = {
           domain: dom.name,
           account,
           login: mailLogin,
           delivery: mailDelivery,
           mailboxes,
+          forwarders,
+          lists,
+          ...(domainForward ? { domainForward } : {}),
+          // No default-address writer exists in desired state; unknown recipients reject.
+          defaultAddress: { kind: 'reject' },
         }
-        files.push(services.dovecotPasswdFile(os, domainInput))
+        if (mailboxes.length > 0) files.push(services.dovecotPasswdFile(os, domainInput))
         mailDomains.push(domainInput)
       }
     }
@@ -375,19 +419,16 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       sqlStatements.push(...services.createDatabase(db.name, account.username))
     }
     const dbsById = new Map(accountDbs.map((d) => [d.id, d]))
+    // One host per statement builder call: MAX_DB_HOSTS is 20 while an account may save 100 remote hosts.
+    const dbHosts = databaseUserSqlHosts(account)
     for (const dbu of accountDbUsers) {
-      sqlStatements.push(
-        ...services.createUser(dbu.name, account.username, ['localhost'], {
-          plugin: dbu.authPlugin,
-          hash: dbu.authString,
-        }),
-      )
-      for (const grant of dbu.grants) {
-        const targetDb = dbsById.get(grant.databaseId)
-        if (targetDb && targetDb.trashedAt === null) {
-          sqlStatements.push(
-            ...services.grantPrivileges(dbu.name, account.username, ['localhost'], targetDb.name, grant.privileges),
-          )
+      // Suspension keeps the saved remote policy but closes its SQL accounts until reactivation.
+      if (account.status !== 'active') for (const host of databaseUserRemoteSqlHosts(account)) sqlStatements.push(...services.dropUser(dbu.name, account.username, [host]))
+      for (const host of dbHosts) {
+        sqlStatements.push(...services.createUser(dbu.name, account.username, [host], { plugin: dbu.authPlugin, hash: dbu.authString }))
+        for (const grant of dbu.grants) {
+          const targetDb = dbsById.get(grant.databaseId)
+          if (targetDb && targetDb.trashedAt === null) sqlStatements.push(...services.grantPrivileges(dbu.name, account.username, [host], targetDb.name, grant.privileges))
         }
       }
     }
@@ -395,11 +436,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       if (db.trashedAt !== null) {
         const dbGrants: services.DbGrant[] = accountDbUsers
           .filter((u) => u.grants.some((g) => g.databaseId === db.id))
-          .map((u) => ({
-            user: u.name,
-            hosts: ['localhost'],
-            privileges: u.grants.find((g) => g.databaseId === db.id)?.privileges ?? ['ALL'],
-          }))
+          .flatMap((u) => dbHosts.map((host) => ({ user: u.name, hosts: [host], privileges: u.grants.find((g) => g.databaseId === db.id)?.privileges ?? ['ALL'] })))
         sqlStatements.push(...services.trashDatabase(db.name, account.username, dbGrants, db.trashedAt))
       }
     }
@@ -424,7 +461,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     })
   }
 
-  if (mailDomains.length > 0) {
+  if (mailDomains.length > 0 || snapshot.mailIpConfig) {
     const postmaster = services.mailboxPostmaster(snapshot.server?.settings.hostname)
     const domainsDir = services.dovecotDomainsDir(os)
     preActions.push(
@@ -436,6 +473,11 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     files.push(...maps.files)
     preActions.push(...maps.actions.filter((action) => action.kind === 'ensure-dir'))
     postActions.push(...maps.actions.filter((action) => action.kind !== 'ensure-dir'))
+    // mailfx: Sieve during delivery and each mailbox's spam policy script; sievec failures fail the generation.
+    const sieve = services.renderMailboxPolicySieve(os, opts.mailFx?.sieve ?? [])
+    files.push(services.renderDovecotSieveConf(os), ...sieve.files)
+    preActions.push(...sieve.preActions)
+    postActions.push(...sieve.postActions)
     postActions.push({ kind: 'systemd', verb: 'reload', unit: os.services.dovecot })
     localMail = true
   }
@@ -449,7 +491,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
 
   // Postfix outbound multi-IPv4/IPv6 transport maps & master.cf transports
   if (snapshot.mailIpConfig) {
-    const accountsById = new Map(snapshot.accounts.map((a) => [a.id, a]))
+    const accountsById = new Map(snapshot.accounts.filter(a => a.status !== 'terminating').map((a) => [a.id, a]))
     const primaryIpv4 =
       snapshot.ipPool?.find((ip) => ip.version === 4 && ip.isPrimary)?.address ??
       snapshot.ipPool?.find((ip) => ip.version === 4)?.address ??
@@ -471,7 +513,29 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       },
     )
     files.push(...outbound.files)
-    postActions.push(...outbound.actions)
+    // texthash is read directly; do not invoke a distribution-dependent postmap DB type.
+    const senderMap = outbound.files.find(file => file.path.endsWith('/xpanel_sender_transports'))!
+    const master = outbound.files.find(file => file.path.endsWith('/xpanel_master_outbound.cf'))!
+    localMailOptions.outbound = { senderMap: senderMap.path, master: master.content }
+    localMail = true
+  }
+
+  if (localMail) {
+    const tls = opts.mailTls === undefined ? services.mailHostnameTls(snapshot.server?.settings.hostname, snapshot.certificates, now) : opts.mailTls
+    if (tls) localMailOptions.tls = tls
+    // mailfx: the spam filter milter follows OpenDKIM in the managed main.cf block.
+    if (opts.mailFx?.spamMilter) localMailOptions.spamMilter = opts.mailFx.spamMilter
+    // These owned fragments bind merged main/master behavior to the generation checksum.
+    for (const [name, content] of [
+      ['main.cf.fragment', services.localDeliveryMainBlock(os, localMailOptions)],
+      ['master.cf.fragment', services.localSubmissionMasterBlock(os, localMailOptions)],
+    ]) files.push({ path: `${os.paths.postfixDir}/xpanel/${name}`, content: `${content}\n`, mode: 0o640, owner: 'root', group: 'postfix' })
+    if (!preActions.some(action => action.kind === 'ensure-dir' && action.path === `${os.paths.postfixDir}/xpanel`)) {
+      preActions.push({ kind: 'ensure-dir', path: `${os.paths.postfixDir}/xpanel`, mode: 0o750, owner: 'root', group: 'postfix' })
+    }
+    if (!postActions.some(action => action.kind === 'systemd' && action.unit === os.services.postfix)) {
+      postActions.push({ kind: 'systemd', verb: 'reload', unit: os.services.postfix })
+    }
   }
 
   // PowerDNS BIND zone files
@@ -547,6 +611,12 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   if (sqlStatements.length > 0) {
     postActions.push(services.sqlAction(sqlStatements))
   }
+  // PostgreSQL only for accounts that saved PostgreSQL users, so a server without PostgreSQL never needs it.
+  const postgresqlStatements = snapshot.accounts.flatMap((account) => {
+    const users = (snapshot.postgresqlUsers ?? []).filter((user) => user.accountId === account.id)
+    return users.length ? postgresqlAccountStatements(account, (snapshot.postgresqlDatabases ?? []).filter((database) => database.accountId === account.id), users) : []
+  })
+  if (postgresqlStatements.length > 0) postActions.push(postgresqlSqlAction(postgresqlStatements))
 
   files.sort((a, b) => a.path.localeCompare(b.path))
   return {
@@ -557,7 +627,24 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     postActions,
     terminatingAccounts,
     localMail,
+    localMailOptions,
   }
+}
+
+export interface ReconcileOptions {
+  force?: boolean
+  scope?: LiveEventScope
+  actor?: string
+  mailAuth?: OpenDkimSigning | null
+  /** Trusted rollback source; never populated from an HTTP reconcile body. */
+  expectedRestoredState?: { revision: number; checksum: string }
+  /** Trusted historical-restore binding; extended forwarding is outside StateSnapshot. */
+  expectedRestoredMailForwarding?: MailForwardingConfiguration
+}
+export interface GenerationRollbackGuard {
+  request: GenerationRollbackRequest
+  /** Fresh local principal/role read under the state restore writer lease. */
+  authorize: () => Promise<void>
 }
 
 export type ReconcileResult =
@@ -635,6 +722,9 @@ export const rollbackReloadAction = (unit: string): HostAction => {
   if (unit === 'pdns.service' || unit === 'pdns') {
     return { kind: 'exec', argv: ['/usr/bin/systemctl', 'reload-or-restart', unit] }
   }
+  // Slice units have no reload job; restoring their file needs only a daemon reload.
+  // `systemctl reload xpanel-<uid>.slice` fails and would strand the rollback.
+  if (unit.endsWith('.slice')) return { kind: 'systemd-daemon-reload' }
   const verb = unit.startsWith('xpanel-php-fpm-') ? 'restart' : unit.endsWith('.timer') ? 'start' : 'reload'
   return { kind: 'systemd', verb, unit }
 }
@@ -651,7 +741,6 @@ class StageFailureError extends Error {
 export class HostReconciler {
   private readonly deps: ReconcilerDeps
   private readonly listeners = new Set<(event: LiveEvent) => void>()
-  private lastAppliedStateChecksum: string | null = null
   readonly journal: ReconcilerJournal
 
   constructor(deps: ReconcilerDeps) {
@@ -941,7 +1030,7 @@ export class HostReconciler {
    * the host and SQLite generation state so no partial files or false `active` rows remain.
    */
   async recoverInterruptedReconciliation(scope: LiveEventScope = { accountId: null, resellerId: null }): Promise<ReconciliationRecoveryResult> {
-    return withLifecycleWriterAdmission(() => this.recoverInterruptedReconciliationAdmitted(scope))
+    return withLifecycleWriterAdmission(() => withGenerationReconciliationLease(this.deps.store.rootDir, () => this.recoverInterruptedReconciliationAdmitted(scope)))
   }
 
   private async recoverInterruptedReconciliationAdmitted(
@@ -1039,7 +1128,7 @@ export class HostReconciler {
    * that generation failed, and drops the active journal so reconcile can run again.
    */
   async resolveFailedGeneration(generationId: number, actor = 'root'): Promise<{ generationId: number; previousGenerationId: number | null; checkedFiles: number }> {
-    return withLifecycleWriterAdmission(() => this.resolveFailedGenerationAdmitted(generationId, actor))
+    return withLifecycleWriterAdmission(() => withGenerationReconciliationLease(this.deps.store.rootDir, () => this.resolveFailedGenerationAdmitted(generationId, actor)))
   }
 
   private async resolveFailedGenerationAdmitted(
@@ -1131,11 +1220,11 @@ export class HostReconciler {
    * removes only owned obsolete files, rolls back on reload/health failure, or activates
    * atomically and updates the SQLite index.
    */
-  async reconcile(opts: { force?: boolean; scope?: LiveEventScope; actor?: string; mailAuth?: OpenDkimSigning | null } = {}): Promise<ReconcileResult> {
-    return withLifecycleWriterAdmission(() => this.reconcileAdmitted(opts))
+  async reconcile(opts: ReconcileOptions = {}): Promise<ReconcileResult> {
+    return withLifecycleWriterAdmission(() => withGenerationReconciliationLease(this.deps.store.rootDir, () => this.reconcileAdmitted(opts)))
   }
 
-  private async reconcileAdmitted(opts: { force?: boolean; scope?: LiveEventScope; actor?: string; mailAuth?: OpenDkimSigning | null } = {}): Promise<ReconcileResult> {
+  private async reconcileAdmitted(opts: ReconcileOptions = {}): Promise<ReconcileResult> {
     const startMs = Date.now()
     const scope: LiveEventScope = opts.scope ?? { accountId: null, resellerId: null }
     const actor = opts.actor ?? 'agent'
@@ -1148,10 +1237,28 @@ export class HostReconciler {
           error: existingJournal.error,
         })
       }
-      await this.recoverInterruptedReconciliation(scope)
+      await this.recoverInterruptedReconciliationAdmitted(scope)
     }
 
     const snapshot = await this.deps.store.readSnapshot()
+    const mailForwarding = await readMailForwardingConfiguration(this.deps.store.rootDir, snapshot)
+    // mailfx: Sieve inputs come from saved files; the milter needs systemd answers, read after preflight.
+    let mailFx = await readMailfxRenderInput(this.deps.store.rootDir, snapshot, this.deps.os.family, null)
+    // sec: saved WAF/flood edge input and the activated trusted-proxy authority
+    const secEdge = await readSecEdgeConfiguration(this.deps.store.rootDir, { family: this.deps.os.family, domains: snapshot.domains })
+    const trustedProxyAuthority = await secIngressRenderAuthorityNative()
+    if (opts.expectedRestoredMailForwarding && JSON.stringify(mailForwarding) !== JSON.stringify(opts.expectedRestoredMailForwarding)) {
+      fail('CONFLICT', 'Saved mail forwarding changed after generation restore; review the restored state before reconciliation', { stateChanged: true, verificationRequired: true })
+    }
+    const assertMailForwardingUnchanged = async (): Promise<void> => {
+      const fresh = await readMailForwardingConfiguration(this.deps.store.rootDir, snapshot)
+      if (JSON.stringify(fresh) !== JSON.stringify(mailForwarding)) {
+        fail('CONFLICT', 'Saved mail forwarding changed during reconciliation; retry the current configuration')
+      }
+    }
+    if (opts.expectedRestoredState && (snapshot.revision !== opts.expectedRestoredState.revision || snapshot.checksum !== opts.expectedRestoredState.checksum)) {
+      return fail('CONFLICT', 'desired state changed after restore; newer saved changes are preserved and were not reconciled', { stateChanged: true, verificationRequired: true })
+    }
     const currentGen = await latestActive(this.deps.db)
     const mailDomains = [
       ...snapshot.domains.map(domain => domain.name),
@@ -1164,6 +1271,7 @@ export class HostReconciler {
     const previousManifest = currentGen ? await this.journal.readManifest(currentGen.id) : null
     const appliedSnapshot = currentGen ? await this.deps.store.readGenerationSnapshot(currentGen.id) : null
     let accountIoDevices: ReadonlyMap<string, readonly string[]> | undefined
+    let mailTls: CompileOptions['mailTls']
     const compileMail = (mailAuth: OpenDkimSigning | null, previousZones?: ReadonlyMap<string, string>) => {
       const next = compileDesiredGeneration(snapshot, {
         os: this.deps.os,
@@ -1173,6 +1281,11 @@ export class HostReconciler {
         ...(this.deps.zoneDir && { zoneDir: this.deps.zoneDir }),
         ...(mailAuth ? { mailAuth } : {}),
         ...(previousZones ? { previousZones } : {}),
+        mailForwarding,
+        mailFx,
+        ...(mailTls !== undefined ? { mailTls } : {}),
+        secEdge,
+        ...(trustedProxyAuthority ? { trustedProxyAuthority } : {}),
         now: new Date(),
       })
       if (appliedSnapshot) {
@@ -1208,8 +1321,18 @@ export class HostReconciler {
     let compiled = compileMail(mailAuth)
     let filesChecksum = computeFilesChecksum(compiled.files)
     await this.deps.executor.preflight(preflightOf(compiled, filesChecksum))
+    await assertMailForwardingUnchanged()
+    if (compiled.localMailOptions.tls) {
+      const tls = compiled.localMailOptions.tls
+      const cert = await this.deps.executor.readFile(tls.certFile)
+      const key = await this.deps.executor.readFile(tls.keyFile)
+      // Keep public submission off until the hostname's saved certificate is present.
+      mailTls = cert !== null && key !== null ? tls : null
+      if (cert !== null && key !== null) services.assertKeyPair(cert, key)
+    }
     if (!this.deps.ioDevices?.length) accountIoDevices = await resolveAccountIoDevices(this.deps.executor, snapshot.accounts, this.deps.quotaFilesystem ?? '/home')
       ?? new Map(snapshot.accounts.map(account => [account.id, []]))
+    if (compiled.localMail) mailFx = await readMailfxRenderInput(this.deps.store.rootDir, snapshot, this.deps.os.family, argv => this.deps.executor.runCommand(argv))
     if (!('mailAuth' in opts)) {
       try {
         mailAuth = (await ensureOpenDkimSigning(this.deps.executor, mailDomains)).signing
@@ -1236,13 +1359,15 @@ export class HostReconciler {
     if (
       !opts.force &&
       currentGen &&
-      (this.lastAppliedStateChecksum === snapshot.checksum || currentGen.checksum === filesChecksum)
+      currentGen.checksum === filesChecksum
     ) {
       const drift = await detectHostDrift(this.deps.executor, previousManifest)
-      if (!drift.hasDrift && !drift.manifestMissing) {
+      const mailDrift = compiled.localMail && await localMailNeedsUpdate(this.deps.executor, this.deps.os, compiled.localMailOptions)
+      await assertMailForwardingUnchanged()
+      if (!drift.hasDrift && !drift.manifestMissing && !mailDrift) {
         return { status: 'noop', generation: currentGen, stateChecksum: snapshot.checksum }
       }
-      repairedDriftCount = drift.items.length
+      repairedDriftCount = drift.items.length + (mailDrift ? 1 : 0)
     }
 
     const pendingGen = await createGeneration(this.deps.db, {
@@ -1264,6 +1389,7 @@ export class HostReconciler {
     // Stage 1: Render, capture previous file backups, and stage candidate files in isolated directory
     this.emitStage(pendingGen.id, 'render', 'running', scope, `Rendering ${compiled.files.length} files`)
     try {
+      await assertMailForwardingUnchanged()
       // Persist exactly the state that produced these files. The store rejects
       // a revision advanced during preflight before any live host activation.
       await this.deps.store.saveGenerationSnapshot(pendingGen.id, snapshot)
@@ -1274,8 +1400,13 @@ export class HostReconciler {
       throw err
     }
 
+    const managedMailFiles: RenderedFile[] = compiled.localMail || previousManifest?.files.some(file => file.path.startsWith(`${this.deps.os.paths.postfixDir}/xpanel/`))
+      ? [
+        ...['main.cf', 'master.cf'].map(name => ({ path: `${this.deps.os.paths.postfixDir}/${name}`, content: '', mode: 0o644, owner: 'root', group: 'root' })),
+        services.renderDovecotAuthConf(this.deps.os), services.renderDovecotSpecialUseConf(this.deps.os), services.renderDovecotQuotaConf(this.deps.os),
+      ] : []
     const previousFilesBackup = await this.capturePreviousFilesBackup(
-      compiled.files,
+      [...compiled.files, ...managedMailFiles],
       manifestDiff.removed,
       previousManifest,
     )
@@ -1418,6 +1549,7 @@ export class HostReconciler {
       // Stage 3, 4 & 5: Activate (Switch live files & remove obsolete owned files), Reload, and Verify Health
       let currentStageLabel: 'switch' | 'reload' | 'verify' = 'switch'
       try {
+        await assertMailForwardingUnchanged()
         journalRecord.phase = 'activate'
         await this.journal.saveJournal(journalRecord)
         this.emitStage(pendingGen.id, 'switch', 'running', scope)
@@ -1439,7 +1571,7 @@ export class HostReconciler {
           || file.path.endsWith('/11-xpanel-mailboxes.conf')
           || (file.path.endsWith('.passwd') && file.path.includes('/dovecot/')))
         if (compiled.localMail) {
-          await applyPostfixLocalDelivery(this.deps.executor, this.deps.os)
+          await applyPostfixLocalDelivery(this.deps.executor, this.deps.os, undefined, compiled.localMailOptions)
         } else if (removedMail) {
           await retirePostfixLocalDelivery(this.deps.executor, this.deps.os)
           await this.deps.executor.runAction({ kind: 'systemd', verb: 'reload', unit: this.deps.os.services.postfix })
@@ -1554,7 +1686,6 @@ export class HostReconciler {
       await this.journal.saveJournal(journalRecord)
       await this.journal.cleanupStagingDir(pendingGen.id)
 
-      this.lastAppliedStateChecksum = finalSnapshot.checksum
       this.emitStage(pendingGen.id, 'verify', 'passed', scope)
 
       const durationMs = Date.now() - startMs
@@ -1603,13 +1734,54 @@ export class HostReconciler {
   /**
    * Restores the desired-state tree of a previous generation and reconciles the host to it.
    */
-  async rollbackToGeneration(genId: number, actor = 'root'): Promise<ReconcileResult> {
-    return withLifecycleWriterAdmission(() => this.rollbackToGenerationAdmitted(genId, actor))
+  async rollbackToGeneration(genId: number, actor = 'root', guard?: GenerationRollbackGuard): Promise<ReconcileResult & { rollbackTargetGenerationId: number; rollbackTargetChecksum: string; stateChanged: true; verificationRequired?: true; details?: { stateChanged: true; verificationRequired: true } }> {
+    if (!guard || typeof guard.authorize !== 'function') return fail('PRECONDITION_FAILED', 'guarded generation restore requires trusted authorization and reviewed state metadata', { stateChanged: false })
+    const request = parseGenerationRollbackRequest(genId, guard.request)
+    return withLifecycleWriterAdmission(() => withGenerationReconciliationLease(this.deps.store.rootDir, () => this.rollbackToGenerationAdmitted(genId, actor, { ...guard, request })))
   }
 
-  private async rollbackToGenerationAdmitted(genId: number, actor = 'root'): Promise<ReconcileResult> {
-    await this.deps.store.restoreGenerationSnapshot(genId)
-    return this.reconcile({ force: true, actor })
+  private async rollbackToGenerationAdmitted(genId: number, actor: string, guard: GenerationRollbackGuard): Promise<ReconcileResult & { rollbackTargetGenerationId: number; rollbackTargetChecksum: string; stateChanged: true; verificationRequired?: true; details?: { stateChanged: true; verificationRequired: true } }> {
+    if (await this.journal.readActiveJournal()) return fail('PRECONDITION_FAILED', 'an existing reconciliation journal requires review before restoring desired state', { stateChanged: false })
+    let restored = false
+    let expectedRestoredMailForwarding: MailForwardingConfiguration | undefined
+    try {
+      const snapshot = await this.deps.store.restoreGenerationSnapshot(genId, {
+        expectedRevision: guard.request.expectedCurrentStateRevision,
+        restoreGuard: async (current, targetSource) => {
+          await guard.authorize()
+          const [active, target] = await Promise.all([latestActive(this.deps.db), getGeneration(this.deps.db, genId)])
+          const appliedSource = active ? await this.deps.store.readValidatedGenerationSnapshot(active.id) : null
+          assertGenerationRollbackPreconditions(genId, guard.request, { current, active, target, appliedSource })
+          const [activeManifest, targetManifest] = await Promise.all([this.journal.readManifest(active!.id), this.journal.readManifest(genId)])
+          if (!generationSourceIsLinked(active!, appliedSource, activeManifest) || !generationSourceIsLinked(target!, targetSource, targetManifest)) return fail('CONFLICT', 'generation source linkage requires review before restoration', { stateChanged: false })
+          const forwarding = await readMailForwardingConfiguration(this.deps.store.rootDir, targetSource)
+          const mapPaths = new Set(Object.values(services.postfixMapPaths(this.deps.os)).filter(path => path !== services.postfixMapPaths(this.deps.os).dir))
+          const desiredMail = compileDesiredGeneration(targetSource, { os: this.deps.os, mailForwarding: forwarding }).files.filter(file => mapPaths.has(file.path))
+          const savedMail = targetManifest!.files.filter(file => mapPaths.has(file.path))
+          // A StateSnapshot cannot restore the extended forwarding files. Only proceed
+          // when their exact effective maps match the recorded target generation.
+          if (desiredMail.length !== savedMail.length || desiredMail.some(file => savedMail.find(saved => saved.path === file.path)?.sha256 !== sha256Text(file.content))) {
+            return fail('PRECONDITION_FAILED', 'Target generation mail forwarding cannot be restored from the current saved records; explicit review is required', { stateChanged: false })
+          }
+          expectedRestoredMailForwarding = forwarding
+          await guard.authorize()
+          await appendAudit(this.deps.db, { actor, action: 'generation.restore_requested', target: 'generation:' + String(genId),
+            detail: { expectedCurrentGenerationId: guard.request.expectedCurrentGenerationId, expectedCurrentStateRevision: guard.request.expectedCurrentStateRevision,
+              rollbackTargetGenerationId: genId, rollbackTargetChecksum: guard.request.expectedTargetChecksum }, outcome: 'ok' })
+        },
+      })
+      restored = true
+      if (snapshot.revision === undefined) return fail('PRECONDITION_FAILED', 'the restored desired-state revision is unavailable', { stateChanged: true, verificationRequired: true })
+      const result = await this.reconcileAdmitted({ force: true, actor, expectedRestoredState: { revision: snapshot.revision, checksum: snapshot.checksum }, ...(expectedRestoredMailForwarding ? { expectedRestoredMailForwarding } : {}) })
+      const metadata = { rollbackTargetGenerationId: genId, rollbackTargetChecksum: guard.request.expectedTargetChecksum, stateChanged: true as const }
+      if (result.status !== 'applied') return { ...result, ...metadata, verificationRequired: true, details: { stateChanged: true, verificationRequired: true } }
+      const [active, source] = await Promise.all([latestActive(this.deps.db), this.deps.store.readValidatedGenerationSnapshot(result.generation.id)])
+      if (active?.id !== result.generation.id || active.checksum !== result.generation.checksum || source?.checksum !== snapshot.checksum) return fail('CONFLICT', 'the restored generation source could not be confirmed', { stateChanged: true, verificationRequired: true })
+      return { ...result, ...metadata }
+    } catch (error) {
+      if (restored || error instanceof AggregateError || isStateDirectoryDurabilityError(error)) return fail('PRECONDITION_FAILED', 'generation restoration requires state review before continuing', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
+      throw error
+    }
   }
 
   /**

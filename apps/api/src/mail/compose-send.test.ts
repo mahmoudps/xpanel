@@ -46,8 +46,10 @@ describe('approved compose send contract', () => {
     }
   })
 
-  it('keeps To and plain text required even for Bcc or HTML', () => {
-    expect(() => parseMailboxSend({ ...draft, to: '', bcc: 'hidden@example.test' })).toThrow(/recipient/)
+  it('requires an actual envelope recipient and plain text while allowing genuine Cc or Bcc-only send', () => {
+    expect(parseMailboxSend({ ...draft, to: '', bcc: 'hidden@example.test' })).toMatchObject({ to: '', bcc: ['hidden@example.test'] })
+    expect(parseMailboxSend({ ...draft, to: '', cc: 'copy@example.test' })).toMatchObject({ to: '', cc: ['copy@example.test'] })
+    expect(() => parseMailboxSend({ ...draft, to: '', cc: '', bcc: '' })).toThrow(/recipient/)
     expect(() => parseMailboxSend({ ...draft, text: '', html: '<b>HTML alone</b>' })).toThrow(/message text/)
     expect(() => parseMailboxSend({ ...draft, subject: 'Review\r\nBcc: hidden@example.test' })).toThrow(/subject/)
     expect(() => parseMailboxSend({ ...draft, html: 5 })).toThrow(/HTML/)
@@ -130,7 +132,7 @@ describe('compose transport MIME and blind recipient boundary', () => {
     vi.spyOn(ImapProtocolClient.prototype, 'connect').mockResolvedValue('OK')
     vi.spyOn(ImapProtocolClient.prototype, 'login').mockResolvedValue()
     vi.spyOn(ImapProtocolClient.prototype, 'logout').mockResolvedValue()
-    const append = vi.spyOn(ImapProtocolClient.prototype, 'appendMessage').mockResolvedValue({ appendedUid: 1, statusText: 'OK' })
+    const append = vi.spyOn(ImapProtocolClient.prototype, 'appendMessage').mockResolvedValue({ appendedUid: 1, appendedUidValidity: 17, statusText: 'OK' })
     const signed: string[] = []
     const transport = createLocalMailboxTransport({}, { signSent: async (_mailbox, rawMime) => {
       signed.push(rawMime)

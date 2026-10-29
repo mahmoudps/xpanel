@@ -1,22 +1,13 @@
+import '../../../i18n.ts'
 import type { ComposedRoute } from '../types.ts'
-
 export const xwhm_home: readonly ComposedRoute[] = [
   {
     "route": "/whm/jobs",
     "surface": "xwhm",
     "section": "home",
-    "group": [
-      "Home",
-      "الرئيسية"
-    ],
-    "title": [
-      "Jobs",
-      "المهام"
-    ],
-    "lede": [
-      "Job history has not been read. No job status or completion is assumed.",
-      "لم يُقرأ سجل المهام. لا تُفترض حالة أي مهمة أو اكتمالها."
-    ],
+    "group": msgid('Home'),
+    "title": msgid('Jobs'),
+    "lede": msgid('Job history has not been read. No job status or completion is assumed.'),
     "layout": "cron",
     "action": null,
     "columns": [],
@@ -27,18 +18,9 @@ export const xwhm_home: readonly ComposedRoute[] = [
     "route": "/whm/support",
     "surface": "xwhm",
     "section": "home",
-    "group": [
-      "Home",
-      "الرئيسية"
-    ],
-    "title": [
-      "Support",
-      "الدعم"
-    ],
-    "lede": [
-      "Support requests have not been read. Sending a request is unavailable.",
-      "لم تُقرأ طلبات الدعم. إرسال طلب غير متاح."
-    ],
+    "group": msgid('Home'),
+    "title": msgid('Support'),
+    "lede": msgid('Support requests have not been read. Sending a request is unavailable.'),
     "layout": "list",
     "action": null,
     "columns": [],

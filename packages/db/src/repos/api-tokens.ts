@@ -115,11 +115,20 @@ export const findActiveApiTokenByHash = async (
   return row ? fromRow(row) : null
 }
 
-export const recordApiTokenUse = (db: Db, id: Id, ip: string): Promise<void> =>
+/** Persist successful authentication; coalesce same-address bursts within 60 seconds without process-local caches. */
+export const recordApiTokenUse = (db: Db, id: Id, ip: string | null): Promise<void> =>
   withSqliteErrors(async () => {
     const tid = assertId(id, 'id')
-    const cleanIp = assertIp(ip, 'ip')
-    await db.query(`UPDATE api_tokens SET last_used_at = $1, last_used_ip = $2 WHERE id = $3`, [nowIso(), cleanIp, tid])
+    const cleanIp = ip === null ? null : assertIp(ip, 'ip')
+    const now = nowIso()
+    const before = new Date(Date.parse(now) - 60_000).toISOString()
+    await db.query(
+      `UPDATE api_tokens SET last_used_at = $1, last_used_ip = $2
+       WHERE id = $3 AND revoked_at IS NULL AND expires_at > $1
+       AND EXISTS (SELECT 1 FROM principals WHERE principals.id = api_tokens.principal_id AND disabled = 0)
+       AND (last_used_at IS NULL OR last_used_at <= $4 OR last_used_ip IS NOT $2)`,
+      [now, cleanIp, tid, before],
+    )
   })
 
 export const revokeApiToken = (db: Db, id: Id, principalId?: Id): Promise<void> =>

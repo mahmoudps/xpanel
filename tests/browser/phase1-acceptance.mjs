@@ -21,7 +21,8 @@ const matrix = [
 const screenMarkers = {
   '/login': '[data-login-form]', '/whm': '[data-section="overview-attention"]',
   '/whm/accounts': '[data-section="accounts-isolation"]', '/whm/accounts/new': '[data-create-account-form]',
-  '/home': '[data-board-port="xpanel-home"]', '/domains': '[data-domains-table]',
+  // The owner's /domains page is the approved domain workspace; its table replaced the former summary table.
+  '/home': '[data-board-port="xpanel-home"]', '/domains': '[data-approved-xpanel-workspace="/domains"] [data-domain-workspace] [data-domain-table]',
   '/files/manager': '[data-file-manager-table]', '/mail/inbox': '[data-mail-pane="message-list"]', '/mail/compose': '[data-compose-form]',
 }
 const focusSelector = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),details > summary:first-of-type,[tabindex]'

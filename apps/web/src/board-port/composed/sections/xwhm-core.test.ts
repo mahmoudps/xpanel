@@ -1,3 +1,4 @@
+import { translator } from '../../../i18n.ts'
 import { describe, expect, it } from 'vitest'
 import { xwhm_accounts } from './xwhm-accounts.ts'
 import { xwhm_backups } from './xwhm-backups.ts'
@@ -28,8 +29,8 @@ describe('xWHM core route metadata', () => {
       expect(spec.surface).toBe('xwhm')
       expect(spec.route).toMatch(/^\/whm\//)
       expect(Object.keys(spec).sort()).toEqual(keys)
-      expect(spec.title.every(text => text.trim().length > 0)).toBe(true)
-      expect(spec.lede.every(text => text.trim().length > 0)).toBe(true)
+      expect(spec.title.trim().length > 0).toBe(true)
+      expect(spec.lede.trim().length > 0).toBe(true)
       expect(spec.fields).toEqual([])
       expect(spec.action).toBeNull()
     }
@@ -39,7 +40,7 @@ describe('xWHM core route metadata', () => {
     for (const route of ['/whm/accounts/announcements', '/whm/accounts/templates']) {
       expect(at(route).bind).toBe('soon')
       expect(at(route).columns).toEqual([])
-      expect(at(route).lede[0]).toMatch(/(?:has|have) not been read/)
+      expect(at(route).lede).toMatch(/(?:has|have) not been read/)
     }
     for (const spec of routes.filter(item => item.bind === 'soon')) {
       expect(spec.fields).toEqual([])
@@ -51,10 +52,11 @@ describe('xWHM core route metadata', () => {
 
   it('distinguishes stored account status and unmeasured bandwidth from health or usage readings', () => {
     expect(at('/whm/accounts/health').bind).toBe('accounts')
-    expect(at('/whm/accounts/health').lede[0]).toContain('assessments and repairs are unavailable')
+    expect(at('/whm/accounts/health').lede).toContain('assessments and repairs are unavailable')
     expect(at('/whm/accounts/bandwidth').bind).toBe('accounts')
-    expect(at('/whm/accounts/bandwidth').lede[0]).toContain('Bandwidth is not measured')
-    expect(at('/whm/accounts/bandwidth').columns.at(-1)).toEqual(['Bandwidth', 'النطاق الترددي'])
+    expect(at('/whm/accounts/bandwidth').lede).toContain('Bandwidth is not measured')
+    expect(at('/whm/accounts/bandwidth').columns.at(-1)).toBe('Bandwidth')
+    expect(translator('ar')(at('/whm/accounts/bandwidth').columns.at(-1)!)).toBe('النطاق الترددي')
     expect(routes.filter(item => item.bind === 'accounts')).toHaveLength(2)
   })
 
@@ -68,7 +70,7 @@ describe('xWHM core route metadata', () => {
       expect(at(route).fields).toEqual([])
     }
     expect(at('/whm/backups/files').bind).toBe('backups')
-    expect(at('/whm/email/outbound').lede[0]).toContain('cannot be applied')
+    expect(at('/whm/email/outbound').lede).toContain('cannot be applied')
     expect(JSON.stringify(routes)).not.toContain('/api/')
   })
 })

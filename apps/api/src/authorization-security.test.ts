@@ -296,23 +296,15 @@ describe('HTTP authorization security regressions', () => {
     expect(await response.text()).not.toContain('passwordHash')
   })
 
-  it('extended mail and PostgreSQL lists and deletion are restricted by persisted account ownership', async () => {
+  it('extended mail lists and deletion are restricted by persisted account ownership', async () => {
     const own = { id: randomUUID(), accountId: alice.id, sourceAddress: `team@${alice.primaryDomain}`, destinations: ['visible@example.test'], createdAt: new Date().toISOString() }
     const foreign = { ...own, id: randomUUID(), accountId: bob.id, sourceAddress: `secret@${bob.primaryDomain}`, destinations: ['FOREIGN_ADDRESS@example.test'] }
     await atomicWriteJson(join(state.rootDir, 'extended/mail/forwarders.json'), [own, foreign])
-    const pgOwn = { id: randomUUID(), accountId: alice.id, name: 'alice_owned', encoding: 'UTF8', locale: 'C', extensions: [], compiledSql: '', createdAt: new Date().toISOString() }
-    const pgForeign = { ...pgOwn, id: randomUUID(), accountId: bob.id, name: 'bobby_FOREIGN_DATABASE' }
-    await atomicWriteJson(join(state.rootDir, 'extended/databases/postgres-dbs.json'), [pgOwn, pgForeign])
     const token = await tokenFor(aliceId, ['*'])
     const forwarders = await request(token, '/api/mail/forwarders')
     expect(forwarders.status).toBe(200)
     expect(await forwarders.text()).not.toContain('FOREIGN_ADDRESS')
     expect((await request(token, `/api/mail/forwarders/${foreign.id}`, 'DELETE')).status).toBe(404)
-    const postgres = await request(token, '/api/databases/postgres')
-    expect(postgres.status).toBe(200)
-    expect(await postgres.text()).not.toContain('FOREIGN_DATABASE')
-    expect((await request(token, `/api/databases/postgres/${pgForeign.id}`, 'DELETE')).status).toBe(404)
-    expect((await request(token, `/api/databases/postgres/${pgOwn.id}`, 'DELETE')).status).toBe(200)
   })
 
   it('malformed JSON is rejected without creating a feature list or falling back to an empty request', async () => {
@@ -416,7 +408,8 @@ describe('HTTP authorization security regressions', () => {
 
     // Sibling mailbox in the SAME account cannot read, search, or delete inbox's message or attachments
     expect((await request(siblingMailboxToken, `/api/webmail/messages?mailbox=${encodeURIComponent(inboxLogin)}`)).status).toBe(404)
-    expect((await request(siblingMailboxToken, `/api/webmail/search?q=CONFIDENTIAL&mailbox=${encodeURIComponent(inboxLogin)}`)).status).toBe(404)
+    // Mailbox-principal search is native IMAP and needs a sealed mailbox sign-in; a bearer token is refused before any mailbox selection.
+    expect((await request(siblingMailboxToken, `/api/webmail/search?q=CONFIDENTIAL&mailbox=${encodeURIComponent(inboxLogin)}`)).status).toBe(401)
     expect((await request(siblingMailboxToken, `/api/webmail/messages/${sentMsg.id}`)).status).toBe(404)
     expect((await request(siblingMailboxToken, `/api/webmail/messages/${sentMsg.id}`, 'DELETE')).status).toBe(404)
     expect((await request(siblingMailboxToken, `/api/webmail/messages/${sentMsg.id}/attachments/invoice.pdf`)).status).toBe(404)
@@ -494,11 +487,16 @@ describe('HTTP authorization security regressions', () => {
     const inboxToken = await tokenFor(aliceId, [`mailbox:${inboxUser.id}`, 'webmail:*'])
     const siblingToken = await tokenFor(aliceId, [`mailbox:${siblingUser.id}`, 'webmail:*'])
 
+    // Mailbox principals use the strict calendar workspace: every write is bound to the revision its GET returned.
+    const workspaceRevision = async (token: string) => ((await (await request(token, '/api/webmail/calendars')).json()) as { revision: string }).revision
+    const calendarRevision = async (token: string) => ((await (await request(token, `/api/webmail/calendars/${calId}`)).json()) as { calendar: { revision: string } }).calendar.revision
+
     // Create calendar as inbox
     const calRes = await request(inboxToken, '/api/webmail/calendars', 'POST', {
       name: 'Ops Schedule',
       color: '#10b981',
       timezone: 'UTC',
+      expectedRevision: await workspaceRevision(inboxToken),
     })
     expect(calRes.status).toBe(201)
     const calId = ((await calRes.json()) as { calendar: { id: string } }).calendar.id
@@ -511,16 +509,18 @@ describe('HTTP authorization security regressions', () => {
     expect(
       (
         await request(inboxToken, `/api/webmail/calendars/${calId}/share`, 'POST', {
-          grantee: foreignLogin,
+          principal: foreignLogin,
           permission: 'read',
+          expectedRevision: await calendarRevision(inboxToken),
         })
       ).status,
     ).toBe(404)
 
     // Share with sibling as read-only
     const shareRead = await request(inboxToken, `/api/webmail/calendars/${calId}/share`, 'POST', {
-      grantee: siblingLogin,
+      principal: siblingLogin,
       permission: 'read',
+      expectedRevision: await calendarRevision(inboxToken),
     })
     expect(shareRead.status).toBe(200)
 
@@ -528,28 +528,31 @@ describe('HTTP authorization security regressions', () => {
     const siblingCals = ((await (await request(siblingToken, '/api/webmail/calendars')).json()) as { calendars: { id: string }[] }).calendars
     expect(siblingCals.map(c => c.id)).toEqual([calId])
     expect((await request(siblingToken, `/api/webmail/calendars/${calId}/export`)).status).toBe(200)
-    expect((await request(siblingToken, `/api/webmail/calendars/${calId}`, 'PATCH', { name: 'Hijacked' })).status).toBe(403)
+    const readOnlyRevision = await calendarRevision(siblingToken)
+    expect((await request(siblingToken, `/api/webmail/calendars/${calId}`, 'PATCH', { name: 'Hijacked', expectedRevision: readOnlyRevision })).status).toBe(403)
     expect(
       (
         await request(siblingToken, `/api/webmail/calendars/${calId}/import`, 'POST', {
           ics: 'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:ev-1\r\nSUMMARY:Test\r\nDTSTART:20261022T100000Z\r\nDTEND:20261022T110000Z\r\nEND:VEVENT\r\nEND:VCALENDAR',
+          expectedRevision: readOnlyRevision,
         })
       ).status,
     ).toBe(403)
-    expect((await request(siblingToken, `/api/webmail/calendars/${calId}`, 'DELETE')).status).toBe(403)
-    expect((await request(siblingToken, `/api/webmail/calendars/${calId}/share`, 'POST', { grantee: inboxLogin, permission: 'read' })).status).toBe(403)
+    expect((await request(siblingToken, `/api/webmail/calendars/${calId}`, 'DELETE', { expectedRevision: readOnlyRevision })).status).toBe(403)
+    expect((await request(siblingToken, `/api/webmail/calendars/${calId}/share`, 'POST', { principal: inboxLogin, permission: 'read', expectedRevision: readOnlyRevision })).status).toBe(403)
 
     // Upgrade sibling to read-write
     expect(
       (
         await request(inboxToken, `/api/webmail/calendars/${calId}/share`, 'POST', {
-          grantee: siblingLogin,
+          principal: siblingLogin,
           permission: 'read-write',
+          expectedRevision: await calendarRevision(inboxToken),
         })
       ).status,
     ).toBe(200)
 
-    // Sibling can now import valid ICS events and PATCH calendar metadata, but still cannot DELETE or share
+    // Sibling can now import valid ICS events, but still cannot change owner settings, DELETE or share
     const validIcs = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
@@ -562,29 +565,33 @@ describe('HTTP authorization security regressions', () => {
       'END:VEVENT',
       'END:VCALENDAR',
     ].join('\r\n')
-    const importCalRes = await request(siblingToken, `/api/webmail/calendars/${calId}/import`, 'POST', { ics: validIcs })
+    const importCalRes = await request(siblingToken, `/api/webmail/calendars/${calId}/import`, 'POST', { ics: validIcs, expectedRevision: await calendarRevision(siblingToken) })
     expect(importCalRes.status).toBe(201)
-    expect((await request(siblingToken, `/api/webmail/calendars/${calId}`, 'PATCH', { name: 'Team Ops Schedule' })).status).toBe(200)
-    expect((await request(siblingToken, `/api/webmail/calendars/${calId}`, 'DELETE')).status).toBe(403)
+    // Read-write grants event writes only; calendar settings stay owner-managed in the strict workspace.
+    expect((await request(siblingToken, `/api/webmail/calendars/${calId}`, 'PATCH', { name: 'Hijacked', expectedRevision: await calendarRevision(siblingToken) })).status).toBe(403)
+    expect((await request(siblingToken, `/api/webmail/calendars/${calId}`, 'DELETE', { expectedRevision: await calendarRevision(siblingToken) })).status).toBe(403)
+    expect((await request(inboxToken, `/api/webmail/calendars/${calId}`, 'PATCH', { name: 'Team Ops Schedule', expectedRevision: await calendarRevision(inboxToken) })).status).toBe(200)
 
-    const exportedIcs = await (await request(inboxToken, `/api/webmail/calendars/${calId}/export`)).text()
+    const exportedIcs = ((await (await request(inboxToken, `/api/webmail/calendars/${calId}/export`)).json()) as { ics: string }).ics
     expect(exportedIcs).toContain('SUMMARY:Production Release Window')
     expect(exportedIcs).toContain('X-WR-CALNAME:Team Ops Schedule')
 
     // Malicious ICS payloads are rejected with 422 VALIDATION and do not corrupt calendar state
+    const beforeMalicious = await calendarRevision(inboxToken)
     for (const badIcs of [
       'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:<script>alert(1)</script>\r\nDTSTART:20261022T120000Z\r\nDTEND:20261022T130000Z\r\nEND:VEVENT\r\nEND:VCALENDAR',
       'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Leak\r\nATTACH;VALUE=URI:file:///etc/passwd\r\nDTSTART:20261022T120000Z\r\nDTEND:20261022T130000Z\r\nEND:VEVENT\r\nEND:VCALENDAR',
     ]) {
-      expect((await request(inboxToken, `/api/webmail/calendars/${calId}/import`, 'POST', { ics: badIcs })).status).toBe(422)
+      expect((await request(inboxToken, `/api/webmail/calendars/${calId}/import`, 'POST', { ics: badIcs, expectedRevision: beforeMalicious })).status).toBe(422)
     }
+    expect(await calendarRevision(inboxToken)).toBe(beforeMalicious)
 
     // Revoke calendar share
-    const revokeRes = await request(inboxToken, `/api/webmail/calendars/${calId}/share`, 'DELETE', { grantee: siblingLogin })
+    const revokeRes = await request(inboxToken, `/api/webmail/calendars/${calId}/share`, 'DELETE', { principal: siblingLogin, expectedRevision: await calendarRevision(inboxToken) })
     expect(revokeRes.status).toBe(200)
     expect(((await (await request(siblingToken, '/api/webmail/calendars')).json()) as { calendars: unknown[] }).calendars).toHaveLength(0)
     expect((await request(siblingToken, `/api/webmail/calendars/${calId}/export`)).status).toBe(404)
-    expect((await request(siblingToken, `/api/webmail/calendars/${calId}`, 'PATCH', { name: 'Denied' })).status).toBe(404)
+    expect((await request(siblingToken, `/api/webmail/calendars/${calId}`, 'PATCH', { name: 'Denied', expectedRevision: beforeMalicious })).status).toBe(404)
 
     // Contacts vCard import/export + sharing & revocation
     const validVcard = [
@@ -599,6 +606,18 @@ describe('HTTP authorization security regressions', () => {
     const importContactsRes = await request(inboxToken, '/api/webmail/contacts/import', 'POST', { vcard: validVcard })
     expect(importContactsRes.status).toBe(201)
     const importedContact = ((await importContactsRes.json()) as { contacts: { id: string }[] }).contacts[0]!
+    const contactEdit = async (readerToken: string, title: string) => {
+      const response = await request(readerToken, '/api/webmail/contacts')
+      expect(response.status).toBe(200)
+      const { contacts } = await response.json() as { contacts: {
+        id: string; fullName: string; email: string; phone: string; organization: string; revision: string
+      }[] }
+      const current = contacts.find(contact => contact.id === importedContact.id)!
+      expect(current).toBeDefined()
+      expect(current.revision).toMatch(/^[0-9a-f]{64}$/)
+      return { fullName: current.fullName, email: current.email, phone: current.phone,
+        organization: current.organization, title, expectedRevision: current.revision }
+    }
 
     // Reject malicious vCard payloads
     expect(
@@ -619,7 +638,7 @@ describe('HTTP authorization security regressions', () => {
       ).status,
     ).toBe(200)
     expect((await request(siblingToken, '/api/webmail/contacts/export')).status).toBe(200)
-    expect((await request(siblingToken, `/api/webmail/contacts/${importedContact.id}`, 'PATCH', { title: 'Blocked' })).status).toBe(403)
+    expect((await request(siblingToken, `/api/webmail/contacts/${importedContact.id}`, 'PATCH', await contactEdit(siblingToken, 'Blocked'))).status).toBe(403)
     expect(
       (
         await request(inboxToken, `/api/webmail/contacts/${importedContact.id}/share`, 'POST', {
@@ -628,7 +647,7 @@ describe('HTTP authorization security regressions', () => {
         })
       ).status,
     ).toBe(200)
-    expect((await request(siblingToken, `/api/webmail/contacts/${importedContact.id}`, 'PATCH', { title: 'Lead SRE' })).status).toBe(200)
+    expect((await request(siblingToken, `/api/webmail/contacts/${importedContact.id}`, 'PATCH', await contactEdit(siblingToken, 'Lead SRE'))).status).toBe(200)
     expect(
       (
         await request(inboxToken, `/api/webmail/contacts/${importedContact.id}/share`, 'POST', {
@@ -637,7 +656,7 @@ describe('HTTP authorization security regressions', () => {
         })
       ).status,
     ).toBe(200)
-    expect((await request(siblingToken, `/api/webmail/contacts/${importedContact.id}`, 'PATCH', { title: 'Revoked' })).status).toBe(404)
+    expect((await request(siblingToken, `/api/webmail/contacts/${importedContact.id}`, 'PATCH', await contactEdit(inboxToken, 'Revoked'))).status).toBe(404)
   })
 
   it('A06/A30 live state re-verification blocks reseller mutation if account ownership changes mid-flight and fails closed on missing plan metadata', async () => {

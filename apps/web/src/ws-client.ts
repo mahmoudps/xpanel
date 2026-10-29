@@ -1,3 +1,4 @@
+import { WHM_DNS_CLIENT_BINDING } from './whm-dns-client.ts'
 // Real-time RFC 6455 WebSocket state store, 5-stage reconcile pipeline banner renderer,
 // and embedded browser script for live updates and keyboard navigation shortcuts.
 
@@ -8,13 +9,140 @@ import type {
   ReconcileStage,
   WebsiteAnalyticsSnapshot,
 } from '@xpanel/core'
-import { dirForLocale, t, type Locale } from './i18n.ts'
+import { localeDirection, translator, type Locale } from './i18n.ts'
 import { escapeHtml, renderLtrValue, renderStatusBadge } from './tokens.ts'
 import { SHELL_MOTION_CLIENT_SCRIPT } from './shell-motion.ts'
 import { PLAN_EDITOR_CLIENT_SCRIPT } from './plan-editor.ts'
 import { ACCOUNT_LIST_CLIENT_SCRIPT } from './account-list.ts'
 import { APPROVED_WORKSPACE_FORMS_CLIENT } from './approved-workspace-forms.ts'
+import { ACCOUNT_FORWARDERS_CLIENT_BINDING } from './account-forwarders-client.ts'
+import { ACCOUNT_FILTERS_CLIENT_BINDING } from './account-filters-client.ts'
+import { ACCOUNT_MAILING_LISTS_CLIENT_BINDING } from './account-mailing-lists-client.ts'
+import { ACCOUNT_SPAM_CLIENT_BINDING } from './account-spam-client.ts'
+import { ACCOUNT_SESSIONS_CLIENT_BINDING } from './account-sessions-client.ts'
+import { ACCOUNT_SSL_CLIENT_BINDING } from './account-ssl-client.ts'
+import { ACCOUNT_CONTACT_CLIENT_BINDING } from './account-contact-client.ts'
+import { DOMAIN_WORKSPACE_CLIENT_BINDING } from './domain-workspace-client.ts'
+import { DATABASE_WORKSPACE_CLIENT_BINDING } from './database-workspace-client.ts'
+import { MAIL_FOLDER_WORKSPACE_CLIENT_BINDING } from './mail-folder-workspace-client.ts'
+import { MAIL_CONTACTS_WORKSPACE_CLIENT_BINDING } from './mail-contacts-workspace-client.ts'
+import { MAIL_CONTACTS_TOOLS_CLIENT_BINDING } from './mail-contacts-tools-client.ts'
+import { MAIL_IDENTITIES_CLIENT_BINDING } from './mail-identities-client.ts'
+import { MAIL_VACATION_WORKSPACE_CLIENT_BINDING } from './mail-vacation-workspace-client.ts'
+import { FILE_WORKSPACE_CLIENT_BINDING } from './file-workspace-client.ts'
 import { MAIL_SEND_CLIENT_BINDING } from './mail-send-client.ts'
+import { ACCOUNT_BACKUP_CLIENT_BINDING } from './account-backup-client.ts'
+import { ACCOUNT_CRON_CLIENT_BINDING } from './account-cron-client.ts'
+import { ACCOUNT_HTACCESS_CLIENT_BINDING } from './account-htaccess-client.ts'
+import { ACCOUNT_QUARANTINE_CLIENT_BINDING } from './account-quarantine-client.ts'
+import { MAIL_CONTACT_GROUPS_CLIENT_BINDING } from './mail-contact-groups-client.ts'
+import { MAIL_SEARCH_CLIENT_BINDING } from './mail-search-client.ts'
+import { MAIL_ATTACHMENTS_CLIENT_BINDING } from './mail-attachments-client.ts'
+import { MAIL_CALENDAR_CLIENT_BINDING } from './mail-calendar-client.ts'
+import { MAIL_CALENDAR_VIEW_CLIENT_BINDING } from './mail-calendar-view-client.ts'
+import { MAIL_COMPOSE_IDENTITIES_CLIENT_BINDING } from './mail-compose-identities-client.ts'
+import { MAIL_COMPOSE_ATTACHMENTS_CLIENT_BINDING } from './mail-compose-attachments-client.ts'
+import { MAIL_DRAFT_CLIENT_BINDING } from './mail-draft-client.ts'
+import { WHM_BACKUPS_CLIENT_BINDING } from './whm-backups-client.ts'
+import { WHM_DOMAINS_CLIENT_BINDING } from './whm-domains-client.ts'
+import { WHM_DEFAULT_SITE_CLIENT_BINDING } from './whm-default-site-client.ts'
+import { WHM_SSL_CLIENT_BINDING } from './whm-ssl-client.ts'
+import { WHM_SSL_INSTALL_CLIENT_BINDING } from './whm-ssl-install-client.ts'
+import { WHM_SECURITY_CLIENT_BINDING } from './whm-security-client.ts'
+import { WHM_SSH_CLIENT_BINDING } from './whm-ssh-client.ts'
+import { WHM_PHP_CLIENT_BINDING } from './whm-php-client.ts'
+import { WHM_MAIL_QUEUE_CLIENT_BINDING } from './whm-mail-queue-client.ts'
+import { WHM_UPDATES_CLIENT_BINDING } from './whm-updates-client.ts'
+import { WHM_REPAIR_CLIENT_BINDING } from './whm-repair-client.ts'
+import { WHM_ACCOUNT_HEALTH_CLIENT_BINDING } from './whm-account-health-client.ts'
+import { WHM_BACKUP_FILES_CLIENT_BINDING } from './whm-backup-files-client.ts'
+import { WHM_JOBS_CLIENT_BINDING } from './whm-jobs-client.ts'
+import { WHM_PANEL_TOKENS_CLIENT_BINDING } from './whm-panel-tokens-client.ts'
+import { WHM_PANEL_NOTIFICATIONS_CLIENT_BINDING } from './whm-panel-notifications-client.ts'
+import { WHM_ANNOUNCEMENTS_CLIENT_BINDING } from './whm-announcements-client.ts'
+import { WHM_BACKUP_RUNS_CLIENT_BINDING } from './acct-backup-runs-client.ts'
+import { ACCT_TRANSFER_CREDENTIALS_CLIENT_BINDING } from './acct-transfer-credentials-client.ts'
+import { ACCT_CONVERT_ADDON_CLIENT_BINDING } from './acct-convert-addon-client.ts'
+import { ACCT_RESTORE_CLIENT_BINDING } from './acct-restore-client.ts'
+import { ACCT_STAGING_CLIENT_BINDING } from './acct-staging-client.ts'
+import { ACCOUNT_TEAM_CLIENT_BINDING } from './acct-team-client.ts'
+import { WHM_ACCOUNT_TEMPLATES_CLIENT_BINDING } from './acct-templates-client.ts'
+import { WHM_ENHANCEMENTS_CLIENT_BINDING } from './acct-enhancements-client.ts'
+import { ACCOUNT_ANNOUNCEMENTS_CLIENT_BINDING } from './board-port/account-announcements-banner-client.ts'
+import { WHM_SOFTWARE_CENTER_CLIENT_BINDING } from './whm-software-center-client.ts'
+import { WHM_DATABASES_CLIENT_BINDING } from './whm-databases-client.ts'
+import { WHM_DATABASE_TUNING_CLIENT_BINDING } from './whm-database-tuning-client.ts'
+import { WHM_PREFERENCES_CLIENT_BINDING } from './whm-preferences-client.ts'
+import { WHM_SERVICE_MANAGER_CLIENT_BINDING } from './whm-service-manager-client.ts'
+import { WHM_CONFIGURATION_HEALTH_CLIENT_BINDING } from './whm-configuration-health-client.ts'
+import { ACCOUNT_PACKAGES_CLIENT_BINDING } from './account-packages-client.ts'
+import { ACCOUNT_DATABASE_REMOTE_CLIENT_BINDING } from './account-database-remote-client.ts'
+import { DB_ENGINES_CLIENT_BINDING } from './db-engines-client.ts'
+import { ACCOUNT_COLLABORATION_CLIENT_BINDING } from './account-collaboration-client.ts'
+import { WHM_DEVELOPER_CLIENT_BINDING } from './whm-developer-client.ts'
+import { WHM_TRUSTED_PROXIES_CLIENT_BINDING } from './whm-trusted-proxies-client.ts'
+import { WHM_BACKUP_DESTINATIONS_CLIENT_BINDING } from './whm-backup-destinations-client.ts'
+import { MAIL_TOOLS_CLIENT_BINDING } from './mail-tools-client.ts'
+import { MAIL_SPAM_CLIENT_BINDING } from './mail-spam-client.ts'
+import { MAIL_MAILING_LISTS_CLIENT_BINDING } from './mail-mailing-lists-client.ts'
+import { WHM_BENCHMARK_CLIENT_BINDING } from './whm-benchmark-client.ts'
+import { WHM_TRAFFIC_CLIENT_BINDING } from './whm-traffic-client.ts'
+import { WHM_DEFAULT_INDEX_CLIENT_BINDING } from './whm-default-index-client.ts'
+import { WHM_COMPOSER_CLIENT_BINDING } from './whm-composer-client.ts'
+import { SW_CONTAINERS_CLIENT_BINDING } from './sw-containers-client.ts'
+import { SW_ADDON_SERVICES_CLIENT_BINDING } from './sw-addon-services-client.ts'
+import { SW_DEPLOYMENTS_CLIENT_BINDING } from './sw-deployments-client.ts'
+import { SW_APP_PROJECTS_CLIENT_BINDING } from './sw-app-projects-client.ts'
+import { SW_OPTIMIZE_CLIENT_BINDING } from './sw-optimize-client.ts'
+import { SW_APPLICATIONS_CLIENT_BINDING } from './sw-applications-client.ts'
+import { ACCOUNT_DYNAMIC_DNS_CLIENT_BINDING } from './account-dynamic-dns-client.ts'
+import { ACCOUNT_SITE_PUBLISHER_CLIENT_BINDING } from './account-site-publisher-client.ts'
+import { ACCOUNT_GIT_CLIENT_BINDING } from './account-git-client.ts'
+import { ACCOUNT_PGP_CLIENT_BINDING } from './account-pgp-client.ts'
+import { ACCOUNT_WEB_DIRECTIVES_CLIENT_BINDING } from './account-web-directives-client.ts'
+import { ACCOUNT_SSH_CLIENT_BINDING } from './account-ssh-client.ts'
+import { ACCOUNT_LOGS_CLIENT_BINDING } from './account-logs-client.ts'
+import { SITE_HEALTH_CLIENT_BINDING } from './site-health-client.ts'
+import { ACCOUNT_VIRUS_SCAN_CLIENT_BINDING } from './account-virus-scan-client.ts'
+import { ACCOUNT_NETWORK_TOOLS_CLIENT_BINDING } from './account-network-tools-client.ts'
+import { ACCOUNT_DATABASE_INSIGHTS_CLIENT_BINDING } from './account-database-insights-client.ts'
+import { WHM_MAIL_LOG_CLIENT_BINDING } from './whm-mail-log-client.ts'
+import { WHM_FTP_LOG_CLIENT_BINDING } from './whm-ftp-log-client.ts'
+import { WHM_MAIL_SERVER_CLIENT_BINDING } from './whm-mail-server-client.ts'
+import { MAILX_WHM_CLIENT_BINDING } from './mailx-whm-client.ts'
+import { MAILX_ARCHIVE_CLIENT_BINDING } from './mailx-archive-client.ts'
+import { MAILX_COLLECTIONS_CLIENT_BINDING } from './mailx-collections-client.ts'
+import { MAILX_MAIL_TOOLS_CLIENT_BINDING } from './mailx-mail-tools-client.ts'
+import { WHM_MAIL_QUALITY_CLIENT_BINDING } from './whm-mail-quality-client.ts'
+import { WHM_MAILBOX_MAINTENANCE_CLIENT_BINDING } from './whm-mailbox-maintenance-client.ts'
+import { MAIL_TRACK_DELIVERY_CLIENT_BINDING } from './mail-track-delivery-client.ts'
+import { MAIL_FOLDERS_CLIENT_BINDING } from './mail-folders-client.ts'
+import { MAIL_DISK_USAGE_CLIENT_BINDING } from './mail-disk-usage-client.ts'
+import { MAIL_CONNECT_DEVICES_CLIENT_BINDING } from './mail-connect-devices-client.ts'
+import { MAIL_MAILBOX_FORWARDERS_CLIENT_BINDING } from './mail-mailbox-forwarders-client.ts'
+import { MAIL_MAILBOX_PREFERENCES_CLIENT_BINDING } from './mail-mailbox-preferences-client.ts'
+import { WHM_UPGRADE_CLIENT_BINDING } from './whm-upgrade-client.ts'
+import { WHM_MONITORING_CLIENT_BINDING } from './whm-monitoring-client.ts'
+import { WHM_SERVER_OBSERVATION_CLIENT_BINDING } from './whm-server-observation-client.ts'
+import { OPS_FILE_SHARING_CLIENT_BINDING } from './ops-file-sharing-client.ts'
+import { OPS_TERMINAL_CLIENT_BINDING } from './ops-terminal-client.ts'
+import { OPS_NODES_CLIENT_BINDING } from './ops-nodes-client.ts'
+import { OPS_INTEGRATIONS_CLIENT_BINDING } from './ops-integrations-client.ts'
+import { WHM_SERVER_HEALTH_CLIENT_BINDING } from './whm-server-health-client.ts'
+import { WHM_SUPPORT_CLIENT_BINDING } from './whm-support-client.ts'
+import { WHM_MONITORING_ALERTS_CLIENT_BINDING } from './whm-monitoring-alerts-client.ts'
+import { WHM_SERVICE_DETAIL_CLIENT_BINDING } from './whm-service-detail-client.ts'
+import { WHM_DNS_TOOLS_CLIENT_BINDING } from './whm-dns-tools-client.ts'
+import { WHM_SECURITY_TOOLS_CLIENT_BINDING } from './whm-security-tools-client.ts'
+import { SEC_SECURITY_CLIENT_BINDING } from './sec-security-client.ts'
+import { SEC_DNS_CLIENT_BINDING } from './sec-dns-client.ts'
+import { WHM_WEB_SERVER_CLIENT_BINDING } from './whm-web-server-client.ts'
+import { WHM_SERVER_INFO_CLIENT_BINDING } from './whm-server-info-client.ts'
+import { WHM_IPS_CLIENT_BINDING } from './whm-ips-client.ts'
+import { WHM_PANEL_DATA_CLIENT_BINDING } from './whm-panel-data-client.ts'
+import { WHM_TRANSFER_CLIENT_BINDING } from './whm-transfer-client.ts'
+import { ZONE_EDITOR_CLIENT_BINDING } from './zone-editor-client.ts'
+import { DIRECTORY_PRIVACY_CLIENT_BINDING } from './directory-privacy-client.ts'
 import { PASSWORD_GENERATOR_CLIENT_BINDING } from './password-generate-client.ts'
 import { APPROVED_HOST_SERVICES_CLIENT } from './approved-host-services-client.ts'
 import { APPROVED_WHM_OPERATIONS_TABS_CLIENT } from './board-port/approved-whm-operations-components.ts'
@@ -32,6 +160,14 @@ export const RECONCILE_STAGES: readonly ReconcileStage[] = [
   'reload',
   'verify',
 ] as const
+
+const RECONCILE_STAGE_LABELS: Readonly<Record<ReconcileStage, string>> = {
+  render: msgid('1. Render config'),
+  test: msgid('2. Config test'),
+  switch: msgid('3. Atomic switch'),
+  reload: msgid('4. Service reload'),
+  verify: msgid('5. Health verify'),
+}
 
 export interface ReconcilePipelineState {
   generationId: number
@@ -346,43 +482,43 @@ export function renderReconcileBanner(
   locale: Locale = 'en',
 ): string {
   const { reconcile, connectionState } = state
-  const dir = dirForLocale(locale)
+  const dir = localeDirection(locale)
   const arrow = dir === 'rtl' ? '←' : '→'
 
   const wsBadge =
     connectionState === 'connected'
-      ? renderStatusBadge('ok', t(locale, 'common.ws.connected'))
+      ? renderStatusBadge('ok', translator(locale)('Live stream connected'))
       : connectionState === 'reconnecting'
-        ? renderStatusBadge('reconciling', t(locale, 'common.ws.reconnecting'))
-        : renderStatusBadge('warn', t(locale, 'common.ws.offline'))
+        ? renderStatusBadge('reconciling', translator(locale)('Reconnecting live stream...'))
+        : renderStatusBadge('warn', translator(locale)('Live stream offline'))
 
   const generationBadge =
     reconcile.generationId <= 0 || reconcile.updatedAt === null
-      ? renderStatusBadge('warn', locale === 'ar' ? 'لم تُرصد عملية مطابقة بعد' : 'Reconciliation has not been observed')
+      ? renderStatusBadge('warn', translator(locale)('Reconciliation has not been observed'))
       : reconcile.status === 'running'
       ? renderStatusBadge(
           'reconciling',
-          t(locale, 'reconcile.status.running', {
+          translator(locale)('Reconciling generation #{generationId}...', {
             generationId: reconcile.generationId,
           }),
         )
       : reconcile.status === 'failed'
         ? renderStatusBadge(
             'critical',
-            t(locale, 'reconcile.status.rolledBack', {
+            translator(locale)('Rolled back from generation #{generationId}', {
               generationId: reconcile.generationId,
             }),
           )
         : renderStatusBadge(
             'ok',
-            t(locale, 'reconcile.status.applied', {
+            translator(locale)('Applied in generation #{generationId}', {
               generationId: reconcile.generationId,
             }),
           )
 
   const stepsHtml = RECONCILE_STAGES.map((stage, idx) => {
     const stepStatus = reconcile.stages[stage] ?? 'pending'
-    const stageLabel = t(locale, `reconcile.stage.${stage}`)
+    const stageLabel = translator(locale)(RECONCILE_STAGE_LABELS[stage])
     const stepBadgeKind =
       stepStatus === 'passed'
         ? 'ok'
@@ -407,13 +543,13 @@ export function renderReconcileBanner(
 
   const metaSummary =
     reconcile.stateChecksum && reconcile.durationMs !== null
-      ? `<span class="xp-reconcile-meta xp-tabular xp-mono">${escapeHtml(
-          t(locale, 'reconcile.meta.summary', {
+      ? `<span class="xp-reconcile-meta xp-tabular xp-mono" style="min-inline-size:0;overflow-wrap:anywhere;white-space:normal">${escapeHtml(
+          translator(locale)('{filesCount} files · {durationMs} ms · sha256 {checksum}', {
             filesCount: reconcile.filesCount,
             durationMs: reconcile.durationMs,
             checksum: '{checksum}',
           }),
-        ).replace('{checksum}', renderLtrValue(reconcile.stateChecksum.slice(0, 12)))}</span>`
+        ).replace('{checksum}', renderLtrValue(reconcile.stateChecksum))}</span>`
       : ''
 
   const errorBlock =
@@ -421,20 +557,20 @@ export function renderReconcileBanner(
       ? `<details class="xp-reconcile-error" open>` +
         `<summary class="xp-reconcile-error__summary">` +
         `${escapeHtml(
-          t(locale, 'reconcile.error.failedTest', {
+          translator(locale)('Failed validation test: {failedTest}', {
             failedTest: reconcile.failedTest ?? 'configtest',
           }),
-        )} — ${escapeHtml(t(locale, 'reconcile.error.rawDetails'))}` +
+        )} — ${escapeHtml(translator(locale)('Expand raw verifier & configtest stderr output'))}` +
         `</summary>` +
         `<pre class="xp-terminal xp-mono">${escapeHtml(reconcile.error ?? 'Configuration test failed; previous generation remains active.')}</pre>` +
         `</details>`
       : ''
 
   return (
-    `<section id="xp-reconcile-banner" class="xp-reconcile-banner" data-reconcile-banner="true" data-generation-id="${reconcile.generationId}" data-reconcile-status="${reconcile.status}" dir="${dir}" aria-label="${escapeHtml(t(locale, 'reconcile.banner.title'))}">` +
+    `<section id="xp-reconcile-banner" class="xp-reconcile-banner" data-reconcile-banner="true" data-generation-id="${reconcile.generationId}" data-reconcile-status="${reconcile.status}" dir="${dir}" aria-label="${escapeHtml(translator(locale)('Declarative State Reconciler Pipeline'))}">` +
     `<div class="xp-card__header">` +
     `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">` +
-    `<strong class="xp-reconcile-title">${escapeHtml(t(locale, 'reconcile.banner.title'))}</strong>` +
+    `<strong class="xp-reconcile-title">${escapeHtml(translator(locale)('Declarative State Reconciler Pipeline'))}</strong>` +
     generationBadge +
     metaSummary +
     `</div>` +
@@ -474,13 +610,12 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     var el = document.querySelector('[data-ws-state]');
     if (el) el.setAttribute('data-ws-state', state);
     var indicators = document.querySelectorAll('[data-ws-indicator]');
-    var ar = document.documentElement.lang === 'ar';
     var connected = state === 'connected';
     var label = connected
-      ? (ar ? 'مباشر' : 'Live')
-      : state === 'offline' ? (ar ? 'غير متصل' : 'Offline')
-      : state === 'reconnecting' ? (ar ? 'إعادة الاتصال' : 'Reconnecting')
-      : (ar ? 'جار الاتصال' : 'Connecting');
+      ? (xpT(msgctxt('ws-client', 'Live')))
+      : state === 'offline' ? (xpT('Offline'))
+      : state === 'reconnecting' ? (xpT('Reconnecting'))
+      : (xpT('Connecting'));
     for (var i = 0; i < indicators.length; i++) {
       var indicator = indicators[i];
       if (indicator.getAttribute('data-ws-indicator') === 'unavailable') continue;
@@ -503,8 +638,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       try { ws.close(); } catch (_err) { /* The socket is already gone. */ }
     }
     var indicators = document.querySelectorAll('[data-ws-indicator]');
-    var ar = document.documentElement.lang === 'ar';
-    var label = ar ? 'التحديثات المباشرة متوقفة' : 'Live updates off';
+    var label = xpT('Live updates off');
     for (var i = 0; i < indicators.length; i++) {
       var indicator = indicators[i];
       if (indicator.getAttribute('data-ws-indicator') === 'unavailable') continue;
@@ -1054,14 +1188,13 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     var controls = Array.prototype.map.call(form.querySelectorAll('input,select'), function (control) {
       return { element: control, disabled: control.disabled, readOnly: Boolean(control.readOnly) };
     });
-    var ar = document.documentElement.lang === 'ar';
-    function copy(en, arabic) { return ar ? arabic : en; }
+    function copy(message, values) { return xpT(message, values); }
     function status(message, state) {
       feedback.textContent = message; feedback.hidden = false;
       feedback.setAttribute('data-state', state);
       feedback.setAttribute('role', state === 'failed' ? 'alert' : 'status');
       var observation = creationWorkspace && creationWorkspace.querySelector('[data-account-creation-observation]');
-      if (observation) observation.textContent = message + copy(' Individual host task completion has not been observed.', ' لم يُرصد اكتمال مهام المضيف منفردة.');
+      if (observation) observation.textContent = message + ' ' + copy('Individual host task completion has not been observed.');
     }
     function ipStatus(message, state) {
       ipFeedback.textContent = message;
@@ -1108,17 +1241,17 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       var shared = wantedAssignment === 'shared';
       var selected = current && current.available.find(function (entry) { return wantedAssignment === 'dedicated:' + entry.poolId; });
       var available = shared ? !current || Boolean(current.shared) : Boolean(current && current.entitled && (wantedAssignment === 'dedicated:auto' ? current.available.length : selected));
-      assignment.setCustomValidity(available ? '' : shared ? copy('No default shared IPv4 is configured.', 'لم يُضبط عنوان IPv4 مشترك افتراضي.') : copy('This dedicated IPv4 selection is unavailable. Choose another assignment.', 'العنوان المخصص المحدد غير متاح. اختر تعيينًا آخر.'));
+      assignment.setCustomValidity(available ? '' : shared ? copy('No default shared IPv4 is configured.') : copy('This dedicated IPv4 selection is unavailable. Choose another assignment.'));
       ipAddress.textContent = current && (shared ? current.shared && current.shared.address : selected && selected.address) || '';
       ipAddress.parentElement.hidden = !ipAddress.textContent;
-      if (current) ipStatus(available ? copy('Checked on the server after creation.', 'يُفحص على الخادم بعد الإنشاء.') : assignment.validationMessage, available ? 'ready' : 'unavailable');
+      if (current) ipStatus(available ? copy('Checked on the server after creation.') : assignment.validationMessage, available ? 'ready' : 'unavailable');
       return available;
     }
     function renderIpOptions() {
       var current = availability && previewPlan === plan.value && previewOwner === ownerContext() ? availability : null;
-      var nodes = [option('shared', copy('Default shared', 'المشترك الافتراضي'), Boolean(current && !current.shared)), option('dedicated:auto', copy('Dedicated · Automatic', 'مخصص تلقائي'), !current || !current.entitled || !current.available.length)];
+      var nodes = [option('shared', copy('Default shared'), Boolean(current && !current.shared)), option('dedicated:auto', copy('Dedicated · Automatic'), !current || !current.entitled || !current.available.length)];
       if (current) current.available.forEach(function (entry) { nodes.push(option('dedicated:' + entry.poolId, String.fromCharCode(0x2066) + entry.address + String.fromCharCode(0x2069), false)); });
-      if (!nodes.some(function (entry) { return entry.value === wantedAssignment; })) nodes.push(option(wantedAssignment, copy('Dedicated selection unavailable', 'التعيين المخصص غير متاح'), true));
+      if (!nodes.some(function (entry) { return entry.value === wantedAssignment; })) nodes.push(option(wantedAssignment, copy('Dedicated selection unavailable'), true));
       assignment.replaceChildren.apply(assignment, nodes);
       assignment.value = wantedAssignment;
       assignment.disabled = !canCreate || busy || accepted || reviewRequired;
@@ -1136,11 +1269,11 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       availability = null; previewPlan = plan.value; previewOwner = ownerContext();
       renderIpOptions();
       if (!canCreate || !plan.value || previewOwner === 'invalid' || !form.isConnected || busy || accepted || reviewRequired) {
-        ipStatus(copy('IP availability unavailable.', 'توفر عناوين IP غير متاح.'), 'unavailable'); return;
+        ipStatus(copy('IP availability unavailable.'), 'unavailable'); return;
       }
-      ipStatus(copy('Loading IP availability…', 'جارٍ تحميل العناوين…'), 'loading');
+      ipStatus(copy('Loading IP availability…'), 'loading');
       if (typeof window.fetch !== 'function' || typeof AbortController !== 'function') {
-        ipStatus(copy('Could not load IP availability.', 'تعذر تحميل توفر العناوين.'), 'failed'); return;
+        ipStatus(copy('Could not load IP availability.'), 'failed'); return;
       }
       var sequence = previewSequence, context = plan.value, owner = previewOwner, controller = new AbortController();
       previewController = controller;
@@ -1176,7 +1309,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       }).catch(function (error) {
         if (!current()) return;
         availability = null; renderIpOptions();
-        ipStatus(error && error.status === 401 ? copy('Your session expired. Sign in again.', 'انتهت الجلسة. سجّل الدخول مجددًا.') : error && error.status === 403 ? copy('IP availability is not permitted for this plan.', 'لا تملك صلاحية عرض العناوين لهذه الخطة.') : copy('Could not load IP availability.', 'تعذر تحميل توفر العناوين.'), 'failed');
+        ipStatus(error && error.status === 401 ? copy('Your session expired. Sign in again.') : error && error.status === 403 ? copy('IP availability is not permitted for this plan.') : copy('Could not load IP availability.'), 'failed');
       }).finally(function () {
         if (sequence !== previewSequence) return;
         if (previewTimer !== null) clearTimeout(previewTimer);
@@ -1218,7 +1351,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       event.preventDefault();
       if (busy || accepted || reviewRequired || button.disabled || form.closest('[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled') || !updateIpSelection() || !form.reportValidity()) return;
       if (typeof window.xpanelSessionRequest !== 'function') {
-        status(copy('Account creation is unavailable. No changes were made.', 'إنشاء الحساب غير متاح. لم تُجرَ تغييرات.'), 'failed'); return;
+        status(copy('Account creation is unavailable. No changes were made.'), 'failed'); return;
       }
       var value = function (name) { return form.querySelector('[name="' + name + '"]').value.trim(); };
       var ipAssignment = wantedAssignment === 'shared' ? { mode: 'shared' } : { mode: 'dedicated' };
@@ -1228,7 +1361,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         var selectedOwner = creationSelection('ownerId'), selectedShell = creationSelection('shell');
         if (selectedOwner !== undefined) body.ownerId = selectedOwner;
         if (selectedShell !== undefined) body.shell = selectedShell;
-      } catch (_error) { status(copy('Choose an available owner and shell option. No changes were sent.', 'اختر مالكًا وخيار صدفة متاحين. لم تُرسل تغييرات.'), 'failed'); return; }
+      } catch (_error) { status(copy('Choose an available owner and shell option. No changes were sent.'), 'failed'); return; }
       var contactField = form.querySelector('[name="contactEmail"]');
       var contactEmail = contactField && contactField.value ? contactField.value.trim() : '';
       if (contactEmail) body.contactEmail = contactEmail;
@@ -1244,7 +1377,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       localActions.forEach(function (state) { state.element.disabled = true; });
       controls.forEach(function (state) { state.element.disabled = true; });
       password.value = '';
-      status(copy('Submitting…', 'جارٍ الإرسال…'), 'loading');
+      status(copy('Submitting…'), 'loading');
       var refreshAfterRefusal = false;
       Promise.resolve().then(function () { return window.xpanelSessionRequest('POST', '/api/accounts', body); }).then(function (result) {
         var execution = result && result.execution;
@@ -1252,33 +1385,33 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         var observedHost = execution && execution.targetVerified === true && execution.verificationRequired === false && execution.hostBinding === 'observed' && execution.observedAddress === result.account.ipv4;
         if (!result || !result.account || result.account.username !== body.username || (Object.hasOwn(body, 'ownerId') && result.account.ownerId !== body.ownerId) || (Object.hasOwn(body, 'shell') && result.account.shell !== body.shell) || !ipv4(result.account.ipv4) || !result.reconcile || result.reconcile.status !== 'applied' || !execution || execution.status !== 'configuration_applied' || execution.scope !== 'global_configuration' || (!pendingHost && !observedHost)) {
           reviewRequired = true;
-          status(copy('The result could not be verified. Review accounts before retrying.', 'تعذر التحقق من النتيجة. راجع الحسابات قبل إعادة المحاولة.'), 'failed'); return;
+          status(copy('The result could not be verified. Review accounts before retrying.'), 'failed'); return;
         }
         accepted = true; dirty = false;
         ipAddress.textContent = result.account.ipv4; ipAddress.parentElement.hidden = false;
         if (observedHost) {
-          ipStatus(copy('This address is on the server.', 'هذا العنوان موجود على الخادم.'), 'ready');
-          status(copy('Account created.', 'تم إنشاء الحساب.'), 'pending');
+          ipStatus(copy('This address is on the server.'), 'ready');
+          status(copy('Account created.'), 'pending');
         } else {
-          ipStatus(copy('This address is reserved in configuration. The server has not confirmed it is listening on the host.', 'هذا العنوان محجوز في الإعداد. لم يؤكد الخادم أنه يستمع على المضيف.'), 'ready');
-          status(copy('Account configuration created. Hosting verification is still required.', 'أُنشئ إعداد الحساب. ما زال يلزم التحقق من الاستضافة.'), 'pending');
+          ipStatus(copy('This address is reserved in configuration. The server has not confirmed it is listening on the host.'), 'ready');
+          status(copy('Account configuration created. Hosting verification is still required.'), 'pending');
         }
       }).catch(function (error) {
         var details = error && error.details || {};
         var serverFailed = error && (error.status === 500 || error.code === 'INTERNAL_ERROR');
         reviewRequired = Boolean(error && (error.stateChanged === true || error.verificationRequired === true || error.unknownOutcome === true || error.needsAttention === true)) || details.verificationRequired === true || details.unknownOutcome === true || details.needsAttention === true || (serverFailed || details.stateChanged !== false);
         var message = serverFailed
-          ? copy('The server returned an error. The creation outcome is unverified. Review accounts before retrying.', 'أرجع الخادم خطأ. نتيجة الإنشاء غير متحققة. راجع الحسابات قبل إعادة المحاولة.')
+          ? copy('The server returned an error. The creation outcome is unverified. Review accounts before retrying.')
           : reviewRequired
-          ? copy('The request could not be verified. Review accounts before retrying.', 'تعذر التحقق من الطلب. راجع الحسابات قبل إعادة المحاولة.')
-          : copy('Account creation is unavailable. No changes were made.', 'إنشاء الحساب غير متاح. لم تُجرَ تغييرات.');
+          ? copy('The request could not be verified. Review accounts before retrying.')
+          : copy('Account creation is unavailable. No changes were made.');
         if (!reviewRequired) {
-          if (error && error.status === 401) message = copy('Your session expired. Sign in again.', 'انتهت الجلسة. سجّل الدخول مجددًا.');
-          else if (error && error.status === 403) message = copy('You do not have permission to create accounts.', 'لا تملك صلاحية إنشاء الحسابات.');
+          if (error && error.status === 401) message = copy('Your session expired. Sign in again.');
+          else if (error && error.status === 403) message = copy('You do not have permission to create accounts.');
           else if (details.reason === 'shared_ipv4_unavailable' || details.reason === 'account_ipv4_unavailable') {
-            message = copy('No default shared IPv4 is available. Review the IP pool.', 'لا يتوفر عنوان IPv4 مشترك افتراضي. راجع مخزون العناوين.'); refreshAfterRefusal = true;
+            message = copy('No default shared IPv4 is available. Review the IP pool.'); refreshAfterRefusal = true;
           } else if (details.reason === 'dedicated_ipv4_unavailable') {
-            message = copy('No dedicated IPv4 is available. Choose another assignment.', 'لا يتوفر عنوان IPv4 مخصص. اختر تعيينًا آخر.'); refreshAfterRefusal = true;
+            message = copy('No dedicated IPv4 is available. Choose another assignment.'); refreshAfterRefusal = true;
           }
         }
         status(message, 'failed');
@@ -1312,8 +1445,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     var cancel = dialog.querySelector('[data-account-action-cancel]');
     var feedback = dialog.querySelector('[data-account-action-status]');
     var target = null, origin = null, busy = false, accepted = false;
-    var ar = document.documentElement.lang === 'ar';
-    function copy(en, arabic) { return ar ? arabic : en; }
+    function copy(message, values) { return xpT(message, values); }
     function status(message, state) {
       feedback.textContent = message;
       feedback.hidden = !message;
@@ -1361,14 +1493,14 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       target = Object.freeze({ id: id, username: username, domain: domain, action: action });
       origin = button; accepted = false; confirmation.value = ''; reason.value = ''; status('', 'idle');
       var deleting = action === 'terminate-account', suspending = action === 'suspend-account';
-      dialog.querySelector('[data-account-dialog-title]').textContent = deleting ? copy('Delete account', 'حذف الحساب') : suspending ? copy('Suspend account', 'تعليق الحساب') : copy('Unsuspend account', 'إلغاء تعليق الحساب');
-      dialog.querySelector('[data-account-dialog-description]').textContent = deleting ? copy('Permanently removes this account and its data. This cannot be undone.', 'يحذف هذا الحساب وبياناته نهائيًا. لا يمكن التراجع.') : suspending ? copy('Hosting access will be suspended for this account.', 'سيُعلق وصول الاستضافة لهذا الحساب.') : copy('Restore hosting access for this account.', 'استعادة وصول الاستضافة لهذا الحساب.');
+      dialog.querySelector('[data-account-dialog-title]').textContent = deleting ? copy('Delete account') : suspending ? copy('Suspend account') : copy('Unsuspend account');
+      dialog.querySelector('[data-account-dialog-description]').textContent = deleting ? copy('Permanently removes this account and its data. This cannot be undone.') : suspending ? copy('Hosting access will be suspended for this account.') : copy('Restore hosting access for this account.');
       dialog.querySelector('[data-account-dialog-username]').textContent = username;
       dialog.querySelector('[data-account-dialog-domain]').textContent = domain;
       dialog.querySelector('[data-account-confirm-field]').hidden = !deleting;
       dialog.querySelector('[data-account-reason-field]').hidden = !suspending;
       confirmation.required = deleting;
-      submission.textContent = deleting ? copy('Delete account', 'حذف الحساب') : suspending ? copy('Suspend', 'تعليق') : copy('Unsuspend', 'إلغاء التعليق');
+      submission.textContent = deleting ? copy('Delete account') : suspending ? copy('Suspend') : copy('Unsuspend');
       submission.classList.toggle('xp-accounts__delete', deleting);
       validate(); dialog.showModal();
       (deleting ? confirmation : suspending ? reason : cancel).focus();
@@ -1376,34 +1508,34 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     form.addEventListener('submit', function (event) {
       event.preventDefault();
       if (busy || accepted || !target || (target.action === 'terminate-account' && confirmation.value !== target.username)) { validate(); return; }
-      if (typeof window.xpanelSessionRequest !== 'function') { status(copy('Action unavailable. No changes were made.', 'الإجراء غير متاح. لم تُجرَ تغييرات.'), 'failed'); return; }
+      if (typeof window.xpanelSessionRequest !== 'function') { status(copy('Action unavailable. No changes were made.'), 'failed'); return; }
       var selected = target;
       var deleting = selected.action === 'terminate-account';
       var verb = selected.action === 'suspend-account' ? 'suspend' : 'unsuspend';
       var endpoint = '/api/accounts/' + encodeURIComponent(selected.id) + (deleting ? '' : '/' + verb);
       var body = deleting ? { confirmUsername: confirmation.value } : verb === 'suspend' ? { reason: reason.value.trim() } : {};
       busy = true; cancel.disabled = true; confirmation.readOnly = true; reason.readOnly = true; form.setAttribute('aria-busy', 'true'); validate();
-      status(copy('Submitting…', 'جارٍ الإرسال…'), 'loading');
+      status(copy('Submitting…'), 'loading');
       Promise.resolve().then(function () { return window.xpanelSessionRequest(deleting ? 'DELETE' : 'POST', endpoint, body); }).then(function (result) {
         if (deleting) {
           if (!result || result.ok !== true || result.purged !== true) {
-            status(copy('The result could not be verified. Review the account before retrying.', 'تعذر التحقق من النتيجة. راجع الحساب قبل إعادة المحاولة.'), 'failed'); return;
+            status(copy('The result could not be verified. Review the account before retrying.'), 'failed'); return;
           }
           accepted = true;
           var removed = origin && origin.closest('[data-account-row]');
           if (removed) removed.hidden = true;
-          status(copy('Account removed.', 'تم حذف الحساب.'), 'pending');
+          status(copy('Account removed.'), 'pending');
           return;
         }
         var expected = verb === 'suspend' ? 'suspended' : 'active';
         var execution = result && result.execution;
         if (!result || !result.account || result.account.id !== selected.id || result.account.status !== expected || !result.reconcile || result.reconcile.status !== 'applied' || !execution || execution.status !== 'configuration_applied' || execution.scope !== 'global_configuration' || execution.targetVerified !== false || execution.verificationRequired !== true) {
-          status(copy('The result could not be verified. Review the account before retrying.', 'تعذر التحقق من النتيجة. راجع الحساب قبل إعادة المحاولة.'), 'failed'); return;
+          status(copy('The result could not be verified. Review the account before retrying.'), 'failed'); return;
         }
         accepted = true;
         var row = origin && origin.closest('[data-account-row]');
         var label = row && row.querySelector('[data-account-status] .xp-badge__label');
-        if (label) label.textContent = copy('Verification required', 'يلزم التحقق');
+        if (label) label.textContent = copy('Verification required');
         var badge = row && row.querySelector('[data-account-status] .xp-badge');
         if (badge) {
           badge.className = 'xp-badge xp-badge--warn';
@@ -1412,17 +1544,17 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
           if (icon) icon.innerHTML = '<path d="M8 2.2L14.4 13.5H1.6L8 2.2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6.5V9.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.6" r="0.85" fill="currentColor"/>';
         }
         if (origin) origin.disabled = true;
-        status(copy(verb === 'suspend' ? 'Account suspended. Hosting verification is still required.' : 'Account restored. Hosting verification is still required.', verb === 'suspend' ? 'تم تعليق الحساب. ما زال يلزم التحقق من الاستضافة.' : 'أُعيد الحساب. ما زال يلزم التحقق من الاستضافة.'), 'pending');
+        status(verb === 'suspend' ? copy('Account suspended. Hosting verification is still required.') : copy('Account restored. Hosting verification is still required.'), 'pending');
       }).catch(function (error) {
         var details = error && error.details || {};
         var serverFailed = error && (error.status === 500 || error.code === 'INTERNAL_ERROR');
         var message = serverFailed
-          ? copy('The server could not complete this request.', 'تعذر على الخادم إكمال هذا الطلب.')
-          : details.stateChanged === false ? copy('Action unavailable. No changes were made.', 'الإجراء غير متاح. لم تُجرَ تغييرات.') : copy('The request could not be verified. Review the account before retrying.', 'تعذر التحقق من الطلب. راجع الحساب قبل إعادة المحاولة.');
-        if (error && error.status === 401) message = copy('Your session expired. Sign in again.', 'انتهت الجلسة. سجّل الدخول مجددًا.');
-        else if (error && error.status === 403) message = copy('You do not have permission for this action.', 'لا تملك صلاحية هذا الإجراء.');
-        else if (error && error.status === 404) message = copy('This account is no longer available.', 'لم يعد هذا الحساب متاحًا.');
-        else if (error && error.status === 409) message = copy('This account changed. Reload before retrying.', 'تغيّر الحساب. أعد تحميل الصفحة قبل المحاولة.');
+          ? copy('The server could not complete this request.')
+          : details.stateChanged === false ? copy('Action unavailable. No changes were made.') : copy('The request could not be verified. Review the account before retrying.');
+        if (error && error.status === 401) message = copy('Your session expired. Sign in again.');
+        else if (error && error.status === 403) message = copy('You do not have permission for this action.');
+        else if (error && error.status === 404) message = copy('This account is no longer available.');
+        else if (error && error.status === 409) message = copy('This account changed. Reload before retrying.');
         status(message, 'failed');
       }).finally(function () {
         busy = false; cancel.disabled = false; confirmation.readOnly = false; reason.readOnly = false; form.setAttribute('aria-busy', 'false');
@@ -1435,42 +1567,104 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
   function bindInteractiveClientActions() {
     if (typeof document === 'undefined') return;
 
-    // Interactive Terminal Command Submit
-    var termForm = document.querySelector('[data-terminal-form]');
-    if (termForm) {
-      termForm.addEventListener('submit', function (e) {
-        e.preventDefault();
-        var cmdInput = termForm.querySelector('input[name="command"]');
-        var cmd = cmdInput ? cmdInput.value.trim() : '';
-        if (!cmd) return;
-        appendTerminalOutputDom({ sessionId: '', stream: 'stdout', chunk: '$ ' + cmd });
-        if (cmdInput) cmdInput.value = '';
-        xpanelApiCall('POST', termForm.getAttribute('action') || '/api/xpanel/terminal/exec', { command: cmd })
-          .then(function (res) {
-            if (res && res.output) {
-              appendTerminalOutputDom({ sessionId: '', stream: 'stdout', chunk: res.output });
-            }
-          })
-          .catch(function () {});
-      });
-    }
-
-    // Custom Config (userdata) Save
+    // Domain custom configuration (site settings): validated current-value guard + readback.
     var userdataForm = document.querySelector('[data-userdata-form]');
     if (userdataForm) {
-      userdataForm.addEventListener('submit', function (e) {
-        e.preventDefault();
-        var nginxInclude = (userdataForm.querySelector('[name="nginxInclude"]') || {}).value || '';
-        var apacheInclude = (userdataForm.querySelector('[name="apacheInclude"]') || {}).value || '';
-        var userIni = (userdataForm.querySelector('[name="userIni"]') || {}).value || '';
-        var customHeaders = (userdataForm.querySelector('[name="customHeaders"]') || {}).value || '';
-        xpanelApiCall('POST', userdataForm.getAttribute('action') || '/api/xpanel/domains/custom-config', {
-          nginxInclude: nginxInclude,
-          apacheInclude: apacheInclude,
-          userIni: userIni,
-          customHeaders: customHeaders
-        }).catch(function () {});
-      });
+      var udDomain = userdataForm.getAttribute('data-domain-custom-config') || '';
+      var udStatus = userdataForm.querySelector('[data-userdata-status]');
+      var udButton = userdataForm.querySelector('[data-action="apply-userdata"]');
+      var udFields = userdataForm.querySelectorAll('textarea, button');
+      var udBaseline = null;
+      try { udBaseline = JSON.parse(userdataForm.getAttribute('data-userdata-baseline') || 'null'); } catch (_udError) { udBaseline = null; }
+      var udBusy = false, udUncertain = false;
+      var udNote = function (text, kind) { if (!udStatus) return; udStatus.hidden = !text; udStatus.dataset.state = kind; udStatus.setAttribute('role', kind === 'failed' || kind === 'uncertain' ? 'alert' : 'status'); udStatus.textContent = text; };
+      var udLock = function () { var blocked = udBusy || udUncertain || !/^[0-9a-f-]{36}$/i.test(udDomain); udFields.forEach(function (node) { node.disabled = blocked; }); };
+      var udValue = function (name) { var node = userdataForm.querySelector('[name="' + name + '"]'); return node ? String(node.value) : ''; };
+      var udLines = function (text, separator) {
+        var rows = [];
+        String(text).split('\\n').forEach(function (line) {
+          var trimmed = line.trim();
+          if (!trimmed || trimmed.charAt(0) === '#') return;
+          var at = trimmed.indexOf(separator);
+          if (at <= 0) throw new Error('invalid_line');
+          var key = trimmed.slice(0, at).trim(), value = trimmed.slice(at + 1).trim();
+          if (!key || !value || !/^[A-Za-z0-9_.-]{1,128}$/.test(key)) throw new Error('invalid_line');
+          rows.push([key, value]);
+        });
+        return rows;
+      };
+      var udBody = function () {
+        var userIni = {}, headers = {}, bypass = [];
+        udLines(udValue('userIni'), '=').forEach(function (pair) { if (Object.prototype.hasOwnProperty.call(userIni, pair[0])) throw new Error('duplicate_line'); userIni[pair[0]] = pair[1]; });
+        udLines(udValue('customHeaders'), ':').forEach(function (pair) {
+          if (pair[0].toLowerCase() === 'bypass') { bypass = pair[1].split(',').map(function (item) { return item.trim(); }).filter(Boolean); return; }
+          if (!/^[A-Za-z0-9-]{1,128}$/.test(pair[0])) throw new Error('invalid_line');
+          headers[pair[0]] = pair[1];
+        });
+        return { nginxInclude: udValue('nginxInclude'), apacheInclude: udValue('apacheInclude'), userIni: userIni, customHeaders: headers, cacheBypassPaths: bypass };
+      };
+      var udStable = function (value) {
+        if (Array.isArray(value)) return '[' + value.map(udStable).join(',') + ']';
+        if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(function (key) { return JSON.stringify(key) + ':' + udStable(value[key]); }).join(',') + '}';
+        return JSON.stringify(value);
+      };
+      var udComparable = function (raw) {
+        var config = raw && typeof raw === 'object' ? raw.config : null;
+        if (!config || typeof config !== 'object') return null;
+        return { nginxInclude: typeof config.nginxInclude === 'string' ? config.nginxInclude : '', apacheInclude: typeof config.apacheInclude === 'string' ? config.apacheInclude : '', userIni: config.userIni && typeof config.userIni === 'object' && !Array.isArray(config.userIni) ? config.userIni : {}, customHeaders: config.customHeaders && typeof config.customHeaders === 'object' && !Array.isArray(config.customHeaders) ? config.customHeaders : {}, cacheBypassPaths: Array.isArray(config.cacheBypassPaths) ? config.cacheBypassPaths : [] };
+      };
+      var udCertainRefusal = function (error) { var detail = error && error.details; return !!(error && (error.stateChanged === false || (detail && detail.stateChanged === false))) && !(detail && (detail.unknownOutcome === true || detail.verificationRequired === true)); };
+      var udRequest = function (method, path, body) { return window.xpanelSessionRequest(method, path, body); };
+      var udRun = function () {
+        if (udBusy || udUncertain || !/^[0-9a-f-]{36}$/i.test(udDomain)) return;
+        var body;
+        try { body = udBody(); } catch (_udBodyError) { udNote(xpT('Each line must be "Name = value" for PHP settings or "Name: value" for headers, and the Bypass line lists comma-separated paths. Nothing was sent.'), 'failed'); return; }
+        if (!udBaseline) { udNote(xpT('Current values for this domain were not read. Reload the page before saving.'), 'failed'); return; }
+        udBusy = true; udLock();
+        var path = '/api/domains/' + encodeURIComponent(udDomain) + '/custom-config';
+        var dispatched = false;
+        udNote(xpT('Reading the saved configuration before saving…'), 'reading');
+        udRequest('GET', path).then(function (current) {
+          var observed = udComparable(current);
+          if (!observed) throw Object.assign(new Error('unread'), { stateChanged: false });
+          if (udStable(observed) !== udStable(udBaseline)) return { stale: true };
+          dispatched = true;
+          return udRequest('PUT', path, body).then(function (saved) {
+            if (!saved || typeof saved !== 'object' || !saved.config || typeof saved.config !== 'object') throw new Error('unverified');
+            return udRequest('GET', path).then(function (readback) {
+              var after = udComparable(readback);
+              if (!after || udStable(after) !== udStable(body)) throw new Error('unverified');
+              return { saved: true, baseline: after };
+            });
+          });
+        }).then(function (outcome) {
+          if (outcome && outcome.stale) { udNote(xpT('The saved custom configuration changed elsewhere. Your edits are kept; reload the page before saving again.'), 'stale'); return; }
+          if (outcome && outcome.saved) {
+            udBaseline = outcome.baseline;
+            try { userdataForm.setAttribute('data-userdata-baseline', JSON.stringify(outcome.baseline)); } catch (_udSaveError) {}
+            udNote(xpT('The requested custom configuration was saved and read back. Server-side application remains unverified.'), 'saved');
+          }
+        }).catch(function (error) {
+          if (dispatched && !udCertainRefusal(error)) {
+            udUncertain = true;
+            udNote(xpT('The write outcome is uncertain. Inspect the saved configuration before retrying; no automatic retry was sent.'), 'uncertain');
+            return;
+          }
+          var detail = error && error.details;
+          if (detail && detail.rolledBack === true) {
+            udNote(xpT('The configuration failed the web-service test and was rolled back. The previous configuration remains active.'), 'failed');
+            return;
+          }
+          udNote(xpT('The request was refused or its fields could not be verified. Nothing was retried.'), 'failed');
+        }).then(function () { udBusy = false; udLock(); });
+      };
+      if (!userdataForm.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled') && typeof window.xpanelSessionRequest === 'function') {
+        udLock();
+        if (udButton) udButton.addEventListener('click', function (event) { event.preventDefault(); if (!udButton.disabled) udRun(); });
+      } else {
+        udFields.forEach(function (node) { node.disabled = true; });
+        udNote(xpT('Custom configuration editing is unavailable here. No changes were sent.'), 'unavailable');
+      }
     }
 
     // Delegated click handlers for File Manager (create/chmod/restore) and action buttons
@@ -1530,41 +1724,6 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         if (activeOverlay && activeOverlay.kind === 'mobile-nav') closeActiveOverlay(true);
         return;
       }
-      if ((action === 'new-file' || action === 'new-folder' || action === 'empty-trash') && target.closest('[data-file-manager]')) return;
-      if (action === 'new-file' || action === 'new-folder') {
-        e.preventDefault();
-        var kind = action === 'new-folder' ? 'folder' : 'file';
-        var defaultPath = target.getAttribute('data-path');
-        if (!defaultPath) { showToast('Choose a destination before creating an item', 'warn'); return; }
-        var defaultMode = kind === 'folder' ? '0750' : '0640';
-        xpanelApiCall('POST', '/api/xpanel/files/create', { kind: kind, path: defaultPath, modeOctal: defaultMode }).catch(function () {});
-        return;
-      }
-      if (action === 'chmod-file') {
-        e.preventDefault();
-        var filePath = target.getAttribute('data-path');
-        if (!filePath) { showToast('Choose a file before changing permissions', 'warn'); return; }
-        var octalInput = document.getElementById('chmod-octal-input');
-        var modeOctal = (octalInput && octalInput.value) ? octalInput.value : '0640';
-        if (modeOctal === '0777' || modeOctal === '0666') {
-          showToast('World-writable mode ' + modeOctal + ' is forbidden (max 0640 file / 0750 dir)', 'critical');
-          return;
-        }
-        xpanelApiCall('POST', '/api/xpanel/files/chmod', { path: filePath, modeOctal: modeOctal }).catch(function () {});
-        return;
-      }
-      if (action === 'restore-file') {
-        e.preventDefault();
-        var restorePath = target.getAttribute('data-path') || '';
-        xpanelApiCall('POST', '/api/xpanel/files/restore', { path: restorePath }).catch(function () {});
-        return;
-      }
-      if (action === 'empty-trash') {
-        e.preventDefault();
-        xpanelApiCall('POST', '/api/xpanel/files/empty-trash', {}).catch(function () {});
-        return;
-      }
-
       var apiUrl = target.getAttribute('data-api-url');
       if (action && apiUrl) {
         e.preventDefault();
@@ -1665,7 +1824,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     form.method = 'dialog';
     form.className = 'xp-form-group';
     form.innerHTML = '<div class="xp-dialog__header"><h2 data-xp-prompt-title></h2><p data-xp-prompt-body></p></div>' +
-      '<div class="xp-field" data-xp-prompt-field><label class="xp-label" for="xp-prompt-input" data-xp-prompt-label></label>' +
+      '<div class="xp-field" data-xp-prompt-field><label class="xp-label" for="xp-prompt-input" data-xp-prompt-label style="padding-inline-start: var(--xp-control-content-inset)"></label>' +
       '<input id="xp-prompt-input" class="xp-input" data-xp-prompt-input autocomplete="off"></div>' +
       '<div class="xp-dialog__footer">' +
       '<button type="button" class="xp-btn" value="cancel" data-xp-prompt-cancel></button>' +
@@ -1683,7 +1842,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       event.preventDefault();
       var field = dialog.querySelector('[data-xp-prompt-field]');
       var input = dialog.querySelector('[data-xp-prompt-input]');
-      var entered = input && input.value ? input.value.trim() : '';
+      var entered = input && typeof input.value === 'string' ? input.value : '';
+      if (!dialog._xpPreserveWhitespace) entered = entered.trim();
       if (field && !field.hidden && !entered) {
         input.focus();
         return;
@@ -1701,7 +1861,6 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
 
   function askDialog(options) {
     var dialog = ensurePromptDialog();
-    var ar = document.documentElement.lang === 'ar';
     dialog.querySelector('[data-xp-prompt-title]').textContent = options.title || '';
     dialog.querySelector('[data-xp-prompt-body]').textContent = options.body || '';
     var field = dialog.querySelector('[data-xp-prompt-field]');
@@ -1710,11 +1869,12 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     field.hidden = !options.input;
     label.textContent = options.label || '';
     input.value = options.value || '';
+    dialog._xpPreserveWhitespace = options.preserveWhitespace === true;
     input.type = options.secret ? 'password' : 'text';
     input.required = false;
-    dialog.querySelector('[data-xp-prompt-cancel]').textContent = options.cancel || (ar ? 'إلغاء' : 'Cancel');
+    dialog.querySelector('[data-xp-prompt-cancel]').textContent = options.cancel || (xpT('Cancel'));
     var confirm = dialog.querySelector('[data-xp-prompt-confirm]');
-    confirm.textContent = options.confirm || (ar ? 'تأكيد' : 'Confirm');
+    confirm.textContent = options.confirm || (xpT('Confirm'));
     confirm.className = options.danger ? 'xp-btn xp-btn--danger' : 'xp-btn xp-btn--primary';
     dialog._xpValue = null;
     return new Promise(function (resolve) {
@@ -1733,8 +1893,89 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${APPROVED_WHM_OPERATIONS_TABS_CLIENT})();
     (${APPROVED_WHM_TABLE_FILTERS_CLIENT})();
     if (typeof window.xpanelSessionRequest !== 'function') return;
+    var rtl = document.documentElement.dir === 'rtl';
     (${APPROVED_WORKSPACE_FORMS_CLIENT})(askDialog);
-    var ar = document.documentElement.lang === 'ar';
+    (${ACCOUNT_FORWARDERS_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_FILTERS_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_MAILING_LISTS_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_SPAM_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_SESSIONS_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_SSL_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_CONTACT_CLIENT_BINDING})(askDialog, rtl);
+    (${ACCOUNT_BACKUP_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_CRON_CLIENT_BINDING})(askDialog);
+    (${ACCT_STAGING_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_WEB_DIRECTIVES_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_SSH_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_TEAM_CLIENT_BINDING})(askDialog, rtl);
+    (${ACCOUNT_LOGS_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_VIRUS_SCAN_CLIENT_BINDING})(askDialog);
+    (${SEC_SECURITY_CLIENT_BINDING})(askDialog);
+    (${SEC_DNS_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_NETWORK_TOOLS_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_DATABASE_INSIGHTS_CLIENT_BINDING})(askDialog);
+    (${SITE_HEALTH_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_ANNOUNCEMENTS_CLIENT_BINDING})();
+    (${ACCOUNT_HTACCESS_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_QUARANTINE_CLIENT_BINDING})(askDialog);
+    (${DOMAIN_WORKSPACE_CLIENT_BINDING})(askDialog);
+    (${DATABASE_WORKSPACE_CLIENT_BINDING})(askDialog);
+    (${MAIL_FOLDER_WORKSPACE_CLIENT_BINDING})(askDialog, rtl);
+    (${MAIL_CONTACTS_WORKSPACE_CLIENT_BINDING})(askDialog);
+    (${MAIL_CONTACT_GROUPS_CLIENT_BINDING})(askDialog);
+    (${MAIL_CONTACTS_TOOLS_CLIENT_BINDING})(askDialog);
+    (${MAIL_IDENTITIES_CLIENT_BINDING})(askDialog);
+    (${MAIL_VACATION_WORKSPACE_CLIENT_BINDING})(askDialog);
+    (${MAIL_CALENDAR_CLIENT_BINDING})(askDialog);
+    (${MAIL_CALENDAR_VIEW_CLIENT_BINDING})(askDialog);
+    // Selection is UI context only; the attachment API independently authenticates every read.
+    var bindMailAttachments = (${MAIL_ATTACHMENTS_CLIENT_BINDING});
+    bindMailAttachments(askDialog);
+    if (document.documentElement.dataset.mailSearchAttachmentsBound !== 'true') {
+      document.documentElement.dataset.mailSearchAttachmentsBound = 'true';
+      function applyMailAttachmentSelection(article, selection) {
+        if (typeof selection.mailbox !== 'string' || !selection.mailbox
+          || typeof selection.folder !== 'string' || selection.folder !== selection.folder.trim() || !/^[A-Za-z][A-Za-z0-9._-]{0,40}$/.test(selection.folder)
+          || !Number.isInteger(selection.uid) || selection.uid < 1 || selection.uid > 4294967295
+          || !Number.isInteger(selection.uidValidity) || selection.uidValidity < 1 || selection.uidValidity > 4294967295) return;
+        var matched = false;
+        article.querySelectorAll('[data-mail-attachments]').forEach(function (root) {
+          if (root.closest('[data-mail-search-message],[data-mail-article="true"]') !== article || root.getAttribute('data-mailbox') !== selection.mailbox) return;
+          matched = true;
+          [['data-folder', selection.folder], ['data-uid', String(selection.uid)], ['data-uid-validity', String(selection.uidValidity)]].forEach(function (attribute) {
+            if (root.getAttribute(attribute[0]) !== attribute[1]) root.setAttribute(attribute[0], attribute[1]);
+          });
+        });
+        if (matched) bindMailAttachments(askDialog);
+      }
+      document.addEventListener('xpanel:mail-search-selection', function (event) {
+        var selection = event.detail, article = event.target;
+        if (!(article instanceof Element) || !article.matches('[data-mail-search-message]') || !article.isConnected || !selection || typeof selection !== 'object') return;
+        var workspace = article.closest('[data-mail-search-workspace]');
+        if (!workspace || workspace.getAttribute('data-search-mailbox') !== selection.mailbox || workspace.getAttribute('data-search-enabled') !== 'true') return;
+        applyMailAttachmentSelection(article, selection);
+      });
+      document.addEventListener('xpanel:mail-message-read', function (event) {
+        var selection = event.detail, article = event.target;
+        if (!(article instanceof Element) || !article.matches('[data-mail-pane="reading-pane"][data-mail-article="true"]') || !article.isConnected || !selection || typeof selection !== 'object' || selection.uidValidityObserved !== true) return;
+        var workspace = article.closest('[data-board-port="xmail-inbox"][data-product="true"]');
+        if (!workspace || workspace.getAttribute('data-mailbox') !== selection.mailbox || workspace.getAttribute('data-mail-folder') !== selection.folder
+          || workspace.querySelector('[data-mail-pane="reading-pane"][data-mail-article="true"]') !== article) return;
+        applyMailAttachmentSelection(article, selection);
+      });
+    }
+    (${MAIL_SEARCH_CLIENT_BINDING})(askDialog);
+    (${MAIL_TRACK_DELIVERY_CLIENT_BINDING})();
+    (${MAIL_FOLDERS_CLIENT_BINDING})();
+    (${MAIL_DISK_USAGE_CLIENT_BINDING})();
+    (${MAIL_CONNECT_DEVICES_CLIENT_BINDING})();
+    (${MAIL_MAILBOX_FORWARDERS_CLIENT_BINDING})(askDialog);
+    (${MAIL_MAILBOX_PREFERENCES_CLIENT_BINDING})(askDialog);
+    (${MAIL_COMPOSE_IDENTITIES_CLIENT_BINDING})(askDialog);
+    (${MAIL_COMPOSE_ATTACHMENTS_CLIENT_BINDING})(askDialog);
+    (${MAIL_DRAFT_CLIENT_BINDING})();
+    (${ZONE_EDITOR_CLIENT_BINDING})(askDialog);
+    (${DIRECTORY_PRIVACY_CLIENT_BINDING})(askDialog);
     function note(el, message) { if (!el) return; el.hidden = false; el.textContent = message; }
     function dialogInput(selector, name) {
       var dialog = document.querySelector(selector);
@@ -1742,8 +1983,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     }
     function failText(error) {
       var details = error && error.details;
-      if (ar && details && typeof details.messageAr === 'string' && details.messageAr) return details.messageAr;
-      return (error && error.message) || (ar ? 'تعذر إكمال الطلب.' : 'The request could not be completed.');
+      return error && error.message ? xpT(error.message) : xpT('The request could not be completed.');
     }
     function reload() { window.location.reload(); }
     document.querySelectorAll('[data-certificate-form]').forEach(function (form) {
@@ -1754,30 +1994,14 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         var domain = form.querySelector('[name="domain"]').value;
         var button = form.querySelector('button[type="submit"]');
         if (button) button.disabled = true;
-        note(status, ar ? 'جار إصدار الشهادة. قد يستغرق هذا نحو دقيقة.' : 'Issuing the certificate. This can take about a minute.');
+        note(status, xpT('Issuing the certificate. This can take about a minute.'));
         window.xpanelSessionRequest('POST', '/api/accounts/' + username + '/certificates', { domain: domain }).then(function () {
-          note(status, ar ? 'صدرت الشهادة.' : 'The certificate was issued.');
+          note(status, xpT('The certificate authority issued the certificate. Reloading stored state.'));
           reload();
         }).catch(function (error) {
           if (button) button.disabled = false;
           note(status, failText(error));
         });
-      });
-    });
-    document.querySelectorAll('[data-domain-form]').forEach(function (form) {
-      form.addEventListener('submit', function (event) {
-        event.preventDefault();
-        var status = form.querySelector('[data-domain-status]');
-        var name = form.querySelector('[name="name"]').value.trim().toLowerCase();
-        var kind = form.querySelector('[name="kind"]').value;
-        var body = { name: name, kind: kind };
-        if (kind === 'subdomain') body.parentId = form.getAttribute('data-primary-id');
-        window.xpanelSessionRequest('POST', '/api/domains', body).then(reload).catch(function (error) { note(status, failText(error)); });
-      });
-    });
-    document.querySelectorAll('[data-remove-domain]').forEach(function (button) {
-      button.addEventListener('click', function () {
-        window.xpanelSessionRequest('DELETE', '/api/domains/' + button.getAttribute('data-remove-domain')).then(reload).catch(function (error) { note(button.parentElement, failText(error)); });
       });
     });
     document.querySelectorAll('[data-mailbox-form]').forEach(function (form) {
@@ -1814,9 +2038,9 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         event.preventDefault();
         if (busy || (typeof form.reportValidity === 'function' && !form.reportValidity())) return;
         busy = true;
-        show(ar ? 'جارٍ الإرسال…' : 'Submitting…', 'loading');
+        show(xpT('Submitting…'), 'loading');
         Promise.resolve().then(run).then(function () {
-          show(ar ? 'تم الحفظ.' : 'Saved.', 'pending');
+          show(xpT('Saved.'), 'pending');
           reload();
         }).catch(function (error) {
           busy = false;
@@ -1855,9 +2079,9 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     document.querySelectorAll('[data-remove-mailbox]').forEach(function (button) {
       button.addEventListener('click', function () {
         askDialog({
-          title: ar ? 'حذف صندوق البريد' : 'Delete mailbox',
-          body: ar ? 'سيُحذف صندوق البريد هذا. لا يمكن التراجع.' : 'This mailbox will be deleted. This cannot be undone.',
-          confirm: ar ? 'حذف' : 'Delete',
+          title: xpT('Delete mailbox'),
+          body: xpT('This mailbox will be deleted. This cannot be undone.'),
+          confirm: xpT('Delete'),
           danger: true,
         }).then(function (ok) {
           if (!ok) return;
@@ -1952,7 +2176,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         var controls = Array.prototype.map.call(form.querySelectorAll('input,select,button'), function (control) { return { control: control, disabled: control.disabled }; });
         var wrote = false, submitted;
         busy = true; form.setAttribute('aria-busy', 'true'); controls.forEach(function (item) { item.control.disabled = true; });
-        mailNote(ar ? 'جارٍ مراجعة الإعدادات الحالية…' : 'Checking current settings…', 'loading');
+        mailNote(xpT('Checking current settings…'), 'loading');
         Promise.resolve().then(function () { return window.xpanelSessionRequest('GET', '/api/mail/ips'); }).then(function (current) {
           var config = current && current.config;
           if (!validConfig(config)) throw { mailIpState: 'unread' };
@@ -1960,7 +2184,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
           submitted = { mode: config.mode, defaultIpv4: config.defaultIpv4, defaultIpv6: config.defaultIpv6, defaultHelo: config.defaultHelo, domainOverrides: config.domainOverrides };
           edits.forEach(function (key) { submitted[key] = key === 'mode' ? desired[key] : desired[key] || null; });
           wrote = true;
-          mailNote(ar ? 'جارٍ الحفظ…' : 'Saving…', 'loading');
+          mailNote(xpT('Saving…'), 'loading');
           return window.xpanelSessionRequest('PUT', '/api/mail/ips', submitted);
         }).then(function (result) {
           var saved = result && result.config;
@@ -1969,20 +2193,20 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
             && overrides.size === submitted.domainOverrides.length && submitted.domainOverrides.every(function (item) { var found = overrides.get(item.domainName); return found && ['ipv4', 'ipv6', 'heloHostname'].every(function (key) { return found[key] === item[key]; }); });
           if (!matches) {
             reviewRequired = true;
-            mailNote(ar ? 'تعذر التحقق من النتيجة. راجع إعدادات البريد قبل إعادة المحاولة.' : 'The result could not be verified. Review mail settings before retrying.', 'failed');
+            mailNote(xpT('The result could not be verified. Review mail settings before retrying.'), 'failed');
             return;
           }
           keys.forEach(function (key) { form.querySelector('[name="' + key + '"]').value = normalize(saved[key]); });
           var mapText = form.querySelector('[data-mail-ip-overrides]');
-          if (mapText) mapText.textContent = saved.domainOverrides.map(function (item) { return [item.domainName, item.ipv4, item.ipv6, item.heloHostname].filter(Boolean).join(' · '); }).join(String.fromCharCode(10)) || (ar ? 'لا توجد إعدادات خاصة بالنطاقات.' : 'No domain overrides are configured.');
+          if (mapText) mapText.textContent = saved.domainOverrides.map(function (item) { return [item.domainName, item.ipv4, item.ipv6, item.heloHostname].filter(Boolean).join(' · '); }).join(String.fromCharCode(10)) || (xpT('No domain overrides are configured.'));
           baseline = read();
-          mailNote(ar ? 'حُفظت إعدادات البريد. التحقق من تسليم البريد غير مؤكد.' : 'Mail settings saved. Delivery verification is not confirmed.', 'pending');
+          mailNote(xpT('Mail settings saved. Delivery verification is not confirmed.'), 'pending');
         }).catch(function (error) {
           reviewRequired = wrote && (error && error.details && (error.details.stateChanged === true || error.details.verificationRequired === true) || [400, 401, 403, 404, 409, 412, 422].indexOf(error && error.status) < 0);
-          var message = error && error.mailIpState === 'conflict' ? (ar ? 'تغيرت إعدادات البريد منذ فتح النموذج. أعد التحميل وراجعها.' : 'Mail settings changed since this form loaded. Reload and review them.')
-            : !wrote ? (ar ? 'تعذر قراءة إعدادات البريد الحالية. لم تُرسل تغييرات.' : 'Current mail settings could not be read. No changes were sent.')
-            : reviewRequired ? (ar ? 'النتيجة غير مؤكدة. راجع إعدادات البريد قبل إعادة المحاولة.' : 'The result is uncertain. Review mail settings before retrying.')
-            : (ar ? 'رُفضت إعدادات البريد. راجع القيم والصلاحيات.' : 'Mail settings were refused. Review the values and permissions.');
+          var message = error && error.mailIpState === 'conflict' ? (xpT('Mail settings changed since this form loaded. Reload and review them.'))
+            : !wrote ? (xpT('Current mail settings could not be read. No changes were sent.'))
+            : reviewRequired ? (xpT('The result is uncertain. Review mail settings before retrying.'))
+            : (xpT('Mail settings were refused. Review the values and permissions.'));
           mailNote(message, 'failed');
         }).finally(function () {
           busy = false; form.removeAttribute('aria-busy'); controls.forEach(function (item) { item.control.disabled = item.disabled; }); refresh();
@@ -2010,162 +2234,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         });
       });
     });
-    var filesRoot = document.querySelector('[data-file-manager="browse"]');
-    if (filesRoot) {
-      var username = filesRoot.getAttribute('data-account-username');
-      var tbody = filesRoot.querySelector('[data-file-manager-table] tbody');
-      var editor = document.getElementById('jailed-code-editor');
-      var fileStatus = filesRoot.querySelector('[data-file-status]');
-      var currentPath = '';
-      function files(body) { return window.xpanelSessionRequest('POST', '/api/accounts/' + username + '/files', body); }
-      function formatSize(bytes) {
-        var value = Number(bytes) || 0;
-        if (value <= 0) return '0 B';
-        var units = ['B', 'KB', 'MB', 'GB', 'TB'];
-        var unit = 0;
-        while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
-        var digits = unit === 0 ? 0 : value >= 10 ? 1 : 2;
-        return value.toFixed(digits) + ' ' + units[unit];
-      }
-      function formatWhen(value) {
-        if (!value) return '';
-        var date = new Date(value);
-        if (isNaN(date.getTime())) return String(value);
-        return date.toISOString().slice(0, 19).replace('T', ' ') + ' UTC';
-      }
-      function paint(entries) {
-        while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
-        (entries || []).forEach(function (entry) {
-          var row = document.createElement('tr');
-          function cell(value) { var td = document.createElement('td'); td.textContent = value; row.appendChild(td); }
-          cell(entry.name || '');
-          cell(entry.kind === 'directory' ? (ar ? 'مجلد' : 'Folder') : (ar ? 'ملف' : 'File'));
-          cell(formatSize(entry.sizeBytes));
-          cell((entry.mode >>> 0).toString(8));
-          cell(formatWhen(entry.mtime));
-          var action = document.createElement('td');
-          var open = document.createElement('button');
-          open.type = 'button'; open.className = 'xp-btn';
-          open.textContent = entry.kind === 'directory' ? (ar ? 'فتح' : 'Open') : (ar ? 'تحرير' : 'Edit');
-          open.addEventListener('click', function () {
-            if (entry.kind === 'directory') { currentPath = entry.path; return refresh(); }
-            files({ op: 'read', path: entry.path }).then(function (file) {
-              editor.value = file.content || '';
-              editor.setAttribute('data-editor-path', entry.path);
-            }).catch(function (error) { note(fileStatus, failText(error)); });
-          });
-          var remove = document.createElement('button');
-          remove.type = 'button'; remove.className = 'xp-btn';
-          remove.textContent = ar ? 'حذف' : 'Delete';
-          remove.addEventListener('click', function () {
-            askDialog({
-              title: ar ? 'نقل إلى المهملات' : 'Move to trash',
-              body: ar ? 'سيُنقل هذا العنصر إلى المهملات.' : 'This item will move to trash.',
-              confirm: ar ? 'نقل إلى المهملات' : 'Move to trash',
-              danger: true,
-            }).then(function (ok) {
-              if (!ok) return;
-              files({ op: 'trash', path: entry.path }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); });
-            });
-          });
-          action.appendChild(open);
-          if (entry.kind === 'file') {
-            var download = document.createElement('button');
-            download.type = 'button'; download.className = 'xp-btn';
-            download.textContent = ar ? 'تنزيل' : 'Download';
-            download.addEventListener('click', function () {
-              files({ op: 'get-bytes', path: entry.path }).then(function (file) {
-                var encoded = String(file.contentBase64 || '');
-                var binary = atob(encoded);
-                var bytes = new Uint8Array(binary.length);
-                for (var i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-                var url = URL.createObjectURL(new Blob([bytes]));
-                var link = document.createElement('a');
-                link.href = url; link.download = entry.name || 'download';
-                link.click();
-                URL.revokeObjectURL(url);
-              }).catch(function (error) { note(fileStatus, failText(error)); });
-            });
-            action.appendChild(download);
-          }
-          action.appendChild(remove); row.appendChild(action); tbody.appendChild(row);
-        });
-      }
-      function refresh() { return files({ op: 'list', path: currentPath }).then(function (data) { paint(data.entries || []); }).catch(function (error) { note(fileStatus, failText(error)); }); }
-      var upload = filesRoot.querySelector('[data-action="upload-file"]');
-      var picker = filesRoot.querySelector('[data-file-upload]');
-      if (upload && picker) upload.addEventListener('click', function () { picker.click(); });
-      if (picker) picker.addEventListener('change', function () {
-        var file = picker.files && picker.files[0];
-        picker.value = '';
-        if (!file) return;
-        if (file.size > 2 * 1024 * 1024) {
-          note(fileStatus, ar ? 'الحد 2 ميجابايت.' : 'The limit is 2 MB.');
-          return;
-        }
-        var reader = new FileReader();
-        reader.onload = function () {
-          var bytes = new Uint8Array(reader.result);
-          var binary = '';
-          var step = 0x8000;
-          for (var i = 0; i < bytes.length; i += step) {
-            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
-          }
-          var path = (currentPath ? currentPath.replace(/[/]$/, '') + '/' : '') + file.name;
-          files({ op: 'put-bytes', path: path, contentBase64: btoa(binary) }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); });
-        };
-        reader.onerror = function () { note(fileStatus, ar ? 'تعذر قراءة الملف.' : 'The file could not be read.'); };
-        reader.readAsArrayBuffer(file);
-      });
-      var newFile = filesRoot.querySelector('[data-action="new-file"]');
-      if (newFile) newFile.addEventListener('click', function (event) {
-        event.stopPropagation();
-        askDialog({
-          title: ar ? 'ملف جديد' : 'New file',
-          label: ar ? 'اسم الملف' : 'File name',
-          input: true,
-          confirm: ar ? 'إنشاء' : 'Create',
-        }).then(function (name) {
-          if (!name) return;
-          var path = (currentPath ? currentPath.replace(/[/]$/, '') + '/' : '') + name;
-          files({ op: 'write', path: path, content: '' }).then(function () { editor.value = ''; editor.setAttribute('data-editor-path', path); return refresh(); }).catch(function (error) { note(fileStatus, failText(error)); });
-        });
-      });
-      var newFolder = filesRoot.querySelector('[data-action="new-folder"]');
-      if (newFolder) newFolder.addEventListener('click', function (event) {
-        event.stopPropagation();
-        askDialog({
-          title: ar ? 'مجلد جديد' : 'New folder',
-          label: ar ? 'اسم المجلد' : 'Folder name',
-          input: true,
-          confirm: ar ? 'إنشاء' : 'Create',
-        }).then(function (name) {
-          if (!name) return;
-          var path = (currentPath ? currentPath.replace(/[/]$/, '') + '/' : '') + name;
-          files({ op: 'mkdir', path: path }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); });
-        });
-      });
-      var emptyTrash = filesRoot.querySelector('[data-action="empty-trash"]');
-      if (emptyTrash) emptyTrash.addEventListener('click', function (event) {
-        event.stopPropagation();
-        askDialog({
-          title: ar ? 'إفراغ المهملات' : 'Empty trash',
-          body: ar ? 'ستُحذف عناصر المهملات نهائيًا.' : 'Items in trash will be deleted for good.',
-          confirm: ar ? 'حذف نهائي' : 'Delete for good',
-          danger: true,
-        }).then(function (ok) {
-          if (!ok) return;
-          files({ op: 'empty-trash' }).then(refresh).catch(function (error) { note(fileStatus, failText(error)); });
-        });
-      });
-      var save = filesRoot.querySelector('[data-action="save-file"]');
-      if (save) save.addEventListener('click', function () {
-        var path = editor.getAttribute('data-editor-path');
-        if (!path) { note(fileStatus, ar ? 'افتح ملفًا أولًا.' : 'Open a file first.'); return; }
-        files({ op: 'write', path: path, content: editor.value }).then(function () { note(fileStatus, ar ? 'تم الحفظ.' : 'Saved.'); return refresh(); }).catch(function (error) { note(fileStatus, failText(error)); });
-      });
-      refresh();
-    }
+    (${FILE_WORKSPACE_CLIENT_BINDING})(askDialog);
     ${MAIL_SEND_CLIENT_BINDING}
     document.querySelectorAll('[data-reseller-create-form]').forEach(function (form) {
       form.addEventListener('submit', function (event) {
@@ -2188,100 +2257,90 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         window.xpanelSessionRequest('${xwhmPageAdapters.resellers.create.method}', '${xwhmPageAdapters.resellers.create.path}', body).then(reload).catch(function (error) { note(status, failText(error)); });
       });
     });
-    var dnsEditor = document.querySelector('[data-dns-editor]');
-    if (dnsEditor && !dnsEditor.closest('[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')) {
-      var zoneSelect = dnsEditor.querySelector('[data-dns-zone]');
-      var recordBody = dnsEditor.querySelector('[data-dns-records]');
-      var dnsStatus = dnsEditor.querySelector('[data-dns-status]');
-      var zones = [];
-      var dnsWorkspace = dnsEditor.closest('[data-whm-dns-workspace]');
-      var zoneRows = dnsWorkspace && dnsWorkspace.querySelector('[data-whm-dns-zone-rows]');
-      var zoneCount = dnsWorkspace && dnsWorkspace.querySelector('[data-whm-dns-zone-count]');
-      var zoneSerial = dnsWorkspace && dnsWorkspace.querySelector('[data-whm-dns-soa-serial]');
-      function paintZoneSummaries() {
-        if (zoneCount) zoneCount.textContent = String(zones.length);
-        if (!zoneRows) return;
-        zoneRows.textContent = '';
-        var accountSelect = dnsEditor.querySelector('[data-dns-account]');
-        zones.forEach(function (zone) {
-          var accountOption = accountSelect && Array.prototype.find.call(accountSelect.options, function (option) { return option.value === (zone.accountId || ''); });
-          var accountLabel = accountOption && accountOption.textContent.trim() || (ar ? 'غير مقروء' : 'Not read');
-          var row = document.createElement('tr');
-          [zone.name, accountLabel, String(zone.records.length), String(zone.serial), ar ? 'غير مقروء' : 'Not read'].forEach(function (value) { var cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell); });
-          zoneRows.appendChild(row);
-        });
-        if (!zones.length) { var row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 5; cell.textContent = ar ? 'لم تُرجع القراءة أي مناطق DNS.' : 'The read returned no DNS zones.'; row.appendChild(cell); zoneRows.appendChild(row); }
-      }
-      var dnsTypes = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA'];
-      function recordRow(record) {
-        var row = document.createElement('tr');
-        row.setAttribute('data-record-id', record.id || '');
-        function field(name, value) {
-          var cell = document.createElement('td');
-          var input = document.createElement(name === 'type' ? 'select' : 'input');
-          input.setAttribute('data-field', name);
-          if (name === 'type') dnsTypes.forEach(function (type) { var option = document.createElement('option'); option.value = type; option.textContent = type; if (type === value) option.selected = true; input.appendChild(option); });
-          else { input.value = value == null ? '' : String(value); input.className = 'xp-input'; }
-          cell.appendChild(input);
-          row.appendChild(cell);
-        }
-        field('name', record.name || '@');
-        field('type', record.type || 'A');
-        field('ttl', record.ttl || 14400);
-        field('content', record.content || '');
-        field('priority', record.priority);
-        recordBody.appendChild(row);
-      }
-      function paintZone() {
-        var zone = zones.find(function (item) { return item.name === zoneSelect.value; });
-        recordBody.textContent = '';
-        (zone && zone.records || []).forEach(recordRow);
-        if (zoneSerial) zoneSerial.textContent = zone ? String(zone.serial) : (ar ? 'غير مقروء' : 'Not read');
-      }
-      function loadZones() {
-        return window.xpanelSessionRequest('${xwhmPageAdapters.dns.list.method}', '${xwhmPageAdapters.dns.list.path}').then(function (data) {
-          if (!data || !Array.isArray(data.zones) || data.zones.some(function (zone) { return !zone || typeof zone.name !== 'string' || !zone.name || !Array.isArray(zone.records) || !Number.isSafeInteger(zone.serial) || zone.serial < 0; })) throw new Error('Invalid DNS zone response');
-          zones = data.zones;
-          paintZoneSummaries();
-          zoneSelect.textContent = '';
-          zones.forEach(function (zone) { var option = document.createElement('option'); option.value = zone.name; option.textContent = zone.name; zoneSelect.appendChild(option); });
-          paintZone();
-        }).catch(function (error) { note(dnsStatus, failText(error)); });
-      }
-      zoneSelect.addEventListener('change', paintZone);
-      dnsEditor.querySelector('[data-dns-add-record]').addEventListener('click', function () { recordRow({ id: window.crypto.randomUUID(), name: '@', type: 'A', ttl: 14400, content: '', priority: null }); });
-      dnsEditor.querySelector('[data-dns-add-zone]').addEventListener('click', function () {
-        var name = dnsEditor.querySelector('[data-dns-new-name]').value.trim().toLowerCase();
-        var accountId = dnsEditor.querySelector('[data-dns-account]').value;
-        window.xpanelSessionRequest('${xwhmPageAdapters.dns.save.method}', '${xwhmPageAdapters.dns.save.path}' + encodeURIComponent(name), { accountId: accountId || null, serial: 1, records: [] }).then(loadZones).catch(function (error) { note(dnsStatus, failText(error)); });
-      });
-      dnsEditor.querySelector('[data-dns-save]').addEventListener('click', function () {
-        var zone = zones.find(function (item) { return item.name === zoneSelect.value; });
-        if (!zone) { note(dnsStatus, ar ? 'اختر منطقة.' : 'Choose a zone.'); return; }
-        var records = [];
-        recordBody.querySelectorAll('tr').forEach(function (row) {
-          var value = function (name) { return row.querySelector('[data-field="' + name + '"]').value.trim(); };
-          var priority = value('priority');
-          records.push({ id: row.getAttribute('data-record-id') || window.crypto.randomUUID(), name: value('name'), type: value('type'), ttl: Number(value('ttl')), content: value('content'), priority: priority === '' ? null : Number(priority) });
-        });
-        window.xpanelSessionRequest('${xwhmPageAdapters.dns.save.method}', '${xwhmPageAdapters.dns.save.path}' + encodeURIComponent(zone.name), { id: zone.id, accountId: zone.accountId, serial: Number(zone.serial || 1) + 1, records: records }).then(function () { note(dnsStatus, ar ? 'حُفظت المنطقة.' : 'The zone was saved.'); return loadZones(); }).catch(function (error) { note(dnsStatus, failText(error)); });
-      });
-      dnsEditor.querySelector('[data-dns-delete]').addEventListener('click', function () {
-        if (!zoneSelect.value) return;
-        window.xpanelSessionRequest('${xwhmPageAdapters.dns.remove.method}', '${xwhmPageAdapters.dns.remove.path}' + encodeURIComponent(zoneSelect.value)).then(loadZones).catch(function (error) { note(dnsStatus, failText(error)); });
-      });
-      loadZones();
-    }
+    (${WHM_DNS_CLIENT_BINDING})(askDialog);
+    (${WHM_DOMAINS_CLIENT_BINDING})(askDialog);
+    (${WHM_DEFAULT_SITE_CLIENT_BINDING})(askDialog);
+    (${WHM_BACKUPS_CLIENT_BINDING})(askDialog);
+    (${WHM_SSL_CLIENT_BINDING})(askDialog);
+    (${WHM_SSL_INSTALL_CLIENT_BINDING})(askDialog);
+    (${WHM_SECURITY_CLIENT_BINDING})();
+    (${WHM_SSH_CLIENT_BINDING})(askDialog);
+    (${WHM_PHP_CLIENT_BINDING})();
+    (${WHM_MAIL_QUEUE_CLIENT_BINDING})(askDialog);
+    (${WHM_SERVICE_DETAIL_CLIENT_BINDING})(askDialog);
+    (${WHM_DNS_TOOLS_CLIENT_BINDING})(askDialog);
+    (${WHM_SECURITY_TOOLS_CLIENT_BINDING})(askDialog);
+    (${SEC_SECURITY_CLIENT_BINDING})(askDialog);
+    (${SEC_DNS_CLIENT_BINDING})(askDialog);
+    (${WHM_UPDATES_CLIENT_BINDING})(askDialog);
+    (${WHM_REPAIR_CLIENT_BINDING})(askDialog);
+    (${WHM_ACCOUNT_HEALTH_CLIENT_BINDING})();
+    (${WHM_BACKUP_FILES_CLIENT_BINDING})();
+    (${ACCT_RESTORE_CLIENT_BINDING})();
+    (${WHM_JOBS_CLIENT_BINDING})(askDialog);
+    (${WHM_PANEL_TOKENS_CLIENT_BINDING})(askDialog);
+    (${WHM_PANEL_NOTIFICATIONS_CLIENT_BINDING})();
+    (${WHM_ANNOUNCEMENTS_CLIENT_BINDING})(askDialog);
+    (${WHM_BACKUP_RUNS_CLIENT_BINDING})(askDialog);
+    (${ACCT_TRANSFER_CREDENTIALS_CLIENT_BINDING})(askDialog);
+    (${ACCT_CONVERT_ADDON_CLIENT_BINDING})(askDialog);
+    (${WHM_ACCOUNT_TEMPLATES_CLIENT_BINDING})(askDialog, rtl);
+    (${WHM_ENHANCEMENTS_CLIENT_BINDING})(askDialog);
+    (${WHM_SOFTWARE_CENTER_CLIENT_BINDING})(askDialog);
+    (${WHM_DATABASES_CLIENT_BINDING})(askDialog);
+    (${WHM_DATABASE_TUNING_CLIENT_BINDING})();
+    (${WHM_PREFERENCES_CLIENT_BINDING})();
+    (${WHM_SERVICE_MANAGER_CLIENT_BINDING})(askDialog);
+    (${WHM_CONFIGURATION_HEALTH_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_PACKAGES_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_DATABASE_REMOTE_CLIENT_BINDING})(askDialog);
+    (${DB_ENGINES_CLIENT_BINDING})(askDialog, rtl);
+    (${ACCOUNT_COLLABORATION_CLIENT_BINDING})(askDialog);
+    (${WHM_DEVELOPER_CLIENT_BINDING})();
+    (${WHM_TRUSTED_PROXIES_CLIENT_BINDING})();
+    (${WHM_BACKUP_DESTINATIONS_CLIENT_BINDING})(askDialog);
+    (${MAIL_TOOLS_CLIENT_BINDING})(askDialog);
+    (${MAIL_SPAM_CLIENT_BINDING})(askDialog);
+    (${MAIL_MAILING_LISTS_CLIENT_BINDING})(askDialog);
+    (${WHM_BENCHMARK_CLIENT_BINDING})();
+    (${WHM_TRAFFIC_CLIENT_BINDING})();
+    (${WHM_DEFAULT_INDEX_CLIENT_BINDING})(askDialog);
+    (${WHM_COMPOSER_CLIENT_BINDING})(askDialog);
+    (${SW_CONTAINERS_CLIENT_BINDING})(askDialog);
+    (${SW_ADDON_SERVICES_CLIENT_BINDING})(askDialog);
+    (${SW_DEPLOYMENTS_CLIENT_BINDING})(askDialog);
+    (${SW_APP_PROJECTS_CLIENT_BINDING})();
+    (${SW_OPTIMIZE_CLIENT_BINDING})();
+    (${SW_APPLICATIONS_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_DYNAMIC_DNS_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_SITE_PUBLISHER_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_GIT_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_PGP_CLIENT_BINDING})(askDialog);
+    (${WHM_MAIL_LOG_CLIENT_BINDING})();
+    (${WHM_FTP_LOG_CLIENT_BINDING})();
+    (${WHM_MAIL_SERVER_CLIENT_BINDING})();
+    (${MAILX_WHM_CLIENT_BINDING})();
+    (${MAILX_ARCHIVE_CLIENT_BINDING})(askDialog);
+    (${MAILX_COLLECTIONS_CLIENT_BINDING})(askDialog);
+    (${MAILX_MAIL_TOOLS_CLIENT_BINDING})(askDialog);
+    (${WHM_MAIL_QUALITY_CLIENT_BINDING})();
+    (${WHM_MAILBOX_MAINTENANCE_CLIENT_BINDING})(askDialog);
+    (${WHM_UPGRADE_CLIENT_BINDING})();
+    (${WHM_MONITORING_CLIENT_BINDING})(askDialog);
+    (${WHM_SERVER_OBSERVATION_CLIENT_BINDING})();
+    (${OPS_FILE_SHARING_CLIENT_BINDING})(askDialog);
+    (${OPS_TERMINAL_CLIENT_BINDING})();
+    (${OPS_NODES_CLIENT_BINDING})();
+    (${OPS_INTEGRATIONS_CLIENT_BINDING})();
+    (${WHM_SERVER_HEALTH_CLIENT_BINDING})();
+    (${WHM_SUPPORT_CLIENT_BINDING})();
+    (${WHM_MONITORING_ALERTS_CLIENT_BINDING})();
+    (${WHM_WEB_SERVER_CLIENT_BINDING})(askDialog);
+    (${WHM_TRANSFER_CLIENT_BINDING})(askDialog);
     (${APPROVED_HOST_SERVICES_CLIENT})(askDialog);
-    var infoRoot = document.querySelector('[data-host-info]');
-    if (infoRoot) {
-      function mb(bytes) { return Number.isFinite(bytes) ? String(Math.round(bytes / 1048576)) + ' MB' : ''; }
-      window.xpanelSessionRequest('${xwhmPageAdapters.serverInfo.read.method}', '${xwhmPageAdapters.serverInfo.read.path}').then(function (data) {
-        infoRoot.querySelector('[data-host-load]').textContent = [data.load.load1, data.load.load5, data.load.load15].join(' ');
-        infoRoot.querySelector('[data-host-memory]').textContent = mb(data.memory.availableBytes) + ' / ' + mb(data.memory.totalBytes);
-        infoRoot.querySelector('[data-host-disk]').textContent = mb(data.disk.availableBytes) + ' / ' + mb(data.disk.totalBytes);
-      }).catch(function (error) { note(infoRoot.querySelector('[data-host-info-status]'), failText(error)); });
-    }
+    (${WHM_SERVER_INFO_CLIENT_BINDING})();
+    (${WHM_IPS_CLIENT_BINDING})(askDialog);
+    (${WHM_PANEL_DATA_CLIENT_BINDING})(askDialog);
     var backupRoot = document.querySelector('[data-account-backups]');
     if (backupRoot) {
       var backupAccount = backupRoot.querySelector('[data-backup-account]');
@@ -2301,11 +2360,11 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
             var button = document.createElement('button');
             button.type = 'button';
             button.className = 'xp-btn';
-            button.textContent = ar ? 'استعادة' : 'Restore';
+            button.textContent = xpT('Restore');
             button.addEventListener('click', function () {
               button.disabled = true;
-              note(backupStatus, ar ? 'جار الاستعادة.' : 'Restoring.');
-              window.xpanelSessionRequest('${xwhmPageAdapters.backups.create.method}', '${xwhmPageAdapters.backups.create.path}' + backupAccount.value, { op: 'restore', file: item.file }).then(function () { button.disabled = false; note(backupStatus, ar ? 'استُعيدت النسخة.' : 'The backup was restored.'); }).catch(function (error) { button.disabled = false; note(backupStatus, failText(error)); });
+              note(backupStatus, xpT('Restoring.'));
+              window.xpanelSessionRequest('${xwhmPageAdapters.backups.create.method}', '${xwhmPageAdapters.backups.create.path}' + backupAccount.value, { op: 'restore', file: item.file }).then(function () { button.disabled = false; note(backupStatus, xpT('The backup was restored.')); }).catch(function (error) { button.disabled = false; note(backupStatus, failText(error)); });
             });
             action.appendChild(button);
             row.appendChild(name);
@@ -2317,8 +2376,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       }
       backupAccount.addEventListener('change', loadBackups);
       backupRoot.querySelector('[data-backup-create]').addEventListener('click', function () {
-        note(backupStatus, ar ? 'جار إنشاء النسخة. قد يستغرق هذا وقتًا.' : 'Creating the backup. This can take a while.');
-        window.xpanelSessionRequest('${xwhmPageAdapters.backups.create.method}', '${xwhmPageAdapters.backups.create.path}' + backupAccount.value, { op: 'create' }).then(function () { note(backupStatus, ar ? 'أُنشئت النسخة.' : 'The backup was created.'); return loadBackups(); }).catch(function (error) { note(backupStatus, failText(error)); });
+        note(backupStatus, xpT('Creating the backup. This can take a while.'));
+        window.xpanelSessionRequest('${xwhmPageAdapters.backups.create.method}', '${xwhmPageAdapters.backups.create.path}' + backupAccount.value, { op: 'create' }).then(function () { note(backupStatus, xpT('The backup was created.')); return loadBackups(); }).catch(function (error) { note(backupStatus, failText(error)); });
       });
       loadBackups();
     }

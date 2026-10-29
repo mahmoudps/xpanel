@@ -33,10 +33,12 @@ import {
   MIN_ACCOUNT_UID,
   oneOf,
   parseServiceLogin,
+  parseDatabaseRemoteEntries,
   planErrors,
   validateDocRoot,
   validateDomainCustomConfig,
   validateDomainName,
+  validateDomainIndexFiles,
   validateFirewallRules,
   validateHome,
   validateMailIpConfig,
@@ -256,6 +258,7 @@ export const validateAccountFile = (v: unknown): StoredAccount => {
         extraIps: [...new Set(a.extraIps.map((ip) => canonicalIp(ip, 'extraIp').address))],
       }),
     shell: oneOf(a.shell, SHELLS, 'shell'),
+    ...(a.databaseRemoteAccess !== undefined && { databaseRemoteAccess: parseDatabaseRemoteEntries(a.databaseRemoteAccess) }),
     createdAt: assertIsoDate(a.createdAt, 'createdAt').toISOString(),
   }
 }
@@ -318,6 +321,7 @@ export const validateDomainFile = (
     suspended: assertBool(d.suspended, 'suspended'),
     expiresAt: d.expiresAt == null ? null : assertIsoDate(d.expiresAt, 'expiresAt').toISOString(),
     pathQuotaMb,
+    ...(d.indexFiles !== undefined ? { indexFiles: validateDomainIndexFiles(d.indexFiles) } : {}),
     ...(d.ipv4 != null && { ipv4: assertIpv4(d.ipv4, 'domain.ipv4') }),
     ...(d.ipv6 != null && { ipv6: assertIpv6(d.ipv6, 'domain.ipv6') }),
   }
@@ -487,6 +491,7 @@ export const validateCronJob = (v: unknown, accountId: string): CronJobState => 
     command: assertLine(c.command, 4096, 'command', { allowEmpty: false }),
     comment: assertLine(c.comment ?? '', 255, 'comment'),
     enabled: assertBool(c.enabled ?? true, 'enabled'),
+    ...(c.maxRuntimeSec === undefined ? {} : { maxRuntimeSec: assertInt(c.maxRuntimeSec, 1, 604800, 'maxRuntimeSec') }),
   }
 }
 
@@ -671,6 +676,7 @@ export const checksumStateTree = (tree: Omit<StateSnapshot, 'checksum' | 'revisi
           : {}),
         ...(tree.ipPool && tree.ipPool.length > 0 ? { ipPool: tree.ipPool } : {}),
         ...(tree.mailIpConfig ? { mailIpConfig: tree.mailIpConfig } : {}),
+        ...(tree.postgresqlUsers?.length ? { postgresqlDatabases: tree.postgresqlDatabases ?? [], postgresqlUsers: tree.postgresqlUsers } : {}),
       }),
       'utf8',
     )

@@ -5,7 +5,7 @@ import { StringDecoder } from 'node:string_decoder'
 import { lstat } from 'node:fs/promises'
 import { assertAgentCredential, assertRootOwnedAgentPath, MAX_AGENT_MESSAGE_BYTES } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
-import { fail, XpanelError } from '@xpanel/core'
+import { fail, isUuid, XpanelError } from '@xpanel/core'
 import type { LiveEvent } from '@xpanel/core'
 
 export interface AgentClientOptions {
@@ -57,6 +57,61 @@ const responseHeaders = (response: IncomingMessage): Headers => {
   return headers
 }
 
+const MAX_ARCHIVE_RESPONSE_BYTES = 2 * 1024 * 1024 * 1024
+const archiveDownloadFile = (request: Request, url: URL): string | null => {
+  if (request.method !== 'GET' || url.search) return null
+  const match = /^\/accounts\/([a-z][a-z0-9]{0,15})\/backup-workspace\/([^/]+)\/download$/.exec(url.pathname)
+  if (!match) return null
+  let file: string
+  try { file = decodeURIComponent(match[2]!) } catch { return fail('VALIDATION', 'agent archive path is invalid') }
+  if (!new RegExp('^xpanel-backup-' + match[1] + '-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\\.tar\\.gz$').test(file)) return fail('VALIDATION', 'agent archive path is invalid')
+  if (!isUuid(request.headers.get('x-xpanel-principal-id'))) return fail('VALIDATION', 'agent archive request requires a principal identity')
+  return file
+}
+
+/** The archive route alone gets a larger response budget; ordinary JSON stays bounded. */
+const archiveResponse = (incoming: IncomingMessage, outgoing: ClientRequest, file: string): Response => {
+  // A socket may fail before the response body's first pull attaches its iterator.
+  incoming.on('error', () => undefined)
+  const headers = responseHeaders(incoming), declared = headers.get('content-length')
+  const invalid = headers.get('content-type') !== 'application/gzip' || headers.has('content-encoding')
+    || headers.get('content-disposition') !== `attachment; filename="${file}"` || !declared || !/^[1-9][0-9]*$/.test(declared)
+  const expected = declared && /^[1-9][0-9]*$/.test(declared) ? Number(declared) : 0
+  if (invalid || !Number.isSafeInteger(expected) || expected > MAX_ARCHIVE_RESPONSE_BYTES) {
+    incoming.once('error', () => undefined); incoming.destroy(); outgoing.destroy()
+    return fail(expected > MAX_ARCHIVE_RESPONSE_BYTES ? 'LIMIT_EXCEEDED' : 'PRECONDITION_FAILED', 'agent archive response headers could not be verified')
+  }
+  const iterator = incoming[Symbol.asyncIterator]()
+  let bytes = 0, ended = false
+  const destroy = (): void => { incoming.destroy(); outgoing.destroy() }
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (ended) return
+      try {
+        const next = await iterator.next()
+        if (ended) return
+        if (next.done) {
+          if (bytes !== expected) throw unavailable()
+          ended = true; controller.close(); return
+        }
+        const chunk = Buffer.from(next.value)
+        bytes += chunk.byteLength
+        if (bytes > expected || bytes > MAX_ARCHIVE_RESPONSE_BYTES) throw new XpanelError('LIMIT_EXCEEDED', 'agent archive response exceeds its declared limit')
+        controller.enqueue(chunk)
+      } catch (error) {
+        if (ended) return
+        ended = true; destroy(); controller.error(error instanceof XpanelError ? error : unavailable())
+      }
+    },
+    async cancel() {
+      if (ended) return
+      ended = true; destroy()
+      await iterator.return?.().catch(() => undefined)
+    },
+  })
+  return new Response(stream, { status: 200, headers })
+}
+
 /** A bounded local IPC client. It never creates a host executor or falls back to TCP. */
 export const createAgentClient = (options: AgentClientOptions): AgentApp & { close(): void } => {
   const token = assertAgentCredential(options.token)
@@ -87,6 +142,7 @@ export const createAgentClient = (options: AgentClientOptions): AgentApp & { clo
     if (closed) throw unavailable()
     const url = new URL(req.url)
     if (url.origin !== 'http://agent.local') fail('VALIDATION', 'agent client accepts internal agent requests only')
+    const archiveFile = archiveDownloadFile(req, url)
     try { await assertSocketPath(options.socketPath) } catch { throw unavailable() }
     const body = await boundedBody(req.body)
     if (closed) throw unavailable()
@@ -102,6 +158,11 @@ export const createAgentClient = (options: AgentClientOptions): AgentApp & { clo
         socketPath: options.socketPath, path: `${url.pathname}${url.search}`,
         method: req.method, headers, timeout, signal: req.signal,
       }, response => {
+        if (archiveFile !== null && response.statusCode === 200) {
+          try { resolveResponse(archiveResponse(response, outgoing, archiveFile)) }
+          catch (error) { rejectResponse(error) }
+          return
+        }
         const chunks: Buffer[] = []
         let bytes = 0
         response.on('data', (chunk: Buffer) => {

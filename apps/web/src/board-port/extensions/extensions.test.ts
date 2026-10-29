@@ -3,7 +3,7 @@ import { describe, it } from 'vitest'
 import { defaultPlan, type Principal, type ServiceUser } from '@xpanel/core'
 import { tools, navigation } from '@xpanel/catalog'
 import { renderEmailAccountsExtension, emailAccountsRouteSpec } from './email-accounts.ts'
-import { accountPageRouteSpecs, renderAccountPagesExtension } from './account-pages.ts'
+import { accountPageRouteSpecs, renderAccountPagesExtension, type AccountPagesExtensionInput } from './account-pages.ts'
 import { renderStoreExtension, storeRouteSpecs, type StoreExtensionInput } from './store.ts'
 import { EXTENSION_CSS, extensionCollection } from './shared.ts'
 
@@ -15,13 +15,25 @@ const root: Principal = { kind: 'root', id: 'synthetic-root', username: 'root' }
 describe('account and store extension presentation boundaries', () => {
   it('distinguishes unread collections from observed empty results in both languages', () => {
     for (const locale of ['en', 'ar'] as const) {
-      assert.match(extensionCollection(locale, undefined, ['Empty result', 'نتيجة فارغة'], () => ''), /data-collection-state="unread"/)
-      assert.match(extensionCollection(locale, { state: 'read', items: [] }, ['Empty result', 'نتيجة فارغة'], () => ''), /data-collection-state="empty"/)
-      for (const route of ['/email/filters', '/email/encryption', '/preferences/team']) {
+      assert.match(extensionCollection(locale, undefined, 'Empty result', () => ''), /data-collection-state="unread"/)
+      assert.match(extensionCollection(locale, { state: 'read', items: [] }, 'Empty result', () => ''), /data-collection-state="empty"/)
+      for (const route of ['/email/encryption', '/preferences/team']) {
         const html = renderAccountPagesExtension({ locale, route, account, principal })
         assert.match(html, /data-collection-state="unread"/)
         assert.doesNotMatch(html, /No rules|لا توجد قواعد|data-collection-state="empty"/)
       }
+    }
+  })
+
+  it('keeps selected-scope filters unread until their own API read', () => {
+    for (const locale of ['en', 'ar'] as const) {
+      const html = renderAccountPagesExtension({ locale, route: '/email/filters', account, principal,
+        collections: { '/email/filters': { state: 'read', items: [] } },
+      })
+      assert.match(html, /data-filter-workspace/)
+      assert.match(html, /data-filter-account="account-a"/)
+      assert.ok(html.includes(locale === 'en' ? 'Configuration has not been read.' : 'لم تُقرأ الإعدادات.'))
+      assert.doesNotMatch(html, /data-collection-state="empty"|No saved filters|لا توجد مرشحات محفوظة/)
     }
   })
 
@@ -63,12 +75,23 @@ describe('account and store extension presentation boundaries', () => {
     assert.doesNotMatch(health, /<img|foreign\.example\.test|data-check-state="passed"/)
   })
 
-  it('keeps preferences bound to current contact/theme', () => {
-    const html = renderAccountPagesExtension({ locale: 'en', principal, account, route: '/preferences', theme: 'dark' })
-    assert.match(html, /contact@example\.test/)
-    assert.match(html, /Dark/)
-    assert.match(html, /disabled data-wiring="unavailable"/)
-
+  it('pins contact preferences to a fresh account read and preserves appearance and permissions', () => {
+    for (const locale of ['en', 'ar'] as const) {
+      const input: AccountPagesExtensionInput = { locale, principal, account, route: '/preferences', theme: 'dark' }
+      const html = renderAccountPagesExtension(input)
+      assert.match(html, /data-contact-account="account-a"/)
+      assert.match(html, /data-contact-manage="false"/)
+      assert.ok(html.includes(locale === 'en' ? 'Saved contact details have not been read.' : 'لم تُقرأ بيانات التواصل المحفوظة.'))
+      assert.ok(html.includes(locale === 'en' ? 'Dark' : 'داكن'))
+      assert.doesNotMatch(html, /contact@example\.test|data-contact-form/)
+      const managed = renderAccountPagesExtension({ ...input, mutationsQualified: true })
+      assert.match(managed, /data-contact-manage="true"/)
+      assert.match(managed, /data-contact-form/)
+      assert.match(managed, /name="contactEmail"[^>]* disabled/)
+      assert.doesNotMatch(managed, /value="contact@example\.test"/)
+      assert.equal(renderAccountPagesExtension({ ...input, principal: root }), '')
+      assert.equal(renderAccountPagesExtension({ ...input, principal: { ...principal, accountId: 'other' } }), '')
+    }
   })
 
   it('keeps every store screen read-only and rejects the wrong principal', () => {
@@ -116,7 +139,7 @@ describe('account and store extension presentation boundaries', () => {
     assert.match(EXTENSION_CSS, /gap:16px/)
     assert.match(EXTENSION_CSS, /gap:8px/)
     assert.match(EXTENSION_CSS, /padding:24px/)
-    assert.match(EXTENSION_CSS, /max-width:800px[^}]*padding:16px/)
+    assert.match(EXTENSION_CSS, /max-width:600px[^}]*padding:16px/)
     assert.match(EXTENSION_CSS, /min-block-size:44px/)
     assert.doesNotMatch(EXTENSION_CSS, /overflow:\s*hidden|text-align:\s*(left|right)|padding-(left|right)/)
   })

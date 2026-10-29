@@ -74,7 +74,7 @@ try {
     try {
       await page.goto(`${origin}/?lang=${locale}&theme=${theme}&density=${density}`, { waitUntil: 'networkidle' })
       await page.evaluate(() => document.fonts.ready)
-      outcome.font = await assertAppliedFont(page, 'h1', locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
+      outcome.font = await assertAppliedFont(page, 'h1', locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
       outcome.geometry = await page.evaluate(() => {
         const rect = element => { const r = element.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, height: r.height, width: r.width } }
         const glyph = element => { const range = document.createRange(); range.selectNodeContents(element); const r = range.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom } }
@@ -128,7 +128,7 @@ try {
       const response = await page.goto(`${origin}/${surface}?lang=${locale}&theme=${theme}`, { waitUntil: 'networkidle' })
       assert.equal(response.status(), 200)
       await page.evaluate(() => document.fonts.ready)
-      outcome.font = await assertAppliedFont(page, 'h1', locale === 'ar' ? 'IBM Plex Sans Arabic' : 'IBM Plex Sans')
+      outcome.font = await assertAppliedFont(page, 'h1', locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
       outcome.geometry = await page.evaluate(() => {
         const readMeter = group => group ? ({ kind: group.dataset.resourceState, used: group.querySelector('[data-resource-part="used"]').textContent, limit: group.querySelector('[data-resource-part="limit"]').textContent, hasBar: Boolean(group.querySelector('[role="meter"], .xp-meter__fill')), value: group.querySelector('.xp-meter__values').textContent, text: group.textContent }) : null
         return {
@@ -136,7 +136,7 @@ try {
           meters: [...document.querySelectorAll('.xp-meter')].map(readMeter),
           nativeResellers: [...document.querySelectorAll('[data-reseller-row]')].map(row => ({ username: row.dataset.resellerRow, meters: [...row.querySelectorAll('.xp-meter')].map(readMeter) })),
           resellerDetails: [...document.querySelectorAll('[data-reseller-detail]')].map(detail => ({
-            username: detail.querySelector('summary').textContent.trim(),
+            username: detail.querySelector('.xp-reseller-header h2').textContent.trim(),
             capacities: ['maxAccounts', 'totalDiskMb', 'totalBandwidthMb'].map(name => {
               const input = detail.querySelector(`input[name="${name}"]`), group = input?.closest('.xp-reseller-groups')
               return { name, value: input?.value, label: input?.labels[0]?.textContent.trim(), unlimited: detail.querySelector(`input[name="${name}Unlimited"]`)?.checked, meter: readMeter(group?.querySelector('.xp-meter')) }

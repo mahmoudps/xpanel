@@ -57,10 +57,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
 
-  browser-acceptance:
-    name: Chromium authentication and interface acceptance (no hosting-service proof)
+  browser-shards:
+    name: Chromium acceptance shard ${{ matrix.shard }}/3 (no hosting-service proof)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        shard: [1, 2, 3]
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.tools/playwright-browsers
     steps:
@@ -73,55 +78,46 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Validate complete browser coverage
+        run: node scripts/browser-acceptance-runner.mjs --validate
       - name: Install the pinned Playwright Chromium and runner dependencies
         run: pnpm exec playwright install --with-deps chromium
-      - name: Exercise actual browser authentication and Arabic layout
-        run: node scripts/toolchain.mjs pnpm test:browser
-      - name: Exercise 18 synthetic UI states (no hosting-service proof)
-        run: node scripts/toolchain.mjs node tests/browser/phase1-acceptance.mjs --output=test-results/phase1-ui-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Exercise navigation and responsive interaction contracts (synthetic data)
-        run: node scripts/toolchain.mjs node tests/browser/navigation-acceptance.mjs --output=test-results/navigation-ui-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Exercise independent login surface visual contracts (synthetic data)
-        run: node scripts/toolchain.mjs node tests/browser/login-surface-acceptance.mjs --output=test-results/login-ui-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Exercise 24 mail layout states (synthetic data, no delivery proof)
-        run: node scripts/toolchain.mjs node tests/browser/mail-layout-acceptance.mjs --output=test-results/mail-layout-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Run the isolated browser partition
+        run: node scripts/toolchain.mjs node scripts/browser-acceptance-runner.mjs --shard=${{ matrix.shard }}/3 --run-id=${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Preserve the partition receipt
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-receipt-${{ github.run_id }}-${{ github.run_attempt }}-shard-${{ matrix.shard }}
+          path: test-results/browser-acceptance-${{ github.run_id }}-${{ github.run_attempt }}/shard-${{ matrix.shard }}/partition-receipt.json
+          if-no-files-found: error
+          include-hidden-files: false
 
-      - name: Exercise functional mail formatting and safe paste (no visual assertions)
-        run: node scripts/toolchain.mjs node tests/browser/mail-compose-functional.mjs --out test-results/mail-compose-functional-${{ github.run_id }}-${{ github.run_attempt }}.json
-
-      - name: Exercise 24 Accounts workflow states (synthetic API responses)
-        run: node scripts/toolchain.mjs node tests/browser/accounts-acceptance.mjs --output=test-results/accounts-ui-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Exercise 96 technical-value and contained-table layout states (synthetic data)
-        run: node scripts/toolchain.mjs node tests/browser/technical-values-acceptance.mjs --output=test-results/technical-values-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Exercise 24 resource-meter views and 264 component states (synthetic data)
-        run: node scripts/toolchain.mjs node tests/browser/resource-usage-acceptance.mjs --output=test-results/resource-usage-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Exercise interruptible shell overlay motion (synthetic data)
-        run: node scripts/toolchain.mjs node tests/browser/shell-motion-acceptance.mjs --output=test-results/shell-motion-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Exercise shell motion partial-setup recovery (synthetic failure injection)
-        run: node scripts/toolchain.mjs node tests/browser/shell-motion-exception-acceptance.mjs --output=test-results/shell-motion-exception-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Exercise browser native-control states and login boundaries (synthetic data)
-        run: node scripts/toolchain.mjs node tests/browser/native-control-states-acceptance.mjs --output=test-results/native-control-states-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Exercise advisory account IP allocation workflows (synthetic data)
-        run: node scripts/toolchain.mjs node tests/browser/ip-allocation-acceptance.mjs --output=test-results/ip-allocation-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Exercise current mailbox refresh with actual Chromium (synthetic mail, no delivery proof)
+  browser-acceptance:
+    name: Chromium authentication and interface acceptance (no hosting-service proof)
+    needs: browser-shards
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every browser partition to succeed
         env:
-          XPANEL_REQUIRE_BROWSER_TESTS: '1'
-        run: node scripts/toolchain.mjs pnpm exec vitest run apps/web/src/xmail-live-refresh.test.ts --maxWorkers=1
-      - name: Exercise development-disabled MFA and native login boundaries (synthetic data)
-        run: node scripts/toolchain.mjs node tests/browser/mfa-runtime-acceptance.mjs --output=test-results/mfa-runtime-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Exercise registered composed views and strict field geometry (synthetic data)
-        run: node scripts/toolchain.mjs node tests/browser/composed-acceptance.mjs --output=test-results/composed-ui-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Exercise native plans, scoped accounts and outbound settings (synthetic APIs)
-        run: node scripts/toolchain.mjs node tests/browser/native-workflows-acceptance.mjs --output=test-results/native-workflows-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Exercise scoped mail, preferences, store and resource views (synthetic data)
-        run: node scripts/toolchain.mjs node tests/browser/extensions-acceptance.mjs --output=test-results/extensions-ui-${{ github.run_id }}-${{ github.run_attempt }}
+          SHARDS_RESULT: ${{ needs.browser-shards.result }}
+        run: test "$SHARDS_RESULT" = success
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .node-version
+      - name: Collect partition receipts without merging their paths
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: browser-receipt-${{ github.run_id }}-${{ github.run_attempt }}-shard-*
+          path: test-results/browser-receipts
+          merge-multiple: false
+      - name: Verify exact coverage, source identity and successful outcomes
+        run: node scripts/browser-acceptance-runner.mjs --aggregate=test-results/browser-receipts --run-id=${{ github.run_id }}-${{ github.run_attempt }}
 
   qualification-prerequisites:
     if: github.event_name == 'workflow_dispatch'

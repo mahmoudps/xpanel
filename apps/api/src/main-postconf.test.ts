@@ -3,6 +3,7 @@ import { createUserPrincipal, createSession, createTestDb } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
 import { createDefaultWebRenderer } from './main.ts'
 import { SESSION_COOKIE_NAME, sha256Hex } from './auth.ts'
+import { mailboxPrincipalUsername } from './mail/inbox.ts'
 
 const probe = vi.hoisted(() => ({ mode: 'ok', events: [] as string[], started: null as (() => void) | null, calls: [] as unknown[][], mail: [] as Array<{ postfixMain?: string | null }> }))
 vi.mock('node:child_process', async original => {
@@ -60,10 +61,12 @@ const renderer = async () => {
   const account = await state.store.createAccount({ username: 'postconf7', primaryDomain: 'postconf7.example.test', passwordHash, planId: plan.id, ownerId: null, contactEmail: 'postconf@example.test', ipv4: '192.0.2.10', shell: 'none',
     php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 1, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} },
   })
-  const principal = await createUserPrincipal(database.db, { username: account.username, accountId: account.id, passwordHash })
+  // The xMail document opens only for a mailbox identity of the account.
+  const inbox = await state.store.createServiceUser({ accountId: account.id, login: 'inbox@postconf7.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash })
+  const principal = await createUserPrincipal(database.db, { username: mailboxPrincipalUsername(inbox.login), accountId: account.id, passwordHash })
   const token = 'synthetic-postconf-renderer-session'
   await createSession(database.db, { principalId: principal.id, tokenHash: sha256Hex(token), expiresAt: new Date(Date.now() + 60000).toISOString(), mfaVerified: true })
-  const render = await createDefaultWebRenderer({ db: database.db, store: state.store, serverSecret: 'synthetic-renderer-secret-at-least-32-bytes' })
+  const render = await createDefaultWebRenderer({ db: database.db, store: state.store, serverSecret: 'synthetic-renderer-' + 'fixture-value-at-least-32-bytes' })
   return () => render(new Request('http://localhost/mail/inbox', { headers: { cookie: `${SESSION_COOKIE_NAME}=${token}` } }))
 }
 describe('bounded nonblocking Postfix default lookup in the actual HTML renderer', () => {

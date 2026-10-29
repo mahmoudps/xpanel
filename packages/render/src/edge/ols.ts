@@ -1,6 +1,6 @@
 // OpenLiteSpeed as the server-wide alternative engine behind Nginx: lsphp external apps per
 // account (extUser/extGroup = account), one virtual host per site, a loopback listener.
-import { assertHandlerAvailable, fail } from '@xpanel/core'
+import { assertHandlerAvailable, fail, validateDomainIndexFiles } from '@xpanel/core'
 import type { Account, Domain, Limit, OsProfile, PhpSettings, RenderedFile, ServerSettings } from '@xpanel/core'
 import { lsphpBinary, XP_PATHS } from './paths.ts'
 import { assertWorkers, iniEntries, phpIsolation, type PhpIsolationOptions } from './php.ts'
@@ -163,7 +163,8 @@ const vhconfBody = (account: Account, g: SiteGroup, os: OsProfile, opts: VhostOp
     kv('docRoot', d.docRoot),
     ...names,
     kv('enableGzip', 1),
-    ...block('index', [kv('useServer', 0), kv('indexFiles', 'index.php, index.html, index.htm')]),
+    // useServer=0 replaces server indexes; filenames are ordered and comma-delimited (https://www.litespeedtech.com/docs/webserver/config/vhostgeneral).
+    ...block('index', [kv('useServer', 0), kv('indexFiles', d.indexFiles === undefined || mode === 'upstream' ? 'index.php, index.html, index.htm' : validateDomainIndexFiles(d.indexFiles).join(', '))]),
     // .htaccess rewrite rules work because OLS reads them per directory
     ...block('rewrite', [kv('enable', 1), kv('autoLoadHtaccess', 1)]),
   ]

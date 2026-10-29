@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import playwright from '@playwright/test'
 import { renderInbox, xmailInboxFromProps, type XmailInboxMessageInput } from './board-port/xmail-inbox.ts'
 import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
+import { clientI18nAsset } from './i18n.ts'
 import { DESIGN_TOKENS_CSS } from './tokens.ts'
 
 interface Locator {
@@ -36,7 +37,7 @@ const documentFor = (locale: 'en' | 'ar', fresh = false, moved = false, empty = 
   const messages = empty ? [] : fresh ? [message(9, 'New Keep'), ...(moved ? [] : [message(7, 'Keep selected')]), message(8, 'Other')] : [message(7, 'Keep selected'), message(8, 'Other')]
   if (fresh) for (const item of messages) { item.body = ''; item.bodyPending = true }
   const model = xmailInboxFromProps({ locale, mailbox, activeFolder: 'Archive', selectedUid: 7, messages, folderCounts: [{ folder: 'Archive', total: messages.length, unread: fresh ? 1 : 0 }, { folder: 'INBOX', total: fresh ? 2 : 0, unread: fresh ? 2 : 0 }] })
-  return `<!doctype html><html lang="${locale}" dir="${locale === 'ar' ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>${DESIGN_TOKENS_CSS}</style></head><body>${renderInbox(model)}</body></html>`
+  return `<!doctype html><html lang="${locale}" dir="${locale === 'ar' ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>${DESIGN_TOKENS_CSS}</style><script>${clientI18nAsset(locale)}</script></head><body>${renderInbox(model)}</body></html>`
 }
 
 const emit = (page: Page, kind = 'mail.changed', target = mailbox) => page.evaluate(({ kind, target }) => { (window as unknown as FixtureWindow).fixtureEmit(kind, target) }, { kind, target })
@@ -73,13 +74,17 @@ describe('current xMail board live invalidation', () => {
           const transport = (method: string, path: string) => {
             fixture.fixtureRequests.push({ method, path })
             if (method === 'POST') return new Promise(resolve => { fixture.fixtureResolve = resolve })
-            return Promise.resolve({ message: { body: 'Explicitly opened body' } })
+            // An explicit open is an actual read; only its observed UIDVALIDITY grants move/delete identity.
+            const uid = Number(/^\/api\/webmail\/inbox\/(\d+)\?folder=Archive$/.exec(path)?.[1])
+            return Promise.resolve({ mailbox: 'fixture@example.test', folder: 'Archive', message: { uid, from: 'sender@example.test', to: 'fixture@example.test', subject: 'Keep selected', receivedAt: '2026-10-24T11:00:00.000Z', unread: false, sizeBytes: 32, body: 'Kept body ' + uid, uidValidityObserved: true, uidValidity: 800 } })
           }
           ;(window as unknown as { xpanelSessionRequest: typeof transport }).xpanelSessionRequest = transport
         })
         await page.route('**/*', async route => {
           const request = route.request()
           const url = new URL(request.url())
+          // The shared realtime client is a cached same-origin asset.
+          if (url.origin === 'https://mail.example.test' && url.pathname === '/assets/ws-client.js') return route.fulfill({ contentType: 'application/javascript', body: BROWSER_REALTIME_SCRIPT })
           if (url.origin !== 'https://mail.example.test' || url.pathname !== '/mail/inbox') return route.abort()
           if (request.isNavigationRequest()) return route.fulfill({ contentType: 'text/html', body: documentFor(locale) })
           calls++
@@ -89,6 +94,8 @@ describe('current xMail board live invalidation', () => {
         })
         await page.goto('https://mail.example.test/mail/inbox?folder=Archive&lang=' + locale + '&theme=light&page=2')
         await page.addScriptTag({ content: dispatch + '\nwindow.fixtureEmit = function(kind, mailbox) { handleLiveEvent({kind:kind,scope:{mailboxLogin:mailbox}}) }' })
+        await page.locator('[data-mail-open="uid-7"]').click()
+        await page.locator('[data-mail-open="uid-7"][data-mail-uid-validity-observed="true"]').waitFor()
         await page.locator('#xmail-query').fill('Keep')
         await page.locator('[data-mail-filter="attachments"]').click()
         await page.locator('[data-mail-action="toggle-move"]').click()
@@ -104,7 +111,8 @@ describe('current xMail board live invalidation', () => {
         expect(await page.evaluate(() => (window as unknown as FixtureWindow).fixtureArticle === document.querySelector('[data-mail-article]'))).toBe(true)
         expect(await page.locator('[data-mail-count="INBOX"]').textContent()).toBe('2')
         expect(await page.locator('[data-mail-unread]').getAttribute('data-mail-unread')).toBe('0')
-        expect(await page.evaluate(() => (window as unknown as FixtureWindow).fixtureRequests)).toEqual([])
+        expect(await page.locator('[data-mail-open="uid-7"]').getAttribute('data-mail-uid-validity')).toBe('800')
+        expect(await page.evaluate(() => (window as unknown as FixtureWindow).fixtureRequests)).toEqual([{ method: 'GET', path: '/api/webmail/inbox/7?folder=Archive' }])
         expect(await page.evaluate(() => (window as unknown as FixtureWindow).returnedScriptRan === true)).toBe(false)
         expect(requests.every(request => request.method === 'GET' && request.hint === 'list' && new URL(request.url).searchParams.get('page') === '2' && new URL(request.url).searchParams.get('folder') === 'Archive')).toBe(true)
         failed = true
@@ -131,14 +139,15 @@ describe('current xMail board live invalidation', () => {
           await page.waitForTimeout(100)
           expect(calls).toBe(beforeAction)
           moved = true
-          await page.evaluate(() => (window as unknown as FixtureWindow).fixtureResolve({ uid: 77 }))
+          expect((await page.evaluate(() => (window as unknown as FixtureWindow).fixtureRequests)).at(-1)).toEqual({ method: 'POST', path: '/api/webmail/inbox/7/move' })
+          await page.evaluate(() => (window as unknown as FixtureWindow).fixtureResolve({ ok: true, mailbox: 'fixture@example.test', from: 'Archive', sourceUid: 7, sourceUidValidity: 800, folder: 'Trash', uid: 77, destinationUidKnown: true, stateChanged: true, uidValidityObserved: true, uidValidity: 900 }))
           await page.locator('[data-mail-undo]').waitFor()
           await page.waitForFunction(() => document.querySelector('[data-mail-pager]')?.getAttribute('data-total') === '2')
           expect(await page.locator('[data-mail-undo]').getAttribute('data-undo-uid')).toBe('77')
           expect(await page.locator('[data-mail-open="uid-7"]').count()).toBe(1)
           await page.locator('[data-mail-action="undo"]').click()
           expect((await page.evaluate(() => (window as unknown as FixtureWindow).fixtureRequests)).some(request => request.method === 'POST' && request.path === '/api/webmail/inbox/77/move')).toBe(true)
-          await page.evaluate(() => (window as unknown as FixtureWindow).fixtureResolve({ uid: 78 }))
+          await page.evaluate(() => (window as unknown as FixtureWindow).fixtureResolve({ ok: true, mailbox: 'fixture@example.test', from: 'Trash', sourceUid: 77, sourceUidValidity: 900, folder: 'Archive', uid: 78, destinationUidKnown: true, stateChanged: true, uidValidityObserved: true, uidValidity: 800 }))
           await page.locator('[data-mail-open="uid-78"]').waitFor()
           expect(await page.locator('[data-mail-open="uid-78"]').getAttribute('aria-current')).toBe('true')
           expect(await page.locator('[data-mail-undo]').count()).toBe(0)

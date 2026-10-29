@@ -3,6 +3,7 @@ import { navigation, tools } from '@xpanel/catalog'
 import { resolveSurfaceSection } from '../../../shell.ts'
 import { composedRouteSpecs, composedXwhmRoutes, nativeComposedRoutePaths } from '../all.ts'
 import { renderComposedRoutes } from '../render.ts'
+import { renderWhmDetailPage } from '../../approved-xwhm.ts'
 import { xwhm_software } from './xwhm-software.ts'
 import { xwhm_server } from './xwhm-server.ts'
 import { xwhm_security } from './xwhm-security.ts'
@@ -40,8 +41,8 @@ describe('xWHM administration route contracts', () => {
       ])
       expect(spec.action).toBeNull()
       expect(spec.fields).toEqual([])
-      expect(spec.title.every(value => value.trim().length > 0)).toBe(true)
-      expect(spec.lede.every(value => value.trim().length > 0)).toBe(true)
+      expect(spec.title.trim().length > 0).toBe(true)
+      expect(spec.lede.trim().length > 0).toBe(true)
     }
   })
 
@@ -60,8 +61,8 @@ describe('xWHM administration route contracts', () => {
     expect(unwired).toHaveLength(44)
     const terminal = unwired.find(spec => spec.route === '/whm/server/terminal')!
     expect(terminal.layout).not.toBe('terminal')
-    expect(terminal.lede[0]).toContain('dedicated server session')
-    expect(unwired.find(spec => spec.route === '/whm/services/health')!.lede[0]).toContain('A running service is not a configuration-drift result')
+    expect(terminal.lede).toContain('dedicated server session')
+    expect(unwired.find(spec => spec.route === '/whm/services/health')!.lede).toContain('A running service is not a configuration-drift result')
     for (const spec of unwired) {
       expect(spec.columns).toEqual([])
       if (nativeComposedRoutePaths.has(spec.route)) continue
@@ -91,8 +92,10 @@ describe('xWHM administration route contracts', () => {
     const route = '/whm/services/default-index'
     const principals = [undefined, { kind: 'user' as const, id: 'user-test', username: 'root', accountId: 'account-test' }, { kind: 'reseller' as const, id: 'reseller-test', username: 'root' }]
     for (const principal of principals) for (const locale of ['en', 'ar'] as const) {
-      const html = renderComposedRoutes(routes, { locale, route, principal })!
-      expect(html).toContain('data-read-state="denied"')
+      expect(nativeComposedRoutePaths.has(route)).toBe(true)
+      expect(renderComposedRoutes(routes, { locale, route, principal })).toBeUndefined()
+      const html = renderWhmDetailPage({ activeRoute: route, locale, principal })!
+      expect(html).toContain('data-whm-detail-denied')
       expect(html).not.toMatch(/<form\b|<input\b|<select\b|<textarea\b|<button\b|<table\b|\/api\/|data-terminal/)
     }
   })
@@ -108,7 +111,7 @@ describe('xWHM administration route contracts', () => {
       expect(spec.action).toBeNull()
       expect(spec.fields).toEqual([])
       expect(spec.columns.length).toBeGreaterThan(0)
-      expect(spec.lede[0]).toMatch(/(?:Only loaded|unavailable|does not change)/)
+      expect(spec.lede).toMatch(/(?:Only loaded|unavailable|does not change)/)
     }
     const serialized = JSON.stringify(routes)
     expect(serialized).not.toContain('/api/')

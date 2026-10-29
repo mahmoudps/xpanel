@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { admitTrustedProxyRenderPolicy } from '../../../core/src/trusted-proxies.ts'
+import type { TrustedProxyRenderAuthority } from '../../../core/src/trusted-proxies.ts'
 import {
+  assertNginxEdgeHeaderSanitization,
   defaultSiteFile,
   nginxConfigTest,
   nginxEdgeDirs,
@@ -65,15 +68,18 @@ describe('renderNginxMain', () => {
     expect(c).not.toContain('/home')
   })
 
-  it('trusts no client-IP header unless proxies are configured', () => {
+  it('trusts no client-IP header without protected process-local canonical authority', () => {
     expect(renderNginxMain(settings(), debianOs).content).not.toContain('set_real_ip_from')
-    const c = renderNginxMain(edge({ trustedProxies: ['173.245.48.0/20', '2400:cb00::/32'], realIpHeader: 'CF-Connecting-IP' }), debianOs).content
+    const policy = { cidrs: ['173.245.48.0/20', '2400:cb00::/32'], header: 'X-Forwarded-For' as const }
+    const authority = admitTrustedProxyRenderPolicy(policy, { kind: 'protected-dedicated-ingress-v1', localAddresses: ['127.0.0.1', '192.0.2.1'], managementClient: '198.51.100.50', dedicatedCidrs: policy.cidrs })
+    const c = renderNginxMain(settings(), debianOs, authority).content
     expect(c).toContain('set_real_ip_from 173.245.48.0/20;')
     expect(c).toContain('set_real_ip_from 2400:cb00::/32;')
-    expect(c).toContain('real_ip_header CF-Connecting-IP;')
-    expect(c).toContain('real_ip_recursive on;')
+    expect(c).toContain('real_ip_header X-Forwarded-For;')
+    expect(c).toContain('real_ip_recursive off;')
+    expect(codeOf(() => renderNginxMain(settings(), debianOs, { kind: 'trusted-proxy-render-authority' } as TrustedProxyRenderAuthority))).toBe('PRECONDITION_FAILED')
+    expect(codeOf(() => renderNginxMain(edge({ trustedProxies: policy.cidrs, realIpHeader: 'CF-Connecting-IP' }), debianOs))).toBe('VALIDATION')
   })
-
   it('rejects bad proxies and headers', () => {
     expect(codeOf(() => renderNginxMain(edge({ trustedProxies: ['1.2.3.4; evil'] }), debianOs))).toBe('VALIDATION')
     expect(codeOf(() => renderNginxMain(edge({ trustedProxies: ['10.0.0.0/8'], realIpHeader: 'X-A;b' }), debianOs))).toBe('VALIDATION')
@@ -128,7 +134,9 @@ describe('renderNginxSite', () => {
     expect(c).toContain('proxy_pass http://127.0.0.1:8080;')
     expect(c).toContain('proxy_set_header Host $host;')
     expect(c).toContain('proxy_set_header X-Real-IP $remote_addr;')
-    expect(c).toContain('proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;')
+    expect(c).toContain('proxy_set_header X-Forwarded-For $remote_addr;')
+    expect(c).toContain('proxy_set_header Forwarded "";')
+    expect(c).not.toContain('$proxy_add_x_forwarded_for')
     expect(c).toContain('proxy_set_header X-Forwarded-Proto $scheme;')
     expect(c).toContain('access_log /var/log/xpanel/nginx/example.com.access.log xpanel_metrics;')
     expect(c).not.toContain('listen 443')
@@ -470,5 +478,19 @@ describe('renderDefaultSite', () => {
   it('has balanced braces', () => {
     const c = renderDefaultSite()
     expect(blockOf(c, 'server').length).toBe(c.trimEnd().length - c.indexOf('server {'))
+  })
+})
+
+describe('forwarded identity sanitization', () => {
+  it('overwrites every emitted proxy location and rejects forged alternate forwarding chains', () => {
+    const c = renderNginxSite(account(), [domain()], settings(), cert(), { forceHttps: true })
+    const proxyCount = [...c.matchAll(/proxy_pass /g)].length
+    expect(proxyCount).toBeGreaterThan(0)
+    expect([...c.matchAll(/proxy_set_header X-Forwarded-For \$remote_addr;/g)]).toHaveLength(proxyCount)
+    expect([...c.matchAll(/proxy_set_header Forwarded "";/g)]).toHaveLength(proxyCount)
+    expect(() => assertNginxEdgeHeaderSanitization(c)).not.toThrow()
+    expect(codeOf(() => assertNginxEdgeHeaderSanitization(c.replace('X-Forwarded-For $remote_addr;', 'X-Forwarded-For $proxy_add_x_forwarded_for;')))).toBe('VALIDATION')
+    expect(codeOf(() => assertNginxEdgeHeaderSanitization(c + '\nproxy_set_header Forwarded $http_forwarded;'))).toBe('VALIDATION')
+    expect(codeOf(() => assertNginxEdgeHeaderSanitization(c + '\nproxy_set_header x-forwarded-for $http_x_forwarded_for;'))).toBe('VALIDATION')
   })
 })

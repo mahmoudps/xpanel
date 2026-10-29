@@ -731,7 +731,7 @@ const withLock = async (c: Ctx, body: () => Promise<UpgradeResult>): Promise<Upg
   }
 }
 
-export const readLock = async (fs: FsPort, path: string): Promise<LockInfo | null> => {
+export const readLock = async (fs: Pick<FsPort, 'readFile'>, path: string): Promise<LockInfo | null> => {
   const raw = await fs.readFile(path)
   if (raw === null) return null
   try {

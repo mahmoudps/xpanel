@@ -8,11 +8,12 @@ import type { CatalogTool } from '@xpanel/catalog'
 import { createTestDb, createRootPrincipal, createUserPrincipal, createResellerPrincipal, createSession, revokeSession, setTotpSecret } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
 import { createDefaultWebRenderer } from './main.ts'
+import { mailboxPrincipalUsername } from './mail/inbox.ts'
 import { createApiApp, INGRESS_SECRET_HEADER, listenApiServer } from './server.ts'
 import { sessionCookieName, sessionTokenHash, type EntryPoint } from './entry-points.ts'
 
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
-const SECRET = 'synthetic-scoped-renderer-secret-at-least-32-bytes'
+const SECRET = 'synthetic-scoped-renderer-' + 'fixture-value-at-least-32-bytes'
 const INGRESS = 'synthetic-scoped-renderer-ingress-at-least-32-bytes'
 const profiles: EntryPoint[] = ['xpanel', 'xwhm', 'xmail']
 const origins = { xpanel: 'https://panel.example.test:2083', xwhm: 'https://whm.example.test:2087', xmail: 'https://mail.example.test:2096' }
@@ -35,6 +36,9 @@ const fixture = async () => {
   const account = await state.store.createAccount({ ...input, username: 'owner7', primaryDomain: 'owner7.example.test' })
   const other = await state.store.createAccount({ ...input, username: 'other7', primaryDomain: 'private-other-scoped.example.test' })
   const owner = await createUserPrincipal(database.db, { username: account.username, accountId: account.id, passwordHash: HASH })
+  // xMail admits only a mailbox identity, so its document session belongs to the account's mailbox principal.
+  const inbox = await state.store.createServiceUser({ accountId: account.id, login: 'inbox@owner7.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: HASH })
+  const mailbox = await createUserPrincipal(database.db, { username: mailboxPrincipalUsername(inbox.login), accountId: account.id, passwordHash: HASH })
   const root = await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
   await setTotpSecret(database.db, root.id, new Uint8Array(32))
   const reseller = await state.store.createReseller({ username: 'reseller7', passwordHash: HASH, acl: ['list-accounts'], maxAccounts: 10, totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] })
@@ -47,7 +51,7 @@ const fixture = async () => {
     return { cookie: sessionCookieName(profile, true) + '=' + token, id: record.id }
   }
   for (const profile of profiles) {
-    sessions.set(profile, await session(profile, profile === 'xwhm' ? root.id : owner.id))
+    sessions.set(profile, await session(profile, profile === 'xwhm' ? root.id : profile === 'xmail' ? mailbox.id : owner.id))
     const renderer = await createDefaultWebRenderer({ store: state.store, db: database.db, serverSecret: SECRET, entryPoint: profile })
     const app = createApiApp({ db: database.db, store: state.store, webRenderer: renderer, serverSecret: SECRET, entryPoint: profile, publicOrigin: origins[profile], allowedOrigins: [origins[profile]], ingressSecret: INGRESS, requireSecureCookies: true, requireOriginHeader: true })
     const server = await listenApiServer(app, { host: '127.0.0.1', port: 0 })

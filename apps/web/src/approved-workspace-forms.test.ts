@@ -8,6 +8,7 @@ import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
 type Request = (method: string, path: string, body?: unknown) => Promise<unknown>
 const id = '10000000-0000-4000-8000-000000000001'
 const otherId = '10000000-0000-4000-8000-000000000002'
+const domainRevision = 'b'.repeat(64)
 const php = {
   version: '8.3', handler: 'fpm',
   fpm: { mode: 'ondemand', maxChildren: 5, startServers: 1, minSpareServers: 1, maxSpareServers: 3, maxRequests: 500, processIdleTimeoutSec: 10 },
@@ -163,27 +164,27 @@ describe('approved workspace browser bindings', () => {
   })
   it('selects the exact domain from the authorized list before preserving and patching its full PHP model', async () => {
     const merged = mergeWorkspacePhp(php, { version: '8.4', 'ini.memory_limit': '256M' })
-    const send = vi.fn<Request>().mockResolvedValueOnce({ domains: [{ id: otherId, php: { ...php, version: '8.2' } }, { id, php }] }).mockResolvedValueOnce({ domain: { id, php: merged }, reconcile: null })
+    const send = vi.fn<Request>().mockResolvedValueOnce({ domains: [{ id: otherId, php: { ...php, version: '8.2' } }, { id, php }], revision: domainRevision }).mockResolvedValueOnce({ domain: { id, php: merged }, reconcile: null })
     request(send); boot(`<form data-domain-php-form data-domain-id="${id}">${field('version', '8.4')}${field('ini.memory_limit', '256M')}<button type="submit">Save</button><p data-domain-php-status></p></form>`)
     submit(); await tick()
-    expect(send.mock.calls).toEqual([['GET', '/api/domains'], ['PATCH', '/api/domains/' + id, { php: merged }]])
+    expect(send.mock.calls).toEqual([['GET', '/api/domains'], ['PATCH', '/api/domains/' + id, { php: merged, expectedRevision: domainRevision }]])
     expect(status().dataset.state).toBe('stored')
   })
   it('does not patch a domain absent from the authorized reader result', async () => {
-    const send = vi.fn<Request>().mockResolvedValue({ domains: [{ id: otherId, php }] }); request(send)
+    const send = vi.fn<Request>().mockResolvedValue({ domains: [{ id: otherId, php }], revision: domainRevision }); request(send)
     boot(`<form data-domain-php-form data-domain-id="${id}">${field('version', '8.4')}<button type="submit">Save</button></form>`); submit(); await tick()
     expect(send).toHaveBeenCalledExactlyOnceWith('GET', '/api/domains'); expect(status().dataset.state).toBe('failed')
   })
   it('rehydrates every visible PHP field before accepting a changed domain selection', async () => {
     const nextPhp = { ...php, version: '8.2', fpm: { ...php.fpm, maxChildren: 9 }, ini: { ...php.ini, memory_limit: '512M' } }
     const domains = [{ id, php }, { id: otherId, php: nextPhp }]
-    const send = vi.fn<Request>().mockResolvedValueOnce({ domains }).mockResolvedValueOnce({ domains }).mockResolvedValueOnce({ domain: { id: otherId, php: nextPhp } }); request(send)
+    const send = vi.fn<Request>().mockResolvedValueOnce({ domains, revision: domainRevision }).mockResolvedValueOnce({ domains, revision: domainRevision }).mockResolvedValueOnce({ domain: { id: otherId, php: nextPhp } }); request(send)
     boot(`<form data-domain-php-form data-domain-id="${id}"><select name="domainId" data-domain-php-select><option value="${id}">One</option><option value="${otherId}">Two</option></select>${field('version', '8.3')}${field('fpm.maxChildren', '5')}${field('ini.memory_limit', '128M')}<button type="submit">Save</button><p data-domain-php-status></p></form>`)
     const select = document.querySelector<HTMLSelectElement>('select')!; select.value = otherId; select.dispatchEvent(new Event('change')); expect(button().disabled).toBe(true); await tick()
     expect(form().dataset.domainId).toBe(otherId); expect((form().elements.namedItem('version') as HTMLInputElement).value).toBe('8.2')
     expect((form().elements.namedItem('fpm.maxChildren') as HTMLInputElement).value).toBe('9')
     expect((form().elements.namedItem('ini.memory_limit') as HTMLInputElement).value).toBe('512M')
-    submit(); await tick(); expect(send.mock.calls[2]).toEqual(['PATCH', '/api/domains/' + otherId, { php: nextPhp }])
+    submit(); await tick(); expect(send.mock.calls[2]).toEqual(['PATCH', '/api/domains/' + otherId, { php: nextPhp, expectedRevision: domainRevision }])
   })
   it('blocks a changed domain until its current configuration can be read', async () => {
     const send = vi.fn<Request>().mockRejectedValue(new Error('read failed')); request(send)
@@ -194,7 +195,7 @@ describe('approved workspace browser bindings', () => {
   it('keeps PHP Reset bound to the last read domain before saving A to B to reset to save', async () => {
     const nextPhp = { ...php, version: '8.2', handler: 'lsphp', fpm: { ...php.fpm, mode: 'dynamic', maxChildren: 9 }, ini: {} }
     const domains = [{ id, php }, { id: otherId, php: nextPhp }]
-    const send = vi.fn<Request>().mockResolvedValueOnce({ domains }).mockResolvedValueOnce({ domains }).mockResolvedValueOnce({ domain: { id: otherId, php: nextPhp } }); request(send)
+    const send = vi.fn<Request>().mockResolvedValueOnce({ domains, revision: domainRevision }).mockResolvedValueOnce({ domains, revision: domainRevision }).mockResolvedValueOnce({ domain: { id: otherId, php: nextPhp } }); request(send)
     boot('<form data-domain-php-form data-domain-id="' + id + '"><select name="domainId" data-domain-php-select><option value="' + id + '" selected>One</option><option value="' + otherId + '">Two</option></select>' + field('version', '8.3') + '<select name="handler"><option value="fpm" selected>FPM</option><option value="lsphp">LSAPI</option><option value="cgi">CGI</option></select><select name="fpm.mode"><option value="ondemand" selected>On demand</option><option value="dynamic">Dynamic</option></select>' + field('fpm.maxChildren', '5', 'number') + field('ini.memory_limit', '128M') + '<button type="reset">Reset</button><button type="submit">Save</button><p data-domain-php-status></p></form>')
     const domain = form().querySelector<HTMLSelectElement>('[data-domain-php-select]')!
     domain.value = otherId; domain.dispatchEvent(new Event('change')); await tick()
@@ -210,7 +211,7 @@ describe('approved workspace browser bindings', () => {
     expect((form().elements.namedItem('fpm.maxChildren') as HTMLInputElement).value).toBe('9')
     expect((form().elements.namedItem('ini.memory_limit') as HTMLInputElement).value).toBe('')
     submit(); await tick()
-    expect(send.mock.calls).toEqual([['GET', '/api/domains'], ['GET', '/api/domains'], ['PATCH', '/api/domains/' + otherId, { php: nextPhp }]])
+    expect(send.mock.calls).toEqual([['GET', '/api/domains'], ['GET', '/api/domains'], ['PATCH', '/api/domains/' + otherId, { php: nextPhp, expectedRevision: domainRevision }]])
     expect(status().dataset.state).toBe('stored')
   })
   it('does not reset PHP selection during a pending read', async () => {
@@ -220,17 +221,17 @@ describe('approved workspace browser bindings', () => {
     const domain = form().querySelector<HTMLSelectElement>('select')!
     domain.value = otherId; domain.dispatchEvent(new Event('change')); form().reset()
     expect(domain.value).toBe(otherId); expect(button().disabled).toBe(true)
-    resolve({ domains: [{ id: otherId, php: { ...php, version: '8.2' } }] }); await tick()
+    resolve({ domains: [{ id: otherId, php: { ...php, version: '8.2' } }], revision: domainRevision }); await tick()
     expect(form().dataset.domainId).toBe(otherId); expect(button().disabled).toBe(false)
     form().reset(); expect(domain.value).toBe(otherId); expect((form().elements.namedItem('version') as HTMLInputElement).value).toBe('8.2')
   })
   it.each([false, true])('saves a version change with empty INI controls, clearing only displayed overrides: %s', async clearOverride => {
     const current = { ...php, ini: clearOverride ? { ...php.ini } : {} }
     const expected = { ...current, version: '8.4', ini: clearOverride ? { display_errors: 'Off', custom_unexposed: 'preserve' } : {} }
-    const send = vi.fn<Request>().mockResolvedValueOnce({ domains: [{ id, php: current }] }).mockResolvedValueOnce({ domain: { id, php: expected } }); request(send)
+    const send = vi.fn<Request>().mockResolvedValueOnce({ domains: [{ id, php: current }], revision: domainRevision }).mockResolvedValueOnce({ domain: { id, php: expected } }); request(send)
     boot('<form data-domain-php-form data-domain-id="' + id + '">' + field('version', '8.4') + field('ini.memory_limit', '') + field('ini.upload_max_filesize', '') + field('ini.post_max_size', '') + field('ini.max_execution_time', '') + field('saveTarget', 'global') + field('ini.date.timezone', 'invented') + '<button type="submit">Save</button><p data-domain-php-status></p></form>')
     submit(); await tick()
-    expect(send.mock.calls).toEqual([['GET', '/api/domains'], ['PATCH', '/api/domains/' + id, { php: expected }]])
+    expect(send.mock.calls).toEqual([['GET', '/api/domains'], ['PATCH', '/api/domains/' + id, { php: expected, expectedRevision: domainRevision }]])
     expect(status().dataset.state).toBe('stored')
   })
   it('sends the selected setup IPv4 and verifies its real primaryIp acknowledgement', async () => {

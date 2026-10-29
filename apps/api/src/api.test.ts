@@ -465,9 +465,9 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     })
     assert.equal(reconcileForbidden.status, 403)
 
-    const upgradeForbidden = await alice.request('/api/lifecycle/upgrade', {
+    const upgradeForbidden = await alice.request('/api/server/upgrade/preflight', {
       method: 'POST',
-      body: { dryRun: true },
+      body: { targetVersion: '0.2.0', expectedRevision: 'a'.repeat(64) },
     })
     assert.equal(upgradeForbidden.status, 403)
   })
@@ -871,23 +871,16 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
   it('8. Root-gated upgrade & transfer endpoints + non-200 error contract (never leaks internal 500 error details)', async () => {
     const { client: root } = await loginRoot()
 
-    // Root-gated upgrade endpoint runs preflight and records an upgrade row
-    const upgradeRes = await root.request('/api/lifecycle/upgrade', {
-      method: 'POST',
-      body: {
-        currentVersion: '0.1.0',
-        targetVersion: '0.2.0',
-      },
-    })
-    assert.equal(upgradeRes.status, 200)
-    const upgradeBody = (await upgradeRes.json()) as {
-      ok: boolean
-      report: { ok: boolean }
-      upgrade: { id: number; toVersion: string }
-    }
-    assert.equal(upgradeBody.ok, true)
-    assert.equal(upgradeBody.report.ok, true)
-    assert.equal(upgradeBody.upgrade.toVersion, '0.2.0')
+    // The request-controlled lifecycle upgrade endpoint is gone; preflight facts come only from agent observations.
+    const removedUpgrade = await root.request('/api/lifecycle/upgrade', { method: 'POST', body: { currentVersion: '0.1.0', targetVersion: '0.2.0' } })
+    assert.equal(removedUpgrade.status, 404)
+    const forgedPreflight = await root.request('/api/server/upgrade/preflight', { method: 'POST', body: { targetVersion: '0.2.0', expectedRevision: 'a'.repeat(64), freeBytes: 1 } })
+    assert.equal(forgedPreflight.status, 422)
+    const observedUpgrade = await root.request('/api/server/upgrade')
+    assert.equal(observedUpgrade.status, 200)
+    const observedBody = (await observedUpgrade.json()) as { availability: { start: { enabled: boolean; reasons: string[] } } }
+    assert.equal(observedBody.availability.start.enabled, false)
+    assert.ok(observedBody.availability.start.reasons.includes('upgrade-coordinator-unavailable'))
 
     // A transfer cannot accept client-supplied progress as a real host operation.
     const transferRes = await root.request('/api/lifecycle/transfer', {

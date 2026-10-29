@@ -176,6 +176,9 @@ interface SessionSnapshotRow {
   last_seen_at: string
   expires_at: string
   revoked_at: string | null
+  impersonator_principal_id?: string | null
+  impersonator_login?: string | null
+  impersonator_team_member_id?: string | null
   [k: string]: unknown
 }
 
@@ -1061,7 +1064,9 @@ export const restoreIdentityAuthorityBackup = (
           revokedSessionIdSet.has(s.id) ||
           revokedSessionHashSet.has(s.token_hash.toLowerCase()) ||
           forceRevokeAllPrincipals.has(s.principal_id) ||
-          revokedByWatermarkCutoff
+          revokedByWatermarkCutoff ||
+          // A recovered handoff session is never resumed; its row keeps the issuing identity.
+          (s.impersonator_principal_id ?? null) !== null
 
         const revokedAt = shouldRevoke ? (s.revoked_at ?? restoredAt) : null
         if (revokedAt === null) {
@@ -1074,8 +1079,8 @@ export const restoreIdentityAuthorityBackup = (
         await tx.query(
           `INSERT INTO sessions (
             id, principal_id, token_hash, ip, user_agent, mfa_verified,
-            created_at, last_seen_at, expires_at, revoked_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            created_at, last_seen_at, expires_at, revoked_at, impersonator_principal_id, impersonator_login, impersonator_team_member_id
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
           [
             s.id,
             s.principal_id,
@@ -1087,6 +1092,9 @@ export const restoreIdentityAuthorityBackup = (
             s.last_seen_at,
             s.expires_at,
             revokedAt,
+            s.impersonator_principal_id ?? null,
+            s.impersonator_login ?? null,
+            s.impersonator_team_member_id ?? null,
           ],
         )
       }

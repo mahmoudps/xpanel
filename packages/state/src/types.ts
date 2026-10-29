@@ -4,9 +4,12 @@ import type {
   Certificate,
   Database,
   DatabaseUser,
+  OwnerDatabaseStateRequest,
   DnsRecord,
   Domain,
   DomainCustomConfig,
+  DomainWorkspaceSource,
+  DomainWorkspaceTransition,
   FeatureList,
   FirewallRule,
   Id,
@@ -24,11 +27,17 @@ import type {
   ServiceUser,
   ShellAccess,
 } from '@xpanel/core'
+import type { StoredPostgresqlUser } from './pg-state.ts'
 
 export interface StoredServerSettings {
   settings: ServerSettings
   setupCompletedAt: string | null
   updatedAt: string
+}
+
+/** Trusted settings authorization runs inside the existing authority writer lease. */
+export interface ServerSettingsMutationOptions extends MutationOptions {
+  settingsGuard?: (current: ServerSettings | null) => Promise<void>
 }
 
 export interface PrefixList {
@@ -89,6 +98,63 @@ export interface WriterLockHolder {
 export interface MutationOptions {
   expectedRevision?: number
   fencingToken?: number
+}
+
+/** Trusted generation checks; invoked under the writer lease before restore publication. */
+export interface RestoreGenerationMutationOptions extends MutationOptions {
+  restoreGuard?: (current: StateSnapshot, target: StateSnapshot) => Promise<void>
+}
+
+/** Trusted DNS precondition/authorization, evaluated under the existing writer lease. */
+export interface DnsZoneMutationOptions extends MutationOptions {
+  dnsGuard?: (current: DnsZoneState | null) => Promise<void>
+}
+
+/** Server-owned checks run under the same lease that publishes the new configuration. */
+export interface CronMutationOptions extends MutationOptions {
+  cronGuard?: (account: Account, current: readonly CronJobState[]) => Promise<void>
+}
+
+export interface CertificateMutationOptions extends MutationOptions {
+  certificateGuard?: (current: StoredCertificate | null, domains: readonly Domain[]) => Promise<void>
+}
+
+/** Trusted server callbacks; never populated from an HTTP request body. */
+export interface DatabaseMutationOptions extends MutationOptions {
+  stateGuard?: OwnerDatabaseStateRequest
+  authorize?: (account: Account) => Promise<void>
+  onMutationStarted?: () => void
+  onCommitted?: (authorityRevision: number) => void
+  prepareIndex?: (account: Account, database: Database) => Promise<{
+    apply: () => Promise<void>
+    rollback: () => Promise<void>
+  }>
+  prepareTransitionIndex?: (account: Account, before: Database, after: Database) => Promise<{
+    apply: () => Promise<void>
+    rollback: () => Promise<void>
+  }>
+}
+
+/** Trusted server ports, never deserialized from an HTTP domain body. */
+export interface DomainMutationGuard {
+  accountId: Id
+  expectedRevision: string
+  authorize: (account: Account, current: Domain | null) => Promise<void>
+  safeLeaf?: boolean
+  prepareProjection?: (transition: DomainWorkspaceTransition) => Promise<{
+    apply: () => Promise<void>
+    rollback: () => Promise<void>
+  }>
+  onCommitted?: (authorityRevision: number) => void
+}
+
+export interface DomainMutationOptions extends MutationOptions {
+  domainGuard?: DomainMutationGuard
+}
+
+export interface DomainWorkspaceRead {
+  source: DomainWorkspaceSource
+  revision: string
 }
 
 export interface StoredAccount extends Account {
@@ -159,6 +225,7 @@ export type DomainPatch = Partial<
     | 'suspended'
     | 'expiresAt'
     | 'pathQuotaMb'
+    | 'indexFiles'
     | 'ipv4'
     | 'ipv6'
   >
@@ -193,6 +260,7 @@ export interface NewDatabaseUser {
   /** MariaDB authentication string (hash) */
   authString: string
   authPlugin?: 'mysql_native_password' | 'ed25519'
+  initialGrant?: { databaseId: Id; privileges: string[] }
 }
 
 export interface StoredCertificate extends Certificate {
@@ -235,6 +303,7 @@ export interface CronJobState {
   command: string
   comment: string
   enabled: boolean
+  maxRuntimeSec?: number
 }
 
 /** Complete, validated desired-state tree read from `/var/lib/xpanel/state/`. */
@@ -258,6 +327,9 @@ export interface StateSnapshot {
   domainCustomConfigs?: DomainCustomConfig[]
   ipPool?: ServerIpEntry[]
   mailIpConfig?: MailIpConfig | null
+  /** present only when the server holds PostgreSQL users; each database's owner is one of them */
+  postgresqlDatabases?: Database[]
+  postgresqlUsers?: StoredPostgresqlUser[]
 }
 
 /**

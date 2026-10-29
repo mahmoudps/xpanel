@@ -1,6 +1,6 @@
 // One shared Apache on a loopback port behind Nginx. With mpm_itk the child serving a vhost
 // drops to the account UID (AssignUserId); handlers then run as that same UID.
-import { assertHandlerAvailable, fail, validateApacheWorkers } from '@xpanel/core'
+import { assertHandlerAvailable, fail, validateApacheWorkers, validateDomainIndexFiles } from '@xpanel/core'
 import type { Account, ApacheMpm, ConfigTest, Domain, HostAction, OsProfile, PhpHandler, RenderedFile, ServerSettings } from '@xpanel/core'
 import {
   cgiWrapperDir,
@@ -224,11 +224,13 @@ const serverNameLines = (g: SiteGroup): string[] => {
   return lines
 }
 
-const docDirectory = (docRoot: string, extra: string[], execCgi: boolean): string[] =>
+const docDirectory = (docRoot: string, extra: string[], execCgi: boolean, indexFiles?: string[]): string[] =>
   section(`Directory ${apacheQuote(docRoot)}`, 'Directory', [
     'AllowOverride All',
     `Options -Indexes +SymLinksIfOwnerMatch${execCgi ? ' +ExecCGI' : ''}`,
     'Require all granted',
+    // mod_dir DirectoryIndex adds within a context; reset before replacing (https://httpd.apache.org/docs/2.4/mod/mod_dir.html).
+    ...(indexFiles === undefined ? [] : ['DirectoryIndex disabled', `DirectoryIndex ${validateDomainIndexFiles(indexFiles).join(' ')}`]),
     ...extra,
   ])
 
@@ -271,13 +273,13 @@ const vhostBody = (
   }
   if (mode === 'upstream' || wiring === null) {
     const note = mode === 'upstream' ? [`# ${d.siteType} site: Nginx proxies it to its app upstream directly`] : []
-    return [...head, ...note, ...docDirectory(d.docRoot, [], false), ...DENY_PHP]
+    return [...head, ...note, ...docDirectory(d.docRoot, [], false, mode === 'upstream' ? undefined : d.indexFiles), ...DENY_PHP]
   }
   const version = d.php.version
   if (wiring === 'fpm') {
     return [
       ...head,
-      ...docDirectory(d.docRoot, [], false),
+      ...docDirectory(d.docRoot, [], false, d.indexFiles),
       ...section('FilesMatch "\\.php$"', 'FilesMatch', [
         `SetHandler ${apacheQuote(`proxy:unix:${fpmSocketPath(user, version)}|fcgi://localhost`)}`,
       ]),
@@ -287,12 +289,12 @@ const vhostBody = (
     return [
       ...head,
       `SuexecUserGroup ${user} ${user}`,
-      ...docDirectory(d.docRoot, [`FcgidWrapper ${apacheQuote(cgiWrapperPath(user, version, 'fcgi', os))} .php`], true),
+      ...docDirectory(d.docRoot, [`FcgidWrapper ${apacheQuote(cgiWrapperPath(user, version, 'fcgi', os))} .php`], true, d.indexFiles),
       ...section('FilesMatch "\\.php$"', 'FilesMatch', ['SetHandler fcgid-script']),
     ]
   }
   const suexec = wiring === 'suphp-action' ? [`SuexecUserGroup ${user} ${user}`] : []
-  return [...head, ...suexec, ...docDirectory(d.docRoot, [], false), ...actionBlock(account, version, os)]
+  return [...head, ...suexec, ...docDirectory(d.docRoot, [], false, d.indexFiles), ...actionBlock(account, version, os)]
 }
 
 /** Deepest base name first; more labels than any legal name could have keeps the prefix positive. */

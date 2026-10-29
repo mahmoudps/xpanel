@@ -190,6 +190,11 @@ const inferFileServiceAndOwner = (
     const unitName = path.split('/').pop() ?? path
     return { service: 'cron', logicalOwner: `cron:${unitName}`, dependentUnits: [unitName] }
   }
+  const cronSource = /^\/etc\/xpanel\/cron\/([a-z][a-z0-9]{0,15})\/([A-Za-z0-9_-]{1,64})\.command$/.exec(path)
+  if (cronSource) {
+    const unit = `xpanel-cron-${cronSource[1]}-${cronSource[2]}.service`
+    return { service: 'cron', logicalOwner: `cron:${unit}`, dependentUnits: [unit] }
+  }
   if (path.includes('/systemd/')) {
     const unitName = path.split('/').pop() ?? path
     return { service: 'systemd', logicalOwner: `systemd:${unitName}`, dependentUnits: [unitName] }

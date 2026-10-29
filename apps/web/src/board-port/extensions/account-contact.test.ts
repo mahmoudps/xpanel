@@ -1,0 +1,10 @@
+import { describe,expect,it } from 'vitest'
+import { renderAccountContact } from './account-contact.ts'
+
+describe('account contact email card',()=>{
+  it('starts unread with no invented saved address or active Save',()=>{const html=renderAccountContact({lang:'en',expectedAccountId:'account-a',canManage:true});expect(html).toContain('Not read');expect(html).toContain('data-contact-save disabled');expect(html).toContain('name="contactEmail"');expect(html).toContain('type="text"');expect(html).toContain('inputmode="email"');expect(html).not.toContain('name="accountId"');expect(html).not.toContain('type="email"')})
+  it('preserves read-only metadata and Refresh without a mutation form',()=>{const html=renderAccountContact({lang:'en',expectedAccountId:'account-a',canManage:false});expect(html).toContain('data-contact-refresh');expect(html).not.toContain('<form');expect(html).not.toMatch(/<button\b[^>]*\bdata-contact-save(?:\s|>)/)})
+  it('escapes the trusted account pin without displaying it as a contact value',()=>{const html=renderAccountContact({lang:'en',expectedAccountId:'" onclick="bad',canManage:true});expect(html).toContain('&quot;');expect(html).not.toContain('data-contact-account="" onclick=');expect(html).not.toContain('value="account-')})
+  it('keeps Arabic copy, isolated email direction and scoped alignment/spacing',()=>{const html=renderAccountContact({lang:'ar',expectedAccountId:'account-a',canManage:true});expect(html).toContain('بريد التواصل');expect(html).toContain('dir="rtl"');expect(html).toContain('dir="ltr"');expect(html).toContain('text-align:right');expect(html).toContain('text-box-trim:trim-end');expect(html).toContain('gap:24px');expect(html).toContain('aria-live="polite"')})
+  it('does not invent verification, login or mailbox actions',()=>{const html=renderAccountContact({lang:'en',expectedAccountId:'account-a',canManage:true});expect(html).not.toContain('Send verification');expect(html).not.toContain('Change password');expect(html).not.toContain('SMTP');expect(html).toContain('Reload saved details')})
+})

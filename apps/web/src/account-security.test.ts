@@ -31,7 +31,8 @@ describe('optional two-factor enrollment', () => {
     expect(security).toContain('data-auth-setup-form')
     expect(security).toContain('data-auth-recovery')
     expect(security).not.toContain('data-mfa-optional-link')
-    expect(security).not.toMatch(/must complete enrollment|إلزامي/)
+    // Inline client bindings (e.g. FTP TLS mode labels) legitimately say "Required"; enrollment copy is page markup.
+    expect(security.replace(/<script\b[\s\S]*?<\/script>/g, '')).not.toMatch(/must complete enrollment|إلزامي/)
     expect(security).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
     if (locale === 'ar') expect(security).toMatch(/[\u0600-\u06ff]/)
 

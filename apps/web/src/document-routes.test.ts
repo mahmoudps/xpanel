@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { navigation } from '@xpanel/catalog'
+import { canonicalNavigationRoute, navigation } from '@xpanel/catalog'
 import { serveWebUi } from './app.ts'
 import { resolveSurfaceSection } from './shell.ts'
 import { contextualizeDocumentLinks, contextualizeNavigationHref, resolveWebDocumentRoute } from './document-routes.ts'
 
 describe('product document route identity and context', () => {
+  it('keeps managed mail folder identity while inheriting Inbox qualification', () => {
+    for (const route of ['/mail/sent', '/mail/drafts', '/mail/trash']) {
+      expect(resolveWebDocumentRoute(route)).toEqual({ surface: 'xmail', activeRoute: route })
+      expect(canonicalNavigationRoute(route)).toBe('/mail/inbox')
+    }
+  })
   it('recognizes every declared product page without promoting its capability', () => {
     for (const surface of navigation) for (const section of surface.sections) for (const page of section.pages) {
       expect(resolveWebDocumentRoute(page.route)).toEqual({ surface: surface.surface, activeRoute: page.route })

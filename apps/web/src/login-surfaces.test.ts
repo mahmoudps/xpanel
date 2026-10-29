@@ -40,7 +40,7 @@ describe('listener-specific sign-in presentation', () => {
         assert.match(html, /<aside[^>]+aria-label=/)
         assert.match(html, /<footer[^>]+role="contentinfo"/)
         assert.match(html, /data-login-design="approved"/)
-        assert.match(html, /class="xp-login-profile-tabs"/)
+        assert.doesNotMatch(html, /class="xp-login-profile-tabs"|data-login-profile=/)
         assert.match(html, /data-login-success data-required-auth-state="authenticated"/)
         assert.match(html, /data-login-lockout-details/)
         for (const field of ['login-username', 'login-password', 'login-otp', 'login-recovery-code']) {
@@ -118,25 +118,17 @@ describe('listener-specific sign-in presentation', () => {
     }
   })
 
-  it('names the panel, labels the theme control, and links only safe sibling origins', () => {
+  it('names the panel, labels the theme control, and links no other panel', () => {
     const bare = renderLoginSurface({ audience: 'xpanel', theme: 'light' })
     assert.match(bare, /data-login-product="xpanel"/)
     assert.match(bare, /aria-label="Dark theme"/)
     assert.match(bare, /class="xp-login-theme__label"/)
     assert.match(bare, /data-password-label>Show</)
     assert.doesNotMatch(bare, /data-panel-link|mailto:/)
-    const linked = renderLoginSurface({
-      audience: 'xpanel', theme: 'light', supportEmail: 'ops@example.test',
-      panels: [
-        { surface: 'xpanel', origin: 'https://panel.example.test:2083' },
-        { surface: 'xwhm', origin: 'https://whm.example.test:2087' },
-        { surface: 'xmail', origin: 'http://mail.example.test:2096' },
-        { surface: 'xmail', origin: 'https://user:pass@mail.example.test:2096' },
-      ],
-    })
-    assert.match(linked, /data-panel-link="xwhm" href="https:\/\/whm\.example\.test:2087\/login\?lang=en&amp;theme=light"/)
-    assert.match(linked, /mailto:ops@example.test/)
-    assert.doesNotMatch(linked, /data-panel-link="xpanel"|data-panel-link="xmail"|http:\/\/mail/)
+    const own = renderLoginSurface({ audience: 'xpanel', theme: 'light', supportEmail: 'ops@example.test', publicOrigin: 'https://panel.example.test:2083' })
+    assert.match(own, /<bdi dir="ltr">panel\.example\.test:2083<\/bdi>/)
+    assert.match(own, /mailto:ops@example.test/)
+    assert.doesNotMatch(own, /data-panel-link|https:\/\/|xWHM|xMail/)
     assert.doesNotMatch(renderLoginSurface({ audience: 'xmail', supportEmail: 'not an email' }), /mailto:/)
   })
 
