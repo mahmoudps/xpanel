@@ -451,7 +451,7 @@ const verifySourceClosure = (files) => {
   return { checkedSources, checkedImports }
 }
 
-const collectProductionSbom = (sourceRoot, version, nodeVersion, packageManager, lockfileSha256) => {
+export const collectProductionSbom = (sourceRoot, version, nodeVersion, packageManager, lockfileSha256) => {
   const workspacePackages = []
   for (const group of ['apps', 'packages']) {
     const groupDir = join(sourceRoot, group)
@@ -483,6 +483,8 @@ const collectProductionSbom = (sourceRoot, version, nodeVersion, packageManager,
   // Verified production external packages from lockfile & runtime policy
   const productionDependencies = [
     { name: 'ws', version: '8.22.0', license: 'MIT', nativeAddon: false },
+    { name: '@xterm/xterm', version: '5.5.0', license: 'MIT', nativeAddon: false },
+    { name: '@xterm/addon-fit', version: '0.10.0', license: 'MIT', nativeAddon: false },
     { name: 'tar-stream', version: '3.2.2', license: 'MIT', nativeAddon: false },
     { name: 'yaml', version: '2.9.1', license: 'ISC', nativeAddon: false },
     { name: 'b4a', version: '1.9.0', license: 'Apache-2.0', nativeAddon: false },
