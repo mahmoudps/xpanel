@@ -290,6 +290,15 @@ describe('approved workspace browser bindings', () => {
     submit(); submit(); await tick()
     expect(send.mock.calls).toEqual([['POST', '/api/firewall/rules', payload], ['GET', '/api/firewall']]); expect(status().dataset.state).toBe('stored'); expect(status().textContent).toContain('traffic enforcement are not verified')
   })
+  it('confirms an applied port rule from this session after the readback', async () => {
+    const payload = { kind: 'port', action: 'accept', protocol: 'tcp', port: '8443', source: null, forwardTo: null, list: null, comment: 'Web', enabled: true }
+    const rule = { ...payload, id }, confirmation = { id: '00000000-0000-4000-8000-0000000000bb', deadline: '2026-10-29T00:02:00.000Z' }
+    const send = vi.fn<Request>().mockResolvedValueOnce({ rule, confirmation, reconcile: null }).mockResolvedValueOnce({ rules: [rule], prefixLists: [] }).mockResolvedValueOnce({ confirmed: true, rules: [rule] }); request(send)
+    boot('<form data-firewall-port-rule-form><input type="radio" name="action" value="accept" checked><select name="protocol"><option value="tcp">TCP</option></select>' + field('port', '8443') + field('source', '') + field('comment', 'Web') + '<button type="submit">Save</button><p data-firewall-port-rule-status></p></form>')
+    submit(); await tick()
+    expect(send.mock.calls).toEqual([['POST', '/api/firewall/rules', payload], ['GET', '/api/firewall'], ['POST', '/api/firewall/confirm', { id: confirmation.id }]])
+    expect(status().dataset.state).toBe('stored'); expect(status().textContent).toContain('confirmed from this session')
+  })
   it.each(['0', '65536', '9000-8000', '1,2', '1e3'])('rejects an invalid firewall port before mutation: %s', async port => {
     const send = vi.fn<Request>(); request(send)
     boot('<form data-firewall-port-rule-form><input type="radio" name="action" value="accept" checked><select name="protocol"><option value="tcp">TCP</option></select>' + field('port', port) + '<button type="submit">Save</button><p data-firewall-port-rule-status></p></form>')

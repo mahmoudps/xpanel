@@ -4,11 +4,11 @@ import type { Mock } from 'vitest'
 import { renderWhmMonitoringAlertsWorkspace } from './board-port/whm-monitoring-alerts-workspace.ts'
 import { readMonitoringAlertsView, WHM_MONITORING_ALERTS_CLIENT_BINDING } from './whm-monitoring-alerts-client.ts'
 
-const IDS = ['load', 'memory', 'swap', 'disk-space', 'disk-inodes', 'services', 'drift', 'certificates', 'reboot']
+const IDS = ['load', 'memory', 'swap', 'disk-space', 'disk-inodes', 'services', 'drift', 'certificates', 'reboot', 'bandwidth']
 const pct = (min: number, max: number, value: number, direction = 'above') => ({ unit: 'percent', direction, min, max, decimals: 0, default: value })
 const BOUNDS: Record<string, Record<string, unknown> | null> = {
   load: { unit: 'per-processor', direction: 'above', min: 0.5, max: 10, decimals: 1, default: 1 }, memory: pct(1, 50, 15, 'below'), swap: pct(10, 99, 50),
-  'disk-space': pct(50, 99, 85), 'disk-inodes': pct(50, 99, 85), services: null, drift: null, certificates: { unit: 'days', direction: 'below', min: 1, max: 14, decimals: 0, default: 14 }, reboot: null,
+  'disk-space': pct(50, 99, 85), 'disk-inodes': pct(50, 99, 85), services: null, drift: null, certificates: { unit: 'days', direction: 'below', min: 1, max: 14, decimals: 0, default: 14 }, reboot: null, bandwidth: pct(50, 100, 80),
 }
 const DEFAULTS = IDS.map(id => ({ id, enabled: true, threshold: (BOUNDS[id]?.default as number | undefined) ?? null }))
 const R1 = 'a'.repeat(64), R2 = 'b'.repeat(64)
@@ -45,7 +45,7 @@ afterEach(() => { document.body.innerHTML = ''; document.documentElement.lang = 
 
 describe('WHM monitoring alerts client parser', () => {
   it('accepts consistent views and a delivery log of known results only', () => {
-    expect(readMonitoringAlertsView(view()).rules).toHaveLength(9)
+    expect(readMonitoringAlertsView(view()).rules).toHaveLength(10)
     expect(readMonitoringAlertsView(evaluated(FIRING)).evaluation!.results[3]).toMatchObject({ state: 'firing', severity: 'critical', firstFiredAt: FIRED })
     expect(readMonitoringAlertsView(evaluated(FIRING, {}, { log: LOG })).delivery.log[0]).toMatchObject({ channel: 'webhook', error: 'rejected_status', status: 503 })
     for (const bad of [

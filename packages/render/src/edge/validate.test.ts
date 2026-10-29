@@ -198,7 +198,7 @@ describe('xPanel paths', () => {
     }
   })
   it('builds per-instance socket and wrapper paths from validated names', () => {
-    expect(fpmSocketPath('alice', '8.3')).toBe('/run/xpanel/fpm/alice-8.3/php-fpm.sock')
+    expect(fpmSocketPath('alice', '8.3')).toBe('/run/xpanel-fpm/alice-8.3/php-fpm.sock')
     expect(cgiWrapperPath('alice', '8.3', 'cgi', debianOs)).toBe('/var/www/xpanel-cgi/alice/php8.3.cgi')
     expect(codeOf(() => fpmSocketPath('../root', '8.3'))).toBe('VALIDATION')
     expect(codeOf(() => cgiWrapperPath('alice', '8.3', 'cgi', { ...debianOs, paths: { ...debianOs.paths, suexecDocroot: '/var/www/../..' } }))).toBe('VALIDATION')

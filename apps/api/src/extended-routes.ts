@@ -1,6 +1,6 @@
 import { createHash, createPublicKey, randomUUID } from 'node:crypto'
 import { isIP } from 'node:net'
-import { services as mailServices } from '@xpanel/render'
+import { services as mailServices, system } from '@xpanel/render'
 import { join } from 'node:path'
 import {
   fail,
@@ -22,11 +22,12 @@ import type {
 } from '@xpanel/core'
 import type { Db } from '@xpanel/db'
 import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
-import type { StateStore } from '@xpanel/state'
+import type { StateStore, WriterLease } from '@xpanel/state'
+import { readRuntimeRegistry } from '../../agent/src/account-runtime.ts'
 import { passwordHashFromInput } from './auth.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 import { createContactToolsRoutes, createContactMetadataAccess, assertContactMutationCapacity } from './mail/contact-tools-routes.ts'
-import { assertMailboxMetadataAuthority, captureMailboxMetadataAuthority, readBoundMailboxIdentityRecords, MAILBOX_METADATA_REVIEW_REQUIRED } from './mail/metadata-authority.ts'
+import { assertMailboxMetadataAuthority, captureMailboxMetadataAuthority, readBoundMailboxIdentityRecords, resolveMailboxMetadataAuthority, MAILBOX_METADATA_REVIEW_REQUIRED } from './mail/metadata-authority.ts'
 import { createIdentityMetadataRoutes } from './mail/identity-routes.ts'
 import { readContactVcards } from './mail/contact-vcard.ts'
 import { createCalendarWorkspaceRoutes } from './mail/calendar-workspace.ts'
@@ -37,9 +38,10 @@ import { createTransferWorkspaceRoutes } from './transfer-workspace.ts'
 import type { TransferWorkspacePorts } from './transfer-workspace.ts'
 import { createTransferSourceDiscovery } from './acct-transfer-discovery.ts'
 import { readTransferCredentialToken } from './acct-transfer-credentials.ts'
-import { validateForwarderInput } from './mail/forwarder-validation.ts'
+import { canonicalForwarderAddress, validateForwarderInput, type ForwarderAction } from './mail/forwarder-validation.ts'
+import { applyMailRoutingChange, commitRoutingRevision, readMailRoutingStatus, type MailRoutingRecordState, type MailRoutingStatusView } from './mail/routing-application.ts'
 import { createFilterRoutes } from './mail/filter-routes.ts'
-import { compileFilterRulesSafe } from './mail/filter-validation.ts'
+import { createAutoresponderRoutes } from './mail/autoresponder-routes.ts'
 import { contactWorkspaceRevision, projectContactWorkspace, parseContactWorkspaceRequest,
   createWorkspaceContact, updateWorkspaceContact, normalizeContactGroups, updateWorkspaceContactGroups } from './mail/contact-workspace.ts'
 import { compileVacationWorkspace, parseVacationWorkspaceRequest, projectVacationWorkspace,
@@ -60,7 +62,8 @@ export interface ExtendedRouteHelpers {
   serverSecret?: string
   backupDestinationHost?: (caller: AuthenticatedCaller, path: string, body?: unknown) => Promise<unknown>
   /** Server-to-server transfer execution (apps/api/src/lifecycle-transfer-execution.ts); absent without the host agent. */
-  transferExecution?: TransferWorkspacePorts['execution']
+  /** Native transfer execution, background caller and cPanel import; absent without the host agent. */
+  transferPorts?: Pick<TransferWorkspacePorts, 'execution' | 'callerFor' | 'cpanel'>
   /** Authenticated agent result. Private key material must never cross this boundary. */
   readDkimPublicMaterial?: (caller: AuthenticatedCaller, domain: string) => Promise<{ selector: string; publicKeyPem: string } | null>
   requireCaller: (req: Request, opts?: { allowUnverifiedMfa?: boolean; deferDeniedAudit?: (input: Parameters<ExtendedRouteHelpers['emitAudit']>[0]) => void }) => Promise<AuthenticatedCaller>
@@ -107,8 +110,20 @@ export interface EmailForwarder {
   id: Id
   accountId: Id | null
   sourceAddress: string
+  /** absent on records saved before reject existed means forward */
+  action?: ForwarderAction
   destinations: string[]
+  rejectMessage?: string
   createdAt: string
+}
+
+/** cPanel "default address": what happens to mail for an address that does not exist on the domain. */
+export interface DefaultAddressRecord {
+  accountId: Id
+  domain: string
+  kind: 'reject' | 'forward' | 'discard'
+  destination: string | null
+  updatedAt: string
 }
 
 export interface MailingListRecord {
@@ -123,31 +138,6 @@ export interface MailingListRecord {
   createdAt: string
   selfSubscription?: 'open' | 'closed'
   memberAuthorities?: Record<string, MailboxMetadataAuthority>
-}
-
-export interface SieveFilterCondition {
-  field: 'from' | 'to' | 'subject' | 'header' | 'size' | 'body'
-  headerName?: string
-  comparator: 'contains' | 'is' | 'matches' | 'over' | 'under'
-  value: string
-}
-
-export interface SieveFilterRule {
-  id: Id
-  accountId: Id | null
-  scope: 'global' | 'mailbox'
-  mailbox: string | null
-  name: string
-  priority: number
-  enabled: boolean
-  matchAll: boolean
-  conditions: SieveFilterCondition[]
-  action: {
-    type: 'fileinto' | 'redirect' | 'discard' | 'reject' | 'keep'
-    target?: string
-  }
-  compiledSieve: string
-  createdAt: string
 }
 
 export interface SpamSettingsState {
@@ -303,10 +293,16 @@ export interface BackupScheduleConfig {
   enabled: boolean
   frequency: 'daily' | 'weekly' | 'monthly'
   cron: string
+  /** Daily copies; weekly and monthly copies keep the newest archive of each of that many ISO weeks and months. */
   retentionCount: number
+  retentionWeekly: number
+  retentionMonthly: number
   compress: 'zstd' | 'gzip'
   includeDatabases: boolean
   includeMail: boolean
+  includeDns: boolean
+  /** Once-per-run snapshot of desired state and the index database, for disaster recovery and upgrade rollback. */
+  includeControl: boolean
   selectedAccounts: string[] | 'all'
   destinationIds: Id[]
   updatedAt: string
@@ -414,27 +410,6 @@ export interface RemoteDatabaseHostsConfig {
   updatedAt: string
 }
 
-export interface AccountCacheConfig {
-  accountId: Id
-  uid: number
-  username: string
-  slice: string
-  redis: {
-    enabled: boolean
-    socketPath: string
-    maxMemoryMb: number
-    evictionPolicy: 'allkeys-lru' | 'volatile-lru' | 'noeviction'
-    systemdUnit: string
-  }
-  memcached: {
-    enabled: boolean
-    socketPath: string
-    maxMemoryMb: number
-    systemdUnit: string
-  }
-  updatedAt: string
-}
-
 export interface ServerFineSettingsState {
   limits: {
     maxMemoryPerProcessMb: number
@@ -466,25 +441,6 @@ export interface ServerFineSettingsState {
     modSecurityEnabled: boolean
   }
   updatedAt: string
-}
-
-export interface RootlessContainerRecord {
-  id: Id
-  accountId: Id
-  username: string
-  uid: number
-  name: string
-  image: string
-  runtime: 'podman' | 'docker'
-  internalPort: number
-  hostPort: number
-  env: Record<string, string>
-  memoryMb: number
-  cpuPercent: number
-  slice: string
-  systemdUnit: string
-  status: 'running' | 'stopped'
-  createdAt: string
 }
 
 export type AppCatalogType = 'wordpress' | 'laravel' | 'drupal' | 'joomla' | 'ghost' | 'nextcloud'
@@ -519,38 +475,6 @@ export interface ClusterNodeRecord {
   joinedAt: string
 }
 
-export interface PanelBrandingConfig {
-  companyName: string
-  productName: string
-  logoUrl: string | null
-  faviconUrl: string | null
-  primaryColorOklch: string
-  accentColorOklch: string
-  supportUrl: string
-  supportEmail: string
-  footerText: string
-  hidePoweredBy: boolean
-  updatedAt: string
-}
-
-export interface LanguageOverridePack {
-  locale: string
-  direction: 'ltr' | 'rtl'
-  overrides: Record<string, string>
-  updatedAt: string
-}
-
-export interface WhmcsIntegrationConfig {
-  enabled: boolean
-  whmcsUrl: string
-  apiIdentifier: string
-  allowedIps: string[]
-  ssoRedirectTarget: 'xpanel' | 'xwhm' | 'xmail'
-  autoProvisionOnOrder: boolean
-  webhookSecretConfigured: boolean
-  updatedAt: string
-}
-
 // ---------------------------------------------------------------------------
 // Compilers & Helpers
 // ---------------------------------------------------------------------------
@@ -568,8 +492,6 @@ const readJsonBody = async <T = Record<string, unknown>>(req: Request): Promise<
   if (!body || typeof body !== 'object' || Array.isArray(body)) return fail('VALIDATION', 'request body must be a JSON object')
   return body as T
 }
-
-export const compileSieveRules = (rules: readonly SieveFilterRule[]): string => compileFilterRulesSafe(rules)
 
 export const compileVacationSieve = (cfg: {
   enabled: boolean
@@ -731,10 +653,27 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     return account.id
   }
 
+  const applyMailRouting = (caller: AuthenticatedCaller, revision: number, restore: { relPath: string; previous: unknown }) => applyMailRoutingChange({
+    store: helpers.store, db: helpers.db, reconcile: () => helpers.triggerReconcile(caller),
+    audit: reason => helpers.emitAudit({ actor: caller.principal.username, action: 'mail.routing.rolled_back', target: 'mail-routing:' + restore.relPath,
+      detail: { reason }, outcome: 'failed', principalId: caller.principal.id }),
+  }, revision, { path: join(ext.baseDir, restore.relPath), previous: restore.previous })
+
+  const forwarderView = (record: EmailForwarder, status: MailRoutingStatusView) => ({
+    ...record, action: record.action ?? 'forward',
+    application: status.record('forwarder', record.id, { domain: record.sourceAddress.split('@')[1] ?? '' }),
+  })
+
+  const handleAutoresponderRoute = createAutoresponderRoutes({ store: helpers.store, ext, requireCaller: helpers.requireCaller, requireResolvedAccount,
+    emitAudit: helpers.emitAudit, readRoutingStatus: () => readMailRoutingStatus(helpers.store, helpers.db), commitRoutingRevision, applyRouting: applyMailRouting })
+
   const handleFilterRoute = createFilterRoutes({
     store: helpers.store, requireCaller: helpers.requireCaller, emitAudit: helpers.emitAudit,
     readFilters: () => ext.readOrDefault<unknown[]>('mail/filters.json', []),
     writeFilters: values => ext.write('mail/filters.json', values),
+    commitRoutingRevision,
+    applyFilters: (caller, revision, previous) => applyMailRouting(caller, revision, { relPath: 'mail/filters.json', previous }),
+    readRoutingStatus: () => readMailRoutingStatus(helpers.store, helpers.db),
     requireAccountId, assertRecordAccount, scopedRecords,
   })
   const handleContactToolsRoute = createContactToolsRoutes(helpers)
@@ -763,7 +702,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     ...(helpers.backupDestinationHost ? { destinationHost: helpers.backupDestinationHost } : {}),
   })
   const handleTransferWorkspaceRoute = createTransferWorkspaceRoutes(helpers, { discover: createTransferSourceDiscovery({ readToken: id => readTransferCredentialToken(helpers.store, id) }),
-    ...(helpers.transferExecution ? { execution: helpers.transferExecution } : {}) })
+    ...(helpers.transferPorts ?? {}) })
   const handleExtendedRoute = async (req: Request, url: URL, method: string): Promise<Response | null> => {
     const { pathname } = url
     const identityResponse = await handleIdentityMetadataRoute(req)
@@ -1016,122 +955,174 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     const domFwdDeleteMatch = /^\/api\/mail\/domain-forwarders\/([^/]+)$/.exec(pathname)
     if (pathname === '/api/mail/domain-forwarders' || domFwdDeleteMatch) {
       const caller = await helpers.requireCaller(req)
-      const list = await ext.readOrDefault<DomainForwarder[]>('mail/domain-forwarders.json', [])
+      const domainForwarderView = (record: DomainForwarder, status: MailRoutingStatusView) => ({
+        ...record, application: status.record('domain-forwarder', record.id, { domain: record.sourceDomain }),
+      })
       if (method === 'GET') {
-        return jsonResponse({ domainForwarders: await scopedRecords(caller, list) })
+        const list = await ext.readOrDefault<DomainForwarder[]>('mail/domain-forwarders.json', [])
+        const status = await readMailRoutingStatus(helpers.store, helpers.db)
+        return jsonResponse({ domainForwarders: (await scopedRecords(caller, list)).map(record => domainForwarderView(record, status)) })
       }
-      if (method === 'POST') {
-        const body = await readJsonBody<{
-          accountId?: Id
-          sourceDomain?: string
-          targetDomain?: string
-        }>(req)
-        const sourceDomain = validateDomainName(body.sourceDomain ?? '')
-        const targetDomain = validateDomainName(body.targetDomain ?? '')
-        if (sourceDomain === targetDomain) {
-          return fail('VALIDATION', 'sourceDomain and targetDomain must be different')
-        }
-        const account = await requireDomainAccount(helpers.store, caller, sourceDomain, 'mail.domain_forwarder.create', body.accountId)
-        const record: DomainForwarder = {
-          id: randomUUID(),
-          accountId: account.id,
-          sourceDomain,
-          targetDomain,
-          createdAt: new Date().toISOString(),
-        }
-        list.push(record)
-        await ext.write('mail/domain-forwarders.json', list)
-        const compiledVirtualMap = (await scopedRecords(caller, list)).map((f) => `@${f.sourceDomain} @${f.targetDomain}`).join('\n') + '\n'
+      if (method === 'POST' || method === 'DELETE') {
+        const body = await readJsonBody<{ accountId?: Id; sourceDomain?: string; targetDomain?: string; id?: string }>(req)
+        let lease: WriterLease | null = await helpers.store.getWriterLock().acquire()
+        let record: DomainForwarder | undefined
+        let previous: DomainForwarder[] | null
+        let revision: number
+        try {
+          const stored = await ext.readOrDefault<DomainForwarder[] | null>('mail/domain-forwarders.json', null)
+          previous = stored
+          const list = stored ?? []
+          let next: DomainForwarder[]
+          if (method === 'POST') {
+            const sourceDomain = validateDomainName(body.sourceDomain ?? '')
+            const targetDomain = validateDomainName(body.targetDomain ?? '')
+            if (sourceDomain === targetDomain) return fail('VALIDATION', 'sourceDomain and targetDomain must be different')
+            const account = await requireDomainAccount(helpers.store, caller, sourceDomain, 'mail.domain_forwarder.create', body.accountId)
+            await assertAccountFeatures(helpers.store, caller, account, ['forwarders'])
+            if (list.some(item => item.sourceDomain === sourceDomain)) return fail('CONFLICT', 'This domain already has a domain forwarder')
+            const defaults = await ext.readOrDefault<DefaultAddressRecord[]>('mail/default-addresses.json', [])
+            if (defaults.some(item => item.domain === sourceDomain && item.kind !== 'reject')) return fail('CONFLICT', 'Set the default address of this domain to reject before adding a domain forwarder')
+            record = { id: randomUUID(), accountId: account.id, sourceDomain, targetDomain, createdAt: new Date().toISOString() }
+            next = [...list, record]
+          } else {
+            const targetId = domFwdDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
+            record = list.find(item => item.id === targetId || item.sourceDomain === targetId)
+            await assertRecordAccount(caller, record, 'mail.domain_forwarder.delete')
+            next = list.filter(item => item !== record)
+          }
+          await lease.assertFencingToken()
+          await ext.write('mail/domain-forwarders.json', next)
+          revision = await commitRoutingRevision(lease)
+        } finally { await lease?.release(); lease = null }
+        const status = await applyMailRouting(caller, revision, { relPath: 'mail/domain-forwarders.json', previous })
         await helpers.emitAudit({
           actor: caller.principal.username,
-          action: 'mail.domain_forwarder.created',
-          target: `domain-forwarder:${sourceDomain}->${targetDomain}`,
+          action: method === 'POST' ? 'mail.domain_forwarder.created' : 'mail.domain_forwarder.deleted',
+          target: `domain-forwarder:${record!.sourceDomain}->${record!.targetDomain}`,
+          detail: { revision },
           outcome: 'ok',
           principalId: caller.principal.id,
         })
-        return jsonResponse({ domainForwarder: record, compiledVirtualMap }, 201)
-      }
-      if (method === 'DELETE') {
-        const body = await readJsonBody<{ id?: string }>(req)
-        const targetId = domFwdDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
-        await assertRecordAccount(caller, list.find(item => item.id === targetId || item.sourceDomain === targetId), 'mail.domain_forwarder.delete')
-        const next = list.filter((item) => item.id !== targetId && item.sourceDomain !== targetId)
-        await ext.write('mail/domain-forwarders.json', next)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'mail.domain_forwarder.deleted',
-          target: `domain-forwarder:${String(targetId)}`,
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ ok: true })
+        return method === 'POST'
+          ? jsonResponse({ domainForwarder: domainForwarderView(record!, status), revision }, 201)
+          : jsonResponse({ ok: true, revision })
       }
     }
 
     const fwdDeleteMatch = /^\/api\/mail\/forwarders\/([^/]+)$/.exec(pathname)
     if (pathname === '/api/mail/forwarders' || fwdDeleteMatch) {
       const caller = await helpers.requireCaller(req)
-      let lease = method === 'POST' || method === 'DELETE' ? await helpers.store.getWriterLock().acquire() : null
-      try {
+      if (method === 'GET') {
         const list = await ext.readOrDefault<EmailForwarder[]>('mail/forwarders.json', [])
-        const application = { status: 'configuration_only', nativeApplied: false } as const
-        if (method === 'GET') {
-          return jsonResponse({ forwarders: await scopedRecords(caller, list), application })
-        }
-        if (method === 'POST') {
-          const body = validateForwarderInput(await readJsonBody<unknown>(req))
-          const { sourceAddress, destinations } = body
-          const account = await requireDomainAccount(helpers.store, caller, sourceAddress.split('@')[1]!, 'mail.forwarder.create', body.accountId)
-          const accountRecords = list.filter(item => item.accountId === account.id)
-          if (accountRecords.some(item => item.sourceAddress.toLowerCase() === sourceAddress)) return fail('CONFLICT', 'A forwarder for this source already exists')
-          const plan = await helpers.store.getPlan(account.planId)
-          if (!plan) return fail('CONFLICT', 'The account plan is unavailable')
-          const cap = plan.caps.forwarders
-          if (cap !== 'unlimited' && accountRecords.length >= cap) return fail('CONFLICT', 'The account forwarder limit has been reached')
-          const record: EmailForwarder = {
-            id: randomUUID(),
-            accountId: account.id,
-            sourceAddress,
-            destinations,
-            createdAt: new Date().toISOString(),
+        const status = await readMailRoutingStatus(helpers.store, helpers.db)
+        return jsonResponse({ forwarders: (await scopedRecords(caller, list)).map(record => forwarderView(record, status)), generationId: status.generationId })
+      }
+      if (method === 'POST' || method === 'DELETE') {
+        const input = method === 'POST' ? validateForwarderInput(await readJsonBody<unknown>(req)) : null
+        const body = method === 'DELETE' ? await readJsonBody<{ id?: string }>(req) : {}
+        let lease: WriterLease | null = await helpers.store.getWriterLock().acquire()
+        let record: EmailForwarder | undefined
+        let previous: EmailForwarder[] | null
+        let revision: number
+        try {
+          const stored = await ext.readOrDefault<EmailForwarder[] | null>('mail/forwarders.json', null)
+          previous = stored
+          const list = stored ?? []
+          let next: EmailForwarder[]
+          if (input) {
+            const { sourceAddress } = input
+            const account = await requireDomainAccount(helpers.store, caller, sourceAddress.split('@')[1]!, 'mail.forwarder.create', input.accountId)
+            await assertAccountFeatures(helpers.store, caller, account, ['forwarders'])
+            const accountRecords = list.filter(item => item.accountId === account.id)
+            if (accountRecords.some(item => item.sourceAddress.toLowerCase() === sourceAddress)) return fail('CONFLICT', 'A forwarder for this source already exists')
+            if (input.action === 'reject') {
+              const mailbox = await helpers.store.getServiceUserByLogin(sourceAddress)
+              if (mailbox?.services.email) return fail('CONFLICT', 'This address is a mailbox; delete the mailbox before rejecting its mail')
+            }
+            const plan = await helpers.store.getPlan(account.planId)
+            if (!plan) return fail('CONFLICT', 'The account plan is unavailable')
+            const cap = plan.caps.forwarders
+            if (cap !== 'unlimited' && accountRecords.length >= cap) return fail('CONFLICT', 'The account forwarder limit has been reached')
+            record = {
+              id: randomUUID(),
+              accountId: account.id,
+              sourceAddress,
+              action: input.action,
+              destinations: input.destinations,
+              ...(input.rejectMessage === undefined ? {} : { rejectMessage: input.rejectMessage }),
+              createdAt: new Date().toISOString(),
+            }
+            next = [...list, record]
+          } else {
+            const targetId = fwdDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
+            record = list.find(item => item.id === targetId) ?? (await scopedRecords(caller, list)).find(item => item.sourceAddress === targetId)
+            await assertRecordAccount(caller, record, 'mail.forwarder.delete')
+            next = list.filter(item => item !== record)
           }
-          list.push(record)
-          await lease!.assertFencingToken()
-          await ext.write('mail/forwarders.json', list)
-          await lease!.release()
-          lease = null
-          await helpers.emitAudit({
-            actor: caller.principal.username,
-            action: 'mail.forwarder.created',
-            target: `forwarder:${sourceAddress}`,
-            detail: { destinations, application },
-            outcome: 'ok',
-            principalId: caller.principal.id,
-          })
-          return jsonResponse({ forwarder: record, application }, 201)
-        }
-        if (method === 'DELETE') {
-          const body = await readJsonBody<{ id?: string }>(req)
-          const targetId = fwdDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
-          const exact = list.find(item => item.id === targetId)
-          const record = exact ?? (await scopedRecords(caller, list)).find(item => item.sourceAddress === targetId)
-          await assertRecordAccount(caller, record, 'mail.forwarder.delete')
-          const next = list.filter(item => item !== record)
-          await lease!.assertFencingToken()
+          await lease.assertFencingToken()
           await ext.write('mail/forwarders.json', next)
-          await lease!.release()
-          lease = null
-          await helpers.emitAudit({
-            actor: caller.principal.username,
-            action: 'mail.forwarder.deleted',
-            target: `forwarder:${String(targetId)}`,
-            detail: { application },
-            outcome: 'ok',
-            principalId: caller.principal.id,
-          })
-          return jsonResponse({ ok: true, application })
-        }
-      } finally { await lease?.release() }
+          revision = await commitRoutingRevision(lease)
+        } finally { await lease?.release(); lease = null }
+        const status = await applyMailRouting(caller, revision, { relPath: 'mail/forwarders.json', previous })
+        await helpers.emitAudit({
+          actor: caller.principal.username,
+          action: input ? 'mail.forwarder.created' : 'mail.forwarder.deleted',
+          target: `forwarder:${record!.sourceAddress}`,
+          detail: { action: record!.action ?? 'forward', destinations: record!.destinations, revision },
+          outcome: 'ok',
+          principalId: caller.principal.id,
+        })
+        return input
+          ? jsonResponse({ forwarder: forwarderView(record!, status), revision }, 201)
+          : jsonResponse({ ok: true, revision })
+      }
+    }
+
+    if (pathname === '/api/mail/default-addresses') {
+      const caller = await helpers.requireCaller(req)
+      const account = await requireResolvedAccount(caller, url.searchParams.get('accountId'), 'mail.default_address.read')
+      await assertAccountFeatures(helpers.store, caller, account, ['forwarders'])
+      const domains = (await helpers.store.listDomains()).filter(domain => domain.accountId === account.id).map(domain => domain.name).sort()
+      const view = (records: readonly DefaultAddressRecord[], status: MailRoutingStatusView) => domains.map(domain => {
+        const record = records.find(item => item.accountId === account.id && item.domain === domain)
+        return { domain, kind: record?.kind ?? 'reject', destination: record?.destination ?? null, updatedAt: record?.updatedAt ?? null,
+          application: status.record('default-address', domain, { domain }) }
+      })
+      if (method === 'GET') {
+        const records = await ext.readOrDefault<DefaultAddressRecord[]>('mail/default-addresses.json', [])
+        return jsonResponse({ context: { accountId: account.id }, defaultAddresses: view(records, await readMailRoutingStatus(helpers.store, helpers.db)) })
+      }
+      if (method === 'PUT') {
+        const body = await readJsonBody<Record<string, unknown>>(req)
+        if (!body || typeof body !== 'object' || Object.keys(body).some(key => !['domain', 'kind', 'destination'].includes(key))) return fail('VALIDATION', 'domain, kind and destination are the only default address fields')
+        const domain = validateDomainName(String(body.domain ?? ''))
+        if (!domains.includes(domain)) return fail('NOT_FOUND', 'domain not found')
+        if (body.kind !== 'reject' && body.kind !== 'forward' && body.kind !== 'discard') return fail('VALIDATION', 'kind must be reject, forward or discard')
+        const kind = body.kind
+        if (kind !== 'forward' && body.destination != null) return fail('VALIDATION', 'only a forwarding default address has a destination')
+        const destination = kind === 'forward' ? canonicalForwarderAddress(body.destination) : null
+        let lease: WriterLease | null = await helpers.store.getWriterLock().acquire()
+        let previous: DefaultAddressRecord[] | null
+        let revision: number
+        try {
+          const stored = await ext.readOrDefault<DefaultAddressRecord[] | null>('mail/default-addresses.json', null)
+          previous = stored
+          if (kind !== 'reject' && (await ext.readOrDefault<DomainForwarder[]>('mail/domain-forwarders.json', [])).some(item => item.sourceDomain === domain)) {
+            return fail('CONFLICT', 'This domain has a domain forwarder, which already routes its unknown addresses')
+          }
+          const next = [...(stored ?? []).filter(item => item.domain !== domain),
+            ...(kind === 'reject' ? [] : [{ accountId: account.id, domain, kind, destination, updatedAt: new Date().toISOString() }])]
+          await lease.assertFencingToken()
+          await ext.write('mail/default-addresses.json', next)
+          revision = await commitRoutingRevision(lease)
+        } finally { await lease?.release(); lease = null }
+        const status = await applyMailRouting(caller, revision, { relPath: 'mail/default-addresses.json', previous })
+        await helpers.emitAudit({ actor: caller.principal.username, action: 'mail.default_address.updated', target: 'domain:' + domain,
+          detail: { kind, destination, revision }, outcome: 'ok', principalId: caller.principal.id }, { accountId: account.id, resellerId: account.ownerId })
+        const records = await ext.readOrDefault<DefaultAddressRecord[]>('mail/default-addresses.json', [])
+        return jsonResponse({ context: { accountId: account.id }, defaultAddresses: view(records, status), revision })
+      }
     }
 
     const mlDeleteMatch = /^\/api\/mail\/mailing-lists\/([^/]+)$/.exec(pathname)
@@ -1381,6 +1372,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
 
       const importedMailboxes: { email: string; quotaMb: number }[] = []
       const importedForwarders: { sourceAddress: string; destination: string }[] = []
+      let importRevision: number | null = null
       const errors: { row: number; error: string }[] = []
       const includesForwarders = body.kind === 'forwarders' || lines.some((line, i) => {
         if (i === 0 && /^(email|address|username|source)\b/i.test(line)) return false
@@ -1441,6 +1433,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
             })
             await lease.assertFencingToken()
             await ext.write('mail/forwarders.json', forwarders)
+            importRevision = await commitRoutingRevision(lease)
             importedForwarders.push({ sourceAddress: forwarderInput.sourceAddress, destination: forwarderInput.destinations[0]! })
           } finally { await lease.release() }
         } else {
@@ -1462,7 +1455,17 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         }
       }
 
-      const application = body.kind === 'forwarders' || importedForwarders.length > 0 ? { status: 'configuration_only', nativeApplied: false } as const : undefined
+      // one apply for the whole import; a failed test is reported, the imported rows stay saved for review
+      let application: { state: string; reason: string | null; revision: number } | undefined
+      if (importRevision !== null) {
+        let failedApply: string | null = null
+        try {
+          const reconcile = await helpers.triggerReconcile(caller)
+          if (reconcile?.body.status === 'failed') failedApply = String(reconcile.body.error ?? 'mail configuration test failed').slice(0, 500)
+        } catch { /* the status read below reports the host state */ }
+        const status = await readMailRoutingStatus(helpers.store, helpers.db, failedApply)
+        application = { ...status.record('forwarder', '', { domain: importedForwarders[0]!.sourceAddress.split('@')[1]! }), revision: importRevision }
+      }
       await helpers.emitAudit({
         actor: caller.principal.username,
         action: 'mail.import_csv',
@@ -1782,7 +1785,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       if (scoped && url.searchParams.size) return fail('VALIDATION', 'vacation workspace does not accept mailbox selectors', { stateChanged: false })
       const mailbox = await requireMailbox(helpers.store, caller, scoped ? undefined : body.mailbox ?? url.searchParams.get('mailbox'))
       const fileKey = `webmail/vacation/${encodeURIComponent(mailbox)}.json`
-      const application = { status: 'configuration_only', nativeApplied: false } as const
+      const applicationOf = (status: MailRoutingStatusView): MailRoutingRecordState => status.record('autoresponder', mailbox, { mailbox })
       const defaultVac: WebmailVacationConfig = {
         mailbox,
         enabled: false,
@@ -1799,7 +1802,8 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         const authority = await captureMailboxMetadataAuthority(helpers.store, mailbox)
         const stored = await ext.readOrDefault<WebmailVacationConfig | null>(fileKey, null)
         const visible = stored && assessMailboxMetadataAuthority(stored.mailbox, stored.ownerAuthority, authority) === 'match' ? stored : null
-        if (!scoped) return jsonResponse({ vacation: projectVacationWorkspace(visible ?? defaultVac), metadataReview: MAILBOX_METADATA_REVIEW_REQUIRED })
+        const application = applicationOf(await readMailRoutingStatus(helpers.store, helpers.db))
+        if (!scoped) return jsonResponse({ vacation: projectVacationWorkspace(visible ?? defaultVac), application, metadataReview: MAILBOX_METADATA_REVIEW_REQUIRED })
         return jsonResponse({ context: { mailbox }, vacation: visible ? projectVacationWorkspace(visible) : null,
           revision: vacationWorkspaceRevision(visible), application, metadataReview: MAILBOX_METADATA_REVIEW_REQUIRED })
       }
@@ -1810,6 +1814,8 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         const lease = await helpers.store.getWriterLock().acquire()
         let writeAttempted = false
         let vacation: WebmailVacationConfig
+        let previous: WebmailVacationConfig | null = null
+        let stateRevision: number
         let auditCaller = caller
         let auditAccount: Account
         try {
@@ -1833,6 +1839,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           const authority = await captureMailboxMetadataAuthority(helpers.store, mailbox)
           const current = await ext.readOrDefault<WebmailVacationConfig | null>(fileKey, null)
           if (current) assertMailboxMetadataAuthority(current.mailbox, current.ownerAuthority, authority)
+          previous = current
           const merged = { ...(current ?? defaultVac), ...body }
           const fields = submitted ?? parseVacationWorkspaceRequest({ enabled: merged.enabled, subject: merged.subject,
             body: merged.body, htmlBody: merged.htmlBody, startDate: merged.startDate, endDate: merged.endDate,
@@ -1844,22 +1851,27 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           await lease.assertFencingToken()
           writeAttempted = true
           await atomicWriteJson(join(ext.baseDir, fileKey), vacation, 0o640, () => lease.assertFencingToken())
-          await lease.assertFencingToken()
+          stateRevision = await commitRoutingRevision(lease)
         } catch (error) {
           if (writeAttempted) return fail('SERVICE_UNAVAILABLE', 'vacation write requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
           if (isXpanelError(error)) return fail(error.code, error.message, { ...error.detail, stateChanged: false })
           throw error
         } finally { await lease.release() }
+        const application = applicationOf(await applyMailRouting(auditCaller, stateRevision, { relPath: fileKey, previous }))
         try {
           await helpers.emitAudit({ actor: auditCaller.principal.username, action: 'webmail.vacation.updated',
-            target: `vacation:${vacation.mailbox}`, detail: { enabled: vacation.enabled, nativeApplied: false },
+            target: `vacation:${vacation.mailbox}`, detail: { enabled: vacation.enabled, application: application.state, revision: stateRevision },
             outcome: 'ok', principalId: auditCaller.principal.id }, { accountId: auditAccount.id, resellerId: auditAccount.ownerId })
         } catch { return fail('SERVICE_UNAVAILABLE', 'vacation audit requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true }) }
         return scoped ? jsonResponse({ context: { mailbox }, vacation: projectVacationWorkspace(vacation),
           revision: vacationWorkspaceRevision(vacation), stateChanged: true, application, metadataReview: MAILBOX_METADATA_REVIEW_REQUIRED })
-          : jsonResponse({ vacation: projectVacationWorkspace(vacation), metadataReview: MAILBOX_METADATA_REVIEW_REQUIRED })
+          : jsonResponse({ vacation: projectVacationWorkspace(vacation), application, metadataReview: MAILBOX_METADATA_REVIEW_REQUIRED })
       }
     }
+
+    // Account view of every mailbox autoresponder; each one is saved through /api/webmail/vacation
+    const autoresponders = await handleAutoresponderRoute(req, url, method)
+    if (autoresponders) return autoresponders
 
     const contactShareMatch = /^\/api\/webmail\/contacts\/([^/]+)\/share$/.exec(pathname)
     const contactExportMatch = /^\/api\/webmail\/contacts\/([^/]+)\/(?:export|vcard)$/.exec(pathname)
@@ -2919,60 +2931,20 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       })
     }
 
+    // Read-only projection of the saved runtime registry; the account owner changes it through /api/account/runtime,
+    // where the agent checks the plan and the host. One source for the socket paths: system.cachePaths.
     const cacheMatch = /^\/api\/cache\/([^/]+)$/.exec(pathname)
     if (cacheMatch) {
       const caller = await helpers.requireCaller(req)
       const account = await helpers.resolveAccountParam(cacheMatch[1]!)
       await helpers.assertCanAccessAccount(caller, account, 'cache.manage')
-      const slice = `xpanel-${account.uid}.slice`
-      const fileKey = `cache/${account.id}.json`
-      const defaultCache: AccountCacheConfig = {
-        accountId: account.id,
-        uid: account.uid,
-        username: account.username,
-        slice,
-        redis: {
-          enabled: false,
-          socketPath: `/run/xpanel/cache/${account.username}/redis.sock`,
-          maxMemoryMb: 128,
-          evictionPolicy: 'allkeys-lru',
-          systemdUnit: `xpanel-redis-${account.username}.service`,
-        },
-        memcached: {
-          enabled: false,
-          socketPath: `/run/xpanel/cache/${account.username}/memcached.sock`,
-          maxMemoryMb: 64,
-          systemdUnit: `xpanel-memcached-${account.username}.service`,
-        },
-        updatedAt: new Date().toISOString(),
+      if (method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } })
+      const registry = await readRuntimeRegistry(helpers.store.rootDir, account.id)
+      const service = (name: system.CacheService) => {
+        const saved = registry.cache[name], paths = system.cachePaths(account, name)
+        return { enabled: saved?.enabled ?? false, socketPath: paths.socket, maxMemoryMb: saved?.memoryMb ?? null, systemdUnit: paths.unit }
       }
-      if (method === 'GET') {
-        return jsonResponse({ cache: await ext.readOrDefault(fileKey, defaultCache) })
-      }
-      if (method === 'PUT') {
-        const body = await readJsonBody<{
-          redis?: Partial<AccountCacheConfig['redis']>
-          memcached?: Partial<AccountCacheConfig['memcached']>
-        }>(req)
-        const current = await ext.readOrDefault(fileKey, defaultCache)
-        const updated: AccountCacheConfig = {
-          ...current,
-          redis: { ...current.redis, ...(body.redis ?? {}) },
-          memcached: { ...current.memcached, ...(body.memcached ?? {}) },
-          updatedAt: new Date().toISOString(),
-        }
-        await helpers.assertCanAccessAccount(caller, account, 'cache.manage')
-        await ext.write(fileKey, updated)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'cache.updated',
-          target: `account:${account.username}:cache`,
-          detail: { redis: updated.redis.enabled, memcached: updated.memcached.enabled, slice },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ cache: updated })
-      }
+      return jsonResponse({ cache: { accountId: account.id, username: account.username, slice: system.accountSliceName(account.uid), redis: { ...service('redis'), evictionPolicy: 'allkeys-lru' }, memcached: service('memcached') } })
     }
 
     // =========================================================================
@@ -3069,80 +3041,17 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       }
     }
 
-    const containerItemMatch = /^\/api\/containers\/([^/]+)\/([^/]+)$/.exec(pathname)
+    // Read-only projection of the saved runtime registry: containers publish no port and run only through the agent.
     const containerListMatch = /^\/api\/containers\/([^/]+)$/.exec(pathname)
-    if (containerItemMatch || containerListMatch) {
+    if (containerListMatch) {
       const caller = await helpers.requireCaller(req)
-      const accountParam = (containerItemMatch?.[1] ?? containerListMatch?.[1])!
-      const account = await helpers.resolveAccountParam(accountParam)
+      const account = await helpers.resolveAccountParam(containerListMatch[1]!)
       await helpers.assertCanAccessAccount(caller, account, 'containers.manage')
-      const fileKey = `containers/${account.id}.json`
-      const containers = await ext.readOrDefault<RootlessContainerRecord[]>(fileKey, [])
-
-      if (containerListMatch && method === 'GET') {
-        return jsonResponse({ containers })
-      }
-      if (containerListMatch && method === 'POST') {
-        const body = await readJsonBody<Partial<RootlessContainerRecord>>(req)
-        if (!body.name || !body.image) return fail('VALIDATION', 'container name and image are required')
-        const slice = `xpanel-${account.uid}.slice`
-        const runtime = body.runtime ?? 'podman'
-        const internalPort = body.internalPort ?? 3000
-        const hostPort = body.hostPort ?? 30000 + containers.length
-        const systemdUnit = [
-          `[Unit]`,
-          `Description=xPanel Rootless Container ${body.name} (${account.username})`,
-          `After=network.target`,
-          `[Service]`,
-          `User=${account.username}`,
-          `Group=${account.username}`,
-          `Slice=${slice}`,
-          `ExecStart=/usr/bin/${runtime} run --rm --name ${body.name} -p 127.0.0.1:${hostPort}:${internalPort} ${body.image}`,
-          `Restart=always`,
-        ].join('\n')
-        const record: RootlessContainerRecord = {
-          id: randomUUID(),
-          accountId: account.id,
-          username: account.username,
-          uid: account.uid,
-          name: body.name,
-          image: body.image,
-          runtime,
-          internalPort,
-          hostPort,
-          env: body.env ?? {},
-          memoryMb: body.memoryMb ?? 512,
-          cpuPercent: body.cpuPercent ?? 100,
-          slice,
-          systemdUnit,
-          status: 'running',
-          createdAt: new Date().toISOString(),
-        }
-        await helpers.assertCanAccessAccount(caller, account, 'containers.manage')
-        containers.push(record)
-        await ext.write(fileKey, containers)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'container.created',
-          target: `account:${account.username}:container:${record.name}`,
-          detail: { image: record.image, slice, hostPort },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ container: record }, 201)
-      }
-      if (method === 'DELETE') {
-        const body = await readJsonBody<{ id?: string }>(req)
-        const targetId = containerItemMatch?.[2] ?? url.searchParams.get('id') ?? body.id
-        const existing = containers.find((c) => c.id === targetId || c.name === targetId)
-        if (!existing) return fail('NOT_FOUND', `container "${targetId ?? ''}" not found`)
-        await helpers.assertCanAccessAccount(caller, account, 'containers.manage')
-        const next = containers.filter((c) => c.id !== targetId && c.name !== targetId)
-        await ext.write(fileKey, next)
-        return jsonResponse({ ok: true })
-      }
+      if (method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } })
+      const registry = await readRuntimeRegistry(helpers.store.rootDir, account.id)
+      return jsonResponse({ containers: registry.containers.map(c => ({ name: c.name, image: c.image, enabled: c.enabled, envKeys: Object.keys(c.env), systemdUnit: system.containerUnitName(account.username, c.name),
+        slice: system.accountSliceName(account.uid), publishedPorts: [], updatedAt: c.updatedAt })) })
     }
-
     const appStagingMatch = /^\/api\/apps\/([^/]+)\/([^/]+)\/(staging-clone|staging-push)$/.exec(pathname)
     const appItemMatch = /^\/api\/apps\/([^/]+)\/([^/]+)$/.exec(pathname)
     const appListMatch = /^\/api\/apps\/([^/]+)$/.exec(pathname)
@@ -3278,129 +3187,6 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           },
         },
       })
-    }
-
-    if (pathname === '/api/branding') {
-      const caller = await helpers.requireCaller(req)
-      const defaultBranding: PanelBrandingConfig = {
-        companyName: 'xPanel Cloud Hosting',
-        productName: 'xPanel',
-        logoUrl: null,
-        faviconUrl: null,
-        primaryColorOklch: 'oklch(0.65 0.19 250)',
-        accentColorOklch: 'oklch(0.72 0.17 165)',
-        supportUrl: 'https://support.xpanel.internal',
-        supportEmail: 'support@xpanel.internal',
-        footerText: 'Powered by xPanel Hosting Platform',
-        hidePoweredBy: false,
-        updatedAt: new Date().toISOString(),
-      }
-      if (method === 'GET') {
-        return jsonResponse({ branding: await ext.readOrDefault('branding.json', defaultBranding) })
-      }
-      if (method === 'PUT') {
-        await helpers.assertRoot(caller, 'branding.update')
-        const body = await readJsonBody<Partial<PanelBrandingConfig>>(req)
-        const current = await ext.readOrDefault('branding.json', defaultBranding)
-        const branding: PanelBrandingConfig = {
-          ...current,
-          ...body,
-          updatedAt: new Date().toISOString(),
-        }
-        await ext.write('branding.json', branding)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'branding.updated',
-          target: 'server:branding',
-          detail: { companyName: branding.companyName, productName: branding.productName },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ branding })
-      }
-    }
-
-    const langMatch = /^\/api\/languages\/([a-zA-Z0-9_-]+)$/.exec(pathname)
-    if (pathname === '/api/languages' || langMatch) {
-      const caller = await helpers.requireCaller(req)
-      const packs = await ext.readOrDefault<Record<string, LanguageOverridePack>>('languages.json', {
-        en: { locale: 'en', direction: 'ltr', overrides: {}, updatedAt: new Date().toISOString() },
-        ar: { locale: 'ar', direction: 'rtl', overrides: {}, updatedAt: new Date().toISOString() },
-      })
-      if (method === 'GET' && !langMatch) {
-        return jsonResponse({ languages: Object.values(packs) })
-      }
-      if (langMatch) {
-        const locale = langMatch[1]!.toLowerCase()
-        if (method === 'GET') {
-          const pack = packs[locale] ?? {
-            locale,
-            direction: locale.startsWith('ar') ? 'rtl' : 'ltr',
-            overrides: {},
-            updatedAt: new Date().toISOString(),
-          }
-          return jsonResponse({ language: pack })
-        }
-        if (method === 'PUT') {
-          await helpers.assertRoot(caller, 'languages.update')
-          const body = await readJsonBody<{ direction?: 'ltr' | 'rtl'; overrides?: Record<string, string> }>(req)
-          const pack: LanguageOverridePack = {
-            locale,
-            direction: body.direction ?? (locale.startsWith('ar') ? 'rtl' : 'ltr'),
-            overrides: { ...(packs[locale]?.overrides ?? {}), ...(body.overrides ?? {}) },
-            updatedAt: new Date().toISOString(),
-          }
-          packs[locale] = pack
-          await ext.write('languages.json', packs)
-          await helpers.emitAudit({
-            actor: caller.principal.username,
-            action: 'language.updated',
-            target: `language:${locale}`,
-            detail: { keysCount: Object.keys(pack.overrides).length },
-            outcome: 'ok',
-            principalId: caller.principal.id,
-          })
-          return jsonResponse({ language: pack })
-        }
-      }
-    }
-
-    if (pathname === '/api/whmcs') {
-      const caller = await helpers.requireCaller(req)
-      await helpers.assertRoot(caller, 'whmcs.config')
-      const defaultWhmcs: WhmcsIntegrationConfig = {
-        enabled: false,
-        whmcsUrl: 'https://billing.example.com',
-        apiIdentifier: 'xpanel-whmcs-module',
-        allowedIps: ['127.0.0.1'],
-        ssoRedirectTarget: 'xpanel',
-        autoProvisionOnOrder: true,
-        webhookSecretConfigured: false,
-        updatedAt: new Date().toISOString(),
-      }
-      if (method === 'GET') {
-        return jsonResponse({ whmcs: await ext.readOrDefault('whmcs.json', defaultWhmcs) })
-      }
-      if (method === 'PUT') {
-        const body = await readJsonBody<Partial<WhmcsIntegrationConfig> & { webhookSecret?: string }>(req)
-        const current = await ext.readOrDefault('whmcs.json', defaultWhmcs)
-        const whmcs: WhmcsIntegrationConfig = {
-          ...current,
-          ...body,
-          webhookSecretConfigured: Boolean(body.webhookSecret) || current.webhookSecretConfigured,
-          updatedAt: new Date().toISOString(),
-        }
-        await ext.write('whmcs.json', whmcs)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'whmcs.updated',
-          target: 'integration:whmcs',
-          detail: { enabled: whmcs.enabled, whmcsUrl: whmcs.whmcsUrl },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ whmcs })
-      }
     }
 
     return null

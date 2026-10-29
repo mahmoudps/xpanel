@@ -19,7 +19,9 @@ const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0
 const PASSWORD = 'correct horse battery staple'
 const ORIGIN = 'https://mail.example.test:2096'
 const route = '/api/webmail/vacation'
-const application = { status: 'configuration_only', nativeApplied: false } as const
+// before any apply the host state is unknown; after a save the fixture's host agent applies it
+const pending = { state: 'pending', reason: expect.stringContaining('not applied') }
+const application = { state: 'applied', reason: null }
 // Static metadata-authority guidance now accompanies every vacation response; it asserts no withheld record exists.
 const metadataReview = { status: 'review_required', reason: 'mailbox_metadata_binding_unverified' } as const
 const cleanup: Array<() => Promise<unknown>> = []
@@ -41,14 +43,14 @@ interface SealedView {
   context: { mailbox: string }
   vacation: VacationRecord | null
   revision: string
-  application: { status: string; nativeApplied: boolean }
+  application: { state: string; reason: string | null }
 }
 interface SealedAck {
   context: { mailbox: string }
   vacation: VacationRecord
   revision: string
   stateChanged: boolean
-  application: { status: string; nativeApplied: boolean }
+  application: { state: string; reason: string | null }
 }
 interface Problem {
   code: string
@@ -234,7 +236,7 @@ const fixture = async () => {
     commands: executor.executedCommands.length,
   })
   return {
-    database, state, features, owner, other, inbox, sibling, foreign, sealedPrincipal, adminPrincipal,
+    database, state, features, owner, other, inbox, sibling, foreign, sealedPrincipal, adminPrincipal, executor,
     credential, readOnly, open, view, save, saveValid, call, legacyCall, filePath, readBytes, stored, audits, snapshot, authorityFor,
   }
 }
@@ -259,7 +261,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Synthetic vacation fixture cleanup failed')
   })
 
-  it('returns the sealed mailbox context, absence revision and configuration-only application without allocating state', async () => {
+  it('returns the sealed mailbox context, absence revision and pending application without allocating state', async () => {
     const session = await f.open()
     const before = await f.snapshot()
     const first = await f.view(session), second = await f.view(session)
@@ -267,7 +269,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(first.context).toEqual({ mailbox: f.inbox.login })
     expect(first.vacation).toBeNull()
     expect(first.revision).toMatch(/^[0-9a-f]{64}$/)
-    expect(first.application).toEqual(application)
+    expect(first.application).toEqual(pending)
     expect(await f.readBytes(f.inbox.login)).toBeNull()
     expect(await f.snapshot()).toEqual(before)
   })
@@ -589,15 +591,15 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     const absentResponse = await f.legacyCall(`${route}?mailbox=${encodeURIComponent(f.inbox.login)}`)
     expect(absentResponse.status).toBe(200)
     const absent = await absentResponse.json() as { vacation: VacationRecord }
-    expect(Object.keys(absent)).toEqual(['vacation', 'metadataReview'])
+    expect(Object.keys(absent)).toEqual(['vacation', 'application', 'metadataReview'])
     expect(absent.vacation).toMatchObject({ mailbox: f.inbox.login, enabled: false, compiledSieve: '# Vacation responder disabled\n' })
     await expectValidation(await f.legacyCall(route), 'legacy request without a mailbox selector')
     const wroteResponse = await f.legacyCall(route, 'PUT', { mailbox: f.inbox.login, enabled: true, subject: 'Legacy admin save', body: 'Legacy body' })
     expect(wroteResponse.status).toBe(200)
     const wrote = await wroteResponse.json() as { vacation: VacationRecord }
-    expect(Object.keys(wrote)).toEqual(['vacation', 'metadataReview'])
+    expect(Object.keys(wrote)).toEqual(['vacation', 'application', 'metadataReview'])
     expect(wrote).not.toHaveProperty('context')
-    expect(wrote).not.toHaveProperty('application')
+    expect(wrote).toMatchObject({ application })
     expect(wrote).not.toHaveProperty('stateChanged')
     expect(wrote.vacation).toMatchObject({ mailbox: f.inbox.login, enabled: true, subject: 'Legacy admin save', body: 'Legacy body' })
     expect(wrote.vacation.compiledSieve).toContain('vacation :days 1 ')
@@ -605,7 +607,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect((await readback.json() as { vacation: VacationRecord }).vacation).toEqual(wrote.vacation)
     expect((await f.view(ownerSession)).vacation).toEqual(wrote.vacation)
     const legacyAudit = (await f.audits()).find(entry => entry.target === `vacation:${f.inbox.login}`)
-    expect(legacyAudit).toMatchObject({ outcome: 'ok', detail: { enabled: true, nativeApplied: false } })
+    expect(legacyAudit).toMatchObject({ outcome: 'ok', detail: { enabled: true, application: 'applied' } })
     expect(legacyAudit!.actor).toBe(f.owner.username)
     const savedBytes = await f.readBytes(f.inbox.login)
     await expectValidation(await f.legacyCall(route, 'PUT', { mailbox: f.inbox.login, enabled: true, subject: '   ', body: '' }), 'legacy blank enabled subject')
@@ -626,7 +628,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     const ack = await response.json() as SealedAck
     const entries = await f.audits()
     expect(entries).toHaveLength(1)
-    expect(entries[0]).toMatchObject({ action: 'webmail.vacation.updated', target: `vacation:${f.inbox.login}`, outcome: 'ok', detail: { enabled: true, nativeApplied: false } })
+    expect(entries[0]).toMatchObject({ action: 'webmail.vacation.updated', target: `vacation:${f.inbox.login}`, outcome: 'ok', detail: { enabled: true, application: 'applied' } })
     expect(entries[0]!.actor).toBe(f.inbox.login)
     expect(entries[0]!.at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
     const auditRows = await f.database.db.query<{ principal_id: string | null }>("SELECT principal_id FROM audit_log WHERE action = 'webmail.vacation.updated' ORDER BY id DESC LIMIT 1")
@@ -643,18 +645,20 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(await f.audits()).toHaveLength(2)
   })
 
-  it('reports a configuration-only application without any host agent or executor effect', async () => {
+  it('applies the saved responder as the mailbox Sieve script through the host agent', async () => {
     const session = await f.open()
     const before = await f.snapshot()
     expect(before.agentCalls).toBe(0)
     const ack = await f.saveValid(session)
     const after = await f.snapshot()
     expect(ack.application).toEqual(application)
-    expect(after.agentCalls).toBe(0)
-    expect(after.files).toBe(0)
-    expect(after.actions).toBe(0)
-    expect(after.tests).toBe(0)
-    expect(after.commands).toBe(0)
+    expect(after.agentCalls).toBe(1)
+    const [local, domain] = f.inbox.login.split('@')
+    const script = [...f.executor.files.values()].find(file => file.path.endsWith(`/mail/${domain}/${local}/.dovecot.sieve`))
+    expect(script).toMatchObject({ owner: f.owner.username, mode: 0o600 })
+    expect(script!.content).toContain('vacation ')
+    expect(script!.content).toContain(`:from "${f.inbox.login}"`)
+    expect([...f.executor.files.keys()].filter(path => path.endsWith('.dovecot.sieve'))).toHaveLength(1)
     expect(after.contents.sibling).toBe(before.contents.sibling)
     expect(after.contents.foreign).toBe(before.contents.foreign)
     expect(after.audits).toBe(1)
@@ -662,6 +666,6 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     const saved = (await f.stored())!
     expect(saved).not.toHaveProperty('nativeApplied')
     expect(saved).not.toHaveProperty('application')
-    expect(JSON.stringify(saved)).not.toMatch(/nativeApplied|sieveApplied|hostAgent/)
   })
+
 })

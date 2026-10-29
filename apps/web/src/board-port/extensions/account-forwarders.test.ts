@@ -3,13 +3,28 @@ import { renderAccountForwarders } from './account-forwarders.ts'
 import { renderAccountPagesExtension, type AccountPagesExtensionInput } from './account-pages.ts'
 
 describe('account forwarder configuration view', () => {
-  it('keeps unread, observed empty and native application states distinct', () => {
+  it('keeps unread and observed empty states distinct and never claims activation before a read', () => {
     const unread = renderAccountForwarders({ lang: 'en', domains: [], canManage: true })
     const empty = renderAccountForwarders({ lang: 'en', domains: [], forwarders: [], canManage: true })
     expect(unread).toContain('Records have not been read.')
-    expect(empty).toContain('No saved records.')
-    expect(empty).toContain('Native forwarding has not been applied')
-    expect(empty).not.toContain('Forwarding is active')
+    expect(empty).toContain('No forwarders.')
+    expect(empty).not.toContain('Applied')
+    expect(empty).not.toContain('has not been applied')
+  })
+  it('offers the design options: reject with an error, autoresponders and the default address', () => {
+    const html = renderAccountForwarders({ lang: 'en', domains: [{ name: 'tenant.test' }], mailboxes: ['info@tenant.test'], canManage: true })
+    expect(html).toContain('value="reject"')
+    expect(html).not.toContain('unavailable')
+    expect(html).toContain('data-autoresponder-form')
+    expect(html).toContain('Starts (UTC)')
+    expect(html).toContain('No end date')
+    expect(html).toContain('data-default-form')
+    expect(html).toContain('Discard silently')
+    const noMailbox = renderAccountForwarders({ lang: 'en', domains: [{ name: 'tenant.test' }], mailboxes: [], canManage: true })
+    // an address without a mailbox can answer too, so the form needs only a domain
+    expect(noMailbox).toContain('data-autoresponder-form')
+    expect(noMailbox).toContain('answers without a mailbox')
+    expect(renderAccountForwarders({ lang: 'en', domains: [], mailboxes: [], canManage: true })).not.toContain('data-autoresponder-form')
   })
   it('renders scoped metadata without mutation controls when read-only', () => {
     const html = renderAccountForwarders({ lang: 'en', domains: [{ name: 'tenant.test' }], canManage: false, forwarders: [{ id: 'internal-id', source: 'info@tenant.test', destinations: ['outside@recipient.test'] }] })
@@ -27,9 +42,11 @@ describe('account forwarder configuration view', () => {
   })
   it('keeps Arabic labels and isolated technical addresses', () => {
     const html = renderAccountForwarders({ lang: 'ar', domains: [{ name: 'tenant.test' }], canManage: true, forwarders: [{ id: 'record', source: 'info@tenant.test', destinations: ['outside@recipient.test'] }] })
-    expect(html).toContain('عنوان البريد المصدر')
+    expect(html).toContain('رفضه برسالة خطأ إلى المرسل')
     expect(html).toContain('<bdi dir="ltr"')
-    expect(html).toContain('حفظ الإعداد')
+    // technical values stay on one line; the table scrolls instead of wrapping them in a narrow Arabic layout
+    expect(html).toContain('<bdi dir="ltr" class="xp-mono xp-technical-token">info@tenant.test</bdi>')
+    expect(html).toContain('العنوان الافتراضي')
     expect(html).toContain('aria-live="polite"')
   })
   const ownerInput = (): AccountPagesExtensionInput => ({

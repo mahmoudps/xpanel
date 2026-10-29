@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto'
-import { MAILX_MAPS, MAILX_RETENTION_MAX_DAYS, isMailxAddress, isMailxHost } from '../../../packages/os/src/mailx-command.ts'
+import {
+  MAILX_DOVECOT_SERVER_CONF, MAILX_MAPS, MAILX_RECIPIENT_KEY, MAILX_POSTCONF_KEYS, MAILX_RBL_MAX, MAILX_RETENTION_MAX_DAYS, MAILX_TLS_PROTOCOLS, isMailxAddress, isMailxHost, mailxCertPaths, mailxRblRestrictions,
+} from '../../../packages/os/src/mailx-command.ts'
 
 /**
  * Saved server mail policy, shared by the API (which saves it) and the agent (which renders and applies it).
  * Desired state lives in files under <state>/extended/mailx; a section without a file is not managed and its
  * Postfix parameters are never touched.
  */
-export const MAILX_SECTIONS = ['spam', 'relay', 'bcc', 'marketing'] as const
+export const MAILX_SECTIONS = ['spam', 'relay', 'bcc', 'marketing', 'server', 'routing'] as const
 export type MailxSection = typeof MAILX_SECTIONS[number]
 export const isMailxSection = (value: unknown): value is MailxSection => (MAILX_SECTIONS as readonly unknown[]).includes(value)
 export interface MailxSpamPolicy { enabled: boolean; rejectScore: number; headerScore: number; greylistScore: number | null; blockedDomains: string[] }
@@ -16,19 +18,35 @@ export interface MailxBccPolicy { alwaysBcc: string | null; recipient: MailxBccR
 export interface MailxMarketingPolicy { messageRateLimit: number; recipientRateLimit: number; recipientsPerMessage: number; destinationRateDelay: number; destinationConcurrency: number; rateWindow: number }
 export interface MailxArchiveDomain { domain: string; mailbox: string; incoming: boolean; outgoing: boolean; retentionDays: number }
 export interface MailxArchivePolicy { domains: MailxArchiveDomain[] }
-export interface MailxPolicies { spam: MailxSpamPolicy; relay: MailxRelayPolicy; bcc: MailxBccPolicy; marketing: MailxMarketingPolicy }
+/**
+ * Postfix/Dovecot server settings. A key absent from `postfix`/`dovecot` (or `rbl: null`) is not managed and keeps the
+ * host value. Certificates are certificate ids: `smtp` is port 25, `submission` the mail-client SMTP ports (rendered by
+ * the reconciler with the hostname certificate as fallback), `imap` Dovecot IMAP/POP3; null keeps the default.
+ */
+export interface MailxServerPolicy {
+  postfix: Record<string, string>
+  dovecot: Record<string, string>
+  rbl: string[] | null
+  certificates: { smtp: string | null; submission: string | null; imap: string | null }
+}
+/** local: delivered here (default); backup: this server is a lower-priority MX and relays to the primary; remote: mail goes to the domain's MX. */
+export type MailxRoutingMode = 'local' | 'backup' | 'remote'
+export interface MailxRoutingPolicy { domains: { domain: string; mode: Exclude<MailxRoutingMode, 'local'> }[] }
+export interface MailxPolicies { spam: MailxSpamPolicy; relay: MailxRelayPolicy; bcc: MailxBccPolicy; marketing: MailxMarketingPolicy; server: MailxServerPolicy; routing: MailxRoutingPolicy }
 /** Relay credentials stay in the saved file (mode 0600) and in the 0600 Postfix map only; views carry `passwordSet`. */
 export interface MailxRelaySecret { password: string; version: string }
 export interface MailxStored<S extends MailxSection = MailxSection> { section: S; policy: MailxPolicies[S]; secret?: MailxRelaySecret | null; updatedAt: string; updatedBy: string }
 export interface MailxArchiveStored { accountId: string; policy: MailxArchivePolicy; updatedAt: string; updatedBy: string }
 
-export const MAILX_LIMITS = { blockedDomains: 500, bccRules: 500, archiveDomains: 200 } as const
+export const MAILX_LIMITS = { blockedDomains: 500, bccRules: 500, archiveDomains: 200, routingDomains: 2000 } as const
 export const MAILX_DEFAULTS: MailxPolicies = {
   spam: { enabled: true, rejectScore: 15, headerScore: 6, greylistScore: 4, blockedDomains: [] },
   relay: { enabled: false, host: null, port: 587, username: null },
   bcc: { alwaysBcc: null, recipient: [], sender: [] },
   // Postfix defaults (postconf(5)): no client rate limits, 1000 recipients, no delay, concurrency 20, 60s window.
   marketing: { messageRateLimit: 0, recipientRateLimit: 0, recipientsPerMessage: 1000, destinationRateDelay: 0, destinationConcurrency: 20, rateWindow: 60 },
+  server: { postfix: {}, dovecot: {}, rbl: null, certificates: { smtp: null, submission: null, imap: null } },
+  routing: { domains: [] },
 }
 export const mailxStatePath = (...parts: string[]): string[] => ['extended', 'mailx', ...parts]
 export const MAILX_MARKER = '# Managed by xPanel mail policy. Changes here are replaced on the next apply.'
@@ -98,7 +116,57 @@ export function parseMailxArchive(value: unknown): MailxArchivePolicy {
   })
   return { domains: unique(domains, row => row.domain, 'domain') }
 }
-export const MAILX_PARSERS: { [S in MailxSection]: (value: unknown) => MailxPolicies[S] } = { spam: parseMailxSpam, relay: parseMailxRelay, bcc: parseMailxBcc, marketing: parseMailxMarketing }
+/** Postfix keys the server section edits directly; smtpd_client_restrictions and mailbox_size_limit are rendered from `rbl` and message_size_limit. */
+export const MAILX_SERVER_POSTFIX_KEYS = ['myhostname', 'mydomain', 'myorigin', 'smtpd_banner', 'inet_interfaces', 'inet_protocols', 'mynetworks', 'smtpd_helo_required',
+  'smtpd_tls_protocols', 'smtpd_tls_mandatory_protocols', 'smtpd_tls_ciphers', 'smtpd_tls_mandatory_ciphers', 'smtpd_tls_exclude_ciphers', 'smtp_tls_security_level',
+  'smtp_tls_protocols', 'smtp_tls_mandatory_protocols', 'smtp_tls_ciphers', 'tls_preempt_cipherlist', 'message_size_limit', 'smtpd_client_connection_rate_limit',
+  'smtpd_client_connection_count_limit', 'smtpd_client_event_limit_exceptions', 'default_destination_recipient_limit', 'smtp_destination_concurrency_limit', 'default_process_limit'] as const
+/** Dovecot settings the server section writes to its own conf.d file; values use doveconf's own syntax. */
+export const MAILX_SERVER_DOVECOT: Readonly<Record<string, (value: string) => boolean>> = Object.freeze({
+  // lmtp carries every delivery, so it always stays; at least one mail-client protocol remains.
+  protocols: (value: string) => {
+    const items = value.split(' ')
+    return new Set(items).size === items.length && items.every(item => ['imap', 'pop3', 'lmtp', 'sieve'].includes(item)) && items.includes('lmtp') && (items.includes('imap') || items.includes('pop3'))
+  },
+  ssl_min_protocol: (value: string) => ['TLSv1', 'TLSv1.1', 'TLSv1.2', 'TLSv1.3'].includes(value),
+  ssl_cipher_list: (value: string) => /^[A-Za-z0-9!:+@._-]{1,512}$/.test(value),
+  ssl_prefer_server_ciphers: (value: string) => value === 'yes' || value === 'no',
+})
+const CERTIFICATE = /^[A-Za-z0-9_-]{1,64}$/
+const certificate = (value: unknown, field: string): string | null => value === null ? null : typeof value === 'string' && CERTIFICATE.test(value) && value !== 'default' ? value : bad(field)
+const settingsOf = (value: unknown, keys: readonly string[], valid: (key: string, value: string) => boolean, field: string): Record<string, string> => {
+  if (!object(value) || Object.keys(value).some(key => !keys.includes(key))) return bad(field)
+  // Canonical key order, so an equal policy always serializes (and hashes) the same.
+  return Object.fromEntries(keys.filter(key => Object.hasOwn(value, key)).map(key => {
+    const item = value[key]
+    return [key, typeof item === 'string' && valid(key, item) ? item : bad(key)]
+  }))
+}
+export function parseMailxServer(value: unknown): MailxServerPolicy {
+  const raw = exact(value, ['postfix', 'dovecot', 'rbl', 'certificates'], 'server')
+  const postfix = settingsOf(raw.postfix, MAILX_SERVER_POSTFIX_KEYS, (key, item) => MAILX_POSTCONF_KEYS[key]!(item), 'postfix')
+  const dovecot = settingsOf(raw.dovecot, Object.keys(MAILX_SERVER_DOVECOT), (key, item) => MAILX_SERVER_DOVECOT[key]!(item), 'dovecot')
+  const rbl = raw.rbl === null ? null : unique(list(raw.rbl, MAILX_RBL_MAX, 'rbl').map(item => isMailxHost(item) ? item : bad('rbl')), item => item, 'rbl')
+  // The mandatory floor (opportunistic STARTTLS) never sits below the general one.
+  const floor = (key: string): number => Object.values(MAILX_TLS_PROTOCOLS).indexOf(postfix[key] as typeof MAILX_TLS_PROTOCOLS[keyof typeof MAILX_TLS_PROTOCOLS])
+  if (postfix.smtpd_tls_protocols && postfix.smtpd_tls_mandatory_protocols && floor('smtpd_tls_mandatory_protocols') < floor('smtpd_tls_protocols')) bad('smtpd_tls_mandatory_protocols')
+  // mynetworks clients relay without signing in: a network wider than /8 (IPv4) or /16 (IPv6) would make an open relay.
+  if (postfix.mynetworks?.split(', ').some(net => Number(net.slice(net.lastIndexOf('/') + 1)) < (net.startsWith('[') ? 16 : 8))) bad('mynetworks')
+  const certs = exact(raw.certificates, ['smtp', 'submission', 'imap'], 'certificates')
+  return { postfix, dovecot, rbl, certificates: { smtp: certificate(certs.smtp, 'certificates.smtp'), submission: certificate(certs.submission, 'certificates.submission'), imap: certificate(certs.imap, 'certificates.imap') } }
+}
+export function parseMailxRouting(value: unknown): MailxRoutingPolicy {
+  const raw = exact(value, ['domains'], 'routing')
+  const domains = list(raw.domains, MAILX_LIMITS.routingDomains, 'domains').map(item => {
+    const row = exact(item, ['domain', 'mode'], 'domain')
+    return { domain: isMailxHost(row.domain) ? row.domain : bad('domain'), mode: row.mode === 'backup' || row.mode === 'remote' ? row.mode as 'backup' | 'remote' : bad('mode') }
+  })
+  return { domains: unique(domains, row => row.domain, 'domain').sort((a, b) => a.domain.localeCompare(b.domain)) }
+}
+/** Domain to routing mode for the saved routing section; absent domains are delivered locally. */
+export const mailxRoutingModes = (saved: Pick<MailxSaved, 'sections'>): Map<string, Exclude<MailxRoutingMode, 'local'>> =>
+  new Map((saved.sections.routing?.policy.domains ?? []).map(row => [row.domain, row.mode]))
+export const MAILX_PARSERS: { [S in MailxSection]: (value: unknown) => MailxPolicies[S] } = { spam: parseMailxSpam, relay: parseMailxRelay, bcc: parseMailxBcc, marketing: parseMailxMarketing, server: parseMailxServer, routing: parseMailxRouting }
 
 const iso = (value: unknown): value is string => typeof value === 'string' && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value
 const actor = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9._@-]{1,128}$/.test(value)
@@ -135,11 +203,16 @@ export const mailxCompositeRevision = (saved: MailxSaved): string =>
   mailxRevision('composite', { sections: Object.fromEntries(MAILX_SECTIONS.map(section => [section, mailxRevision(section, saved.sections[section])])), archives: [...saved.archives].sort((a, b) => a.accountId.localeCompare(b.accountId)).map(item => [item.accountId, mailxRevision('archive', item)]) })
 
 export interface MailxFile { path: string; content: string; mode: number; owner: 'root'; group: 'root' | 'postfix' }
-export interface MailxPostfixPlan { settings: Record<string, string>; files: MailxFile[]; conflicts: { accountId: string; domain: string; direction: 'incoming' | 'outgoing' }[] }
+/** `master` is the port 25 certificate id; null removes the override, undefined leaves master.cf alone (server section not saved). */
+export interface MailxPostfixPlan { settings: Record<string, string>; files: MailxFile[]; conflicts: { accountId: string; domain: string; direction: 'incoming' | 'outgoing' }[]; master?: string | null }
 const map = (path: string, lines: string[], mode = 0o640, group: MailxFile['group'] = 'postfix'): MailxFile => ({ path, content: `${MAILX_MARKER}\n${lines.map(line => line + '\n').join('')}`, mode, owner: 'root', group })
 
 /** Postfix parameters and owned lookup tables for every saved section; archive rules never override an administrator rule. */
-export function renderMailxPostfix(saved: MailxSaved): MailxPostfixPlan {
+/**
+ * `recipients` holds the known recipients of each backup MX domain (full addresses, or `@domain` when a domain forwarder
+ * accepts every address); a backup domain without an entry accepts no recipient.
+ */
+export function renderMailxPostfix(saved: MailxSaved, recipients: ReadonlyMap<string, readonly string[]> = new Map()): MailxPostfixPlan {
   const settings: Record<string, string> = {}, files: MailxFile[] = [], conflicts: MailxPostfixPlan['conflicts'] = []
   const relay = saved.sections.relay
   if (relay) {
@@ -175,7 +248,36 @@ export function renderMailxPostfix(saved: MailxSaved): MailxPostfixPlan {
     smtpd_recipient_limit: String(marketing.recipientsPerMessage), default_destination_rate_delay: `${marketing.destinationRateDelay}s`,
     default_destination_concurrency_limit: String(marketing.destinationConcurrency), anvil_rate_time_unit: `${marketing.rateWindow}s`,
   })
-  return { settings, files, conflicts }
+  const server = saved.sections.server?.policy
+  if (server) {
+    Object.assign(settings, server.postfix)
+    if (server.postfix.message_size_limit) settings.mailbox_size_limit = '0'
+    if (server.rbl) settings.smtpd_client_restrictions = mailxRblRestrictions(server.rbl)
+  }
+  const routing = saved.sections.routing?.policy
+  if (routing) {
+    const backup = routing.domains.filter(row => row.mode === 'backup').map(row => row.domain)
+    settings.relay_domains = `texthash:${MAILX_MAPS.relayDomains}`
+    settings.relay_recipient_maps = `texthash:${MAILX_MAPS.relayRecipients}`
+    files.push(map(MAILX_MAPS.relayDomains, backup.map(domain => `${domain} OK`)))
+    files.push(map(MAILX_MAPS.relayRecipients, backup.flatMap(domain => (recipients.get(domain) ?? []).filter(key => MAILX_RECIPIENT_KEY(key, domain)).map(key => `${key} OK`))))
+  }
+  return { settings, files, conflicts, ...(server ? { master: server.certificates.smtp } : {}) }
+}
+
+export type MailxDovecotDialect = '2.3' | '2.4'
+/** Dovecot setting names per release: 2.4 renamed the certificate pair and the cipher preference (doc: upgrading 2.3 to 2.4). */
+export const mailxDovecotLines = (settings: Readonly<Record<string, string>>, imap: string | null, dialect: MailxDovecotDialect): string[] => {
+  const lines = Object.entries(settings).map(([key, value]) => dialect === '2.4' && key === 'ssl_prefer_server_ciphers' ? `ssl_server_prefer_ciphers = ${value === 'yes' ? 'server' : 'client'}` : `${key} = ${value}`)
+  if (imap) { const tls = mailxCertPaths(imap); lines.push(...dialect === '2.4' ? [`ssl_server_cert_file = ${tls.certFile}`, `ssl_server_key_file = ${tls.keyFile}`] : [`ssl_cert = <${tls.certFile}`, `ssl_key = <${tls.keyFile}`]) }
+  return lines
+}
+/** The server section's Dovecot file; null when the section is not saved (the host file is then left alone). */
+export function renderMailxDovecot(saved: Pick<MailxSaved, 'sections'>, dialect: MailxDovecotDialect = '2.3'): MailxFile | null {
+  const server = saved.sections.server?.policy
+  if (!server) return null
+  const lines = mailxDovecotLines(server.dovecot, server.certificates.imap, dialect)
+  return map(MAILX_DOVECOT_SERVER_CONF, lines, 0o644, 'root')
 }
 
 export type MailxEngine = 'rspamd' | 'spamassassin'

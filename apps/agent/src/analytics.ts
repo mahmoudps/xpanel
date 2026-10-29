@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
-import { assertJailedShellAllowed, assertResourceConfigurationBinding, fail, isUnlimited, parseResourceObservationSnapshot, RESOURCE_SAMPLE_INTERVAL_MS } from '@xpanel/core'
+import { assertResourceConfigurationBinding, fail, isUnlimited, parseResourceObservationSnapshot, RESOURCE_SAMPLE_INTERVAL_MS } from '@xpanel/core'
 import type {
   Account,
   CanonicalIoAnalyticsUnavailable,
@@ -15,7 +15,6 @@ import type {
   WebsiteTopEntry,
   WebsiteTrafficBucket,
 } from '@xpanel/core'
-import { system } from '@xpanel/render'
 import type { AccountSliceMetrics, AgentExecutor } from './executor.ts'
 import type { StateSnapshot, StateStore } from '@xpanel/state'
 import { readLifecyclePublicStatus } from '../../../scripts/lifecycle-admission.mjs'
@@ -28,6 +27,18 @@ export const unavailableIoAnalytics = (
 ): CanonicalIoAnalyticsUnavailable => Object.freeze({ available: false, snapshot: null, reason, fieldReasons: Object.freeze({ ...fieldReasons }), observedAt })
 
 export type SliceRuntimeMetrics = AccountSliceMetrics
+
+/** Host fields of the cached resource observation; null when the field was not measured. */
+export interface IoHostFields { cpuPercent: number | null; memoryUsedBytes: number | null; memoryTotalBytes: number | null; loadAvg1m: number | null; psiSomeAvg10: number | null; psiFullAvg10: number | null; awaitMs: number | null }
+/** Per-account IO, memory and process snapshot for /whm/monitoring/io. Accounts with any unmeasured field are counted, never shown as zero. */
+export interface IoAccountsView {
+  state: 'read' | 'partial' | 'unavailable'
+  reason: CanonicalIoAnalyticsUnavailable['reason'] | null
+  observedAt: string | null
+  host: IoHostFields | null
+  accounts: AccountIoRank[]
+  unmeasuredAccounts: number
+}
 
 export interface NginxMetricLogLine {
   ts: string
@@ -198,16 +209,42 @@ export class IoAnalyticsEngine {
 
   /** Cached, configuration-bound production projection. Parsing does not qualify kernel origin. */
   readResourceObservation(reading: ResourceSamplerReading, state: StateSnapshot): CanonicalIoAnalyticsRead {
-    if (reading.observation === null) return unavailableIoAnalytics(reading.state === 'blocked' || reading.state === 'failed' ? 'invalid' : 'not-sampled')
+    const projected = this.projectResourceObservation(reading, state)
+    if ('unavailable' in projected) return projected.unavailable
+    const { observedAt, reasons, host, ranks } = projected
+    const { cpuPercent, memoryUsedBytes, memoryTotalBytes, loadAvg1m, psiSomeAvg10, psiFullAvg10, awaitMs } = host
+    if (Object.keys(reasons).length > 0 || cpuPercent === null || memoryUsedBytes === null || memoryTotalBytes === null || loadAvg1m === null || psiSomeAvg10 === null || psiFullAvg10 === null || awaitMs === null) {
+      return unavailableIoAnalytics('incomplete', reasons, observedAt)
+    }
+    const sum = (key: 'readBytesPerSec' | 'writeBytesPerSec' | 'readIops' | 'writeIops'): number => ranks.reduce((total, account) => total + account[key], 0)
+    const current: IoAnalyticsPoint = { at: observedAt, readBytesPerSec: sum('readBytesPerSec'), writeBytesPerSec: sum('writeBytesPerSec'),
+      readIops: sum('readIops'), writeIops: sum('writeIops'), cpuPercent, memoryUsedBytes, memoryTotalBytes, loadAvg1m, psiSomeAvg10, psiFullAvg10, awaitMs }
+    if (memoryTotalBytes <= 0 || Object.entries(current).some(([key, number]) => key !== 'at' && (typeof number !== 'number' || !Number.isFinite(number) || number < 0))) {
+      return unavailableIoAnalytics('invalid', { aggregate: 'invalid' }, observedAt)
+    }
+    return { available: true, snapshot: { at: observedAt, current, history: [current], accounts: ranks } }
+  }
+
+  /** The same cached projection, keeping every fully measured account and host field when others are missing. */
+  readResourceAccounts(reading: ResourceSamplerReading, state: StateSnapshot): IoAccountsView {
+    const projected = this.projectResourceObservation(reading, state)
+    if ('unavailable' in projected) return { state: 'unavailable', reason: projected.unavailable.reason, observedAt: projected.unavailable.observedAt, host: null, accounts: [], unmeasuredAccounts: 0 }
+    const unmeasured = new Set(Object.keys(projected.reasons).filter(key => key.startsWith('accounts.')).map(key => key.split('.')[1]))
+    const partial = unmeasured.size > 0 || Object.values(projected.host).some(value => value === null)
+    return { state: partial ? 'partial' : 'read', reason: null, observedAt: projected.observedAt, host: projected.host, accounts: projected.ranks, unmeasuredAccounts: unmeasured.size }
+  }
+
+  private projectResourceObservation(reading: ResourceSamplerReading, state: StateSnapshot): { unavailable: CanonicalIoAnalyticsUnavailable } | { observedAt: string; reasons: Record<string, string>; host: IoHostFields; ranks: AccountIoRank[] } {
+    if (reading.observation === null) return { unavailable: unavailableIoAnalytics(reading.state === 'blocked' || reading.state === 'failed' ? 'invalid' : 'not-sampled') }
     let observed
     const active = state.accounts.filter(account => account.status === 'active')
     try {
       observed = parseResourceObservationSnapshot(reading.observation.snapshot)
-    } catch { return unavailableIoAnalytics('invalid') }
+    } catch { return { unavailable: unavailableIoAnalytics('invalid') } }
     try { assertResourceConfigurationBinding(observed, { revision: state.checksum, accountIds: active.map(account => account.id) }) }
-    catch { return unavailableIoAnalytics('configuration-changed') }
+    catch { return { unavailable: unavailableIoAnalytics('configuration-changed') } }
     if (reading.state !== 'ready' || reading.observation.freshness !== 'fresh') {
-      return unavailableIoAnalytics(reading.observation.freshness === 'stale' ? 'stale' : 'invalid', {}, observed.observedAt)
+      return { unavailable: unavailableIoAnalytics(reading.observation.freshness === 'stale' ? 'stale' : 'invalid', {}, observed.observedAt) }
     }
     const reasons: Record<string, string> = Object.create(null)
     const value = (name: string, field: { value: number | null; availability: string }): number | null => {
@@ -217,14 +254,16 @@ export class IoAnalyticsEngine {
       }
       return field.value
     }
-    const host = observed.host.fields
-    const cpuPercent = value('cpuPercent', host.cpuBusyPercent)
-    const memoryUsedBytes = value('memoryUsedBytes', host.memoryUsedBytes)
-    const memoryTotalBytes = value('memoryTotalBytes', host.memoryTotalBytes)
-    const loadAvg1m = value('loadAvg1m', host.loadAvg1m)
-    const psiSomeAvg10 = value('psiSomeAvg10', host.ioPressureSomeAvg10)
-    const psiFullAvg10 = value('psiFullAvg10', host.ioPressureFullAvg10)
-    const awaitMs = value('awaitMs', observed.deferred.aggregateAwaitMs)
+    const hostFields = observed.host.fields
+    const host: IoHostFields = {
+      cpuPercent: value('cpuPercent', hostFields.cpuBusyPercent),
+      memoryUsedBytes: value('memoryUsedBytes', hostFields.memoryUsedBytes),
+      memoryTotalBytes: value('memoryTotalBytes', hostFields.memoryTotalBytes),
+      loadAvg1m: value('loadAvg1m', hostFields.loadAvg1m),
+      psiSomeAvg10: value('psiSomeAvg10', hostFields.ioPressureSomeAvg10),
+      psiFullAvg10: value('psiFullAvg10', hostFields.ioPressureFullAvg10),
+      awaitMs: value('awaitMs', observed.deferred.aggregateAwaitMs),
+    }
     const byId = new Map(observed.accounts.map(account => [account.accountId, account]))
     const plans = new Map(state.plans.map(plan => [plan.id, plan]))
     const ranks: AccountIoRank[] = []
@@ -251,17 +290,8 @@ export class IoAnalyticsEngine {
         readIops, writeIops, cpuPercent: accountCpu, memoryCurrentBytes, memoryLimitMb: plan.resources.memoryMb,
         pidsCurrent, pidsLimit: plan.resources.maxProcesses, statusLevel })
     }
-    if (Object.keys(reasons).length > 0 || cpuPercent === null || memoryUsedBytes === null || memoryTotalBytes === null || loadAvg1m === null || psiSomeAvg10 === null || psiFullAvg10 === null || awaitMs === null) {
-      return unavailableIoAnalytics('incomplete', reasons, observed.observedAt)
-    }
     ranks.sort((a, b) => b.readBytesPerSec + b.writeBytesPerSec - a.readBytesPerSec - a.writeBytesPerSec)
-    const sum = (key: 'readBytesPerSec' | 'writeBytesPerSec' | 'readIops' | 'writeIops'): number => ranks.reduce((total, account) => total + account[key], 0)
-    const current: IoAnalyticsPoint = { at: observed.observedAt, readBytesPerSec: sum('readBytesPerSec'), writeBytesPerSec: sum('writeBytesPerSec'),
-      readIops: sum('readIops'), writeIops: sum('writeIops'), cpuPercent, memoryUsedBytes, memoryTotalBytes, loadAvg1m, psiSomeAvg10, psiFullAvg10, awaitMs }
-    if (memoryTotalBytes <= 0 || Object.entries(current).some(([key, number]) => key !== 'at' && (typeof number !== 'number' || !Number.isFinite(number) || number < 0))) {
-      return unavailableIoAnalytics('invalid', { aggregate: 'invalid' }, observed.observedAt)
-    }
-    return { available: true, snapshot: { at: observed.observedAt, current, history: [current], accounts: ranks } }
+    return { observedAt: observed.observedAt, reasons, host, ranks }
   }
 
   constructor(opts: { memoryTotalBytes?: number; cpuCores?: number; clockMs?: () => number } = {}) {
@@ -585,20 +615,32 @@ export class CanonicalIoResourcePipeline {
   }
 
   async read(snapshot: StateSnapshot): Promise<CanonicalIoAnalyticsRead> {
+    const latest = await this.latest()
+    return 'unavailable' in latest ? latest.unavailable : this.options.engine.readResourceObservation(latest.reading, snapshot)
+  }
+
+  /** Per-account view of the same cached reading; it never triggers kernel reads. */
+  async readAccounts(snapshot: StateSnapshot): Promise<IoAccountsView> {
+    const latest = await this.latest()
+    if ('unavailable' in latest) return { state: 'unavailable', reason: latest.unavailable.reason, observedAt: null, host: null, accounts: [], unmeasuredAccounts: 0 }
+    return this.options.engine.readResourceAccounts(latest.reading, snapshot)
+  }
+
+  private async latest(): Promise<{ unavailable: CanonicalIoAnalyticsUnavailable } | { reading: ResourceSamplerReading }> {
     try {
       if ((await readLifecyclePublicStatus()).active) {
         this.state = 'paused'
         void this.sampler?.stop().catch(() => { this.state = 'invalid' })
-        return unavailableIoAnalytics('paused')
+        return { unavailable: unavailableIoAnalytics('paused') }
       }
     } catch {
       this.state = 'invalid'
       void this.sampler?.stop().catch(() => undefined)
-      return unavailableIoAnalytics('invalid')
+      return { unavailable: unavailableIoAnalytics('invalid') }
     }
-    if (!this.running || this.manuallyPaused || this.state === 'paused') return unavailableIoAnalytics(this.manuallyPaused || this.state === 'paused' ? 'paused' : 'not-sampled')
-    if (this.state !== 'active' || !this.sampler) return unavailableIoAnalytics('invalid')
-    return this.options.engine.readResourceObservation(this.sampler.readLatest(), snapshot)
+    if (!this.running || this.manuallyPaused || this.state === 'paused') return { unavailable: unavailableIoAnalytics(this.manuallyPaused || this.state === 'paused' ? 'paused' : 'not-sampled') }
+    if (this.state !== 'active' || !this.sampler) return { unavailable: unavailableIoAnalytics('invalid') }
+    return { reading: this.sampler.readLatest() }
   }
 
   async pause(): Promise<void> {
@@ -924,42 +966,3 @@ export class WebsiteAnalyticsEngine {
   }
 }
 
-/**
- * Executes a single command inside the account's isolated jailed shell (`xpanel-<uid>.slice`
- * + mount/proc/tmpfs sandboxing), verifying account & plan shell permissions first.
- */
-export const runJailedShellCommand = async (
-  account: Account,
-  plan: Plan,
-  command: string,
-  executor: AgentExecutor,
-  opts: { sessionId?: string; cwdRel?: string; env?: Record<string, string>; onEvent?: (event: LiveEvent) => void } = {},
-): Promise<{ sessionId: string; code: number; stdout: string; stderr: string; argv: string[] }> => {
-  assertJailedShellAllowed(account, plan)
-  const sessionId = opts.sessionId ?? randomUUID()
-  const argv = system.buildJailedShellArgv(account, plan, command, {
-    ...(opts.cwdRel && { cwdRel: opts.cwdRel }),
-    ...(opts.env && { env: opts.env }),
-  })
-  const res = await executor.runCommand(argv)
-  const stdout = res.code === 0 ? res.stdout || `[jailshell:${account.username}@xpanel ~]$ ${command}\n` : res.stdout
-  const stderr = res.stderr
-  const stream = res.code !== 0 && stderr ? 'stderr' : 'stdout'
-  const chunk = res.code !== 0 && stderr ? stderr : stdout
-  if (opts.onEvent) {
-    opts.onEvent({
-      id: randomUUID(),
-      at: new Date().toISOString(),
-      kind: 'terminal.output',
-      scope: { accountId: account.id, resellerId: account.ownerId },
-      data: {
-        sessionId,
-        username: account.username,
-        stream,
-        chunk,
-        exitCode: res.code,
-      },
-    })
-  }
-  return { sessionId, code: res.code, stdout, stderr, argv }
-}

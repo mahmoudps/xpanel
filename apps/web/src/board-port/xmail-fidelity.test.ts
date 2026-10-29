@@ -21,7 +21,7 @@ describe('mail component fidelity and truthful actions', () => {
     assert.match(html, /data-vacation-preview/)
     assert.match(html, /data-vacation-save disabled/)
     assert.match(html, /data-vacation-manage="true"/)
-    assert.match(html, locale === 'en' ? /[Aa]ctivation (?:remains )?unverified/ : /التفعيل غير متحقق منه/)
+    assert.match(html, locale === 'en' ? /whether the mail server runs it/ : /ما إذا كان خادم البريد يطبّقه/)
     assert.doesNotMatch(html, /value="2026-12-24"|Away until 2 January|Orders ship on/)
   })
 

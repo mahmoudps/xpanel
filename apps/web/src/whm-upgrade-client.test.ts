@@ -9,7 +9,7 @@ const observation = (start = { enabled: true, reasons: [] as string[] }) => ({
   observedAt: '2026-10-27T10:00:00.000Z', revision,
   current: { state: 'read', version: '1.0.0', releasePath: '/opt/xpanel/releases/1.0.0' }, schemaVersion: 42,
   os: { id: 'ubuntu', versionId: '24.04', prettyName: 'Ubuntu 24.04 LTS' }, freeBytes: 53687091200, freeBytesPath: '/opt/xpanel', activeTransfers: 0,
-  lock: { present: false, state: null, to: null, at: null }, retirementPending: false, maintenance: false, lastUpgrade: null,
+  lock: { present: false, state: null, to: null, at: null }, retirementPending: false, maintenance: false, lastUpgrade: null, rewind: null,
   trust: { state: 'configured', keysConfigured: 1, keyIds: ['xpanel-release-2026'], source: '/etc/xpanel/release-keys.json', reason: null },
   staged: { directory: '/opt/xpanel/downloads', state: 'read', truncated: false, releases: [
     { manifest: 'xpanel-1.1.0.manifest.json', version: '1.1.0', schemaVersion: 43, bytes: 104857600, sha256: 'c'.repeat(64), keyId: 'xpanel-release-2026', signatureState: 'verified', reason: null },
@@ -26,7 +26,7 @@ const checks = [
   { id: 'schema-compatible', ok: true, message: 'schema 42 -> 43', detail: { current: 42, target: 43 } },
 ]
 const preflight = (startEnabled = true) => ({ observedAt: '2026-10-27T10:01:00.000Z', revision, targetVersion: '1.1.0', fromVersion: '1.0.0', report: { ok: true, checks }, start: startEnabled ? { enabled: true, reasons: [] } : { enabled: false, reasons: ['upgrade-coordinator-unavailable'] } })
-const status = () => ({ observedAt: '2026-10-27T10:00:00.000Z', revision, lock: { present: false, state: null, to: null, at: null }, retirementPending: false, maintenance: false, current: { state: 'read', version: '1.0.0', releasePath: '/opt/xpanel/releases/1.0.0' }, latest: null, history: [] })
+const status = () => ({ observedAt: '2026-10-27T10:00:00.000Z', revision, lock: { present: false, state: null, to: null, at: null }, retirementPending: false, maintenance: false, current: { state: 'read', version: '1.0.0', releasePath: '/opt/xpanel/releases/1.0.0' }, rewind: null, latest: null, history: [] })
 const accepted = { accepted: true, handoffId: '11111111-1111-4111-8111-111111111111', upgradeId: null, targetVersion: '1.1.0', fromVersion: '1.0.0' }
 
 beforeEach(() => {
@@ -51,6 +51,39 @@ describe('WHM upgrade readers', () => {
     expect(() => readUpgradeStartView({ ...accepted, accepted: false })).toThrow()
     expect(readUpgradeStatusView(status()).history).toEqual([])
     expect(() => readUpgradeStatusView({ ...status(), latest: { id: 'x' } })).toThrow()
+    const rewind = { state: 'rewind-unknown', done: ['release'], problems: ['canary alice served by uid 33 instead of 1001'], updatedAt: '2026-10-27T10:00:00.000Z' }
+    expect(readUpgradeStatusView({ ...status(), rewind }).rewind).toEqual(rewind)
+    for (const bad of [{ ...rewind, state: 'restored' }, { ...rewind, done: ['reboot'] }, { ...rewind, problems: ['‮spoof'] }, { ...rewind, updatedAt: 'yesterday' }]) {
+      expect(() => readUpgradeStatusView({ ...status(), rewind: bad })).toThrow('invalid_upgrade_rewind')
+    }
+    expect(() => readUpgradeObservationView({ ...observation(), rewind: undefined })).toThrow()
+  })
+})
+
+describe('WHM upgrade rewind states', () => {
+  const failed = {
+    id: '11111111-1111-4111-8111-111111111111', fromVersion: '1.0.0', toVersion: '1.1.0', fromSchemaVersion: 42, toSchemaVersion: null,
+    status: 'running', phase: 'rollback', error: null, actor: 'root', createdAt: '2026-10-27T09:00:00.000Z', startedAt: '2026-10-27T09:00:01.000Z', finishedAt: null,
+  }
+  const done = ['release', 'state-extract', 'state-swap', 'index', 'units', 'start-panel']
+  it.each([
+    [{ state: 'rewind-started', done: done.slice(0, 2), problems: [] }, 'running', 'Rewinding the failed upgrade to its snapshot: 2 of 6 steps restored.'],
+    [{ state: 'rewind-verified', done, problems: [] }, 'read', 'The failed upgrade was rewound: the release, state files, index and units were restored from the snapshot and verified.'],
+    [{ state: 'rewind-unknown', done, problems: ['canary alice served by uid 33 instead of 1001'] }, 'failed', 'Rewind unverified, operator action required: canary alice served by uid 33 instead of 1001'],
+    [{ state: 'rewind-failed', done: done.slice(0, 3), problems: ['rewind:index: reindex refused'] }, 'failed', 'Rewind failed, operator action required. 3 of 6 steps restored: rewind:index: reindex refused'],
+    [{ state: 'unreadable', done: [], problems: [] }, 'failed', 'The rewind journal could not be read, operator action required.'],
+  ])('shows %j as read-only progress', async (journal, state, text) => {
+    const rewind = { ...journal, updatedAt: journal.state === 'unreadable' ? null : '2026-10-27T09:05:00.000Z' }
+    const send = vi.fn(async (_method: string, path: string) => path.endsWith('/status')
+      ? { ...status(), lock: { present: true, state: 'rollback-failed', to: '1.1.0', at: '2026-10-27T09:05:00.000Z' }, retirementPending: true, rewind, latest: failed, history: [failed] }
+      : { ...observation({ enabled: false, reasons: ['upgrade-lock-present'] }), rewind, lastUpgrade: failed })
+    boot(send); await tick()
+    const progress = $('[data-upgrade-progress]')
+    expect(progress.textContent).toBe(text)
+    expect(progress.dataset.state).toBe(state)
+    expect(progress.getAttribute('role')).toBe(state === 'failed' ? 'alert' : 'status')
+    // Reading rewind states never writes: only the two GETs were sent.
+    expect(send.mock.calls.every(call => call[0] === 'GET')).toBe(true)
   })
 })
 

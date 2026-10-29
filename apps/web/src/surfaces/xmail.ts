@@ -4,6 +4,7 @@ import { renderMailFolders } from '../board-port/xmail-folders.ts'
 import { renderMailDiskUsage } from '../board-port/xmail-disk-usage.ts'
 import { renderMailConnectDevices } from '../board-port/xmail-connect-devices.ts'
 import { renderMailForwarders } from '../board-port/xmail-mailbox-forwarders.ts'
+import { renderFilterWorkspace } from '../board-port/extensions/account-filters.ts'
 import { renderMailPreferences } from '../board-port/xmail-mailbox-preferences.ts'
 import { renderMailTools } from '../board-port/xmail-tools.ts'
 import { renderMailSpam } from '../board-port/xmail-spam.ts'
@@ -211,8 +212,8 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
     </div>
   </section><aside class="xp-mail-compose-aside" aria-labelledby="mail-sender-heading"><section class="xp-card"><h2 id="mail-sender-heading">${text('Sending as')}</h2><dl>${field(text('Address'), mailbox)}</dl></section>${quota ? `<section class="xp-card"><h2>${text('Mailbox quota')}</h2>${quota}</section>` : ''}</aside></div>`
 
-  const sieveRules = props.sieveRules ?? []
-  const filtersHtml = `<section class="xp-card" data-section="sieve-filters" aria-labelledby="sieve-rules-heading"><div class="xp-card__header" style="margin-block-end:var(--xp-space-group,24px)"><h2 id="sieve-rules-heading">${text('Filters')}</h2><span class="xp-help xp-tabular">${sieveRules.length} ${text('rules')}</span></div><div class="xp-table-wrap"><table class="xp-table"><thead><tr><th>${text('Rule')}</th><th>${text('Condition')}</th><th>${text('Action')}</th><th>${text('Status')}</th></tr></thead><tbody>${sieveRules.map(rule => `<tr data-sieve-rule-id="${escapeHtml(rule.id)}"><td><strong>${escapeHtml(rule.name)}</strong></td><td><code class="xp-mono"><bdi dir="ltr">${escapeHtml(rule.condition)}</bdi></code></td><td><code class="xp-mono"><bdi dir="ltr">${escapeHtml(rule.action)}</bdi></code></td><td>${renderStatusBadge(rule.enabled ? 'ok' : 'suspended', rule.enabled ? text(msgctxt('xmail', 'Active')) : text('Paused'))}</td></tr>`).join('')}</tbody></table></div></section>`
+  // the mailbox owner's own rules through /api/mail/filters, the same API and Sieve path as xPanel
+  const filtersHtml = `<section class="xp-card" data-section="sieve-filters" aria-labelledby="sieve-rules-heading" style="display:grid;gap:var(--xp-space-group,24px)"><h2 id="sieve-rules-heading" style="margin:0">${text('Filters')}</h2>${mailbox ? renderFilterWorkspace({ lang: locale, canManage: qualifiedMailRoutes.has('/mail/settings/filters') && visibleMailToolIds.has('webmail-email-filters'), fixedMailbox: mailbox }) : `<p role="status">${text('Mailbox has not been read.')}</p>`}</section>`
   const mailboxCanManage = mailbox.length > 0
   const content = activeRoute === '/mail/later' ? `<h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>${renderMailTools({ locale, mailbox, canManage: mailbox.length > 0, searchAvailable: canSearchMailbox, attachmentsAvailable: attachmentReadEnabled, quotaAvailable: visibleMailToolIds.has('webmail-disk-cleanup') })}`
     : activeRoute === '/mail/settings/spam' ? `<h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>${renderMailSpam({ locale, mailbox, canManage: qualifiedMailRoutes.has(activeRoute) && visibleMailToolIds.has('webmail-spam-box') })}`

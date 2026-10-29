@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, it, vi } from 'vitest'
 import { defaultFirewallRules, isXpanelError, suggestServerSettings } from '@xpanel/core'
-import type { LiveEvent } from '@xpanel/core'
+import type { HostAction, LiveEvent } from '@xpanel/core'
 import { createRootPrincipal, createTestDb, createUserPrincipal, latestActive, listAudit, listMetricsHistory, type TestDbHandle } from '@xpanel/db'
 import { profileFor } from '@xpanel/os'
 import { createTestStateStore, type TestStateStoreHandle } from '@xpanel/state'
@@ -226,6 +226,41 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
     assert.equal(noopRes.status, 'noop')
   })
 
+  it('renders a root-granted function exception into the account pool and keeps the rest disabled', async () => {
+    const { account } = await seedServerAndAccount('jailed')
+    const settings = (await stateHandle.store.getServerSettings())!
+    await stateHandle.store.saveServerSettings({ ...settings, phpFunctionExceptions: [{ account: account.username, functions: ['proc_open'], reason: 'queue worker', grantedAt: '2026-10-29T00:00:00.000Z', grantedBy: 'root' }] })
+    const res = await new HostReconciler({ store: stateHandle.store, db: dbHandle.db, executor, os, onEvent: () => {} }).reconcile({ actor: 'root' })
+    assert.equal(res.status, 'applied')
+    const pool = [...executor.files.values()].map(file => file.content).find(content => content.startsWith('; Managed by xPanel: PHP') && content.includes(`[${account.username}]`))!
+    const disabled = /php_admin_value\[disable_functions\] = "?([^"\n]*)/.exec(pool)![1]!.split(',')
+    assert.equal(disabled.includes('proc_open'), false)
+    assert.equal(disabled.includes('exec'), true)
+  })
+
+  it('moves running pools to the new socket root: daemon-reload, restart each FPM unit, then reload the web servers', async () => {
+    const { account } = await seedServerAndAccount('jailed')
+    const reconciler = new HostReconciler({ store: stateHandle.store, db: dbHandle.db, executor, os, onEvent: () => {} })
+    assert.equal((await reconciler.reconcile({ actor: 'root' })).status, 'applied')
+    // A host deployed before the move still has the old unit; the next plain reconcile replaces it.
+    const unitPath = [...executor.files.keys()].find(path => path.endsWith(`/xpanel-php-fpm-${account.username}-8.3.service`))!
+    const deployed = executor.files.get(unitPath)!
+    executor.files.set(unitPath, { ...deployed, content: deployed.content.replace('RuntimeDirectory=xpanel-fpm/', 'RuntimeDirectory=xpanel/fpm/') })
+    executor.executedActions.length = 0
+    assert.equal((await reconciler.reconcile({ actor: 'root' })).status, 'applied')
+    const contents = [...executor.files.values()].map(file => file.content)
+    assert.equal(contents.some(content => content.includes('/run/xpanel/fpm') || content.includes('RuntimeDirectory=xpanel/fpm/')), false)
+    assert.ok(contents.some(content => content.includes(`RuntimeDirectory=xpanel-fpm/${account.username}-8.3`)))
+    assert.ok(contents.some(content => content.includes(`proxy:unix:/run/xpanel-fpm/${account.username}-8.3/php-fpm.sock`)))
+    const at = (match: (action: HostAction) => boolean) => executor.executedActions.findIndex(match)
+    const unit = `xpanel-php-fpm-${account.username}-8.3.service`
+    const daemonReload = at(action => action.kind === 'systemd-daemon-reload')
+    const restart = at(action => action.kind === 'systemd' && action.verb === 'restart' && action.unit === unit)
+    const reloads = [os.services.apache, os.services.nginx].map(name => at(action => action.kind === 'systemd' && action.verb === 'reload' && action.unit === name))
+    assert.ok(daemonReload >= 0 && daemonReload < restart, 'the changed unit file is loaded before the pool restarts')
+    for (const reload of reloads) assert.ok(restart < reload, 'web servers reload only after the pool listens on the new socket')
+  })
+
   it('rolls back staged files and records failed generation when a service config test fails', async () => {
     await seedServerAndAccount('jailed')
     const reconciler = new HostReconciler({
@@ -378,7 +413,7 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
     )
     assert.equal(forbiddenReconcile.status, 403)
 
-    // User alice cannot access user bob's files or shell -> 403 FORBIDDEN
+    // User alice cannot access user bob's files -> 403 FORBIDDEN
     const crossAccountFiles = await app.fetch(
       new Request('http://agent.local/accounts/bob/files', {
         method: 'POST',
@@ -388,14 +423,6 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
     )
     assert.equal(crossAccountFiles.status, 403)
 
-    const crossAccountShell = await app.fetch(
-      new Request('http://agent.local/accounts/bob/shell', {
-        method: 'POST',
-        headers: aliceHeaders,
-        body: JSON.stringify({ command: 'whoami' }),
-      }),
-    )
-    assert.equal(crossAccountShell.status, 403)
     assert.equal(bob.username, 'bob')
 
     // 1. Cached IO reads cannot manufacture samples; metric collection remains explicit.
@@ -478,56 +505,7 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
     assert.equal(webSnap.topPaths.map((p) => p.key).includes('/products'), true)
     assert.equal(events.some((e) => e.kind === 'website.analytics'), true)
 
-    // 3. Verify the shell argv contract and propagated fake exit status; this is not kernel proof
-    const shellRes = await app.fetch(
-      new Request('http://agent.local/accounts/alice/shell', {
-        method: 'POST',
-        headers: aliceHeaders,
-        body: JSON.stringify({ command: 'php -v' }),
-      }),
-    )
-    assert.equal(shellRes.status, 200)
-    const shellBody = (await shellRes.json()) as { code: number; argv: string[] }
-    assert.equal(shellBody.code, 0)
-    assert.equal(shellBody.argv.includes(`Slice=xpanel-${account.uid}.slice`), true)
-    assert.equal(shellBody.argv.includes('ProtectHome=tmpfs'), true)
-    assert.equal(events.some((e) => e.kind === 'terminal.output'), true)
-
-    // Simulate non-zero exit code from systemd-run command
-    executor.failCommand('/usr/bin/composer', 2, 'Composer could not find a composer.json file')
-    const failShellRes = await app.fetch(
-      new Request('http://agent.local/accounts/alice/shell', {
-        method: 'POST',
-        headers: aliceHeaders,
-        body: JSON.stringify({ command: 'composer install' }),
-      }),
-    )
-    assert.equal(failShellRes.status, 200)
-    const failShellBody = (await failShellRes.json()) as { code: number; stderr: string }
-    assert.equal(failShellBody.code, 2)
-    assert.match(failShellBody.stderr, /composer\.json/)
-    executor.clearCommandFailures()
-
-    // Reject shell metacharacters & bash -c
-    const metaShellRes = await app.fetch(
-      new Request('http://agent.local/accounts/alice/shell', {
-        method: 'POST',
-        headers: aliceHeaders,
-        body: JSON.stringify({ command: 'php -v; id' }),
-      }),
-    )
-    assert.equal(metaShellRes.status, 422)
-
-    const bashShellRes = await app.fetch(
-      new Request('http://agent.local/accounts/alice/shell', {
-        method: 'POST',
-        headers: aliceHeaders,
-        body: JSON.stringify({ command: 'bash -c id' }),
-      }),
-    )
-    assert.equal(bashShellRes.status, 403)
-
-    // 4. Missing confined execution fails closed and records the failure
+    // 3. Missing confined execution fails closed and records the failure
     const writeRes = await app.fetch(
       new Request('http://agent.local/accounts/alice/files', {
         method: 'POST',
@@ -543,7 +521,6 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
     assert.equal(writeRes.status, 412)
 
     const audits = await listAudit(dbHandle.db, { limit: 50 })
-    assert.equal(audits.some((a) => a.action === 'shell.exec' && a.actor === 'alice'), true)
     assert.equal(audits.some((a) => a.action === 'file.write' && a.actor === 'alice' && a.outcome === 'failed'), true)
     assert.equal(audits.some((a) => a.action === 'agent.access_denied' && a.outcome === 'denied'), true)
   })

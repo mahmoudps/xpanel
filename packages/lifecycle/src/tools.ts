@@ -7,6 +7,9 @@ export interface LifecycleTools {
   mkdir: string
   dd: string
   systemctl: string
+  sync: string
+  chown: string
+  chmod: string
   /** MariaDB 10.5+ ship these names next to the mysql* compatibility links */
   mariadbDump: string
   mariadb: string
@@ -19,6 +22,9 @@ const USR_BIN: LifecycleTools = Object.freeze({
   mkdir: '/usr/bin/mkdir',
   dd: '/usr/bin/dd',
   systemctl: '/usr/bin/systemctl',
+  sync: '/usr/bin/sync',
+  chown: '/usr/bin/chown',
+  chmod: '/usr/bin/chmod',
   mariadbDump: '/usr/bin/mariadb-dump',
   mariadb: '/usr/bin/mariadb',
 })

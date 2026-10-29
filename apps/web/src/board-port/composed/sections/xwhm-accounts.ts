@@ -25,7 +25,7 @@ export const xwhm_accounts: readonly ComposedRoute[] = [
     "section": "accounts",
     "group": msgid('Accounts'),
     "title": msgid('Bandwidth'),
-    "lede": msgid('Stored account names and domains can be shown after an authorized read. Bandwidth is not measured.'),
+    "lede": msgid('Monthly traffic per account: web from the saved site access logs, plus mail and FTP from their service logs.'),
     "layout": "list",
     "action": null,
     "columns": [

@@ -424,7 +424,7 @@ describe('HTTP authorization security regressions', () => {
     const ownFilterRes = await request(inboxMailboxToken, '/api/mail/filters', 'POST', {
       name: 'Inbox Filter',
       conditions: [{ field: 'Subject', comparator: 'contains', value: '[SPAM]' }],
-      actions: [{ type: 'fileinto', argument: 'Junk' }],
+      actions: [{ type: 'fileinto', target: 'Junk' }],
     })
     expect(ownFilterRes.status).toBe(201)
     const ownFilter = ((await ownFilterRes.json()) as { filter: { id: string; mailbox: string } }).filter
@@ -436,7 +436,7 @@ describe('HTTP authorization security regressions', () => {
           name: 'Attempted Global Filter',
           scope: 'global',
           conditions: [{ field: 'Subject', comparator: 'contains', value: 'alert' }],
-          actions: [{ type: 'discard', argument: '' }],
+          actions: [{ type: 'discard' }],
         })
       ).status,
     ).toBe(403)
@@ -446,7 +446,7 @@ describe('HTTP authorization security regressions', () => {
           name: 'Attempted Forged Sibling Filter',
           mailbox: inboxLogin,
           conditions: [{ field: 'Subject', comparator: 'contains', value: 'alert' }],
-          actions: [{ type: 'discard', argument: '' }],
+          actions: [{ type: 'discard' }],
         })
       ).status,
     ).toBe(404)

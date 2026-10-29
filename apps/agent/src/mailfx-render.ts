@@ -4,10 +4,10 @@ import { fail } from '@xpanel/core'
 import type { OsFamily } from '@xpanel/core'
 import { services } from '@xpanel/render'
 import { readJsonIfExists } from '@xpanel/state'
-import { MAILX_RSPAMD_MILTER, MAILX_SPAMASS_MILTERS, MAILX_SPAMASS_MILTER_UNIT, mailxEngineShowArgv } from '../../../packages/os/src/mailx-command.ts'
+import { MAILX_RSPAMD_MILTER, MAILX_SPAMASS_MILTERS, MAILX_SPAMASS_MILTER_UNIT, mailxCertPaths, mailxEngineShowArgv } from '../../../packages/os/src/mailx-command.ts'
 import type { MailxShowUnit } from '../../../packages/os/src/mailx-command.ts'
 import { isMailxInvalid, mailxMailboxEffects, mailxStatePath, readMailxMailboxSpam, readMailxStored } from './mailx-policy.ts'
-import type { MailxMailboxSpam } from './mailx-policy.ts'
+import type { MailxMailboxSpam, MailxRoutingMode } from './mailx-policy.ts'
 
 /**
  * Mail policy inputs the reconciler renders: the spam filter milter in the Postfix main.cf block, one Dovecot
@@ -20,6 +20,7 @@ export interface MailxSnapshot {
   serviceUsers: readonly { id: string; accountId: string; login: string; domainId?: string; localPart?: string; services: { email: boolean } }[]
   plans?: readonly { id: string; featureListId: string }[]
   featureLists?: readonly { id: string; disabled: readonly string[] }[]
+  certificates?: readonly { id: string; source: string; notAfter: string }[]
 }
 export type MailfxRun = (argv: string[]) => Promise<{ ok: boolean; code: number | null; stdout: string }>
 
@@ -94,13 +95,27 @@ export const mailfxSieveInputs = (rows: readonly MailxMailboxSpam[], snapshot: M
     return effects.blocklist || effects.spamBox ? [{ address: row.mailbox, account: accountRef(account), blockedSenders: [...row.blocklist], spamToJunk: effects.spamBox }] : []
   }).sort((a, b) => a.address.localeCompare(b.address))
 
-export interface MailfxRenderInput { spamMilter: string | null; sieve: services.MailboxPolicySieveInput[] }
+/**
+ * `routing`: domains the server routing policy sends to a backup or remote exchanger, kept out of local delivery.
+ * `submissionTls`: the certificate the server policy chose for the mail-client SMTP ports; absent uses the hostname certificate.
+ */
+export interface MailfxRenderInput { spamMilter: string | null; sieve: services.MailboxPolicySieveInput[]; routing?: ReadonlyMap<string, MailxRoutingMode>; submissionTls?: { certFile: string; keyFile: string } }
+/** Saved routing and submission certificate; a policy that needs review is reported by the policy status and never fails a reconcile. */
+async function mailfxServerInput(stateRoot: string, snapshot: MailxSnapshot, now: Date): Promise<Pick<MailfxRenderInput, 'routing' | 'submissionTls'>> {
+  const read = async <S extends 'server' | 'routing'>(section: S) => {
+    try { const raw = await readJsonIfExists<unknown>(join(stateRoot, ...mailxStatePath(section + '.json'))); return raw === null ? null : readMailxStored(section, raw).policy }
+    catch (error) { if (isMailxInvalid(error) || error instanceof SyntaxError) return null; throw error }
+  }
+  const routing = await read('routing'), id = (await read('server'))?.certificates.submission ?? null
+  const cert = id === null ? undefined : snapshot.certificates?.find(item => item.id === id && Date.parse(item.notAfter) > now.getTime())
+  return { ...(routing?.domains.length ? { routing: new Map(routing.domains.map(row => [row.domain, row.mode])) } : {}), ...(cert ? { submissionTls: mailxCertPaths(cert.id) } : {}) }
+}
 /**
  * Read for each compile. `run` is null before the executor preflight, which keeps the milter off for that first
  * pass; without systemd answers the milter stays off and the Sieve scripts still render.
  */
-export async function readMailfxRenderInput(stateRoot: string, snapshot: MailxSnapshot, family: OsFamily, run: MailfxRun | null): Promise<MailfxRenderInput> {
-  return { spamMilter: run ? await mailfxSpamMilter(stateRoot, family, run) : null, sieve: mailfxSieveInputs((await readMailxMailboxRows(stateRoot)).rows, snapshot) }
+export async function readMailfxRenderInput(stateRoot: string, snapshot: MailxSnapshot, family: OsFamily, run: MailfxRun | null, now = new Date()): Promise<MailfxRenderInput> {
+  return { spamMilter: run ? await mailfxSpamMilter(stateRoot, family, run) : null, sieve: mailfxSieveInputs((await readMailxMailboxRows(stateRoot)).rows, snapshot), ...await mailfxServerInput(stateRoot, snapshot, now) }
 }
 
 // ---- mailing lists ------------------------------------------------------------------------
@@ -110,6 +125,7 @@ export type MailfxListState = 'pending' | 'disabled' | 'restricted' | 'empty' | 
 export interface MailfxListRow { id: string; accountId: string | null; address: string; members: number; state: MailfxListState }
 export interface MailfxDeliveredList { accountId: string; address: string; members: string[] }
 export interface MailfxForwarding {
+  rejects?: readonly { accountId: string; sourceAddress: string; message: string }[]
   forwarders: readonly { accountId: string; sourceAddress: string; destinations: readonly string[] }[]
   domainForwarders: readonly { accountId: string; sourceDomain: string; targetDomain: string }[]
 }
@@ -150,6 +166,7 @@ export async function readMailfxLists(stateRoot: string, snapshot: MailxSnapshot
       domain: domain.name, account: accountRef(account),
       mailboxes: snapshot.serviceUsers.filter(user => user.accountId === account.id && user.domainId === domain.id && user.services.email).map(user => ({ local: user.localPart ?? user.login.slice(0, user.login.lastIndexOf('@')), passwordHash: '', quotaMb: 0 })),
       forwarders: forwarding.forwarders.filter(item => item.accountId === account.id && item.sourceAddress.endsWith(`@${domain.name}`)).map(item => ({ local: item.sourceAddress.slice(0, item.sourceAddress.lastIndexOf('@')), to: [...item.destinations] })),
+      rejects: (forwarding.rejects ?? []).filter(item => item.accountId === account.id && item.sourceAddress.endsWith(`@${domain.name}`)).map(item => ({ local: item.sourceAddress.slice(0, item.sourceAddress.lastIndexOf('@')), message: item.message })),
       ...(domainForward ? { domainForward } : {}),
     }
   }))
@@ -180,6 +197,8 @@ export const mailfxListAliasLine = (list: MailfxDeliveredList): string => `${lis
 
 export interface MailForwardingConfiguration {
   forwarders: { accountId: string; sourceAddress: string; destinations: string[] }[]
+  /** addresses that answer RCPT with a permanent error (forwarder action "reject") */
+  rejects: { accountId: string; sourceAddress: string; message: string }[]
   domainForwarders: { accountId: string; sourceDomain: string; targetDomain: string }[]
   /** Only admitted lists; the others are reported by the mail policy status and never rendered. */
   lists: MailfxDeliveredList[]
@@ -189,7 +208,7 @@ export interface MailForwardingConfiguration {
 export const readMailForwardingConfiguration = async (root: string, snapshot: MailxSnapshot): Promise<MailForwardingConfiguration> => {
   const domains = new Map(snapshot.domains.map(domain => [domain.name, domain.accountId]))
   const invalid = (): never => fail('PRECONDITION_FAILED', 'Saved mail forwarding configuration is invalid; review it before reconciliation')
-  const list = async (name: string, keys: readonly string[]): Promise<Record<string, unknown>[]> => {
+  const list = async (name: string, keys: readonly string[], optional: readonly string[] = []): Promise<Record<string, unknown>[]> => {
     let text: string
     try { text = await readFile(join(root, 'extended', 'mail', name), 'utf8') } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
@@ -202,7 +221,7 @@ export const readMailForwardingConfiguration = async (root: string, snapshot: Ma
     return value.map(row => {
       if (!row || typeof row !== 'object' || Array.isArray(row)) return invalid()
       const item = row as Record<string, unknown>
-      if (Object.keys(item).some(key => !keys.includes(key)) || keys.some(key => !(key in item))
+      if (Object.keys(item).some(key => !keys.includes(key) && !optional.includes(key)) || keys.some(key => !(key in item))
         || typeof item.id !== 'string' || !item.id || item.id.length > 128
         || typeof item.accountId !== 'string' || !item.accountId || item.accountId.length > 128
         || typeof item.createdAt !== 'string' || !Number.isFinite(Date.parse(item.createdAt))) return invalid()
@@ -214,7 +233,14 @@ export const readMailForwardingConfiguration = async (root: string, snapshot: Ma
     return accountId
   }
   try {
-    const forwarders = (await list('forwarders.json', ['id', 'accountId', 'sourceAddress', 'destinations', 'createdAt'])).map(item => {
+    const saved = await list('forwarders.json', ['id', 'accountId', 'sourceAddress', 'destinations', 'createdAt'], ['action', 'rejectMessage'])
+    const rejects = saved.filter(item => item.action === 'reject').map(item => {
+      const source = services.normalizeHostedEmail(item.sourceAddress, 'saved forwarder source')
+      if (!Array.isArray(item.destinations) || item.destinations.length !== 0) return invalid()
+      return { accountId: own(source.domain, item.accountId), sourceAddress: source.address, message: services.assertRejectText(item.rejectMessage) }
+    })
+    const forwarders = saved.filter(item => item.action !== 'reject').map(item => {
+      if (item.action !== undefined && item.action !== 'forward' || item.rejectMessage !== undefined) return invalid()
       const source = services.normalizeHostedEmail(item.sourceAddress, 'saved forwarder source')
       if (!Array.isArray(item.destinations) || item.destinations.length === 0 || item.destinations.length > services.MAX_FORWARD_TARGETS) return invalid()
       const destinations = item.destinations.map(target => services.normalizeEmail(target, 'saved forwarder destination').address)
@@ -227,8 +253,8 @@ export const readMailForwardingConfiguration = async (root: string, snapshot: Ma
       if (sourceDomain === targetDomain) return invalid()
       return { accountId: own(sourceDomain, item.accountId), sourceDomain, targetDomain }
     })
-    if (new Set(forwarders.map(item => item.sourceAddress)).size !== forwarders.length
+    if (new Set([...forwarders, ...rejects].map(item => item.sourceAddress)).size !== forwarders.length + rejects.length
       || new Set(domainForwarders.map(item => item.sourceDomain)).size !== domainForwarders.length) return invalid()
-    return { forwarders, domainForwarders, lists: (await readMailfxLists(root, snapshot, { forwarders, domainForwarders })).lists }
+    return { forwarders, rejects, domainForwarders, lists: (await readMailfxLists(root, snapshot, { forwarders, rejects, domainForwarders })).lists }
   } catch { return invalid() }
 }

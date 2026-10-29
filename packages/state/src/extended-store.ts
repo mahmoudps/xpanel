@@ -373,17 +373,6 @@ export interface WebExtrasConfig {
 // Types — 6. Databases Beyond MariaDB
 // ---------------------------------------------------------------------------
 
-export interface AccountCacheConfig {
-  accountId: string
-  redisEnabled: boolean
-  redisSocketPath: string
-  redisMemoryMb: number
-  memcachedEnabled: boolean
-  memcachedSocketPath: string
-  memcachedMemoryMb: number
-  updatedAt: string
-}
-
 // ---------------------------------------------------------------------------
 // Types — 7. Fine-Grained Server Settings & Previously Deferred Capabilities
 // ---------------------------------------------------------------------------
@@ -474,33 +463,6 @@ export interface LegacyTrafficSummary {
     hits: number
     bandwidthBytes: number
   }
-  updatedAt: string
-}
-
-export interface PanelBrandingConfig {
-  companyName: string
-  productName: string
-  primaryColorOklch: string
-  logoUrl: string | null
-  supportUrl: string | null
-  footerText: string
-  updatedAt: string
-}
-
-export interface LanguageOverridesState {
-  en: Record<string, string>
-  ar: Record<string, string>
-  updatedAt: string
-}
-
-export interface WhmcsConfig {
-  enabled: boolean
-  whmcsUrl: string
-  apiIdentifier: string
-  allowedServerIps: string[]
-  autoProvision: boolean
-  ssoEnabled: boolean
-  lastWebhookAt: string | null
   updatedAt: string
 }
 
@@ -1980,54 +1942,6 @@ export class ExtendedFeaturesStore {
     })
   }
 
-  async getAccountCacheConfig(accountId: string): Promise<AccountCacheConfig> {
-    const safeAcc = safeSlug(accountId, 'accountId')
-    const stored = await readJsonIfExists<AccountCacheConfig>(
-      this.extPath('databases', 'cache', `${safeAcc}.json`),
-    )
-    if (stored) return stored
-    return {
-      accountId,
-      redisEnabled: false,
-      redisSocketPath: `/run/xpanel-redis/${safeAcc}.sock`,
-      redisMemoryMb: 128,
-      memcachedEnabled: false,
-      memcachedSocketPath: `/run/xpanel-memcached/${safeAcc}.sock`,
-      memcachedMemoryMb: 64,
-      updatedAt: new Date(0).toISOString(),
-    }
-  }
-
-  saveAccountCacheConfig(
-    accountId: string,
-    cfg: {
-      redisEnabled: boolean
-      redisSocketPath: string
-      redisMemoryMb: number
-      memcachedEnabled: boolean
-      memcachedSocketPath: string
-      memcachedMemoryMb: number
-    },
-  ): Promise<AccountCacheConfig> {
-    return this.mutex.run(async () => {
-      const safeAcc = safeSlug(accountId, 'accountId')
-      const next: AccountCacheConfig = {
-        accountId,
-        redisEnabled: assertBool(cfg.redisEnabled, 'redisEnabled'),
-        redisSocketPath: assertLine(cfg.redisSocketPath, 256, 'redisSocketPath', { allowEmpty: false }),
-        redisMemoryMb: assertInt(cfg.redisMemoryMb, 16, 65536, 'redisMemoryMb'),
-        memcachedEnabled: assertBool(cfg.memcachedEnabled, 'memcachedEnabled'),
-        memcachedSocketPath: assertLine(cfg.memcachedSocketPath, 256, 'memcachedSocketPath', {
-          allowEmpty: false,
-        }),
-        memcachedMemoryMb: assertInt(cfg.memcachedMemoryMb, 16, 65536, 'memcachedMemoryMb'),
-        updatedAt: new Date().toISOString(),
-      }
-      await atomicWriteJson(this.extPath('databases', 'cache', `${safeAcc}.json`), next)
-      return next
-    })
-  }
-
   // =========================================================================
   // 7. Fine-Grained Server Settings & Previously Deferred Capabilities
   // =========================================================================
@@ -2356,110 +2270,4 @@ export class ExtendedFeaturesStore {
     }
   }
 
-  async getPanelBranding(): Promise<PanelBrandingConfig> {
-    const stored = await readJsonIfExists<PanelBrandingConfig>(this.extPath('server', 'branding.json'))
-    if (stored) return stored
-    return {
-      companyName: 'xPanel Hosting',
-      productName: 'xPanel',
-      primaryColorOklch: 'oklch(0.62 0.19 255)',
-      logoUrl: null,
-      supportUrl: 'https://support.example.com',
-      footerText: 'Powered by xPanel',
-      updatedAt: new Date(0).toISOString(),
-    }
-  }
-
-  savePanelBranding(
-    branding: Omit<PanelBrandingConfig, 'updatedAt'>,
-  ): Promise<PanelBrandingConfig> {
-    return this.mutex.run(async () => {
-      const next: PanelBrandingConfig = {
-        companyName: assertLine(branding.companyName, 128, 'companyName', { allowEmpty: false }),
-        productName: assertLine(branding.productName, 64, 'productName', { allowEmpty: false }),
-        primaryColorOklch: assertLine(branding.primaryColorOklch, 64, 'primaryColorOklch', {
-          allowEmpty: false,
-        }),
-        logoUrl: branding.logoUrl ? assertLine(branding.logoUrl, 512, 'logoUrl', { allowEmpty: false }) : null,
-        supportUrl: branding.supportUrl
-          ? assertLine(branding.supportUrl, 512, 'supportUrl', { allowEmpty: false })
-          : null,
-        footerText: assertLine(branding.footerText, 256, 'footerText'),
-        updatedAt: new Date().toISOString(),
-      }
-      await atomicWriteJson(this.extPath('server', 'branding.json'), next)
-      return next
-    })
-  }
-
-  async getLanguageOverrides(): Promise<LanguageOverridesState> {
-    const stored = await readJsonIfExists<LanguageOverridesState>(this.extPath('server', 'i18n-overrides.json'))
-    if (stored) return stored
-    return {
-      en: {},
-      ar: {},
-      updatedAt: new Date(0).toISOString(),
-    }
-  }
-
-  saveLanguageOverrides(
-    locale: Locale,
-    overrides: Record<string, string>,
-  ): Promise<LanguageOverridesState> {
-    return this.mutex.run(async () => {
-      const validLocale = oneOf(locale, ['en', 'ar'] as const, 'locale')
-      const current = await this.getLanguageOverrides()
-      const sanitized: Record<string, string> = {}
-      for (const [k, v] of Object.entries(overrides)) {
-        sanitized[assertLine(k, 128, 'key', { allowEmpty: false })] = assertLine(v, 1024, 'value')
-      }
-      const next: LanguageOverridesState = {
-        ...current,
-        [validLocale]: sanitized,
-        updatedAt: new Date().toISOString(),
-      }
-      await atomicWriteJson(this.extPath('server', 'i18n-overrides.json'), next)
-      return next
-    })
-  }
-
-  async getWhmcsConfig(): Promise<WhmcsConfig> {
-    const stored = await readJsonIfExists<WhmcsConfig>(this.extPath('server', 'whmcs.json'))
-    if (stored) return stored
-    return {
-      enabled: false,
-      whmcsUrl: 'https://billing.example.com',
-      apiIdentifier: '',
-      allowedServerIps: [],
-      autoProvision: true,
-      ssoEnabled: true,
-      lastWebhookAt: null,
-      updatedAt: new Date(0).toISOString(),
-    }
-  }
-
-  saveWhmcsConfig(cfg: {
-    enabled: boolean
-    whmcsUrl: string
-    apiIdentifier: string
-    allowedServerIps: string[]
-    autoProvision: boolean
-    ssoEnabled: boolean
-    lastWebhookAt?: string | null
-  }): Promise<WhmcsConfig> {
-    return this.mutex.run(async () => {
-      const next: WhmcsConfig = {
-        enabled: assertBool(cfg.enabled, 'enabled'),
-        whmcsUrl: assertLine(cfg.whmcsUrl, 512, 'whmcsUrl', { allowEmpty: false }),
-        apiIdentifier: assertLine(cfg.apiIdentifier, 256, 'apiIdentifier'),
-        allowedServerIps: validateIpList(cfg.allowedServerIps, 'allowedServerIps'),
-        autoProvision: assertBool(cfg.autoProvision, 'autoProvision'),
-        ssoEnabled: assertBool(cfg.ssoEnabled, 'ssoEnabled'),
-        lastWebhookAt: cfg.lastWebhookAt ?? null,
-        updatedAt: new Date().toISOString(),
-      }
-      await atomicWriteJson(this.extPath('server', 'whmcs.json'), next)
-      return next
-    })
-  }
 }

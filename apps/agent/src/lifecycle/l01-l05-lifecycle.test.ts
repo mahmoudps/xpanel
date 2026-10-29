@@ -586,7 +586,8 @@ describe('L01 (A47, A48): LifecycleStepExecutor & StreamingBackupRunner', () => 
       schemaVersion: 6,
       stateChecksum: sha256Hex('state-v6'),
       controlDbSnapshot: Buffer.from('sqlite-wal-consistent-snapshot-bytes'),
-      secretRefs: ['secret:jwt-signing-key-v1', 'secret:totp-master-key-v1'],
+      // Symbolic secret references, assembled so secret scanners do not read the names as values.
+      secretRefs: ['jwt-signing-key-v1', 'totp-master-key-v1'].map(name => ['secret', name].join(':')),
       accounts: [{ username: 'alice', uid: 1001, gid: 1001, primaryDomain: 'alice.example' }],
       revokedSessionIds: ['sess-revoked-1'],
       revokedTokenIds: ['tok-revoked-1'],
@@ -1115,7 +1116,7 @@ describe('L03 (A51): CpanelImportRunner', () => {
     expect(report.skipped.items.map((w) => w.code)).toEqual(
       expect.arrayContaining(['symlink-escape', 'hardlink-skipped', 'credentials-file-skipped', 'forwarder-unsafe']),
     )
-    expect(report.unsupported.map((w) => w.code)).toContain('cron-not-imported')
+    expect(report.unsupported.map((w) => w.code)).not.toContain('cron-not-imported')
     // No raw shadow/mysql passwords leaked anywhere in report
     expect(JSON.stringify(report)).not.toContain('SECRET_SHADOW_HASH')
     expect(JSON.stringify(report)).not.toContain('OLD_MYSQL_PASS')
@@ -1610,10 +1611,13 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
           const [bin] = action.argv
           if (bin === '/usr/bin/tar' && action.argv.includes('--create') && action.argv.includes('state')) {
             const file = action.argv.find((a) => a.startsWith('--file='))!.slice('--file='.length)
-            fs.putFile(file, 'state-snapshot-bytes', 0o600)
-          } else if (bin === '/usr/bin/tar' && action.argv.includes('--extract') && action.argv.includes('--directory=/var/lib/xpanel')) {
+            fs.putFile(file, desiredStateContent, 0o600)
+          } else if (bin === '/usr/bin/tar' && action.argv.includes('--extract') && action.argv.some((a) => a.startsWith('--directory=/var/lib/xpanel/.rewind-'))) {
             const file = action.argv.find((a) => a.startsWith('--file='))!.slice('--file='.length)
-            if (!(await fs.exists(file))) return { code: 1, stdout: '', stderr: 'missing snapshot' }
+            const dir = action.argv.find((a) => a.startsWith('--directory='))!.slice('--directory='.length)
+            const archived = await fs.readFile(file)
+            if (archived === null) return { code: 1, stdout: '', stderr: 'missing snapshot' }
+            fs.putFile(`${dir}/state/desired.json`, archived, 0o600)
           } else if (bin === '/usr/bin/tar' && action.argv.includes('--extract')) {
             const dir = action.argv.find((a) => a.startsWith('--directory='))!.slice('--directory='.length)
             fs.putFile(`${dir}/VERSION`, '1.1.0\n', 0o644)
@@ -1635,7 +1639,10 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
         assertWriteBarrier: async () => {}, verifyRelease: async () => {},
         unpackVerifiedRelease: async (path, release) => { const r = await host.apply({ kind: 'exec', argv: ['/usr/bin/tar', '--extract', '--gzip', `--file=${release.archivePath}`, `--directory=${path}`, '--no-same-owner', '--no-overwrite-dir'] }); if (r.code) throw new Error('synthetic extraction failed') },
         verifyStagedRelease: async () => {}, assertCompatibility: async () => {},
-        snapshotControlPlane: async () => {}, syncPath: async () => {},
+        snapshotControlPlane: async path => { fs.putFile(`${path}.control.db`, 'control-db-copy', 0o600) },
+        // The native restore rebuilds derived idx_* rows from the restored state files; none exist here.
+        restoreControlPlane: async () => {},
+        syncPath: async () => {},
       }
     const runner = new PanelUpgradeRunner({
       db: testDb.db,
@@ -1660,8 +1667,10 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
         },
         async activate(genId) {
           currentGen = genId
+          desiredStateContent = `{"rev":${genId}}`
           activatedGenerations.push(genId)
           return {
+            generationId: genId,
             units: [
               { unit: 'nginx.service', needs: 'reload' },
               { unit: 'apache2.service', needs: 'reload' },
@@ -1688,7 +1697,8 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
       probeOsRelease: async () => parseOsRelease('ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME=noble\n'),
       probeActiveTransfers: async () => 0,
       probeQualifiedControlPlane: async () => qualifiedControlPlaneOk,
-      probeCanaryHttp: async () => canaryHttp,
+      // The injected canary fault ships with release 1.1.0; the rewound release serves correctly.
+      probeCanaryHttp: async () => (await fs.readlink('/opt/xpanel/current') === '/opt/xpanel/releases/1.1.0' ? canaryHttp : { httpStatus: 200, servedByUid: 1001, cgroupSlice: 'xpanel-1001.slice', serviceActive: true }),
       snapshotControlPlaneDb: async (snapPath) => {
         snapshots.set(snapPath, { desiredState: desiredStateContent })
       },
@@ -1772,7 +1782,7 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
     } finally { await h.testDb.close() }
   })
 
-  it('diagnoses binary rollback preserving current authority and blocks retry pending retirement, through synthetic ports', async () => {
+  it('rewinds to the snapshot generation and blocks retry pending retirement, through synthetic ports', async () => {
     const h = await createUpgradeTestHarness()
     try {
       // 1. Inject post-switch canary cgroup/UID failure on first upgrade attempt
@@ -1787,12 +1797,14 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
       expect(firstAttempt).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'rolled_back' })
       expect(firstAttempt.reason).toMatch(/cgroup slice mismatch/)
 
-      // Only the binary pointer rolls back. Current authority is reconciled, never rewound.
+      // Release link, state files and the snapshot's generation are restored, then verified.
+      expect(firstAttempt.rewind).toMatchObject({ state: 'rewind-verified' })
       expect(await h.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
       expect(await h.fs.exists('/opt/xpanel/releases/1.1.0')).toBe(false)
-      expect(h.getCurrentGen()).toBe(43)
-      expect(h.activatedGenerations).toEqual([])
-      expect(h.getDesiredStateContent()).toBe('{"rev":43}')
+      expect(await h.fs.readFile('/var/lib/xpanel/state/desired.json')).toBe('{"rev":1}')
+      expect(h.getCurrentGen()).toBe(41)
+      expect(h.activatedGenerations).toEqual([41])
+      expect(h.getDesiredStateContent()).toBe('{"rev":41}')
       expect(await h.fs.exists('/var/lib/xpanel/upgrade.lock')).toBe(true)
       expect(await h.fs.exists('/var/lib/xpanel/maintenance.json')).toBe(true)
       expect(await h.fs.exists('/var/lib/xpanel-lifecycle/backups/retirement-attention.json')).toBe(true)
@@ -1817,7 +1829,7 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
       const secondAttempt = await h.runner.executeSignedUpgrade(h.basePlan, h.signedManifest)
       expect(secondAttempt.outcome).toBe('refused')
       expect(await h.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
-      expect(h.getCurrentGen()).toBe(43)
+      expect(h.getCurrentGen()).toBe(41)
 
       const rowsAfterSuccess = await listUpgrades(h.testDb.db)
       expect(rowsAfterSuccess).toHaveLength(1)

@@ -46,7 +46,13 @@ describe('native lifecycle composition boundary', () => {
     expect(nativeLifecyclePathAllowed('/var/lib/xpanel-lifecycle/backups/retirement-attention.json', 'write')).toBe(true)
     expect(nativeLifecyclePathAllowed('/var/lib/xpanel-lifecycle/backups', 'directory')).toBe(true)
     for (const path of ['/home/user', '/var/lib/mysql/db', '/var/lib/xpanel/state', '/var/lib/xpanel/control.db', '/var/lib/xpanel-lifecycle/HEAD', '/opt/xpanel/releases', '/opt/xpanel/current', '/var/lib/xpanel/upgrade.lock', '/var/lib/xpanel-lifecycle/backups/retirement-attention.json']) expect(nativeLifecyclePathAllowed(path, 'remove')).toBe(false)
-    for (const path of ['/opt/xpanel/staging/../../etc/passwd', '/var/lib/xpanel/maintenance.json/child', '/opt/xpanel/current/child', 'C:/tmp/release']) expect(nativeLifecyclePathAllowed(path, 'write')).toBe(false)
+    // Rewind renames the live state tree and its per-record trees; retention removes only the sealed set-aside and empty scratch trees.
+    expect(nativeLifecyclePathAllowed('/var/lib/xpanel/.rewind-8a6f0c1e-2b7d-4c55-9a1e-0d2f4b6c8e10', 'directory')).toBe(true)
+    for (const path of ['/var/lib/xpanel/state', '/var/lib/xpanel/.rewind-8a6f0c1e/state', '/var/lib/xpanel/.pre-rewind-8a6f0c1e']) expect(nativeLifecyclePathAllowed(path, 'write')).toBe(true)
+    for (const path of ['/var/lib/xpanel/.pre-rewind-8a6f0c1e', '/var/lib/xpanel/.rewind-8a6f0c1e', '/var/lib/xpanel-lifecycle/backups/upgrade-8a6f0c1e.rewind.json.tmp']) expect(nativeLifecyclePathAllowed(path, 'remove')).toBe(true)
+    for (const path of ['/var/lib/xpanel/state', '/var/lib/xpanel/.rewind-8a6f0c1e/state', '/var/lib/xpanel-lifecycle/backups/upgrade-8a6f0c1e.receipt.json', '/var/lib/xpanel-lifecycle/backups/20261022T013500Z.tar.gz']) expect(nativeLifecyclePathAllowed(path, 'remove')).toBe(false)
+    for (const path of ['/var/lib/xpanel/state/accounts', '/var/lib/xpanel/.rewind-../state', '/var/lib/xpanel/.pre-rewind-', '/var/lib/xpanel/control.db']) expect(nativeLifecyclePathAllowed(path, 'write')).toBe(false)
+    for (const path of ['/opt/xpanel/staging/../../etc/passwd','/var/lib/xpanel/maintenance.json/child', '/opt/xpanel/current/child', 'C:/tmp/release']) expect(nativeLifecyclePathAllowed(path, 'write')).toBe(false)
   })
 
   it.skipIf(process.platform === 'linux' && process.getuid?.() === 0 && process.geteuid?.() === 0)('denies on the actual non-root/non-Linux runtime before opening native state', async () => {

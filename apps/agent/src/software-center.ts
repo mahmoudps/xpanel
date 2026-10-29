@@ -274,8 +274,8 @@ export function parseDnfSimulation(stdout: string): SimulationPlan {
   return plan
 }
 
-type Outcome = { plan: SimulationPlan } | { refusal: PreviewRefusal }
-async function simulate(family: SoftwareCenterFamily, action: SoftwareCenterAction, run: SoftwareCenterRun, names: readonly string[]): Promise<Outcome> {
+export type Outcome = { plan: SimulationPlan } | { refusal: PreviewRefusal }
+export async function simulate(family: SoftwareCenterFamily, action: SoftwareCenterAction, run: SoftwareCenterRun, names: readonly string[]): Promise<Outcome> {
   const kind = family === 'debian' ? (action === 'install' ? 'apt-simulate-install' : 'apt-simulate-remove') : (action === 'install' ? 'dnf-simulate-install' : 'dnf-simulate-remove')
   const result = await invoke(run, softwareCenterArgv(kind, names))
   if (result.code === null) return { refusal: 'simulation-unavailable' }

@@ -23,6 +23,8 @@ export interface ComposedContext {
     processCount: number | null
     bandwidth: 'unmeasured'
     ioEnforced?: boolean | null
+    /** This UTC month's metered traffic and enforcement state. */
+    bandwidthMonth?: { month: string; totalBytes: number | null; limitBytes: number | null; usedPercent: number | null; enforced: boolean; limited: boolean }
   }
   /** Only logical reader names, never raw host errors or credentials. */
   failedReads?: readonly ('domains' | 'serviceUsers' | 'accounts' | 'resellers' | 'usage')[]

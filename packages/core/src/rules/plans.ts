@@ -99,7 +99,7 @@ const fieldErrors = <K extends string>(
   return errors
 }
 
-const PLAN_KEYS: readonly string[] = ['id', 'name', 'ownerId', 'featureListId', 'resources', 'caps', 'dedicatedIp', 'shell', 'defaultMailboxQuotaMb']
+const PLAN_KEYS: readonly string[] = ['id', 'name', 'ownerId', 'featureListId', 'resources', 'caps', 'dedicatedIp', 'shell', 'defaultMailboxQuotaMb', 'enforceBandwidth']
 
 /** Structural problems only; no authorization. Empty array means the plan is well-formed. */
 export const planErrors = (plan: unknown): string[] => {
@@ -116,6 +116,7 @@ export const planErrors = (plan: unknown): string[] => {
   errors.push(...fieldErrors('resources', RESOURCE_RULES, plan.resources))
   errors.push(...fieldErrors('caps', PLAN_CAP_RULES, plan.caps))
   if (typeof plan.dedicatedIp !== 'boolean') errors.push('dedicatedIp must be a boolean')
+  if (plan.enforceBandwidth !== undefined && typeof plan.enforceBandwidth !== 'boolean') errors.push('enforceBandwidth must be a boolean')
   if (plan.shell !== 'none' && plan.shell !== 'jailed') errors.push('shell must be "none" or "jailed"')
   const mq = plan.defaultMailboxQuotaMb
   if (!isLimit(mq, 1) || (!isUnlimited(mq) && mq > MAX_DISK_MB)) {
@@ -145,6 +146,7 @@ const clonePlan = (p: Plan): Plan => ({
   dedicatedIp: p.dedicatedIp,
   shell: p.shell,
   defaultMailboxQuotaMb: p.defaultMailboxQuotaMb,
+  ...(p.enforceBandwidth !== undefined && { enforceBandwidth: p.enforceBandwidth }),
 })
 
 const holdsAcl = (reseller: Reseller, acl: Reseller['acl'][number]): boolean => Array.isArray(reseller.acl) && reseller.acl.includes(acl)

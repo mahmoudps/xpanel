@@ -1,9 +1,12 @@
 import { createHash } from 'node:crypto'
 import { fail } from '@xpanel/core'
+import { services } from '@xpanel/render'
 import { canonicalForwarderAddress } from './forwarder-validation.ts'
 
 export const FILTER_COMPILATION_BUDGET_BYTES = 1024 * 1024
-export const MAX_FILTER_RULES = 10000
+/** the host renders account-wide and mailbox rules into one script with at most this many rules */
+export const MAX_FILTER_RULES = services.MAX_FILTERS
+export const MAX_FILTER_ACTIONS = 10
 export type FilterScope = 'global' | 'mailbox'
 export interface FilterScopeContext { accountId: string; scope: FilterScope; mailbox: string | null }
 export interface FilterCondition {
@@ -12,8 +15,8 @@ export interface FilterCondition {
   comparator: 'contains' | 'is' | 'matches' | 'over' | 'under'
   value: string
 }
-export interface FilterAction { type: 'fileinto' | 'redirect' | 'discard' | 'reject' | 'keep'; target?: string }
-export interface FilterContent { name: string; priority: number; enabled: boolean; matchAll: boolean; conditions: FilterCondition[]; action: FilterAction }
+export interface FilterAction { type: 'fileinto' | 'redirect' | 'discard' | 'reject' | 'keep' | 'mark-read' | 'stop'; target?: string }
+export interface FilterContent { name: string; priority: number; enabled: boolean; matchAll: boolean; conditions: FilterCondition[]; actions: FilterAction[] }
 export type FilterPatch = Partial<Omit<FilterContent, 'priority'>>
 export interface ValidatedFilterRule extends FilterContent, FilterScopeContext { id: string; createdAt: string }
 
@@ -35,16 +38,11 @@ const boolean = (value: unknown, label: string): boolean => typeof value === 'bo
 const priority = (value: unknown): number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= 10000 ? value : invalid('priority must be an integer between 1 and 10000')
 const conditionFields = ['from', 'to', 'subject', 'header', 'size', 'body'] as const
 const stringComparators = ['contains', 'is', 'matches'] as const
-const actionTypes = ['fileinto', 'redirect', 'discard', 'reject', 'keep'] as const
-const contentKeys = ['name', 'priority', 'enabled', 'matchAll', 'conditions', 'action', 'actions'] as const
+const actionTypes = ['fileinto', 'redirect', 'discard', 'reject', 'keep', 'mark-read', 'stop'] as const
+const contentKeys = ['name', 'priority', 'enabled', 'matchAll', 'conditions', 'actions'] as const
 const storedKeys = [...contentKeys, 'id', 'accountId', 'scope', 'mailbox', 'compiledSieve', 'createdAt']
 const own = (value: object, key: string): boolean => Object.hasOwn(value, key)
 const dense = (value: readonly unknown[]): void => { for (let i = 0; i < value.length; i++) if (!own(value, String(i))) invalid('Sparse filter arrays are not supported') }
-
-export const quoteSieveString = (value: string): string => {
-  const text = printable(value, 'Sieve literal', 1024)
-  return '"' + text.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'
-}
 
 export function validateFilterCondition(input: unknown): FilterCondition {
   const value = record(input, 'condition')
@@ -74,27 +72,27 @@ const conditions = (value: unknown): FilterCondition[] => {
   dense(value)
   return value.map(validateFilterCondition)
 }
-const action = (input: unknown, legacy: boolean): FilterAction => {
+const action = (input: unknown): FilterAction => {
   const value = record(input, 'action')
-  keys(value, legacy ? ['type', 'target', 'argument'] : ['type', 'target'])
+  keys(value, ['type', 'target'])
   if (typeof value.type !== 'string' || !(actionTypes as readonly string[]).includes(value.type)) return invalid('Unknown filter action')
-  if (own(value, 'target') && own(value, 'argument')) return invalid('Conflicting action target aliases')
-  const target = own(value, 'argument') ? value.argument : value.target
-  if (value.type === 'keep' || value.type === 'discard') {
-    if (target !== undefined && target !== '') return invalid('keep and discard do not accept a target')
-    return { type: value.type }
+  if (['keep', 'discard', 'mark-read', 'stop'].includes(value.type)) {
+    if (value.target !== undefined && value.target !== '') return invalid(value.type + ' does not accept a target')
+    return { type: value.type as 'keep' }
   }
-  if (value.type === 'redirect') return { type: 'redirect', target: canonicalForwarderAddress(target) }
-  return { type: value.type as 'fileinto' | 'reject', target: printable(target, 'action target', value.type === 'fileinto' ? 255 : 1024, 1) }
+  if (value.type === 'redirect') return { type: 'redirect', target: canonicalForwarderAddress(value.target) }
+  return { type: value.type as 'fileinto' | 'reject', target: printable(value.target, 'action target', value.type === 'fileinto' ? 255 : 1024, 1) }
 }
-const actionInput = (body: Record<string, unknown>): FilterAction => {
-  if (own(body, 'action') && own(body, 'actions')) return invalid('Use exactly one action representation')
-  if (own(body, 'actions')) {
-    if (!Array.isArray(body.actions) || body.actions.length !== 1) return invalid('Exactly one legacy action is supported')
-    return action(body.actions[0], true)
-  }
-  if (!own(body, 'action')) return invalid('An explicit action is required')
-  return action(body.action, false)
+const actions = (value: unknown): FilterAction[] => {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_FILTER_ACTIONS) return invalid('actions must contain between 1 and ' + MAX_FILTER_ACTIONS + ' entries')
+  dense(value)
+  return value.map(action)
+}
+/** The host renderer is the grammar: a rule it cannot render (empty value, header name, folder, action mix) is refused here. */
+const renderable = <T extends FilterContent>(rule: T): T => {
+  try { services.renderSieveScript({ filters: [services.mailFilterOf({ ...rule, enabled: true } as unknown as Record<string, unknown>)] }) }
+  catch (error) { return invalid(error instanceof Error ? error.message : 'filter cannot be rendered') }
+  return rule
 }
 const validateHints = (body: Record<string, unknown>): void => {
   if (body.expectedRevision !== undefined && (typeof body.expectedRevision !== 'string' || !/^[a-f0-9]{64}$/.test(body.expectedRevision))) invalid('expectedRevision must be a SHA256 revision')
@@ -109,25 +107,25 @@ export function validateFilterDraft(input: unknown, defaults: { priority: number
   keys(body, [...contentKeys, 'accountId', 'scope', 'mailbox', 'expectedRevision'])
   validateHints(body)
   if (!own(body, 'conditions')) return invalid('Explicit conditions are required')
-  return {
+  return renderable({
     name: printable(body.name, 'filter name', 128, 1).trim() || invalid('filter name cannot be empty'),
     priority: priority(own(body, 'priority') ? body.priority : defaults?.priority),
     enabled: own(body, 'enabled') ? boolean(body.enabled, 'enabled') : true,
     matchAll: own(body, 'matchAll') ? boolean(body.matchAll, 'matchAll') : true,
     conditions: conditions(body.conditions),
-    action: actionInput(body),
-  }
+    actions: actions(body.actions),
+  })
 }
 export function validateFilterPatch(input: unknown): FilterPatch {
   const body = record(input, 'filter patch')
-  keys(body, ['name', 'enabled', 'matchAll', 'conditions', 'action', 'actions', 'expectedRevision'])
+  keys(body, ['name', 'enabled', 'matchAll', 'conditions', 'actions', 'expectedRevision'])
   validateHints(body)
   const result: FilterPatch = {}
   if (own(body, 'name')) result.name = printable(body.name, 'filter name', 128, 1).trim() || invalid('filter name cannot be empty')
   if (own(body, 'enabled')) result.enabled = boolean(body.enabled, 'enabled')
   if (own(body, 'matchAll')) result.matchAll = boolean(body.matchAll, 'matchAll')
   if (own(body, 'conditions')) result.conditions = conditions(body.conditions)
-  if (own(body, 'action') || own(body, 'actions')) result.action = actionInput(body)
+  if (own(body, 'actions')) result.actions = actions(body.actions)
   if (!Object.keys(result).length) return invalid('At least one editable filter field is required')
   return result
 }
@@ -139,13 +137,13 @@ export function assertFilterContext(input: unknown, context: FilterScopeContext)
   const mailbox = rule.mailbox === null ? null : canonicalForwarderAddress(rule.mailbox)
   if (mailbox !== context.mailbox) return invalid('Filter mailbox does not belong to this context')
 }
-const storedContent = (body: Record<string, unknown>): FilterContent => ({
+const storedContent = (body: Record<string, unknown>): FilterContent => renderable({
   name: printable(body.name, 'filter name', 128, 1).trim() || invalid('filter name cannot be empty'),
   priority: priority(body.priority),
   enabled: boolean(body.enabled, 'enabled'),
   matchAll: boolean(body.matchAll, 'matchAll'),
   conditions: conditions(body.conditions),
-  action: actionInput(body),
+  actions: actions(body.actions),
 })
 export function validateStoredFilterRule(input: unknown, context: FilterScopeContext): ValidatedFilterRule {
   const body = record(input, 'stored filter')
@@ -165,41 +163,12 @@ const budget = () => {
     return text
   }
 }
-const emitConditions = (value: FilterCondition): string => {
-  if (value.field === 'size') return 'size :' + value.comparator + ' ' + value.value
-  if (value.field === 'body') return 'body :' + value.comparator + ' ' + quoteSieveString(value.value)
-  const header = value.field === 'header' ? value.headerName! : { from: 'From', to: 'To', subject: 'Subject' }[value.field]
-  return 'header :' + value.comparator + ' ' + quoteSieveString(header) + ' ' + quoteSieveString(value.value)
-}
+/** The selected scope's rules exactly as the host renders them (renderSieveScript), within the size budget. */
 function compileContents(values: readonly FilterContent[]): string {
   const active = values.filter(value => value.enabled).sort((a, b) => a.priority - b.priority)
-  const extensions = new Set<string>()
-  for (const rule of active) {
-    if (rule.action.type === 'fileinto' || rule.action.type === 'reject') extensions.add(rule.action.type)
-    if (rule.conditions.some(condition => condition.field === 'body')) extensions.add('body')
-  }
-  const consume = budget(), lines: string[] = []
-  const append = (line: string) => { lines.push(consume(line + '\n')) }
-  append('# Generated by xPanel')
-  if (extensions.size) append('require [' + [...extensions].sort().map(quoteSieveString).join(', ') + '];')
-  append('')
-  active.forEach((rule, index) => {
-    append('# Rule ' + (index + 1) + ' (priority ' + rule.priority + ')')
-    const tests = rule.conditions.map(emitConditions)
-    const expression = tests.length === 0 ? 'true' : tests.length === 1 ? tests[0]! : (rule.matchAll ? 'allof' : 'anyof') + ' (' + tests.join(', ') + ')'
-    append('if ' + expression + ' {')
-    const target = rule.action.target
-    switch (rule.action.type) {
-      case 'keep': append('  keep;'); break
-      case 'discard': append('  discard; stop;'); break
-      case 'fileinto': append('  fileinto ' + quoteSieveString(target!) + '; stop;'); break
-      case 'redirect': append('  redirect ' + quoteSieveString(target!) + '; stop;'); break
-      case 'reject': append('  reject ' + quoteSieveString(target!) + '; stop;'); break
-    }
-    append('}')
-    append('')
-  })
-  return lines.join('')
+  const text = services.renderSieveScript({ filters: active.map(value => services.mailFilterOf(value as unknown as Record<string, unknown>)) })
+  if (Buffer.byteLength(text, 'utf8') > FILTER_COMPILATION_BUDGET_BYTES) invalid('Filter compilation budget exceeded')
+  return text
 }
 export function compileValidatedFilters(rules: readonly unknown[], context: FilterScopeContext): string {
   if (!Array.isArray(rules) || rules.length > MAX_FILTER_RULES) return invalid('Too many filter rules')
@@ -213,19 +182,6 @@ export function compileValidatedFilters(rules: readonly unknown[], context: Filt
     return value
   })
   return compileContents(values)
-}
-/** Syntax-only compatibility adapter. It neither infers nor authorizes any scope. New routes must use compileValidatedFilters. */
-export function compileFilterRulesSafe(rules: readonly unknown[]): string {
-  if (!Array.isArray(rules) || rules.length > MAX_FILTER_RULES) return invalid('Too many filter rules')
-  dense(rules)
-  const consume = budget()
-  return compileContents(rules.map(input => {
-    const body = record(input, 'filter')
-    keys(body, storedKeys)
-    const value = storedContent(body)
-    consume(JSON.stringify(value))
-    return value
-  }))
 }
 export function filterRevision(context: FilterScopeContext, records: readonly unknown[]): string {
   assertFilterContext({ ...context }, context)
@@ -256,4 +212,28 @@ export function filterRevision(context: FilterScopeContext, records: readonly un
   })
   visit({ context, records: projection }, 0)
   return digest.digest('hex')
+}
+/** A sample message for a filter dry run: From, To and Subject plus up to 50 other headers, a text body and an optional size. */
+export function validateSampleMessage(input: unknown): { headers: { name: string; value: string }[]; body: string; size?: number } {
+  const value = record(input, 'message')
+  keys(value, ['from', 'to', 'subject', 'headers', 'body', 'size'])
+  const line = (text: unknown, label: string): string => printable(text ?? '', label, 998)
+  const headers = [['From', value.from], ['To', value.to], ['Subject', value.subject]]
+    .filter(([, text]) => text !== undefined && text !== '').map(([name, text]) => ({ name: name as string, value: line(text, String(name)) }))
+  if (value.headers !== undefined) {
+    if (!Array.isArray(value.headers) || value.headers.length > 50) return invalid('headers must contain at most 50 entries')
+    dense(value.headers)
+    for (const raw of value.headers) {
+      const header = record(raw, 'header')
+      keys(header, ['name', 'value'])
+      const name = printable(header.name, 'header name', 78, 1)
+      if (!/^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$/.test(name)) return invalid('Invalid header token')
+      headers.push({ name, value: line(header.value, 'header value') })
+    }
+  }
+  if (typeof value.body !== 'string' && value.body !== undefined) return invalid('body must be a string')
+  const body = value.body ?? ''
+  if (body.length > 65536 || /[\u0000\u2028\u2029]/u.test(body)) return invalid('body must be at most 65536 characters of text')
+  if (value.size !== undefined && !(typeof value.size === 'number' && Number.isSafeInteger(value.size) && value.size >= 0 && value.size <= 2147483647)) return invalid('size must be a whole number of bytes')
+  return { headers, body, ...(value.size === undefined ? {} : { size: value.size as number }) }
 }

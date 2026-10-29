@@ -113,7 +113,7 @@ export async function handleUpgradeRoute(req: Request, url: URL, method: string,
     const inputs = await observe()
     const { observation } = inputs
     const history = (await listUpgrades(ctx.db, { limit: 20 })).map(projectUpgradeRecord)
-    return json({ observedAt: observation.observedAt, revision: observation.revision, lock: observation.lock, retirementPending: observation.retirementPending, maintenance: observation.maintenance, current: observation.current, latest: history[0] ?? null, history })
+    return json({ observedAt: observation.observedAt, revision: observation.revision, lock: observation.lock, retirementPending: observation.retirementPending, maintenance: observation.maintenance, current: observation.current, rewind: observation.rewind, latest: history[0] ?? null, history })
   }
 
   const start = url.pathname === '/host/upgrade/start'

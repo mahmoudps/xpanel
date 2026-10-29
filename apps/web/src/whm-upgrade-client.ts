@@ -6,6 +6,7 @@ const formatDisplayDateTime = canonicalFormatDisplayDateTime
 
 export type UpgradeHistoryRow = { id: string; fromVersion: string; toVersion: string; fromSchemaVersion: number | null; toSchemaVersion: number | null; status: 'pending' | 'running' | 'succeeded' | 'failed' | 'rolled_back'; phase: string | null; error: string | null; actor: string; createdAt: string; startedAt: string | null; finishedAt: string | null }
 export type UpgradeLockView = { present: boolean | null; state: string | null; to: string | null; at: string | null }
+export type UpgradeRewindView = { state: 'rewind-started' | 'rewind-verified' | 'rewind-failed' | 'rewind-unknown' | 'unreadable'; done: string[]; problems: string[]; updatedAt: string | null }
 export type StagedReleaseView = { manifest: string; version: string | null; schemaVersion: number | null; bytes: number | null; sha256: string | null; keyId: string | null; signatureState: 'verified' | 'unverified' | 'invalid' | 'no-trusted-keys'; reason: string | null }
 export type UpgradeGate = { enabled: boolean; reasons: string[] }
 export type UpgradeObservationView = {
@@ -13,7 +14,7 @@ export type UpgradeObservationView = {
   current: { state: 'read' | 'unavailable'; version: string | null; releasePath: string | null }
   schemaVersion: number | null; os: { id: string; versionId: string; prettyName: string } | null
   freeBytes: number | null; freeBytesPath: string; activeTransfers: number | null
-  lock: UpgradeLockView; retirementPending: boolean | null; maintenance: boolean | null; lastUpgrade: UpgradeHistoryRow | null
+  lock: UpgradeLockView; retirementPending: boolean | null; maintenance: boolean | null; lastUpgrade: UpgradeHistoryRow | null; rewind: UpgradeRewindView | null
   trust: { state: 'configured' | 'missing' | 'invalid'; keysConfigured: number; keyIds: string[]; source: string; reason: string | null }
   staged: { directory: string; state: 'read' | 'missing' | 'unavailable'; truncated: boolean; releases: StagedReleaseView[] }
   coordinator: { available: boolean; reason: string | null }
@@ -23,7 +24,7 @@ export type UpgradeObservationView = {
 export type UpgradeCheckView = { id: string; ok: boolean; message: string; detail: Record<string, string | number | boolean | null> }
 export type UpgradePreflightView = { observedAt: string; revision: string; targetVersion: string; fromVersion: string | null; report: { ok: boolean; checks: UpgradeCheckView[] }; start: UpgradeGate }
 export type UpgradeStartView = { accepted: true; handoffId: string; upgradeId: string | null; targetVersion: string; fromVersion: string | null }
-export type UpgradeStatusView = { observedAt: string; revision: string; lock: UpgradeLockView; retirementPending: boolean | null; maintenance: boolean | null; current: UpgradeObservationView['current']; latest: UpgradeHistoryRow | null; history: UpgradeHistoryRow[] }
+export type UpgradeStatusView = { observedAt: string; revision: string; lock: UpgradeLockView; retirementPending: boolean | null; maintenance: boolean | null; current: UpgradeObservationView['current']; rewind: UpgradeRewindView | null; latest: UpgradeHistoryRow | null; history: UpgradeHistoryRow[] }
 
 /** Self-contained strict readers; the binding embeds this function's source. */
 export function createUpgradeParsers() {
@@ -42,6 +43,13 @@ export function createUpgradeParsers() {
   const lock = (v: unknown) => {
     if (!object(v) || ![true, false, null].includes(v.present as boolean | null) || !(v.state === null || ['running', 'rollback-failed', 'retirement-pending', 'unreadable'].includes(String(v.state)))) return bad('lock')
     return { present: v.present as boolean | null, state: v.state as string | null, to: or<string>(v.to, x => isText(x, 64), 'lock'), at: or<string>(v.at, x => isText(x, 64), 'lock') }
+  }
+  const rewind = (v: unknown): UpgradeRewindView | null => {
+    if (v === null) return null
+    if (!object(v) || !['rewind-started', 'rewind-verified', 'rewind-failed', 'rewind-unknown', 'unreadable'].includes(String(v.state)) || !Array.isArray(v.done) || v.done.length > 6
+      || !v.done.every(step => ['release', 'state-extract', 'state-swap', 'index', 'units', 'start-panel'].includes(String(step))) || !Array.isArray(v.problems) || v.problems.length > 8
+      || !v.problems.every(problem => isText(problem, 500)) || !(v.updatedAt === null || isTime(v.updatedAt))) return bad('rewind')
+    return { state: v.state as UpgradeRewindView['state'], done: [...v.done as string[]], problems: [...v.problems as string[]], updatedAt: v.updatedAt as string | null }
   }
   const current = (v: unknown) => {
     if (!object(v) || !['read', 'unavailable'].includes(String(v.state)) || (v.state === 'read') !== isVersion(v.version) || v.state === 'unavailable' && (v.version !== null || v.releasePath !== null)) return bad('current')
@@ -77,7 +85,7 @@ export function createUpgradeParsers() {
         observedAt: v.observedAt, revision: v.revision, current: current(v.current), schemaVersion: or<number>(v.schemaVersion, isCount, 'schema'), os,
         freeBytes: or<number>(v.freeBytes, isCount, 'free'), freeBytesPath: v.freeBytesPath, activeTransfers: or<number>(v.activeTransfers, isCount, 'transfers'),
         lock: lock(v.lock), retirementPending: or<boolean>(v.retirementPending, x => typeof x === 'boolean', 'retirement'), maintenance: or<boolean>(v.maintenance, x => typeof x === 'boolean', 'maintenance'),
-        lastUpgrade: v.lastUpgrade === null ? null : row(v.lastUpgrade),
+        lastUpgrade: v.lastUpgrade === null ? null : row(v.lastUpgrade), rewind: rewind(v.rewind),
         trust: { state: trust.state as 'configured' | 'missing' | 'invalid', keysConfigured: trust.keysConfigured, keyIds: [...trust.keyIds as string[]], source: trust.source, reason: trust.reason as string | null },
         staged: { directory: stagedBlock.directory, state: stagedBlock.state as 'read' | 'missing' | 'unavailable', truncated: stagedBlock.truncated, releases },
         coordinator: { available: v.coordinator.available, reason: v.coordinator.reason as string | null },
@@ -108,7 +116,7 @@ export function createUpgradeParsers() {
       const history = v.history.map(row)
       const latest = v.latest === null ? null : row(v.latest)
       if ((latest?.id ?? null) !== (history[0]?.id ?? null)) return bad('status')
-      return { observedAt: v.observedAt, revision: v.revision, lock: lock(v.lock), retirementPending: or<boolean>(v.retirementPending, x => typeof x === 'boolean', 'retirement'), maintenance: or<boolean>(v.maintenance, x => typeof x === 'boolean', 'maintenance'), current: current(v.current), latest, history }
+      return { observedAt: v.observedAt, revision: v.revision, lock: lock(v.lock), retirementPending: or<boolean>(v.retirementPending, x => typeof x === 'boolean', 'retirement'), maintenance: or<boolean>(v.maintenance, x => typeof x === 'boolean', 'maintenance'), current: current(v.current), rewind: rewind(v.rewind), latest, history }
     },
   }
 }
@@ -207,7 +215,7 @@ function bindWhmUpgrade(): void {
     }
     const paintHistory = (history: UpgradeHistoryRow[]): void => fill('[data-upgrade-history]', 6, history.map(row => [row.fromVersion + ' → ' + row.toVersion, (row.fromSchemaVersion ?? '?') + ' → ' + (row.toSchemaVersion ?? '?'), formatDisplayDateTime(row.startedAt ?? row.createdAt), ((statusCopy[row.status]) ? t(statusCopy[row.status]!) : null) ?? row.status, row.actor, row.error ?? '']), [0, 1, 2, 4], t('No upgrade has been recorded.'))
     const inFlight = (row: UpgradeHistoryRow | null): boolean => !!row && (row.status === 'pending' || row.status === 'running')
-    const paintProgress = (lock: UpgradeLockView, latest: UpgradeHistoryRow | null, retirement: boolean | null): void => {
+    const paintProgress = (lock: UpgradeLockView, latest: UpgradeHistoryRow | null, retirement: boolean | null, rewind: UpgradeRewindView | null): void => {
       const holder = progress.parentElement
       const order = ['precheck', 'snapshot', 'stage', 'migrate', 'switch', 'health-check', 'rollback']
       const at = latest?.phase ? order.indexOf(latest.phase) : -1
@@ -221,6 +229,14 @@ function bindWhmUpgrade(): void {
       const label = latest ? ((statusCopy[latest.status]) ? t(statusCopy[latest.status]!) : null) ?? latest.status : ''
       say(progress, running ? 'running' : 'read', running ? (!latest ? t('An upgrade is recorded as locked.') : latest.phase ? t('An upgrade is recorded as {status} · {phase}.', { status: label, phase: latest.phase }) : t('An upgrade is recorded as {status}.', { status: label }))
         : latest ? t('The last upgrade is {status}.', { status: label }) : t('No upgrade has been recorded on this server.'))
+      if (!rewind) return
+      // The rewind journal outranks the history row: only a verified rewind is reported as restored.
+      const steps = { done: String(rewind.done.length), total: '6' }, problems = rewind.problems.join('; ')
+      if (rewind.state === 'rewind-started') say(progress, 'running', t('Rewinding the failed upgrade to its snapshot: {done} of {total} steps restored.', steps))
+      else if (rewind.state === 'rewind-verified') say(progress, 'read', t('The failed upgrade was rewound: the release, state files, index and units were restored from the snapshot and verified.'))
+      else if (rewind.state === 'rewind-unknown') say(progress, 'failed', t('Rewind unverified, operator action required: {problems}', { problems }))
+      else if (rewind.state === 'rewind-failed') say(progress, 'failed', t('Rewind failed, operator action required. {done} of {total} steps restored: {problems}', { ...steps, problems }))
+      else say(progress, 'failed', t('The rewind journal could not be read, operator action required.'))
     }
     const paintObservation = (value: UpgradeObservationView): void => {
       observation = value
@@ -242,7 +258,7 @@ function bindWhmUpgrade(): void {
         ? t('Version {version} is staged and its signature verified. Nothing changes until you start.', { version: String(candidate) }) + (value.availability.start.enabled ? '' : ' ' + reasons(value.availability.start.reasons))
         : t('No upgrade can be prepared: {reasons}', { reasons: reasons(value.availability.preflight.reasons) }))
       if (value.lastUpgrade) paintHistory([value.lastUpgrade])
-      paintProgress(value.lock, value.lastUpgrade, value.retirementPending)
+      paintProgress(value.lock, value.lastUpgrade, value.retirementPending, value.rewind)
       paintTarget()
     }
     const paintChecks = (value: UpgradePreflightView | null): void => {
@@ -271,7 +287,7 @@ function bindWhmUpgrade(): void {
         if (!root.isConnected || !send || polls++ > 360) return
         try {
           const status = readUpgradeStatusView(await send('GET', '/api/server/upgrade/status'))
-          paintHistory(status.history); paintProgress(status.lock, status.latest, status.retirementPending)
+          paintHistory(status.history); paintProgress(status.lock, status.latest, status.retirementPending, status.rewind)
           if (inFlight(status.latest) || status.lock.present === true) poll(); else void load()
         } catch { say(progress, 'running', t('Waiting for the panel to answer while the upgrade restarts its services…')); poll() }
       }, 5000)
@@ -283,7 +299,7 @@ function bindWhmUpgrade(): void {
       busy = false
       if (!admitted()) { controls(); return }
       if (observed.status === 'fulfilled') paintObservation(observed.value); else say(banner, 'failed', failure(observed.reason).message)
-      if (status.status === 'fulfilled') { paintHistory(status.value.history); paintProgress(status.value.lock, status.value.latest, status.value.retirementPending); if (inFlight(status.value.latest) || status.value.lock.present === true) poll() }
+      if (status.status === 'fulfilled') { paintHistory(status.value.history); paintProgress(status.value.lock, status.value.latest, status.value.retirementPending, status.value.rewind); if (inFlight(status.value.latest) || status.value.lock.present === true) poll() }
       controls()
     }
     const preflight = async (): Promise<void> => {

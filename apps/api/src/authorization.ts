@@ -126,8 +126,11 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   if (/^\/api\/account\/backups(?:\/|$)/.test(pathname)) return { resource: 'backups', acl: 'edit-account', toolIds: [/(?:preview|preview\.csv|restore)$/.test(pathname) ? 'backup-restoration' : 'backup'], ...(method === 'POST' && /\/preview$/.test(pathname) ? { scopeAccess: 'read' as const } : {}) }
   if (/^\/api\/account\/cron(?:\/|$)/.test(pathname)) return { resource: 'cron', acl: 'edit-account', toolIds: ['cron-jobs'] }
   if (pathname === '/api/account/ssh/keys') return { resource: 'ssh', acl: 'edit-account', toolIds: ['ssh-access'] }
+  if (pathname === '/api/account/terminal') return { resource: 'shell', acl: 'edit-account', toolIds: ['terminal'] }
   if (/^\/api\/account\/dynamic-dns(?:\/|$)/.test(pathname)) return { resource: 'dynamic-dns', acl: 'edit-account', toolIds: ['dynamic-dns'] }
   if (pathname === '/api/account/optimize') return { resource: 'optimize', acl: 'list-accounts', toolIds: ['optimize-website'], scopeAccess: 'read' }
+  // Apps, caches and containers each check their own plan feature in the agent.
+  if (pathname === '/api/account/runtime' || pathname === '/api/account/runtime/log') return { resource: 'runtime', acl: read ? 'list-accounts' : 'edit-account', toolIds: [] }
   if (pathname === '/api/account/applications' || pathname === '/api/account/applications/jobs') return { resource: 'applications', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['application-manager'] }
   if (pathname === '/api/account/git') return { resource: 'git', acl: 'edit-account', toolIds: ['git-version-control'] }
   if (/^\/api\/account\/staging(?:\/|$)/.test(pathname)) return { resource: 'staging', acl: 'edit-account', toolIds: ['site-staging'], ...(method === 'POST' && pathname.endsWith('/review') ? { scopeAccess: 'read' as const } : {}) }
@@ -157,14 +160,16 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   if (pathname === '/api/server/mail-quality/check') return { resource: 'server', rootOnly: true, scopeAccess: 'read' }
   if (/^\/api\/server\/default-index\/[^/]+\/preview$/.test(pathname)) return { resource: 'server', rootOnly: true, scopeAccess: 'read' }
   if (pathname === '/api/server/upgrade/preflight') return { resource: 'server', rootOnly: true, scopeAccess: 'read' }
-  if (pathname === '/api/server/software-center/preview') return { resource: 'server', rootOnly: true, scopeAccess: 'read' }
+  if (pathname === '/api/server/software-center/preview' || pathname === '/api/server/php/manage/preview') return { resource: 'server', rootOnly: true, scopeAccess: 'read' }
   if (pathname === '/api/server/repair/preview') return { resource: 'server', rootOnly: true, scopeAccess: 'read' }
+  if (/^\/api\/server\/panel\/languages(?:\/[A-Za-z0-9-]{1,35}\/catalog)?$/.test(pathname)) return { resource: 'languages', rootOnly: true }
+  if (/^\/api\/server\/panel\/branding(?:\/(?:logo|favicon))?$/.test(pathname)) return { resource: 'branding', rootOnly: true }
+  if (/^\/api\/server\/panel\/whmcs(?:\/(?:token|module|activity))?$/.test(pathname)) return { resource: 'whmcs', rootOnly: true }
   if (/^\/api\/(?:server|setup)(?:\/|$)/.test(pathname)) return { resource: 'server', rootOnly: true }
   if (/^\/api\/feature-lists(?:\/|$)/.test(pathname)) return { resource: 'feature-lists', acl: 'manage-feature-lists' }
   if (/^\/api\/plans(?:\/|$)/.test(pathname)) return { resource: 'plans', acl: 'manage-plans' }
   if (/^\/api\/resellers(?:\/|$)/.test(pathname)) return { resource: 'resellers', rootOnly: !read }
   if (/^\/api\/accounts\/[^/]+\/files$/.test(pathname)) return { resource: 'files', acl: 'edit-account', toolIds: ['file-manager'] }
-  if (/^\/api\/accounts\/[^/]+\/shell$/.test(pathname)) return { resource: 'shell', acl: 'edit-account', toolIds: ['ssh-access'] }
   if (/^\/api\/accounts\/[^/]+\/certificates(?:\/(?:install|[0-9a-f-]{36}))?$/.test(pathname)) return { resource: 'accounts', acl: 'manage-ssl', toolIds: ['ssl-install'] }
   if (/^\/api\/accounts(?:\/|$)/.test(pathname)) {
     const acl: ResellerAcl = read ? 'list-accounts'
@@ -209,16 +214,15 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   if (/^\/api\/backups\/workspace\/(?:runs|destinations\/[0-9a-f-]{36}\/(?:retention|recover))$/.test(pathname)) return { resource: 'backups', rootOnly: true, toolIds: ['backup'] }
   if (/^\/api\/backups\/accounts\/[a-z][a-z0-9]{0,15}$/.test(pathname)) return { resource: 'backups', rootOnly: true, toolIds: ['backup-restoration'] }
   if (/^\/api\/backups(?:\/|$)/.test(pathname)) return { resource: 'backups', acl: 'transfer', toolIds: ['backup'] }
-  // A destination exports accounts with the same lifecycle read token it uses for the source inventory.
-  if (/^\/api\/transfers\/source\/accounts\/[a-z][a-z0-9]{0,15}\/backup(?:\/[^/]+)?$/.test(pathname)) return { resource: 'lifecycle', rootOnly: true, scopeAccess: 'read' }
+  // A destination packages, downloads and then discards accounts with the same lifecycle read token it uses for the source inventory.
+  if (/^\/api\/transfers\/source\/accounts\/[a-z][a-z0-9]{0,15}\/package(?:\/[0-9a-f-]{36}(?:\/[^/]+)?)?$/.test(pathname)) return { resource: 'lifecycle', rootOnly: true, scopeAccess: 'read' }
   if (/^\/api\/(?:transfers|lifecycle)(?:\/|$)/.test(pathname)) return { resource: 'lifecycle', rootOnly: true }
   if (/^\/api\/web-features(?:\/|$)/.test(pathname)) return { resource: 'files', acl: 'edit-account', toolIds: [pathname.split('/').at(-1) === 'extras' ? 'file-manager' : pathname.split('/').at(-1)!] }
   if (/^\/api\/git(?:\/|$)/.test(pathname)) return { resource: 'git', acl: 'edit-account', toolIds: ['git-version-control'] }
   if (/^\/api\/(?:cache|containers|apps)(?:\/|$)/.test(pathname)) return { resource: pathname.split('/')[2]!, acl: 'edit-account', toolIds: [pathname.startsWith('/api/cache/') ? 'account-cache-services' : pathname.startsWith('/api/containers/') ? 'account-containers' : 'web-apps'] }
   if (/^\/api\/analytics(?:\/|$)/.test(pathname)) return { resource: 'analytics', acl: 'list-accounts' }
-  if (/^\/api\/(?:firewall|generations|reconcile|cluster|whmcs)(?:\/|$)/.test(pathname)) return { resource: pathname.split('/')[2]!, rootOnly: true }
+  if (/^\/api\/(?:firewall|generations|reconcile|cluster)(?:\/|$)/.test(pathname)) return { resource: pathname.split('/')[2]!, rootOnly: true }
   if (pathname === '/api/audit') return { resource: 'audit', acl: 'list-accounts' }
-  if (/^\/api\/(?:branding|languages)(?:\/|$)/.test(pathname)) return { resource: pathname.split('/')[2]!, rootOnly: !read }
   return fail('FORBIDDEN', 'no authorization policy is declared for this route')
 }
 

@@ -9,7 +9,7 @@ const plan = defaultPlan({ id: 'plan-internal', name: 'Standard', featureListId:
 const account: Account = { id: 'account-internal', username: 'alpha', uid: 20001, gid: 20001, home: '/home/alpha', primaryDomain: 'alpha.example.test', ownerId: 'reseller-internal', planId: plan.id, status: 'active', suspendReason: null, contactEmail: '', ipv4: '192.0.2.1', shell: 'none', createdAt: '2026-10-24T00:00:00Z' }
 const reseller: Reseller = { id: 'reseller-internal', username: 'reseller-alpha', acl: ['list-accounts'], maxAccounts: 8, totalDiskMb: 1024, totalBandwidthMb: 2048, oversell: false, nameservers: [], delegatedIps: [] }
 const owner: ComposedContext = { locale: 'en', route: '/files/web-disk', principal: { kind: 'user', id: 'user-internal', username: 'alpha', accountId: account.id }, account, plan }
-const root: ComposedContext = { locale: 'en', route: '/whm/accounts/bandwidth', principal: { kind: 'root', id: 'root-internal', username: 'root' } }
+const root: ComposedContext = { locale: 'en', route: '/whm/accounts/health', principal: { kind: 'root', id: 'root-internal', username: 'root' } }
 const membership: ServiceUser = { id: 'membership-internal', accountId: account.id, login: 'disk@alpha.example.test', services: { ftp: true, webdisk: true, email: false }, mailboxQuotaMb: 999999, ftpDir: 'public_html' }
 
 describe('additive composed route presentation', () => {
@@ -17,14 +17,14 @@ describe('additive composed route presentation', () => {
     expect(composedRouteSpecs).toHaveLength(135)
     expect(new Set(composedRouteSpecs.map(spec => spec.route)).size).toBe(135)
     expect(new Set(composedRouteSpecs.map(spec => `${spec.surface}/${spec.section}`)).size).toBe(22)
-    expect(composedXpanelRoutes.length + composedXwhmRoutes.length).toBe(13)
+    expect(composedXpanelRoutes.length + composedXwhmRoutes.length).toBe(5)
     // An approved xPanel workspace renders its route, so its composed spec must not stay a composed route.
-    // Only the owner's unqualified reverse-proxy document keeps its composed metadata; it renders the read-only approved workspace.
-    expect(composedXpanelRoutes.filter(spec => approvedXpanelWorkspaceRoutes.has(spec.route)).map(spec => spec.route)).toEqual(['/domains/reverse-proxy'])
+    expect(composedXpanelRoutes.filter(spec => approvedXpanelWorkspaceRoutes.has(spec.route)).map(spec => spec.route)).toEqual([])
     // Workspace routes: specs stay as metadata while their native workspaces render them.
     for (const route of ['/whm/server/terminal', '/whm/server/file-sharing', '/whm/server/nodes', '/software/apps', '/software/optimize', '/whm/software/addon-services', '/whm/software/containers',
       '/whm/software/containers/engine', '/whm/software/deployments', '/whm/software/application-projects', '/whm/email/spam', '/whm/email/relay', '/whm/email/bcc', '/whm/email/marketing',
-      '/whm/accounts/templates', '/whm/plans/enhancements', '/whm/backups/restore-more', '/whm/transfers/convert-addon', '/whm/transfers/server', '/domains/staging']) {
+      '/whm/accounts/templates', '/whm/plans/enhancements', '/whm/backups/restore-more', '/whm/transfers/convert-addon', '/whm/transfers/server', '/domains/staging',
+      '/software/containers', '/software/cache', '/whm/panel/settings', '/whm/panel/branding', '/whm/panel/languages', '/whm/panel/whmcs', '/domains/reverse-proxy']) {
       expect(composedRouteSpecs.some(spec => spec.route === route), route).toBe(true)
       expect(nativeComposedRoutePaths.has(route), route).toBe(true)
     }
@@ -44,7 +44,7 @@ describe('additive composed route presentation', () => {
       expect(nativeComposedRoutePaths.has(route), route).toBe(true)
       expect(composedRouteSpecs.some(spec => spec.route === route), route).toBe(false)
     }
-    for (const route of ['/whm/services/more', '/whm/services/default-index', '/whm/software/composer', '/whm/monitoring/benchmark', '/whm/monitoring/traffic', '/domains/dynamic-dns', '/domains/site-publisher', '/files/git']) {
+    for (const route of ['/whm/services/more', '/whm/services/default-index', '/whm/software/composer', '/whm/monitoring/benchmark', '/whm/monitoring/traffic', '/whm/accounts/bandwidth', '/domains/dynamic-dns', '/domains/site-publisher', '/files/git']) {
       expect(composedRouteSpecs.some(spec => spec.route === route), route).toBe(true)
       expect(nativeComposedRoutePaths.has(route), route).toBe(true)
     }
@@ -97,22 +97,15 @@ describe('additive composed route presentation', () => {
     expect(html).toContain('Assigned')
   })
 
-  it('retains terminating status and unmeasured usage without invented zeros', () => {
-    const html = renderComposedXwhm({ ...root, accounts: [{ ...account, status: 'terminating' }] })!
-    expect(html).toContain('Terminating')
-    expect(html).toContain('Not measured')
-    expect(html).not.toContain('account-internal')
+  it('keeps unread usage unread without invented zeros', () => {
     const panel = renderComposedXpanel({ ...owner, route: '/server-information', plan: { ...plan, id: 'neighbor-plan', name: 'SECRET-PLAN' } })!
     expect(panel).not.toContain('SECRET-PLAN')
     expect(panel).toContain('Not read')
     expect(panel).not.toContain('0 B')
   })
 
-  it('requires trusted reseller read ACL and filters own accounts and reseller records', () => {
+  it('requires trusted reseller read ACL and filters own reseller records', () => {
     const context: ComposedContext = { ...root, principal: { kind: 'reseller', id: reseller.id, username: reseller.username }, reseller, resellers: [reseller, { ...reseller, id: 'neighbor', username: 'NEIGHBOR' }] }
-    const accounts = renderComposedXwhm({ ...context, accounts: [account, { ...account, ownerId: 'neighbor', username: 'NEIGHBOR-ACCOUNT' }] })!
-    expect(accounts).toContain('alpha.example.test')
-    expect(accounts).not.toContain('NEIGHBOR-ACCOUNT')
     const records = renderComposedXwhm({ ...context, route: '/whm/resellers/more' })!
     expect(records).toContain(reseller.username)
     expect(records).toContain('None')
@@ -122,10 +115,10 @@ describe('additive composed route presentation', () => {
     expect(denied).not.toContain(reseller.username)
     expect(renderComposedXwhm({ ...root, route: '/whm/resellers/more' })).toContain('data-read-state="unread"')
     expect(renderComposedXwhm({ ...root, route: '/whm/resellers/more', resellers: [] })).toContain('data-read-state="empty"')
-    const deniedOwner = renderComposedXwhm({ ...root, principal: owner.principal, accounts: [account] })!
+    const deniedOwner = renderComposedXwhm({ ...root, route: '/whm/resellers/more', principal: owner.principal, accounts: [account], resellers: [reseller] })!
     expect(deniedOwner).toContain('data-read-state="denied"')
     expect(deniedOwner).not.toContain(account.primaryDomain)
-    const missingPrincipal = renderComposedXwhm({ ...root, principal: undefined, accounts: [account] })!
+    const missingPrincipal = renderComposedXwhm({ ...root, route: '/whm/resellers/more', principal: undefined, accounts: [account], resellers: [reseller] })!
     expect(missingPrincipal).toContain('data-read-state="denied"')
     expect(missingPrincipal).not.toContain(account.primaryDomain)
   })

@@ -141,6 +141,26 @@ if (process.platform === 'win32') describe('agent client over a Windows local na
       error => isXpanelError(error) && error.code === 'SERVICE_UNAVAILABLE')
   })
 
+  it('streams a terminal session output beyond the request timeout and closes it on cancel', async () => {
+    let closed!: () => void
+    const serverClosed = new Promise<void>(resolve => { closed = resolve })
+    let write!: (line: string) => void
+    const ipc = await listen((req, res) => {
+      assert.equal(req.url, '/terminal/sessions/2f7a1c9e-4b1d-4a7e-9c1f-6d2e8b5a3f10/output')
+      res.setHeader('content-type', 'application/x-ndjson')
+      res.flushHeaders()
+      write = line => { res.write(line + '\n') }
+      res.once('close', closed)
+    }, 50)
+    const response = await ipc.fetch(new Request('http://agent.local/terminal/sessions/2f7a1c9e-4b1d-4a7e-9c1f-6d2e8b5a3f10/output'))
+    const reader = response.body!.getReader()
+    await new Promise(resolve => setTimeout(resolve, 120))
+    write('{"o":"aGk="}')
+    assert.equal(Buffer.from((await reader.read()).value!).toString(), '{"o":"aGk="}\n')
+    await reader.cancel()
+    await serverClosed
+  })
+
   it('limits response bytes and never accepts partial content as success', async () => {
     const ipc = await listen((_req, res) => res.end(Buffer.alloc(MAX_AGENT_MESSAGE_BYTES + 1)))
     await assert.rejects(() => ipc.fetch(new Request('http://agent.local/oversized')),

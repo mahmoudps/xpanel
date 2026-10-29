@@ -14,7 +14,8 @@ export interface ExtensionRouteSpec {
 export type ReadCollection<T> = { state: 'unread' } | { state: 'read'; items: readonly T[] }
 
 export const extensionText = (locale: Locale, copy: ExtensionCopy, values?: MessageValues): string => escapeHtml(translator(locale)(copy, values))
-export const extensionTechnical = (value: string | number): string => `<bdi dir="ltr" class="xp-mono">${escapeHtml(String(value))}</bdi>`
+/** A technical value; a table token stays whole (its table region scrolls) also in Arabic. */
+export const extensionTechnical = (value: string | number, tableToken = false): string => `<bdi dir="ltr" class="xp-mono${tableToken ? ' xp-technical-token' : ''}">${escapeHtml(String(value))}</bdi>`
 export const extensionUnread: ExtensionCopy = msgctxt('shared', 'Not read')
 export const extensionNotChecked: ExtensionCopy = msgid('Not checked')
 

@@ -585,6 +585,9 @@ interface LiveFacts {
   sites: number
   diskLimit: string | null
   bandwidthLimit: string | null
+  /** This month's metered traffic; null when not metered. */
+  bandwidthBytes: number | null
+  bandwidthLimited: boolean
   memoryLimit: string | null
   processLimit: string | null
   ioLimit: string | null
@@ -615,8 +618,9 @@ const resourceLine = (facts: LiveFacts, kind: 'disk' | 'memory' | 'processes' | 
   const limit = kind === 'disk' ? facts.diskLimit : kind === 'memory' ? facts.memoryLimit : kind === 'processes' ? facts.processLimit : facts.bandwidthLimit
   if (kind === 'bandwidth') {
     if (!facts.sampled) return limit ? `— / ${limit}` : '—'
-    const label = translator(facts.locale)('not measured yet')
-    return limit ? `${label} / ${limit}` : label
+    const label = facts.bandwidthBytes === null ? translator(facts.locale)('not measured yet') : formatAsciiBytes(facts.bandwidthBytes)
+    const line = limit ? `${label} / ${limit}` : label
+    return facts.bandwidthLimited ? `${line} · ${translator(facts.locale)('limit page served')}` : line
   }
   const used = kind === 'disk' ? facts.diskBytes : kind === 'memory' ? facts.memoryBytes : facts.processCount
   if (!facts.sampled || used === null) return limit ? `— / ${limit}` : '—'
@@ -759,6 +763,7 @@ export interface XpanelHomeProps {
     processCount: number | null
     bandwidth: 'unmeasured'
     ioEnforced?: boolean | null
+    bandwidthMonth?: { month: string; totalBytes: number | null; limitBytes: number | null; usedPercent: number | null; enforced: boolean; limited: boolean }
   }
 }
 
@@ -800,6 +805,8 @@ const factsFromProps = (props: XpanelHomeProps): LiveFacts => {
     sites: domains.length,
     diskLimit: diskMb === null ? null : storage(diskMb),
     bandwidthLimit: finite(resources?.bandwidthMbMonth) === null ? null : storage(finite(resources?.bandwidthMbMonth) ?? 0),
+    bandwidthBytes: props.usage?.bandwidthMonth?.totalBytes ?? null,
+    bandwidthLimited: props.usage?.bandwidthMonth?.limited === true,
     memoryLimit: memoryMb === null ? null : formatAsciiBytes(memoryMb * 1024 * 1024),
     processLimit: finite(resources?.maxProcesses) === null ? null : String(finite(resources?.maxProcesses)),
     ioLimit: io === null ? null : `${formatAsciiBytes(io)}/s`,

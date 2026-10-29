@@ -7,7 +7,7 @@ const id = (n: number) => 'aaaaaaaa-aaaa-4aaa-8aaa-' + String(n).padStart(12, '0
 const application = { status: 'configuration_only', nativeApplied: false, remoteConnectionVerified: false, schedulerVerified: false }
 const initial = () => ({ revision: '1'.padStart(64, '0'), application, accounts: [{ id: id(1), username: 'ownerone', primaryDomain: 'one.example.test', status: 'active' }],
   destinations: [{ id: id(2), name: 'Local configuration', kind: 'local', endpoint: '/var/backups/xpanel', bucket: null, region: null, pathPrefix: '/var/backups/xpanel/daily', username: null, retentionDays: 30, enabled: true, createdAt: '2026-10-26T00:00:00.000Z' }],
-  schedule: { enabled: false, frequency: 'daily', cron: '0 2 * * *', retentionCount: 7, compress: 'zstd', includeDatabases: true, includeMail: true, selectedAccounts: 'all', destinationIds: [], updatedAt: '2026-10-26T00:00:00.000Z' },
+  schedule: { enabled: false, frequency: 'daily', cron: '0 2 * * *', retentionCount: 7, retentionWeekly: 4, retentionMonthly: 0, compress: 'zstd', includeDatabases: true, includeMail: true, includeDns: true, includeControl: true, selectedAccounts: 'all', destinationIds: [], updatedAt: '2026-10-26T00:00:00.000Z' },
   snapshots: [{ id: id(3), accountId: id(1), username: 'ownerone', createdAt: '2026-10-26T00:00:00.000Z', sizeBytes: 10, files: [{ path: '<img src=x onerror=alert(1)>', sizeBytes: 10, mode: 0o640, content: 'SYNTHETIC_PRIVATE_CONTENT' }], databases: [], application: { status: 'recorded_metadata', archiveVerified: false, restoreAvailable: false } }],
 })
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value))
@@ -78,7 +78,10 @@ describe('WHM backups browser controller', () => {
     expect(document.querySelector('[data-backup-snapshot-rows]')!.textContent).toContain('Not a verified archive')
     expect(document.querySelector('img')).toBeNull()
     expect(document.body.textContent).not.toContain('SYNTHETIC_PRIVATE_CONTENT')
-    for (const key of ['sftp-key', 'weekly-copies', 'restore-acknowledge']) expect(input(key).disabled).toBe(true)
+    for (const key of ['sftp-key', 'restore-acknowledge']) expect(input(key).disabled).toBe(true)
+    // Weekly copies and the DNS and control-snapshot parts are saved schedule fields now.
+    for (const key of ['weekly-copies', 'include-dns', 'include-control']) expect(input(key).disabled).toBe(false)
+    expect(input('weekly-copies').value).toBe('4')
     expect(input('destination-enabled').disabled).toBe(true)
     expect(document.querySelector('#backup-destination-activation-help a')?.getAttribute('href')).toBe('/whm/backups/destinations')
   })
@@ -161,6 +164,6 @@ describe('readable date closure snapshot metadata', () => {
     expect(input('restore-acknowledge').disabled).toBe(true); expect(document.body.textContent).not.toContain('SYNTHETIC_PRIVATE_CONTENT')
     expect(JSON.stringify(source)).toBe(before); expect(readWhmBackupWorkspace(source).snapshots[0]!.createdAt).toBe('2026-10-27T09:01:02.123Z')
     expect(readWhmBackupWorkspace(source).schedule!.updatedAt).toBe('2026-10-26T00:00:00.000Z')
-    expect(send.mock.calls).toEqual([['GET', '/api/backups/workspace']]); expect(document.body.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+    expect(send.mock.calls[0]).toEqual(['GET', '/api/backups/workspace']); expect(send.mock.calls.every(call => (call as unknown[])[0] === 'GET')).toBe(true); expect(document.body.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
   })
 })

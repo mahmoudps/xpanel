@@ -4,8 +4,9 @@ import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, open, readFile, readlink, realpath, rename, unlink, readdir } from 'node:fs/promises'
-import { dirname, join, posix } from 'node:path'
-import { withHostOperationGuard, assertHostOperationGuardHeld, assertHostOperationGuardActive, getStrictOperationDatabaseOrigin, createRootOperationAuditAuthority, assertOperationIntentReceipt, getPrincipal, createJob, finishJob, finishUpgrade, currentSchemaVersion } from '../packages/db/src/index.ts'
+import { basename, dirname, join, posix } from 'node:path'
+import { withHostOperationGuard, assertHostOperationGuardHeld, assertHostOperationGuardActive, getStrictOperationDatabaseOrigin, createRootOperationAuditAuthority, assertOperationIntentReceipt, getPrincipal, createJob, finishJob, finishUpgrade, currentSchemaVersion, latestUpgrade, reindexFromState } from '../packages/db/src/index.ts'
+import { StateStore } from '../packages/state/src/index.ts'
 import { withAuthenticatedReleaseArchive, stageAuthenticatedReleaseArchive, verifyAuthenticatedReleaseArchive } from './release-verifier.mjs'
 import { readInstallationReceipt, assertOwnedFile, withTrustedFile, withTrustedDirectory, requireLinuxRoot } from './lifecycle-ownership.mjs'
 import { observeOwnedControlPlaneUnits, assertOwnedControlPlaneQuiescent, awaitOwnedServiceChildren, projectOwnedControlPlaneObservation } from './lifecycle-services.mjs'
@@ -88,6 +89,32 @@ async function durableJson(path, value, replace = false, mode = 0o600) {
     try { await directory.sync() } finally { await directory.close() }
     await parent.verify()
   })
+}
+
+/**
+ * Pure schema admission. Forward moves stay within the authenticated release. An older reader is admitted
+ * only as a rollback through this upgrade's own snapshot: `planned` at precheck, then the verified snapshot.
+ */
+export function admitSchemaTransition(input, facts) {
+  if (!input || !['forward', 'rollback'].includes(input.direction) || !Number.isSafeInteger(input.currentSchema) || !Number.isSafeInteger(input.targetSchema)) return false
+  const manifest = facts.manifestSchema
+  if (input.direction === 'rollback' && input.snapshot === 'planned') return Number.isSafeInteger(manifest) && input.targetSchema === facts.liveSchema && input.currentSchema === manifest && input.targetSchema <= manifest
+  if (input.currentSchema !== facts.liveSchema) return false
+  if (input.direction === 'rollback' && input.snapshot !== undefined) return facts.snapshotVerified === true && input.targetSchema <= facts.liveSchema
+  return Number.isSafeInteger(manifest) && input.targetSchema >= facts.liveSchema && input.targetSchema <= manifest
+}
+
+/** The snapshot must be the one this scope wrote, or (recover) the one the in-flight upgrade's root-only receipt names. */
+async function verifiedRewindSnapshot(scope, input) {
+  const snapshot = input?.snapshot
+  if (!snapshot || typeof snapshot !== 'object' || typeof snapshot.recordId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/.test(snapshot.recordId) || typeof snapshot.path !== 'string' || dirname(snapshot.path) !== ROOT + '/backups' || !/^[0-9]{8}T[0-9]{6}Z\.tar\.gz$/.test(basename(snapshot.path))) return false
+  const copy = snapshot.path + '.control.db'
+  const digest = await withTrustedFile(copy, { maxBytes: 256 * 1024 * 1024 }, async pin => pin.sha256)
+  if (scope.backup) return scope.backup.path === copy && scope.backup.sha256 === digest && scope.backup.schema === input.targetSchema
+  const last = await latestUpgrade(scope.db)
+  if (!last || last.id !== snapshot.recordId || !['pending', 'running'].includes(last.status)) return false
+  const receipt = await withTrustedFile(`${ROOT}/backups/upgrade-${snapshot.recordId}.receipt.json`, { exactMode: 0o600, maxBytes: 4 * 1024 * 1024 }, async pin => JSON.parse(pin.bytes.toString('utf8')))
+  return receipt?.recordId === snapshot.recordId && receipt.snapshot?.path === snapshot.path && receipt.control?.path === copy && receipt.control?.sha256 === digest && receipt.fromSchema === input.targetSchema
 }
 
 async function readHead() {
@@ -302,16 +329,27 @@ export async function createNativeUpgradeSafety(options) {
     },
     async verifyStagedRelease(path) { const scope = await current(); if (scope.staged !== path || !scope.report) fail('LIFECYCLE_STAGE_BINDING_REQUIRED'); await runtimeDependencies(scope, path, scope.report) },
     async assertCompatibility(input) {
-      const scope = await current(), currentSchema = await currentSchemaVersion(db)
-      if (!input || currentSchema !== input.currentSchema || !scope.report || input.targetSchema < currentSchema || input.targetSchema > scope.report.manifest.controlDbSchemaVersion) fail('LIFECYCLE_READER_COMPATIBILITY_REQUIRED')
+      const scope = await current(), liveSchema = await currentSchemaVersion(db)
+      const snapshotVerified = input?.direction === 'rollback' && input.snapshot !== undefined && input.snapshot !== 'planned' ? await verifiedRewindSnapshot(scope, input) : false
+      if (!admitSchemaTransition(input, { liveSchema, manifestSchema: scope.report?.manifest.controlDbSchemaVersion ?? null, snapshotVerified })) fail('LIFECYCLE_READER_COMPATIBILITY_REQUIRED')
     },
     async snapshotControlPlane(snapshotPath) {
       const scope = await current(); await safety.assertWritersQuiescent()
       if (!snapshotPath.startsWith(ROOT + '/backups/')) fail('LIFECYCLE_BACKUP_PATH_INVALID')
       const databaseCopy = snapshotPath + '.control.db'
       await db.query('VACUUM INTO $1', [databaseCopy])
-      await withTrustedFile(databaseCopy, { maxBytes: 256 * 1024 * 1024 }, async backup => { await backup.verify(); scope.backup = { path: databaseCopy, sha256: backup.sha256 } })
+      const schema = await currentSchemaVersion(db)
+      await withTrustedFile(databaseCopy, { maxBytes: 256 * 1024 * 1024 }, async backup => { await backup.verify(); scope.backup = { path: databaseCopy, sha256: backup.sha256, schema } })
       await safety.syncPath(databaseCopy); await safety.syncPath(dirname(databaseCopy))
+    },
+    // Rewind: the engine matched this copy to the snapshot receipt. Derived idx_* rows are rebuilt from
+    // the restored state files; identity, session, job and audit authority never rewinds (A25).
+    async restoreControlPlane(snapshotPath) {
+      await current(); await safety.assertWritersQuiescent()
+      if (!snapshotPath.startsWith(ROOT + '/backups/')) fail('LIFECYCLE_BACKUP_PATH_INVALID')
+      await withTrustedFile(snapshotPath + '.control.db', { maxBytes: 256 * 1024 * 1024 }, async copy => { await copy.verify() })
+      await reindexFromState(db, await new StateStore('/var/lib/xpanel/state').readSnapshot())
+      await current()
     },
     async syncPath(path) {
       await current()
@@ -342,7 +380,7 @@ async function settleNative(scope, result) {
   await scope.db.transaction(async tx => {
     assertHostOperationGuardActive(scope.guard, bindingFor(scope.origin))
     assertOperationIntentReceipt(scope.intentReceipt, scope.intentBinding, tx)
-    if (result.recordId) await finishUpgrade(tx, result.recordId, { status: result.hostOutcome === 'succeeded' ? 'succeeded' : 'rolled_back', healthReport: { nativeLifecycleReference: scope.job.referenceCode, terminalSha256: sha(JSON.stringify(terminal) + '\n') }, error: result.hostOutcome === 'succeeded' ? null : 'Current authority preserved during verified binary rollback', toSchemaVersion: await currentSchemaVersion(tx) })
+    if (result.recordId) await finishUpgrade(tx, result.recordId, { status: result.hostOutcome === 'succeeded' ? 'succeeded' : 'rolled_back', healthReport: { nativeLifecycleReference: scope.job.referenceCode, terminalSha256: sha(JSON.stringify(terminal) + '\n') }, error: result.hostOutcome === 'succeeded' ? null : 'State snapshot restored and verified after a failed upgrade', toSchemaVersion: await currentSchemaVersion(tx) })
     await finishJob(tx, scope.job.id, { status: 'succeeded', summary: 'Native lifecycle settlement completed' })
     assertHostOperationGuardActive(scope.guard, bindingFor(scope.origin))
     assertOperationIntentReceipt(scope.intentReceipt, scope.intentBinding, tx)

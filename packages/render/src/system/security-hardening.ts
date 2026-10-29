@@ -1,4 +1,4 @@
-import { assertJailedShellAllowed, fail, resolveDomainOutboundMailIp } from '@xpanel/core'
+import { fail, resolveDomainOutboundMailIp } from '@xpanel/core'
 import type {
   Account,
   Domain,
@@ -6,7 +6,6 @@ import type {
   HostAction,
   MailIpConfig,
   OsProfile,
-  Plan,
   RenderedFile,
 } from '@xpanel/core'
 import { DEFAULT_JAIL_SHELL } from './account.ts'
@@ -377,23 +376,6 @@ const buildSandboxRunPrefix = (
     ...envFlags,
     '--',
   ]
-}
-
-/**
- * Builds the `systemd-run` argv that executes an allowed binary and its arguments directly
- * (never `bash -c`) as the account UID inside `xpanel-<uid>.slice` with a private `/tmp`,
- * invisible `/proc` of other users, and a mount namespace where `/home` contains ONLY this
- * account's home directory.
- */
-export const buildJailedShellArgv = (
-  account: Pick<Account, 'username' | 'uid' | 'gid' | 'home' | 'status' | 'shell'>,
-  plan: Pick<Plan, 'name' | 'shell'>,
-  command: string | readonly string[],
-  opts: JailedCommandOptions = {},
-): string[] => {
-  assertJailedShellAllowed(account, plan)
-  const cmdArgv = parseAndValidateJailedCommand(command)
-  return [...buildSandboxRunPrefix(account, opts), ...cmdArgv]
 }
 
 /**

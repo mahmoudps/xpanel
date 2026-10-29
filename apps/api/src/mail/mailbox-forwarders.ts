@@ -2,23 +2,29 @@ import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { fail, isXpanelError } from '@xpanel/core'
 import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
-import type { StateStore } from '@xpanel/state'
+import type { StateStore, WriterLease } from '@xpanel/state'
 import type { DomainForwarder, EmailForwarder } from '../extended-routes.ts'
 import { canonicalForwarderAddress } from './forwarder-validation.ts'
+import type { MailRoutingRecordState, MailRoutingStatusView } from './routing-application.ts'
 import { mailboxJson, methodNotAllowed, strictMailboxBody } from './folder-admin.ts'
 import type { SealedMailboxAuditEvent, SealedMailboxSession } from './folder-admin.ts'
 
 export const MAILBOX_FORWARD_LIMIT = 10
 const LOOP_SEARCH_MAX = 10000
 const KEYS = ['destinations', 'keepCopy', 'expectedRevision'] as const
-/** The account-level forwarders route writes the same file; the reconciler does not render it yet. */
-const APPLICATION = Object.freeze({ status: 'configuration_only' as const, nativeApplied: false as const })
 
 export interface MailboxForwardersPorts {
   /** Fresh sealed-mailbox authority (server: authorizeNativeMailboxRequest with webmail-forwarders); never request input. */
   open: (request: Request) => Promise<SealedMailboxSession>
   store: Pick<StateStore, 'rootDir' | 'getWriterLock' | 'getAccount' | 'getPlan'>
   audit: (request: Request, event: SealedMailboxAuditEvent) => Promise<void>
+  /** The account forwarders route writes the same file; both advance the revision and apply it on the host. */
+  routing: {
+    status: () => Promise<MailRoutingStatusView>
+    commit: (lease: WriterLease) => Promise<number>
+    /** a failed configuration test restores `previous` and throws */
+    apply: (request: Request, revision: number, previous: readonly EmailForwarder[] | null) => Promise<MailRoutingStatusView>
+  }
   now?: () => Date
 }
 export type MailboxForwardersReview = 'managed_elsewhere' | 'duplicate_records'
@@ -28,7 +34,8 @@ export interface MailboxForwardersView {
   revision: string
   limit: number
   review: MailboxForwardersReview | null
-  application: typeof APPLICATION
+  /** host state of the mailbox's own forwarder; null when it has none */
+  application: MailRoutingRecordState | null
 }
 
 const unchanged = { stateChanged: false }
@@ -63,10 +70,11 @@ export const mailboxForwardersRevision = (mailbox: string, accountId: string, ma
   .update(JSON.stringify({ namespace: 'xpanel-mailbox-forwarders:v1', accountId, mailbox,
     records: matching.map(item => ({ id: item.id, accountId: item.accountId, sourceAddress: item.sourceAddress, destinations: item.destinations, createdAt: item.createdAt })) }))
   .digest('hex')
-const view = (mailbox: string, accountId: string, list: readonly EmailForwarder[]): MailboxForwardersView => {
+const view = (mailbox: string, accountId: string, list: readonly EmailForwarder[], status: MailRoutingStatusView): MailboxForwardersView => {
   const scoped = scope(list, mailbox, accountId), own = scoped.own
+  const application = own ? status.record('forwarder', own.id, { domain: mailbox.slice(mailbox.lastIndexOf('@') + 1) }) : null
   return { context: { mailbox }, forwarding: own ? { id: own.id, destinations: [...own.destinations], keepCopy: true, createdAt: own.createdAt } : null,
-    revision: mailboxForwardersRevision(mailbox, accountId, scoped.matching), limit: MAILBOX_FORWARD_LIMIT, review: scoped.review, application: APPLICATION }
+    revision: mailboxForwardersRevision(mailbox, accountId, scoped.matching), limit: MAILBOX_FORWARD_LIMIT, review: scoped.review, application }
 }
 
 /**
@@ -113,7 +121,7 @@ export async function handleMailboxForwardersRoute(request: Request, url: URL, m
   if (method === 'GET') {
     if (url.search) return fail('VALIDATION', 'mailbox forwarders accept no query selectors', unchanged)
     const session = sealed(await ports.open(request))
-    const result = view(session.mailbox, session.record.accountId, await readForwarders(ports.store))
+    const result = view(session.mailbox, session.record.accountId, await readForwarders(ports.store), await ports.routing.status())
     if (!sameSession(session, await ports.open(request))) return fail('FORBIDDEN', 'mailbox session changed; sign in again', unchanged)
     return mailboxJson(result)
   }
@@ -125,11 +133,12 @@ export async function handleMailboxForwardersRoute(request: Request, url: URL, m
   const session = sealed(await ports.open(request)), { mailbox } = session, { accountId } = session.record
   const fresh = async (): Promise<void> => { if (!sameSession(session, await ports.open(request))) fail('FORBIDDEN', 'mailbox session changed; sign in again', unchanged) }
   const lease = await ports.store.getWriterLock().acquire()
-  let attempted = false, operation: 'created' | 'updated' | 'deleted', result: MailboxForwardersView
+  let attempted = false, operation: 'created' | 'updated' | 'deleted', after: EmailForwarder[], previous: EmailForwarder[] | null, revision: number
   try {
     await fresh()
     const account = await ports.store.getAccount(accountId)
     if (!account || account.id !== accountId || account.status !== 'active') return fail('FORBIDDEN', 'mailbox account is unavailable', unchanged)
+    previous = await readJsonIfExists<EmailForwarder[]>(file(ports.store, 'forwarders.json'))
     const list = await readForwarders(ports.store), domains = await readDomainForwarders(ports.store)
     const scoped = scope(list, mailbox, accountId)
     if (scoped.review) return fail('PRECONDITION_FAILED', 'forwarding for this address is managed by the account owner', { ...unchanged, reason: scoped.review })
@@ -137,7 +146,7 @@ export async function handleMailboxForwardersRoute(request: Request, url: URL, m
     const loop = input.destinations.find(target => target === mailbox || forwardsBackTo(target, mailbox, list, domains))
     if (loop) return fail('VALIDATION', 'forwarding to this address would send mail back to this mailbox', { ...unchanged, reason: 'FORWARD_LOOP', destination: loop })
     const own = scoped.own
-    if ((own?.destinations ?? []).join('\n') === input.destinations.join('\n')) return mailboxJson({ ...view(mailbox, accountId, list), stateChanged: false })
+    if ((own?.destinations ?? []).join('\n') === input.destinations.join('\n')) return mailboxJson({ ...view(mailbox, accountId, list, await ports.routing.status()), stateChanged: false })
     if (!own) {
       const plan = await ports.store.getPlan(account.planId), cap = plan?.caps.forwarders
       if (cap === undefined) return fail('PRECONDITION_FAILED', 'the account plan is unavailable', unchanged)
@@ -150,16 +159,18 @@ export async function handleMailboxForwardersRoute(request: Request, url: URL, m
     await lease.assertFencingToken()
     attempted = true
     await atomicWriteJson(file(ports.store, 'forwarders.json'), next, 0o640, () => lease.assertFencingToken())
-    const after = await readForwarders(ports.store), confirmed = scope(after, mailbox, accountId)
+    after = await readForwarders(ports.store)
+    const confirmed = scope(after, mailbox, accountId)
     if (confirmed.review || (operation === 'deleted' ? confirmed.own !== null : confirmed.own?.id !== record.id || confirmed.own.destinations.join('\n') !== record.destinations.join('\n'))) throw new Error('forwarder readback mismatch')
-    result = view(mailbox, accountId, after)
+    revision = await ports.routing.commit(lease)
   } catch (error) {
     if (attempted) return fail('SERVICE_UNAVAILABLE', 'the forwarder change could not be verified; review it before retrying', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
     if (isXpanelError(error)) return fail(error.code, error.message, { ...error.detail, ...unchanged })
     throw error
   } finally { await lease.release() }
+  const result = view(mailbox, accountId, after, await ports.routing.apply(request, revision, previous))
   try {
-    await ports.audit(request, { action: 'webmail.forwarder.' + operation, mailbox, detail: { destinations: input.destinations, keepCopy: true, application: APPLICATION } })
+    await ports.audit(request, { action: 'webmail.forwarder.' + operation, mailbox, detail: { destinations: input.destinations, keepCopy: true, application: result.application?.state ?? 'applied', revision } })
   } catch { return fail('SERVICE_UNAVAILABLE', 'the forwarder change was saved but could not be recorded; review it before retrying', { stateChanged: true, verificationRequired: true, unknownOutcome: true }) }
   return mailboxJson({ ...result, stateChanged: true, operation })
 }

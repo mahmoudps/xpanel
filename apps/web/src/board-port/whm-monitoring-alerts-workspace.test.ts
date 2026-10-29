@@ -31,7 +31,7 @@ describe('WHM monitoring alerts renderer', () => {
     expect(html).not.toContain('<form')
     expect(html).toContain('data-alerts-can-manage="false"')
     expect(html.match(/data-state="unavailable"/g)).toHaveLength(2)
-    expect(html.match(/data-whm-alerts-rule=/g)).toHaveLength(9)
+    expect(html.match(/data-whm-alerts-rule=/g)).toHaveLength(10)
     const controls = html.match(/<(?:button|input|select|fieldset)\b[^>]*>/g) ?? []
     expect(controls.length).toBeGreaterThan(9)
     for (const control of controls) expect(control).toContain(' disabled')

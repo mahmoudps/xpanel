@@ -79,7 +79,9 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     if (endpoint.origin !== window.location.origin || endpoint.pathname.indexOf('/api/') !== 0) throw new Error(copy.unexpected);
     var headers = { accept: 'application/json' };
     var init = { method: method, credentials: 'same-origin', cache: 'no-store', headers: headers };
-    if (body !== undefined) { headers['content-type'] = 'application/json'; init.body = JSON.stringify(body); }
+    // A Blob (a chosen file) is sent as raw bytes with its own media type; everything else as JSON.
+    if (body instanceof Blob) { headers['content-type'] = body.type || 'application/octet-stream'; init.body = body; }
+    else if (body !== undefined) { headers['content-type'] = 'application/json'; init.body = JSON.stringify(body); }
     if (csrf) headers['x-csrf-token'] = csrf;
     var controller = new AbortController();
     init.signal = controller.signal;

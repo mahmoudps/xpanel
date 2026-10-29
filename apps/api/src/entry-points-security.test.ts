@@ -297,7 +297,7 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
     const other = await f.state.store.createAccount({ ...f.account, username: 'bob', primaryDomain: 'bob.example.test', contactEmail: 'bob@example.test', passwordHash: HASH,
       php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 4, startServers: 2, minSpareServers: 1, maxSpareServers: 3, maxRequests: 500, processIdleTimeoutSec: 10 }, ini: {} } })
     const ext = new ExtendedFeaturesStore(f.state.rootDir)
-    const rule = (accountId: string | null, name: string) => ({ id: randomUUID(), accountId, name, scope: 'global', mailbox: null, priority: 1, enabled: true, matchAll: true, conditions: [{ field: 'subject', comparator: 'contains', value: name }], action: { type: 'fileinto', target: 'Spam' }, compiledSieve: '', createdAt: new Date().toISOString() })
+    const rule = (accountId: string | null, name: string) => ({ id: randomUUID(), accountId, name, scope: 'global', mailbox: null, priority: 1, enabled: true, matchAll: true, conditions: [{ field: 'subject', comparator: 'contains', value: name }], actions: [{ type: 'fileinto', target: 'Spam' }], compiledSieve: '', createdAt: new Date().toISOString() })
     const own = rule(f.account.id, 'Own rule')
     const foreign = rule(other.id, 'Foreign private rule')
     const serverWide = rule(null, 'Server private rule')
@@ -318,7 +318,7 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
     assert.deepEqual(await ext.readOrDefault('mail/filters.json', []), seeded)
     assert.equal((await request(`/api/mail/filters/${serverWide.id}`, 'DELETE')).status, 403)
     assert.deepEqual(await ext.readOrDefault('mail/filters.json', []), seeded)
-    const allowed = await request('/api/mail/filters', 'POST', { accountId: f.account.id, scope: 'global', name: 'Owned account-wide rule', conditions: [], action: { type: 'keep' } })
+    const allowed = await request('/api/mail/filters', 'POST', { accountId: f.account.id, scope: 'global', name: 'Owned account-wide rule', conditions: [], actions: [{ type: 'keep' }] })
     assert.equal(allowed.status, 201)
   })
 })

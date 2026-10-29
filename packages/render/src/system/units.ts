@@ -7,7 +7,7 @@
 // - ProcSubset=pid: apps read /proc/meminfo and /proc/cpuinfo.
 // - PrivateNetwork/IPAddressDeny: sites talk to MariaDB, Redis and remote APIs.
 
-import type { Account, OsProfile, RenderedFile, ResourceLimits } from '@xpanel/core'
+import type { Account, Limit, OsProfile, RenderedFile, ResourceLimits } from '@xpanel/core'
 import { cronToOnCalendar } from './cron.ts'
 import { accountSliceName, sliceBodyLines, SYSTEMD_UNIT_DIR, type CgroupControllers } from './slice.ts'
 import {
@@ -18,7 +18,6 @@ import {
   assertInt,
   assertNoControl,
   assertPhpVersion,
-  assertPort,
   assertShortName,
   assertUsername,
   invalid,
@@ -26,8 +25,6 @@ import {
 } from './validate.ts'
 
 export const XPANEL_CONFIG_ROOT = '/etc/xpanel'
-/** Root-only EnvironmentFiles of Node/Python apps, one directory per account. */
-export const APP_ENV_DIR = `${XPANEL_CONFIG_ROOT}/apps`
 export const SH_BINARY = '/bin/sh'
 
 export interface UnitOptions {
@@ -173,7 +170,7 @@ export const fpmAccountLogDir = (username: string): string => `/var/log/${FPM_LO
 export const fpmPaths = (username: string, version: string): FpmPaths => {
   const user = assertUsername(username)
   const v = assertPhpVersion(version)
-  const runtimeDirectory = `xpanel/fpm/${user}-${v}`
+  const runtimeDirectory = `xpanel-fpm/${user}-${v}`
   const logsDirectory = `${FPM_LOGS_DIRECTORY}/${user}`
   const socketDir = `/run/${runtimeDirectory}`
   return {
@@ -238,36 +235,83 @@ export const renderFpmUnit = (account: AccountRef, version: string, os: OsProfil
   ])
 }
 
-// ---------------------------------------------------------------- Node / Python apps
+// ---------------------------------------------------------------- Node.js / Python / Ruby apps
+
+/** Root-only per-account runtime configuration: EnvironmentFiles of apps and containers. */
+export const RUNTIME_CONFIG_ROOT = `${XPANEL_CONFIG_ROOT}/runtime`
+/** Stdlib-only WSGI server on a unix socket; world-readable so every account's Python app can load it. */
+export const WSGI_LAUNCHER_PATH = `${RUNTIME_CONFIG_ROOT}/wsgi-unix.py`
+/**
+ * Root-owned front sockets that Nginx connects to; no account can create or replace an entry here. Runtime paths sit
+ * outside /run/xpanel: the agent's RuntimeDirectory=xpanel is removed whenever the agent stops or restarts.
+ */
+export const APP_PROXY_SOCKET_DIR = '/run/xpanel-app-proxy'
+export const SOCKET_PROXYD_BINARY = '/usr/lib/systemd/systemd-socket-proxyd'
+export const RUNTIME_KINDS = ['node', 'python', 'ruby'] as const
+export type RuntimeKind = (typeof RUNTIME_KINDS)[number]
+/** Distribution interpreters only; versions are whatever the host's packages installed. */
+export const RUNTIME_BINARIES: Readonly<Record<RuntimeKind, string>> = { node: '/usr/bin/node', python: '/usr/bin/python3', ruby: '/usr/bin/ruby' }
+export const RUBY_BUNDLE_BINARY = '/usr/bin/bundle'
+const RESERVED_APP_ENV = new Set(['PORT', 'BUNDLE_GEMFILE', 'BUNDLE_PATH'])
 
 export interface AppSpec {
   name: string
-  kind: 'node' | 'python'
-  /** loopback port the app listens on; Apache proxies to it */
-  port: number
-  /** argv; argv[0] is an absolute path to the interpreter or launcher */
-  execStart: string[]
-  /** absolute path inside the account home */
-  workingDir: string
+  kind: RuntimeKind
+  /** absolute application root inside the account home */
+  root: string
+  /** startup file relative to root: server.js, passenger_wsgi.py (exports `application`) or config.ru */
+  startup: string
   /** private settings, written to a root-only EnvironmentFile (never visible via `systemctl show`) */
   env?: Record<string, string>
 }
 
 export interface AppUnitOptions extends UnitOptions {
-  /** ports the app may not take: panel, backend, ssh ... */
-  reservedPorts?: number[]
+  /** group of the Nginx workers that may connect to the front socket; os.paths.nginxUser when omitted */
+  nginxGroup?: string
+}
+
+export interface AppPaths {
+  service: string
+  proxySocketUnit: string
+  proxyService: string
+  /** relative to /run, as RuntimeDirectory= wants it */
+  runtimeDirectory: string
+  /** where the app listens; inside a 0700 directory of the account */
+  appSocket: string
+  /** where Nginx connects; root-owned, group of the Nginx workers */
+  proxySocket: string
+  envFile: string
 }
 
 export interface RenderedApp {
-  unit: RenderedFile
+  paths: AppPaths
+  service: RenderedFile
+  proxySocket: RenderedFile
+  proxyService: RenderedFile
   envFile: RenderedFile
 }
 
-const RESERVED_ENV = new Set(['PORT', 'HOST'])
+export const runtimeConfigDir = (username: string): string => `${RUNTIME_CONFIG_ROOT}/${assertUsername(username)}`
 
-export const appUnitName = (username: string, app: string): string => `xpanel-app-${username}-${app}.service`
-
-export const appEnvDir = (username: string): string => `${APP_ENV_DIR}/${assertUsername(username)}`
+/**
+ * One app = three units. The app listens on a unix socket in its own 0700 runtime directory. Nginx never
+ * connects there: it connects to a root-owned front socket whose systemd-socket-proxyd runs as the account,
+ * so a symlink the account plants in its own directory can only ever reach what the account itself can reach.
+ */
+export const appPaths = (username: string, name: string): AppPaths => {
+  const user = assertUsername(username)
+  const app = assertShortName('app name', name)
+  const runtimeDirectory = `xpanel-apps/${user}-${app}`
+  return {
+    service: `xpanel-app-${user}-${app}.service`,
+    proxySocketUnit: `xpanel-appproxy-${user}-${app}.socket`,
+    proxyService: `xpanel-appproxy-${user}-${app}.service`,
+    runtimeDirectory,
+    appSocket: `/run/${runtimeDirectory}/app.sock`,
+    proxySocket: `${APP_PROXY_SOCKET_DIR}/${user}-${app}.sock`,
+    envFile: `${runtimeConfigDir(user)}/${app}.env`,
+  }
+}
 
 const insideHome = (ctx: Ctx, what: string, p: unknown): string => {
   const path = assertAbsPath(what, p)
@@ -279,66 +323,288 @@ const insideHome = (ctx: Ctx, what: string, p: unknown): string => {
 const envFileValue = (value: string): string =>
   value.includes("'") ? `"${value.replace(/[\\"`$]/g, (c) => `\\${c}`)}"` : `'${value}'`
 
-export const renderAppUnit = (account: AccountRef, app: AppSpec, os: OsProfile, opts: AppUnitOptions = {}): RenderedApp => {
-  const ctx = context(account, os, opts)
-  const name = assertShortName('app name', app.name)
-  if (app.kind !== 'node' && app.kind !== 'python') return invalid('app kind must be node or python', { kind: app.kind })
-  const port = assertInt('app port', app.port, 1024, 65535)
-  if ((opts.reservedPorts ?? []).map((p) => assertPort('reserved port', p)).includes(port)) {
-    return invalid(`port ${port} is reserved`, { port })
-  }
-  if (!Array.isArray(app.execStart) || app.execStart.length === 0 || app.execStart.length > 64) {
-    return invalid('execStart must hold 1-64 arguments')
-  }
-  const [exe, ...args] = app.execStart
-  const binary = assertAbsPath('app executable', exe)
-  const argv = args.map((a, i) => quoteExecArg(assertNoControl(`execStart[${i + 1}]`, a, 1024)))
-  const workingDir = insideHome(ctx, 'workingDir', app.workingDir)
-
-  const env = app.env ?? {}
+const renderEnvFile = (path: string, what: string, env: unknown, reserved: ReadonlySet<string>): RenderedFile => {
   if (typeof env !== 'object' || env === null || Array.isArray(env)) return invalid('env must be an object')
-  const envEntries = Object.entries(env)
-  if (envEntries.length > 128) return invalid('at most 128 env variables')
-  const envLines = envEntries.map(([k, v]) => {
+  const entries = Object.entries(env)
+  if (entries.length > 64) return invalid('at most 64 env variables')
+  const lines = entries.map(([k, v]) => {
     if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(k)) return invalid(`invalid env name ${JSON.stringify(k)}`)
-    if (RESERVED_ENV.has(k)) return invalid(`${k} is set by xPanel`, { key: k })
+    if (reserved.has(k)) return invalid(`${k} is set by xPanel`, { key: k })
     return `${k}=${envFileValue(assertNoControl(`env ${k}`, v, 4096))}`
   })
+  return { path, content: `${header(what)}\n${lines.map((l) => `${l}\n`).join('')}`, mode: 0o600, owner: 'root', group: 'root' }
+}
 
-  const unit = appUnitName(ctx.username, name)
-  const envPath = `${appEnvDir(ctx.username)}/${name}.env`
-  const unitText = unitFile(`${ctx.systemdDir}/${unit}`, [
-    header(`${app.kind} app ${name} for ${ctx.username}`),
+export const renderAppUnits = (account: AccountRef, app: AppSpec, os: OsProfile, opts: AppUnitOptions = {}): RenderedApp => {
+  const ctx = context(account, os, opts)
+  const p = appPaths(ctx.username, app.name)
+  if (!RUNTIME_KINDS.includes(app.kind)) return invalid('app runtime must be node, python or ruby', { kind: app.kind })
+  const root = insideHome(ctx, 'app root', app.root)
+  if (root === ctx.home) return invalid('app root must be a directory inside the account home, not the home itself')
+  const startup = insideHome(ctx, 'startup file', `${root}/${assertNoControl('startup file', app.startup, 255)}`)
+  const nginxGroup = opts.nginxGroup ?? os.paths.nginxUser
+  if (!/^[a-z_][a-z0-9_-]{0,31}$/.test(nginxGroup)) return invalid('nginx group must be a system group name', { nginxGroup })
+  const env: string[] = []
+  let exec: string[]
+  if (app.kind === 'node') {
+    env.push(quoteEnvAssignment('PORT', p.appSocket), quoteEnvAssignment('NODE_ENV', 'production'))
+    exec = [RUNTIME_BINARIES.node, quoteExecArg(startup)]
+  } else if (app.kind === 'python') {
+    env.push(quoteEnvAssignment('PYTHONUNBUFFERED', '1'))
+    exec = [`${root}/.venv/bin/python`, WSGI_LAUNCHER_PATH, quoteExecArg(p.appSocket), quoteExecArg(startup)]
+  } else {
+    env.push(quoteEnvAssignment('BUNDLE_GEMFILE', `${root}/Gemfile`), quoteEnvAssignment('BUNDLE_PATH', `${root}/vendor/bundle`), quoteEnvAssignment('RACK_ENV', 'production'))
+    exec = [RUBY_BUNDLE_BINARY, 'exec', 'puma', '--bind', quoteExecArg(`unix://${p.appSocket}`), quoteExecArg(startup)]
+  }
+  const service = unitFile(`${ctx.systemdDir}/${p.service}`, [
+    header(`${app.kind} app ${app.name} for ${ctx.username}`),
     '[Unit]',
-    `Description=xPanel ${app.kind} app ${name} for ${ctx.username}`,
+    `Description=xPanel ${app.kind} app ${app.name} for ${ctx.username}`,
     'After=network.target',
     '',
     '[Service]',
     'Type=simple',
-    `WorkingDirectory=${workingDir}`,
-    `Environment=${quoteEnvAssignment('PORT', String(port))} ${quoteEnvAssignment('HOST', '127.0.0.1')}`,
-    ...(app.kind === 'python' ? [`Environment=${quoteEnvAssignment('PYTHONUNBUFFERED', '1')}`] : []),
-    `EnvironmentFile=${envPath}`,
-    `ExecStart=${[binary, ...argv].join(' ')}`,
+    `WorkingDirectory=${root}`,
+    `Environment=${env.join(' ')}`,
+    `EnvironmentFile=${p.envFile}`,
+    `ExecStart=${exec.join(' ')}`,
     'Restart=on-failure',
     'RestartSec=2s',
-    // TCP: the app may bind its own port and nothing else.
-    `SocketBindAllow=tcp:${port}`,
-    ...NO_TCP_LISTEN,
+    `RuntimeDirectory=${p.runtimeDirectory}`,
+    'RuntimeDirectoryMode=0700',
     'LimitNOFILE=65536',
-    ...isolation(ctx, { netlink: true }),
+    // The app listens on its unix socket; it may never take a TCP port another account's site could reach.
+    ...NO_TCP_LISTEN,
+    ...isolation(ctx, { writable: [`/run/${p.runtimeDirectory}`], netlink: app.kind === 'node' }),
     '',
     '[Install]',
     'WantedBy=multi-user.target',
   ])
-  const envFile: RenderedFile = {
-    path: envPath,
-    content: `${header(`env for app ${name} of ${ctx.username}`)}\n${envLines.map((l) => `${l}\n`).join('')}`,
-    mode: 0o600,
-    owner: 'root',
-    group: 'root',
-  }
-  return { unit: unitText, envFile }
+  const proxySocket = unitFile(`${ctx.systemdDir}/${p.proxySocketUnit}`, [
+    header(`front socket of app ${app.name} for ${ctx.username}`),
+    '[Unit]',
+    `Description=xPanel front socket of app ${app.name} for ${ctx.username}`,
+    '',
+    '[Socket]',
+    `ListenStream=${p.proxySocket}`,
+    'SocketUser=root',
+    `SocketGroup=${nginxGroup}`,
+    'SocketMode=0660',
+    'DirectoryMode=0755',
+    `Service=${p.proxyService}`,
+    '',
+    '[Install]',
+    'WantedBy=sockets.target',
+  ])
+  const proxyService = unitFile(`${ctx.systemdDir}/${p.proxyService}`, [
+    header(`front proxy of app ${app.name} for ${ctx.username}`),
+    '[Unit]',
+    `Description=xPanel front proxy of app ${app.name} for ${ctx.username}`,
+    `Requires=${p.proxySocketUnit}`,
+    `After=${p.proxySocketUnit}`,
+    '',
+    '[Service]',
+    `ExecStart=${SOCKET_PROXYD_BINARY} --exit-idle-time=10min ${p.appSocket}`,
+    ...NO_TCP_LISTEN,
+    ...isolation(ctx),
+  ])
+  return { paths: p, service, proxySocket, proxyService, envFile: renderEnvFile(p.envFile, `env for app ${app.name} of ${ctx.username}`, app.env ?? {}, RESERVED_APP_ENV) }
+}
+
+/** Serves the WSGI callable `application` of the startup file on a unix socket, with the Python stdlib only. */
+export const WSGI_LAUNCHER = [
+  '# Generated by xPanel. Manual edits are overwritten.',
+  'import importlib.util, os, socketserver, sys',
+  'from wsgiref.simple_server import WSGIRequestHandler, WSGIServer',
+  '',
+  'class Handler(WSGIRequestHandler):',
+  '    # A unix-socket peer has no address; Nginx passes the client in X-Real-IP.',
+  '    def setup(self):',
+  "        self.client_address = ('127.0.0.1', 0)",
+  '        super().setup()',
+  '    def get_environ(self):',
+  '        env = super().get_environ()',
+  "        env['REMOTE_ADDR'] = self.headers.get('X-Real-IP', '127.0.0.1')",
+  '        return env',
+  '',
+  'class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer, WSGIServer):',
+  '    daemon_threads = True',
+  '    def server_bind(self):',
+  '        socketserver.UnixStreamServer.server_bind(self)',
+  "        self.server_name, self.server_port = 'localhost', 80",
+  '        self.setup_environ()',
+  '',
+  'socket_path, startup = sys.argv[1], sys.argv[2]',
+  'sys.path.insert(0, os.path.dirname(startup))',
+  "spec = importlib.util.spec_from_file_location('xpanel_wsgi_app', startup)",
+  'module = importlib.util.module_from_spec(spec)',
+  'spec.loader.exec_module(module)',
+  'if os.path.exists(socket_path):',
+  '    os.unlink(socket_path)',
+  'with Server(socket_path, Handler) as server:',
+  '    server.set_app(module.application)',
+  '    server.serve_forever()',
+  '',
+].join('\n')
+
+export const renderWsgiLauncher = (): RenderedFile => ({ path: WSGI_LAUNCHER_PATH, content: WSGI_LAUNCHER, mode: 0o644, owner: 'root', group: 'root' })
+
+// ---------------------------------------------------------------- Redis / Memcached per account
+
+export const CACHE_SERVICES = ['redis', 'memcached'] as const
+export type CacheService = (typeof CACHE_SERVICES)[number]
+
+export interface CachePaths {
+  unit: string
+  dir: string
+  socket: string
+}
+
+/** The socket sits in the account home: only the account's own processes can reach it. */
+export const cachePaths = (account: Pick<Account, 'username' | 'home'>, service: CacheService): CachePaths => {
+  const user = assertUsername(account.username)
+  if (!CACHE_SERVICES.includes(service)) return invalid('cache service must be redis or memcached', { service })
+  const dir = `${assertAbsPath('home', account.home)}/.xpanel-cache`
+  return { unit: `xpanel-${service}-${user}.service`, dir, socket: `${dir}/${service}.sock` }
+}
+
+export interface CacheSpec {
+  service: CacheService
+  memoryMb: number
+  /** redis-server, valkey-server or memcached as installed on the host */
+  binary: string
+}
+
+export const renderCacheUnit = (account: AccountRef, spec: CacheSpec, os: OsProfile, opts: UnitOptions = {}): RenderedFile => {
+  const ctx = context(account, os, opts)
+  const p = cachePaths(account, spec.service)
+  const mb = assertInt('cache memory', spec.memoryMb, 8, 4096)
+  const binary = assertAbsPath('cache binary', spec.binary)
+  const exec = spec.service === 'redis'
+    // No TCP listener, no persistence: a cache that restarts empty, never a store that fills the quota.
+    ? [binary, '--port', '0', '--unixsocket', quoteExecArg(p.socket), '--unixsocketperm', '700', '--maxmemory', `${mb}mb`, '--maxmemory-policy', 'allkeys-lru',
+      '--save', '""', '--appendonly', 'no', '--dir', quoteExecArg(p.dir), '--daemonize', 'no', '--logfile', '""']
+    : [binary, '-s', quoteExecArg(p.socket), '-a', '0700', '-m', String(mb), '-c', '256', '-t', '1']
+  return unitFile(`${ctx.systemdDir}/${p.unit}`, [
+    header(`${spec.service} for ${ctx.username}`),
+    '[Unit]',
+    `Description=xPanel ${spec.service} for ${ctx.username}`,
+    '',
+    '[Service]',
+    'Type=simple',
+    `ExecStartPre=/usr/bin/mkdir -p -m 0700 ${quoteExecArg(p.dir)}`,
+    `ExecStart=${exec.join(' ')}`,
+    'Restart=on-failure',
+    'RestartSec=2s',
+    // Cache memory plus process overhead; the account slice caps the total on top.
+    `MemoryMax=${mb + 32}M`,
+    ...NO_TCP_LISTEN,
+    ...isolation(ctx),
+    '',
+    '[Install]',
+    'WantedBy=multi-user.target',
+  ])
+}
+
+// ---------------------------------------------------------------- Rootless containers per account
+
+export const PODMAN_BINARY = '/usr/bin/podman'
+/** Registries an account may run images from; the image must name a tag or a digest. */
+export const CONTAINER_REGISTRIES = ['docker.io', 'quay.io', 'ghcr.io'] as const
+const IMAGE_RE = /^(?:docker\.io|quay\.io|ghcr\.io)\/[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*){0,3}(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}|@sha256:[0-9a-f]{64})$/
+export const isContainerImage = (v: unknown): v is string => typeof v === 'string' && v.length <= 255 && IMAGE_RE.test(v)
+
+export interface ContainerSpec {
+  name: string
+  image: string
+  /** values reach Podman through a root-only EnvironmentFile; only the names appear in the unit */
+  env?: Record<string, string>
+}
+
+export interface ContainerLimits {
+  memoryMb: Limit
+  cpuPercent: Limit
+  maxProcesses: Limit
+}
+
+export interface RenderedContainer {
+  unit: string
+  service: RenderedFile
+  envFile: RenderedFile
+}
+
+/** One Podman runtime directory per account (Podman binds its database to it), kept across container restarts. */
+export const containerRuntimeDir = (username: string): string => `/run/xpanel-ctr/${assertUsername(username)}`
+
+export const containerUnitName = (username: string, name: string): string => `xpanel-ctr-${assertUsername(username)}-${assertShortName('container name', name)}.service`
+
+/**
+ * Podman rootless as the account, attached (logs go to the unit journal), in the account slice with a
+ * delegated cgroup so plan limits reach the container. No port is published: a container is reachable
+ * only inside its own network namespace, so no other account can connect to it.
+ * Rootless Podman needs newuidmap (setuid) and its own namespaces, so this unit cannot use the
+ * NoNewPrivileges/RestrictNamespaces/CapabilityBoundingSet isolation of the other account units.
+ */
+export const renderContainerUnit = (account: AccountRef, spec: ContainerSpec, limits: ContainerLimits, os: OsProfile, opts: UnitOptions = {}): RenderedContainer => {
+  const ctx = context(account, os, opts)
+  const unit = containerUnitName(ctx.username, spec.name)
+  if (!isContainerImage(spec.image)) return invalid(`image must be ${CONTAINER_REGISTRIES.join(', ')}/<name> with a tag or digest`, { image: spec.image })
+  const envPath = `${runtimeConfigDir(ctx.username)}/ctr-${spec.name}.env`
+  const runtimeDirectory = containerRuntimeDir(ctx.username).slice('/run/'.length)
+  const cap = (what: string, v: Limit, min: number, max: number): number | null => (v === 'unlimited' ? null : assertInt(what, v, min, max))
+  const memory = cap('memoryMb', limits.memoryMb, 16, 1048576)
+  const cpu = cap('cpuPercent', limits.cpuPercent, 1, 100000)
+  const pids = cap('maxProcesses', limits.maxProcesses, 1, 4194304)
+  const run = [
+    PODMAN_BINARY, '--cgroup-manager=cgroupfs', 'run', '--rm', '--replace', '--name', spec.name, '--cgroups=split', '--log-driver=passthrough',
+    '--security-opt=no-new-privileges', '--pull=missing',
+    ...(memory === null ? [] : [`--memory=${memory}m`]),
+    ...(cpu === null ? [] : [`--cpus=${(cpu / 100).toFixed(2)}`]),
+    ...(pids === null ? [] : [`--pids-limit=${pids}`]),
+    ...Object.keys(spec.env ?? {}).flatMap((k) => ['--env', k]),
+    quoteExecArg(spec.image),
+  ]
+  const service = unitFile(`${ctx.systemdDir}/${unit}`, [
+    header(`container ${spec.name} for ${ctx.username}`),
+    '[Unit]',
+    `Description=xPanel container ${spec.name} for ${ctx.username}`,
+    'After=network-online.target',
+    'Wants=network-online.target',
+    '',
+    '[Service]',
+    'Type=simple',
+    `User=${ctx.username}`,
+    `Group=${ctx.username}`,
+    `Slice=${ctx.slice}`,
+    'Delegate=yes',
+    `WorkingDirectory=${ctx.home}`,
+    `RuntimeDirectory=${runtimeDirectory}`,
+    'RuntimeDirectoryMode=0700',
+    'RuntimeDirectoryPreserve=yes',
+    `Environment=${[quoteEnvAssignment('HOME', ctx.home), quoteEnvAssignment('XDG_RUNTIME_DIR', `/run/${runtimeDirectory}`), quoteEnvAssignment('TMPDIR', `${ctx.home}/tmp`)].join(' ')}`,
+    `EnvironmentFile=${envPath}`,
+    `ExecStartPre=/usr/bin/mkdir -p -m 0700 ${quoteExecArg(`${ctx.home}/tmp`)}`,
+    `ExecStart=${run.join(' ')}`,
+    'KillMode=mixed',
+    'TimeoutStartSec=300',
+    'TimeoutStopSec=30',
+    'Restart=on-failure',
+    'RestartSec=10s',
+    'PrivateTmp=yes',
+    'ProtectHome=tmpfs',
+    ...ctx.hiddenBases.map((b) => `TemporaryFileSystem=${b}:ro`),
+    `BindPaths=${ctx.home}`,
+    'ProtectKernelModules=yes',
+    'ProtectKernelLogs=yes',
+    // No ProtectHostname=: the OCI runtime sets the container hostname inside its own UTS namespace.
+    'ProtectClock=yes',
+    'RestrictRealtime=yes',
+    'LockPersonality=yes',
+    '',
+    '[Install]',
+    'WantedBy=multi-user.target',
+  ])
+  return { unit, service, envFile: renderEnvFile(envPath, `env for container ${spec.name} of ${ctx.username}`, spec.env ?? {}, new Set()) }
 }
 
 // ---------------------------------------------------------------- Cron as timers

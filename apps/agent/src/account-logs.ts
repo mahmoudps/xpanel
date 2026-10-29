@@ -42,6 +42,10 @@ export function tailLines(tail: Pick<LogTail, 'text' | 'truncated'>, maxLines = 
   return { lines: clean.slice(-maxLines), dropped: Math.max(0, clean.length - maxLines) }
 }
 
+/** One bounded slice of a protected edge log, with the file identity so a caller can detect rotation. */
+export interface LogSlice { exists: boolean; identity: string | null; sizeBytes: number; start: number; bytes: Buffer }
+export const LOG_SLICE_MAX_BYTES = 4 * 1024 * 1024
+
 /**
  * Root read of an edge log under the fixed xPanel log directory only. Ancestors must be root-owned
  * real directories (the two xPanel-owned ones without group/other write; distro /var/log may be
@@ -49,8 +53,21 @@ export function tailLines(tail: Pick<LogTail, 'text' | 'truncated'>, maxLines = 
  * after the open so a swapped component is refused.
  */
 export const readProtectedLogTail: LogTailReader = async (path, maxBytes) => {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > LOG_TAIL_MAX_BYTES) return fail('PRECONDITION_FAILED', 'the log path is not an xPanel edge log', { stateChanged: false })
+  const slice = await readProtectedLog(path, maxBytes, size => Math.max(0, size - maxBytes))
+  return slice.exists ? { exists: true, sizeBytes: slice.sizeBytes, mtime: slice.mtime, text: new TextDecoder('utf-8').decode(slice.bytes), truncated: slice.start > 0 } : { exists: false, sizeBytes: 0, mtime: null, text: '', truncated: false }
+}
+
+/** Reads at most maxBytes from offset; an offset past the end (a truncated file) reads nothing. */
+export const readProtectedLogFrom = async (path: string, offset: number, maxBytes: number): Promise<LogSlice> => {
+  if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > LOG_SLICE_MAX_BYTES) return fail('PRECONDITION_FAILED', 'the log path is not an xPanel edge log', { stateChanged: false })
+  const { exists, identity, sizeBytes, start, bytes } = await readProtectedLog(path, maxBytes, size => Math.min(offset, size))
+  return { exists, identity, sizeBytes, start, bytes }
+}
+
+const readProtectedLog = async (path: string, maxBytes: number, startAt: (size: number) => number): Promise<LogSlice & { mtime: string | null }> => {
   const directory = edge.XP_PATHS.nginxLogDir, owned = [directory, posix.dirname(directory)]
-  if (posix.normalize(path) !== path || posix.dirname(path) !== directory || !/^[a-z0-9.-]+\.(?:access|error)\.log$/.test(posix.basename(path)) || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > LOG_TAIL_MAX_BYTES) return fail('PRECONDITION_FAILED', 'the log path is not an xPanel edge log', { stateChanged: false })
+  if (posix.normalize(path) !== path || posix.dirname(path) !== directory || !/^[a-z0-9.-]+\.(?:access|error)\.log$/.test(posix.basename(path))) return fail('PRECONDITION_FAILED', 'the log path is not an xPanel edge log', { stateChanged: false })
   const ancestors = async (): Promise<string> => {
     const identity: string[] = []
     for (let current: string = directory; current !== '/'; current = posix.dirname(current)) {
@@ -63,13 +80,13 @@ export const readProtectedLogTail: LogTailReader = async (path, maxBytes) => {
   const before = await ancestors()
   let handle
   try { handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK) }
-  catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return { exists: false, sizeBytes: 0, mtime: null, text: '', truncated: false }; return fail('PRECONDITION_FAILED', 'the log file could not be opened safely', { stateChanged: false }) }
+  catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return { exists: false, identity: null, sizeBytes: 0, start: 0, bytes: Buffer.alloc(0), mtime: null }; return fail('PRECONDITION_FAILED', 'the log file could not be opened safely', { stateChanged: false }) }
   try {
     const metadata = await handle.stat(), named = await lstat(path)
     if (!metadata.isFile() || named.dev !== metadata.dev || named.ino !== metadata.ino || await ancestors() !== before) return fail('PRECONDITION_FAILED', 'the log is not a stable regular file', { stateChanged: false })
-    const start = Math.max(0, metadata.size - maxBytes), buffer = Buffer.alloc(metadata.size - start)
+    const start = startAt(metadata.size), buffer = Buffer.alloc(Math.min(maxBytes, metadata.size - start))
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, start)
-    return { exists: true, sizeBytes: metadata.size, mtime: metadata.mtime.toISOString(), text: new TextDecoder('utf-8').decode(buffer.subarray(0, bytesRead)), truncated: start > 0 }
+    return { exists: true, identity: metadata.dev + ':' + metadata.ino, sizeBytes: metadata.size, start, bytes: buffer.subarray(0, bytesRead), mtime: metadata.mtime.toISOString() }
   } finally { await handle.close() }
 }
 

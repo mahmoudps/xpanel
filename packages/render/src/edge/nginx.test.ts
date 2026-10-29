@@ -10,6 +10,7 @@ import {
   renderDefaultSite,
   renderNginxMain,
   renderNginxSite,
+  BANDWIDTH_LIMIT_PAGE,
   type EdgeSettings,
 } from './nginx.ts'
 import { account, blockOf, cert, codeOf, debianOs, domain, rhelOs, serverBlocks, settings } from './testkit.ts'
@@ -142,6 +143,31 @@ describe('renderNginxSite', () => {
     expect(c).not.toContain('listen 443')
   })
 
+  it('serves runtime apps on their paths through front sockets, uncached, and a / app replaces the backend', () => {
+    const sock = '/run/xpanel-app-proxy/alice-api.sock'
+    const c = renderNginxSite(a, [domain()], settings(), null, { appRoutes: { 'example.com': [{ path: '/api', socket: sock }] } })
+    expect(c).toContain('location = /api {')
+    expect(c).toContain('return 308 /api/$is_args$args;')
+    const api = blockOf(c, 'location ^~ /api/')
+    expect(api).toContain(`proxy_pass http://unix:${sock}:;`)
+    expect(api).toContain('proxy_set_header X-Forwarded-For $remote_addr;')
+    expect(api).not.toContain('proxy_cache ')
+    expect(c).toContain('proxy_pass http://127.0.0.1:8080;')
+    expect(c.indexOf('location ^~ /.well-known/acme-challenge/')).toBeLessThan(c.indexOf('location ^~ /api/'))
+    assertNginxEdgeHeaderSanitization(c)
+    const whole = renderNginxSite(a, [domain()], settings(), null, { appRoutes: { 'example.com': [{ path: '/', socket: sock }] } })
+    expect(whole).not.toContain('127.0.0.1:8080')
+    expect(blockOf(whole, 'location /')).toContain(`proxy_pass http://unix:${sock}:;`)
+  })
+
+  it.each([
+    ['another socket dir', { path: '/x', socket: '/home/alice/app.sock' }],
+    ['trailing slash', { path: '/x/', socket: '/run/xpanel-app-proxy/alice-api.sock' }],
+    ['path injection', { path: '/x;}', socket: '/run/xpanel-app-proxy/alice-api.sock' }],
+  ])('refuses an app route with %s', (_, route) => {
+    expect(() => renderNginxSite(a, [domain()], settings(), null, { appRoutes: { 'example.com': [route] } })).toThrow()
+  })
+
   it('never lets nginx open the home: no root/alias into /home or the account home anywhere', () => {
     const doms = [
       domain(),
@@ -162,10 +188,41 @@ describe('renderNginxSite', () => {
     }
   })
 
+  it('applies reverse-proxy options: Host source, WebSocket relay and literal extra headers', () => {
+    const plain = renderNginxSite(a, [domain({ siteType: 'proxy', upstream: 'http://127.0.0.1:3000' })], settings())
+    expect(plain).toContain('proxy_set_header Upgrade $http_upgrade;')
+    const c = renderNginxSite(a, [domain({ siteType: 'proxy', upstream: 'http://127.0.0.1:3000',
+      proxy: { websocket: false, hostHeader: 'upstream', headers: [{ name: 'X-App-Key', value: 'shop "a"' }] } })], settings())
+    expect(c).toContain('proxy_set_header Host $proxy_host;')
+    expect(c).not.toContain('proxy_set_header Host $host;')
+    expect(c).toContain('proxy_set_header Upgrade "";')
+    expect(c).toContain('proxy_set_header Connection close;')
+    expect(c).toContain('proxy_set_header X-App-Key "shop \\"a\\"";')
+    // Options only shape proxy sites; a stored value never reaches a node upstream or a forwarding header.
+    expect(renderNginxSite(a, [domain({ siteType: 'node', upstream: 'http://127.0.0.1:3000', proxy: { websocket: false, hostHeader: 'upstream', headers: [] } })], settings())).toContain('proxy_set_header Host $host;')
+    expect(codeOf(() => renderNginxSite(a, [domain({ siteType: 'proxy', upstream: 'http://127.0.0.1:3000', proxy: { websocket: true, hostHeader: 'client', headers: [{ name: 'X-Forwarded-For', value: '1.2.3.4' }] } })], settings()))).toBe('VALIDATION')
+    expect(codeOf(() => renderNginxSite(a, [domain({ siteType: 'proxy', upstream: 'http://127.0.0.1:3000', proxy: { websocket: true, hostHeader: 'client', headers: [{ name: 'X-A', value: '$host' }] } })], settings()))).toBe('VALIDATION')
+  })
+
   it('strips the httpoxy Proxy header before the backend sees it', () => {
     for (const d of [domain(), domain({ siteType: 'node', upstream: 'http://127.0.0.1:3000' })]) {
       expect(renderNginxSite(a, [d], settings())).toContain('proxy_set_header Proxy "";')
     }
+  })
+
+  it('serves the bandwidth-exceeded page from the edge itself while the account is limited, keeping ACME and no backend', () => {
+    const limited = account({ bandwidthLimitedMonth: '2026-10' })
+    const c = renderNginxSite(limited, [domain()], settings())
+    for (const b of serverBlocks(c)) {
+      expect(b).toContain('location ^~ /.well-known/acme-challenge/ {')
+      expect(blockOf(b, 'location /')).toContain('return 503 "<!doctype html>')
+      expect(blockOf(b, 'location /')).toContain('add_header Retry-After 3600 always;')
+      expect(b).not.toContain('proxy_pass')
+    }
+    expect(c).toContain(BANDWIDTH_LIMIT_PAGE.replace(/"/g, '\\"'))
+    expect(renderNginxSite(account(), [domain()], settings())).not.toContain('Bandwidth limit exceeded')
+    // A suspended account keeps the suspended page; the bandwidth page never hides a suspension.
+    expect(renderNginxSite(account({ status: 'suspended', bandwidthLimitedMonth: '2026-10' }), [domain()], settings())).not.toContain('Bandwidth limit exceeded')
   })
 
   it('serves ACME http-01 from the xPanel-owned dir on every site, even redirects and suspended', () => {

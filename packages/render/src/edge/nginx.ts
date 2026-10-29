@@ -1,9 +1,9 @@
 // Nginx edge on 80/443. It proxies to the loopback backend (Apache or OpenLiteSpeed) or to an
 // app upstream, caches responses (never files), and never opens anything inside a home.
-import { validateDefaultSitePolicy, validateNginxWorkers } from '@xpanel/core'
+import { assertProxyOptions, validateDefaultSitePolicy, validateNginxWorkers } from '@xpanel/core'
 import { readAdmittedTrustedProxyPolicy, renderTrustedProxyRealIp } from '../../../core/src/trusted-proxies.ts'
 import type { TrustedProxyRenderAuthority } from '../../../core/src/trusted-proxies.ts'
-import type { Account, Certificate, ConfigTest, Domain, HostAction, Limit, OsProfile, RenderedFile, ServerSettings } from '@xpanel/core'
+import type { Account, Certificate, ConfigTest, Domain, HostAction, Limit, OsProfile, ProxyOptions, RenderedFile, ServerSettings } from '@xpanel/core'
 import { certPaths, DEFAULT_TLS, nginxAccessLog, nginxBinary, nginxErrorLog, nginxModuleIncludes, XP_PATHS } from './paths.ts'
 import { nginxQuote } from './quote.ts'
 import { asCertList, certForName, groupSites, siteMode, siteUpstream, type RenderTime, type SiteGroup, type UpstreamPolicy } from './sites.ts'
@@ -181,7 +181,20 @@ export interface NginxSiteOptions extends UpstreamPolicy {
   cache?: boolean
   /** time used to stop expired sites (default: the time of rendering) */
   now?: RenderTime
+  /** runtime apps per site, keyed by the site's main domain name */
+  appRoutes?: Record<string, AppRoute[]>
 }
+
+/** A runtime app served on a URL path of a site through its root-owned front socket. */
+export interface AppRoute {
+  /** '/' or a lowercase path without trailing slash, e.g. '/api' */
+  path: string
+  /** front socket under /run/xpanel-app-proxy/ */
+  socket: string
+}
+
+const APP_ROUTE_PATH_RE = /^\/(?:[a-z0-9][a-z0-9._-]{0,62}(?:\/[a-z0-9][a-z0-9._-]{0,62}){0,3})?$/
+const APP_SOCKET_RE = /^\/run\/xpanel-app-proxy\/[a-z][a-z0-9]{0,15}-[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\.sock$/
 
 const listen = (port: 80 | 443, e: EdgeExtras, extra = ''): string[] => {
   const h2 = port === 443 && (e.http2 ?? 'listen') === 'listen' ? ' http2' : ''
@@ -202,27 +215,38 @@ const suspendedLocations = (): string[] => [
   ...block('location /', ['return 503;']),
 ]
 
+/** Served by the edge itself while account.bandwidthLimitedMonth is set: no file, no backend, no tenant path. */
+export const BANDWIDTH_LIMIT_PAGE = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Bandwidth limit exceeded</title></head>'
+  + '<body><h1>Bandwidth limit exceeded</h1><p>This website has used its monthly bandwidth. It will be available again at the start of next month (UTC) or when the hosting administrator raises the limit.</p></body></html>'
+const bandwidthLimitLocations = (): string[] =>
+  block('location /', ['default_type text/html;', 'add_header Cache-Control "no-store" always;', 'add_header Retry-After 3600 always;', `return 503 ${nginxQuote(BANDWIDTH_LIMIT_PAGE)};`])
+
 interface ProxyTarget {
   url: string
   tls: boolean
   pre?: string[]
+  /** owner options of a reverse-proxy site; absent keeps the defaults */
+  options?: ProxyOptions
 }
 
-const proxyLocation = (t: ProxyTarget, cache: boolean): string[] => {
+const proxyLocation = (t: ProxyTarget, cache: boolean, at = '/'): string[] => {
+  const o = t.options
   const body = [
     ...(t.pre ?? []),
     `proxy_pass ${t.url};`,
-    'proxy_set_header Host $host;',
+    o?.hostHeader === 'upstream' ? 'proxy_set_header Host $proxy_host;' : 'proxy_set_header Host $host;',
     'proxy_set_header X-Real-IP $remote_addr;',
     'proxy_set_header X-Forwarded-For $remote_addr;',
     'proxy_set_header Forwarded "";',
     'proxy_set_header X-Forwarded-Proto $scheme;',
     'proxy_set_header X-Forwarded-Host $host;',
     'proxy_set_header X-Forwarded-Port $server_port;',
-    'proxy_set_header Upgrade $http_upgrade;',
-    'proxy_set_header Connection $xpanel_connection;',
+    ...(o?.websocket === false
+      ? ['proxy_set_header Upgrade "";', 'proxy_set_header Connection close;']
+      : ['proxy_set_header Upgrade $http_upgrade;', 'proxy_set_header Connection $xpanel_connection;']),
     // httpoxy (CVE-2016-5385): a client "Proxy:" header must never become HTTP_PROXY for PHP/CGI
     'proxy_set_header Proxy "";',
+    ...(o?.headers ?? []).map((h) => `proxy_set_header ${h.name} ${nginxQuote(h.value, 'proxy header value')};`),
   ]
   if (t.tls) body.push('proxy_ssl_server_name on;')
   if (cache) {
@@ -238,7 +262,23 @@ const proxyLocation = (t: ProxyTarget, cache: boolean): string[] => {
       'add_header X-Cache-Status $upstream_cache_status always;',
     )
   }
-  return block('location /', body)
+  return block(at === '/' ? 'location /' : `location ^~ ${at}/`, body)
+}
+
+/** App locations of one site; a '/' app replaces the backend. Responses of apps are never cached. */
+const appLocations = (routes: readonly AppRoute[]): { paths: string[]; root: string[] | null } => {
+  const seen = new Set<string>()
+  let root: string[] | null = null
+  const paths: string[] = []
+  for (const r of routes) {
+    if (!APP_ROUTE_PATH_RE.test(r.path) || seen.has(r.path)) invalid('app route path', r.path, 'must be / or a unique lowercase path without trailing slash')
+    if (!APP_SOCKET_RE.test(r.socket)) invalid('app route socket', r.socket, 'must be an xPanel app front socket')
+    seen.add(r.path)
+    const target = { url: `http://unix:${r.socket}:`, tls: false }
+    if (r.path === '/') root = proxyLocation(target, false)
+    else paths.push(...block(`location = ${r.path}`, [`return 308 ${r.path}/$is_args$args;`]), ...proxyLocation(target, false, r.path))
+  }
+  return { paths, root }
 }
 
 /**
@@ -248,9 +288,10 @@ const proxyLocation = (t: ProxyTarget, cache: boolean): string[] => {
 const upstreamTarget = (d: Domain, ctx: SiteCtx): ProxyTarget => {
   const u = siteUpstream(d, ctx.settings, ctx.opts)
   const tls = u.scheme === 'https'
+  const options = d.siteType === 'proxy' && d.proxy ? { options: assertProxyOptions(d.proxy) } : {}
   if (u.hostKind === 'ip') {
     const url = u.path && !u.path.endsWith('/') ? `${u.url}/` : u.url
-    return { url, tls }
+    return { url, tls, ...options }
   }
   const resolvers = (ctx.e.resolvers ?? []).map((r) => formatCidr(parseCidr(r, 'resolver')))
   if (resolvers.length === 0 || resolvers.some((r) => r.includes('/'))) {
@@ -260,6 +301,7 @@ const upstreamTarget = (d: Domain, ctx: SiteCtx): ProxyTarget => {
   return {
     url: `${base}$request_uri`,
     tls,
+    ...options,
     pre: [`resolver ${resolvers.map((r) => (r.includes(':') ? `[${r}]` : r)).join(' ')} valid=300s;`, 'resolver_timeout 5s;'],
   }
 }
@@ -276,13 +318,17 @@ const siteBody = (g: SiteGroup, ctx: SiteCtx, toHttps: boolean): string[] => {
   const mode = siteMode(ctx.account, g.main, ctx.opts.now)
   const body = acmeLocation()
   if (mode === 'suspended') return [...body, ...suspendedLocations()]
+  // Only the websites stop: mail, FTP and the panels are separate services. ACME renewals keep working.
+  if (ctx.account.bandwidthLimitedMonth !== undefined) return [...body, ...bandwidthLimitLocations()]
   if (mode === 'redirect' && g.main.redirect) {
     return [...body, ...block('location /', [`return ${g.main.redirect.code} ${nginxQuote(g.main.redirect.to)};`])]
   }
   if (toHttps) return [...body, ...block('location /', ['return 301 https://$host$request_uri;'])]
   const cache = ctx.opts.cache !== false
-  if (mode === 'upstream') return [...body, ...proxyLocation(upstreamTarget(g.main, ctx), cache)]
-  return [...body, ...proxyLocation({ url: ctx.backend, tls: false }, cache)]
+  const apps = appLocations(ctx.opts.appRoutes?.[g.main.name] ?? [])
+  if (apps.root) return [...body, ...apps.paths, ...apps.root]
+  if (mode === 'upstream') return [...body, ...apps.paths, ...proxyLocation(upstreamTarget(g.main, ctx), cache)]
+  return [...body, ...apps.paths, ...proxyLocation({ url: ctx.backend, tls: false }, cache)]
 }
 
 interface NamePart {

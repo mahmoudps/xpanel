@@ -79,7 +79,9 @@ export function renderResourcesBoard({ context, reading }: ResourcesBoardProps):
     row('memory', msgid('Memory'), limit(plan?.memoryMb, 'MiB'), sample?.memoryBytes, mib),
     row('processes', msgid('Processes'), limit(plan?.maxProcesses, ''), sample?.processCount, number),
     { id: 'cpu', label: msgid('CPU'), limit: limit(plan?.cpuPercent, '%'), used: unknown, state: state === 'unread' ? 'unread' : 'unavailable' },
-    { id: 'bandwidth', label: msgid('Bandwidth / month'), limit: limit(plan?.bandwidthMbMonth, 'MiB'), used: human(copy(context, unmeasured)), state: 'unmeasured' },
+    sample?.bandwidthMonth && sample.bandwidthMonth.totalBytes !== null
+      ? { id: 'bandwidth', label: msgid('Bandwidth / month'), limit: limit(plan?.bandwidthMbMonth, 'MiB'), used: numeric(mib(sample.bandwidthMonth.totalBytes) + (sample.bandwidthMonth.limited ? ' · ' + copy(context, msgid('Limit page served')) : '')), state: 'measured' }
+      : { id: 'bandwidth', label: msgid('Bandwidth / month'), limit: limit(plan?.bandwidthMbMonth, 'MiB'), used: human(copy(context, unmeasured)), state: 'unmeasured' },
     { id: 'io-read', label: msgid('Disk read rate'), limit: limit(plan?.ioReadBps, 'B/s'), used: unknown, state: state === 'unread' ? 'unread' : 'unavailable' },
     { id: 'io-write', label: msgid('Disk write rate'), limit: limit(plan?.ioWriteBps, 'B/s'), used: unknown, state: state === 'unread' ? 'unread' : 'unavailable' },
     { id: 'io-await', label: msgid('IO latency'), limit: human(copy(context, msgid('No stored limit'))), used: human(copy(context, unmeasured)), state: 'unmeasured' },

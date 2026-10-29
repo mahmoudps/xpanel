@@ -5,6 +5,7 @@ import type { AuthenticatedCaller } from './auth.ts'
 import type { BackupDestination, BackupScheduleConfig } from './extended-routes.ts'
 import type { WhmBackupWorkspacePorts } from './backup-workspace.ts'
 import { createBackupRunsWorkspaceRoutes } from './acct-backup-runs-workspace.ts'
+import { createBackupCredentialsWorkspaceRoutes } from './backup-credentials-workspace.ts'
 
 export type BackupLifecycleDestination = BackupDestination & { credentialRef?: string | null; verification?: BackupDestinationProof | null }
 export type BackupDestinationHost = (caller: AuthenticatedCaller, path: string, body?: unknown) => Promise<unknown>
@@ -49,9 +50,9 @@ export async function assertBackupDestinationsReady(destinations: readonly Backu
 
 /** Lifecycle metadata is published only through the canonical destinations file and its existing writer lease. */
 export function createBackupDestinationsWorkspaceRoutes(ports: BackupDestinationsWorkspacePorts) {
-  const runs = createBackupRunsWorkspaceRoutes(ports)
+  const runs = createBackupRunsWorkspaceRoutes(ports), credentials = createBackupCredentialsWorkspaceRoutes(ports)
   return async (req: Request, url: URL, method: string): Promise<Response | null> => {
-    const runsResponse = await runs(req, url, method)
+    const runsResponse = await runs(req, url, method) ?? await credentials(req, url, method)
     if (runsResponse) return runsResponse
     const listing = url.pathname === '/api/backups/workspace/destination-lifecycle'
     const match = /^\/api\/backups\/workspace\/destinations\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(test|activate|revoke)$/.exec(url.pathname)

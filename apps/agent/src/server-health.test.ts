@@ -2,7 +2,8 @@ import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import type { StateSnapshot } from '@xpanel/state'
 import { defaultPlan, type Account } from '@xpanel/core'
 import { FakeHostExecutor, type AccountSliceMetrics } from './executor.ts'
-import { evaluateServerHealth, handleServerHealthRoute, SERVER_HEALTH_THRESHOLDS } from './server-health.ts'
+import { bandwidthCheck, evaluateServerHealth, handleServerHealthRoute, SERVER_HEALTH_THRESHOLDS } from './server-health.ts'
+import type { BandwidthReport } from './metering.ts'
 import type { ServerHealthReport, ServerHealthRouteContext, ServerHealthSaved } from './server-health.ts'
 
 const at = '2026-10-27T10:00:00.000Z'
@@ -54,7 +55,7 @@ describe('server health checks', () => {
     const report = await evaluateServerHealth({ executor: host, family: 'debian', readDrift: drift, saved: saved(), now })
     const checks = byId(report)
     expect(report).toMatchObject({ observedAt: at, host: 'read', thresholds: SERVER_HEALTH_THRESHOLDS })
-    expect(report.checks.map(entry => entry.id)).toEqual(['load', 'memory', 'swap', 'disk-space', 'disk-inodes', 'services', 'drift', 'certificates', 'reboot'])
+    expect(report.checks.map(entry => entry.id)).toEqual(['load', 'memory', 'swap', 'disk-space', 'disk-inodes', 'services', 'drift', 'certificates', 'reboot', 'bandwidth'])
     expect(checks.load).toMatchObject({ state: 'warning', reason: 'load_high' })
     expect(checks.load!.evidence).toContain('5m per processor=1.5')
     expect(checks.memory).toMatchObject({ state: 'warning', reason: 'memory_low' })
@@ -68,7 +69,7 @@ describe('server health checks', () => {
     expect(checks.certificates).toMatchObject({ state: 'problem', reason: 'certificates_problem' })
     expect(checks.certificates!.items!.map(entry => [entry.name, entry.reason])).toEqual([['old.example.test', 'cert_expired'], ['soon.example.test', 'cert_expiring']])
     expect(checks.reboot).toMatchObject({ state: 'warning', reason: 'reboot_required' })
-    expect(report.counts).toEqual({ ok: 0, warning: 4, problem: 5, unavailable: 0 })
+    expect(report.counts).toEqual({ ok: 0, warning: 4, problem: 5, unavailable: 1 })
     expect(host.commands.every(argv => argv[0] === '/usr/bin/df' || argv[0] === '/usr/bin/systemctl' && argv[1] === 'show')).toBe(true)
   })
 
@@ -111,7 +112,7 @@ describe('server health checks', () => {
     expect(partial.reboot).toMatchObject({ state: 'unavailable', reason: 'reboot_unsupported' })
     const offline = await evaluateServerHealth({ executor: null, family: null, readDrift: null, saved: saved(), now })
     expect(offline.host).toBe('unavailable')
-    expect(offline.checks.filter(entry => entry.id !== 'certificates').every(entry => entry.state === 'unavailable' && entry.reason === 'host_unavailable')).toBe(true)
+    expect(offline.checks.filter(entry => entry.id !== 'certificates' && entry.id !== 'bandwidth').every(entry => entry.state === 'unavailable' && entry.reason === 'host_unavailable')).toBe(true)
   })
 })
 
@@ -129,6 +130,27 @@ const context = (overrides: Partial<ServerHealthRouteContext> = {}) => {
   return { ctx, events }
 }
 
+describe('bandwidth health check', () => {
+  const row = (username: string, totalBytes: number | null, limitBytes: number | null) => ({ username, domain: username + '.test', status: 'active' as const, month: { web: null, mail: null, ftp: null },
+    totalBytes, limitBytes, usedPercent: totalBytes !== null && limitBytes ? Math.round(totalBytes / limitBytes * 1000) / 10 : null, limitState: 'within' as const, enforced: username === 'over', limited: username === 'over' })
+  const report = (accounts: ReturnType<typeof row>[], state: BandwidthReport['state'] = 'partial'): BandwidthReport => ({ state, month: '2026-10', since: at, updatedAt: at,
+    sources: { web: { state: 'read', since: at }, mail: { state: 'unavailable', since: null }, ftp: { state: 'unavailable', since: null } }, pendingBytes: 0, unavailableSites: 0, skippedLines: 0, accounts })
+  it('grades accounts against their plan limit with alert-readable evidence and never grades unlimited plans', async () => {
+    const graded = await bandwidthCheck(async () => report([row('over', 1100, 1000), row('near', 850, 1000), row('fine', 10, 1000), row('free', 9e9, null), row('blind', null, 1000)]))
+    expect(graded).toMatchObject({ id: 'bandwidth', state: 'problem', reason: 'bandwidth_problem' })
+    expect(graded.items!.map(entry => [entry.name, entry.state])).toEqual([['over', 'problem'], ['near', 'warning'], ['blind', 'unavailable']])
+    expect(graded.items![0]!.evidence).toBe('1100 of 1000 bytes in 2026-10; limit page served (110% used)')
+    expect(graded.items![1]!.evidence).toContain('; not enforced (85% used)')
+    expect(graded.evidence).toContain('1 serving the limit page')
+    expect(await bandwidthCheck(async () => report([row('fine', 10, 1000)]))).toMatchObject({ state: 'ok', reason: 'bandwidth_ok', items: [] })
+  })
+  it('is unavailable without a meter, a failed read or an unmeasured month', async () => {
+    expect((await bandwidthCheck(null)).state).toBe('unavailable')
+    expect((await bandwidthCheck(async () => { throw new Error('offline') })).reason).toBe('bandwidth_unread')
+    expect((await bandwidthCheck(async () => report([], 'unavailable'))).state).toBe('unavailable')
+  })
+})
+
 describe('agent server health routes', () => {
   it('ignores unrelated paths without authorizing', async () => {
     const { ctx } = context()
@@ -139,7 +161,7 @@ describe('agent server health routes', () => {
     const { ctx, events } = context()
     const health = (await call(get('/host/server-health'), ctx))!
     expect(health.headers.get('cache-control')).toBe('no-store')
-    expect(await health.json()).toMatchObject({ host: 'unavailable', counts: { ok: 1, unavailable: 8 } })
+    expect(await health.json()).toMatchObject({ host: 'unavailable', counts: { ok: 1, unavailable: 9 } })
     expect(events).toEqual(['root:server.health.read', 'saved', 'root:server.health.read'])
     const limits = await (await call(get('/host/server-limits?username=bob&username=alice'), ctx))!.json() as { accounts: { username: string }[] }
     expect(limits.accounts.map(entry => entry.username)).toEqual(['bob', 'alice'])

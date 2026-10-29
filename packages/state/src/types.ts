@@ -57,6 +57,26 @@ export interface FirewallGuard {
 
 export type NewFirewallRule = Omit<FirewallRule, 'id'> & { id?: string }
 
+/** An applied firewall change that auto-reverts unless the saving session confirms it in time. */
+export interface FirewallPendingChange {
+  id: string
+  /** ISO 8601 UTC; after it the last confirmed rules are restored */
+  deadline: string
+  actor: string
+  sessionIp: string
+  /** firewallRevision of the rules this change wrote; a newer write supersedes the revert */
+  appliedRevision: string
+  /** the last confirmed rules, restored on revert */
+  previous: FirewallState
+}
+
+export interface FirewallMutationOptions extends MutationOptions {
+  /** firewallRevision the caller reviewed; the write is refused when the rules changed since */
+  expectedFirewallRevision?: string
+  /** records the change as pending until confirmFirewallChange */
+  confirmation?: Omit<FirewallPendingChange, 'appliedRevision' | 'previous'>
+}
+
 export interface UidAllocation {
   uid: number
   username: string
@@ -198,6 +218,7 @@ export interface PlanPatch {
   resources?: Partial<ResourceLimits>
   caps?: Partial<PlanCaps>
   dedicatedIp?: boolean
+  enforceBandwidth?: boolean
   shell?: ShellAccess
   defaultMailboxQuotaMb?: Plan['defaultMailboxQuotaMb']
 }
@@ -226,6 +247,7 @@ export type DomainPatch = Partial<
     | 'expiresAt'
     | 'pathQuotaMb'
     | 'indexFiles'
+    | 'proxy'
     | 'ipv4'
     | 'ipv6'
   >
@@ -306,6 +328,21 @@ export interface CronJobState {
   maxRuntimeSec?: number
 }
 
+/**
+ * Saved account mail routing under `extended/`: forwarders, domain forwarders, default
+ * addresses, filter rules and autoresponders. Records stay as saved; the mail renderer
+ * checks each one and reports the ones it cannot apply.
+ */
+export interface MailRoutingState {
+  forwarders: unknown[]
+  domainForwarders: unknown[]
+  defaultAddresses: unknown[]
+  filters: unknown[]
+  vacations: unknown[]
+  /** autoresponders of addresses without a mailbox; present only when one is saved */
+  autoresponders?: unknown[]
+}
+
 /** Complete, validated desired-state tree read from `/var/lib/xpanel/state/`. */
 export interface StateSnapshot {
   checksum: string
@@ -327,6 +364,8 @@ export interface StateSnapshot {
   domainCustomConfigs?: DomainCustomConfig[]
   ipPool?: ServerIpEntry[]
   mailIpConfig?: MailIpConfig | null
+  /** present only when at least one routing record is saved */
+  mailRouting?: MailRoutingState
   /** present only when the server holds PostgreSQL users; each database's owner is one of them */
   postgresqlDatabases?: Database[]
   postgresqlUsers?: StoredPostgresqlUser[]

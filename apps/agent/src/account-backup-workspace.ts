@@ -8,11 +8,13 @@ import type { AgentExecutor } from './executor.ts'
 import { withPinnedHostTargetParent } from './host-target-parent.ts'
 import { assertBackupFileName, createAccountBackup, DEFAULT_BACKUP_DIR, listAccountBackups, MAX_BACKUP_BYTES, openAccountBackupArchive, restoreAccountBackup } from './account-backup.ts'
 import type { BackupAccountTarget, BackupArchive } from './account-backup.ts'
+import { BACKUP_DATA_DIR } from './acct-backup-archive.ts'
 
 export const MAX_ACCOUNT_BACKUP_ENTRIES = 10000
 export interface AccountBackupIdentity extends BackupAccountTarget { id: string; gid: number }
 export interface AccountArchiveFile { path: string; bytes: number; sha256: string; mode: number }
-export interface AccountArchiveInventory { file: string; bytes: number; sha256: string; files: AccountArchiveFile[] }
+/** `parts` are the root-written `.xpanel-backup-data/` members of a server backup (dumps, zones, manifest); never home files. */
+export interface AccountArchiveInventory { file: string; bytes: number; sha256: string; files: AccountArchiveFile[]; parts: AccountArchiveFile[] }
 export interface AccountHomeEntry { path: string; type: 'file' | 'directory' | 'symlink' | 'other'; bytes: number; mode: number; uid: number; gid: number; links: number; mtimeMs: number; sha256: string | null }
 export type AccountBackupDifference = 'add' | 'replace' | 'unchanged' | 'keep' | 'preserve-mail'
 export interface AccountBackupDifferenceRow { path: string; state: AccountBackupDifference; archiveBytes: number | null; currentBytes: number | null }
@@ -33,7 +35,7 @@ export async function inspectAccountBackupArchive(input: { root?: string; accoun
   try {
     const signature = Buffer.alloc(2)
     if ((await opened.handle.read(signature, 0, 2, 0)).bytesRead !== 2 || signature[0] !== 0x1f || signature[1] !== 0x8b) fail('VALIDATION', 'the account archive must be gzip-compressed tar data')
-    const before = await opened.handle.stat(), digest = createHash('sha256'), files: AccountArchiveFile[] = []
+    const before = await opened.handle.stat(), digest = createHash('sha256'), files: AccountArchiveFile[] = [], parts: AccountArchiveFile[] = []
     const names = new Set<string>()
     let compressedBytes = 0
     async function* source() {
@@ -51,13 +53,13 @@ export async function inspectAccountBackupArchive(input: { root?: string; accoun
       if (names.has(entry.path)) return fail('VALIDATION', 'the account archive contains duplicate file paths')
       names.add(entry.path)
       const content = await hashing(body).finish()
-      files.push({ path: entry.path, bytes: content.size, sha256: content.sha256, mode: entry.mode & 0o777 })
+      ;(entry.path.startsWith(BACKUP_DATA_DIR + '/') ? parts : files).push({ path: entry.path, bytes: content.size, sha256: content.sha256, mode: entry.mode & 0o777 })
     }, { maxEntries: MAX_ACCOUNT_BACKUP_ENTRIES, maxTotalBytes: MAX_BACKUP_BYTES, linkScope: () => null,
       onSkip: () => fail('VALIDATION', 'the account archive contains an unsupported or unsafe entry') })
     if (compressedBytes !== opened.bytes) fail('VALIDATION', 'the complete compressed archive was not inspected')
     const after = await opened.handle.stat()
     if (after.size !== opened.bytes || after.mtimeMs !== before.mtimeMs || after.ino !== before.ino || after.dev !== before.dev) fail('CONFLICT', 'the archive changed while it was inspected', { stateChanged: false })
-    return { file: input.file, bytes: opened.bytes, sha256: digest.digest('hex'), files: files.sort((a, b) => a.path.localeCompare(b.path)) }
+    return { file: input.file, bytes: opened.bytes, sha256: digest.digest('hex'), files: files.sort((a, b) => a.path.localeCompare(b.path)), parts: parts.sort((a, b) => a.path.localeCompare(b.path)) }
   } finally { await opened.handle.close() }
 }
 

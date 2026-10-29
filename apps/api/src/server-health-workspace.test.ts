@@ -41,7 +41,7 @@ describe('API server health workspace', () => {
     const response = (await call(get('/api/server/server-health'), value))!
     expect(response.headers.get('cache-control')).toBe('no-store')
     const body = await response.json() as { host: string; counts: Record<string, number>; checks: { id: string; state: string }[] }
-    expect(body).toMatchObject({ host: 'unavailable', counts: { warning: 1, unavailable: 8 } })
+    expect(body).toMatchObject({ host: 'unavailable', counts: { warning: 1, unavailable: 9 } })
     expect(body.checks.find(entry => entry.id === 'certificates')).toMatchObject({ state: 'warning' })
     expect(events).toEqual(['auth', 'root:server.server-health.read', 'agent:/host/server-health', 'auth', 'root:server.server-health.read'])
   })

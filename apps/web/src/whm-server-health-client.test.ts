@@ -9,8 +9,8 @@ const RLO = String.fromCharCode(0x202e)
 const check = (id: string, state: string, reason: string, extra: Record<string, unknown> = {}) => ({ id, state, reason, evidence: 'evidence for ' + id, ...extra })
 const health = () => ({
   observedAt: at, host: 'read',
-  thresholds: { loadPerCore: { warning: 1, problem: 2 }, memoryAvailablePercent: { warning: 15, problem: 5 }, swapUsedPercent: { warning: 50, problem: 80 }, diskUsedPercent: { warning: 85, problem: 95 }, inodeUsedPercent: { warning: 85, problem: 95 }, certificateExpiryDays: 14 },
-  counts: { ok: 5, warning: 2, problem: 2, unavailable: 0 },
+  thresholds: { loadPerCore: { warning: 1, problem: 2 }, memoryAvailablePercent: { warning: 15, problem: 5 }, swapUsedPercent: { warning: 50, problem: 80 }, diskUsedPercent: { warning: 85, problem: 95 }, inodeUsedPercent: { warning: 85, problem: 95 }, certificateExpiryDays: 14, bandwidthUsedPercent: { warning: 80, problem: 100 } },
+  counts: { ok: 5, warning: 2, problem: 2, unavailable: 1 },
   checks: [
     check('load', 'warning', 'load_high'), check('memory', 'ok', 'memory_ok'), check('swap', 'ok', 'swap_none'),
     check('disk-space', 'problem', 'filesystems_problem', { items: [{ name: '/', state: 'problem', reason: 'space_full', evidence: '96% used' }, { name: '/home', state: 'ok', reason: 'space_ok', evidence: '10% used' }], omitted: 0 }),
@@ -19,6 +19,7 @@ const health = () => ({
     check('drift', 'ok', 'drift_none', { items: [], omitted: 0 }),
     check('certificates', 'warning', 'certificates_warning', { items: [{ name: 'soon.example.test', state: 'warning', reason: 'cert_expiring', evidence: 'notAfter=2026-10-30' }], omitted: 0 }),
     check('reboot', 'ok', 'reboot_not_required'),
+    check('bandwidth', 'unavailable', 'bandwidth_unread'),
   ],
 })
 const IDS = ['cpu', 'memory', 'processes', 'io-read-bps', 'io-write-bps', 'io-read-iops', 'io-write-iops', 'disk']
@@ -94,16 +95,16 @@ describe('server health client binding', () => {
     expect(fact('count-problem')).toBe('2')
     expect(fact('observed-at')).toBe('2026-10-27 10:00 UTC')
     const cards = [...document.querySelectorAll<HTMLElement>('[data-whm-server-health-check]')]
-    expect(cards.map(card => card.dataset.whmServerHealthCheck)).toHaveLength(9)
+    expect(cards.map(card => card.dataset.whmServerHealthCheck)).toHaveLength(10)
     const fixes = Object.fromEntries([...document.querySelectorAll<HTMLAnchorElement>('[data-whm-server-health-fix]')].map(link => [link.dataset.whmServerHealthFix, link.getAttribute('href')]))
-    expect(fixes).toEqual({ load: '/whm/monitoring/processes', 'disk-space': '/whm/monitoring/disk', services: '/whm/services', certificates: '/whm/ssl' })
+    expect(fixes).toEqual({ load: '/whm/monitoring/processes', 'disk-space': '/whm/monitoring/disk', services: '/whm/services', certificates: '/whm/ssl', bandwidth: '/whm/accounts/bandwidth' })
     expect(document.querySelector('[data-whm-server-health-check="disk-space"] bdi')!.textContent).toBe('/')
-    expect(document.querySelectorAll('[data-whm-server-health-thresholds] tr')).toHaveLength(6)
-    expect([...document.querySelectorAll<HTMLTableRowElement>('[data-whm-server-health-thresholds] tr')].at(-1)!.cells[1]!.textContent).toBe('< 14 days')
+    expect(document.querySelectorAll('[data-whm-server-health-thresholds] tr')).toHaveLength(7)
+    expect([...document.querySelectorAll<HTMLTableRowElement>('[data-whm-server-health-thresholds] tr')].at(-2)!.cells[1]!.textContent).toBe('< 14 days')
     send.mockRejectedValueOnce(new Error('down'))
     document.querySelector<HTMLButtonElement>('[data-whm-server-health-refresh]')!.click(); await tick()
     expect(status().dataset.state).toBe('failed')
-    expect(document.querySelectorAll('[data-whm-server-health-check]')).toHaveLength(9)
+    expect(document.querySelectorAll('[data-whm-server-health-check]')).toHaveLength(10)
   })
 
   it('renders Arabic copy with ASCII digits and refuses a malformed report without painting it', async () => {
@@ -112,7 +113,7 @@ describe('server health client binding', () => {
     expect(document.querySelectorAll('[data-whm-server-health-check]')).toHaveLength(0)
     mount('health', 'ar'); boot(vi.fn(async () => health())); await tick()
     expect(status().textContent).toMatch(/[\u0600-\u06ff]/)
-    expect([...document.querySelectorAll<HTMLTableRowElement>('[data-whm-server-health-thresholds] tr')].at(-1)!.cells[1]!.textContent).toBe('< 14 \u064a\u0648\u0645\u064b\u0627')
+    expect([...document.querySelectorAll<HTMLTableRowElement>('[data-whm-server-health-thresholds] tr')].at(-2)!.cells[1]!.textContent).toBe('< 14 \u064a\u0648\u0645\u064b\u0627')
     expect(document.body.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
   })
 

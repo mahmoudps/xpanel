@@ -121,7 +121,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     return { plan, account, fl }
   }
 
-  it('mail composition applies saved forwarding changes without a snapshot revision and repairs merged-file drift', async () => {
+  it('mail composition applies saved forwarding changes and repairs merged-file drift', async () => {
     const { account } = await seedEnvironment()
     const directory = join(stateHandle.store.rootDir, 'extended', 'mail')
     await mkdir(directory, { recursive: true })
@@ -138,7 +138,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     assert.match(executor.files.get('/etc/postfix/xpanel/virtual_alias_domains')!.content, /alice.example.com\tOK/)
     assert.equal((await reconciler.reconcile({ actor: 'root', mailAuth: null })).status, 'noop')
     await writeFile(join(directory, 'forwarders.json'), JSON.stringify([{ ...forwarder, destinations: ['second@external.test'] }]))
-    assert.equal((await stateHandle.store.readSnapshot()).checksum, before.checksum)
+    assert.notEqual((await stateHandle.store.readSnapshot()).checksum, before.checksum)
     const changed = await reconciler.reconcile({ actor: 'root', mailAuth: null })
     assert.equal(changed.status, 'applied')
     assert.ok(changed.generation)

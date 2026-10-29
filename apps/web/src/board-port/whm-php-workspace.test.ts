@@ -50,7 +50,7 @@ describe('PHP and Composer visual structure regressions', () => {
         : { scope: 'saved-domain-configuration', observedRuntime: false, usage: [{ version: '8.3', domainCount: 1, domains: [{ name: 'example.test', account: 'alpha', handler: 'fpm' }] }] }
     }
     new Function('return ' + WHM_PHP_CLIENT_BINDING)()(); await tick()
-    expect(paths).toEqual(['/api/server/php/inventory', '/api/server/php/usage']); semanticTables()
+    expect(paths).toEqual(['/api/server/php/inventory', '/api/server/php/usage', '/api/server/php/manage']); semanticTables()
     expect(document.querySelector('[data-whm-php-source]')!.textContent).toBe('dpkg')
     expect(document.querySelector('[data-whm-php-usage]')!.textContent).toContain('example.test')
     for (const name of ['php-selected-version', 'php-extension-version', 'php-version']) { const select = document.querySelector<HTMLSelectElement>('[name="' + name + '"]')!; expect(select.value).toBe('8.3'); expect(select.disabled).toBe(false) }

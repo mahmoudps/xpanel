@@ -4,9 +4,12 @@ import type { Account, Id } from '@xpanel/core'
 import type { AuthenticatedCaller } from '../auth.ts'
 import type { ExtendedRouteHelpers } from '../extended-routes.ts'
 import { assertAccountFeatures, isMailboxPrincipal, requireMailboxPrincipalAccess } from '../authorization.ts'
-import { compileValidatedFilters, filterRevision, validateFilterDraft, validateFilterPatch, validateStoredFilterRule } from './filter-validation.ts'
+import { services } from '@xpanel/render'
+import { MAX_FILTER_RULES, compileValidatedFilters, filterRevision, validateFilterDraft, validateFilterPatch, validateSampleMessage, validateStoredFilterRule } from './filter-validation.ts'
 import type { FilterScopeContext, ValidatedFilterRule } from './filter-validation.ts'
 import { canonicalForwarderAddress } from './forwarder-validation.ts'
+import type { WriterLease } from '@xpanel/state'
+import type { MailRoutingStatusView } from './routing-application.ts'
 
 type Row = Record<string, unknown> & { accountId: Id | null }
 type Hints = { accountId?: string; scope?: 'global' | 'mailbox'; mailbox?: string | null }
@@ -16,8 +19,11 @@ export interface FilterRoutePorts extends Pick<ExtendedRouteHelpers, 'store' | '
   requireAccountId: (caller: AuthenticatedCaller, requested: Id | null | undefined, action: string) => Promise<Id>
   assertRecordAccount: (caller: AuthenticatedCaller, record: { accountId: Id | null } | undefined, action: string) => Promise<void>
   scopedRecords: <T extends { accountId: Id | null }>(caller: AuthenticatedCaller, rows: readonly T[]) => Promise<T[]>
+  commitRoutingRevision: (lease: WriterLease) => Promise<number>
+  /** applies on the host; a failed configuration test restores `previous` and throws */
+  applyFilters: (caller: AuthenticatedCaller, revision: number, previous: readonly unknown[] | null) => Promise<MailRoutingStatusView>
+  readRoutingStatus: () => Promise<MailRoutingStatusView>
 }
-const application = { status: 'configuration_only', nativeApplied: false } as const
 const metadata = (value: unknown, limit: number): string | null => typeof value === 'string' && value.length > 0 && value.length <= limit && !/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(value) ? value : null
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8' } })
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -106,7 +112,7 @@ export function createFilterRoutes(ports: FilterRoutePorts) {
       return { id: metadata(raw.id, 128), name: metadata(raw.name, 128),
         ...context, priority: typeof raw.priority === 'number' && Number.isFinite(raw.priority) ? raw.priority : null,
         enabled: typeof raw.enabled === 'boolean' ? raw.enabled : null, matchAll: typeof raw.matchAll === 'boolean' ? raw.matchAll : null,
-        conditions: [], action: null, compiledSieve: null, createdAt: metadata(raw.createdAt, 64),
+        conditions: [], actions: [], compiledSieve: null, createdAt: metadata(raw.createdAt, 64),
         validation: { status: 'invalid', reasonCode: 'invalid_saved_filter' } }
     }
   }
@@ -118,7 +124,7 @@ export function createFilterRoutes(ports: FilterRoutePorts) {
     let compilation: { status: 'ready' | 'blocked'; reason?: string }
     try { compiledSieve = compileValidatedFilters(records, context); compilation = { status: 'ready' } }
     catch { compilation = { status: 'blocked', reason: 'invalid_saved_filter_or_preview_limit' } }
-    return { filters: records.map(value => project(value, context)), context, revision, application, compilation, compiledSieve }
+    return { filters: records.map(value => project(value, context)), context, revision, compilation, compiledSieve }
   }
   const inventory = async (caller: AuthenticatedCaller, values: readonly unknown[]): Promise<Record<string, unknown>> => {
     const visible = await ports.scopedRecords(caller, values.filter(row))
@@ -156,7 +162,7 @@ export function createFilterRoutes(ports: FilterRoutePorts) {
       : { id: metadata(value.id, 128), name: metadata(value.name, 128),
           accountId: null, scope: value.scope === 'global' || value.scope === 'mailbox' ? value.scope : null,
           mailbox: metadata(value.mailbox, 254), compiledSieve: null,
-          validation: { status: 'invalid', reasonCode: 'legacy_server_filter_context' } }), context: null, revision: null, application,
+          validation: { status: 'invalid', reasonCode: 'legacy_server_filter_context' } }), context: null, revision: null,
       compilation: { status: 'selection_required', reason: 'select_one_account_filter_scope' }, compiledSieve: null }
   }
   const targetContext = async (caller: AuthenticatedCaller, values: readonly unknown[], id: string, action: string): Promise<{ target: Row; context: FilterScopeContext }> => {
@@ -182,42 +188,93 @@ export function createFilterRoutes(ports: FilterRoutePorts) {
     if (!inContext(target, context)) return fail('PRECONDITION_FAILED', 'legacy filter context requires review')
     return { target, context }
   }
+  /** Each rule's host state: an account-wide rule is live only when every mailbox script carries it. */
+  const decorate = (body: Record<string, unknown>, status: MailRoutingStatusView): Record<string, unknown> => {
+    const one = (value: unknown): unknown => {
+      if (!object(value) || typeof value.id !== 'string' || typeof value.accountId !== 'string') return value
+      const target = value.scope === 'mailbox' && typeof value.mailbox === 'string' ? { mailbox: value.mailbox } : { accountId: value.accountId }
+      return { ...value, application: status.record('filter', value.id, target) }
+    }
+    return { ...body, ...(Array.isArray(body.filters) ? { filters: body.filters.map(one) } : {}), ...(body.filter ? { filter: one(body.filter) } : {}),
+      application: { generationId: status.generationId } }
+  }
+  /**
+   * Runs a sample message through the rules the host runs for the scope: a mailbox gets the account-wide
+   * rules first, then its own. Account-wide rules the caller may not read show only whether they matched,
+   * the kinds of action they ran, and no names, values or redirect addresses.
+   */
+  const dryRun = async (caller: AuthenticatedCaller, body: Record<string, unknown>, url: URL): Promise<Record<string, unknown>> => {
+    if (Object.keys(body).some(key => !['accountId', 'scope', 'mailbox', 'message'].includes(key))) return fail('VALIDATION', 'unknown filter test field')
+    const context = await authorize(caller, hints(url, body), 'mail.filter.read')
+    const message = validateSampleMessage(body.message)
+    const values = await load()
+    const accountWide: FilterScopeContext = { accountId: context.accountId, scope: 'global', mailbox: null }
+    let shown = true
+    if (context.scope === 'mailbox') {
+      if (isMailboxPrincipal(caller)) shown = false
+      else try { await authorize(caller, accountWide, 'mail.filter.read') } catch (error) { if (!object(error) || !['FORBIDDEN', 'NOT_FOUND'].includes(String(error.code))) throw error; shown = false }
+    }
+    const rules: { rule: ValidatedFilterRule; hidden: boolean }[] = []
+    try {
+      if (context.scope === 'mailbox') rules.push(...selected(values, accountWide).map(value => ({ rule: validateStoredFilterRule(value, accountWide), hidden: !shown })))
+      rules.push(...selected(values, context).map(value => ({ rule: validateStoredFilterRule(value, context), hidden: false })))
+    } catch { return fail('CONFLICT', 'a saved filter is blocked; repair it before a test', { stateChanged: false }) }
+    const active = rules.filter(entry => entry.rule.enabled)
+    const trace: services.FilterTrace = services.traceMailFilters(active.map(entry => services.mailFilterOf(entry.rule as unknown as Record<string, unknown>)), message)
+    const projected = trace.rules.map(step => {
+      const { rule, hidden } = active[step.index]!
+      const ran = rule.actions.slice(0, step.ran.length)
+      return hidden
+        ? { id: null, name: null, scope: rule.scope, hidden: true, matched: step.matched, stopped: step.stopped, tests: [], actions: ran.map(action => ({ type: action.type })) }
+        : { id: rule.id, name: rule.name, scope: rule.scope, hidden: false, matched: step.matched, stopped: step.stopped,
+            tests: step.tests.map((test, index) => ({ ...rule.conditions[index]!, actual: test.actual, matched: test.matched })), actions: ran }
+    })
+    const { folders, discarded, rejected, markedRead } = trace.outcome
+    return { context, rules: projected, notRun: active.length - projected.length,
+      outcome: { folders, discarded, rejected, markedRead, stopped: trace.outcome.stoppedAt !== null,
+        redirects: projected.flatMap(step => step.actions.filter(action => action.type === 'redirect').map(action => ('target' in action ? action.target ?? null : null))) } }
+  }
   return async (req: Request, url: URL, method: string): Promise<Response | null> => {
     const base = '/api/mail/filters'
     if (url.pathname !== base && !url.pathname.startsWith(base + '/')) return null
     const suffix = url.pathname === base ? null : url.pathname.slice(base.length + 1)
     if (suffix?.includes('/') || !['GET', 'POST', 'PATCH', 'DELETE'].includes(method)) return null
-    if (method === 'GET' && suffix || method === 'POST' && suffix && suffix !== 'reorder' || method === 'PATCH' && !suffix) return null
+    if (method === 'GET' && suffix || method === 'POST' && suffix && suffix !== 'reorder' && suffix !== 'test' || method === 'PATCH' && !suffix) return null
     let caller = await ports.requireCaller(req)
     if (method === 'GET') {
       const selection = hints(url)
       const values = await load()
-      if (isMailboxPrincipal(caller) || selection.scope !== undefined || selection.mailbox !== undefined) return json(view(values, await authorize(caller, selection, 'mail.filter.read')))
+      if (isMailboxPrincipal(caller) || selection.scope !== undefined || selection.mailbox !== undefined) return json(decorate(view(values, await authorize(caller, selection, 'mail.filter.read')), await ports.readRoutingStatus()))
       if (selection.accountId !== undefined) {
         const account = await accountFor(caller, selection.accountId, 'mail.filter.read')
-        return json(await inventory(caller, values.filter(value => row(value) && value.accountId === account.id)))
+        return json(decorate(await inventory(caller, values.filter(value => row(value) && value.accountId === account.id)), await ports.readRoutingStatus()))
       }
-      return json(await inventory(caller, values))
+      return json(decorate(await inventory(caller, values), await ports.readRoutingStatus()))
     }
     const body = await readBody(req)
+    if (suffix === 'test') return json(await dryRun(caller, body, url))
     const lease = await ports.store.getWriterLock().acquire()
     let response: Record<string, unknown>
     let audit: { action: string; target: string; detail: Record<string, unknown> }
     let status = 200
     let writeAttempted = false
+    let revision = 0
+    let previous: unknown[] | null = null
     const persist = async (values: readonly unknown[]): Promise<void> => {
       await lease.assertFencingToken()
       writeAttempted = true
       await ports.writeFilters(values)
+      revision = await ports.commitRoutingRevision(lease)
     }
     try {
       caller = await ports.requireCaller(req)
       const values = await load()
+      previous = values
       if (method === 'POST' && suffix !== 'reorder') {
         const context = await authorize(caller, hints(url, body), 'mail.filter.create')
         const records = selected(values, context)
         revisionMatches(body, filterRevision(context, records), false)
-        if (records.length >= 10000) return fail('LIMIT_EXCEEDED', 'filter scope safety limit reached')
+        if (records.length >= MAX_FILTER_RULES) return fail('LIMIT_EXCEEDED', 'filter scope safety limit reached')
         const nextPriority = records.reduce((value, current) => typeof current.priority === 'number' && Number.isInteger(current.priority) ? Math.max(value, current.priority) : value, 0) + 1
         const draft = validateFilterDraft(content(body), { priority: nextPriority })
         const created: ValidatedFilterRule = { ...draft, ...context, id: randomUUID(), createdAt: new Date().toISOString() }
@@ -226,7 +283,7 @@ export function createFilterRoutes(ports: FilterRoutePorts) {
         compileValidatedFilters(selected(next, context), context)
         response = { ...view(next, context), filter: project(saved, context) }; status = 201
         await persist(next)
-        audit = { action: 'mail.filter.created', target: 'sieve-filter:' + saved.name, detail: { context, application } }
+        audit = { action: 'mail.filter.created', target: 'sieve-filter:' + saved.name, detail: { context } }
       } else if (method === 'POST') {
         const context = await authorize(caller, hints(url, body), 'mail.filter.reorder')
         if (Object.keys(body).some(key => !['accountId', 'scope', 'mailbox', 'orderedIds', 'expectedRevision'].includes(key))) return fail('VALIDATION', 'unknown reorder field')
@@ -247,7 +304,7 @@ export function createFilterRoutes(ports: FilterRoutePorts) {
         compileValidatedFilters(selected(next, context), context)
         response = { ...view(next, context), ok: true }
         await persist(next)
-        audit = { action: 'mail.filter.reordered', target: 'sieve-filter-scope:' + context.scope, detail: { context, application, count: ids.length } }
+        audit = { action: 'mail.filter.reordered', target: 'sieve-filter-scope:' + context.scope, detail: { context, count: ids.length } }
       } else {
         const selectors = [suffix, Object.hasOwn(body, 'id') ? body.id : null, url.searchParams.get('id')].filter(value => value !== null)
         if (selectors.some(value => typeof value !== 'string') || new Set(selectors).size > 1) return fail('VALIDATION', 'conflicting filter ID selectors')
@@ -264,21 +321,22 @@ export function createFilterRoutes(ports: FilterRoutePorts) {
           compileValidatedFilters(selected(next, context), context)
           response = { ...view(next, context), filter: project(saved, context), ok: true }
           await persist(next)
-          audit = { action: 'mail.filter.updated', target: 'sieve-filter:' + saved.name, detail: { context, application } }
+          audit = { action: 'mail.filter.updated', target: 'sieve-filter:' + saved.name, detail: { context } }
         } else {
           if (Object.keys(body).some(key => !['id', 'expectedRevision'].includes(key))) return fail('VALIDATION', 'unknown removal field')
           const next = values.filter(value => value !== target)
           response = { ...view(next, context), ok: true }
           await persist(next)
-          audit = { action: 'mail.filter.deleted', target: 'sieve-filter:' + id, detail: { context, application } }
+          audit = { action: 'mail.filter.deleted', target: 'sieve-filter:' + id, detail: { context } }
         }
       }
     } catch (error) {
       if (writeAttempted) return fail('CONFLICT', 'filter write requires verification before another change', { stateChanged: true, verificationRequired: true })
       throw error
     } finally { await lease.release() }
-    try { await ports.emitAudit({ actor: caller.principal.username, principalId: caller.principal.id, outcome: 'ok', ...audit! }) }
+    const routing = await ports.applyFilters(caller, revision, previous)
+    try { await ports.emitAudit({ actor: caller.principal.username, principalId: caller.principal.id, outcome: 'ok', ...audit!, detail: { ...audit!.detail, revision } }) }
     catch { return fail('CONFLICT', 'saved filter audit requires verification before another change', { stateChanged: true, verificationRequired: true }) }
-    return json(response!, status)
+    return json(decorate(response!, routing), status)
   }
 }

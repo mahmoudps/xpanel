@@ -23,6 +23,7 @@ import {
   assertResellerAcl,
   assertServiceHash,
   assertSha256Hex,
+  assertProxyOptions,
   assertUpstream,
   canonicalIp,
   dbUserName,
@@ -203,6 +204,7 @@ export const validatePlanFile = (v: unknown): Plan => {
     dedicatedIp: p.dedicatedIp,
     shell: p.shell,
     defaultMailboxQuotaMb: p.defaultMailboxQuotaMb,
+    ...(p.enforceBandwidth !== undefined && { enforceBandwidth: p.enforceBandwidth }),
   }
 }
 
@@ -260,6 +262,7 @@ export const validateAccountFile = (v: unknown): StoredAccount => {
     shell: oneOf(a.shell, SHELLS, 'shell'),
     ...(a.databaseRemoteAccess !== undefined && { databaseRemoteAccess: parseDatabaseRemoteEntries(a.databaseRemoteAccess) }),
     createdAt: assertIsoDate(a.createdAt, 'createdAt').toISOString(),
+    ...(a.bandwidthLimitedMonth !== undefined && { bandwidthLimitedMonth: typeof a.bandwidthLimitedMonth === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(a.bandwidthLimitedMonth) ? a.bandwidthLimitedMonth : fail('VALIDATION', 'bandwidthLimitedMonth must be YYYY-MM') }),
   }
 }
 
@@ -324,6 +327,8 @@ export const validateDomainFile = (
     ...(d.indexFiles !== undefined ? { indexFiles: validateDomainIndexFiles(d.indexFiles) } : {}),
     ...(d.ipv4 != null && { ipv4: assertIpv4(d.ipv4, 'domain.ipv4') }),
     ...(d.ipv6 != null && { ipv6: assertIpv6(d.ipv6, 'domain.ipv6') }),
+    // Options only shape a reverse proxy; other site types carry none.
+    ...(d.proxy !== undefined && d.proxy !== null && siteType === 'proxy' ? { proxy: assertProxyOptions(d.proxy) } : {}),
   }
 }
 
@@ -676,6 +681,7 @@ export const checksumStateTree = (tree: Omit<StateSnapshot, 'checksum' | 'revisi
           : {}),
         ...(tree.ipPool && tree.ipPool.length > 0 ? { ipPool: tree.ipPool } : {}),
         ...(tree.mailIpConfig ? { mailIpConfig: tree.mailIpConfig } : {}),
+        ...(tree.mailRouting ? { mailRouting: tree.mailRouting } : {}),
         ...(tree.postgresqlUsers?.length ? { postgresqlDatabases: tree.postgresqlDatabases ?? [], postgresqlUsers: tree.postgresqlUsers } : {}),
       }),
       'utf8',

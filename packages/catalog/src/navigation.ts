@@ -57,6 +57,12 @@ const WORKSPACE_CORE_TOOLS: Readonly<Record<string, string>> = {
   '/whm/services/health': 'service-config-health',
   '/whm/panel/developer': 'api-explorer',
   '/whm/panel/integrations': 'integrations-hub',
+  '/whm/panel/settings': 'aapanel-panel-general',
+  '/whm/panel/branding': 'panel-branding',
+  '/whm/panel/languages': 'application-locales',
+  '/whm/panel/whmcs': 'whmcs-integration',
+  // The owner proxy switch is a domain workspace write; the page's other aaPanel proxy tools stay unqualified.
+  '/domains/reverse-proxy': 'domains',
   '/email/calendars-contacts': 'calendars-contacts-management',
   '/mail/later': 'webmail-search',
   '/mail/settings/spam': 'webmail-spam-box',

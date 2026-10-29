@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { fail } from '@xpanel/core'
-import { buildTransferSourceInventory, handleTransferSourceBackupRoute, handleTransferSourceInventoryRoute, signTransferManifest, verifyTransferManifest } from './acct-transfer-source.ts'
+import { buildTransferSourceInventory, handleTransferSourceInventoryRoute, handleTransferSourcePackageRoute, signTransferManifest, verifyTransferManifest } from './acct-transfer-source.ts'
 import type { TransferSourceSnapshot } from './acct-transfer-source.ts'
 import { parseTransferSourceInventory } from './acct-transfer-discovery.ts'
 import type { AuthenticatedCaller } from './auth.ts'
@@ -60,36 +60,67 @@ describe('transfer source inventory', () => {
   })
 })
 
-describe('signed transfer archive source', () => {
-  const TOKEN = 'xp_' + 'a'.repeat(43)
-  const ports = (overrides: Record<string, unknown> = {}) => ({
-    requireCaller: async () => ({ principal: { kind: 'root', id: 'p' }, sessionId: null, apiTokenId: 't' }) as unknown as AuthenticatedCaller,
-    assertRoot: async (caller: AuthenticatedCaller) => { if (caller.principal.kind !== 'root') fail('FORBIDDEN', 'root required') },
-    readSnapshot: async () => snapshot(), now: () => new Date('2026-10-28T12:00:00.000Z'),
-    createArchive: async () => new Response(JSON.stringify({ file: 'xpanel-backup-alice-20261028T120000Z-abcdefabcdef.tar.gz', bytes: 7, sha256: 'c'.repeat(64) }), { status: 201 }),
-    openArchive: async () => new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-length': '3' } }),
-    ...overrides,
-  })
-  const call = (path: string, method: string, p = ports(), body?: string, token = TOKEN) => { const url = new URL('http://x' + path); return handleTransferSourceBackupRoute(new Request(url, { method, headers: { authorization: 'Bearer ' + token, ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, ...(body === undefined ? {} : { body }) }), url, method, p) }
-  it('returns a manifest signed with the presented token that the destination verifies', async () => {
-    const response = (await call('/api/transfers/source/accounts/alice/backup', 'POST', ports(), '{}'))!
-    expect(response.status).toBe(201)
-    const value = await response.json()
-    expect(value.manifest).toEqual({ source: 'source.example.test', username: 'alice', file: 'xpanel-backup-alice-20261028T120000Z-abcdefabcdef.tar.gz', bytes: 7, sha256: 'c'.repeat(64), createdAt: '2026-10-28T12:00:00.000Z' })
+describe('signed transfer package source', () => {
+  const TOKEN = 'xp_' + 'a'.repeat(43), ID = '0f0f0f0f-0000-4000-8000-000000000001'
+  const full = () => {
+    const base = snapshot()
+    return { ...base,
+      plans: [{ id: 'p2', name: 'silver', ownerId: null, featureListId: 'f1', resources: { diskMb: 1024 }, caps: {}, dedicatedIp: false, shell: 'jailed', defaultMailboxQuotaMb: 1024 }] as never,
+      accounts: (base.accounts as unknown as Record<string, unknown>[]).map(a => ({ ...a, home: '/home/' + String(a.username), contactEmail: 'owner@example.test', shell: 'jailed', ipv4: '192.0.2.5' })) as never,
+      domains: [{ id: 'd1', accountId: 'a2', name: 'alice.example.test', kind: 'primary', parentId: null, docRoot: '/home/alice/public_html', siteType: 'php', upstream: null, redirect: null, php: php('8.3'), wildcard: false }] as never,
+      databases: [{ id: 'db1', accountId: 'a2', name: 'alice_wp', trashedAt: null }] as never,
+      databaseUsers: [{ accountId: 'a2', name: 'alice_wpuser', authPlugin: 'mysql_native_password', authString: '*HASH', grants: [{ databaseId: 'db1', privileges: ['ALL'] }] }] as never,
+      serviceUsers: [{ accountId: 'a2', login: 'info@alice.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 512, ftpDir: '', passwordHash: '{ARGON2ID}$x' }] as never,
+      zones: [{ accountId: 'a2', name: 'alice.example.test', records: [{ id: 'r', zone: 'alice.example.test', name: '@', type: 'A', ttl: 300, content: '192.0.2.5', priority: null }] }] as never,
+      cronJobs: [{ accountId: 'a2', schedule: '@daily', command: '/home/alice/run.sh', comment: '', enabled: true }] as never,
+    }
+  }
+  const task = (state: string) => ({ task: { id: ID, kind: 'package', username: 'alice', state, updatedAt: '2026-10-29T01:00:00.000Z', error: state === 'failed' ? 'dump failed' : null,
+    result: { artifacts: [{ name: 'home.tar.gz', bytes: 7, sha256: 'c'.repeat(64) }, { name: 'db-alice_wp.sql', bytes: 3, sha256: 'd'.repeat(64) }], databases: [{ name: 'alice_wp', artifact: 'db-alice_wp.sql' }], certificates: [] } } })
+  const ports = (overrides: Record<string, unknown> = {}, state = 'succeeded') => {
+    const calls: string[] = []
+    return { calls, ports: {
+      requireCaller: async () => ({ principal: { kind: 'root', id: 'p' }, sessionId: null, apiTokenId: 't' }) as unknown as AuthenticatedCaller,
+      assertRoot: async (caller: AuthenticatedCaller) => { if (caller.principal.kind !== 'root') fail('FORBIDDEN', 'root required') },
+      readSnapshot: async () => full(),
+      agent: async (_caller: AuthenticatedCaller, path: string, init: { method?: string; body?: unknown } = {}) => {
+        calls.push((init.method ?? 'GET') + ' ' + path + (init.body ? ' ' + JSON.stringify(init.body) : ''))
+        if (path === '/transfers/tasks') return Response.json({ task: { id: ID } }, { status: 202 })
+        if (path.startsWith('/transfers/packages/')) return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-length': '3' } })
+        return init.method === 'DELETE' ? Response.json({ discarded: true }) : Response.json(task(state))
+      },
+      ...overrides,
+    } }
+  }
+  const call = (path: string, method: string, p = ports().ports, body?: string, token = TOKEN) => { const url = new URL('http://x' + path); return handleTransferSourcePackageRoute(new Request(url, { method, headers: { authorization: 'Bearer ' + token, ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, ...(body === undefined ? {} : { body }) }), url, method, p) }
+  it('starts packaging on the agent and, once ready, signs the manifest with the account state', async () => {
+    const p = ports()
+    const started = (await call('/api/transfers/source/accounts/alice/package', 'POST', p.ports, '{}'))!
+    expect(started.status).toBe(202); expect(await started.json()).toEqual({ package: ID })
+    expect(p.calls[0]).toBe('POST /transfers/tasks {"kind":"package","username":"alice"}')
+    const value = await (await call('/api/transfers/source/accounts/alice/package/' + ID, 'GET', p.ports))!.json()
+    expect(value.manifest).toMatchObject({ source: 'source.example.test', username: 'alice', package: ID, artifacts: [{ name: 'home.tar.gz' }, { name: 'db-alice_wp.sql' }] })
+    expect(value.manifest.bundle).toMatchObject({ account: { username: 'alice', home: '/home/alice', ipv4: '192.0.2.5' }, plan: { name: 'silver' }, databaseUsers: [{ name: 'alice_wpuser', authString: '*HASH', grants: [{ database: 'alice_wp', privileges: ['ALL'] }] }],
+      mailboxes: [{ login: 'info@alice.example.test', passwordHash: '{ARGON2ID}$x' }], zones: [{ name: 'alice.example.test' }], cron: [{ schedule: '@daily' }], databases: [{ name: 'alice_wp', artifact: 'db-alice_wp.sql' }] })
+    expect(value.manifest.bundle.plan).not.toHaveProperty('id')
     expect(value.signature).toBe(signTransferManifest(TOKEN, value.manifest))
-    expect(verifyTransferManifest(value, TOKEN, { source: 'source.example.test', username: 'alice' })).toEqual(value.manifest)
-    for (const [raw, token, expected] of [[{ ...value, signature: '0'.repeat(64) }, TOKEN, 'alice'], [value, 'xp_' + 'b'.repeat(43), 'alice'], [value, TOKEN, 'bob'], [{ ...value, manifest: { ...value.manifest, bytes: 8 } }, TOKEN, 'alice'], [{ ...value, extra: 1 }, TOKEN, 'alice']] as const)
-      expect(() => verifyTransferManifest(raw, token, { source: 'source.example.test', username: expected })).toThrow(/invalid or unsigned archive manifest/)
+    expect(verifyTransferManifest(value, TOKEN, { source: 'source.example.test', username: 'alice', package: ID })).toMatchObject({ package: ID })
+    for (const [raw, token, user] of [[{ ...value, signature: '0'.repeat(64) }, TOKEN, 'alice'], [value, 'xp_' + 'b'.repeat(43), 'alice'], [value, TOKEN, 'bob'], [{ ...value, manifest: { ...value.manifest, artifacts: [] } }, TOKEN, 'alice'], [{ ...value, extra: 1 }, TOKEN, 'alice']] as const)
+      expect(() => verifyTransferManifest(raw, token, { source: 'source.example.test', username: user, package: ID })).toThrow(/invalid or unsigned package manifest/)
   })
-  it('streams the named archive and refuses sessions, other names, bodies and unverified agent replies', async () => {
-    const stream = (await call('/api/transfers/source/accounts/alice/backup/xpanel-backup-alice-20261028T120000Z.tar.gz', 'GET'))!
-    expect(stream.headers.get('content-type')).toBe('application/gzip'); expect(new Uint8Array(await stream.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]))
-    await expect(call('/api/transfers/source/accounts/alice/backup/xpanel-backup-bob-20261028T120000Z.tar.gz', 'GET')).rejects.toMatchObject({ code: 'VALIDATION' })
-    const session = ports({ requireCaller: async () => ({ principal: { kind: 'root', id: 'p' }, sessionId: 's', apiTokenId: null }) as unknown as AuthenticatedCaller })
-    await expect(call('/api/transfers/source/accounts/alice/backup', 'POST', session, '{}')).rejects.toMatchObject({ code: 'FORBIDDEN' })
-    await expect(call('/api/transfers/source/accounts/alice/backup', 'POST', ports(), '{"all":true}')).rejects.toMatchObject({ code: 'VALIDATION' })
-    await expect(call('/api/transfers/source/accounts/gone/backup', 'POST', ports(), '{}')).rejects.toMatchObject({ code: 'NOT_FOUND' })
-    await expect(call('/api/transfers/source/accounts/alice/backup', 'POST', ports({ createArchive: async () => new Response(JSON.stringify({ file: '../x', bytes: 1, sha256: 'c'.repeat(64) }), { status: 201 }) }), '{}')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
-    expect((await call('/api/transfers/source/accounts/alice/backup', 'GET'))!.status).toBe(405)
+  it('reports running and failed packaging without a manifest', async () => {
+    expect(await (await call('/api/transfers/source/accounts/alice/package/' + ID, 'GET', ports({}, 'running').ports))!.json()).toEqual({ state: 'running' })
+    expect(await (await call('/api/transfers/source/accounts/alice/package/' + ID, 'GET', ports({}, 'failed').ports))!.json()).toEqual({ state: 'failed', error: 'dump failed' })
+  })
+  it('streams named artifacts only, for API tokens only, and refuses bodies and selectors', async () => {
+    const stream = (await call('/api/transfers/source/accounts/alice/package/' + ID + '/home.tar.gz', 'GET'))!
+    expect(stream.headers.get('content-type')).toBe('application/octet-stream'); expect(new Uint8Array(await stream.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]))
+    await expect(call('/api/transfers/source/accounts/alice/package/' + ID + '/..%2Ftasks.json', 'GET')).rejects.toMatchObject({ code: 'VALIDATION' })
+    const session = ports({ requireCaller: async () => ({ principal: { kind: 'root', id: 'p' }, sessionId: 's', apiTokenId: null }) as unknown as AuthenticatedCaller }).ports
+    await expect(call('/api/transfers/source/accounts/alice/package', 'POST', session, '{}')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await expect(call('/api/transfers/source/accounts/alice/package', 'POST', ports().ports, '{"all":true}')).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(call('/api/transfers/source/accounts/gone/package', 'POST', ports().ports, '{}')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect((await call('/api/transfers/source/accounts/alice/package', 'GET'))!.status).toBe(405)
+    expect(await (await call('/api/transfers/source/accounts/alice/package/' + ID, 'DELETE'))!.json()).toEqual({ discarded: true })
   })
 })

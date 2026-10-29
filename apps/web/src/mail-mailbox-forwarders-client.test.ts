@@ -6,7 +6,7 @@ import { MAIL_MAILBOX_FORWARDERS_CLIENT_BINDING, forwardAddress, readMailboxForw
 const MAILBOX = 'alice@example.com', R1 = 'a'.repeat(64), R2 = 'b'.repeat(64)
 const tick = async () => { for (let i = 0; i < 6; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const view = (destinations: string[] = [], over: Record<string, unknown> = {}) => ({ context: { mailbox: MAILBOX }, revision: R1, limit: 10, review: null,
-  forwarding: destinations.length ? { id: 'r1', destinations, keepCopy: true, createdAt: '2026-10-27T12:00:00.000Z' } : null, application: { status: 'configuration_only', nativeApplied: false }, ...over })
+  forwarding: destinations.length ? { id: 'r1', destinations, keepCopy: true, createdAt: '2026-10-27T12:00:00.000Z' } : null, application: destinations.length ? { state: 'applied', reason: null } : null, ...over })
 const boot = (html: string, request?: (method: string, path: string, body?: unknown) => Promise<unknown>, ask = vi.fn(async () => true), ar = false) => {
   document.documentElement.lang = ar ? 'ar' : 'en'; document.documentElement.dir = ar ? 'rtl' : 'ltr'
   document.body.innerHTML = html
@@ -22,7 +22,7 @@ beforeEach(() => { document.documentElement.lang = 'en'; document.documentElemen
 describe('mailbox forwarders reader', () => {
   it('accepts only the sealed mailbox and configuration-only application', () => {
     expect(readMailboxForwarders(view(['ext@remote.test']), MAILBOX).destinations).toEqual(['ext@remote.test'])
-    for (const value of [view([], { context: { mailbox: 'bob@example.com' } }), view([], { application: { status: 'applied', nativeApplied: true } }), view(['alice@example.com']),
+    for (const value of [view([], { context: { mailbox: 'bob@example.com' } }), view(['ext@remote.test'], { application: { status: 'configuration_only', nativeApplied: false } }), view(['alice@example.com']),
       view(['EXT@remote.test']), view(['a@remote.test', 'a@remote.test']), view([], { revision: 'x' }), view([], { limit: 50 }), view(['ext@remote.test'], { review: 'managed_elsewhere' }),
       view([], { context: { mailbox: MAILBOX, accountId: 'x' } }), { ...view(['ext@remote.test']), forwarding: { id: 'r1', destinations: ['ext@remote.test'], keepCopy: false, createdAt: 'x' } }])
       expect(() => readMailboxForwarders(value, MAILBOX)).toThrow()

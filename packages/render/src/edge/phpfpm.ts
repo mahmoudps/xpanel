@@ -202,7 +202,7 @@ const fpmKeyValue = (content: string, key: string): string | undefined =>
 /**
  * Verifies the per-account PHP-FPM pool and master isolation contract (H05 — A31, A32, A35):
  * - Runs as `<user>:<user>` inside `xpanel-<uid>.slice`
- * - Listens on `/run/xpanel/fpm/<user>-<ver>/php-fpm.sock` (`0660`, owned by `<user>:<user>`)
+ * - Listens on `/run/xpanel-fpm/<user>-<ver>/php-fpm.sock` (`0660`, owned by `<user>:<user>`)
  * - Grants zero `listen.acl_users` under `mpm_itk` so only the account's own UID/GID may connect
  * - Enforces `pm` worker bounds and `open_basedir` confinement
  */

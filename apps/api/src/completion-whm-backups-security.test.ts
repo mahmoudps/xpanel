@@ -89,6 +89,12 @@ describe('WHM backup configuration loopback HTTP security', () => {
     expect((await f.request('/api/backups/workspace/destinations/' + created.destination.id, 'DELETE', { expectedRevision: current.revision })).status).toBe(409)
     expect(await f.bytes('destinations')).toBe(before)
   })
+  it('enables a local-only schedule without destinations; the agent keeps verified local archives', async () => {
+    const expectedRevision = (await f.view()).revision
+    const input = { enabled: true, frequency: 'weekly', cron: '0 3 * * 0', retentionCount: 4, compress: 'gzip', includeDatabases: true, includeMail: true, selectedAccounts: 'all', destinationIds: [], expectedRevision }
+    expect((await f.request('/api/backups/workspace/schedule', 'PUT', input)).status).toBe(200)
+    expect(JSON.parse(await f.bytes('schedule'))).toMatchObject({ enabled: true, cron: '0 3 * * 0', retentionCount: 4, destinationIds: [] })
+  })
   it('refuses stale revisions and serializes concurrent destination writes', async () => {
     const expectedRevision = (await f.view()).revision
     const responses = await Promise.all(['First destination', 'Second destination'].map(name => f.request('/api/backups/workspace/destinations', 'POST', { ...destination(name), expectedRevision })))

@@ -50,11 +50,11 @@ describe('xWHM core route metadata', () => {
     expect(routes.filter(item => item.bind === 'soon')).toHaveLength(42)
   })
 
-  it('distinguishes stored account status and unmeasured bandwidth from health or usage readings', () => {
+  it('distinguishes stored account status and measured web bandwidth from health or usage readings', () => {
     expect(at('/whm/accounts/health').bind).toBe('accounts')
     expect(at('/whm/accounts/health').lede).toContain('assessments and repairs are unavailable')
     expect(at('/whm/accounts/bandwidth').bind).toBe('accounts')
-    expect(at('/whm/accounts/bandwidth').lede).toContain('Bandwidth is not measured')
+    expect(at('/whm/accounts/bandwidth').lede).toContain('web from the saved site access logs, plus mail and FTP')
     expect(at('/whm/accounts/bandwidth').columns.at(-1)).toBe('Bandwidth')
     expect(translator('ar')(at('/whm/accounts/bandwidth').columns.at(-1)!)).toBe('النطاق الترددي')
     expect(routes.filter(item => item.bind === 'accounts')).toHaveLength(2)

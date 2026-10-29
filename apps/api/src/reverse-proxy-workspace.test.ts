@@ -77,9 +77,31 @@ describe('reverse proxy upstream validation', () => {
       'http://127.0.0.1:3000;proxy_pass', 'http://127.0.0.1:3000 ', 'HTTP://127.0.0.1:3000', 'http://0177.0.0.1:3000', 'http://127.000.0.1:3000', 'http://[::ffff:127.0.0.1]:3000',
       'http://169.254.169.254:8000', 'http://[fd00:ec2::254]:3000', 'http://0.0.0.0:3000', 'http://127.0.0.1:70000', 'http://127.0.0.1:3000/' + 'a'.repeat(600)]) expect(code(bad), String(bad)).toBe('invalid')
   })
-  it('keeps the upstream on loopback: private, public, named and other 127/8 hosts are refused', () => {
-    for (const remote of ['http://10.0.0.5:3000', 'http://192.0.2.10:3000', 'http://[2001:db8::1]:3000', 'http://example.com:3000', 'http://localhost:3000', 'http://127.0.0.2:3000', 'http://[0:0:0:0:0:0:0:1]:3000'])
-      expect(code(remote), remote).toBe('not_loopback')
+  it('keeps the upstream on loopback unless root allowed the remote host', () => {
+    for (const remote of ['http://10.0.0.5:3000', 'http://192.0.2.10:3000', 'http://[2001:db8::1]:3000', 'http://example.com:3000', 'http://127.0.0.2:3000', 'http://[0:0:0:0:0:0:0:1]:3000'])
+      expect(code(remote), remote).toBe('host_not_allowed')
+    expect(code('http://localhost:3000')).toBe('not_loopback')
+    const allowed = (value: string, hosts: string[], edgeSettings: ServerSettings = settings): string | null => {
+      try { assertReverseProxyUpstream(value, domain, edgeSettings, { allowedHosts: hosts }); return null }
+      catch (error) { return (error as { detail: { fields: { code: string }[] } }).detail.fields[0]!.code }
+    }
+    expect(allowed('https://203.0.113.9:8443/api', ['203.0.113.9'])).toBeNull()
+    expect(allowed('https://203.0.113.9', ['203.0.113.10'])).toBe('host_not_allowed')
+    // Root may list a private or metadata address, but the edge renderer's address rules still refuse it.
+    expect(allowed('http://10.0.0.5:3000', ['10.0.0.5'])).toBe('host_not_allowed')
+    expect(allowed('https://origin.example.org', ['origin.example.org'])).toBe('resolver_unavailable')
+    expect(allowed('https://origin.example.org', ['ORIGIN.example.org'], { ...settings, edge: { resolvers: ['192.0.2.53'] } } as ServerSettings)).toBeNull()
+  })
+  it('refuses a loopback port another account already proxies to, in either loopback spelling', () => {
+    const neighbour = { ...domain, id: '22222222-2222-4222-8222-222222222222', accountId: 'other', siteType: 'proxy', upstream: 'http://[::1]:3000' } as Domain
+    const own = { ...domain, accountId: 'mine' } as Domain
+    const check = (value: string, domains: Domain[]): string | null => {
+      try { assertReverseProxyUpstream(value, own, settings, { domains }); return null }
+      catch (error) { return (error as { detail: { fields: { code: string }[] } }).detail.fields[0]!.code }
+    }
+    expect(check('http://127.0.0.1:3000', [neighbour])).toBe('port_taken')
+    expect(check('http://127.0.0.1:3001', [neighbour])).toBeNull()
+    expect(check('http://127.0.0.1:3000', [{ ...neighbour, accountId: 'mine' }])).toBeNull()
   })
   it('refuses privileged ports and every port the edge renderer reserves', () => {
     for (const port of [80, 443, 1023, 22, 2087, 8080, 8443, 2083, 2096, 12083, 12087, 3306, 5432, 6379, 11211, 8081, 4190, 7080, 8088])
@@ -105,6 +127,36 @@ describe('reverse proxy workspace route over the real desired-state store', () =
     expect(await f.store.getDomain(f.primary.id)).toEqual({ ...before, siteType: 'static' })
     expect(f.mutations).toEqual(['domain.updated', 'domain.updated', 'domain.updated', 'domain.updated'])
     expect(await f.store.getDomain(f.otherPrimary.id)).toEqual(f.otherPrimary)
+  })
+
+  it('saves proxy options, stores defaults as absence and drops them when the site serves files again', async () => {
+    const f = await fixture()
+    const options = { websocket: false, hostHeader: 'upstream', headers: [{ name: 'X-Tenant', value: 'shop-1' }] }
+    const saved = await f.put(f.primary.id, { expectedRevision: await f.revision(), siteType: 'proxy', upstream: 'http://127.0.0.1:3000', proxy: options })
+    expect(saved.domain.proxy).toEqual(options)
+    // The same address with changed options is a change; the same options again are not.
+    await expect(f.put(f.primary.id, { expectedRevision: await f.revision(), siteType: 'proxy', upstream: 'http://127.0.0.1:3000', proxy: options }))
+      .rejects.toMatchObject({ code: 'VALIDATION', detail: { fields: [{ field: 'siteType', code: 'unchanged' }] } })
+    // Omitted options keep the saved ones when only the address moves.
+    expect((await f.put(f.primary.id, { expectedRevision: await f.revision(), siteType: 'proxy', upstream: 'http://127.0.0.1:3001' })).domain.proxy).toEqual(options)
+    const defaults = await f.put(f.primary.id, { expectedRevision: await f.revision(), siteType: 'proxy', upstream: 'http://127.0.0.1:3001', proxy: { websocket: true, hostHeader: 'client', headers: [] } })
+    expect(defaults.domain).not.toHaveProperty('proxy')
+    await f.put(f.primary.id, { expectedRevision: await f.revision(), siteType: 'proxy', upstream: 'http://127.0.0.1:3001', proxy: options })
+    expect((await f.put(f.primary.id, { expectedRevision: await f.revision(), siteType: 'php' })).domain).not.toHaveProperty('proxy')
+    for (const [proxy, field] of [[{ ...options, headers: [{ name: 'Host', value: 'x' }] }, 'headers'], [{ ...options, websocket: 'yes' }, 'websocket'], [{ ...options, extra: 1 }, 'proxy']] as const) {
+      await expect(f.put(f.primary.id, { expectedRevision: await f.revision(), siteType: 'proxy', upstream: 'http://127.0.0.1:3000', proxy }))
+        .rejects.toMatchObject({ code: 'VALIDATION', detail: { stateChanged: false, fields: [{ field, code: 'invalid' }] } })
+    }
+    await expect(f.put(f.primary.id, { expectedRevision: await f.revision(), siteType: 'php', proxy: options })).rejects.toMatchObject({ code: 'VALIDATION' })
+  })
+
+  it('refuses a local port that a neighbour account already proxies to', async () => {
+    const f = await fixture()
+    f.as(f.neighbour)
+    await f.put(f.otherPrimary.id, { expectedRevision: (await f.store.readDomainWorkspace(f.other.id)).revision, siteType: 'proxy', upstream: 'http://127.0.0.1:4000' })
+    f.as(f.self)
+    await expect(f.put(f.primary.id, { expectedRevision: await f.revision(), siteType: 'proxy', upstream: 'http://[::1]:4000' }))
+      .rejects.toMatchObject({ code: 'VALIDATION', detail: { stateChanged: false, fields: [{ field: 'upstream', code: 'port_taken' }] } })
   })
 
   it('refuses a stale captured revision with CONFLICT and a revoked fresh authorization with FORBIDDEN, leaving state unchanged', async () => {
@@ -142,7 +194,7 @@ describe('reverse proxy workspace route over the real desired-state store', () =
     for (const bad of [{ expectedRevision, siteType: 'node', upstream: 'http://127.0.0.1:3000' }, { expectedRevision, siteType: 'php', upstream: null }, { expectedRevision, siteType: 'proxy' },
       { expectedRevision, siteType: 'proxy', upstream: 'http://127.0.0.1:3000', docRoot: '/tmp' }, { siteType: 'proxy', upstream: 'http://127.0.0.1:3000' }, { expectedRevision, siteType: 'php' }])
       await expect(f.put(f.primary.id, bad), JSON.stringify(bad)).rejects.toMatchObject({ code: 'VALIDATION', detail: { stateChanged: false } })
-    await expect(f.put(f.primary.id, { expectedRevision, siteType: 'proxy', upstream: 'http://10.0.0.5:3000' })).rejects.toMatchObject({ code: 'VALIDATION', detail: { fields: [{ field: 'upstream', code: 'not_loopback' }] } })
+    await expect(f.put(f.primary.id, { expectedRevision, siteType: 'proxy', upstream: 'http://10.0.0.5:3000' })).rejects.toMatchObject({ code: 'VALIDATION', detail: { fields: [{ field: 'upstream', code: 'host_not_allowed' }] } })
     expect(f.mutations).toEqual([])
   })
 

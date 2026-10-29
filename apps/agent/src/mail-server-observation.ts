@@ -1,5 +1,5 @@
 import { fail } from '@xpanel/core'
-import { DOVECOT_OBSERVED_SETTINGS, MASTER_OBSERVED_OPTIONS, POSTCONF_MAIN_ARGV, POSTCONF_MASTER_ARGV, POSTFIX_OBSERVED_KEYS, doveconfSettingArgv } from '../../../packages/os/src/mail-server-command.ts'
+import { DOVECOT_OBSERVED_SETTINGS, DOVECOT_PATH_SETTINGS, MASTER_OBSERVED_OPTIONS, isDovecotFileReference, POSTCONF_MAIN_ARGV, POSTCONF_MASTER_ARGV, POSTFIX_OBSERVED_KEYS, doveconfSettingArgv } from '../../../packages/os/src/mail-server-command.ts'
 
 export interface MailServerCommandResult { ok: boolean; code: number; stdout: string; stderr: string }
 export type MailServerRun = (argv: string[]) => Promise<MailServerCommandResult>
@@ -109,7 +109,7 @@ export async function readMailServerObservation(input: { run: MailServerRun; now
   for (const name of DOVECOT_OBSERVED_SETTINGS) {
     // doveconf(1) -h prints the bare value followed by a newline; an unknown setting (e.g. mail_location on Dovecot 2.4) exits non-zero.
     const value = (await stdout(doveconfSettingArgv(name)))?.replace(/\n$/, '') ?? null
-    settings[name] = value !== null && value.length <= MAX_DOVECOT_VALUE && !CONTROL.test(value) ? value : null
+    settings[name] = value !== null && value.length <= MAX_DOVECOT_VALUE && !CONTROL.test(value) && (!DOVECOT_PATH_SETTINGS.includes(name) || value === '' || isDovecotFileReference(value)) ? value : null
   }
   const dovecot: MailServerObservation['dovecot'] = Object.values(settings).some(value => value !== null) ? { state: 'read', settings } : { state: 'unavailable', reason: 'command_failed', settings }
   return { observedAt, postfix, master, dovecot }

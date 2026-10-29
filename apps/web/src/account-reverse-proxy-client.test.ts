@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ACCOUNT_REVERSE_PROXY_CLIENT_BINDING, reverseProxyAcknowledged, reverseProxyBlocked, reverseProxyUpstreamDraft } from './account-reverse-proxy-client.ts'
+import { ACCOUNT_REVERSE_PROXY_CLIENT_BINDING, reverseProxyAcknowledged, reverseProxyBlocked, reverseProxyHeadersProblem, reverseProxyUpstreamDraft } from './account-reverse-proxy-client.ts'
 import { readDomainWorkspace } from './domain-workspace-client.ts'
 import { renderAccountReverseProxyWorkspace } from './board-port/account-reverse-proxy-workspace.ts'
 
@@ -55,8 +55,9 @@ describe('account reverse proxy page', () => {
   })
 
   it('pre-checks upstream drafts and blocks aliases, alias parents, application sites and redirects', () => {
-    for (const ok of ['http://127.0.0.1:3000', 'https://[::1]:3443/app/v1']) expect(reverseProxyUpstreamDraft(ok), ok).toBe(ok)
-    for (const bad of [null, 3000, 'http://127.0.0.1:80', 'http://127.0.0.1:70000', 'http://10.0.0.5:3000', 'http://localhost:3000', 'http://user@127.0.0.1:3000', 'http://127.0.0.1:3000/?a', 'http://127.0.0.1:3000/a/../b', ' http://127.0.0.1:3000'])
+    // Remote hosts pass the format hint; the server decides whether root allowed them.
+    for (const ok of ['http://127.0.0.1:3000', 'https://[::1]:3443/app/v1', 'https://203.0.113.9', 'https://origin.example.org:8443/api']) expect(reverseProxyUpstreamDraft(ok), ok).toBe(ok)
+    for (const bad of [null, 3000, 'http://127.0.0.1:80', 'http://127.0.0.1', 'http://127.0.0.1:70000', 'https://origin.example.org:0', 'http://exa mple.org', 'http://user@127.0.0.1:3000', 'http://127.0.0.1:3000/?a', 'http://127.0.0.1:3000/a/../b', ' http://127.0.0.1:3000'])
       expect(reverseProxyUpstreamDraft(bad), String(bad)).toBeNull()
     const addon = domain(ADDON, 'shop.example.test'), alias = domain(ALIAS, 'mirror.example.test', { kind: 'alias', parentId: ADDON, docRoot: addon.docRoot })
     const rows = readDomainWorkspace(view([primary, addon, alias, domain(APP, 'node.example.test', { siteType: 'node', upstream: 'http://127.0.0.1:3001' }), domain('66666666-6666-4666-8666-666666666666', 'moved.example.test', { redirect: { to: 'https://example.org/', code: 301 } })]), { accountId, home }).domains
@@ -88,7 +89,7 @@ describe('account reverse proxy page', () => {
       expect(method).toBe('PUT'); expect(path).toBe('/api/domains/' + PRIMARY + '/reverse-proxy')
       const target = body as Record<string, unknown>
       if (target.siteType === 'proxy') {
-        expect(body).toEqual({ expectedRevision: 'a'.repeat(64), siteType: 'proxy', upstream: 'http://127.0.0.1:3000' })
+        expect(body).toEqual({ expectedRevision: 'a'.repeat(64), siteType: 'proxy', upstream: 'http://127.0.0.1:3000', proxy: { websocket: true, hostHeader: 'client', headers: [] } })
         const row = { ...primary, siteType: 'proxy', upstream: 'http://127.0.0.1:3000' }; current = view([row], 'b')
         return { ...view([row], 'b', 'not_requested'), domain: row, stateChanged: true, reconcile: null }
       }
@@ -126,7 +127,7 @@ describe('account reverse proxy page', () => {
     configure(); choose('proxy', 'http://127.0.0.1:3306'); $<HTMLButtonElement>('[data-rp-save]').click(); await settle()
     expect($('[data-rp-status]').getAttribute('data-state')).toBe('fields'); expect($<HTMLElement>('[data-rp-error]').hidden).toBe(false); expect($('[data-rp-upstream]').getAttribute('aria-invalid')).toBe('true')
     expect($<HTMLButtonElement>('[data-rp-save]').disabled).toBe(false)
-    choose('proxy', 'http://10.0.0.5:3000'); $<HTMLButtonElement>('[data-rp-save]').click(); await settle()
+    choose('proxy', 'http://127.0.0.1:80'); $<HTMLButtonElement>('[data-rp-save]').click(); await settle()
     expect(refused.mock.calls.map(call => call[0])).toEqual(['GET', 'GET', 'PUT'])
 
     for (const reply of [async () => { throw Object.assign(new Error('unverified'), { status: 503, details: { stateChanged: true, verificationRequired: true, unknownOutcome: true } }) },
@@ -138,6 +139,37 @@ describe('account reverse proxy page', () => {
       expect($('[data-rp-status]').getAttribute('data-state')).toBe('uncertain'); expect($<HTMLButtonElement>('[data-rp-save]').disabled).toBe(true)
       expect(uncertain.mock.calls.map(call => call[0])).toEqual(['GET', 'GET', 'PUT'])
     }
+  })
+
+  it('sends WebSocket, Host and header options, checks headers before sending and verifies the saved options', async () => {
+    expect(reverseProxyHeadersProblem([{ name: 'X-Tenant', value: 'shop-1' }])).toBeNull()
+    expect(reverseProxyHeadersProblem([{ name: 'X-Forwarded-For', value: '1.2.3.4' }])).toBe('reserved')
+    expect(reverseProxyHeadersProblem([{ name: 'X A', value: 'v' }])).toBe('name')
+    expect(reverseProxyHeadersProblem([{ name: 'X-A', value: '$host' }])).toBe('value')
+    expect(reverseProxyHeadersProblem([{ name: 'X-A', value: 'a' }, { name: 'x-a', value: 'b' }])).toBe('duplicate')
+    const options = { websocket: false, hostHeader: 'upstream', headers: [{ name: 'X-Tenant', value: 'shop-1' }] }
+    let current = view([primary], 'a')
+    const request = vi.fn(async (method: string, _path: string, body?: unknown) => {
+      if (method === 'GET') return clone(current)
+      expect(body).toEqual({ expectedRevision: 'a'.repeat(64), siteType: 'proxy', upstream: 'http://127.0.0.1:3000', proxy: options })
+      const row = { ...primary, siteType: 'proxy', upstream: 'http://127.0.0.1:3000', proxy: options }; current = view([row], 'b')
+      return { ...view([row], 'b', 'not_requested'), domain: row, stateChanged: true, reconcile: null }
+    })
+    await bind(page(), request)
+    configure(); choose('proxy', 'http://127.0.0.1:3000')
+    expect($<HTMLElement>('[data-rp-options]').hidden).toBe(false); expect($<HTMLInputElement>('[data-rp-websocket]').checked).toBe(true)
+    $<HTMLInputElement>('[data-rp-websocket]').checked = false; $<HTMLSelectElement>('[data-rp-host]').value = 'upstream'
+    $<HTMLButtonElement>('[data-rp-add-header]').click()
+    $<HTMLInputElement>('[data-rp-header-field="name"]').value = 'Connection'; $<HTMLInputElement>('[data-rp-header-field="value"]').value = 'close'
+    $<HTMLButtonElement>('[data-rp-save]').click(); await settle()
+    expect(request.mock.calls.map(call => call[0])).toEqual(['GET']); expect($('[data-rp-status]').getAttribute('data-state')).toBe('fields')
+    expect($<HTMLElement>('[data-rp-headers-error]').hidden).toBe(false)
+    $<HTMLInputElement>('[data-rp-header-field="name"]').value = 'X-Tenant'; $<HTMLInputElement>('[data-rp-header-field="value"]').value = 'shop-1'
+    $<HTMLButtonElement>('[data-rp-save]').click(); await settle()
+    expect(request.mock.calls.map(call => call[0])).toEqual(['GET', 'GET', 'PUT', 'GET']); expect($('[data-rp-status]').getAttribute('data-state')).toBe('saved')
+    // The saved options come back into the form from the read-back row.
+    expect($<HTMLInputElement>('[data-rp-websocket]').checked).toBe(false); expect($<HTMLSelectElement>('[data-rp-host]').value).toBe('upstream')
+    expect($<HTMLInputElement>('[data-rp-header-field="value"]').value).toBe('shop-1')
   })
 
   it('disables blocked rows and sends nothing when the confirmation is declined', async () => {

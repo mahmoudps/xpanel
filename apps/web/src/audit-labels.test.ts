@@ -25,6 +25,10 @@ const SOURCES = [
   'apps/api/src/support-workspace.ts',
   'apps/agent/src/dns-tools-routes.ts',
   'apps/api/src/admin-preferences.ts',
+  'apps/api/src/panel-settings.ts',
+  'apps/api/src/panel-branding.ts',
+  'apps/api/src/panel-languages.ts',
+  'apps/api/src/whmcs-integration.ts',
   'apps/api/src/default-index-workspace.ts',
   'apps/api/src/dynamic-dns.ts',
   'apps/agent/src/service-manager-routes.ts',
@@ -36,6 +40,9 @@ const SOURCES = [
 /** Templates whose concrete actions are written at runtime. */
 const EXPANSIONS = [
   'server.benchmark.run',
+  'panel.branding.logo_uploaded', 'panel.branding.logo_removed', 'panel.branding.favicon_uploaded', 'panel.branding.favicon_removed',
+  'panel.languages.updated', 'panel.languages.catalog_uploaded', 'panel.languages.catalog_removed',
+  'whmcs.provision.test', 'whmcs.provision.create', 'whmcs.provision.suspend', 'whmcs.provision.unsuspend', 'whmcs.provision.terminate', 'whmcs.provision.change_package',
   'server.default_index.updated', 'server.default_index.reset',
   'dns.dynamic.created', 'dns.dynamic.rotated', 'dns.dynamic.deleted', 'dns.dynamic.updated',
   'account.git.init', 'account.git.clone', 'account.git.pull', 'account.git.checkout', 'account.git.remove',

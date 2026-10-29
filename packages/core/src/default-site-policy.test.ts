@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validateDefaultSitePolicy, validateServerSettings } from './schemas.ts'
+import { validateDefaultSitePolicy, validatePhpFunctionExceptions, validateServerSettings } from './schemas.ts'
 import type { ServerSettings } from './types.ts'
 
 const settings = (): ServerSettings => ({ hostname: 'server.example.test', nameservers: ['ns1.example.test'], adminEmail: 'root@example.test', engine: 'apache', apacheMpm: 'itk', panelPort: 2087, sshPort: 22,
@@ -29,4 +29,23 @@ describe('persisted explicit default-site policy', () => {
   it.each([null, [], { response: 'proxy', refuseHttps: false }, { response: 'reject', redirectTo: 'https://example.test/', refuseHttps: false }, { response: 'reject', refuseHttps: 'false' }, { response: 'reject', refuseHttps: false, upstream: 'http://127.0.0.1/' }])('refuses unsupported policy shape %j', raw => {
     expect(() => validateDefaultSitePolicy(raw)).toThrow()
   })
+})
+
+describe('server default PHP version', () => {
+  it('keeps a valid default for new domains and refuses anything else', () => {
+    expect(validateServerSettings({ ...settings(), defaultPhpVersion: '8.4' }).defaultPhpVersion).toBe('8.4')
+    expect(validateServerSettings(settings())).not.toHaveProperty('defaultPhpVersion')
+    expect(() => validateServerSettings({ ...settings(), defaultPhpVersion: '8.4; rm' })).toThrow()
+  })
+})
+
+describe('PHP function exceptions', () => {
+  const grant = { account: 'karim', functions: ['proc_open', 'exec'], reason: ' queue worker ', grantedAt: '2026-10-29T00:00:00Z', grantedBy: 'root' }
+  it('keeps one canonical entry per account from the six allowed functions', () => {
+    expect(validatePhpFunctionExceptions([grant])).toEqual([{ ...grant, functions: ['exec', 'proc_open'], reason: 'queue worker', grantedAt: '2026-10-29T00:00:00.000Z' }])
+    expect(validateServerSettings({ ...settings(), phpFunctionExceptions: [grant] } as never).phpFunctionExceptions).toHaveLength(1)
+  })
+  it.each([
+    [{ ...grant, functions: ['dl'] }], [{ ...grant, functions: [] }], [{ ...grant, reason: '' }], [{ ...grant, account: 'Root' }], [{ ...grant, extra: true }], [grant, grant],
+  ])('refuses %j', (...list) => { expect(() => validatePhpFunctionExceptions(list)).toThrow() })
 })

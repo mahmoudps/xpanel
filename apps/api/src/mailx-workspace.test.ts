@@ -12,9 +12,9 @@ const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 const status = { observedAt: '2026-10-28T10:00:00.000Z', revision: 'a'.repeat(64), postfix: 'read',
   engine: { engine: 'rspamd', unit: 'rspamd.service', spamAssassinDir: null, wiring: 'not-wired', units: { 'rspamd.service': 'active', 'spamassassin.service': 'not-installed', 'spamd.service': 'not-installed' } },
-  sections: { spam: 'applied', relay: 'applied', bcc: 'not-saved', marketing: 'not-saved' }, archive: { accounts: 0, state: 'not-saved', conflicts: [] } }
+  sections: { spam: 'applied', relay: 'applied', bcc: 'not-saved', marketing: 'not-saved', server: 'not-saved', routing: 'not-saved' }, archive: { accounts: 0, state: 'not-saved', conflicts: [] } }
 
-async function fixture(options: { host?: boolean; lists?: unknown; reconcile?: string } = {}) {
+async function fixture(options: { host?: boolean; lists?: unknown; reconcile?: string; apply?: Record<string, unknown> } = {}) {
   const state = await createTestStateStore(); cleanup.push(() => state.close())
   const features = await state.store.createFeatureList({ name: 'Archive', ownerId: null, disabled: [] })
   const plan = await state.store.createPlan({ name: 'Archive', ownerId: null, featureListId: features.id,
@@ -39,7 +39,7 @@ async function fixture(options: { host?: boolean; lists?: unknown; reconcile?: s
     if (path.endsWith('/lists')) return options.lists ?? { observedAt: status.observedAt, aliases: 'read', lists: [{ address: 'team@archown.example.test', members: 2, state: 'delivering' }, { address: 'mods@archown.example.test', members: 1, state: 'restricted' }] }
     if (path.endsWith('/learn')) return { job: { id: 'job-3', kind: 'mail.spam.learn', status: 'queued' } }
     expect(body).toMatchObject({ revision: expect.stringMatching(/^[0-9a-f]{64}$/) })
-    return { outcome: 'applied', revision: (body as { revision: string }).revision, verificationRequired: false, spam: 'not-saved', mailboxes: 'not-saved', reloads: ['postfix'], reconcile: options.reconcile ?? 'applied' }
+    return { outcome: 'applied', revision: (body as { revision: string }).revision, verificationRequired: false, spam: 'not-saved', mailboxes: 'not-saved', reloads: ['postfix'], reconcile: options.reconcile ?? 'applied', ...options.apply }
   })
   const helpers: MailxWorkspaceHelpers = { store: state.store, requireCaller: async () => current,
     assertRoot: async who => { if (who.principal.kind !== 'root') fail('FORBIDDEN', 'root required') },
@@ -94,6 +94,51 @@ describe('server mail policy workspace', () => {
     const f = await fixture({ host: false })
     const saved = await f.call('/api/server/mailx/marketing', 'PUT', { policy: { ...MAILX_DEFAULTS.marketing, messageRateLimit: 200 }, expectedRevision: mailxRevision('marketing', null) })
     expect(saved.body).toMatchObject({ saved: true, host: 'not-connected', state: 'unavailable', application: { outcome: 'not-connected' } })
+  })
+})
+
+describe('server settings and routing policy', () => {
+  const certificate = (f: Awaited<ReturnType<typeof fixture>>, source: 'upload' | 'self-signed', notAfter = '2027-01-01T00:00:00.000Z') => f.state.store.createCertificate({ accountId: null, names: ['mail.example.test'], source, notAfter,
+    certPath: '/etc/xpanel/ssl/x/fullchain.pem', keyPath: '/etc/xpanel/ssl/x/privkey.pem' })
+  const server = (smtp: string | null = null) => ({ postfix: { myhostname: 'mail.example.test', smtpd_tls_protocols: '!SSLv2, !SSLv3, !TLSv1, !TLSv1.1' }, dovecot: { ssl_min_protocol: 'TLSv1.2' }, rbl: ['zen.spamhaus.org'], certificates: { smtp, submission: null, imap: null } })
+  it('previews the exact rendered change, then saves and applies it with the changed keys in the audit', async () => {
+    const f = await fixture(), cert = await certificate(f, 'upload')
+    const first = await f.call('/api/server/mailx/server')
+    expect(first.body).toMatchObject({ section: 'server', saved: false, policy: MAILX_DEFAULTS.server, choices: { certificates: [{ id: cert.id, names: ['mail.example.test'] }] } })
+    await certificate(f, 'self-signed')
+    expect((await f.call('/api/server/mailx/server')).body.choices.certificates).toHaveLength(1)
+    const preview = await f.call('/api/server/mailx/server/preview', 'POST', { policy: server(cert.id), expectedRevision: first.body.revision })
+    expect(preview.body.changes).toEqual(expect.arrayContaining([
+      { target: 'postfix', key: 'myhostname', before: null, after: 'mail.example.test' },
+      { target: 'postfix', key: 'smtpd_client_restrictions', before: null, after: 'permit_mynetworks, permit_sasl_authenticated, reject_rbl_client zen.spamhaus.org' },
+      { target: 'master', key: 'smtp/inet/smtpd_tls_cert_file', before: null, after: `/etc/xpanel/ssl/${cert.id}/fullchain.pem` },
+      { target: 'dovecot', key: 'ssl_min_protocol', before: null, after: 'TLSv1.2' }]))
+    expect(f.callHost.mock.calls.some(([, path]) => path === '/host/mailx/apply')).toBe(false)
+    const saved = await f.call('/api/server/mailx/server', 'PUT', { policy: server(cert.id), expectedRevision: first.body.revision })
+    expect(saved.body).toMatchObject({ stateChanged: true, saved: true, application: { outcome: 'applied' } })
+    expect(f.audits).toContainEqual(expect.objectContaining({ action: 'server.mail_policy.server_saved', outcome: 'ok', detail: expect.objectContaining({ changed: expect.arrayContaining(['postfix myhostname', 'dovecot ssl_min_protocol']) }) }))
+    const again = await f.call('/api/server/mailx/server/preview', 'POST', { policy: server(cert.id), expectedRevision: saved.body.revision })
+    expect(again.body.changes).toEqual([])
+    expect((await f.call('/api/server/mailx/server/preview', 'POST', { policy: server(), expectedRevision: first.body.revision })).code).toBe('CONFLICT')
+  })
+  it('refuses invalid values by field, unusable certificates and domains not hosted here, before any write', async () => {
+    const f = await fixture(), revision = mailxRevision('server', null)
+    const field = async (policy: unknown, path = '/api/server/mailx/server') => (await f.call(path, 'PUT', { policy, expectedRevision: path.endsWith('routing') ? mailxRevision('routing', null) : revision })).detail?.field
+    expect(await field({ ...server(), postfix: { mynetworks: '0.0.0.0/0;evil' } })).toBe('mynetworks')
+    expect(await field({ ...server(), dovecot: { protocols: 'imap' } })).toBe('protocols')
+    expect(await field(server('missing'))).toBe('certificates.smtp')
+    expect(await field(server((await certificate(f, 'self-signed')).id))).toBe('certificates.smtp')
+    expect(await field(server((await certificate(f, 'upload', '2026-01-01T00:00:00.000Z')).id))).toBe('certificates.smtp')
+    expect(await field({ domains: [{ domain: 'elsewhere.example', mode: 'remote' }] }, '/api/server/mailx/routing')).toBe('domains')
+    expect(f.callHost.mock.calls.some(([, path]) => path === '/host/mailx/apply')).toBe(false)
+    const routed = await f.call('/api/server/mailx/routing', 'PUT', { policy: { domains: [{ domain: 'archown.example.test', mode: 'backup' }] }, expectedRevision: mailxRevision('routing', null) })
+    expect(routed.body).toMatchObject({ saved: true, policy: { domains: [{ domain: 'archown.example.test', mode: 'backup' }] } })
+  })
+  it('reports a rolled-back apply with the failed configuration test and audits it as failed', async () => {
+    const f = await fixture({ apply: { outcome: 'rolled-back', failedCheck: 'dovecot' } })
+    const saved = await f.call('/api/server/mailx/server', 'PUT', { policy: server(), expectedRevision: mailxRevision('server', null) })
+    expect(saved.body.application).toMatchObject({ outcome: 'rolled-back', failedCheck: 'dovecot' })
+    expect(f.audits).toContainEqual(expect.objectContaining({ action: 'server.mail_policy.server_saved', outcome: 'failed', detail: expect.objectContaining({ failedCheck: 'dovecot' }) }))
   })
 })
 

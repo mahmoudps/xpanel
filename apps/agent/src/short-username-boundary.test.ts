@@ -64,15 +64,10 @@ describe('short username agent dispatch retains target and privilege authority',
   beforeEach(() => { fileTargets.length = 0; executor.executedCommands.length = 0 })
   afterAll(async () => { await state?.close(); await db?.close() })
 
-  it.each(names)('routes owned files and portable shell for %s using stored UID/home', async username => {
+  it.each(names)('routes owned files for %s using stored UID/home', async username => {
     const principalId = principalIds.get(username)!, account = accounts.get(username)!
     expect((await call(principalId, `/accounts/${username}/files`, 'POST', { op: 'list', path: '' })).status).toBe(200)
     expect(fileTargets).toEqual([{ username, uid: account.uid, home: '/home/' + username }])
-    const shell = await call(principalId, `/accounts/${username}/shell`, 'POST', { command: 'whoami' })
-    expect(shell.status).toBe(200)
-    expect(executor.executedCommands).toHaveLength(1)
-    expect(executor.executedCommands[0]!.join(' ')).toContain('/home/' + username)
-    expect(executor.executedCommands[0]!.join(' ')).toContain(String(account.uid))
   })
   it.each(names)('routes certificate validation and preserves root-only backup/purge for %s', async username => {
     const principalId = principalIds.get(username)!
@@ -88,9 +83,9 @@ describe('short username agent dispatch retains target and privilege authority',
     }
     expect(executor.executedCommands).toEqual([])
   })
-  it('rejects neighboring targets before confined execution or any shell command', async () => {
-    for (const suffix of ['files', 'shell', 'certificates']) {
-      const response = await call(principalIds.get('a')!, '/accounts/ab/' + suffix, 'POST', suffix === 'files' ? { op: 'list', path: '' } : suffix === 'shell' ? { command: 'whoami' } : {})
+  it('rejects neighboring targets before confined execution', async () => {
+    for (const suffix of ['files', 'certificates']) {
+      const response = await call(principalIds.get('a')!, '/accounts/ab/' + suffix, 'POST', suffix === 'files' ? { op: 'list', path: '' } : {})
       expect(response.status).toBe(403)
     }
     expect(fileTargets).toEqual([]); expect(executor.executedCommands).toEqual([])

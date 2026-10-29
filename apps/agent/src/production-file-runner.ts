@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { fail } from '@xpanel/core'
 import { DEFAULT_FILE_WORKER_INCIDENT_DIR, MAX_CONFINED_ACCOUNT_ID, MIN_CONFINED_ACCOUNT_ID, NativeAccountFileRunner, verifyHelperBinary } from './account-file-runner.ts'
 import type { AccountFileContext } from './file-manager.ts'
+import { readInstalledHelperDigest } from './installed-helper-digest.ts'
 
 export { DEFAULT_FILE_WORKER_INCIDENT_DIR } from './account-file-runner.ts'
 
@@ -17,8 +18,10 @@ export const createProductionAccountFileRunner = async (
   binaryPath: string,
   options: { incidentDir?: string; onRecoveryRequired?: () => void | Promise<void> } = {},
 ): Promise<NativeAccountFileRunner | undefined> => {
-  const installed = existsSync(binaryPath)
-  const expectedSha256 = installed ? await verifyHelperBinary(binaryPath) : undefined
+  // A helper without the installer's root-owned digest file stays unavailable; one that no longer matches it is refused.
+  const digest = existsSync(binaryPath) ? await readInstalledHelperDigest(binaryPath) : null
+  const installed = digest !== null
+  const expectedSha256 = installed ? await verifyHelperBinary(binaryPath, digest) : undefined
   const runner = new NativeAccountFileRunner({
     binaryPath,
     expectedSha256,

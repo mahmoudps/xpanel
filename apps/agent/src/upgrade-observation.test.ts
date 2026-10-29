@@ -3,6 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createUpgrade } from '@xpanel/db'
+import { REWIND_STEPS, rewindJournalPath } from '@xpanel/lifecycle'
 import { createUpgradeFixture, KEY_ID } from './upgrade-observation-fixture.ts'
 import type { UpgradeFixture } from './upgrade-observation-fixture.ts'
 import { loadTrustedReleaseKeys, readReleaseManifestFor, readUpgradeObservation, releaseManifestPathFor } from './upgrade-observation.ts'
@@ -90,6 +91,23 @@ describe('upgrade observation', () => {
     f.links.set(f.layout.currentLink, join(f.layout.releasesDir, '1.0.0'))
     await writeFile(join(f.layout.releasesDir, '1.0.0', 'VERSION'), '0.9.0\n')
     expect((await readUpgradeObservation(f.deps())).current.state).toBe('unavailable')
+  })
+
+  it('reports the latest upgrade rewind journal, and an unreadable journal as unreadable rather than absent', async () => {
+    expect((await readUpgradeObservation(f.deps())).rewind).toBeNull()
+    const { id } = await createUpgrade(f.db.db, { fromVersion: '1.0.0', toVersion: '1.1.0', actor: 'root', fromSchemaVersion: 1 })
+    expect((await readUpgradeObservation(f.deps())).rewind).toBeNull()
+    const journal = rewindJournalPath(f.layout, id)
+    const entry = { schemaVersion: 1, recordId: id, state: 'rewind-unknown', done: ['release', 'state-extract'], generation: null, problems: ['canary alice served by uid 33 instead of 1001'], startedAt: '2026-10-27T09:00:00.000Z', updatedAt: '2026-10-27T09:05:00.000Z' }
+    await writeFile(journal, JSON.stringify(entry))
+    const first = await readUpgradeObservation(f.deps())
+    expect(first.rewind).toEqual({ state: 'rewind-unknown', done: ['release', 'state-extract'], problems: ['canary alice served by uid 33 instead of 1001'], updatedAt: '2026-10-27T09:05:00.000Z' })
+    await writeFile(journal, JSON.stringify({ ...entry, state: 'rewind-verified', done: REWIND_STEPS, problems: [] }))
+    const verified = await readUpgradeObservation(f.deps())
+    expect(verified.rewind?.state).toBe('rewind-verified')
+    expect(verified.revision).not.toBe(first.revision)
+    await writeFile(journal, '{"state":"rewind-verified"')
+    expect((await readUpgradeObservation(f.deps())).rewind).toEqual({ state: 'unreadable', done: [], problems: [], updatedAt: null })
   })
 })
 

@@ -5,6 +5,7 @@ import { panelLabel, renderSecurityNavLink, renderSupportNotice, renderUserMenu,
 import { HANDOFF_CLIENT_BINDING } from './panel-handoff-client.ts'
 import { HANDOFF_CONTROLS_CSS, renderImpersonationBanner } from './panel-handoff-controls.ts'
 import { formatDisplayName } from './display-name.ts'
+import { brandingFaviconHref, brandingHeadStyle, brandingProductName, brandingRootAttributes, renderBrandingFooter, type WebBranding } from './branding.ts'
 import { LOCALES, SOURCE_LOCALE, clientI18nAsset, inlineScriptMessageKeys, isLocale, localeDirection, renderClientI18nScript, requestLocale, requestedLocale, translator, type Locale } from './i18n.ts'
 import { isStatusCode, renderStatusBody, statusPageCopy, type StatusPageModel } from './status-page.ts'
 import { designHeading, renderDesignMain, renderDesignNav, renderDisabledScreen } from './design-board.ts'
@@ -25,6 +26,7 @@ import { renderCommandPaletteModal } from './command-palette.ts'
 import { renderWhmDetailPage } from './board-port/approved-xwhm.ts'
 import { renderStoreExtension, storeRouteSpecs } from './board-port/extensions/store.ts'
 import { getSurfacePageTitle, renderSurfaceShell, resolveSurfaceSection } from './shell.ts'
+import { TERMINAL_EMULATOR_ASSETS } from './vendor/xterm.ts'
 import {
   type AsyncActionBannerProps,
   DESIGN_TOKENS_CSS,
@@ -77,6 +79,8 @@ export interface WebAppRenderState {
   supportEmail?: string
   /** A session opened through a one-time handoff: who acts, and who opened it. */
   impersonation?: { target: string; issuer: string }
+  /** Saved server branding; absent when none is saved, which keeps the built-in identity. */
+  branding?: WebBranding
 }
 
 const renderWorkspaceSummary = (state: WebAppRenderState, locale: Locale): string => {
@@ -250,7 +254,7 @@ export function renderWebApp(state: WebAppRenderState): string {
     xwhm: { brand: 'xWHM', title: msgid('Server sign in') },
     xmail: { brand: 'xMail', title: msgid('Mail sign in') },
   }[loginAudience] : undefined
-  const faviconHref = loginAudience ? `/assets/favicon-${loginAudience}.svg` : '/assets/favicon.svg'
+  const faviconHref = brandingFaviconHref(state.branding, loginAudience ? `/assets/favicon-${loginAudience}.svg` : '/assets/favicon.svg')
 
   let surfaceBodyHtml = ''
   const activeRoute = state.activeRoute ?? (state.surface === 'xwhm' ? '/whm' : state.surface === 'xmail' ? '/mail/inbox' : state.surface === 'login' ? '/login' : '/home')
@@ -276,12 +280,12 @@ export function renderWebApp(state: WebAppRenderState): string {
   const statusSurface = state.error?.surface ?? (state.surface === 'xwhm' || state.surface === 'xmail' ? state.surface : 'xpanel')
   const pageHeading = workspacePageHeading(state.surface, locale, activeRoute)
   const pageTitle = state.title ?? (state.error && isStatusCode(state.error.status)
-    ? `${statusPageCopy(state.error.status, locale).title} — ${panelLabel(statusSurface)}`
+    ? `${statusPageCopy(state.error.status, locale).title} — ${brandingProductName(state.branding, panelLabel(statusSurface))}`
     : loginIdentity
-      ? `${loginIdentity.brand} — ${translator(locale)(loginIdentity.title)}`
+      ? `${brandingProductName(state.branding, loginIdentity.brand)} — ${translator(locale)(loginIdentity.title)}`
       : state.surface === 'login'
         ? `${translator(locale)('xPanel Sign In')} — ${translator(locale)('xPanel Control Plane')}`
-        : `${pageHeading} — ${panelLabel(state.surface === 'xwhm' || state.surface === 'xmail' ? state.surface : 'xpanel')}`)
+        : `${pageHeading} — ${brandingProductName(state.branding, panelLabel(state.surface === 'xwhm' || state.surface === 'xmail' ? state.surface : 'xpanel'))}`)
   if (state.error && isStatusCode(state.error.status)) {
     const principal = state.visibility?.principal
     surfaceBodyHtml = renderStatusBody({
@@ -383,7 +387,7 @@ export function renderWebApp(state: WebAppRenderState): string {
   ${impersonationHtml || handoffControls ? `<style id="xpanel-handoff-controls">${HANDOFF_CONTROLS_CSS}</style>` : ''}
   ${impersonationHtml}
   ${reconcileBannerHtml}
-  ${surfaceBodyHtml}
+  ${surfaceBodyHtml}${renderBrandingFooter(state.branding, locale)}
   ${hasVerifiedSurface ? contextualizeDocumentLinks(renderCommandPaletteModal(state.surface, locale, state.visibility, state.catalog,
     state.surface === 'xwhm' ? { accounts: state.whm?.accounts ?? [], domains: state.whm?.domains ?? [] }
       : state.surface === 'xpanel' ? { accounts: state.panel?.account ? [state.panel.account] : [], domains: state.panel?.domains ?? [] }
@@ -392,21 +396,21 @@ export function renderWebApp(state: WebAppRenderState): string {
   <script id="xpanel-login-client">${LOGIN_CLIENT_SCRIPT}</script>
   ${state.surface === 'login' ? `<script id="xpanel-team-password-client">${TEAM_PASSWORD_CLIENT_BINDING}</script>` : ''}
   ${handoffControls ? `<script id="xpanel-handoff-client">(${HANDOFF_CLIENT_BINDING})()</script>` : ''}
-  ${realtime ? `<script id="xpanel-i18n-realtime" src="/assets/i18n-${locale}.js?v=${I18N_ASSET_VERSION}"></script>
+  ${realtime ? `<script id="xpanel-i18n-realtime" src="/assets/i18n-${locale}.js?v=${I18N_ASSETS().version}"></script>
   <script id="xpanel-realtime-client" src="/assets/ws-client.js?v=${REALTIME_SCRIPT_VERSION}"></script>` : ''}
 `
 
   return `<!doctype html>
-<html lang="${locale}" dir="${dir}" data-theme="${theme}" data-density="${density}" data-surface="${state.error ? statusSurface : state.surface}" data-mfa-mode="${state.mfaRuntimeMode === 'disabled' ? 'disabled' : 'optional'}" data-realtime-enabled="${hasVerifiedSurface && state.realtimeEnabled !== false}"${state.error && isStatusCode(state.error.status) ? ` data-status="${state.error.status}"` : ''}>
+<html lang="${locale}" dir="${dir}" data-theme="${theme}" data-density="${density}" data-surface="${state.error ? statusSurface : state.surface}" data-mfa-mode="${state.mfaRuntimeMode === 'disabled' ? 'disabled' : 'optional'}" data-realtime-enabled="${hasVerifiedSurface && state.realtimeEnabled !== false}"${brandingRootAttributes(state.branding)}${state.error && isStatusCode(state.error.status) ? ` data-status="${state.error.status}"` : ''}>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(pageTitle)}</title>
-  <link rel="icon" type="image/svg+xml" href="${faviconHref}" />
+  <link rel="icon"${state.branding?.faviconUrl ? '' : ' type="image/svg+xml"'} href="${faviconHref}" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <style id="xpanel-design-tokens">${DESIGN_TOKENS_CSS}</style>
+  <style id="xpanel-design-tokens">${DESIGN_TOKENS_CSS}</style>${brandingHeadStyle(state.branding)}
   ${renderClientI18nScript(locale, inlineScriptMessageKeys(bodyHtml))}
 </head>
 <body>${bodyHtml}</body>
@@ -426,10 +430,15 @@ const LOGIN_FAVICONS = {
 const REALTIME_SCRIPT_VERSION = createHash('sha256').update(BROWSER_REALTIME_SCRIPT).digest('hex').slice(0, 16)
 
 // The whole UI catalog per locale as an immutable cached asset; inline page scripts get their own subset in <head>.
-const I18N_ASSETS = new Map(LOCALES.map(info => [info.tag, clientI18nAsset(info.tag)]))
-const I18N_ASSET_VERSION = createHash('sha256').update([...I18N_ASSETS.values()].join('\n')).digest('hex').slice(0, 16)
+// Built on first use, after panel start installed any uploaded catalogs; the version changes with their content.
+let i18nAssets: { bodies: ReadonlyMap<Locale, string>; version: string } | undefined
+const I18N_ASSETS = (): { bodies: ReadonlyMap<Locale, string>; version: string } => i18nAssets ??= (() => {
+  const bodies = new Map(LOCALES.map(info => [info.tag, clientI18nAsset(info.tag)]))
+  return { bodies, version: createHash('sha256').update([...bodies.values()].join('\n')).digest('hex').slice(0, 16) }
+})()
 
 const PUBLIC_STATIC_ASSETS: Readonly<Record<string, { body: string; contentType: string }>> = {
+  ...TERMINAL_EMULATOR_ASSETS,
   '/assets/favicon-xpanel.svg': { body: LOGIN_FAVICONS.xpanel, contentType: 'image/svg+xml; charset=utf-8' },
   '/assets/favicon-xwhm.svg': { body: LOGIN_FAVICONS.xwhm, contentType: 'image/svg+xml; charset=utf-8' },
   '/assets/favicon-xmail.svg': { body: LOGIN_FAVICONS.xmail, contentType: 'image/svg+xml; charset=utf-8' },
@@ -461,7 +470,6 @@ const PUBLIC_STATIC_ASSETS: Readonly<Record<string, { body: string; contentType:
     body: DESIGN_TOKENS_CSS,
     contentType: 'text/css; charset=utf-8',
   },
-  ...Object.fromEntries([...I18N_ASSETS].map(([tag, body]) => [`/assets/i18n-${tag}.js`, { body, contentType: 'application/javascript; charset=utf-8' }])),
 }
 
 /**
@@ -470,9 +478,10 @@ const PUBLIC_STATIC_ASSETS: Readonly<Record<string, { body: string; contentType:
  */
 export function serveStaticAsset(pathname: string): Response | null {
   if (pathname !== '/favicon.ico' && pathname !== '/assets' && !pathname.startsWith('/assets/')) return null
-  const asset = Object.prototype.hasOwnProperty.call(PUBLIC_STATIC_ASSETS, pathname)
-    ? PUBLIC_STATIC_ASSETS[pathname]
-    : undefined
+  const i18nTag = /^\/assets\/i18n-([A-Za-z0-9-]+)\.js$/.exec(pathname)?.[1]
+  const i18nBody = i18nTag ? I18N_ASSETS().bodies.get(i18nTag as Locale) : undefined
+  const asset = i18nBody !== undefined ? { body: i18nBody, contentType: 'application/javascript; charset=utf-8' }
+    : Object.prototype.hasOwnProperty.call(PUBLIC_STATIC_ASSETS, pathname) ? PUBLIC_STATIC_ASSETS[pathname] : undefined
   if (!asset) {
     return new Response('Not Found', {
       status: 404,

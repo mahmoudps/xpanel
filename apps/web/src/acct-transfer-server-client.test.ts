@@ -37,7 +37,7 @@ describe('whole-server migration page', () => {
     const send = vi.fn(async (method: string, path: string, body?: unknown) => {
       if (path === '/api/transfers/credentials' && method === 'GET') return listView(items)
       if (path === '/api/transfers/credentials' && method === 'POST') { const created = { ...credential(3), label: (body as { label: string }).label }; items = [...items, created]; return listView(items, created.id) }
-      if (path === '/api/transfers/sessions' && method === 'GET') return { sessions: [session()], archiveReviews: [], capabilities: { discover: true, execute: false, archiveReview: true, archiveMaxBytes: 524288 } }
+      if (path === '/api/transfers/sessions' && method === 'GET') return { sessions: [session()], cpanelImports: [], capabilities: { discover: true, execute: false, cpanelImport: false, cpanelUploadMaxBytes: 0 } }
       if (method === 'PATCH') return { ...session(), session: { ...session().session, state: 'selected', selection: (body as { accounts: string[]; plans: string[] }) }, revision: '2'.repeat(64) }
       throw { status: 404 }
     })

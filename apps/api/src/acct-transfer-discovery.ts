@@ -13,7 +13,7 @@ export const TRANSFER_SOURCE_TIMEOUT_MS = 15_000
 export const TRANSFER_SOURCE_MAX_BYTES = 8 * 1024 * 1024
 const MAX_ACCOUNTS = 5000
 export interface TransferSourceReply { status: number; contentType: string | null; body: string }
-export interface TransferSourceRequest { url: string; token: string; tlsFingerprint: string | null; timeoutMs: number; maxBytes: number; method?: 'GET' | 'POST'; body?: string }
+export interface TransferSourceRequest { url: string; token: string; tlsFingerprint: string | null; timeoutMs: number; maxBytes: number; method?: 'GET' | 'POST' | 'DELETE'; body?: string }
 /** One bounded HTTPS request; the token travels only in the Authorization header and only after the peer is authenticated. */
 export type TransferSourceTransport = (input: TransferSourceRequest) => Promise<TransferSourceReply>
 export interface TransferSourceStream { status: number; contentType: string | null; body: AsyncIterable<Uint8Array> }

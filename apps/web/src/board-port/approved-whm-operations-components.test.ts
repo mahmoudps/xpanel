@@ -61,7 +61,8 @@ describe('approved native operations component supplement', () => {
     }
     for (const value of ['accept', 'drop', 'reject']) assert.match(html, new RegExp(`name="action" value="${value}" required`))
     const position = inputs(html).find(item => item.includes('name="position"'))!
-    assert.match(position, /\bdisabled\b/)
+    assert.doesNotMatch(position, /\bdisabled\b/)
+    assert.match(html, /<option value="top">At the top<\/option>/)
     assert.match(html, /value="end" selected/)
     assert.match(html, /type="submit">Check and save/)
     assert.doesNotMatch(html, /data-endpoint|\/api\/|sessionIp|value="203\.0\.113\.7"/)
@@ -80,7 +81,10 @@ describe('approved native operations component supplement', () => {
     assert.match(html, /No saved address rules/)
     assert.match(html, /live ban set and its timeouts have not been read/)
     assert.match(html, /<h3>Banned <span class="xp-help">\(Not read\)<\/span>/)
-    for (const title of ['Upload prefix list', 'Replace file', 'Unban', 'Import JSON', 'Export JSON', 'What a save does', 'Edit', 'Discard']) assert.ok(html.includes(title), title)
+    for (const title of ['Upload prefix list', 'Replace file', 'Unban', 'Import JSON', 'Export JSON', 'What a save does']) assert.ok(html.includes(title), title)
+    assert.match(html, /data-firewall-action="import"/)
+    assert.match(html, /data-firewall-action="export"/)
+    assert.doesNotMatch(html, /not connected in this view|not exposed by the HTTP API/)
     for (const name of ['firewall-prefix-name', 'firewall-prefix-file', 'firewall-prefix-ports', 'firewall-prefix-action', 'firewall-unban-address', 'firewall-import-file', 'firewall-import-json']) {
       assert.match(inputs(html).find(input => input.includes(`name="${name}"`))!, /\bdisabled\b/, name)
     }

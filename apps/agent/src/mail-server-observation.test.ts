@@ -75,7 +75,7 @@ describe('mail server observation', () => {
     expect(view).toMatchObject({ observedAt: '2026-10-27T10:00:00.000Z', postfix: { state: 'read' }, master: { state: 'read' }, dovecot: { state: 'read' } })
     expect(view.postfix.settings).toEqual({ myhostname: 'host.example.test', inet_interfaces: 'all', compatibility_level: '3.6', smtpd_relay_restrictions: 'permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination',
       relayhost: '[smtp.relay.example]:587', mydestination: '', virtual_mailbox_domains: 'texthash:/etc/postfix/xpanel/virtual_domains', alias_maps: 'hash:/etc/aliases', message_size_limit: '52428800' })
-    expect(view.dovecot.settings).toEqual({ protocols: 'imap pop3 lmtp', listen: '*, ::', ssl: 'required', ssl_min_protocol: 'TLSv1.2', mail_location: null, auth_mechanisms: 'plain login' })
+    expect(view.dovecot.settings).toEqual({ protocols: 'imap pop3 lmtp', listen: '*, ::', ssl: 'required', ssl_min_protocol: 'TLSv1.2', ssl_cipher_list: null, ssl_prefer_server_ciphers: null, ssl_server_prefer_ciphers: null, ssl_cert: null, ssl_key: null, ssl_server_cert_file: null, ssl_server_key_file: null, mail_location: null, auth_mechanisms: 'plain login' })
     expect(JSON.stringify(view)).not.toMatch(/S3cretPass|relayuser|sasl_password|smtp_sasl_auth_enable/)
   })
   it('marks each failed or malformed source unavailable without inventing values', async () => {
@@ -87,7 +87,12 @@ describe('mail server observation', () => {
     const long = await readMailServerObservation({ run: host({ '/usr/sbin/postconf -n': ok('relayhost = ' + 'x'.repeat(5000)) }), now })
     expect(long.postfix.reason).toBe('malformed_output')
     const none = await readMailServerObservation({ run: async () => { throw new Error('missing') }, now })
-    expect(none.dovecot).toEqual({ state: 'unavailable', reason: 'command_failed', settings: { protocols: null, listen: null, ssl: null, ssl_min_protocol: null, mail_location: null, auth_mechanisms: null } })
+    expect(none.dovecot).toEqual({ state: 'unavailable', reason: 'command_failed', settings: { protocols: null, listen: null, ssl: null, ssl_min_protocol: null, ssl_cipher_list: null, ssl_prefer_server_ciphers: null, ssl_server_prefer_ciphers: null, ssl_cert: null, ssl_key: null, ssl_server_cert_file: null, ssl_server_key_file: null, mail_location: null, auth_mechanisms: null } })
+  })
+  it('keeps certificate and key settings only as file references, for Dovecot 2.3 and 2.4 names', async () => {
+    const view = await readMailServerObservation({ run: host({ '/usr/bin/doveconf -h ssl_cert': ok('</etc/xpanel/ssl/c1/fullchain.pem\n'), '/usr/bin/doveconf -h ssl_key': ok('# hidden, use -P to show it\n'),
+      '/usr/bin/doveconf -h ssl_server_cert_file': ok('-----BEGIN CERTIFICATE-----\n'), '/usr/bin/doveconf -h ssl_server_key_file': ok('/etc/xpanel/ssl/c1/privkey.pem\n') }), now })
+    expect(view.dovecot.settings).toMatchObject({ ssl_cert: '</etc/xpanel/ssl/c1/fullchain.pem', ssl_key: null, ssl_server_cert_file: null, ssl_server_key_file: '/etc/xpanel/ssl/c1/privkey.pem' })
   })
   it('drops multi-line or control-character doveconf values', async () => {
     const view = await readMailServerObservation({ run: host({ '/usr/bin/doveconf -h protocols': ok('imap\npop3\n'), '/usr/bin/doveconf -h ssl': ok('yes\u001b[0m\n') }), now })

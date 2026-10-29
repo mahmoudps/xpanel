@@ -51,7 +51,7 @@ const panelFixture: PanelSurfaceProps = {
 const whmFixture: WhmSurfaceProps = {
   catalog: qualifyHostTools(tools, { executor: 'linux', probes: { 'control-plane': 'passed' } }),
   principal: { kind: 'root', id: 'fixture-root', username: 'synthetic-root' }, hostname: 'srv1.xpanel.test', adminSessionIp: '203.0.113.7',
-  ioSnapshot: SYNTHETIC_WHM_IO_SNAPSHOT, accounts: [fixtureAccount, { ...fixtureAccount, id: 'fixture-other', username: 'omar', uid: 20016, gid: 20016 }], plans: [fixturePlan],
+  accounts: [fixtureAccount, { ...fixtureAccount, id: 'fixture-other', username: 'omar', uid: 20016, gid: 20016 }], plans: [fixturePlan],
   featureLists: [fixtureFeatureList],
   services: ['nginx', 'apache', 'php-fpm', 'mariadb', 'dovecot', 'postfix', 'pdns', 'nftables'].map(name => ({ name, unit: `${name}.service`, version: 'fixture', active: true, enabled: true, rssMb: 24, role: 'Synthetic observation' })),
   resellers: [{ id: 'fixture-reseller', username: 'fixture-reseller', acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 10240, totalBandwidthMb: 102400, oversell: false, nameservers: [], delegatedIps: [] }],
@@ -166,10 +166,10 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     const screens = ['/whm/monitoring/io', '/whm/services', '/whm/plans', '/whm/accounts', '/whm/resellers', '/whm/server/ips', '/whm/email/outbound', '/whm/security/firewall', '/whm/panel/data', '/whm/audit', '/whm/transfers'].map(route => whmAt(route))
     const html = screens.join('\n')
     assert.match(html, /data-surface="xwhm"/)
-    // Real-time Server IO Monitor & cgroup v2 slice rankings
-    assert.match(html, /data-surface-widget="io-monitor"/)
-    assert.match(html, /xpanel-20014\.slice/)
-    assert.match(html, /xpanel-20016\.slice/)
+    // Server IO monitor: the metering workspace reads the cached per-account cgroup v2 sample in the browser
+    assert.match(html, /data-whm-metering="io" data-metering-can-read="true"/)
+    assert.match(html, /data-whm-metering-rows="io"/)
+    assert.match(html, /data-whm-metering-rows="devices"/)
     // Managed services health table
     for (const svc of ['nginx', 'apache', 'php-fpm', 'mariadb', 'dovecot', 'postfix', 'pdns', 'nftables']) {
       assert.match(html, new RegExp(`data-service-row="${svc}"`))
@@ -316,10 +316,10 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     assert.match(html, /0777/)
     assert.match(html, /data-action="restore-file"[^>]*>Restore<\/button>/)
     // Jailed Shell Terminal
-    assert.match(html, /data-terminal-output=""/)
-    assert.match(html, /data-terminal-execution="unavailable"/)
-    assert.doesNotMatch(html, /data-terminal-form/)
-    assert.match(html, /No terminal session has started/)
+    // The fixture has no signed-in owner, so the workspace renders but cannot open a shell.
+    assert.match(html, /data-terminal-workspace data-terminal-kind="account" data-terminal-can-use="false"/)
+    assert.doesNotMatch(html, /data-terminal-output|data-terminal-execution/)
+    assert.match(html, /The account terminal is unavailable here\. Nothing was opened\./)
     assertAllBadgesHaveSvgAndLabel(html)
 
     // Verify honest disabled state when plan.shell === 'none'
@@ -357,7 +357,8 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
         defaultMailboxQuotaMb: 512,
       },
     })
-    assert.match(noShellHtml, /data-terminal-disabled="true"/)
+    assert.match(noShellHtml, /data-terminal-can-use="false"/)
+    assert.match(noShellHtml, /Terminal access is disabled on your current plan\./)
   })
 
   it('renders xMail three-pane webmail, Sieve filter rules, Vacation autoresponder, and mailbox quota meter', () => {
@@ -381,7 +382,7 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
       ['/whm/email/outbound', whmAt, 'data-mail-ip-config-form="true"', ['data-ip-pool-table="true"', 'data-add-ip-form="true"']],
       ['/domains', panelAt, 'data-domains-table="true"', ['data-userdata-form="true"', 'data-file-manager-table="true"']],
       ['/domains/site-settings', panelAt, 'data-userdata-form="true"', ['data-domains-table="true"', 'data-file-manager-table="true"']],
-      ['/files/manager', panelAt, 'data-file-manager-table="true"', ['data-domains-table="true"', 'data-terminal-output=']],
+      ['/files/manager', panelAt, 'data-file-manager-table="true"', ['data-domains-table="true"', 'data-terminal-workspace']],
       ['/mail/inbox', mailAt, 'data-mail-pane="message-list"', ['data-compose-form="true"', 'data-section="sieve-filters"']],
       ['/mail/compose', mailAt, 'data-compose-form="true"', ['data-mail-pane="message-list"', 'data-section="vacation-autoresponder"']],
       ['/mail/settings/filters', mailAt, 'data-section="sieve-filters"', ['data-compose-form="true"', 'data-section="vacation-autoresponder"']],
@@ -395,7 +396,7 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     for (const render of [whmAt, panelAt, mailAt]) {
       const html = render('/unimplemented-synthetic-route')
       assert.match(html, /data-screen="unavailable"/)
-      assert.doesNotMatch(html, /<form\b|data-terminal-output=/)
+      assert.doesNotMatch(html, /<form\b|data-terminal-workspace/)
     }
     for (const [html, title] of [[panelAt('/home'), 'Home'], [panelAt('/domains'), 'Domains'], [whmAt('/whm/accounts/new'), 'Create account']]) {
       const headings = [...html!.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/g)].map(match => match[1]!.replace(/<[^>]*>/g, '').trim())
@@ -407,7 +408,17 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
   it('keeps missing provider observations empty and never invents a session or measurement', () => {
     assert.match(panelAt('/domains/site-settings', { customConfig: undefined }), /data-screen="unavailable"/)
     assert.match(panelAt('/metrics/traffic', { websiteAnalytics: undefined }), /data-screen="unavailable"/)
-    assert.match(whmAt('/whm/monitoring/io', { ioSnapshot: undefined }), /data-screen="unavailable"/)
+    // No sample is rendered on the server: every IO fact and row says it was not read, nothing is shown as a measurement.
+    const io = whmAt('/whm/monitoring/io')
+    assert.match(io, /data-whm-metering="io"/)
+    assert.match(io, /data-whm-metering-status data-state="unread"/)
+    const facts = [...io.matchAll(/data-whm-metering-fact="([a-z]+)">([^<]*)</g)]
+    assert.deepEqual(facts.map(match => match[1]), ['observed', 'read', 'write', 'iops', 'latency', 'pressure', 'host'])
+    assert.ok(facts.every(match => match[2] === 'Not read'))
+    assert.match(io, /No account resources have been read\./)
+    assert.match(io, /No disk devices have been read\./)
+    assert.doesNotMatch(io, /MiB\/s|IOPS<\/bdi>|xpanel-\d+\.slice|% CPU/)
+    assert.doesNotMatch(whmAt('/whm/monitoring/io', { principal: undefined }), /data-metering-can-read="true"/)
     assert.match(whmAt('/whm/email/outbound', { mailIpConfig: undefined }), /data-screen="unavailable"/)
     const emptyMail = mailAt('/mail/inbox', { messages: [] })
     // Inert client <template> rows are not rendered observations.
@@ -415,8 +426,8 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     assert.match(emptyMail, /data-mail-pane="empty"/)
     assert.doesNotMatch(emptyMailRendered, /data-mail-uid=|Synthetic message/)
     const terminal = panelAt('/advanced/terminal')
-    assert.match(terminal, /No terminal session has started/)
-    assert.doesNotMatch(terminal, /data-terminal-output="[^"\s]+"/)
+    assert.match(terminal, /data-terminal-status data-state="(?:closed|unavailable)"/)
+    assert.doesNotMatch(terminal, /Session open/)
     const trash = panelAt('/files/trash')
     assert.match(trash, /data-file-path="\/home\/alice\/\.trash\/trashed-fixture\.txt"/)
     assert.doesNotMatch(trash, /data-file-path="\/home\/alice\/public_html\/fixture\.txt"/)

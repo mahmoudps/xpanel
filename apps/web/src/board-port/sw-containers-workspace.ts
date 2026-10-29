@@ -17,7 +17,7 @@ export function renderSwContainersWorkspace(input: Input): string {
     ${engineFacts(t)}
     <div class="xp-whm-detail-actions"><button type="button" class="xp-btn" data-sw-refresh${input.canRead ? '' : ' disabled'}>${t('Read containers')}</button><a class="xp-btn" href="/whm/software/catalog${lang}">${t('Install an engine')}</a><a class="xp-btn" href="/whm/software/containers/engine${lang}">${t('Engine settings')}</a></div>
     <p class="xp-whm-detail-status" role="status" data-sw-status data-state="unread">${t('Containers have not been read.')}</p>
-    <p class="xp-help">${t('Rootless containers that accounts run under their own users are not read here; per-account observation needs a confined account runner.')}</p>
+    <p class="xp-help">${t('Rootless containers that accounts run under their own users are managed by each account on its Containers page and are not listed here.')}</p>
   </section>
   <section class="xp-whm-detail-card" aria-labelledby="sw-containers-list"><h2 id="sw-containers-list">${t('Containers')}</h2>
     <div class="xp-whm-detail-fields"><div class="xp-whm-detail-field"><label for="sw-containers-engine">${t('Engine')}</label><select id="sw-containers-engine" class="xp-select" data-sw-filter-engine disabled><option value="">${t('All engines')}</option><option value="podman">Podman</option><option value="docker">Docker</option></select></div><div class="xp-whm-detail-field"><label for="sw-containers-search">${t('Search containers')}</label><input id="sw-containers-search" class="xp-input" type="search" dir="ltr" data-sw-filter-search disabled></div></div>

@@ -24,7 +24,7 @@ describe('existing reverse-proxy presentation remains inert without a provider',
     await assertInertBinding(renderAccountReverseProxyWorkspace({ lang, accountId: '', home: '', canManage: false }), lang)
   })
 
-  it.each([['en', true], ['en', false], ['ar', true], ['ar', false]] as const)('keeps the shared %s presentation inert with readOnly=%s despite qualified fixture metadata', async (lang, readOnly) => {
+  it.each([['en', true], ['en', false], ['ar', true], ['ar', false]] as const)('opens the %s workspace for the owner only outside read-only mode (readOnly=%s) on a qualified catalog', async (lang, readOnly) => {
     const account = { id: accountId, username: 'privateowner', home: '/home/privateowner', status: 'active', primaryDomain: 'private.example.test' } as Account
     const domain = { id: '33333333-3333-4333-8333-333333333333', accountId, name: account.primaryDomain, docRoot: '/home/privateowner/public_html' } as Domain
     const html = renderApprovedXpanelWorkspace({ route: '/domains/reverse-proxy', locale: lang, readOnly, account, domains: [domain], activeDomain: domain.name,
@@ -32,8 +32,15 @@ describe('existing reverse-proxy presentation remains inert without a provider',
     document.body.innerHTML = html
     expect(document.querySelectorAll('h1')).toHaveLength(1)
     const wrapper = document.querySelector<HTMLElement>('[data-approved-xpanel-workspace="/domains/reverse-proxy"]')!
-    expect(wrapper.dataset.workspaceMode).toBe('read-only'); expect(wrapper.dataset.wiring).toBe('unavailable'); expect(wrapper.dataset.capabilityUnavailable).toBe('true')
-    for (const value of [accountId, domain.id, account.username, account.home, domain.name, 'private-native-metadata']) expect(html).not.toContain(value)
+    expect(html).not.toContain('private-native-metadata')
+    if (!readOnly) {
+      const root = document.querySelector<HTMLElement>('[data-reverse-proxy]')!
+      expect(wrapper.dataset.workspaceMode).toBe('connected'); expect(wrapper.dataset.wiring).toBeUndefined()
+      expect(root.dataset.rpAccount).toBe(accountId); expect(root.dataset.rpHome).toBe(account.home); expect(root.dataset.rpManage).toBe('true')
+      return
+    }
+    expect(wrapper.dataset.workspaceMode).toBe('read-only'); expect(wrapper.dataset.wiring).toBe('soon')
+    for (const value of [accountId, domain.id, account.username, account.home, domain.name]) expect(html).not.toContain(value)
     await assertInertBinding(html, lang)
   })
 })

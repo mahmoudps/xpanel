@@ -5,11 +5,12 @@ import { isMailboxPrincipal } from './authorization.ts'
 import { readReply } from './backup-file-restore-workspace.ts'
 import type { BackupFileRestoreWorkspacePorts } from './backup-file-restore-workspace.ts'
 import { MAX_RESTORE_FILES, RESTORE_REVISION } from '../../agent/src/backup-file-restore-request.ts'
-import { archivedMessageMailbox, MAILBOX_ADDRESS, MAX_LISTED_MAILBOXES, parseComponentRestoreRequest } from '../../agent/src/acct-restore-request.ts'
+import { archivedMessageMailbox, BACKUP_DATABASE_NAME, MAILBOX_ADDRESS, MAX_LISTED_MAILBOXES, parseComponentRestoreRequest } from '../../agent/src/acct-restore-request.ts'
+import { isBackupZoneName, readBackupRunLedger } from '../../agent/src/acct-backup-plan.ts'
 import type { ComponentRestoreRequest } from '../../agent/src/acct-restore-request.ts'
 
 export type ComponentRestoreWorkspacePorts = Omit<BackupFileRestoreWorkspacePorts, 'visibleAccounts'>
-const ROUTE = /^\/api\/backups\/components\/([a-z][a-z0-9]{0,15})\/(inventory|preview|restore)$/
+const ROUTE = /^\/api\/backups\/components\/([a-z][a-z0-9]{0,15})\/(inventory|preview|restore|parts)$/
 const unchanged = { stateChanged: false }
 const STATES = ['restored', 'skipped-exists', 'failed', 'not-attempted'] as const
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -26,17 +27,27 @@ const readBody = async (req: Request): Promise<unknown> => {
 /** The agent reply must stay bound to the selected account, archive, mailboxes and reviewed revision. */
 export function verifiedComponentReply(request: ComponentRestoreRequest, value: unknown, account: Account): boolean {
   if (!object(value) || !exact(value.context, ['accountId', 'username']) || value.context.accountId !== account.id || value.context.username !== account.username) return false
+  const owned = (name: unknown): boolean => typeof name === 'string' && BACKUP_DATABASE_NAME.test(name) && name.startsWith(account.username + '_')
+  const same = (list: unknown, expected: readonly string[]): boolean => Array.isArray(list) && list.length === expected.length && list.every((name, index) => name === expected[index])
+  if (request.op === 'parts') return exact(value, ['context', 'archive', 'restoreId', 'state', 'databases', 'zones']) && exact(value.archive, ['file', 'sha256']) && value.archive.file === request.file && value.archive.sha256 === request.expectedArchiveSha256
+    && typeof value.restoreId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.restoreId) && value.state === 'running' && same(value.databases, request.databases) && same(value.zones, request.zones)
+  const parts = (list: unknown, valid: (name: unknown) => boolean): boolean => Array.isArray(list) && list.length <= 1000 && list.every(row => exact(row, ['name', 'bytes', 'current']) && valid(row.name) && count(row.bytes) && (row.current === 'exists' || row.current === 'missing'))
+  const state = (raw: unknown, items: unknown): boolean => ['available', 'unavailable', 'not-in-archive'].includes(raw as string) && Array.isArray(items) && (raw === 'not-in-archive') === (items.length === 0)
   const archive = value.archive
   if (!object(archive) || archive.file !== request.file || archive.integrity !== 'verified' || typeof archive.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(archive.sha256) || !count(archive.bytes)) return false
   if (request.op === 'inventory') {
     const c = value.components
     if (!exact(c, ['files', 'mail', 'mailSettings', 'databases', 'dns']) || !exact(c.files, ['state', 'files', 'bytes']) || c.files.state !== 'available' || !count(c.files.files) || !count(c.files.bytes)
       || !exact(c.mailSettings, ['state', 'files']) || c.mailSettings.state !== 'not-restorable' || !count(c.mailSettings.files)
-      || !exact(c.databases, ['state']) || c.databases.state !== 'not-in-archive' || !exact(c.dns, ['state']) || c.dns.state !== 'not-in-archive'
+      || !exact(c.databases, ['state', 'databases', 'restores']) || !state(c.databases.state, c.databases.databases) || !parts(c.databases.databases, owned)
+      || !Array.isArray(c.databases.restores) || c.databases.restores.length > 5 || !exact(c.dns, ['state', 'zones']) || !state(c.dns.state, c.dns.zones) || !parts(c.dns.zones, isBackupZoneName)
       || !exact(c.mail, ['state', 'mailboxes', 'truncated']) || !['available', 'unavailable'].includes(c.mail.state as string) || typeof c.mail.truncated !== 'boolean' || !Array.isArray(c.mail.mailboxes) || c.mail.mailboxes.length > MAX_LISTED_MAILBOXES) return false
+    // Restore records are ledger rows of this account only; the strict ledger reader rejects anything else.
+    try { if (readBackupRunLedger({ version: 1, lastScheduledAt: null, runs: [], recoveries: [], restores: c.databases.restores }).restores.some(item => item.username !== account.username)) return false } catch { return false }
     return new Set(c.mail.mailboxes.map(box => object(box) ? box.address : null)).size === c.mail.mailboxes.length
       && c.mail.mailboxes.every(box => exact(box, ['address', 'messages', 'bytes', 'current']) && typeof box.address === 'string' && MAILBOX_ADDRESS.test(box.address) && count(box.messages) && count(box.bytes) && (box.current === 'exists' || box.current === 'missing'))
   }
+  if (!('mailboxes' in request)) return false
   const selected = new Set(request.mailboxes)
   const mine = (path: unknown): boolean => typeof path === 'string' && selected.has(archivedMessageMailbox(path) ?? '')
   if (!Array.isArray(value.mailboxes) || value.mailboxes.length !== request.mailboxes.length || value.mailboxes.some((item, index) => item !== request.mailboxes[index]) || typeof value.revision !== 'string' || !RESTORE_REVISION.test(value.revision)) return false
@@ -73,7 +84,7 @@ export async function handleComponentRestoreWorkspaceRoute(req: Request, url: UR
   const request = parseComponentRestoreRequest(op, first.account.username, await readBody(req))
   if (!ports.callAgent) return fail('PRECONDITION_FAILED', 'privileged host agent is not connected', unchanged)
   let caller = first.caller
-  if (request.op === 'restore') {
+  if (request.op === 'restore' || request.op === 'parts') {
     // Fresh authority immediately before the mutation; the agent re-checks again inside its account lease.
     const fresh = await authorize()
     if (fresh.account.id !== first.account.id || fresh.account.uid !== first.account.uid || fresh.account.home !== first.account.home || fresh.caller.principal.id !== first.caller.principal.id) return fail('CONFLICT', 'the account or administrator changed before the restore', unchanged)
@@ -83,8 +94,8 @@ export async function handleComponentRestoreWorkspaceRoute(req: Request, url: UR
   const response = await ports.callAgent('/accounts/' + first.account.username + '/backup-components/' + op, { caller, method: 'POST', body })
   if (response.status !== 200) return response
   const value = await readReply(response)
-  if (!verifiedComponentReply(request, value, first.account)) return request.op === 'restore'
-    ? fail('PRECONDITION_FAILED', 'the mail restore outcome requires review; inspect the mailboxes', { stateChanged: true, verificationRequired: true })
+  if (!verifiedComponentReply(request, value, first.account)) return request.op === 'restore' || request.op === 'parts'
+    ? fail('PRECONDITION_FAILED', request.op === 'parts' ? 'the part restore outcome requires review; inspect the audit log' : 'the mail restore outcome requires review; inspect the mailboxes', { stateChanged: true, verificationRequired: true })
     : fail('PRECONDITION_FAILED', 'the host backup response could not be verified', unchanged)
   return json(value)
 }

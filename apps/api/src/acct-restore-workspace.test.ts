@@ -11,10 +11,12 @@ const alice = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', username: 'alice', u
 const context = { accountId: alice.id, username: 'alice' }
 const archive = { file: FILE, bytes: 100, sha256: SHA, createdAt: '2026-10-26T10:00:00Z', integrity: 'verified' }
 const components = { files: { state: 'available', files: 1, bytes: 3 }, mail: { state: 'available', truncated: false, mailboxes: [{ address: BOX, messages: 1, bytes: 11, current: 'exists' }] },
-  mailSettings: { state: 'not-restorable', files: 0 }, databases: { state: 'not-in-archive' }, dns: { state: 'not-in-archive' } }
+  mailSettings: { state: 'not-restorable', files: 0 }, databases: { state: 'not-in-archive', databases: [], restores: [] }, dns: { state: 'not-in-archive', zones: [] } }
+const RESTORE_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
 const replies: Record<string, unknown> = {
   inventory: { context, archive, components },
   preview: { context, archive, mailboxes: [BOX], rows: [{ path: MESSAGE, bytes: 11 }], counts: { messages: 1, present: 0, batch: 1, remaining: 0, refused: 0 }, quota: { limitMb: 'unlimited', plannedBytes: 11, fits: true }, writer: 'available', limits: {}, revision: REVISION },
+  parts: { context, archive: { file: FILE, sha256: SHA }, restoreId: RESTORE_ID, state: 'running', databases: ['alice_wp'], zones: ['alice.example.test'] },
   restore: { context, archive, mailboxes: [BOX], results: [{ path: MESSAGE, bytes: 11, result: 'restored', reason: null, verificationRequired: false }], counts: { restored: 1, 'skipped-exists': 0, failed: 0, 'not-attempted': 0 }, createdDirectories: 0, complete: true, remaining: 0, verificationRequired: false, revision: REVISION },
 }
 const ports = (overrides: Partial<ComponentRestoreWorkspacePorts> = {}, reply: (op: string) => unknown = op => replies[op]) => {
@@ -54,7 +56,9 @@ describe('WHM component restore API', () => {
   })
   it('rejects agent replies bound to another account, archive or mailbox', async () => {
     for (const reply of [{ ...replies.inventory as object, context: { ...context, username: 'bob' } }, { ...replies.inventory as object, archive: { ...archive, file: 'xpanel-backup-alice-20261027T100000Z.tar.gz' } },
-      { ...replies.inventory as object, components: { ...components, databases: { state: 'available' } } }])
+      { ...replies.inventory as object, components: { ...components, databases: { state: 'available' } } },
+      { ...replies.inventory as object, components: { ...components, databases: { state: 'available', databases: [{ name: 'bob_wp', bytes: 1, current: 'exists' }], restores: [] } } },
+      { ...replies.inventory as object, components: { ...components, databases: { state: 'available', databases: [{ name: 'alice_wp', bytes: 1, current: 'exists' }], restores: [{ id: RESTORE_ID, actor: 'root', username: 'bob', file: 'xpanel-backup-bob-20261026T100000Z.tar.gz', startedAt: '2026-10-26T10:00:00.000Z', finishedAt: null, state: 'running', items: [{ database: 'bob_wp', bytes: null, result: 'not-attempted', reason: 'interrupted' }] }] } } }])
       expect(await code(call(ports({}, () => reply).value, 'inventory', { file: FILE }))).toBe('PRECONDITION_FAILED')
     const other = { ...replies.preview as object, rows: [{ path: 'mail/alice.example.test/other/cur/1', bytes: 1 }] }
     expect(await code(call(ports({}, () => other).value, 'preview', { file: FILE, mailboxes: [BOX] }))).toBe('PRECONDITION_FAILED')
@@ -66,5 +70,22 @@ describe('WHM component restore API', () => {
     const stale = { ...replies.restore as object, revision: 'c'.repeat(64) }
     const error = await call(ports({}, () => stale).value, 'restore', { file: FILE, mailboxes: [BOX], expectedRevision: REVISION }).catch(failure => failure)
     expect(error).toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: true, verificationRequired: true } })
+  })
+  it('forwards a part restore with fresh authority and accepts only a reply bound to the reviewed archive, databases and zones', async () => {
+    const dumps = { state: 'available', databases: [{ name: 'alice_wp', bytes: 10, current: 'exists' }], restores: [{ id: RESTORE_ID, actor: 'root', username: 'alice', file: FILE, startedAt: '2026-10-26T10:00:00.000Z', finishedAt: '2026-10-26T10:01:00.000Z', state: 'finished', items: [{ part: 'database', name: 'alice_wp', bytes: 10, result: 'restored', reason: null }] }] }
+    expect((await (await call(ports({}, () => ({ ...replies.inventory as object, components: { ...components, databases: dumps } })).value, 'inventory', { file: FILE }))!.json()).components.databases).toEqual(dumps)
+    const zones = { state: 'available', zones: [{ name: 'alice.example.test', bytes: 50, current: 'exists' }] }
+    expect((await (await call(ports({}, () => ({ ...replies.inventory as object, components: { ...components, dns: zones } })).value, 'inventory', { file: FILE }))!.json()).components.dns).toEqual(zones)
+    await expect(call(ports({}, () => ({ ...replies.inventory as object, components: { ...components, dns: { state: 'available', zones: [{ name: '../x', bytes: 1, current: 'exists' }] } } })).value, 'inventory', { file: FILE })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+    const { value, forwarded } = ports()
+    const request = { file: FILE, databases: ['alice_wp'], zones: ['alice.example.test'], expectedArchiveSha256: SHA }
+    expect(await (await call(value, 'parts', request))!.json()).toMatchObject({ restoreId: RESTORE_ID, state: 'running' })
+    expect(forwarded).toEqual([{ path: '/accounts/alice/backup-components/parts', body: request }])
+    expect(value.requireCaller).toHaveBeenCalledTimes(2)
+    expect(await code(call(value, 'parts', { ...request, databases: ['bob_wp'] }))).toBe('VALIDATION')
+    for (const reply of [{ ...replies.parts as object, archive: { file: FILE, sha256: 'c'.repeat(64) } }, { ...replies.parts as object, databases: ['alice_shop'] }, { ...replies.parts as object, zones: [] }, { ...replies.parts as object, state: 'finished' }]) {
+      const error = await call(ports({}, () => reply).value, 'parts', request).catch(failure => failure)
+      expect(error).toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: true, verificationRequired: true } })
+    }
   })
 })

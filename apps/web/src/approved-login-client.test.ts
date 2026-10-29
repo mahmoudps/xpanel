@@ -50,7 +50,7 @@ const harness = (options: { disabled?: boolean; state?: string; ar?: boolean } =
       getElementById: (id: string) => ({ 'login-otp': inputs.totpCode, 'login-recovery-code': inputs.recoveryCode, 'login-password': inputs.password }[id] ?? null),
       addEventListener: (name: string, handler: (event: unknown) => Promise<void> | void) => listeners.set(name, handler),
     },
-    window, URL, Date, AbortController, setTimeout: () => 1, clearTimeout: () => undefined,
+    window, URL, Blob, Date, AbortController, setTimeout: () => 1, clearTimeout: () => undefined,
     fetch: async (url: string, init: { method: string; body?: string }) => {
       requests.push({ method: init.method, url, body: init.body })
       const response = responses.shift() ?? { status: 500, body: { message: 'unexpected test request' } }
@@ -194,7 +194,7 @@ describe('server lockout timestamp presentation', () => {
             status: 401, headers: { 'content-type': 'application/json' },
           })
         }
-        runInNewContext(LOGIN_CLIENT_SCRIPT, { xpT, msgid, msgctxt, document, window, URL, AbortController, Date: ClientDate, setTimeout, clearTimeout, fetch })
+        runInNewContext(LOGIN_CLIENT_SCRIPT, { xpT, msgid, msgctxt, document, window, URL, Blob, AbortController, Date: ClientDate, setTimeout, clearTimeout, fetch })
         const username = window.document.querySelector<HTMLInputElement>('#login-username')!
         const password = window.document.querySelector<HTMLInputElement>('#login-password')!
         const submit = window.document.querySelector<HTMLButtonElement>('[data-login-form] button[type="submit"]')!

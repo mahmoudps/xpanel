@@ -77,6 +77,47 @@ export interface UpgradeStepLog {
 export type UpgradeHostOutcome = 'succeeded' | 'failed' | 'rolled_back' | 'rollback_failed'
 export type UpgradeOutcome = 'refused' | 'retirement_pending' | UpgradeHostOutcome
 
+/**
+ * Automatic rewind after a failed switch, journaled in `upgrade-<recordId>.rewind.json`.
+ * started -> verified | failed (a step or the snapshot was refused; `done` lists what was restored)
+ * | unknown (restored but the health checks did not prove it: operator action required).
+ */
+export type RewindState = 'rewind-started' | 'rewind-verified' | 'rewind-failed' | 'rewind-unknown'
+export type RewindStep = 'release' | 'state-extract' | 'state-swap' | 'index' | 'units' | 'start-panel'
+export const REWIND_STEPS: readonly RewindStep[] = ['release', 'state-extract', 'state-swap', 'index', 'units', 'start-panel']
+
+export interface RewindJournal {
+  schemaVersion: 1
+  recordId: string
+  state: RewindState
+  done: RewindStep[]
+  /** generation the units step activated; verification expects it to stay active */
+  generation: GenerationId | null
+  problems: string[]
+  startedAt: string
+  updatedAt: string
+}
+
+/** Written once (O_EXCL) right after the snapshot; the rewind restores only what it names. */
+interface SnapshotReceipt {
+  schemaVersion: 1
+  recordId: string
+  stamp: string
+  from: string
+  fromSchema: number
+  release: ReleaseInfo
+  previousTarget: string
+  previousGeneration: GenerationId
+  snapshot: { path: string; sha256: string }
+  control: { path: string; sha256: string }
+  identitiesBefore: AccountIdentity[]
+  canary: string | null
+  panelUnits: string[]
+  panelUser: string
+  health: { attempts: number; intervalMs: number }
+  createdAt: string
+}
+
 export interface UpgradeResult {
   outcome: UpgradeOutcome
   /** Observed host flow only; it never grants writer-admission retirement. */
@@ -92,6 +133,7 @@ export interface UpgradeResult {
   newGeneration: GenerationId | null
   recordId: string | null
   rollbackErrors: string[]
+  rewind: RewindJournal | null
   steps: UpgradeStepLog[]
 }
 
@@ -118,6 +160,20 @@ export const isCustomerDataPath = (p: string): boolean =>
 
 const stateSnapshotArgv = (t: LifecycleTools, stateDir: string, file: string): string[] =>
   [t.tar, '--create', '--gzip', `--file=${file}`, `--directory=${stateDir}`, 'state']
+
+/** Only the `state` member, into a scratch directory beside the live one; root keeps owners and modes. */
+const stateRestoreArgv = (t: LifecycleTools, file: string, scratch: string, excludes: string): string[] =>
+  [t.tar, '--extract', '--gzip', '--overwrite', `--file=${file}`, `--directory=${scratch}`, `--exclude-from=${excludes}`, 'state']
+
+/**
+ * StateStore lease and lock artifacts are never restored: a stale lease or a hot mutex WAL from the
+ * snapshot must not block the restored release. Unanchored: canonical state names never start with a dot.
+ */
+export const REWIND_EXCLUDES: readonly string[] = ['.lock', '.lock-prepared-*', '.rollback-*.tmp', '.writer-mutex.sqlite-wal', '.writer-mutex.sqlite-shm', '.writer-mutex.sqlite-journal']
+/** An uncommitted StateStore write journal means the snapshot caught a write mid-flight: it needs review, never a restore. */
+const PENDING_STATE_WRITE = 'state/.lock/intent.json'
+/** Set-aside state trees kept after verified rewinds, newest last. */
+const REWIND_RETAINED = 2
 
 const normalizeLayout = (partial: Partial<UpgradeLayout> | undefined): UpgradeLayout => {
   const l = { ...DEFAULT_LAYOUT, ...(partial ?? {}) }
@@ -234,6 +290,7 @@ interface Ctx {
   migrated: string[]
   healthProblems: string[]
   rollbackErrors: string[]
+  rewind: RewindJournal | null
   effectsStarted: boolean
   writersStopped: boolean
   hostOutcome: UpgradeHostOutcome | null
@@ -258,6 +315,7 @@ const result = (c: Ctx, outcome: UpgradeOutcome, reason: string | null, code: Er
   newGeneration: c.newGeneration,
   recordId: c.recordId,
   rollbackErrors: c.rollbackErrors,
+  rewind: c.rewind,
   steps: c.steps,
 })
 
@@ -269,6 +327,7 @@ const report = (c: Ctx): Record<string, unknown> => ({
   migrations: c.migrated,
   health: c.healthProblems,
   rollbackErrors: c.rollbackErrors,
+  rewind: c.rewind,
   steps: c.steps,
 })
 
@@ -281,6 +340,7 @@ const audit = async (c: Ctx, action: string, outcome: 'ok' | 'denied' | 'failed'
       previousGeneration: c.previousGeneration,
       newGeneration: c.newGeneration,
       rollbackErrors: c.rollbackErrors,
+      rewind: c.rewind?.state ?? null,
       hostOutcome: c.hostOutcome,
     }, outcome, { now: c.ports.clock.now() }))
 }
@@ -466,7 +526,7 @@ const abortBeforeSwitch = async (c: Ctx, cause: unknown, releaseDir: string): Pr
     }
     try {
       await c.ports.safety.assertWritersQuiescent(c.plan.panelUnits)
-      await c.ports.safety.assertCompatibility({ direction: 'rollback', fromVersion: c.plan.release.version, toVersion: c.from as string, currentSchema: await c.ports.migrator.currentSchema(), targetSchema: c.fromSchema as number })
+      await c.ports.safety.assertCompatibility({ direction: 'rollback', fromVersion: c.plan.release.version, toVersion: c.from as string, currentSchema: await c.ports.migrator.currentSchema(), targetSchema: c.fromSchema as number, ...(c.snapshot ? { snapshot: { recordId: c.recordId as string, path: c.snapshot } } : {}) })
       await c.ports.safety.assertWriteBarrier()
       await panelUnits(c, 'abort:start-panel', 'start')
     } catch (error) {
@@ -479,39 +539,221 @@ const abortBeforeSwitch = async (c: Ctx, cause: unknown, releaseDir: string): Pr
   return finish(c, 'failed', reason)
 }
 
+const RECORD_ID = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/
+const receiptPath = (l: UpgradeLayout, recordId: string): string => posix.join(l.snapshotsDir, `upgrade-${recordId}.receipt.json`)
+export const rewindJournalPath = (l: UpgradeLayout, recordId: string): string => posix.join(l.snapshotsDir, `upgrade-${recordId}.rewind.json`)
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+const parseJson = (raw: string | null): unknown => { try { return raw === null ? null : JSON.parse(raw) } catch { return null } }
+const isFileRef = (v: unknown): v is { path: string; sha256: string } => isObject(v) && isSafeAbsPath(v.path) && isSha256(v.sha256)
+
+export const parseRewindJournal = (raw: string | null): RewindJournal | null => {
+  const v = parseJson(raw)
+  if (!isObject(v) || v.schemaVersion !== 1 || typeof v.recordId !== 'string' || !RECORD_ID.test(v.recordId)
+    || !['rewind-started', 'rewind-verified', 'rewind-failed', 'rewind-unknown'].includes(String(v.state))
+    || !Array.isArray(v.done) || !v.done.every(s => REWIND_STEPS.includes(s as RewindStep))
+    || !(v.generation === null || Number.isSafeInteger(v.generation))
+    || !Array.isArray(v.problems) || !v.problems.every(p => typeof p === 'string')
+    || typeof v.startedAt !== 'string' || typeof v.updatedAt !== 'string') return null
+  return { schemaVersion: 1, recordId: v.recordId, state: v.state as RewindState, done: [...v.done] as RewindStep[], generation: v.generation as GenerationId | null, problems: [...v.problems] as string[], startedAt: v.startedAt, updatedAt: v.updatedAt }
+}
+
+const parseReceipt = (raw: string | null): SnapshotReceipt | null => {
+  const v = parseJson(raw)
+  return isObject(v) && v.schemaVersion === 1 && typeof v.recordId === 'string' && RECORD_ID.test(v.recordId) && typeof v.stamp === 'string'
+    && typeof v.from === 'string' && isNonNegInt(v.fromSchema) && isObject(v.release) && isSafeAbsPath(v.previousTarget)
+    && Number.isSafeInteger(v.previousGeneration) && isFileRef(v.snapshot) && isFileRef(v.control) && Array.isArray(v.identitiesBefore)
+    && (v.canary === null || typeof v.canary === 'string') && Array.isArray(v.panelUnits) && typeof v.panelUser === 'string' && isObject(v.health)
+    ? v as unknown as SnapshotReceipt : null
+}
+
+/** Same atomic replace as the lock, keyed by record so a resume never needs the original stamp. */
+const saveJournal = async (ports: UpgradePorts, fs: FsPort, l: UpgradeLayout, j: RewindJournal): Promise<void> => {
+  const path = rewindJournalPath(l, j.recordId)
+  const tmp = `${path}.tmp`
+  if (await fs.exists(tmp)) await fs.remove(tmp)
+  await fs.writeFileExclusive(tmp, `${JSON.stringify(j)}\n`, 0o600)
+  await ports.safety.syncPath(tmp)
+  await fs.rename(tmp, path)
+  await ports.safety.syncPath(l.snapshotsDir)
+}
+
+/** Restores only this upgrade's snapshot, and only after its checksums and identity match the receipt. */
+const verifiedReceipt = async (c: Ctx): Promise<SnapshotReceipt> => {
+  const l = c.plan.layout
+  const r = parseReceipt(await c.fs.readFile(receiptPath(l, c.recordId as string)))
+  if (!r) throw new Error('snapshot receipt is missing or malformed')
+  const snapshot = posix.join(l.snapshotsDir, `${r.stamp}.tar.gz`)
+  if (r.recordId !== c.recordId || r.stamp !== c.stamp || r.from !== c.from || r.release.version !== c.plan.release.version
+    || r.previousTarget !== c.previousTarget || r.snapshot.path !== snapshot || r.control.path !== `${snapshot}.control.db`) throw new Error('snapshot receipt does not belong to this upgrade')
+  for (const f of [r.snapshot, r.control]) {
+    if ((await c.fs.sha256(f.path)) !== f.sha256) throw new Error(`snapshot ${f.path} does not match its receipt checksum`)
+  }
+  return r
+}
+
+const assertNoPendingStateWrite = async (c: Ctx, r: SnapshotReceipt): Promise<void> => {
+  const listed = await c.ports.host.apply({ kind: 'exec', argv: [c.plan.tools.tar, '--list', '--gzip', `--file=${r.snapshot.path}`], runAsUser: 'root' })
+  if (listed.code !== 0) throw new Error(`snapshot ${r.snapshot.path} cannot be listed: exited ${listed.code}`)
+  if (listed.stdout.split('\n').some(line => line.trim() === PENDING_STATE_WRITE)) throw new Error(`snapshot ${r.snapshot.path} holds an uncommitted state write (${PENDING_STATE_WRITE}); review it before restoring`)
+}
+
+/** After a verified rewind only: keep the newest set-aside trees, remove older ones and the empty scratch. */
+const pruneSetAside = async (c: Ctx, recordId: string): Promise<void> => {
+  const l = c.plan.layout
+  const index = posix.join(l.snapshotsDir, 'rewind-retention.json')
+  const listed = parseJson(await c.fs.readFile(index))
+  const ids = [...(Array.isArray(listed) ? listed : []).filter((id): id is string => typeof id === 'string' && RECORD_ID.test(id) && id !== recordId), recordId]
+  const scratch = posix.join(l.stateDir, `.rewind-${recordId}`)
+  if (await c.fs.exists(scratch)) await c.fs.remove(scratch)
+  // Removal first, index second: a crash in between only repeats an idempotent removal.
+  for (const id of ids.slice(0, -REWIND_RETAINED)) {
+    const tree = posix.join(l.stateDir, `.pre-rewind-${id}`)
+    if (await c.fs.exists(tree)) await c.fs.remove(tree)
+  }
+  await writeAtomic(c, index, `${JSON.stringify(ids.slice(-REWIND_RETAINED))}\n`)
+}
+
+/** Every step converges when re-run after a crash at any point inside it. */
+const rewindStep = async (c: Ctx, r: SnapshotReceipt, step: RewindStep): Promise<void> => {
+  const l = c.plan.layout
+  const scratch = posix.join(l.stateDir, `.rewind-${r.recordId}`)
+  const restored = posix.join(scratch, 'state')
+  const live = posix.join(l.stateDir, 'state')
+  const aside = posix.join(l.stateDir, `.pre-rewind-${r.recordId}`)
+  if (step === 'release') {
+    if ((await c.fs.readlink(l.currentLink)) !== r.previousTarget) await pointCurrentAt(c, r.previousTarget, '-rewind')
+  } else if (step === 'state-extract') {
+    // Re-extracting the same archive over a partial attempt converges; no removal is needed.
+    await c.fs.mkdirp(scratch, 0o700)
+    const excludes = posix.join(l.snapshotsDir, `upgrade-${r.recordId}.rewind-exclude`)
+    const patterns = `${REWIND_EXCLUDES.join('\n')}\n`
+    if ((await c.fs.readFile(excludes)) !== patterns) await writeAtomic(c, excludes, patterns)
+    await run(c, 'rewind:state-extract', { kind: 'exec', argv: stateRestoreArgv(c.plan.tools, r.snapshot.path, scratch, excludes), runAsUser: 'root' })
+    if (!(await c.fs.exists(restored))) throw new Error(`snapshot ${r.snapshot.path} holds no state directory`)
+    // tar does not fsync; the journal may only record the extract once the files are durable.
+    await run(c, 'rewind:state-sync', { kind: 'exec', argv: [c.plan.tools.sync, '--file-system', scratch], runAsUser: 'root' })
+  } else if (step === 'state-swap') {
+    if (await c.fs.exists(restored)) {
+      if (await c.fs.exists(live)) {
+        if (await c.fs.exists(aside)) throw new Error(`${live} and ${aside} both exist; inspect them before resuming`)
+        await c.fs.rename(live, aside)
+      }
+      await c.fs.rename(restored, live)
+    } else if (!(await c.fs.exists(live)) || !(await c.fs.exists(aside))) {
+      throw new Error(`restored state is neither staged in ${scratch} nor swapped into ${live}`)
+    }
+    await c.ports.safety.syncPath(l.stateDir)
+    if (await c.fs.exists(aside)) {
+      // Evidence is sealed root-only so the panel user cannot alter it and retention can later remove it safely.
+      await run(c, 'rewind:seal-set-aside', { kind: 'exec', argv: [c.plan.tools.chown, '-R', '--no-dereference', 'root:root', aside], runAsUser: 'root' })
+      await run(c, 'rewind:seal-set-aside', { kind: 'exec', argv: [c.plan.tools.chmod, '-R', 'go-w', aside], runAsUser: 'root' })
+    }
+  } else if (step === 'index') {
+    await c.ports.safety.restoreControlPlane(r.snapshot.path)
+  } else if (step === 'units') {
+    // The restored desired state is the one this generation was built and tested from.
+    const a = await c.ports.reconciler.activate(r.previousGeneration)
+    c.newGeneration = a.generationId
+    await applyUnits(c, 'rewind:units', a.units)
+  } else {
+    await panelUnits(c, 'rewind:start-panel', 'start')
+  }
+}
+
+const endRewind = async (c: Ctx, j: RewindJournal, state: Exclude<RewindState, 'rewind-started'>, problems: string[]): Promise<RewindJournal> => {
+  j.state = state
+  j.problems = problems
+  j.updatedAt = nowIso(c)
+  try {
+    await saveJournal(c.ports, c.fs, c.plan.layout, j)
+  } catch (e) {
+    problems.push(`rewind journal: ${errorMessage(e)}`)
+    if (state === 'rewind-verified') j.state = 'rewind-unknown'
+  }
+  log(c, j.state, j.state === 'rewind-verified', problems.join('; ') || 'verified against the snapshot')
+  if (j.state === 'rewind-unknown') c.rollbackErrors.push('rewind unverified: operator action required')
+  c.rollbackErrors.push(...problems)
+  return j
+}
+
+/**
+ * Switch back, restore state files, index and units from this upgrade's snapshot, start the panel,
+ * then re-run the post-upgrade health checks. Runs inside the caller's admission scope, keeps
+ * writers fenced throughout and never clears a barrier, lock or maintenance marker.
+ */
+const rewind = async (c: Ctx, resumed: RewindJournal | null): Promise<RewindJournal> => {
+  const at = nowIso(c)
+  const j: RewindJournal = resumed ?? { schemaVersion: 1, recordId: c.recordId as string, state: 'rewind-started', done: [], generation: null, problems: [], startedAt: at, updatedAt: at }
+  c.rewind = j
+  if (resumed) c.newGeneration = j.generation
+  try {
+    await saveJournal(c.ports, c.fs, c.plan.layout, j)
+  } catch (e) {
+    // Nothing was touched and nothing can be journaled: never proceed unrecorded.
+    j.state = 'rewind-failed'
+    j.problems = [`rewind journal: ${errorMessage(e)}`]
+    c.rollbackErrors.push(...j.problems)
+    return j
+  }
+  let receipt: SnapshotReceipt
+  try {
+    // Never move code, restore data or restart anything after uncertain writer termination.
+    await panelUnits(c, 'rewind:stop-panel', 'stop')
+    await c.ports.safety.assertWritersQuiescent(c.plan.panelUnits)
+    c.writersStopped = true
+    receipt = await verifiedReceipt(c)
+    await c.ports.safety.assertCompatibility({ direction: 'rollback', fromVersion: c.plan.release.version, toVersion: c.from as string, currentSchema: await c.ports.migrator.currentSchema(), targetSchema: c.fromSchema as number, snapshot: { recordId: receipt.recordId, path: receipt.snapshot.path } })
+    await c.ports.safety.assertWriteBarrier()
+    // The native safety module is plain JS: refuse before any effect rather than stop half restored.
+    if (typeof c.ports.safety.restoreControlPlane !== 'function') throw new Error('index restore is not available in this admission scope')
+    await assertNoPendingStateWrite(c, receipt)
+  } catch (e) {
+    return endRewind(c, j, 'rewind-failed', [`rewind:admission: ${errorMessage(e)}`])
+  }
+  // Admission just stopped the panel, so a start journaled before a crash no longer holds.
+  j.done = j.done.filter(s => s !== 'start-panel')
+  for (const step of REWIND_STEPS) {
+    if (j.done.includes(step)) continue
+    try {
+      await rewindStep(c, receipt, step)
+    } catch (e) {
+      return endRewind(c, j, 'rewind-failed', [`rewind:${step}: ${errorMessage(e)}`, `restored only: ${j.done.join(', ') || 'nothing'}`])
+    }
+    j.done.push(step)
+    j.generation = c.newGeneration
+    log(c, `rewind:${step}`, true, 'done')
+    try {
+      j.updatedAt = nowIso(c)
+      await saveJournal(c.ports, c.fs, c.plan.layout, j)
+    } catch (e) {
+      return endRewind(c, j, 'rewind-unknown', [`rewind journal after ${step}: ${errorMessage(e)}`])
+    }
+  }
+  const problems: string[] = []
+  const link = await probe(() => c.fs.readlink(c.plan.layout.currentLink), 'release link', problems)
+  if (link !== undefined && link !== receipt.previousTarget) problems.push(`current link points to ${String(link)}, expected ${receipt.previousTarget}`)
+  const generation = await probe(() => c.ports.reconciler.currentGeneration(), 'generation', problems)
+  if (generation !== undefined && generation !== c.newGeneration) problems.push(`generation ${generation} is active, expected the rewound ${String(c.newGeneration)}`)
+  try {
+    await healthGate(c)
+  } catch {
+    problems.push(...c.healthProblems)
+  }
+  const ended = await endRewind(c, j, problems.length ? 'rewind-unknown' : 'rewind-verified', problems)
+  if (ended.state === 'rewind-verified') await bestEffort(c, 'rewind:prune-set-aside', () => pruneSetAside(c, ended.recordId), false)
+  return ended
+}
+
 const rollback = async (c: Ctx, cause: unknown, releaseDir: string): Promise<UpgradeResult> => {
   const reason = errorMessage(cause)
   c.phase = 'rollback'
   log(c, 'rollback', false, reason)
-  const prevTarget = c.previousTarget as string
   await bestEffort(c, 'rollback:phase', () => c.ports.history.setPhase(c.recordId as string, 'rollback'), false)
-  try {
-    // Never move code, restore data or restart anything after uncertain writer termination.
-    await panelUnits(c, 'rollback:stop-panel', 'stop')
-    await c.ports.safety.assertWritersQuiescent(c.plan.panelUnits)
-    c.writersStopped = true
-    await c.ports.safety.assertCompatibility({ direction: 'rollback', fromVersion: c.plan.release.version, toVersion: c.from as string, currentSchema: await c.ports.migrator.currentSchema(), targetSchema: c.fromSchema as number })
-    await c.ports.safety.assertWriteBarrier()
-    await pointCurrentAt(c, prevTarget, '-rollback')
-    await panelUnits(c, 'rollback:start-panel', 'start')
-  } catch (error) {
-    c.rollbackErrors.push(`rollback:admission: ${errorMessage(error)}`)
-    return finish(c, 'rollback_failed', reason)
-  }
-  await bestEffort(c, 'rollback:generation', async () => {
-    // Reconcile CURRENT authority. An old generation can re-enable revoked hosting policy.
-    const r = await c.ports.reconciler.reconcile(`binary rollback ${c.plan.release.version} -> ${c.from}; preserve current authority`)
-    c.newGeneration = r.generationId
-    await applyUnits(c, 'rollback:generation', r.units)
-  }, true)
-  await bestEffort(c, 'rollback:verify', async () => {
-    const st = await c.ports.reconciler.status()
-    if (!st.converged) throw new Error(`not converged after rollback: ${st.drift.join(', ')}`)
-    const drift = identityDrift(c.identitiesBefore, await c.ports.reconciler.identities())
-    if (drift.length) throw new Error(drift.join('; '))
-  }, true)
-  if (c.rollbackErrors.length === 0) await bestEffort(c, 'cleanup:release', () => c.fs.remove(releaseDir), false)
-  return finish(c, c.rollbackErrors.length ? 'rollback_failed' : 'rolled_back', reason)
+  const j = await rewind(c, null)
+  if (j.state !== 'rewind-verified') return finish(c, 'rollback_failed', reason)
+  await bestEffort(c, 'cleanup:release', () => c.fs.remove(releaseDir), false)
+  return finish(c, 'rolled_back', reason)
 }
 
 const snapshotStep = async (c: Ctx): Promise<void> => {
@@ -528,6 +770,32 @@ const snapshotStep = async (c: Ctx): Promise<void> => {
   c.snapshot = file
   c.previousGeneration = await c.ports.reconciler.currentGeneration()
   log(c, 'generation', true, `previous generation ${c.previousGeneration}`)
+  const control = `${file}.control.db`
+  if (!(await c.fs.exists(control))) throw new Error(`control-plane backup did not produce ${control}`)
+  const id = c.recordId as string
+  if (!RECORD_ID.test(id)) throw new Error('upgrade record id cannot name a snapshot receipt')
+  const receipt: SnapshotReceipt = {
+    schemaVersion: 1,
+    recordId: id,
+    stamp: c.stamp,
+    from: c.from as string,
+    fromSchema: c.fromSchema as number,
+    release: c.plan.release,
+    previousTarget: c.previousTarget as string,
+    previousGeneration: c.previousGeneration,
+    snapshot: { path: file, sha256: await c.fs.sha256(file) },
+    control: { path: control, sha256: await c.fs.sha256(control) },
+    identitiesBefore: c.identitiesBefore,
+    canary: c.plan.canary,
+    panelUnits: c.plan.panelUnits,
+    panelUser: c.plan.panelUser,
+    health: c.plan.health,
+    createdAt: nowIso(c),
+  }
+  await c.fs.writeFileExclusive(receiptPath(l, id), `${JSON.stringify(receipt)}\n`, 0o600)
+  await c.ports.safety.syncPath(receiptPath(l, id))
+  await c.ports.safety.syncPath(l.snapshotsDir)
+  log(c, 'snapshot:receipt', true, receiptPath(l, id))
 }
 
 const stageStep = async (c: Ctx, releaseDir: string): Promise<void> => {
@@ -603,7 +871,7 @@ const precheck = async (c: Ctx): Promise<UpgradeResult | null> => {
   c.fromSchema = currentSchema
   await c.ports.safety.assertCompatibility({ direction: 'forward', fromVersion: c.from, toVersion: c.plan.release.version, currentSchema, targetSchema: c.plan.release.schemaVersion })
   // Admit fallback against the prospective schema before applying even an expand-only migration.
-  await c.ports.safety.assertCompatibility({ direction: 'rollback', fromVersion: c.plan.release.version, toVersion: c.from, currentSchema: c.plan.release.schemaVersion, targetSchema: currentSchema })
+  await c.ports.safety.assertCompatibility({ direction: 'rollback', fromVersion: c.plan.release.version, toVersion: c.from, currentSchema: c.plan.release.schemaVersion, targetSchema: currentSchema, snapshot: 'planned' })
   const pre = preflight({
     freeBytes,
     releaseBytes: c.plan.release.bytes,
@@ -691,6 +959,7 @@ const newCtx = (ports: UpgradePorts, plan: NormalizedPlan): Ctx => ({
   migrated: [],
   healthProblems: [],
   rollbackErrors: [],
+  rewind: null,
   effectsStarted: false,
   writersStopped: false,
   hostOutcome: null,
@@ -747,7 +1016,8 @@ export const readLock = async (fs: Pick<FsPort, 'readFile'>, path: string): Prom
 /**
  * Side-by-side upgrade: preflight, state snapshot, unpack next to the running release,
  * expand-only migrations, atomic link switch, reconcile with reloads, health gate.
- * Binary fallback reconciles current authority. Historical DB/state/generations are never replayed.
+ * A failure after the switch rewinds release link, state files, index and units from this
+ * upgrade's receipt-verified snapshot, then re-runs the health checks (see RewindState).
  * Host completion remains retirement_pending until a genuine retirement protocol is qualified.
  */
 export const runUpgrade = async (ports: UpgradePorts, input: UpgradePlan): Promise<UpgradeResult> => {
@@ -773,6 +1043,40 @@ export interface RecoverResult {
 }
 
 /**
+ * Continues a rewind a crash left at `rewind-started`, inside the recovery's admission scope.
+ * Terminal journals are never re-run: failed or unverified rewinds wait for the operator.
+ */
+const resumeRewind = async (ports: UpgradePorts, actor: Principal, os: Pick<OsProfile, 'family'>, layout: UpgradeLayout, recordId: string | null): Promise<RewindJournal | null> => {
+  if (recordId === null || !RECORD_ID.test(recordId)) return null
+  const fs = guardFs(ports.fs, layout)
+  const journal = parseRewindJournal(await fs.readFile(rewindJournalPath(layout, recordId)))
+  if (journal?.state !== 'rewind-started' || journal.recordId !== recordId) return null
+  const r = parseReceipt(await fs.readFile(receiptPath(layout, recordId)))
+  if (!r || r.recordId !== recordId) {
+    journal.state = 'rewind-failed'
+    journal.problems = ['snapshot receipt is missing or malformed']
+    journal.updatedAt = ports.clock.now().toISOString()
+    await saveJournal(ports, fs, layout, journal)
+    return journal
+  }
+  const c = newCtx(ports, {
+    actor,
+    tools: lifecycleTools(os),
+    release: r.release,
+    canary: r.canary,
+    panelUnits: normalizePanelUnits(r.panelUnits),
+    panelUser: r.panelUser,
+    health: normalizeHealth(r.health),
+    layout,
+  })
+  Object.assign(c, {
+    stamp: r.stamp, phase: 'rollback', recordId, from: r.from, fromSchema: r.fromSchema, previousTarget: r.previousTarget,
+    snapshot: r.snapshot.path, previousGeneration: r.previousGeneration, identitiesBefore: r.identitiesBefore, effectsStarted: true,
+  })
+  return rewind(c, journal)
+}
+
+/**
  * Operator path after an interrupted upgrade or a failed rollback, once the server was
  * repaired by hand. Refused while the upgrade unit still runs; accepted only when the
  * health checks pass on a valid release link. Records observations but retains all barriers.
@@ -793,13 +1097,17 @@ const recoverWithinGuard = async (ports: UpgradePorts, input: RecoverInput): Pro
   const active = await ports.host.apply({ kind: 'exec', argv: [tools.systemctl, 'is-active', '--quiet', UPGRADE_UNIT] })
   if (active.code === 0) return fail('CONFLICT', `${UPGRADE_UNIT} is still running`)
   if (active.code !== 3) return fail('PRECONDITION_FAILED', 'upgrade unit state is unknown; recovery cannot clear admission')
+  const rewound = await resumeRewind(ports, actor, input.os, layout, lock?.recordId ?? (last && isInFlight(last) ? last.id : null))
+  if (rewound && rewound.state !== 'rewind-verified') {
+    return fail('PRECONDITION_FAILED', `rewind unverified; operator action required: ${rewound.problems.join('; ')}`, { rewind: rewound })
+  }
   const version = versionFromTarget(await fs.readlink(layout.currentLink), layout)
   if (!version) return fail('PRECONDITION_FAILED', `${layout.currentLink} does not point at a release`)
   const problems = await healthProblems({ ports, canary, before: null })
   if (problems.length) return fail('PRECONDITION_FAILED', `server is not healthy yet: ${problems.join('; ')}`, { problems })
   await retainRetirementAttention(ports, fs, layout, { recoveryObserved: true, version, recordId: last?.id ?? null, observedAt: ports.clock.now().toISOString() })
   const recordId = last && isInFlight(last) ? last.id : null
-  await ports.audit.record(auditEntry(actor, 'upgrade.recovery_observed', 'xpanel', { note, version, lock, recordId, closedRecordId: null, retirementPending: true }, 'failed', { now: ports.clock.now() }))
+  await ports.audit.record(auditEntry(actor, 'upgrade.recovery_observed', 'xpanel', { note, version, lock, recordId, closedRecordId: null, rewind: rewound?.state ?? null, retirementPending: true }, 'failed', { now: ports.clock.now() }))
   return { status: 'retirement_pending', version, recordId, closedRecordId: null, problems: [RETIREMENT_REQUIRED] }
 }
 

@@ -11,7 +11,7 @@ if (existsSync(output)) throw new Error('Preserve prior evidence; choose a fresh
 mkdirSync(join(output, 'screenshots'), { recursive: true })
 process.env.PLAYWRIGHT_BROWSERS_PATH ??= join(process.cwd(), '.tools/playwright-browsers')
 const { chromium } = await import('@playwright/test')
-const inputs = ['apps/web/src/charts.ts', 'apps/web/src/surfaces/xpanel.ts', 'apps/web/src/board-port/approved-xpanel-workspaces.ts', 'apps/web/src/board-port/approved-xpanel-pages.ts', 'apps/web/src/surfaces/xwhm.ts', 'apps/web/src/plan-editor.ts', 'packages/core/src/rules/plans.ts', 'apps/web/src/tokens.ts', 'apps/web/src/ws-client.ts', 'tests/browser/visual-fixture.mjs', 'tests/browser/technical-values-acceptance.mjs']
+const inputs = ['apps/web/src/charts.ts', 'apps/web/src/surfaces/xpanel.ts', 'apps/web/src/board-port/approved-xpanel-workspaces.ts', 'apps/web/src/board-port/approved-xpanel-pages.ts', 'apps/web/src/surfaces/xwhm.ts', 'apps/web/src/board-port/whm-metering-workspace.ts', 'apps/web/src/plan-editor.ts', 'packages/core/src/rules/plans.ts', 'apps/web/src/tokens.ts', 'apps/web/src/ws-client.ts', 'tests/browser/visual-fixture.mjs', 'tests/browser/technical-values-acceptance.mjs']
 const fingerprint = () => inputs.map(path => ({ path, sha256: createHash('sha256').update(readFileSync(path)).digest('hex') }))
 const before = fingerprint()
 const pages = [['traffic', '/metrics/traffic'], ['io', '/whm/monitoring/io'], ['plans', '/whm/plans'], ['outbound', '/whm/email/outbound']]
@@ -128,7 +128,6 @@ try {
             }
           }
         }
-        if (kind === 'io') for (const e of document.querySelectorAll('.xp-io-monitor .xp-table tbody td:first-child .xp-mono, .xp-io-monitor .xp-table tbody td:nth-child(2) .xp-mono, .xp-io-monitor .xp-table tbody td:nth-child(3)')) technical_tokens.push(tokenObservation(e, 'native', 'io', null))
         // Native metric tiles (label + .xp-kpi__value) are measured by the kpis checks, not as approved form fields.
         const approved_fields = [...document.querySelectorAll('[data-approved-xpanel-workspace] .xp-field:not(:has(> .xp-kpi__value)), [data-approved-xpanel-workspace] .xp-panel-detail__facts > div')].map(e => {
           const label = e.querySelector(':scope > label, :scope > dt'), value = e.querySelector(':scope > input, :scope > select, :scope > textarea, :scope > dd')
@@ -146,27 +145,25 @@ try {
         }).filter(Boolean)
         const planEditor = document.querySelector('[data-native-plan-editor]'), feature = planEditor?.querySelector('[name="featureListId"]')
         const planEditorState = planEditor ? { editable: planEditor.dataset.planEditable, savedId: planEditor.getAttribute('data-plan-id'), saveDisabled: planEditor.querySelector('[data-native-plan-save]').disabled, featureId: feature.value, featureOptions: [...feature.options].map(option => ({ value: option.value, text: option.text })) } : null
-        const io = document.querySelector('.xp-io-monitor'), ioHeader = io?.querySelector(':scope > .xp-card__header'), ioStatus = io?.querySelector(':scope > [data-resource-observation-state]'), nestedHeader = io?.querySelector(':scope > .xp-card > .xp-card__header')
-        const ioContract = kind === 'io' ? { incomplete: ioStatus?.dataset.resourceObservationState, legacyLive: document.querySelectorAll('.xp-io-monitor [data-live-kpi]').length, supplied: document.querySelectorAll('[data-resource-observation]').length, hostRatio: /RAM\s+\d+\s*\/|Load\s+\d/.test(io.textContent), headerStatusGap: rect(ioStatus).top - rect(ioHeader).bottom, nestedHeaderMargin: parseFloat(getComputedStyle(nestedHeader).marginBlockEnd) } : null
+        const metering = document.querySelector('[data-whm-metering="io"]')
+        const ioContract = kind === 'io' ? { present: !!metering, facts: [...document.querySelectorAll('[data-whm-metering-fact]')].map(e => e.textContent.trim()), tables: [...document.querySelectorAll('[data-whm-metering-rows]')].map(e => e.getAttribute('data-whm-metering-rows')) } : null
         return { viewport: innerWidth, document_scroll_width: document.documentElement.scrollWidth, body_overflow_x: getComputedStyle(document.body).overflowX, root_overflow_x: getComputedStyle(document.documentElement).overflowX, pairs, kpis, wrappers, fields, approved_fields, technical_tokens, ioContract, unlimited_label: label ? rect(label) : null, plan_inputs: planInputs, plan_editor: planEditorState }
       }, sample.kind)
       const g = outcome.geometry
       check('document-fits-viewport', g.document_scroll_width <= sample.width + 1, g.document_scroll_width)
       check('no-root-overflow-concealment', !['hidden', 'clip'].includes(g.body_overflow_x) && !['hidden', 'clip'].includes(g.root_overflow_x), [g.body_overflow_x, g.root_overflow_x])
-      if (sample.kind === 'traffic' || sample.kind === 'io') {
+      if (sample.kind === 'io') {
+        // The IO page is the metering workspace: without a read every fact and table says so, and no measurement is shown.
+        check('IO-metering-workspace-shows-no-unread-measurement', g.ioContract.present && g.ioContract.facts.length === 7 && g.ioContract.facts.every(text => text.length > 0 && !/\d/.test(text)) && ['io', 'devices'].every(table => g.ioContract.tables.includes(table)), g.ioContract)
+      }
+      if (sample.kind === 'traffic') {
         check('all-metric-values-share-label-edge', g.kpis.length === 6 && g.kpis.every(value => value.logical_edge_delta <= 1), g.kpis.map(value => value.logical_edge_delta))
-        check('whole-technical-table-phrase-glyph-order', g.technical_tokens.filter(token => token.source === 'native').length === (sample.kind === 'traffic' ? 6 : 3) && g.technical_tokens.every(token => token.characters.length >= (token.source === 'native' ? 2 : 1) && token.characters.every((character, i, all) => i === 0 || (Math.abs(character.top - all[0].top) <= 1 && character.left >= all[i - 1].left - 0.5))), g.technical_tokens)
+        check('whole-technical-table-phrase-glyph-order', g.technical_tokens.filter(token => token.source === 'native').length === 6 && g.technical_tokens.every(token => token.characters.length >= (token.source === 'native' ? 2 : 1) && token.characters.every((character, i, all) => i === 0 || (Math.abs(character.top - all[0].top) <= 1 && character.left >= all[i - 1].left - 0.5))), g.technical_tokens)
         check('compound-metric-glyph-order', g.pairs.length >= 1 && g.pairs.every(pair => pair.first.left < pair.second.left), g.pairs)
         check('technical-values-retain-direction-after-text-replacement', g.kpis.every(value => value.direction === 'ltr' && ['isolate', 'isolate-override'].includes(value.unicode_bidi)), g.kpis.map(value => [value.direction, value.unicode_bidi]))
-        if (sample.kind === 'io') {
-          check('unqualified-IO-excludes-legacy-live-and-host-ratios', g.ioContract.incomplete === 'incomplete' && g.ioContract.legacyLive === 0 && g.ioContract.supplied === 3 && !g.ioContract.hostRatio, g.ioContract)
-          // The nested card header keeps the group spacing (24px) to its content, as the IO monitor styles it.
-          check('IO-header-status-gap-24px-with-nested-header-preserved', Math.abs(g.ioContract.headerStatusGap - 24) <= 0.5 && Math.abs(g.ioContract.nestedHeaderMargin - 24) <= 0.5, g.ioContract)
-        }
         outcome.live_text_replacement = await page.evaluate(kind => {
-          const e = document.querySelector(kind === 'io' ? '[data-resource-observation]' : '[data-live-kpi]'), original = e.innerHTML
-          // Exercise actual textContent replacement geometry. The unqualified IO
-          // wrapper is excluded from the legacy live client until producer cutover.
+          const e = document.querySelector('[data-live-kpi]'), original = e.innerHTML
+          // Exercise actual textContent replacement geometry.
           e.textContent = '12.50 MB/s'
           const node = e.firstChild, ranges = []
           for (const [from, to] of [[0, 5], [6, 10]]) { const r = document.createRange(); r.setStart(node, from); r.setEnd(node, to); const b = r.getBoundingClientRect(); ranges.push({ left: b.left, right: b.right }) }

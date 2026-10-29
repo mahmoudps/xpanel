@@ -241,7 +241,7 @@ describe('every supported profile', () => {
       expect(p.paths.powerdnsConf).toMatch(/\/pdns\.conf$/)
       // Nginx never shares an identity with Apache, whose shared children may read docroots
       expect(p.paths.nginxUser).not.toBe(p.paths.apacheUser)
-      expect(p.phpFpmSocketDir).toBe('/run/xpanel/fpm')
+      expect(p.phpFpmSocketDir).toBe('/run/xpanel-fpm')
       for (const u of p.extraSystemUsers) expect(u).toMatch(/^[a-z_][a-z0-9_-]{0,31}$/)
       if (p.extraSystemUsers.length > 0) expect(p.bin.adduser).not.toBeNull()
     })

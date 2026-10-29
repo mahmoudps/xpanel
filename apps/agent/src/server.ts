@@ -2,7 +2,7 @@ import { lifecycleAdmissionResponse, withLifecycleWriterAdmission } from '../../
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { constants } from 'node:fs'
-import { lstat, open, readdir, stat } from 'node:fs/promises'
+import { lstat, mkdir, open, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { once } from 'node:events'
 import { createServer } from 'node:http'
 import type { Server } from 'node:http'
@@ -16,7 +16,7 @@ import { appendAudit, getPrincipal, latestActive } from '@xpanel/db'
 import type { Db } from '@xpanel/db'
 import type { StateStore } from '@xpanel/state'
 import { parseGenerationRollbackRequest } from '@xpanel/state'
-import { type CanonicalIoResourcePipeline, type IoAnalyticsEngine, runJailedShellCommand, unavailableIoAnalytics, WebsiteAnalyticsEngine } from './analytics.ts'
+import { type CanonicalIoResourcePipeline, type IoAnalyticsEngine, unavailableIoAnalytics, WebsiteAnalyticsEngine } from './analytics.ts'
 import { LinuxHostExecutor } from './executor.ts'
 import type { AgentExecutor } from './executor.ts'
 import { JailedFileManager } from './file-manager.ts'
@@ -59,11 +59,15 @@ import { handleAccountHealthRoute, nativeAccountHealthHost } from './account-hea
 import { handleHostJobsRoute } from './host-jobs-routes.ts'
 import type { HostJobRunner } from './host-jobs.ts'
 import { handleSoftwareCenterRoute } from './software-center-routes.ts'
+import { handlePhpManagerRoute } from './php-manager-routes.ts'
+import { PHP_STAGING_DIR } from './php-manager.ts'
+import { readBans, unbanAddresses, type BanRun } from './firewall-bans.ts'
 import { handleSwContainersRoute } from './sw-containers.ts'
 import { handleSwAddonServicesRoute } from './sw-addon-services.ts'
 import { handleSwDeploymentsRoute } from './sw-deployments.ts'
 import { handleSwOptimizeRoute } from './sw-optimize.ts'
 import { handleSwApplicationsRoute } from './sw-applications.ts'
+import { createRuntimeHost, handleAccountRuntimeRoute } from './account-runtime.ts'
 import type { SwApplicationCatalogSource } from './sw-application-catalog-store.ts'
 import type { ApplicationArtifactProvider } from './application-install.ts'
 import type { ComposerJobProvider } from './composer-job-provider.ts'
@@ -79,6 +83,8 @@ import { handleServiceManagerRoute } from './service-manager-routes.ts'
 import { createNativeBenchmarkStore, handleBenchmarkRoute } from './benchmark.ts'
 import type { BenchmarkStore } from './benchmark.ts'
 import { handleTrafficMonitorRoute } from './traffic-monitor.ts'
+import { handleMeteringRoute, type BandwidthMeter } from './metering.ts'
+import type { DiskLatency } from './host-metrics.ts'
 import { handleAccountGitRoute } from './account-git.ts'
 import { handleAccountPackagesRoute } from './account-packages.ts'
 import type { VerifiedPearCatalog } from './account-packages.ts'
@@ -88,6 +94,8 @@ import { handleTrustedProxiesRoute } from './trusted-proxies-routes.ts'
 import type { TrustedProxyNativeProvider } from './trusted-proxies.ts'
 import { handleBackupDestinationRoute } from './backup-destination.ts'
 import { handleBackupRunsRoute } from './acct-backup-runs.ts'
+import { handleBackupCredentialsRoute } from './acct-backup-credentials.ts'
+import type { BackupCredentialStore } from './acct-backup-credentials.ts'
 import type { BackupRunController } from './acct-backup-runs.ts'
 import { handleComponentRestoreRoute } from './acct-restore-components.ts'
 import { handleStagingRoute } from './acct-staging.ts'
@@ -120,14 +128,18 @@ import { handleSecRoute } from './sec-routes.ts'
 import { secIngressProviderFor } from './sec-ingress-provider.ts'
 import { handleAccountSshRoute } from './account-ssh.ts'
 import { handleAccountLogsRoute, readProtectedLogTail } from './account-logs.ts'
+import { handleTerminalRoute, revokeUnauthorizedTerminals } from './terminal-sessions.ts'
+import type { TerminalSessionManager } from './terminal-sessions.ts'
 import { handleAccountVirusScanRoute } from './account-virus-scan.ts'
 import { handleNetworkToolsRoute, systemNetworkToolsHost } from './network-tools.ts'
 import { handleBackupFileRestoreRoute } from './backup-file-restore.ts'
 import { handleAccountDatabaseInsightsRoute } from './account-database-insights.ts'
-import { createAccountBackup, listAccountBackups, restoreAccountBackup, DEFAULT_BACKUP_DIR } from './account-backup.ts'
+import { listAccountBackups, restoreAccountBackup, DEFAULT_BACKUP_DIR } from './account-backup.ts'
 import type { AccountFileRunner } from './file-manager.ts'
 import { handleAccountBackupAgentRequest } from './account-backup-workspace.ts'
-import { handleTransferArchiveRoute } from './lifecycle-transfer-archives.ts'
+import { createTransferTaskController, handleTransferTaskRoute, spawnTransferCommand } from './lifecycle-transfer-tasks.ts'
+import type { TransferTaskController } from './lifecycle-transfer-tasks.ts'
+import { MariaDbServiceAdapter } from './services/mariadb.ts'
 import { handleConvertAddonFilesRoute } from './lifecycle-convert-addon-files.ts'
 import { cronJobUnitId, cronWorkspaceRevision } from '@xpanel/core'
 import type { CronWorkspaceJob } from '@xpanel/core'
@@ -320,6 +332,12 @@ export interface AgentServerDeps {
   backupDestinationProvider?: BackupDestinationProbeProvider
   readBackupDestination?: (id: string) => Promise<BackupDestinationTarget | null>
   backupRuns?: BackupRunController
+  /** Account transfer and cPanel import host tasks; built from the Linux executor and MariaDB adapter when absent. */
+  transferTasks?: TransferTaskController
+  /** Root-only backup credential file and SFTP key directory; absent where they are not administered. */
+  backupCredentials?: BackupCredentialStore
+  /** Low-priority logical restore of one account database from a staged dump with its expected SHA-256. */
+  restoreBackupDatabase?: (account: Account, database: string, inputPath: string, sha256: string) => Promise<void>
   /** Independently qualified account keyring runner; absence keeps native OpenPGP unavailable. */
   pgpRunner?: PgpRunner
   benchmarkStore?: BenchmarkStore
@@ -334,6 +352,10 @@ export interface AgentServerDeps {
   ioAnalytics?: IoAnalyticsEngine
   /** The one daemon-owned sampler; API reads never create collectors or choose kernel paths. */
   ioResourcePipeline?: CanonicalIoResourcePipeline
+  /** Daemon-owned web bandwidth meter; absent off a native host. */
+  bandwidthMeter?: BandwidthMeter
+  /** Latest disk latency from the host metrics collector; absent off a native host. */
+  readDiskLatency?: () => DiskLatency
   websiteAnalytics?: WebsiteAnalyticsEngine
   /** Native upgrade coordinator launcher. Absent: upgrade start is refused with upgrade-coordinator-unavailable. */
   upgradeCoordinator?: UpgradeCoordinator
@@ -356,6 +378,8 @@ export interface AgentServerDeps {
   allowRootPeer?: boolean
   /** Optional observer invoked whenever kernel peer identity is evaluated. */
   onPeerDecision?: (event: PeerIdentityDecisionEvent) => void
+  /** Present only after the PTY helper is verified; absence reports every terminal request unavailable. */
+  terminals?: TerminalSessionManager | null
 }
 
 export interface AgentApp {
@@ -382,6 +406,16 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       ? normalizeAllowedPeerUids(deps.expectedPeerUid, deps.allowRootPeer === true)
       : null
   const allowDkimSign = createSignRateLimit()
+  let transferTaskController: TransferTaskController | null | undefined = deps.transferTasks
+  const transferTasks = (): TransferTaskController | null => {
+    if (transferTaskController !== undefined) return transferTaskController
+    const executor = deps.executor, mariadb = deps.mariadbAdmin
+    transferTaskController = process.platform === 'linux' && executor instanceof LinuxHostExecutor && mariadb instanceof MariaDbServiceAdapter ? createTransferTaskController({
+      stateRoot: deps.store.rootDir, store: deps.store, run: spawnTransferCommand(), mariadb,
+      installCertificate: async (account, domain, fullchainPem, privateKeyPem) => installManualCertificate({ executor, accountId: account.id, domains: (await deps.store.readSnapshot()).domains, body: { domain, fullchainPem, privateKeyPem } }),
+    }) : null
+    return transferTaskController
+  }
   const webEngine = deps.websiteAnalytics ?? new WebsiteAnalyticsEngine()
   const securityExecutor = deps.executor ?? new LinuxHostExecutor()
   let securityObservation: Promise<SecurityObservationService> | undefined
@@ -652,6 +686,18 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
     }
   }
 
+  // Any applied change (suspend, terminate, purge) re-checks the owners of live terminals at once.
+  if (deps.terminals) {
+    const terminals = deps.terminals
+    let sweeping = false
+    deps.reconciler.subscribe(() => {
+      if (sweeping || terminals.size === 0) return
+      sweeping = true
+      void revokeUnauthorizedTerminals(terminals, { getPrincipal: id => getPrincipal(deps.db, id), getAccount: id => deps.store.getAccount(id) })
+        .catch(() => undefined).finally(() => { sweeping = false })
+    })
+  }
+
   const streamInternalEvents = (req: Request): Response => {
     let dispose = () => undefined as void
     const stream = new ReadableStream<Uint8Array>({
@@ -824,7 +870,9 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         try { resources = (await deps.store.getPlan(account.planId))?.resources }
         catch { /* An unread assigned plan leaves enforcement unknown, preserving usage measurements. */ }
         const usage = await readAccountUsage(deps.executor, { username: account.username, uid: account.uid, home: account.home, ...(resources ? { resources } : {}) })
-        return jsonResponse(usage)
+        const metered = deps.bandwidthMeter ? await deps.bandwidthMeter.report().catch(() => null) : null
+        const row = metered && metered.state !== 'unavailable' ? metered.accounts.find(entry => entry.username === account.username) : undefined
+        return jsonResponse(row && metered ? { ...usage, bandwidthMonth: { month: metered.month, totalBytes: row.totalBytes, limitBytes: row.limitBytes, usedPercent: row.usedPercent, enforced: row.enforced, limited: row.limited } } : usage)
       }
 
       const purgeMatch = /^\/accounts\/([a-z][a-z0-9]{0,15})\/purge$/.exec(pathname)
@@ -1107,6 +1155,8 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       if (backupDestinationResponse) return backupDestinationResponse
       const backupRunsResponse = await handleBackupRunsRoute(req, url, method, { authorize: freshRoot('backup runs'), controller: deps.backupRuns ?? null })
       if (backupRunsResponse) return backupRunsResponse
+      const backupCredentialsResponse = await handleBackupCredentialsRoute(req, url, method, { authorize: freshRoot('backup credentials'), store: linuxHost ? deps.backupCredentials ?? null : null })
+      if (backupCredentialsResponse) return backupCredentialsResponse
       if (pathname.startsWith('/host/monitoring/')) {
         const benchmark = await handleBenchmarkRoute(req, url, method, { assertRoot: freshRoot('benchmark'), store: benchmarkStore,
           submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null,
@@ -1116,6 +1166,11 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
           readProc: linuxHost ? () => deps.executor!.readFile('/proc/net/dev') : null,
           readTail: linuxHost ? readProtectedLogTail : null, readState: () => deps.store.readSnapshot() })
         if (traffic) return traffic
+        const metering = await handleMeteringRoute(req, url, method, { assertRoot: freshRoot('metering'),
+          readIo: deps.ioResourcePipeline ? async () => deps.ioResourcePipeline!.readAccounts(await deps.store.readSnapshot()) : null,
+          readDiskLatency: deps.readDiskLatency ?? null,
+          bandwidth: deps.bandwidthMeter ?? null })
+        if (metering) return metering
         const executor = deps.executor instanceof LinuxHostExecutor ? deps.executor : undefined
         const response = await handleHostMonitoringRoute(req, url, method, {
           caller, reauthenticate: () => authenticateCaller(req), assertRoot: assertRootCaller,
@@ -1197,6 +1252,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         readDrift: linuxHost ? () => deps.reconciler.checkDrift() : null,
         readSaved: () => deps.store.readSnapshot(),
         readResources: deps.ioResourcePipeline ? async () => deps.ioResourcePipeline!.read(await deps.store.readSnapshot()) : null,
+        readBandwidth: deps.bandwidthMeter ? () => deps.bandwidthMeter!.report() : null,
       })
       if (serverHealth) return serverHealth
       const support = await handleSupportRoute(req, url, method, {
@@ -1263,6 +1319,20 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         provider: null,
       })
       if (fileSharing) return fileSharing
+      const phpOs = secHostProfile()
+      const phpManager = await handlePhpManagerRoute(req, url, method, {
+        assertRoot: freshRoot('PHP management'),
+        host: phpOs && (phpOs.family === 'debian' || phpOs.family === 'rhel') ? {
+          family: phpOs.family, phpPackages: version => phpOs.phpPackages(version), phpFpmBinary: phpOs.phpFpmBinary, phpIniFile: phpOs.phpIniFile,
+          run: argv => new LinuxHostExecutor({ timeoutMs: 180_000 }).runCommand([...argv]),
+          // fixed profile paths, never request input; the managed drop-in is small
+          readFile: path => readFile(path, 'utf8').then(text => text.length > 65536 ? null : text, () => null),
+          listDir: path => readdir(path).catch(() => null),
+          writeStaged: async (path, content) => { await mkdir(PHP_STAGING_DIR, { recursive: true, mode: 0o700 }); await writeFile(path, content, { mode: 0o600 }) },
+        } : null,
+        submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null,
+      })
+      if (phpManager) return phpManager
       const softwareCenter = await handleSoftwareCenterRoute(req, url, method, {
         assertRoot: freshRoot('software center'),
         family: linuxHost ? (deps.os.family === 'debian' ? 'debian' : deps.os.family === 'rhel' ? 'rhel' : null) : null,
@@ -1282,6 +1352,18 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         files: linuxHost && deps.accountFileRunner ? (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, runner: deps.accountFileRunner! }) : null,
         audit: async entry => { await appendAudit(deps.db, { ...entry, principalId: caller.principalId }) } })
       if (swDeployments) return swDeployments
+      if (pathname === '/host/firewall/bans' || pathname === '/host/firewall/bans/unban') {
+        const read = pathname === '/host/firewall/bans'
+        await assertRootCaller(caller, read ? 'host.firewall.bans.read' : 'host.firewall.bans.unban')
+        if (method !== (read ? 'GET' : 'POST')) return new Response(null, { status: 405, headers: { allow: read ? 'GET' : 'POST' } })
+        if (url.search) return fail('VALIDATION', 'ban routes do not accept selectors', { stateChanged: false })
+        if (!linuxHost) return fail('PRECONDITION_FAILED', 'the live ban sets exist only on a native Linux host', { stateChanged: false })
+        const run: BanRun = argv => deps.executor!.runCommand(argv)
+        const body = read ? null : await req.json().catch(() => fail('VALIDATION', 'request body must be valid JSON', { stateChanged: false })) as { addresses?: unknown } | null
+        const response = jsonResponse(read ? await readBans(run) : await unbanAddresses(run, body?.addresses))
+        response.headers.set('cache-control', 'no-store')
+        return response
+      }
       if (method === 'GET' && pathname === '/host/php/inventory') {
         await assertRootCaller(caller, 'host.php.inventory')
         if (url.search) return fail('VALIDATION', 'PHP inventory does not accept request selectors')
@@ -1419,11 +1501,8 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         })
       }
 
-      const transferArchiveResponse = await handleTransferArchiveRoute(req, url, method, {
-        authorize: action => assertRootCaller(caller, action), store: deps.store,
-        executor: deps.executor instanceof LinuxHostExecutor ? deps.executor : null, root: process.env.XPANEL_BACKUP_DIR || DEFAULT_BACKUP_DIR,
-      })
-      if (transferArchiveResponse) return transferArchiveResponse
+      const transferTaskResponse = await handleTransferTaskRoute(req, url, method, { authorize: async action => { await freshRoot('account transfer')(action) }, controller: transferTasks() })
+      if (transferTaskResponse) return transferTaskResponse
       const convertAddonFilesResponse = await handleConvertAddonFilesRoute(req, url, method, {
         authorize: action => assertRootCaller(caller, action), store: deps.store, audit: entry => appendAudit(deps.db, entry), caller: { actor: caller.actor, principalId: caller.principalId },
         files: deps.executor instanceof LinuxHostExecutor && deps.accountFileRunner ? (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, runner: deps.accountFileRunner! }) : null,
@@ -1441,7 +1520,12 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         const root = process.env.XPANEL_BACKUP_DIR || DEFAULT_BACKUP_DIR
         if (method === 'GET') return jsonResponse({ backups: await listAccountBackups(root, target) })
         const body = await readObjectBody(req)
-        if (body.op === 'create') return jsonResponse({ backup: await createAccountBackup({ executor: deps.executor, root, account: target }) }, 201)
+        // Create runs as a per-account backup job: low priority, dumps and zones included, verified, uploaded to the saved destinations.
+        if (body.op === 'create') {
+          if (!deps.backupRuns) return fail('PRECONDITION_FAILED', 'backup jobs are unavailable on this host', { stateChanged: false })
+          const run = await deps.backupRuns.startAccounts(caller.actor, [account.username])
+          return jsonResponse({ run: { id: run.id, state: run.state } }, 202)
+        }
         if (body.op === 'restore') {
           if (typeof body.file !== 'string') return fail('VALIDATION', 'backup file is required')
           return jsonResponse({ backup: await restoreAccountBackup({ executor: deps.executor, root, account: target, file: body.file }) })
@@ -1541,48 +1625,6 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         return jsonResponse(snap)
       }
 
-      const shellMatch = /^\/accounts\/([a-z][a-z0-9]{0,15})\/shell$/.exec(pathname)
-      if (method === 'POST' && shellMatch) {
-        const username = shellMatch[1]!
-        const account =
-          (await deps.store.getAccountByUsername(username)) ??
-          fail('NOT_FOUND', `account "${username}" not found`, { username })
-        await assertAccountCaller(caller, account, 'shell.exec')
-        const plan =
-          (await deps.store.getPlan(account.planId)) ?? fail('NOT_FOUND', `plan "${account.planId}" not found`)
-        const executor = deps.executor ?? fail('PRECONDITION_FAILED', 'agent executor not configured')
-        const body = await readObjectBody(req)
-        if (Object.keys(body).some(key => key !== 'command' && key !== 'sessionId') || typeof body.command !== 'string' ||
-          (body.sessionId !== undefined && typeof body.sessionId !== 'string')) {
-          fail('VALIDATION', 'shell request requires a command and an optional string sessionId')
-        }
-        const command = body.command as string
-        const sessionId = body.sessionId as string | undefined
-        try {
-          const result = await runJailedShellCommand(account, plan, command, executor, {
-            ...(sessionId && { sessionId }),
-            onEvent: (ev) => deps.reconciler.emit(ev),
-          })
-          await appendAudit(deps.db, {
-            actor: caller.actor,
-            action: 'shell.exec',
-            target: `account:${account.username}`,
-            detail: { command, code: result.code, sessionId: result.sessionId },
-            outcome: result.code === 0 ? 'ok' : 'failed',
-          })
-          return jsonResponse(result)
-        } catch (err) {
-          await appendAudit(deps.db, {
-            actor: caller.actor,
-            action: 'shell.exec',
-            target: `account:${account.username}`,
-            detail: { command, error: isXpanelError(err) ? err.message : 'Shell execution error' },
-            outcome: isXpanelError(err) && err.code === 'FORBIDDEN' ? 'denied' : 'failed',
-          })
-          throw err
-        }
-      }
-
       const htaccessMatch = /^\/accounts\/([a-z][a-z0-9]{0,15})\/htaccess\/([0-9a-f-]{36})$/i.exec(pathname)
       if (method === 'POST' && htaccessMatch) {
         const username = htaccessMatch[1]!, domainId = htaccessMatch[2]!
@@ -1643,6 +1685,12 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         catalog: deps.applicationCatalog ?? null, provider: deps.applicationProvider ?? null,
         submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null, audit: entry => appendAudit(deps.db, entry) })
       if (swApplications) return swApplications
+      const accountRuntime = await handleAccountRuntimeRoute(req, url, method, { caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId),
+        os: profileFor('ID=' + deps.os.id + '\nVERSION_ID=' + deps.os.versionId), host: linuxHost ? createRuntimeHost(deps.executor!) : null,
+        files: linuxHost && deps.accountFileRunner ? (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, runner: deps.accountFileRunner! }) : null,
+        reconcile: linuxHost ? actor => deps.reconciler.reconcile({ actor, scope: { accountId: caller.accountId, resellerId: caller.resellerId } }) : null,
+        audit: entry => appendAudit(deps.db, entry) })
+      if (accountRuntime) return accountRuntime
       const accountPackagesResponse = await handleAccountPackagesRoute(req, url, method, {
         caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), audit: entry => appendAudit(deps.db, entry),
         files: (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
@@ -1667,6 +1715,10 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         files: (account, plan) => deps.accountFileRunner ? new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, runner: deps.accountFileRunner }) : null,
       })
       if (sitePublisherResponse) return sitePublisherResponse
+      const terminalResponse = await handleTerminalRoute(req, url, method, {
+        caller, terminals: deps.terminals ?? null, store: deps.store, assertRootCaller,
+      })
+      if (terminalResponse) return terminalResponse
       const accountLogsResponse = await handleAccountLogsRoute(req, url, method, {
         caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId),
         readTail: process.platform === 'linux' && deps.executor instanceof LinuxHostExecutor ? readProtectedLogTail : null,
@@ -1691,6 +1743,11 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       if (backupFilesResponse) return backupFilesResponse
       const backupComponentsResponse = await handleComponentRestoreRoute(req, url, method, {
         caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), audit: entry => appendAudit(deps.db, entry),
+        backupRuns: deps.backupRuns ?? null, restoreDatabase: deps.restoreBackupDatabase ?? null,
+        reconcile: async account => {
+          const result = await deps.reconciler.reconcile({ force: false, actor: caller.actor, scope: { accountId: account.id, resellerId: caller.resellerId } })
+          if (result.status === 'failed') fail('CONFIG_TEST_FAILED', 'the restored zones could not be applied')
+        },
         root: deps.executor instanceof LinuxHostExecutor ? process.env.XPANEL_BACKUP_DIR || DEFAULT_BACKUP_DIR : null,
         files: (account, plan) => deps.accountFileRunner ? new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, runner: deps.accountFileRunner }) : null,
       })
@@ -2035,7 +2092,8 @@ export const listenAgentSocket = async (
       const abort = new AbortController()
       res.once('close', () => abort.abort())
       req.once('aborted', () => abort.abort())
-      const isEventsStream = (req.url ?? '').startsWith('/internal/events')
+      // Long-lived output streams: the event feed and a terminal session's output.
+      const isEventsStream = (req.url ?? '').startsWith('/internal/events') || /^\/terminal\/sessions\/[0-9a-f-]{36}\/output$/.test(req.url ?? '')
       if (!isEventsStream) {
         inFlightRequests += 1
       }

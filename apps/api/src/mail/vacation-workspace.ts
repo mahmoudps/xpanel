@@ -30,7 +30,8 @@ const schedule = (value: unknown, field: string): string | null => {
     || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString() !== value) return invalid(`${field} must be null or canonical whole-second UTC ISO time`)
   return value
 }
-const fields = (value: Record<string, unknown>): VacationWorkspaceFields => {
+/** Vacation fields shared by mailbox responders and the responders of addresses without a mailbox. */
+export const parseVacationFields = (value: Record<string, unknown>): VacationWorkspaceFields => {
   if (typeof value.enabled !== 'boolean') return invalid('enabled must be a boolean')
   if (typeof value.subject !== 'string' || unsafeHeader.test(value.subject)) return invalid('subject must be text without header controls')
   const subject = value.subject.trim()
@@ -49,7 +50,7 @@ export const parseVacationWorkspaceRequest = (value: unknown): VacationWorkspace
   if (Object.keys(input).length !== keys.length || keys.some(key => !Object.hasOwn(input, key)) || Object.keys(input).some(key => !(keys as readonly string[]).includes(key))) return invalid('exact vacation fields and expectedRevision are required')
   const revision = input.expectedRevision
   if (typeof revision !== 'string' || revision.length !== 64 || !/^[0-9a-f]{64}$/.test(revision)) return invalid('expectedRevision must be an exact lowercase SHA-256 revision')
-  return { ...fields(input), expectedRevision: revision }
+  return { ...parseVacationFields(input), expectedRevision: revision }
 }
 
 /** Explicit scalar projection; derived source and timestamps are never synthesized. */
@@ -78,7 +79,7 @@ const mimeReason = (body: string, html: string): string => {
 
 /** RFC5230/6131/5260 source only; installed engine capabilities are not qualified here. */
 export const compileVacationWorkspace = (value: VacationWorkspaceFields & { mailbox: string }): string => {
-  const input = object(value), content = fields(input)
+  const input = object(value), content = parseVacationFields(input)
   const mailbox = assertEmail(input.mailbox, 'mailbox')
   if (!content.enabled) return '# Vacation responder disabled\n'
   const extensions = ['vacation']

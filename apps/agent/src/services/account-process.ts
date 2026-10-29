@@ -6,14 +6,8 @@ import type { AgentExecutor } from '../executor.ts'
 import { JailedFileManager } from '../file-manager.ts'
 import type { AccountFileRunner, FileEntry } from '../file-manager.ts'
 
-type AppSpec = system.AppSpec
 type CronJob = system.CronJob
 type SshdSettings = system.SshdSettings
-
-export const DEFAULT_RESERVED_PORTS: readonly number[] = [
-  20, 21, 22, 25, 53, 80, 110, 143, 443, 465, 587, 993, 995,
-  2082, 2083, 2086, 2087, 2095, 2096, 3306, 5432, 6379, 7080, 8080, 8443,
-]
 
 export const ALLOWED_SSH_KEY_TYPES = new Set([
   'ssh-ed25519',
@@ -49,28 +43,10 @@ export interface ReconcileAccountCronResult {
   removedUnits: string[]
 }
 
-export interface ReconcileAccountAppsInput {
-  account: Account
-  plan: Plan
-  apps: readonly (AppSpec & { enabled?: boolean })[]
-  existingAppNames?: readonly string[]
-}
-
-export interface ReconcileAccountAppsResult {
-  username: string
-  slice: string
-  activeServices: { appName: string; unit: string; port: number; envFilePath: string; redactedEnvKeys: string[] }[]
-  stoppedServices: string[]
-  removedUnits: string[]
-  removedEnvFiles: string[]
-}
-
 export interface AccountProcessAdapterOptions {
   executor: AgentExecutor
   os: OsProfile
   accountFileRunner?: AccountFileRunner
-  reservedPorts?: readonly number[]
-  appPortRange?: readonly [number, number]
 }
 
 /**
@@ -123,20 +99,6 @@ export const validateSshPublicKey = (rawLine: unknown): ValidatedSshPublicKey =>
   }
 }
 
-/**
- * Redacts all secret values from an app's environment dictionary whenever text is logged or reported.
- */
-export const redactAppSecrets = (text: string, env: Readonly<Record<string, string>> | undefined): string => {
-  if (!env) return text
-  let out = text
-  for (const val of Object.values(env)) {
-    if (typeof val === 'string' && val.length >= 4) {
-      out = out.split(val).join('[REDACTED]')
-    }
-  }
-  return out
-}
-
 const parseSystemctlShow = (stdout: string): Map<string, string> => {
   const map = new Map<string, string>()
   for (const rawLine of stdout.split('\n')) {
@@ -176,17 +138,13 @@ const assertAccountIdentity = (
 }
 
 /**
- * Production Account Process Service Adapter for SSH keys/sshd, systemd cron timers,
- * and per-account Node/Python background app units (D05 — A41).
+ * Production Account Process Service Adapter for SSH keys/sshd and systemd cron timers (D05 — A41).
+ * Runtime apps, caches and containers are rendered by the reconciler (account-runtime.ts).
  */
 export class AccountProcessServiceAdapter {
   readonly executor: AgentExecutor
   readonly os: OsProfile
   private readonly accountFileRunner: AccountFileRunner | undefined
-  private readonly reservedPorts: ReadonlySet<number>
-  private readonly appPortRange: readonly [number, number]
-  /** Tracks `port -> { accountId, username, appName }` across all tenants to prevent port hijacking. */
-  private readonly allocatedPorts = new Map<number, { accountId: string; username: string; appName: string }>()
 
   constructor(opts: AccountProcessAdapterOptions) {
     if (!opts?.executor || !opts?.os) {
@@ -195,12 +153,6 @@ export class AccountProcessServiceAdapter {
     this.executor = opts.executor
     this.os = opts.os
     this.accountFileRunner = opts.accountFileRunner
-    this.reservedPorts = new Set(opts.reservedPorts ?? DEFAULT_RESERVED_PORTS)
-    const range = opts.appPortRange ?? [3000, 9999]
-    if (range[0] < 1024 || range[1] > 65535 || range[0] >= range[1]) {
-      fail('VALIDATION', 'appPortRange must be a valid [min, max] port range in 1024..65535')
-    }
-    this.appPortRange = range
   }
 
   /**
@@ -499,201 +451,28 @@ export class AccountProcessServiceAdapter {
   }
 
   /**
-   * Allocates or validates a loopback port for an account's background app, preventing cross-tenant port hijacking.
-   */
-  allocateAppPort(account: Pick<Account, 'id' | 'username'>, appName: string, requestedPort?: number): number {
-    const cleanApp = appName.trim().toLowerCase()
-    if (requestedPort !== undefined) {
-      if (!Number.isSafeInteger(requestedPort) || requestedPort < 1024 || requestedPort > 65535) {
-        fail('VALIDATION', 'app port must be an integer in 1024..65535', { port: requestedPort })
-      }
-      if (this.reservedPorts.has(requestedPort)) {
-        fail('VALIDATION', `port ${requestedPort} is reserved by system services`, { port: requestedPort })
-      }
-      const owner = this.allocatedPorts.get(requestedPort)
-      if (owner && (owner.accountId !== account.id || owner.appName !== cleanApp)) {
-        fail(
-          'CONFLICT',
-          `port ${requestedPort} is already allocated to another application and cannot be claimed by ${account.username}/${cleanApp}`,
-          {
-            port: requestedPort,
-            requestedByAccount: account.username,
-            requestedByApp: cleanApp,
-          },
-        )
-      }
-      // Release any previous port held by the same (accountId, appName)
-      for (const [p, entry] of this.allocatedPorts.entries()) {
-        if (entry.accountId === account.id && entry.appName === cleanApp && p !== requestedPort) {
-          this.allocatedPorts.delete(p)
-        }
-      }
-      this.allocatedPorts.set(requestedPort, {
-        accountId: account.id,
-        username: account.username,
-        appName: cleanApp,
-      })
-      return requestedPort
-    }
-
-    // Reuse existing port if already allocated for this app
-    for (const [p, entry] of this.allocatedPorts.entries()) {
-      if (entry.accountId === account.id && entry.appName === cleanApp) {
-        return p
-      }
-    }
-
-    const [minPort, maxPort] = this.appPortRange
-    for (let port = minPort; port <= maxPort; port++) {
-      if (!this.reservedPorts.has(port) && !this.allocatedPorts.has(port)) {
-        this.allocatedPorts.set(port, {
-          accountId: account.id,
-          username: account.username,
-          appName: cleanApp,
-        })
-        return port
-      }
-    }
-
-    return fail('LIMIT_EXCEEDED', 'no free loopback ports available in configured appPortRange')
-  }
-
-  /**
-   * Reconciles per-account Node/Python background app units (`xpanel-app-<user>-<app>.service`)
-   * under `Slice=xpanel-<uid>.slice`, writing root-only `0600` EnvironmentFiles (`/etc/xpanel/apps/<user>/<app>.env`)
-   * with secrets redacted from logs and argv, and enforcing cross-tenant port isolation.
-   */
-  async reconcileAccountApps(input: ReconcileAccountAppsInput): Promise<ReconcileAccountAppsResult> {
-    const id = assertAccountIdentity(input.account, this.os)
-    const slice = system.accountSliceName(id.uid)
-    const isAccountActive = input.account.status === 'active'
-    const systemdDir = this.os.paths.systemdDir
-    const envDir = system.appEnvDir(id.username)
-
-    const activeServices: ReconcileAccountAppsResult['activeServices'] = []
-    const stoppedServices: string[] = []
-    const removedUnits: string[] = []
-    const removedEnvFiles: string[] = []
-    const currentAppNames = new Set<string>()
-
-    if (input.apps.length > 0) {
-      await this.executor.runAction({
-        kind: 'ensure-dir',
-        path: system.APP_ENV_DIR,
-        mode: 0o750,
-        owner: 'root',
-        group: 'root',
-      })
-      await this.executor.runAction({
-        kind: 'ensure-dir',
-        path: envDir,
-        mode: 0o700,
-        owner: 'root',
-        group: 'root',
-      })
-    }
-
-    // Validate and allocate ports for all requested apps first
-    for (const app of input.apps) {
-      this.allocateAppPort(input.account, app.name, app.port)
-    }
-
-    for (const app of input.apps) {
-      const rendered = system.renderAppUnit(input.account, app, this.os, {
-        reservedPorts: [...this.reservedPorts],
-      })
-      currentAppNames.add(app.name)
-      await this.executor.writeFile(rendered.envFile)
-      await this.executor.writeFile(rendered.unit)
-    }
-
-    for (const oldApp of input.existingAppNames ?? []) {
-      if (!currentAppNames.has(oldApp)) {
-        const unit = system.appUnitName(id.username, oldApp)
-        const envPath = `${envDir}/${oldApp}.env`
-        await this.executor.runAction({ kind: 'systemd', verb: 'stop', unit })
-        await this.executor.runAction({ kind: 'systemd', verb: 'disable', unit })
-        await this.executor.removePath(`${systemdDir}/${unit}`)
-        await this.executor.removePath(envPath)
-        removedUnits.push(unit)
-        removedEnvFiles.push(envPath)
-
-        for (const [port, entry] of this.allocatedPorts.entries()) {
-          if (entry.accountId === input.account.id && entry.appName === oldApp) {
-            this.allocatedPorts.delete(port)
-          }
-        }
-      }
-    }
-
-    await this.executor.runAction({ kind: 'systemd-daemon-reload' })
-
-    for (const app of input.apps) {
-      const unit = system.appUnitName(id.username, app.name)
-      const envFilePath = `${envDir}/${app.name}.env`
-      const shouldRun = isAccountActive && app.enabled !== false
-
-      if (shouldRun) {
-        try {
-          await this.executor.runAction({ kind: 'systemd', verb: 'enable', unit })
-          await this.executor.runAction({ kind: 'systemd', verb: 'restart', unit })
-        } catch (err) {
-          const rawMsg = err instanceof Error ? err.message : String(err)
-          fail('CONFIG_TEST_FAILED', redactAppSecrets(rawMsg, app.env), {
-            unit,
-            username: id.username,
-            appName: app.name,
-          })
-        }
-        activeServices.push({
-          appName: app.name,
-          unit,
-          port: app.port,
-          envFilePath,
-          redactedEnvKeys: Object.keys(app.env ?? {}).sort(),
-        })
-      } else {
-        await this.executor.runAction({ kind: 'systemd', verb: 'stop', unit })
-        await this.executor.runAction({ kind: 'systemd', verb: 'disable', unit })
-        stoppedServices.push(unit)
-      }
-    }
-
-    return {
-      username: id.username,
-      slice,
-      activeServices,
-      stoppedServices,
-      removedUnits,
-      removedEnvFiles,
-    }
-  }
-
-  /**
-   * Immediately stops and disables all cron timers/services, background app units, and active SSH/logind
-   * sessions (`user-<uid>.slice`) when an account is suspended or terminated.
-   * When `terminate: true`, also removes all unit files, app env files, and releases allocated ports.
+   * Immediately stops and disables all cron timers/services, runtime units (apps, caches, containers) and active
+   * SSH/logind sessions (`user-<uid>.slice`) when an account is suspended or terminated.
+   * When `terminate: true`, also removes the unit files and the account's runtime configuration.
    */
   async enforceAccountLifecycleState(input: {
     account: Account
     cronJobIds: readonly string[]
-    appNames: readonly string[]
+    runtimeUnits: readonly string[]
     terminate?: boolean
   }): Promise<{
     username: string
     stoppedUnits: string[]
     removedPaths: string[]
-    releasedPorts: number[]
   }> {
     const id = assertAccountIdentity(input.account, this.os)
     const systemdDir = this.os.paths.systemdDir
-    const envDir = system.appEnvDir(id.username)
+    const runtimeDir = system.runtimeConfigDir(id.username)
     const stoppedUnits: string[] = []
     const removedPaths: string[] = []
-    const releasedPorts: number[] = []
 
     if (input.account.status === 'active' && !input.terminate) {
-      return { username: id.username, stoppedUnits, removedPaths, releasedPorts }
+      return { username: id.username, stoppedUnits, removedPaths }
     }
 
     // 1. Stop & disable cron timers and services
@@ -712,18 +491,16 @@ export class AccountProcessServiceAdapter {
       }
     }
 
-    // 2. Stop & disable background app services
-    for (const appName of input.appNames) {
-      const unit = system.appUnitName(id.username, appName)
+    // 2. Stop & disable runtime units of this account only
+    for (const unit of input.runtimeUnits) {
+      if (!unit.startsWith(`xpanel-`) || !unit.includes(`-${id.username}`)) fail('VALIDATION', 'runtime unit does not belong to the account', { unit })
       await this.executor.runAction({ kind: 'systemd', verb: 'stop', unit })
       await this.executor.runAction({ kind: 'systemd', verb: 'disable', unit })
       stoppedUnits.push(unit)
       if (input.terminate) {
         const unitPath = `${systemdDir}/${unit}`
-        const envPath = `${envDir}/${appName}.env`
         await this.executor.removePath(unitPath)
-        await this.executor.removePath(envPath)
-        removedPaths.push(unitPath, envPath)
+        removedPaths.push(unitPath)
       }
     }
 
@@ -736,24 +513,12 @@ export class AccountProcessServiceAdapter {
       const accountSlice = system.accountSliceName(id.uid)
       await this.executor.runAction({ kind: 'systemd', verb: 'stop', unit: accountSlice })
       stoppedUnits.push(accountSlice)
-      await this.executor.removePath(envDir)
-      removedPaths.push(envDir)
-
-      for (const [port, entry] of this.allocatedPorts.entries()) {
-        if (entry.accountId === input.account.id || entry.username === id.username) {
-          this.allocatedPorts.delete(port)
-          releasedPorts.push(port)
-        }
-      }
+      await this.executor.removePath(runtimeDir)
+      removedPaths.push(runtimeDir)
     }
 
     await this.executor.runAction({ kind: 'systemd-daemon-reload' })
 
-    return {
-      username: id.username,
-      stoppedUnits,
-      removedPaths,
-      releasedPorts: releasedPorts.sort((a, b) => a - b),
-    }
+    return { username: id.username, stoppedUnits, removedPaths }
   }
 }

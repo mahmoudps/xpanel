@@ -25,8 +25,11 @@ export interface ReconcilerPort {
   currentGeneration(): Promise<GenerationId>
   /** builds a generation from desired state, config-tests it and activates it */
   reconcile(reason: string): Promise<{ generationId: GenerationId; units: UnitChange[] }>
-  /** re-activates an existing, already-tested generation */
-  activate(generationId: GenerationId): Promise<{ units: UnitChange[] }>
+  /**
+   * Rewind only: re-applies the generation built from the desired state now on disk, which must be
+   * the one `generationId` was built from. The host may record it under a new generation id.
+   */
+  activate(generationId: GenerationId): Promise<{ generationId: GenerationId; units: UnitChange[] }>
   status(): Promise<{ converged: boolean; drift: string[] }>
   identities(): Promise<AccountIdentity[]>
 }
@@ -98,10 +101,20 @@ export interface UpgradeSafetyPort {
   unpackVerifiedRelease(path: string, release: { version: string; schemaVersion: number; archivePath: string; sha256: string; bytes: number }): Promise<void>
   /** Reverify and fsync every staged file and directory before the engine may publish the tree. */
   verifyStagedRelease(path: string): Promise<void>
-  /** Verify exact migration hashes, state/protocol contracts and reader compatibility, not schema integers alone. */
-  assertCompatibility(input: { direction: 'forward' | 'rollback'; fromVersion: string; toVersion: string; currentSchema: number; targetSchema: number }): Promise<void>
-  /** Mandatory WAL-safe DB/metadata backup, distinct from the state tar and never used to rewind authority. */
+  /**
+   * Verify exact migration hashes, state/protocol contracts and reader compatibility, not schema integers alone.
+   * An older target schema is admitted only for a rollback through this upgrade's own verified snapshot:
+   * `planned` at precheck (the snapshot this upgrade will take), then the receipt-bound snapshot itself.
+   */
+  assertCompatibility(input: { direction: 'forward' | 'rollback'; fromVersion: string; toVersion: string; currentSchema: number; targetSchema: number; snapshot?: 'planned' | { recordId: string; path: string } }): Promise<void>
+  /** Mandatory WAL-safe index backup written to `${snapshotPath}.control.db`, distinct from the state tar. */
   snapshotControlPlane(snapshotPath: string): Promise<void>
+  /**
+   * Rewind only, writers fenced: bring the index back to this snapshot. Derived rows are rebuilt from
+   * the restored state files; identity, session, job and audit rows never rewind, and the expand-only
+   * schema stays. Idempotent.
+   */
+  restoreControlPlane(snapshotPath: string): Promise<void>
   /** fsync the named regular file or directory; callers also sync containing directories. */
   syncPath(path: string): Promise<void>
 }

@@ -58,28 +58,36 @@ const responseHeaders = (response: IncomingMessage): Headers => {
 }
 
 const MAX_ARCHIVE_RESPONSE_BYTES = 2 * 1024 * 1024 * 1024
-const archiveDownloadFile = (request: Request, url: URL): string | null => {
+const MAX_TRANSFER_ARTIFACT_BYTES = 50 * 1024 ** 3
+const TRANSFER_ARTIFACT = /^\/transfers\/packages\/[0-9a-f-]{36}\/(home\.tar\.gz|db-[a-z][a-z0-9]{0,15}_[A-Za-z0-9_]{1,48}\.sql|(?:cert|key)-[0-9]{1,3}\.pem)$/
+interface ArchiveDownload { file: string; contentType: string; maxBytes: number }
+const archiveDownloadFile = (request: Request, url: URL): ArchiveDownload | null => {
   if (request.method !== 'GET' || url.search) return null
+  const artifact = TRANSFER_ARTIFACT.exec(url.pathname)
+  if (artifact) {
+    if (!isUuid(request.headers.get('x-xpanel-principal-id'))) return fail('VALIDATION', 'agent archive request requires a principal identity')
+    return { file: artifact[1]!, contentType: 'application/octet-stream', maxBytes: MAX_TRANSFER_ARTIFACT_BYTES }
+  }
   const match = /^\/accounts\/([a-z][a-z0-9]{0,15})\/backup-workspace\/([^/]+)\/download$/.exec(url.pathname)
   if (!match) return null
   let file: string
   try { file = decodeURIComponent(match[2]!) } catch { return fail('VALIDATION', 'agent archive path is invalid') }
   if (!new RegExp('^xpanel-backup-' + match[1] + '-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\\.tar\\.gz$').test(file)) return fail('VALIDATION', 'agent archive path is invalid')
   if (!isUuid(request.headers.get('x-xpanel-principal-id'))) return fail('VALIDATION', 'agent archive request requires a principal identity')
-  return file
+  return { file, contentType: 'application/gzip', maxBytes: MAX_ARCHIVE_RESPONSE_BYTES }
 }
 
-/** The archive route alone gets a larger response budget; ordinary JSON stays bounded. */
-const archiveResponse = (incoming: IncomingMessage, outgoing: ClientRequest, file: string): Response => {
+/** Archive and transfer artifact routes alone get a larger response budget; ordinary JSON stays bounded. */
+const archiveResponse = (incoming: IncomingMessage, outgoing: ClientRequest, { file, contentType, maxBytes }: ArchiveDownload): Response => {
   // A socket may fail before the response body's first pull attaches its iterator.
   incoming.on('error', () => undefined)
   const headers = responseHeaders(incoming), declared = headers.get('content-length')
-  const invalid = headers.get('content-type') !== 'application/gzip' || headers.has('content-encoding')
+  const invalid = headers.get('content-type') !== contentType || headers.has('content-encoding')
     || headers.get('content-disposition') !== `attachment; filename="${file}"` || !declared || !/^[1-9][0-9]*$/.test(declared)
   const expected = declared && /^[1-9][0-9]*$/.test(declared) ? Number(declared) : 0
-  if (invalid || !Number.isSafeInteger(expected) || expected > MAX_ARCHIVE_RESPONSE_BYTES) {
+  if (invalid || !Number.isSafeInteger(expected) || expected > maxBytes) {
     incoming.once('error', () => undefined); incoming.destroy(); outgoing.destroy()
-    return fail(expected > MAX_ARCHIVE_RESPONSE_BYTES ? 'LIMIT_EXCEEDED' : 'PRECONDITION_FAILED', 'agent archive response headers could not be verified')
+    return fail(expected > maxBytes ? 'LIMIT_EXCEEDED' : 'PRECONDITION_FAILED', 'agent archive response headers could not be verified')
   }
   const iterator = incoming[Symbol.asyncIterator]()
   let bytes = 0, ended = false
@@ -96,7 +104,7 @@ const archiveResponse = (incoming: IncomingMessage, outgoing: ClientRequest, fil
         }
         const chunk = Buffer.from(next.value)
         bytes += chunk.byteLength
-        if (bytes > expected || bytes > MAX_ARCHIVE_RESPONSE_BYTES) throw new XpanelError('LIMIT_EXCEEDED', 'agent archive response exceeds its declared limit')
+        if (bytes > expected || bytes > maxBytes) throw new XpanelError('LIMIT_EXCEEDED', 'agent archive response exceeds its declared limit')
         controller.enqueue(chunk)
       } catch (error) {
         if (ended) return
@@ -110,6 +118,36 @@ const archiveResponse = (incoming: IncomingMessage, outgoing: ClientRequest, fil
     },
   })
   return new Response(stream, { status: 200, headers })
+}
+
+const TERMINAL_OUTPUT_ROUTE = /^\/terminal\/sessions\/[0-9a-f-]{36}\/output$/
+
+/** A terminal's output stays open for the session's life; it streams with backpressure and no idle timeout. */
+const terminalOutputResponse = (incoming: IncomingMessage, outgoing: ClientRequest): Response => {
+  incoming.on('error', () => undefined)
+  outgoing.setTimeout(0)
+  const iterator = incoming[Symbol.asyncIterator]()
+  let ended = false
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (ended) return
+      try {
+        const next = await iterator.next()
+        if (ended) return
+        if (next.done) { ended = true; controller.close(); return }
+        controller.enqueue(Buffer.from(next.value))
+      } catch {
+        if (ended) return
+        ended = true; incoming.destroy(); outgoing.destroy(); controller.error(unavailable())
+      }
+    },
+    async cancel() {
+      if (ended) return
+      ended = true; incoming.destroy(); outgoing.destroy()
+      await iterator.return?.().catch(() => undefined)
+    },
+  })
+  return new Response(stream, { status: 200, headers: responseHeaders(incoming) })
 }
 
 /** A bounded local IPC client. It never creates a host executor or falls back to TCP. */
@@ -143,6 +181,7 @@ export const createAgentClient = (options: AgentClientOptions): AgentApp & { clo
     const url = new URL(req.url)
     if (url.origin !== 'http://agent.local') fail('VALIDATION', 'agent client accepts internal agent requests only')
     const archiveFile = archiveDownloadFile(req, url)
+    const terminalOutput = req.method === 'GET' && !url.search && TERMINAL_OUTPUT_ROUTE.test(url.pathname)
     try { await assertSocketPath(options.socketPath) } catch { throw unavailable() }
     const body = await boundedBody(req.body)
     if (closed) throw unavailable()
@@ -158,6 +197,10 @@ export const createAgentClient = (options: AgentClientOptions): AgentApp & { clo
         socketPath: options.socketPath, path: `${url.pathname}${url.search}`,
         method: req.method, headers, timeout, signal: req.signal,
       }, response => {
+        if (terminalOutput && response.statusCode === 200 && response.headers['content-type'] === 'application/x-ndjson') {
+          resolveResponse(terminalOutputResponse(response, outgoing))
+          return
+        }
         if (archiveFile !== null && response.statusCode === 200) {
           try { resolveResponse(archiveResponse(response, outgoing, archiveFile)) }
           catch (error) { rejectResponse(error) }

@@ -59,6 +59,8 @@ export const WS_AUTHORIZATION_UNAVAILABLE = Symbol('websocket-authorization-unav
 export type UpgradeAuthorization = EventSubscriber | null | typeof WS_AUTHORIZATION_UNAVAILABLE
 type AuthenticateUpgrade = (req: IncomingMessage) => Promise<UpgradeAuthorization>
 type ConnectedHook = (req: IncomingMessage, subscriber: EventSubscriber, signal: AbortSignal) => void | Promise<void>
+/** Another upgrade endpoint on the same listener claims its own path first; true means it took the socket. */
+type UpgradeClaim = (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean
 
 const accountSet = (subscriber: EventSubscriber): ReadonlySet<Id> =>
   new Set(subscriber.ownedAccountIds ?? [])
@@ -224,7 +226,7 @@ export class LiveEventHub {
     }
   }
 
-  attachToServer(server: HttpServer, authenticate: AuthenticateUpgrade, onConnected?: ConnectedHook): void {
+  attachToServer(server: HttpServer, authenticate: AuthenticateUpgrade, onConnected?: ConnectedHook, claimUpgrade?: UpgradeClaim): void {
     const transport = new WebSocketServer({
       noServer: true,
       clientTracking: false,
@@ -238,6 +240,7 @@ export class LiveEventHub {
       transport.close()
     })
     server.on('upgrade', (req, socket, head) => {
+      if (claimUpgrade?.(req, socket, head)) return
       if (this.#pendingUpgrades >= MAX_PENDING_UPGRADES || this.#networkClosers.size + this.#pendingUpgrades >= MAX_NETWORK_CLIENTS) {
         socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n', () => socket.destroy())
         return

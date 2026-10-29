@@ -74,3 +74,24 @@ describe('reconciler mail inputs', () => {
     expect(isXpanelError(error) && error.code).toBe('PRECONDITION_FAILED')
   })
 })
+
+describe('server routing and submission certificate input', () => {
+  const at = { updatedAt: '2026-10-28T09:00:00.000Z', updatedBy: 'root' }
+  const certs = { ...snapshot, certificates: [{ id: 'live', source: 'acme', notAfter: '2027-01-01T00:00:00.000Z' }, { id: 'old', source: 'acme', notAfter: '2026-01-01T00:00:00.000Z' }] }
+  const server = (submission: string | null) => put(['extended', 'mailx', 'server.json'], { section: 'server', policy: { postfix: {}, dovecot: {}, rbl: null, certificates: { smtp: null, submission, imap: null } }, ...at })
+  const now = new Date('2026-10-28T10:00:00.000Z')
+  it('passes routed domains and an unexpired chosen certificate to the reconciler, and nothing when unsaved', async () => {
+    expect(await readMailfxRenderInput(root, certs, 'debian', null, now)).toEqual({ spamMilter: null, sieve: [] })
+    await put(['extended', 'mailx', 'routing.json'], { section: 'routing', policy: { domains: [{ domain: 'shop.example', mode: 'remote' }] }, ...at })
+    await server('live')
+    const input = await readMailfxRenderInput(root, certs, 'debian', null, now)
+    expect([...input.routing!]).toEqual([['shop.example', 'remote']])
+    expect(input.submissionTls).toEqual({ certFile: '/etc/xpanel/ssl/live/fullchain.pem', keyFile: '/etc/xpanel/ssl/live/privkey.pem' })
+    await server('old')
+    expect((await readMailfxRenderInput(root, certs, 'debian', null, now)).submissionTls).toBeUndefined()
+  })
+  it('never fails a reconcile on a saved routing file that needs review', async () => {
+    await put(['extended', 'mailx', 'routing.json'], { section: 'routing', policy: { domains: [{ domain: 'shop.example', mode: 'local' }] }, ...at })
+    expect((await readMailfxRenderInput(root, snapshot, 'debian', null, now)).routing).toBeUndefined()
+  })
+})

@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, vi } from 'vitest'
-import { join } from 'node:path'
 import { isXpanelError } from '@xpanel/core'
 
 const harness = vi.hoisted(() => ({
@@ -29,7 +28,7 @@ const harness = vi.hoisted(() => ({
 // chmod joined the isolated boundary when the runtime directory became traverse-only 0711 (fa7748a).
 vi.mock('node:fs/promises', async (importOriginal) => ({ ...await importOriginal<typeof import('node:fs/promises')>(), mkdir: async () => undefined, chown: async () => undefined, chmod: async (path: string, mode: number) => { harness.chmods.push([path, mode]) } }))
 vi.mock('@xpanel/db', () => ({ createDb: () => ({ db: {}, runner: {}, close: harness.dbClose }), migrate: async () => undefined, initializeOperationalMetadata: async () => undefined, recordHostMetricsSample: harness.recordMetrics }))
-vi.mock('@xpanel/os', () => ({ detectOs: async () => ({ id: 'ubuntu', versionId: '24.04', family: 'debian', paths: { nginxUser: 'nginx' } }) }))
+vi.mock('@xpanel/os', () => ({ XPANEL_FPM_SOCKET_DIR: '/run/xpanel-fpm', detectOs: async () => ({ id: 'ubuntu', versionId: '24.04', family: 'debian', paths: { nginxUser: 'nginx' } }) }))
 vi.mock('@xpanel/state', () => ({ StateStore: class {} }))
 vi.mock('./production-file-runner.ts', () => ({
   DEFAULT_FILE_WORKER_INCIDENT_DIR: '/var/lib/xpanel-agent/file-worker-incidents',
@@ -119,7 +118,7 @@ describe('privileged worker readiness in actual agent composition', () => {
   it('uses the root-only persistent sibling independently of the shared state path', async () => {
     const daemon = await start()
     assert.equal(harness.options?.incidentDir, '/var/lib/xpanel-agent/file-worker-incidents')
-    assert.deepEqual(harness.chmods, [['/lab/run', 0o711], [join('/lab/run', 'fpm'), 0o711]])
+    assert.deepEqual(harness.chmods, [['/lab/run', 0o711], ['/run/xpanel-fpm', 0o711]])
     await daemon.close()
   })
 

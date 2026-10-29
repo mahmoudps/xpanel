@@ -1,13 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { timingSafeEqual } from 'node:crypto'
-import { chmod, chown, mkdir } from 'node:fs/promises'
+import { chmod, chown, mkdir, readdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fail } from '@xpanel/core'
 import type { OsProfile } from '@xpanel/core'
-import { createDb, initializeOperationalMetadata, migrate, recordHostMetricsSample } from '@xpanel/db'
-import { detectOs } from '@xpanel/os'
-import { StateStore } from '@xpanel/state'
+import { appendAudit, createDb, initializeOperationalMetadata, migrate, pruneMetricsHistory, recordHostMetricsSample } from '@xpanel/db'
+import { detectOs, XPANEL_FPM_SOCKET_DIR } from '@xpanel/os'
+import { StateStore, atomicWriteJson, readJsonIfExists } from '@xpanel/state'
 import { createProductionAccountFileRunner, DEFAULT_FILE_WORKER_INCIDENT_DIR } from './production-file-runner.ts'
 import { CanonicalIoResourcePipeline, IoAnalyticsEngine, WebsiteAnalyticsEngine } from './analytics.ts'
 import { createProductionHostTargetMatcher, LinuxHostExecutor } from './executor.ts'
@@ -21,12 +21,21 @@ import { HostJobRunner } from './host-jobs.ts'
 import { DATABASE_REMOTE_ACCESS_JOURNAL_DIR, pendingDatabaseRemoteAccessJournals, qualifyDatabaseRemoteAccessNative, recoverPendingDatabaseRemoteAccess } from './db-remote-provider.ts'
 import { createHostJobRun } from './host-job-exec.ts'
 import { createHostMetricsCollector } from './host-metrics.ts'
-import { createS3BackupProvider } from './acct-backup-s3.ts'
+import { createBackupTransportProvider } from './acct-backup-sftp.ts'
+import { hostBackupCredentialStore } from './acct-backup-credentials.ts'
+import { defaultBackupArchiveRoot } from './acct-backup-runs.ts'
+import { DatabaseSync } from 'node:sqlite'
+import { BACKUP_LOW_PRIORITY } from './backup-low-priority.ts'
+import { BANDWIDTH_LEDGER_PATH, createBandwidthMeter, enforceBandwidthLimits, type BandwidthMeter } from './metering.ts'
+import { readProtectedLogFrom } from './account-logs.ts'
+import { MAIL_LOG_MAX_OUTPUT_BYTES, observeMailLog } from './mail-log.ts'
+import { observeFtpLog } from './ftp-log.ts'
 import { createHostBackupRunController, readBackupConfigFiles, readSavedBackupDestination } from './acct-backup-runs.ts'
 import { createAgentApp, listenAgentSocket, loadAgentCredentialFile } from './server.ts'
+import { createSystemdPtySpawner, DEFAULT_TERMINAL_PTY_HELPER, TerminalSessionManager, verifyTerminalPtyHelper } from './terminal-sessions.ts'
 import type { AgentApp } from './server.ts'
 import { awaitLifecycleWriterDrain, createLifecycleBackgroundResources, isLifecycleManaged, readLifecyclePublicStatus, startLifecycleWriterParticipant, withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
-import { createMariaDbSqlRunner, DEFAULT_MARIADB_ADMIN_CNF, MariaDbServiceAdapter } from './services/mariadb.ts'
+import { createMariaDbSqlRunner, DEFAULT_MARIADB_ADMIN_CNF, defaultCommandRunner as mariadbCommandRunner, MariaDbServiceAdapter } from './services/mariadb.ts'
 import { withPostgresqlSqlRunner } from './pg-sql.ts'
 
 export interface AgentDaemonOptions {
@@ -40,6 +49,7 @@ export interface AgentDaemonOptions {
   fileHelperBinaryPath?: string
   fileWorkerIncidentDir?: string
   mariadbAdminCnfPath?: string
+  terminalPtyBinaryPath?: string
 }
 
 const detectHostOsProfile = async (): Promise<OsProfile> => detectOs((p) => readFileSync(p, 'utf8'))
@@ -96,6 +106,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
   }
   let ioResourcePipeline: CanonicalIoResourcePipeline | undefined
   let hostMetrics: ReturnType<typeof createHostMetricsCollector> | undefined
+  let bandwidthMeter: BandwidthMeter | undefined
   let backupRuns: ReturnType<typeof createHostBackupRunController> | undefined
   let backupTimer: ReturnType<typeof setInterval> | undefined
   let resourcesFenced = false
@@ -103,7 +114,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
   const participant = managed ? await startLifecycleWriterParticipant('agent', {
     // A fenced pipeline stays paused until an inspected process restart. This callback
     // does not establish native host quiescence or authorize barrier retirement.
-    onFence: async () => { resourcesFenced = true; clearInterval(backupTimer); await hostMetrics?.stop(); await ioResourcePipeline?.pause() },
+    onFence: async () => { resourcesFenced = true; clearInterval(backupTimer); await hostMetrics?.stop(); await bandwidthMeter?.stop(); await ioResourcePipeline?.pause() },
   }) : undefined
   let participantClosing: Promise<void> | undefined
   const closeParticipant = (): Promise<void> => participantClosing ??= participant?.close() ?? Promise.resolve()
@@ -138,25 +149,28 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
       const runtimeDirectory = dirname(socketPath)
       const createdRuntimeDirectory = await mkdir(runtimeDirectory, { recursive: true, mode: 0o750 })
       if (createdRuntimeDirectory) await chown(runtimeDirectory, 0, socketGid)
-      // Per-account PHP-FPM units create their sockets under <runtime>/fpm/<user>-<version>/.
-      // Traverse-only modes let each account reach its own socket without exposing listings,
+      // Traverse-only, so accounts reach their own staging paths below without listings,
       // while the agent socket remains group-only (0660 root:xpanel-agent).
       await chmod(runtimeDirectory, 0o711)
-      const fpmRuntimeDirectory = join(runtimeDirectory, 'fpm')
-      await mkdir(fpmRuntimeDirectory, { recursive: true, mode: 0o711 })
-      await chmod(fpmRuntimeDirectory, 0o711)
+      // PHP-FPM sockets live outside the agent's RuntimeDirectory, which systemd wipes on every
+      // agent stop; each FPM unit creates its own <root>/<user>-<version>/ below this root.
+      await mkdir(XPANEL_FPM_SOCKET_DIR, { recursive: true, mode: 0o711 })
+      await chmod(XPANEL_FPM_SOCKET_DIR, 0o711)
 
       const dbHandle = createDb(dbPath, dbPath === ':memory:' ? {} : { durability: 'strict' })
       let accountFileRunner: Awaited<ReturnType<typeof createProductionAccountFileRunner>> | undefined
       let listener: Awaited<ReturnType<typeof listenAgentSocket>> | undefined
       let hostJobs: HostJobRunner | undefined
+      let terminals: TerminalSessionManager | null = null
       let resourcesClosing: Promise<void> | undefined
       let closing: Promise<void> | undefined
       const closeResources = (): Promise<void> => resourcesClosing ??= (async () => {
         const errors: unknown[] = []
         try { await listener?.close() } catch (error) { errors.push(error) }
         try { hostJobs?.close() } catch (error) { errors.push(error) }
+        try { terminals?.closeAll() } catch (error) { errors.push(error) }
         try { await hostMetrics?.stop() } catch (error) { errors.push(error) }
+        try { await bandwidthMeter?.stop() } catch (error) { errors.push(error) }
         try { clearInterval(backupTimer); await backupRuns?.idle() } catch (error) { errors.push(error) }
         try { await ioResourcePipeline?.stop() } catch (error) { errors.push(error) }
         try { await accountFileRunner?.close() } catch (error) { errors.push(error) }
@@ -190,11 +204,38 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           sqlRunner,
         })
         const readBackupDestination = readSavedBackupDestination(readBackupConfigFiles(stateDir))
-        const backupDestinationProvider = createS3BackupProvider({ readDestination: readBackupDestination })
-        backupRuns = createHostBackupRunController({ executor, stateRoot: stateDir, provider: backupDestinationProvider, listAccounts: async () => (await store.listAccounts()).map(a => ({ id: a.id, username: a.username, home: a.home, uid: a.uid, status: a.status })) })
-        hostMetrics = createHostMetricsCollector({ reader: executor,
+        const backupDestinationProvider = createBackupTransportProvider({ readDestination: readBackupDestination, archiveRoot: defaultBackupArchiveRoot() })
+        // Backup dumps run at the same low priority as the archive build, with the hour-long bound of a large database.
+        const backupDumps = new MariaDbServiceAdapter({ adminDefaultsFile: mariadbAdminCnfPath, dumpTimeoutMs: 3_600_000, commandRunner: input => mariadbCommandRunner({ ...input, argv: [...BACKUP_LOW_PRIORITY, ...input.argv] }) })
+        backupRuns = createHostBackupRunController({ executor, stateRoot: stateDir, provider: backupDestinationProvider, listAccounts: async () => (await store.listAccounts()).map(a => ({ id: a.id, username: a.username, home: a.home, uid: a.uid, status: a.status })),
+          databases: {
+            list: async account => (await store.listDatabases(account.id)).filter(database => database.engine === 'mariadb' && !database.trashedAt).map(database => database.name),
+            dump: async (account, database, outputPath) => { const dumped = await backupDumps.streamLogicalDump({ database, username: account.username, outputPath }); return { bytes: dumped.sizeBytes, sha256: dumped.sha256 } },
+          },
+          zones: { list: async account => (await store.listDnsZones(account.id)).filter(zone => zone.accountId === account.id).map(zone => ({ name: zone.name, content: JSON.stringify(zone) })) },
+          // VACUUM INTO writes a consistent copy of the WAL database from a separate read-only connection.
+          ...(dbPath === ':memory:' ? {} : { copyControlDatabase: async (outputPath: string) => { const copy = new DatabaseSync(dbPath, { readOnly: true }); try { copy.prepare('VACUUM INTO ?').run(outputPath) } finally { copy.close() } } }),
+        })
+        hostMetrics = createHostMetricsCollector({ reader: { readFile: path => executor.readFile(path), runCommand: argv => executor.runCommand(argv), listDirectory: path => readdir(path) },
           write: (observation, at) => withLifecycleWriterAdmission(() => recordHostMetricsSample(dbHandle.db, { at, observation })),
+          prune: olderThan => withLifecycleWriterAdmission(() => pruneMetricsHistory(dbHandle.db, olderThan, 'host')),
           onError: () => { process.stderr.write('xpanel-agent host metrics: sample could not be recorded\n') },
+        })
+        // Same bounded journal reader as /host/mail/log and /host/ftp/log (16 MiB output cap).
+        const journalExecutor = process.platform === 'linux' ? new LinuxHostExecutor({ maxOutputBytes: MAIL_LOG_MAX_OUTPUT_BYTES }) : null
+        bandwidthMeter = createBandwidthMeter({ readState: () => store.readSnapshot(), readFrom: readProtectedLogFrom,
+          readMail: journalExecutor ? (since, until) => observeMailLog({ run: argv => journalExecutor.runCommand(argv), since, until }) : null,
+          readFtp: journalExecutor ? (since, until) => observeFtpLog({ run: argv => journalExecutor.runCommand(argv), readState: () => store.readSnapshot(), since, until }) : null,
+          readLedger: () => readJsonIfExists<unknown>(BANDWIDTH_LEDGER_PATH),
+          writeLedger: ledger => withLifecycleWriterAdmission(() => atomicWriteJson(BANDWIDTH_LEDGER_PATH, ledger, 0o600)),
+          afterCollect: async () => {
+            await enforceBandwidthLimits(await bandwidthMeter!.report(), await store.readSnapshot(), {
+              setLimits: (changes, expectedRevision) => withLifecycleWriterAdmission(() => store.setBandwidthLimits(changes, expectedRevision === undefined ? {} : { expectedRevision })),
+              audit: entry => withLifecycleWriterAdmission(() => appendAudit(dbHandle.db, entry)),
+              reconcile: () => reconciler.reconcile({ actor: 'agent' }),
+            })
+          },
+          onError: () => { process.stderr.write('xpanel-agent bandwidth: collection could not be recorded\n') },
         })
         const ioAnalytics = new IoAnalyticsEngine()
         const websiteAnalytics = new WebsiteAnalyticsEngine()
@@ -216,6 +257,9 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           onRecoveryRequired,
         })
         if (recoveryDetected) fail('PRECONDITION_FAILED', 'privileged file worker recovery is required before agent startup')
+        // Terminal sessions exist only with a verified root-owned PTY helper; otherwise they stay unavailable.
+        const terminalHelperPath = opts.terminalPtyBinaryPath ?? process.env.XPANEL_TERMINAL_PTY_BINARY ?? DEFAULT_TERMINAL_PTY_HELPER
+        if (await verifyTerminalPtyHelper(terminalHelperPath)) terminals = new TerminalSessionManager(createSystemdPtySpawner(terminalHelperPath))
 
         const reconciler = new HostReconciler({
           store,
@@ -286,13 +330,17 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           executor,
           ...(accountFileRunner ? { accountFileRunner } : {}),
           ...(hostJobs ? { hostJobs } : {}),
+          terminals,
           ioAnalytics,
           ioResourcePipeline,
+          ...(process.platform === 'linux' ? { bandwidthMeter, readDiskLatency: () => hostMetrics!.latestDiskLatency() } : {}),
           websiteAnalytics,
           os: { id: os.id, versionId: os.versionId, family: os.family },
           nginxUser: os.paths.nginxUser,
           agentToken,
           mariadbAdmin,
+          backupCredentials: hostBackupCredentialStore(),
+          restoreBackupDatabase: async (account, database, inputPath, sha256) => { await backupDumps.streamLogicalRestore({ targetDatabase: database, username: account.username, inputPath, expectedSha256: sha256 }) },
           ...(databaseRemoteAccessNative ? { databaseRemoteAccessNative } : {}),
           readBackupDestination,
           backupDestinationProvider,
@@ -305,7 +353,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           fail('PRECONDITION_FAILED', 'privileged file worker recovery is required before agent startup')
         }
         if (!resourcesFenced) createLifecycleBackgroundResources(() => hostMetrics!.start())
-        if (!resourcesFenced) { backupTimer = setInterval(() => { void backupRuns!.tick() }, 60_000); backupTimer.unref() }
+        if (!resourcesFenced) { backupTimer = setInterval(() => { void backupRuns!.tick(); if (process.platform === 'linux') void bandwidthMeter!.collect() }, 60_000); backupTimer.unref() }
         return { app, socketPath, close: closeNormal, recoveryRequired, quarantined: false as const }
       } catch (error) {
         try { await closeResources() } catch (cleanup) { throw new AggregateError([error, cleanup], 'agent startup cleanup requires inspection') }

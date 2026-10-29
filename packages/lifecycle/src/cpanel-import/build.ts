@@ -11,7 +11,7 @@ import type { ParsedGrant } from './grants.ts'
 import { cpDomains, parseValiases, phpVersionHint } from './parsers.ts'
 import type { ReadState } from './state.ts'
 import { warn } from './state.ts'
-import type { ImportAccount, ImportDatabase, ImportDbUser, ImportDomain, ImportMailbox, ImportZone } from './types.ts'
+import type { ImportAccount, ImportCronJob, ImportDatabase, ImportDbUser, ImportDomain, ImportMailbox, ImportZone } from './types.ts'
 
 const MB = 1024 * 1024
 const mbOf = (bytes: number): Limit => (bytes === 0 ? 'unlimited' : Math.ceil(bytes / MB))
@@ -357,4 +357,30 @@ export const selectCertificates = (s: ReadState, domains: readonly ImportDomain[
   }
   for (const k of keys) if (!out.some((c) => c.keyPath === k.path)) warn(s, 'ssl-key-unused', `${k.path} matches no imported certificate and was not copied`)
   return out
+}
+
+const CRON_SCHEDULE = /^(@(yearly|annually|monthly|weekly|daily|hourly)|[0-9*/,-]{1,64} [0-9*/,-]{1,64} [0-9*/,-]{1,64} [0-9A-Za-z*/,-]{1,64} [0-9A-Za-z*/,-]{1,64})$/
+const MAX_CRON_JOBS = 200
+
+/**
+ * The account crontab as jobs that run in the new home. Variable lines (MAILTO, SHELL...) and @reboot are
+ * reported, not imported; every imported job starts paused so the owner reviews it before it runs here.
+ */
+export const buildCron = (s: ReadState, sourceUser: string, target: string): ImportCronJob[] => {
+  if (!s.cron) return []
+  const jobs: ImportCronJob[] = []
+  for (const raw of s.cron.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    if (/^[A-Za-z_][A-Za-z0-9_]*\s*=/.test(line)) { warn(s, 'cron-variable-skipped', `cron variable ${line.split('=')[0]!.trim().slice(0, 32)} is not imported`); continue }
+    const keyword = /^(@\w+)\s+(.+)$/.exec(line)
+    const fields = keyword ? null : /^(\S+\s+\S+\s+\S+\s+\S+\s+\S+)\s+(.+)$/.exec(line)
+    const schedule = keyword?.[1] ?? fields?.[1]?.replace(/\s+/g, ' ')
+    const command = (keyword?.[2] ?? fields?.[2] ?? '').replaceAll(`/home/${sourceUser}/`, `/home/${target}/`)
+    if (!schedule || !CRON_SCHEDULE.test(schedule) || !command || command.length > 4096 || /[\u0000-\u001f\u007f]/.test(command)) { warn(s, 'cron-line-skipped', `cron line "${line.slice(0, 60)}" is not a supported schedule`); continue }
+    if (jobs.length >= MAX_CRON_JOBS) { warn(s, 'cron-line-skipped', `more than ${MAX_CRON_JOBS} cron jobs; the rest were not imported`); break }
+    jobs.push({ schedule, command })
+  }
+  if (jobs.length) warn(s, 'cron-paused', `${jobs.length} cron jobs imported and paused until the owner reviews them`, `cron/${sourceUser}`)
+  return jobs
 }

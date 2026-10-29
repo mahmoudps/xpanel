@@ -436,28 +436,12 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     assert.equal((await readRes.json() as { code: string }).code, 'PRECONDITION_FAILED')
     await assert.rejects(access(join(tmpDir, 'host', 'alice', 'public_html', 'index.php')), { code: 'ENOENT' })
 
-    // The injected executor records argv construction; this does not prove Linux execution.
-    const shellRes = await alice.request('/api/accounts/alice/shell', {
-      method: 'POST',
-      body: { command: 'php -v' },
-    })
-    assert.equal(shellRes.status, 200)
-    const shellData = (await shellRes.json()) as { code: number; argv: string[] }
-    assert.equal(shellData.code, 0)
-    assert.ok(shellData.argv.some((a) => /^Slice=xpanel-\d+\.slice$/.test(a)))
-
-    // Alice is rejected with 403 FORBIDDEN when accessing bob's files or shell or root endpoints
+    // Alice is rejected with 403 FORBIDDEN when accessing bob's files or root endpoints
     const bobFilesRes = await alice.request('/api/accounts/bob/files', {
       method: 'POST',
       body: { op: 'list', path: '' },
     })
     assert.equal(bobFilesRes.status, 404)
-
-    const bobShellRes = await alice.request('/api/accounts/bob/shell', {
-      method: 'POST',
-      body: { command: 'whoami' },
-    })
-    assert.equal(bobShellRes.status, 404)
 
     const reconcileForbidden = await alice.request('/api/reconcile', {
       method: 'POST',
@@ -521,12 +505,6 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     })
     assert.equal(writeRes.status, 412)
 
-    const shellRes = await alice.request('/api/accounts/alice/shell', {
-      method: 'POST',
-      body: { command: 'php -v' },
-    })
-    assert.equal(shellRes.status, 200)
-
     // Jailed file manager rejects chmod 0o777 (must be <= 0o640 for files)
     const chmod777Res = await alice.request('/api/accounts/alice/files', {
       method: 'POST',
@@ -558,7 +536,6 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     const audits = await listAudit(dbHandle.db, { limit: 100 })
     assert.ok(!audits.some((a) => a.actor === 'alice' && a.action === 'file.write' && a.outcome === 'ok'))
     await assert.rejects(access(join(tmpDir, 'host', 'alice', 'public_html', 'huge.bin')), { code: 'ENOENT' })
-    assert.ok(audits.some((a) => a.actor === 'alice' && a.action === 'shell.exec' && a.outcome === 'ok'))
   })
 
   it('5. Multi-IPv4/IPv6 pool management and Mail Outbound IP Postfix transport rendering', async () => {
@@ -843,14 +820,9 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     const bobScopedEvent: LiveEvent = {
       id: 'ev-bob-only',
       at: nowIso,
-      kind: 'terminal.output',
+      kind: 'job.updated',
       scope: { accountId: bobAccData.account.id, resellerId: null },
-      data: {
-        sessionId: 'sess-bob',
-        username: 'bob',
-        stream: 'stdout',
-        chunk: 'secret bob output',
-      },
+      data: { jobId: 'job-bob', kind: 'backup', status: 'running', progress: 10, logChunk: 'secret bob output' },
     }
     app.hub.broadcast(bobScopedEvent)
 

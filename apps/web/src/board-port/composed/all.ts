@@ -24,10 +24,12 @@ import { xwhm_services } from './sections/xwhm-services.ts'
 /** Existing controllers always retain priority over additive route metadata. */
 export const nativeComposedRoutePaths: ReadonlySet<string> = new Set([
   '/whm/preferences',
+  '/domains/reverse-proxy',
+  '/whm/panel/settings', '/whm/panel/branding', '/whm/panel/languages', '/whm/panel/whmcs',
   '/whm/server/terminal',
   '/whm/server/file-sharing',
   '/whm/server/nodes',
-  '/software/apps', '/software/optimize', '/whm/software/addon-services', '/whm/software/containers', '/whm/software/containers/engine', '/whm/software/deployments', '/whm/software/application-projects',
+  '/software/apps', '/software/optimize', '/software/containers', '/software/cache', '/whm/software/addon-services', '/whm/software/containers', '/whm/software/containers/engine', '/whm/software/deployments', '/whm/software/application-projects',
   '/whm/email/spam', '/whm/email/relay', '/whm/email/bcc', '/whm/email/marketing',
   '/whm/accounts/templates', '/whm/plans/enhancements', '/whm/backups/restore-more', '/whm/transfers/convert-addon', '/whm/transfers/server', '/domains/staging',
   '/whm/databases/tuning',
@@ -36,6 +38,7 @@ export const nativeComposedRoutePaths: ReadonlySet<string> = new Set([
   '/whm/software/composer',
   '/whm/monitoring/benchmark',
   '/whm/monitoring/traffic',
+  '/whm/accounts/bandwidth',
   '/domains/dynamic-dns',
   '/domains/site-publisher',
   '/files/git',

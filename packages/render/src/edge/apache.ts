@@ -547,7 +547,7 @@ export const inspectHtaccessIsolation = (account: Account, htaccessContent: stri
         lowerArgs.includes('/run/')
       ) {
         const foreignSocket =
-          lowerArgs.includes('/run/xpanel/fpm/') && !lowerArgs.includes(`/run/xpanel/fpm/${user.toLowerCase()}-`)
+          lowerArgs.includes('/run/xpanel-fpm/') && !lowerArgs.includes(`/run/xpanel-fpm/${user.toLowerCase()}-`)
         violations.push({
           line,
           directive: `${directive} ${args}`.trim(),
@@ -604,7 +604,7 @@ export interface ApacheBackendIsolationProof {
  *    `/usr/share/xpanel/default` (`AllowOverride None`, `Options None`, no PHP handler) so forged
  *    `Host` headers sent directly to `127.0.0.1:<backendPort>` never fall into a tenant vhost
  * 4. Binds the tenant `<VirtualHost>` to `AssignUserId <user> <user>` and the account's own
- *    PHP-FPM UNIX socket `/run/xpanel/fpm/<user>-<ver>/php-fpm.sock`
+ *    PHP-FPM UNIX socket `/run/xpanel-fpm/<user>-<ver>/php-fpm.sock`
  */
 export const verifyApacheBackendIsolation = (
   account: Account,

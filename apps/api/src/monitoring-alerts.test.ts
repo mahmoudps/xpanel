@@ -74,7 +74,8 @@ describe('alert evaluation mapping', () => {
   it('fires each default rule that the observed health grades, with severity, values and affected names', async () => {
     const record = evaluate(await observe()), result = byId(record)
     expect(record).toMatchObject({ evaluatedAt: at, observedAt: at, host: 'read', rulesRevision: EMPTY, quiet: false })
-    expect(Object.values(result).every(entry => entry.state === 'firing' && entry.firstFiredAt === at)).toBe(true)
+    expect(Object.values(result).filter(entry => entry.id !== 'bandwidth').every(entry => entry.state === 'firing' && entry.firstFiredAt === at)).toBe(true)
+    expect(result.bandwidth).toMatchObject({ state: 'unavailable', threshold: 80 })
     expect(result.load).toMatchObject({ severity: 'warning', health: 'warning', value: 1.5, threshold: 1 })
     expect(result.memory).toMatchObject({ severity: 'warning', value: 10 })
     expect(result.swap).toMatchObject({ severity: 'critical', value: 90 })
