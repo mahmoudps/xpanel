@@ -144,10 +144,12 @@ ${tls}
 `).join('\n')
 }
 
-export function renderRenewalUnits(nodePath) {
+export function renderRenewalUnits(nodePath, layout = 'flat') {
   if (!/^\/[A-Za-z0-9_./-]+$/.test(nodePath)) fail('NODE_PATH_INVALID')
+  if (!['flat', 'current'].includes(layout)) fail('PROGRAM_LAYOUT_INVALID')
+  const programRoot = layout === 'current' ? '/opt/xpanel/current' : '/opt/xpanel'
   return {
-    service: MARKER + `[Unit]\nDescription=xPanel management TLS renewal and served-certificate verification\nAfter=network-online.target nginx.service\nWants=network-online.target\n\n[Service]\nType=oneshot\nUser=root\nGroup=root\nUMask=0077\nExecStart=${nodePath} /opt/xpanel/scripts/management-tls.mjs renew\nSuccessExitStatus=75\nTimeoutStartSec=720\nTimeoutStopSec=10\nKillMode=control-group\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\n\n`,
+    service: MARKER + `[Unit]\nDescription=xPanel management TLS renewal and served-certificate verification\nAfter=network-online.target nginx.service\nWants=network-online.target\n\n[Service]\nType=oneshot\nUser=root\nGroup=root\nUMask=0077\nExecStart=${nodePath} ${programRoot}/scripts/management-tls.mjs renew\nSuccessExitStatus=75\nTimeoutStartSec=720\nTimeoutStopSec=10\nKillMode=control-group\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\n\n`,
     timer: MARKER + '[Unit]\nDescription=xPanel management TLS renewal schedule\n\n[Timer]\nOnCalendar=*-*-* 00,12:00:00\nRandomizedDelaySec=1h\nPersistent=true\nUnit=xpanel-management-tls.service\n\n[Install]\nWantedBy=timers.target\n',
   }
 }
@@ -550,7 +552,7 @@ async function servedReady(config, certificate, verifyApplication) {
   })
 }
 
-async function lifecycle(config, phase, configReference) {
+async function lifecycle(config, phase, configReference, layout = 'flat') {
   const transaction = new OwnedTransaction()
   let configChanged = false
   let initialNginx, startedNginx, initialConfiguration, listenerInventorySha256
@@ -645,7 +647,7 @@ async function lifecycle(config, phase, configReference) {
     if (phase === 'prepare') {
       const beforeUnitWrite = await renewalTimerState()
       assertTimerSnapshot(initialTimer, beforeUnitWrite, initialTimer.references)
-      const units = renderRenewalUnits(process.execPath)
+      const units = renderRenewalUnits(process.execPath, layout)
       await transaction.write(PATHS.service, units.service, 0o644, 0, false, managedReferences.get(PATHS.service))
       await transaction.write(PATHS.timer, units.timer, 0o644, 0, false, managedReferences.get(PATHS.timer))
     }
@@ -701,6 +703,14 @@ async function lifecycle(config, phase, configReference) {
   }
 }
 
+const programLayout = () => {
+  const sourceRoot = dirname(dirname(realpathSync(fileURLToPath(import.meta.url))))
+  if (sourceRoot === '/opt/xpanel') return 'flat'
+  if (!/^\/opt\/xpanel\/releases\/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(sourceRoot)
+    || realpathSync('/opt/xpanel/current') !== sourceRoot) fail('PROGRAM_LAYOUT_INVALID')
+  return 'current'
+}
+
 async function main(args) {
   const [phase, ...options] = args
   if (phase === 'plan') { const config = parseConfigArguments(options); process.stdout.write(JSON.stringify({ config, origins: requiredEnvironment(config), applicationBootstrap: 'pending' }, null, 2) + '\n'); return }
@@ -710,7 +720,9 @@ async function main(args) {
   process.umask(0o077)
   readRootFile(fileURLToPath(import.meta.url))
   trustedExecutable(process.execPath)
-  if (readRootFile('/opt/xpanel/.node-version', 32).bytes.toString('utf8').trim() !== process.versions.node) fail('PINNED_NODE_VERSION_REQUIRED')
+  const sourceRoot = dirname(dirname(realpathSync(fileURLToPath(import.meta.url))))
+  const layout = programLayout()
+  if (readRootFile(`${sourceRoot}/.node-version`, 32).bytes.toString('utf8').trim() !== process.versions.node) fail('PINNED_NODE_VERSION_REQUIRED')
   trustedDirectory('/etc/xpanel')
   if (phase === 'configure') rootDirectory(PATHS.state, 0o755)
   else trustedDirectory(PATHS.state)
@@ -737,7 +749,7 @@ async function main(args) {
     const cli = `${PATHS.acme}/cli.ini`
     if (!existsSync(cli) && phase !== 'verify') replaceFile(cli, '# Dedicated management ACME scope.\n', 0o600)
     else if (readRootFile(cli, 256, true).bytes.toString('utf8') !== '# Dedicated management ACME scope.\n') fail('ACME_CONFIG_DRIFT')
-    await lifecycle(config, phase, configReference)
+    await lifecycle(config, phase, configReference, layout)
     process.stdout.write(phase === 'verify' ? 'Management ingress observed ready; identity and service qualification remain separate.\n' : 'Management TLS ready; application bootstrap pending.\n')
   } finally { closeSync(lock) }
 }

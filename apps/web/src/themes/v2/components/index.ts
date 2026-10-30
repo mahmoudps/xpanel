@@ -1,0 +1,26 @@
+// The v2 component kit: pure functions that return HTML strings. Text props are escaped; `*Html` props carry
+// markup built with this kit. Every component accepts `hooks` (data-* attributes) for core controllers. Components
+// with built-in text take the page translator as their first argument, so the catalog tooling extracts their messages.
+
+export { bulkBar, type BulkBarProps } from './bulk-bar.ts'
+export { actionState } from './action-state.ts'
+export { card, type CardProps } from './card.ts'
+export { applyBar, changeReview, type ApplyBarProps, type ChangeReviewProps, type ReviewRow, type ReviewStep } from './change-review.ts'
+export { barChart, lineChart, type BarChartProps, type LineChartProps, type LineSeries } from './chart.ts'
+export { codeBlock, type CodeBlockProps } from './code-block.ts'
+export { dataTable, dataTableRow, leadCell, type DataTableColumn, type DataTableProps, type DataTableRow, type DataTableState } from './data-table.ts'
+export { dialog, type DialogProps } from './dialog.ts'
+export { drawer, type DrawerProps } from './drawer.ts'
+export { filterBar, type FilterBarProps, type FilterSelect } from './filter-bar.ts'
+export { formField, switchRow, type FieldControl, type FormFieldProps, type SwitchRowProps } from './form-field.ts'
+export { kpiCard, type KpiCardProps } from './kpi-card.ts'
+export { meter, type MeterProps, type MeterScale } from './meter.ts'
+export { notice, type NoticeProps } from './notice.ts'
+export { pageHeader, type Crumb, type PageHeaderProps } from './page-header.ts'
+export { pagination, type PageLink, type PaginationProps } from './pagination.ts'
+export { rowMenu, type RowMenuItem, type RowMenuProps } from './row-menu.ts'
+export { emptyState, errorState, loadingState, type EmptyStateProps, type ErrorStateProps, type LoadingStateProps } from './state-block.ts'
+export { statePill, stateTones, statusPill, type StatusPillProps } from './status-pill.ts'
+export { stepper, type StepItem, type StepState, type StepperProps } from './stepper.ts'
+export { tabPanel, tabs, type TabItem, type TabPanelProps, type TabsProps } from './tabs.ts'
+export { toastRegion } from './toast-region.ts'

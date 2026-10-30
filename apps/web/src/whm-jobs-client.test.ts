@@ -16,10 +16,10 @@ const log = (overrides: Record<string, unknown> = {}) => ({ id: ID, available: t
 
 type Send = (method: string, path: string, body?: unknown) => Promise<unknown>
 const flush = async () => { for (let i = 0; i < 8; i++) await vi.advanceTimersByTimeAsync(0) }
-const boot = (send?: Send, ask?: (options: Record<string, unknown>) => Promise<unknown>, locale: 'en' | 'ar' = 'en', canRead = true) => {
+const boot = (send?: Send, ask?: (options: Record<string, unknown>) => Promise<unknown>, locale: 'en' | 'ar' = 'en', canRead = true, canManage = true) => {
   // The client translator follows the document language, as it does in a page.
   document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'
-  document.body.innerHTML = renderWhmJobsWorkspace({ locale, canRead })
+  document.body.innerHTML = renderWhmJobsWorkspace({ locale, canRead, canManage })
   if (send) (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
   new Function('return ' + WHM_JOBS_CLIENT_BINDING)()(ask)
 }
@@ -65,6 +65,31 @@ describe('WHM jobs client parsers', () => {
 })
 
 describe('WHM jobs client binding', () => {
+  it.each(['false', 'missing'] as const)('retains list and log reads but refuses cancellation without explicit management authority: %s', async mode => {
+    const send = routes({ 'GET /api/jobs?': () => ({ jobs: [job()] }), [`GET /api/jobs/${ID}/log`]: () => log(), [`GET /api/jobs/${ID}`]: () => ({ job: job() }) })
+    const ask = vi.fn(async () => true)
+    boot(send, ask, 'en', true, false)
+    if (mode === 'missing') $('[data-whm-jobs-workspace]').removeAttribute('data-jobs-can-manage')
+    await flush()
+    $<HTMLButtonElement>(`[data-whm-jobs-select="${ID}"]`).click(); await flush()
+    expect($('[data-whm-jobs-log]').textContent).toContain('first part')
+    const cancel = $<HTMLButtonElement>('[data-whm-jobs-cancel]')
+    expect(cancel.disabled).toBe(true)
+    cancel.disabled = false; cancel.click(); await flush()
+    expect(ask).not.toHaveBeenCalled()
+    expect(send.mock.calls.some(([method]) => method === 'POST')).toBe(false)
+  })
+
+  it('rechecks management authority after the cancellation confirmation', async () => {
+    const send = routes({ 'GET /api/jobs?': () => ({ jobs: [job()] }), [`GET /api/jobs/${ID}/log`]: () => log(), [`GET /api/jobs/${ID}`]: () => ({ job: job() }) })
+    const ask = vi.fn(async () => { $('[data-whm-jobs-workspace]').dataset.jobsCanManage = 'false'; return true })
+    boot(send, ask); await flush()
+    $<HTMLButtonElement>(`[data-whm-jobs-select="${ID}"]`).click(); await flush()
+    $<HTMLButtonElement>('[data-whm-jobs-cancel]').click(); await flush()
+    expect(ask).toHaveBeenCalledOnce()
+    expect(send.mock.calls.some(([method]) => method === 'POST')).toBe(false)
+    expect($<HTMLButtonElement>('[data-whm-jobs-cancel]').disabled).toBe(true)
+  })
   it.each(['en', 'ar'] as const)('shows a null reference as unnumbered in history and detail with internal routing retained: %s', async locale => {
     const current = job({ referenceCode: null, status: 'succeeded', steps: [] })
     const send = routes({ 'GET /api/jobs?': () => ({ jobs: [current] }), [`GET /api/jobs/${ID}/log`]: () => log(), [`GET /api/jobs/${ID}`]: () => ({ job: current }) })

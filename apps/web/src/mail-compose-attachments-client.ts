@@ -1,4 +1,8 @@
 import type { MessageValues } from './i18n.ts'
+import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
+const mailTemplate = canonicalMailTemplate
+const mailSlot = canonicalMailSlot
+const mailRequireTemplates = canonicalMailRequireTemplates
 import { COMPOSE_ATTACHMENT_LIMITS, type ComposeAttachmentPayload } from '@xpanel/core'
 
 // A local binding keeps serialized functions independent of bundler import rewriting.
@@ -59,6 +63,8 @@ export function bindMailComposeAttachments(_askDialog: unknown): void {
     const status = root.querySelector<HTMLElement>('[data-compose-attachment-status]')
     const summary = root.querySelector<HTMLElement>('[data-compose-attachment-summary]')
     if (!opener || !input || !list || !status || input.type !== 'file' || Object.prototype.hasOwnProperty.call(group, 'xpanelReadComposeAttachments')) return
+    try { mailRequireTemplates(root, [['mail-compose-attachment-row', 'li', ['name', 'size', 'remove']], ['mail-compose-attachment-dismiss', 'button', ['label']]]) }
+    catch { opener.disabled = true; input.disabled = true; status.textContent = t('Attachments are unavailable here.'); return }
     root.dataset.composeAttachmentsBound = 'true'
     const state = { pending: false, error: null as string | null, files: [] as readonly ComposeAttachmentPayload[] }
     let generation = 0
@@ -85,7 +91,7 @@ export function bindMailComposeAttachments(_askDialog: unknown): void {
             : t('Up to 10 files, 512 KiB total. Complete message request: 1 MiB.')
       status.append(message)
       if (state.error && enabled()) {
-        const dismiss = document.createElement('button'); dismiss.type = 'button'; dismiss.dataset.composeAttachmentDismiss = ''; dismiss.className = 'xp-btn'
+        const dismiss = mailTemplate(root, 'mail-compose-attachment-dismiss', 'button', ['label']) as HTMLButtonElement; dismiss.dataset.composeAttachmentDismiss = ''
         dismiss.textContent = t('Discard failed selection')
         dismiss.addEventListener('click', () => { if (sending() || state.pending) return; state.error = null; announce() })
         status.append(dismiss)
@@ -103,15 +109,13 @@ export function bindMailComposeAttachments(_askDialog: unknown): void {
         summary.replaceChildren(...t('{count} files · {size}').split(/(\{\w+\})/).filter(Boolean).map(part => part === '{count}' ? count : part === '{size}' ? size : document.createTextNode(part)))
       }
       state.files.forEach((file, index) => {
-        const row = document.createElement('li'), details = document.createElement('span'), filename = document.createElement('bdi'), size = document.createElement('bdi'), remove = document.createElement('button')
-        filename.dir = 'auto'; filename.textContent = digits(file.filename)
-        size.dir = 'ltr'; size.textContent = String(atob(file.contentBase64).length) + ' B'
-        const nameField = document.createElement('span'), sizeField = document.createElement('span')
-        nameField.append(filename); sizeField.append(size); details.append(nameField, sizeField)
-        remove.type = 'button'; remove.dataset.composeAttachmentRemove = String(index); remove.className = 'xp-btn'
+        const row = mailTemplate(root, 'mail-compose-attachment-row', 'li', ['name', 'size', 'remove']), filename = mailSlot(row, 'name', 'bdi'), size = mailSlot(row, 'size', 'bdi'), remove = mailSlot<HTMLButtonElement>(row, 'remove', 'button')
+        filename.textContent = digits(file.filename)
+        size.textContent = String(atob(file.contentBase64).length) + ' B'
+        remove.dataset.composeAttachmentRemove = String(index)
         remove.textContent = t('Remove'); remove.setAttribute('aria-label', t('Remove {file}', { file: digits(file.filename) }))
         remove.addEventListener('click', () => { if (!enabled() || sending() || state.pending) return; state.files = Object.freeze(state.files.filter((_, current) => current !== index)); render(); announce() })
-        row.append(details, remove); list.append(row)
+        list.append(row)
       })
     }
     opener.addEventListener('click', () => { if (enabled() && !sending() && !state.pending) input.click() })
@@ -161,4 +165,4 @@ export function bindMailComposeAttachments(_askDialog: unknown): void {
   })
 }
 
-export const MAIL_COMPOSE_ATTACHMENTS_CLIENT_BINDING = `(()=>{const composeAttachmentLimits=${JSON.stringify(composeAttachmentLimits)};const readComposeAttachmentPayload=${readComposeAttachmentPayload.toString()};return ${bindMailComposeAttachments.toString()};})()`
+export const MAIL_COMPOSE_ATTACHMENTS_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const composeAttachmentLimits=${JSON.stringify(composeAttachmentLimits)};const readComposeAttachmentPayload=${readComposeAttachmentPayload.toString()};return ${bindMailComposeAttachments.toString()};})()`

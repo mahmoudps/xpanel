@@ -1,3 +1,4 @@
+import { classicWhmClientTemplates } from './whm-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 export interface WhmMailboxMaintenanceWorkspaceInput { locale: Locale; canRead: boolean; canManage: boolean }
 
@@ -13,7 +14,7 @@ export function renderWhmMailboxMaintenanceWorkspace({ locale, canRead, canManag
   const status = `<p class="xp-whm-detail-status" data-whm-mailbox-maintenance-status data-state="${canRead ? 'unread' : 'unavailable'}" role="status">${canRead ? t('Nothing has been read yet.') : t('Mailbox maintenance requires an authorized root administrator. Nothing was read or changed.')}</p>`
   const rootOnly = canRead && canManage ? '' : `<p class="xp-help">${t('Changes require root authorization.')}</p>`
 
-  return `<section class="xp-whm-mailbox-maintenance" data-whm-mailbox-maintenance-workspace data-mailbox-maintenance-can-read="${canRead}" data-mailbox-maintenance-can-manage="${canRead && canManage}" lang="${locale}" dir="${localeDirection(locale)}">
+  return `<section class="xp-whm-mailbox-maintenance" data-whm-mailbox-maintenance-workspace data-mailbox-maintenance-can-read="${canRead}" data-mailbox-maintenance-can-manage="${canRead && canManage}" lang="${locale}" dir="${localeDirection(locale)}">${classicWhmClientTemplates('mailbox-maintenance')}
     <style>.xp-whm-mailbox-maintenance h2{font-size:var(--xp-type-card);line-height:var(--xp-leading-card);font-weight:var(--xp-weight-semibold)}
     .xp-whm-mailbox-maintenance{display:flex;flex-direction:column;gap:32px;min-inline-size:0}.xp-whm-mailbox-maintenance :is(h2,p,dl,dd,ul){margin:0}.xp-whm-mailbox-maintenance__card{display:flex;flex-direction:column;gap:24px;padding:16px;min-inline-size:0;border:1px solid var(--xp-border);border-radius:8px;background:var(--xp-bg-surface)}
     .xp-whm-mailbox-maintenance__heading{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px}.xp-whm-mailbox-maintenance__facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));gap:16px}.xp-whm-mailbox-maintenance__facts>div,.xp-whm-mailbox-maintenance__field{display:flex;flex-direction:column;gap:8px;min-inline-size:0}.xp-whm-mailbox-maintenance dt{font-weight:600}.xp-whm-mailbox-maintenance dd{overflow-wrap:anywhere}

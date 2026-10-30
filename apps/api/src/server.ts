@@ -62,6 +62,8 @@ import { handleSwOptimizeWorkspaceRoute } from './sw-optimize-workspace.ts'
 import { handleSwApplicationsWorkspaceRoute } from './sw-applications-workspace.ts'
 import { handleAccountRuntimeWorkspaceRoute } from './account-runtime-workspace.ts'
 import { handleAdminPreferencesRoute } from './admin-preferences.ts'
+import { handleUiPreferencesRoute } from './ui-preferences.ts'
+import { registeredUiThemeIds, resolveUiTheme } from '../../web/src/index.ts'
 import { handlePanelBrandingRoute, panelBrandingFile } from './panel-branding.ts'
 import { handlePanelLanguagesRoute } from './panel-languages.ts'
 import { handlePanelSettingsRoute, panelOfflineAdmits, panelSettingsFile } from './panel-settings.ts'
@@ -196,6 +198,7 @@ import {
   prepareDatabaseIndexCreation,
   prepareDatabaseIndexTransition,
   searchIndex,
+  assertNoActiveDatabaseTransaction,
   recordLoginFailure,
 } from '@xpanel/db'
 import type { Db } from '@xpanel/db'
@@ -268,7 +271,7 @@ import { requestLocale } from '../../web/src/i18n.ts'
 import { requestPrefersHtml } from '../../web/src/status-page.ts'
 import { ENTRY_POINTS, entryPointAdmitsPrincipal, entryPointAllowsApiRoute, isMailboxPrincipalUsername, sessionTokenHash } from './entry-points.ts'
 import type { EntryPoint } from './entry-points.ts'
-import { loadQualifiedCatalog } from './host-catalog.ts'
+import { loadQualifiedCatalog, type HostCatalogSource, type QualifiedCatalogProvider } from './host-catalog.ts'
 import { renderTotpQrSvg } from './totp-qr.ts'
 import { authorizeMailboxSessionBinding, createLocalMailboxTransport, establishMailboxSession, mailFolderName, mailboxAddressIndex, mailboxSessionPassword, openAuthorizedMailboxSession, parseMailboxSend, revokeMailboxIdentity, rewriteMailboxIds } from './mail/inbox.ts'
 import { listMailboxFolder, readMailboxFolder, moveMailboxFolder, mailboxFolderUid, mailboxUidValidity } from './mail/folder-workspace.ts'
@@ -389,6 +392,8 @@ const problemResponse = (err: unknown, instance: string, method = ''): Response 
 const transportProblem = (status: number, code: string, detail: string, instance: string): Response => new Response(JSON.stringify({ type: 'about:blank', title: code, status, code, detail, instance }), { status, headers: { 'content-type': 'application/problem+json; charset=utf-8' } })
 
 export interface ApiServerDeps {
+  /** Shared process-local acceptance and host-readiness provider, supplied only by startup. */
+  catalogProvider?: QualifiedCatalogProvider
   entryPoint?: EntryPoint
   publicOrigin?: string
   db: Db
@@ -468,6 +473,30 @@ const isLocalProxyAddress = (address: string): boolean => {
 }
 
 export const createApiApp = (deps: ApiServerDeps): ApiApp => {
+  const catalogSource: HostCatalogSource | null = deps.agentApp && deps.agentToken ? { fetch: deps.agentApp.fetch, token: deps.agentToken, identity: deps.agentApp } : null
+  const loadCatalog = () => deps.catalogProvider ? deps.catalogProvider.load(catalogSource) : loadQualifiedCatalog(catalogSource)
+  deps.store.registerAccountContactIndexRecovery(account => syncAccountContactIndex(deps.db, account))
+  // Callers resolve authorization before entering this bounded leaf-read scope.
+  // No snapshot, mutation, audit, agent call or nested state guard may run in it.
+  const readRecoveredAccountProjection = async <T>(read: () => Promise<T>): Promise<T> => {
+    let outcome: { ok: true; value: T } | { ok: false; error: unknown }
+    try {
+      assertNoActiveDatabaseTransaction()
+      outcome = await deps.store.withRecoveredAccountProjection(async () => {
+        try { return { ok: true as const, value: await read() } }
+        catch (error) { return { ok: false as const, error } }
+      })
+    } catch {
+      return fail('SERVICE_UNAVAILABLE', 'Account contact recovery is unavailable')
+    }
+    // Preserve leaf errors only after recovery exclusion and retirement succeed.
+    if (!outcome.ok) throw outcome.error
+    return outcome.value
+  }
+  const recoverAccountContactProjection = async (): Promise<void> => {
+    assertNoActiveDatabaseTransaction()
+    await deps.store.getWriterLock().waitForUnlocked()
+  }
   // Copy the profile: mutating the caller's dependency object cannot retarget a running listener.
   const entryPoint = deps.entryPoint
   if (entryPoint !== undefined && !Object.hasOwn(ENTRY_POINTS, entryPoint)) return fail('PRECONDITION_FAILED', 'invalid entry point')
@@ -680,7 +709,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     }
     if (caller.principal.kind === 'reseller') {
       const resellerId = (await resolveResellerId(caller)) ?? caller.principal.id
-      const owned = await deps.store.listAccounts({ ownerId: resellerId })
+      const owned = await readRecoveredAccountProjection(() => deps.store.listAccounts({ ownerId: resellerId }))
       return {
         kind: 'reseller',
         id: resellerId,
@@ -688,7 +717,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         ownedAccountIds: new Set(owned.filter((a) => a.status === 'active').map((a) => a.id)),
       }
     }
-    const account = await deps.store.getAccount(caller.principal.accountId, { username: caller.principal.username })
+    const { accountId, username } = caller.principal
+    const account = await readRecoveredAccountProjection(() => deps.store.getAccount(accountId, { username }))
     if (!account || account.status !== 'active') {
       return fail('FORBIDDEN', 'hosting account is suspended or terminating')
     }
@@ -1507,7 +1537,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     readPrincipal: id => getPrincipal(deps.db, id),
     assertUpdateAvailable: async () => {
       if (!deps.agentApp || !deps.agentToken) return fail('PRECONDITION_FAILED', 'DNS publication is unavailable', { stateChanged: false })
-      const catalog = await loadQualifiedCatalog({ fetch: request => deps.agentApp!.fetch(request), token: deps.agentToken })
+      const catalog = await loadCatalog()
       const dns = catalog.find(tool => tool.id === 'dns-zone-records')
       if (dns?.status !== 'verified' || dns.delivery.status !== 'verified') return fail('PRECONDITION_FAILED', 'DNS publication is unqualified on this host', { stateChanged: false })
       // Keep verified tool delivery and additionally require an uncached current host report.
@@ -2221,11 +2251,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           if (!reseller) return fail('FORBIDDEN', 'reseller authorization is unavailable')
           context.reseller = reseller
         }
-        const catalog = await loadQualifiedCatalog(
-          deps.agentApp && deps.agentToken
-            ? { fetch: request => deps.agentApp!.fetch(request), token: deps.agentToken }
-            : null,
-        )
+        const catalog = await loadCatalog()
         return jsonResponse({ tools: visibleTools(catalog, context), groups, navigation: visibleNavigation(context, catalog) })
       }
 
@@ -2239,21 +2265,22 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             ? kindParam
             : undefined
         if (caller.principal.kind === 'root') {
-          const hits = await searchIndex(deps.db, q, { ...(kind && { kind }) })
+          const hits = await readRecoveredAccountProjection(() => searchIndex(deps.db, q, { ...(kind && { kind }) }))
           return jsonResponse({ hits })
         }
         if (caller.principal.kind === 'reseller') {
           const resellerId = await resolveResellerId(caller)
-          const hits = await searchIndex(deps.db, q, {
+          const hits = await readRecoveredAccountProjection(() => searchIndex(deps.db, q, {
             ...(resellerId && { ownerId: resellerId }),
             ...(kind && { kind }),
-          })
+          }))
           return jsonResponse({ hits })
         }
-        const hits = await searchIndex(deps.db, q, {
-          accountId: caller.principal.accountId,
+        const accountId = caller.principal.accountId
+        const hits = await readRecoveredAccountProjection(() => searchIndex(deps.db, q, {
+          accountId,
           ...(kind && { kind }),
-        })
+        }))
         return jsonResponse({ hits })
       }
 
@@ -2934,7 +2961,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const initial = await requireCaller(req)
         await assertRoot(initial, 'server.default_index.workspace')
         const available = Boolean(deps.agentApp && deps.agentToken)
-        const catalog = await loadQualifiedCatalog(available ? { fetch: request => deps.agentApp!.fetch(request), token: deps.agentToken! } : null)
+        const catalog = await loadCatalog()
         const tool = catalog.find(tool => tool.id === 'aapanel-default-index')
         const qualified = available && tool?.status === 'verified' && tool.delivery.status === 'verified'
         const assertQualified = async (caller: AuthenticatedCaller) => {
@@ -2958,7 +2985,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         await assertRoot(initial, 'default-site.workspace')
         const available = Boolean(deps.agentApp && deps.agentToken)
         // Read trusted host admission before any metadata writer lease is acquired.
-        const catalog = await loadQualifiedCatalog(available ? { fetch: request => deps.agentApp!.fetch(request), token: deps.agentToken! } : null)
+        const catalog = await loadCatalog()
         const tool = catalog.find(tool => tool.id === 'aapanel-default-site')
         const qualified = available && tool?.status === 'verified' && tool.delivery.status === 'verified'
         const assertQualified = async (caller: AuthenticatedCaller) => {
@@ -3060,6 +3087,19 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const response = await handlePanelNotificationsRoute(req, url, method, { requireCaller, assertRoot, emitAudit, ...alertStateFiles(deps.store), transports: await alertTransports(deps.store) })
         if (response) return response
       }
+      const uiPreferencesResponse = await handleUiPreferencesRoute(req, url, method, { store: deps.store, emitAudit,
+        choices: registeredUiThemeIds(), defaultUiTheme: resolveUiTheme().id,
+        open: async request => {
+          const caller = await requireCaller(request)
+          const surface = entryPoint ?? (isMailboxPrincipalUsername(caller.principal.username) ? 'xmail' : caller.principal.kind === 'user' ? 'xpanel' : 'xwhm')
+          if (surface !== 'xmail') return { caller, surface }
+          const record = await authorizeMailboxSessionBinding(deps.db, deps.store, caller)
+          const current = await captureMailboxMetadataAuthority(deps.store, record.mailbox)
+          if (current.accountId !== record.accountId || current.serviceUserId !== record.serviceUserId) return fail('FORBIDDEN', 'mailbox lifetime changed; sign in again', { stateChanged: false })
+          return { caller, surface, mailbox: { ...current, sessionId: record.sessionId } }
+        },
+      })
+      if (uiPreferencesResponse) return uiPreferencesResponse
       const adminPreferencesResponse = await handleAdminPreferencesRoute(req, url, method, { store: deps.store, requireCaller, emitAudit })
       if (adminPreferencesResponse) return adminPreferencesResponse
       const panelConfigResponse = await handlePanelSettingsRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, emitAudit })
@@ -3337,15 +3377,16 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (method === 'GET' && pathname === '/api/accounts') {
         const caller = await requireCaller(req)
         if (caller.principal.kind === 'root') {
-          return jsonResponse({ accounts: await deps.store.listAccounts() })
+          return jsonResponse({ accounts: await readRecoveredAccountProjection(() => deps.store.listAccounts()) })
         }
         if (caller.principal.kind === 'reseller') {
           const resellerId = await resolveResellerId(caller)
           return jsonResponse({
-            accounts: resellerId ? await deps.store.listAccounts({ ownerId: resellerId }) : [],
+            accounts: resellerId ? await readRecoveredAccountProjection(() => deps.store.listAccounts({ ownerId: resellerId })) : [],
           })
         }
-        const acc = await deps.store.getAccount(caller.principal.accountId)
+        const accountId = caller.principal.accountId
+        const acc = await readRecoveredAccountProjection(() => deps.store.getAccount(accountId))
         return jsonResponse({ accounts: acc ? [acc] : [] })
       }
 
@@ -3353,7 +3394,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const caller = await requireCaller(req)
         if (caller.principal.kind !== 'user' || isMailboxPrincipal(caller)) return fail('FORBIDDEN', 'hosting account owner access is required')
         if (new URL(req.url).searchParams.size > 0) return fail('VALIDATION', 'account preferences do not accept query selectors')
-        const target = await deps.store.getAccount(caller.principal.accountId)
+        const accountId = caller.principal.accountId
+        const target = await readRecoveredAccountProjection(() => deps.store.getAccount(accountId))
         if (!target || target.status !== 'active') return fail('FORBIDDEN', 'active hosting account owner access is required')
         await assertCanAccessAccount(caller, target, 'account.contact.read')
         await assertAccountFeatures(deps.store, caller, target, ['account-preferences'])
@@ -3390,7 +3432,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       const accountItemMatch = /^\/api\/accounts\/([^/]+)$/.exec(pathname)
       if (accountItemMatch) {
         const caller = await requireCaller(req)
-        const target = await resolveAccountParam(accountItemMatch[1]!)
+        const target = method === 'GET'
+          ? await readRecoveredAccountProjection(() => resolveAccountParam(accountItemMatch[1]!))
+          : await resolveAccountParam(accountItemMatch[1]!)
         if (method === 'GET') {
           await assertCanAccessAccount(caller, target, 'account.read')
           return jsonResponse({ account: target, domains: await deps.store.listDomains({ accountId: target.id }) })
@@ -4423,6 +4467,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       const probe = new Request(`http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`)
       if (await lifecycleAdmissionResponse(probe)) return WS_AUTHORIZATION_UNAVAILABLE
       return await withLifecycleWriterAdmission(async () => {
+        await recoverAccountContactProjection()
         try { return await authenticateUpgradeInner(req, context) }
         catch { return null }
       })
@@ -4435,6 +4480,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     if (req.method === 'GET' && url.pathname === '/api/health' && url.search === '') return fetchInner(req, context)
     try {
       return await withLifecycleWriterAdmission(async () => {
+        await recoverAccountContactProjection()
         try { return await fetchInner(req, context) }
         catch (error) {
           // Async route failures keep their sanitized public outcome inside admission.
@@ -4478,6 +4524,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (deps.requireSecureCookies && !isVerifiedHttps(webReq)) return null
       if (await lifecycleAdmissionResponse(webReq)) return null
       return withLifecycleWriterAdmission(async () => {
+        await recoverAccountContactProjection()
         const caller = await authenticateRequest(deps.db, webReq, { serverSecret, clientIp: extractClientIp(webReq), touchSession: false, entryPoint, mfaRuntimePolicy, teamMember, handoffAuthority })
         if (!caller || !caller.mfaVerified || caller.sessionId === null || caller.apiTokenId !== null || caller.team || caller.impersonator) return null
         if (entryPoint && !entryPointAdmitsPrincipal(entryPoint, caller.principal)) return null

@@ -1,5 +1,9 @@
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 
 /**
@@ -89,6 +93,16 @@ function bindMailingLists(askDialog: ((options: Record<string, unknown>) => Prom
     const archiveInput = root.querySelector<HTMLInputElement>('[data-ml-archive]')
     const createButton = root.querySelector<HTMLButtonElement>('[data-ml-create]')
     if (!rows || !status) return
+    let templates: { row: HTMLTemplateElement; empty: HTMLTemplateElement }
+    try {
+      templates = { row: clientTemplate(root, 'account-mailing-list-row'), empty: clientTemplate(root, 'account-mailing-list-empty') }
+      cloneClientTemplate(templates.row, 'tr', ['address', 'members', 'moderation', 'archive', 'remove'])
+      cloneClientTemplate(templates.empty, 'tr', ['message'])
+    } catch {
+      root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('button,input,select,textarea').forEach(control => { control.disabled = true })
+      status.textContent = copy('Mailing list editing is unavailable here. No lists were read or changed.')
+      status.dataset.state = 'unavailable'; status.hidden = false; return
+    }
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const eligible = (): boolean => root.isConnected && manageable && !root.closest(denied) && /^[0-9a-f-]{36}$/i.test(accountId)
     let lists: MailingListRecordView[] = []
@@ -108,21 +122,19 @@ function bindMailingLists(askDialog: ((options: Record<string, unknown>) => Prom
     const paint = (): void => {
       rows.textContent = ''
       if (!lists.length) {
-        const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 5
-        cell.textContent = copy('No mailing lists have been saved for this account.')
-        row.appendChild(cell); rows.appendChild(row); lock(); return
+        const row = cloneClientTemplate(templates.empty, 'tr', ['message'])
+        clientTemplateSlot(row, 'message').textContent = copy('No mailing lists have been saved for this account.')
+        rows.appendChild(row); lock(); return
       }
       for (const list of lists) {
-        const row = document.createElement('tr'); row.dataset.mailingListId = list.id
-        const cell = (value: string, technical = false) => { const node = document.createElement('td'); if (technical) { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.className = 'xp-mono'; bdi.textContent = value; node.replaceChildren(bdi) } else node.textContent = value; row.appendChild(node) }
-        cell(list.address, true)
-        cell(String(list.members.length), true)
-        cell(list.moderation === 'open' ? copy('Open') : list.moderation === 'moderated' ? copy('Moderated') : copy('Members'))
-        cell(list.archiveEnabled ? copy(msgctxt('account-mailing-lists-client', 'Kept')) : copy('Not kept'))
-        const action = document.createElement('td')
-        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'xp-btn xp-btn--danger'; remove.textContent = copy('Delete list')
+        const row = cloneClientTemplate(templates.row, 'tr', ['address', 'members', 'moderation', 'archive', 'remove']); row.dataset.mailingListId = list.id
+        clientTemplateSlot(row, 'address').textContent = list.address
+        clientTemplateSlot(row, 'members').textContent = String(list.members.length)
+        clientTemplateSlot(row, 'moderation').textContent = list.moderation === 'open' ? copy('Open') : list.moderation === 'moderated' ? copy('Moderated') : copy('Members')
+        clientTemplateSlot(row, 'archive').textContent = list.archiveEnabled ? copy(msgctxt('account-mailing-lists-client', 'Kept')) : copy('Not kept')
+        const remove = clientTemplateSlot(row, 'remove', 'button') as HTMLButtonElement; remove.textContent = copy('Delete list')
         remove.addEventListener('click', () => { if (remove.disabled || !eligible()) return; void deleteList(list) })
-        action.appendChild(remove); row.appendChild(action); rows.appendChild(row)
+        rows.appendChild(row)
       }
       lock()
     }
@@ -189,4 +201,4 @@ function bindMailingLists(askDialog: ((options: Record<string, unknown>) => Prom
   })
 }
 
-export const ACCOUNT_MAILING_LISTS_CLIENT_BINDING = `(function(askDialog){const mailingUnsafe=${mailingUnsafe.toString()};const mailingEmail=${mailingEmail.toString()};const mailingName=${mailingName.toString()};const MODERATION=${JSON.stringify([...MODERATION])};const mailingObject=${mailingObject.toString()};const readMailingList=${readMailingList.toString()};const readMailingLists=${readMailingLists.toString()};const mailingListDraft=${mailingListDraft.toString()};const mailingListMatches=${mailingListMatches.toString()};(${bindMailingLists.toString()})(askDialog);})`
+export const ACCOUNT_MAILING_LISTS_CLIENT_BINDING = `(function(askDialog){const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const mailingUnsafe=${mailingUnsafe.toString()};const mailingEmail=${mailingEmail.toString()};const mailingName=${mailingName.toString()};const MODERATION=${JSON.stringify([...MODERATION])};const mailingObject=${mailingObject.toString()};const readMailingList=${readMailingList.toString()};const readMailingLists=${readMailingLists.toString()};const mailingListDraft=${mailingListDraft.toString()};const mailingListMatches=${mailingListMatches.toString()};(${bindMailingLists.toString()})(askDialog);})`

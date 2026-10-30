@@ -1,5 +1,6 @@
 import { type Locale, type MessageValues, translator, localeDirection } from '../../i18n.ts'
 import { escapeHtml } from '../../tokens.ts'
+import { accountMailingListClientTemplates } from '../account-routing-client-templates.ts'
 
 /** Account mailing lists workspace (presentation only; controller uses the real route). */
 export function renderAccountMailingLists(input: { lang: Locale; expectedAccountId: string; canManage: boolean; domains: readonly string[] }): string {
@@ -22,5 +23,6 @@ export function renderAccountMailingLists(input: { lang: Locale; expectedAccount
       <p class="xp-help">${t('List membership and moderation are stored configuration only; mail delivery to the list is not verified here.')}</p>
       <div class="xp-mailing-lists__actions"><button type="button" class="xp-btn xp-btn--primary" data-ml-create${disabled}>${t(msgctxt('account-mailing-lists', 'Create list'))}</button></div>
     </div>
+    ${accountMailingListClientTemplates()}
   </div>`
 }

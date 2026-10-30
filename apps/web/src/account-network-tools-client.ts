@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -54,18 +58,28 @@ function bindAccountNetworkTools(_askDialog: unknown): void {
     const tool = find<HTMLSelectElement>('tool'), host = find<HTMLInputElement>('host'), type = find<HTMLSelectElement>('type'), port = find<HTMLInputElement>('port'), run = find<HTMLButtonElement>('run')
     const head = find('head'), rows = find('rows'), summary = find('summary'), status = find('status'), targetText = find('target'), addressText = find('address'), atText = find('at')
     if (!tool || !host || !type || !port || !run || !head || !rows || !summary || !status || !targetText || !addressText || !atText) return
+    try {
+      cloneClientTemplate(clientTemplate(root, 'network-diagnostic-row'), 'tr', [])
+      cloneClientTemplate(clientTemplate(root, 'network-diagnostic-header'), 'th', ['value'])
+      clientTemplateSlot(cloneClientTemplate(clientTemplate(root, 'network-diagnostic-cell'), 'td', ['value']), 'value', 'span')
+      clientTemplateSlot(cloneClientTemplate(clientTemplate(root, 'network-diagnostic-technical-cell'), 'td', ['value']), 'value', 'bdi')
+      cloneClientTemplate(clientTemplate(root, 'network-diagnostic-instant'), 'bdi', [])
+    } catch {
+      root.querySelectorAll<HTMLButtonElement | HTMLSelectElement | HTMLInputElement>('button,select,input').forEach(control => { control.disabled = true })
+      status.dataset.state = 'unavailable'; status.textContent = t('Network tools are unavailable here. Nothing was run.'); return
+    }
     let busy = false
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' || state === 'invalid' ? 'alert' : 'status') }
     const lock = (): void => { for (const control of [tool, host, type, port, run]) control.disabled = !eligible() || busy; root.setAttribute('aria-busy', String(busy)) }
     const layout = (): void => { type.closest<HTMLElement>('[data-nettools-field]')!.hidden = tool.value !== 'dns'; port.closest<HTMLElement>('[data-nettools-field]')!.hidden = tool.value !== 'port' }
     const table = (labels: string[], data: readonly (readonly (readonly [string, boolean])[])[]): void => {
       head.textContent = ''; rows.textContent = ''
-      const top = document.createElement('tr')
-      for (const label of labels) { const th = document.createElement('th'); th.scope = 'col'; th.textContent = label; top.append(th) }
+      const top = cloneClientTemplate(clientTemplate(root, 'network-diagnostic-row'), 'tr', [])
+      for (const label of labels) { const th = cloneClientTemplate(clientTemplate(root, 'network-diagnostic-header'), 'th', ['value']); clientTemplateSlot(th, 'value').textContent = label; top.append(th) }
       head.append(top)
       for (const cells of data) {
-        const row = document.createElement('tr')
-        for (const [text, technical] of cells) { const td = document.createElement('td'); if (technical) { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.className = 'xp-mono'; bdi.textContent = text; td.append(bdi) } else td.textContent = text; row.append(td) }
+        const row = cloneClientTemplate(clientTemplate(root, 'network-diagnostic-row'), 'tr', [])
+        for (const [text, technical] of cells) { const td = cloneClientTemplate(clientTemplate(root, technical ? 'network-diagnostic-technical-cell' : 'network-diagnostic-cell'), 'td', ['value']); clientTemplateSlot(td, 'value', technical ? 'bdi' : 'span').textContent = text; row.append(td) }
         rows.append(row)
       }
     }
@@ -109,7 +123,7 @@ function bindAccountNetworkTools(_askDialog: unknown): void {
       busy = true; lock(); reset(t('Running…')); note('reading', t('Running the diagnostic from the server…'))
       try {
         const view = readNetworkToolsView(await send('POST', '/api/account/network-tools/' + selected, query), accountId, selected, query)
-        paint(view); const [before, after] = t('Finished at {time}.').split('{time}'); note('read', before ?? ''); const observed = document.createElement('bdi'); observed.dir = 'ltr'; observed.textContent = displayDateTime(view.observedAt); status.append(observed, after ?? '')
+        paint(view); const [before, after] = t('Finished at {time}.').split('{time}'); note('read', before ?? ''); const observed = cloneClientTemplate(clientTemplate(root, 'network-diagnostic-instant'), 'bdi', []); observed.textContent = displayDateTime(view.observedAt); status.append(observed, after ?? '')
       } catch (error) {
         const code = error && typeof error === 'object' && 'code' in error ? String((error as { code: unknown }).code) : ''
         reset(t('No result was read.'))
@@ -129,4 +143,4 @@ function bindAccountNetworkTools(_askDialog: unknown): void {
   })
 }
 
-export const ACCOUNT_NETWORK_TOOLS_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};const NETTOOLS_ID=${NETTOOLS_ID.toString()};const NETTOOLS_TOOLS=${JSON.stringify(NETTOOLS_TOOLS)};const NETTOOLS_DNS=${JSON.stringify(NETTOOLS_DNS)};const nettoolsObject=${nettoolsObject.toString()};const nettoolsCount=${nettoolsCount.toString()};const nettoolsMs=${nettoolsMs.toString()};const nettoolsAddress=${nettoolsAddress.toString()};const readNetworkToolsView=${readNetworkToolsView.toString()};return ${bindAccountNetworkTools.toString()};})()`
+export const ACCOUNT_NETWORK_TOOLS_CLIENT_BINDING = `(()=>{const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const NETTOOLS_ID=${NETTOOLS_ID.toString()};const NETTOOLS_TOOLS=${JSON.stringify(NETTOOLS_TOOLS)};const NETTOOLS_DNS=${JSON.stringify(NETTOOLS_DNS)};const nettoolsObject=${nettoolsObject.toString()};const nettoolsCount=${nettoolsCount.toString()};const nettoolsMs=${nettoolsMs.toString()};const nettoolsAddress=${nettoolsAddress.toString()};const readNetworkToolsView=${readNetworkToolsView.toString()};return ${bindAccountNetworkTools.toString()};})()`

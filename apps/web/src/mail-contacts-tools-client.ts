@@ -1,3 +1,7 @@
+import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
+const mailTemplate = canonicalMailTemplate
+const mailSlot = canonicalMailSlot
+const mailRequireTemplates = canonicalMailRequireTemplates
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 
@@ -93,6 +97,8 @@ function bindContactsTools(askDialog: ((options: Record<string, unknown>) => Pro
     const sharesList = root.querySelector<HTMLElement>('[data-contacts-shares]')
     const shareStatus = root.querySelector<HTMLElement>('[data-contacts-share-status]')
     if (!importText || !importButton || !exportButton || !sharesList) return
+    try { mailRequireTemplates(root, [['mail-contact-share', 'li', ['address', 'permission', 'remove']], ['mail-contact-share-empty', 'li', ['message']]]) }
+    catch { root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('input,button,select,textarea').forEach(control => { control.disabled = true }); if (shareStatus) { shareStatus.dataset.state = 'unavailable'; shareStatus.textContent = copy('Unavailable') }; return }
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const eligible = (): boolean => root.isConnected && manageable && !root.closest(denied) && contactToolsEmail.test(mailbox)
     let pendingVcard = ''
@@ -145,23 +151,22 @@ function bindContactsTools(askDialog: ((options: Record<string, unknown>) => Pro
       sharesList.textContent = ''
       const selected = contacts.find(contact => contact.id === contactSelect?.value)
       if (!selected) {
-        const empty = document.createElement('li'); empty.textContent = copy('Choose an owned contact to review its sharing.')
+        const empty = mailTemplate(root, 'mail-contact-share-empty', 'li', ['message']); mailSlot(empty, 'message').textContent = copy('Choose an owned contact to review its sharing.')
         sharesList.appendChild(empty)
         return
       }
       if (!selected.shares.length) {
-        const empty = document.createElement('li'); empty.textContent = copy('This contact is not shared with another mailbox.')
+        const empty = mailTemplate(root, 'mail-contact-share-empty', 'li', ['message']); mailSlot(empty, 'message').textContent = copy('This contact is not shared with another mailbox.')
         sharesList.appendChild(empty)
         return
       }
       for (const share of selected.shares) {
-        const item = document.createElement('li')
-        const label = document.createElement('span')
-        const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.className = 'xp-mono'; bdi.textContent = share.principal
-        label.append(bdi, document.createTextNode(' · ' + (share.permission === 'read-write' ? copy('Read and edit') : copy('Read only'))))
-        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'xp-btn'; remove.textContent = copy('Remove sharing')
+        const item = mailTemplate(root, 'mail-contact-share', 'li', ['address', 'permission', 'remove'])
+        mailSlot(item, 'address', 'bdi').textContent = share.principal
+        mailSlot(item, 'permission').textContent = ' · ' + (share.permission === 'read-write' ? copy('Read and edit') : copy('Read only'))
+        const remove = mailSlot<HTMLButtonElement>(item, 'remove', 'button'); remove.textContent = copy('Remove sharing')
         remove.addEventListener('click', async () => { if (busy || uncertain || !eligible()) return; await removeShare(selected, share.principal) })
-        item.append(label, remove); sharesList.appendChild(item)
+        sharesList.appendChild(item)
       }
     }
     const runWrite = async (work: () => Promise<void>, targetStatus: HTMLElement | null = shareStatus): Promise<void> => {
@@ -276,4 +281,4 @@ function bindContactsTools(askDialog: ((options: Record<string, unknown>) => Pro
   })
 }
 
-export const MAIL_CONTACTS_TOOLS_CLIENT_BINDING = `(function(askDialog){const contactToolsUnsafe=${contactToolsUnsafe.toString()};const contactToolsEmail=${contactToolsEmail.toString()};const IMPORT_LIMIT=${IMPORT_LIMIT};const contactsToolsObject=${contactsToolsObject.toString()};const contactsToolsVcardPreview=${contactsToolsVcardPreview.toString()};const contactsToolsSharePayload=${contactsToolsSharePayload.toString()};const contactsToolsList=${contactsToolsList.toString()};(${bindContactsTools.toString()})(askDialog);})`
+export const MAIL_CONTACTS_TOOLS_CLIENT_BINDING = `(function(askDialog){${MAIL_CLIENT_TEMPLATE_KIT}const contactToolsUnsafe=${contactToolsUnsafe.toString()};const contactToolsEmail=${contactToolsEmail.toString()};const IMPORT_LIMIT=${IMPORT_LIMIT};const contactsToolsObject=${contactsToolsObject.toString()};const contactsToolsVcardPreview=${contactsToolsVcardPreview.toString()};const contactsToolsSharePayload=${contactsToolsSharePayload.toString()};const contactsToolsList=${contactsToolsList.toString()};(${bindContactsTools.toString()})(askDialog);})`

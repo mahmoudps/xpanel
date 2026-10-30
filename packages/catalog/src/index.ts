@@ -1,7 +1,7 @@
 export * from './types.ts'
 export * from './visibility.ts'
 export * from './i18n.ts'
-export { groups, tools } from './data/index.ts'
+export { buildDeliveryCatalog, groups, tools } from './data/index.ts'
 export { navigation } from './data/navigation.ts'
 export { assessDelivery } from './delivery.ts'
 export { qualifyHostTools, PHASE1_TOOL_PROBES } from './host-qualification.ts'

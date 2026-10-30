@@ -84,6 +84,7 @@ export const isMailboxRouteAllowed = (pathname: string, method: string): boolean
   if (/^\/api\/webmail(?:\/|$)/.test(pathname)) return true
   if (/^\/api\/mail\/filters(?:\/|$)/.test(pathname)) return true
   if (method === 'GET' && pathname === '/api/auth/me') return true
+  if (pathname === '/api/auth/ui-preferences' && (method === 'GET' || method === 'PUT')) return true
   if (method === 'POST' && (pathname === '/api/auth/logout' || pathname === '/api/auth/change-password')) return true
   return false
 }

@@ -252,6 +252,10 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
     expect(units.service).toContain('KillMode=control-group')
     expect(units.timer).toContain('Persistent=true')
     expect(() => renderRenewalUnits('/bin/node; bad')).toThrow()
+    const current = renderRenewalUnits('/opt/xpanel-runtime/bin/node', 'current')
+    expect(current.service).toContain('ExecStart=/opt/xpanel-runtime/bin/node /opt/xpanel/current/scripts/management-tls.mjs renew')
+    expect(current.timer).toBe(units.timer)
+    expect(() => renderRenewalUnits('/usr/bin/node', 'arbitrary')).toThrow()
   })
   it('waits through old-worker certificate mismatch instead of equating successful reload to readiness', async () => {
     let now = 0, count = 0

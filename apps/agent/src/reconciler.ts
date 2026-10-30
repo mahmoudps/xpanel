@@ -36,6 +36,7 @@ import type { AgentExecutor } from './executor.ts'
 import { applyPostfixLocalDelivery, localMailNeedsUpdate, retirePostfixLocalDelivery } from './services/local-mail.ts'
 import { ensureOpenDkimSigning, mailAuthZoneAdditions, type OpenDkimSigning } from './services/opendkim-live.ts'
 import { removedMaildirPaths } from './services/mail.ts'
+import type { DnsReconcileProvider } from './services/dns-native.ts'
 import { chooseZoneSerial, stampZoneContent } from './zone-serial.ts'
 import { resolveAccountIoDevices } from './io-device.ts'
 import { databaseUserRemoteSqlHosts, databaseUserSqlHosts } from './db-remote-provider.ts'
@@ -51,7 +52,9 @@ import {
   computeFilesChecksum,
   detectHostDrift,
   diffManifests,
+  hasUnverifiedPreActions,
   ReconcilerJournal,
+  runJournaledPreActions,
   sha256Text,
   validateStagedCandidateSyntax,
 } from './reconciler-journal.ts'
@@ -74,6 +77,49 @@ export interface CompiledGeneration {
   /** Postfix main.cf and master.cf are merged outside the owned file list. */
   localMail: boolean
   localMailOptions: services.PostfixMainOptions
+}
+
+const DNS_CATALOG_PATH = '/etc/powerdns/named.conf.xpanel-zones'
+const DEFAULT_DNS_ZONE_DIR = '/var/lib/powerdns/zones'
+
+const isManagedDnsPath = (path: string, zoneDir: string): boolean =>
+  path === DNS_CATALOG_PATH || (path.startsWith(`${zoneDir}/`) && path.endsWith('.zone'))
+
+/** The generation remains the sole publisher, including when its final zone is removed. */
+export const retainEmptyManagedDnsCatalog = (
+  compiled: CompiledGeneration,
+  previousPaths: readonly string[],
+  zoneDir = DEFAULT_DNS_ZONE_DIR,
+): void => {
+  if (compiled.files.some(file => file.path === DNS_CATALOG_PATH)
+    || !previousPaths.some(path => isManagedDnsPath(path, zoneDir))) return
+  compiled.files.push({ path: DNS_CATALOG_PATH, content: '// Managed by xPanel: PowerDNS BIND zone catalog\n', mode: 0o644, owner: 'root', group: 'root' })
+  compiled.files.sort((a, b) => a.path.localeCompare(b.path))
+  compiled.postActions.push(
+    { kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] },
+    { kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] },
+  )
+}
+
+/** Native DNS effects require a validator/observer; modeled fixtures cannot create native proof. */
+export const runGenerationDnsHook = async (input: {
+  phase: 'validate' | 'verify'
+  native: boolean
+  provider: DnsReconcileProvider | undefined
+  files: readonly RenderedFile[]
+  removedPaths: readonly string[]
+  zoneDir?: string
+}): Promise<void> => {
+  const zoneDir = input.zoneDir ?? DEFAULT_DNS_ZONE_DIR
+  if (!input.files.some(file => isManagedDnsPath(file.path, zoneDir))
+    && !input.removedPaths.some(path => isManagedDnsPath(path, zoneDir))) return
+  if (!input.provider) {
+    if (input.native) return fail('SERVICE_UNAVAILABLE', 'native DNS reconciliation requires a connected validator and authoritative observer', {
+      stateChanged: input.phase === 'verify', verificationRequired: input.phase === 'verify', reason: 'dns_reconciliation_provider_not_connected',
+    })
+    return
+  }
+  await input.provider[input.phase](input.files, input.removedPaths)
 }
 
 export interface CompileOptions {
@@ -730,6 +776,8 @@ export type ReconcileResult =
       error: string
       rolledBack?: boolean
       restoredGenerationId?: number | null
+      stateChanged?: boolean
+      verificationRequired?: true
     }
 
 export interface ReconciliationRecoveryResult {
@@ -754,6 +802,10 @@ export interface ReconcilerDeps {
   onEvent?: (event: LiveEvent) => void
   /** Optional health verification probe run against each service unit after reload and after rollback. */
   healthProbe?: (unit: string, generationId: number) => Promise<{ ok: boolean; error?: string }>
+  /** Exact generation validation/observation; never a second DNS publishing authority. */
+  dnsPublication?: DnsReconcileProvider
+  /** Trusted host-side verification; file checks alone cannot clear prerequisite effects. */
+  preActionRecoveryProbe?: (journal: Readonly<ReconcileJournalRecord>) => Promise<{ ok: boolean; error?: string }>
   /** Optional deterministic hook invoked at each journal phase boundary (used for crash-injection tests). */
   onPhaseHook?: (phase: ReconcileJournalPhase, journal: ReconcileJournalRecord) => Promise<void> | void
 }
@@ -868,7 +920,21 @@ export class HostReconciler {
       if (state && !state.active) {
         return { ok: false, error: `service unit ${unit} is not active after reload` }
       }
+      return { ok: true }
     }
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9_.:@-]|\\x[0-9a-fA-F]{2})*\.service$/.test(unit) || unit.length > 200) {
+      return { ok: false, error: `service unit ${unit} cannot be probed` }
+    }
+    const observed = await this.deps.executor.runCommand([
+      '/usr/bin/systemctl', 'show', '--no-pager',
+      '--property=Id,Names,LoadState,ActiveState,SubState,UnitFileState',
+      '--', unit,
+    ])
+    if (!observed.ok || observed.code !== 0) {
+      return { ok: false, error: observed.stderr.trim() || `service unit ${unit} probe failed` }
+    }
+    const active = observed.stdout.split('\n').find(line => line.startsWith('ActiveState='))?.slice('ActiveState='.length).trim()
+    if (active !== 'active') return { ok: false, error: `service unit ${unit} is ${active || 'unobserved'}` }
     return { ok: true }
   }
 
@@ -998,11 +1064,29 @@ export class HostReconciler {
     restoredActiveGen: ConfigGeneration | null
     restoredFiles: string[]
     reloadedUnits: string[]
+    verificationRequired: boolean
   }> {
     const restoredFiles: string[] = []
     const reloadedUnits: string[] = []
+    const previousFiles: RenderedFile[] = journalRecord.previousFilesBackup
+      .filter((backup): backup is PreviousFileBackup & { content: string } => backup.existed && backup.content !== null)
+      .map(({ path, content, mode, owner, group }) => ({ path, content, mode, owner, group }))
+    const absentPaths = journalRecord.previousFilesBackup.filter(backup => !backup.existed).map(backup => backup.path)
+    const native = process.platform === 'linux' && !('files' in this.deps.executor)
+    const zoneDir = this.deps.zoneDir ?? DEFAULT_DNS_ZONE_DIR
+    const dnsWasTouched = journalRecord.previousFilesBackup.some(backup => isManagedDnsPath(backup.path, zoneDir))
 
     try {
+      // Restore the captured bytes without requiring the failed daemon to answer first.
+      // Readiness and authoritative observations remain mandatory before recovery succeeds.
+      for (const backup of journalRecord.previousFilesBackup.filter(entry => isManagedDnsPath(entry.path, zoneDir))) {
+        if (backup.existed ? backup.content === null || backup.sha256 !== sha256Text(backup.content)
+          : backup.content !== null || backup.sha256 !== null) {
+          fail('PRECONDITION_FAILED', 'captured DNS backup integrity could not be verified', {
+            stateChanged: true, verificationRequired: true, generationId: journalRecord.generationId,
+          })
+        }
+      }
       for (const backup of journalRecord.previousFilesBackup) {
         await this.restoreBackedUpFile(backup)
         restoredFiles.push(backup.path)
@@ -1019,10 +1103,16 @@ export class HostReconciler {
         journalRecord.reloadedUnits.length > 0
           ? [...journalRecord.reloadedUnits].reverse()
           : [...new Set(journalRecord.previousManifest?.files.flatMap((f) => f.dependentUnits) ?? [])].reverse()
+      if (dnsWasTouched && !unitsToReload.includes('pdns.service')) unitsToReload.push('pdns.service')
 
       for (const unit of unitsToReload) {
         if (reloadedUnits.includes(unit)) continue
-        await this.deps.executor.runAction(rollbackReloadAction(unit))
+        if (unit === 'pdns.service' && dnsWasTouched) {
+          await this.deps.executor.runAction({ kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] })
+          await this.deps.executor.runAction({ kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] })
+        } else {
+          await this.deps.executor.runAction(rollbackReloadAction(unit))
+        }
         reloadedUnits.push(unit)
       }
 
@@ -1037,6 +1127,7 @@ export class HostReconciler {
           )
         }
       }
+      await runGenerationDnsHook({ phase: 'verify', native, provider: this.deps.dnsPublication, files: previousFiles, removedPaths: absentPaths, zoneDir })
     } catch (rollbackErr) {
       journalRecord.phase = 'needs_attention'
       journalRecord.error = `rollback failed after ${errorMsg}: ${(rollbackErr as Error).message}`
@@ -1051,14 +1142,15 @@ export class HostReconciler {
       errorMsg,
     )
 
-    journalRecord.phase = 'rolled_back'
+    const verificationRequired = hasUnverifiedPreActions(journalRecord)
+    journalRecord.phase = verificationRequired ? 'needs_attention' : 'rolled_back'
     journalRecord.error = errorMsg
     await this.journal.saveJournal(journalRecord)
     await this.journal.cleanupStagingDir(journalRecord.generationId)
 
     const audit = await appendAudit(this.deps.db, {
       actor: journalRecord.actor,
-      action: 'reconcile.rolled_back',
+      action: verificationRequired ? 'reconcile.failed' : 'reconcile.rolled_back',
       target: `generation:${journalRecord.generationId}`,
       detail: {
         failedUnitOrStage,
@@ -1066,6 +1158,9 @@ export class HostReconciler {
         restoredGenerationId: active?.id ?? null,
         restoredFilesCount: restoredFiles.length,
         reloadedUnits,
+        stateChanged: verificationRequired,
+        verificationRequired,
+        configurationFilesRestored: true,
       },
       outcome: 'failed',
     })
@@ -1087,6 +1182,7 @@ export class HostReconciler {
       restoredActiveGen: active,
       restoredFiles,
       reloadedUnits,
+      verificationRequired,
     }
   }
 
@@ -1102,6 +1198,7 @@ export class HostReconciler {
   private async recoverInterruptedReconciliationAdmitted(
     scope: LiveEventScope = { accountId: null, resellerId: null },
   ): Promise<ReconciliationRecoveryResult> {
+    await this.journal.assertNoUnresolvedPreparation()
     const activeJournal = await this.journal.readActiveJournal()
     if (!activeJournal) {
       return {
@@ -1131,6 +1228,22 @@ export class HostReconciler {
     }
 
     const reason = `recovered from interrupted reconciliation at phase '${interruptedPhase}'`
+
+    // Native config tests can require users and directories before live config activation.
+    // An interrupted prerequisite is not undone by restoring configuration files.
+    if ((interruptedPhase === 'render' || interruptedPhase === 'stage' || interruptedPhase === 'test')
+      && hasUnverifiedPreActions(activeJournal)) {
+      activeJournal.preActionsNeedVerification = true
+      activeJournal.phase = 'needs_attention'
+      activeJournal.error = `${reason}; host prerequisite effects require verification`
+      await this.journal.saveJournal(activeJournal)
+      await markFailed(this.deps.db, activeJournal.generationId, activeJournal.error)
+      return {
+        recovered: false, outcome: 'needs_attention', generationId: activeJournal.generationId,
+        restoredGenerationId: activeJournal.previousActiveGenerationId, interruptedPhase,
+        restoredFiles: [], reloadedUnits: [], error: activeJournal.error,
+      }
+    }
 
     // Crashed before live host activation (`render`, `stage`, `test`): live files were untouched.
     if (interruptedPhase === 'render' || interruptedPhase === 'stage' || interruptedPhase === 'test') {
@@ -1177,8 +1290,8 @@ export class HostReconciler {
     )
 
     return {
-      recovered: true,
-      outcome: 'rolled_back',
+      recovered: !rb.verificationRequired,
+      outcome: rb.verificationRequired ? 'needs_attention' : 'rolled_back',
       generationId: activeJournal.generationId,
       restoredGenerationId: rb.restoredActiveGen?.id ?? null,
       interruptedPhase,
@@ -1201,6 +1314,7 @@ export class HostReconciler {
     generationId: number,
     actor = 'root',
   ): Promise<{ generationId: number; previousGenerationId: number | null; checkedFiles: number }> {
+    await this.journal.assertNoUnresolvedPreparation()
     if (!Number.isSafeInteger(generationId) || generationId < 1) {
       return fail('VALIDATION', 'resolve-failed requires a positive integer generation id')
     }
@@ -1222,6 +1336,18 @@ export class HostReconciler {
         generationId,
         status: candidate.status,
       })
+    }
+
+    if (hasUnverifiedPreActions(journal)) {
+      const probe = await this.deps.preActionRecoveryProbe?.(journal)
+      if (!probe?.ok) {
+        return fail('PRECONDITION_FAILED', 'host prerequisite effects require independent verification before clearing the generation', {
+          generationId, stateChanged: true, verificationRequired: true,
+          ...(probe?.error && { error: probe.error }),
+        })
+      }
+      journal.preActionsNeedVerification = false
+      delete journal.pendingPreAction
     }
 
     const active = await latestActive(this.deps.db)
@@ -1294,16 +1420,24 @@ export class HostReconciler {
     const startMs = Date.now()
     const scope: LiveEventScope = opts.scope ?? { accountId: null, resellerId: null }
     const actor = opts.actor ?? 'agent'
+    const isRealLinuxExecutor = process.platform === 'linux' && !('files' in this.deps.executor)
 
+    await this.journal.assertNoUnresolvedPreparation()
     const existingJournal = await this.journal.readActiveJournal()
     if (existingJournal) {
       if (existingJournal.phase === 'needs_attention') {
         fail('PRECONDITION_FAILED', 'previous reconciliation rollback failed and requires operator attention', {
           generationId: existingJournal.generationId,
           error: existingJournal.error,
+          ...(hasUnverifiedPreActions(existingJournal) && { stateChanged: true, verificationRequired: true }),
         })
       }
-      await this.recoverInterruptedReconciliationAdmitted(scope)
+      const recovery = await this.recoverInterruptedReconciliationAdmitted(scope)
+      if (recovery.outcome === 'needs_attention') {
+        fail('PRECONDITION_FAILED', 'interrupted host prerequisite effects require operator verification', {
+          generationId: recovery.generationId, stateChanged: true, verificationRequired: true,
+        })
+      }
     }
 
     const snapshot = await this.deps.store.readSnapshot()
@@ -1365,6 +1499,7 @@ export class HostReconciler {
           next.postActions.push({ kind: 'remove-path', path })
         }
       }
+      retainEmptyManagedDnsCatalog(next, previousManifest?.files.map(file => file.path) ?? [], this.deps.zoneDir ?? DEFAULT_DNS_ZONE_DIR)
       return next
     }
     const preflightOf = (next: ReturnType<typeof compileMail>, checksum: string) => {
@@ -1393,6 +1528,23 @@ export class HostReconciler {
     let compiled = compileMail(mailAuth)
     let filesChecksum = computeFilesChecksum(compiled.files)
     await this.deps.executor.preflight(preflightOf(compiled, filesChecksum))
+    const removedPathsFor = (files: readonly RenderedFile[]): string[] => {
+      const paths = new Set(files.map(file => file.path))
+      return (previousManifest?.files ?? []).filter(file => !paths.has(file.path)).map(file => file.path)
+    }
+    let validatedDnsDigest: string | undefined
+    const validateDnsCandidate = async (): Promise<void> => {
+      const zoneDir = this.deps.zoneDir ?? DEFAULT_DNS_ZONE_DIR
+      const removedPaths = removedPathsFor(compiled.files)
+      const digest = sha256Text(JSON.stringify({
+        files: compiled.files.filter(file => isManagedDnsPath(file.path, zoneDir)),
+        removedPaths: removedPaths.filter(path => isManagedDnsPath(path, zoneDir)),
+      }))
+      if (digest === validatedDnsDigest) return
+      await runGenerationDnsHook({ phase: 'validate', native: isRealLinuxExecutor, provider: this.deps.dnsPublication, files: compiled.files, removedPaths, zoneDir })
+      validatedDnsDigest = digest
+    }
+    await validateDnsCandidate()
     await assertMailForwardingUnchanged()
     if (compiled.localMailOptions.tls) {
       const tls = compiled.localMailOptions.tls
@@ -1406,9 +1558,10 @@ export class HostReconciler {
       ?? new Map(snapshot.accounts.map(account => [account.id, []]))
     if (compiled.localMail) mailFx = await readMailfxRenderInput(this.deps.store.rootDir, snapshot, this.deps.os.family, argv => this.deps.executor.runCommand(argv))
     if (!('mailAuth' in opts)) {
-      try {
-        mailAuth = (await ensureOpenDkimSigning(this.deps.executor, mailDomains)).signing
-      } catch { /* A missing OpenDKIM user leaves the zone as it was. */ }
+      mailAuth = (await this.journal.runHostPreparation({
+        operation: 'opendkim', actor, stateChecksum: snapshot.checksum,
+        domainsSha256: sha256Text(JSON.stringify([...new Set(mailDomains)].sort())),
+      }, this.deps.executor, executor => ensureOpenDkimSigning(executor, mailDomains))).signing
     }
     const zoneDir = this.deps.zoneDir ?? '/var/lib/powerdns/zones'
     const previousZones = new Map<string, string>()
@@ -1425,6 +1578,7 @@ export class HostReconciler {
       compiled = refreshed
       filesChecksum = nextChecksum
       await this.deps.executor.preflight(preflightOf(compiled, filesChecksum))
+      await validateDnsCandidate()
     }
 
     let repairedDriftCount = 0
@@ -1437,6 +1591,7 @@ export class HostReconciler {
       const mailDrift = compiled.localMail && await localMailNeedsUpdate(this.deps.executor, this.deps.os, compiled.localMailOptions)
       await assertMailForwardingUnchanged()
       if (!drift.hasDrift && !drift.manifestMissing && !mailDrift) {
+        await runGenerationDnsHook({ phase: 'verify', native: isRealLinuxExecutor, provider: this.deps.dnsPublication, files: compiled.files, removedPaths: removedPathsFor(compiled.files), zoneDir: this.deps.zoneDir })
         return { status: 'noop', generation: currentGen, stateChecksum: snapshot.checksum }
       }
       repairedDriftCount = drift.items.length + (mailDrift ? 1 : 0)
@@ -1504,6 +1659,7 @@ export class HostReconciler {
       diff: manifestDiff,
       previousFilesBackup,
       completedPreActions: 0,
+      preActionsNeedVerification: false,
       switchedFilePaths: [],
       removedFilePaths: [],
       stoppedObsoleteUnits: [],
@@ -1519,27 +1675,26 @@ export class HostReconciler {
       this.emitStage(pendingGen.id, 'render', 'passed', scope)
       await this.invokePhaseHook('stage', journalRecord)
 
-      // Stage 2: Staged config syntax tests BEFORE touching any live host path (A19)
+      // Stage 2: Validate every staged syntax input before native prerequisites (A19).
       journalRecord.phase = 'test'
       await this.journal.saveJournal(journalRecord)
       this.emitStage(pendingGen.id, 'test', 'running', scope, `Running ${compiled.tests.length} config tests`)
       const stagedFiles = await this.journal.verifyStagedCandidateIntegrity(pendingGen.id, candidateManifest)
       await this.invokePhaseHook('test', journalRecord)
 
-      const isRealLinuxExecutor = process.platform === 'linux' && !('files' in this.deps.executor)
       let preActionsExecutedDuringTest = false
-
-      for (const test of compiled.tests) {
-        const stagedSyntax = validateStagedCandidateSyntax(test, stagedFiles)
+      const syntaxResults = compiled.tests.map(test => ({ test, result: validateStagedCandidateSyntax(test, stagedFiles) }))
+      const syntaxFailure = syntaxResults.find(entry => !entry.result.ok)
+      // A later malformed file must reject the entire candidate before an earlier daemon
+      // test has a chance to provision identities or directories on the live host.
+      for (const { test, result: stagedSyntax } of syntaxFailure ? [syntaxFailure] : syntaxResults) {
         let res: { ok: boolean; code: number; stdout: string; stderr: string }
         if (!stagedSyntax.ok) {
           res = { ok: false, code: 1, stdout: '', stderr: stagedSyntax.stderr }
         } else {
           if (isRealLinuxExecutor && !preActionsExecutedDuringTest) {
-            for (const action of compiled.preActions) {
-              await this.deps.executor.runAction(action)
-              journalRecord.completedPreActions++
-            }
+            await runJournaledPreActions(journalRecord, compiled.preActions, this.deps.executor,
+              record => this.journal.saveJournal(record), true)
             preActionsExecutedDuringTest = true
           }
           const fpmConfigIdx = isRealLinuxExecutor ? test.argv.indexOf('--fpm-config') : -1
@@ -1601,8 +1756,9 @@ export class HostReconciler {
 
         if (!res.ok) {
           const errorMsg = `${test.name} failed (exit ${res.code}): ${res.stderr || res.stdout}`.slice(0, 2000)
-          await this.journal.cleanupStagingDir(pendingGen.id)
-          journalRecord.phase = 'failed'
+          const verificationRequired = hasUnverifiedPreActions(journalRecord)
+          if (!verificationRequired) await this.journal.cleanupStagingDir(pendingGen.id)
+          journalRecord.phase = verificationRequired ? 'needs_attention' : 'failed'
           journalRecord.error = errorMsg
           await this.journal.saveJournal(journalRecord)
 
@@ -1612,7 +1768,7 @@ export class HostReconciler {
             actor,
             action: 'reconcile.failed',
             target: `generation:${pendingGen.id}`,
-            detail: { failedTest: test.name, error: errorMsg },
+            detail: { failedTest: test.name, error: errorMsg, stateChanged: verificationRequired, verificationRequired },
             outcome: 'failed',
           })
           this.emit({
@@ -1623,7 +1779,9 @@ export class HostReconciler {
             data: { generationId: pendingGen.id, failedTest: test.name, error: errorMsg },
           })
           this.emit({ id: randomUUID(), at: audit.at, kind: 'audit.entry', scope, data: audit })
-          return { status: 'failed', generation: failedGen, failedTest: test.name, error: errorMsg }
+          return { status: 'failed', generation: failedGen, failedTest: test.name, error: errorMsg,
+            stateChanged: verificationRequired,
+            ...(verificationRequired && { verificationRequired: true as const }) }
         }
       }
 
@@ -1644,10 +1802,8 @@ export class HostReconciler {
         this.emitStage(pendingGen.id, 'switch', 'running', scope)
 
         if (!preActionsExecutedDuringTest) {
-          for (const action of compiled.preActions) {
-            await this.deps.executor.runAction(action)
-            journalRecord.completedPreActions++
-          }
+          await runJournaledPreActions(journalRecord, compiled.preActions, this.deps.executor,
+            record => this.journal.saveJournal(record), isRealLinuxExecutor)
         }
 
         for (const file of verifiedStagedFiles) {
@@ -1736,6 +1892,8 @@ export class HostReconciler {
           }
           journalRecord.verifiedUnits.push(unit)
         }
+        await runGenerationDnsHook({ phase: 'verify', native: isRealLinuxExecutor, provider: this.deps.dnsPublication, files: verifiedStagedFiles,
+          removedPaths: manifestDiff.removed.map(file => file.path), zoneDir: this.deps.zoneDir })
 
         await this.journal.saveJournal(journalRecord)
         await this.invokePhaseHook('verify', journalRecord)
@@ -1751,11 +1909,12 @@ export class HostReconciler {
         const rb = await this.rollbackLiveHostAndRecord(journalRecord, failedUnit, errorMsg, scope)
         return {
           status: 'failed',
-          rolledBack: true,
+          rolledBack: !rb.verificationRequired,
           restoredGenerationId: rb.restoredActiveGen?.id ?? null,
           generation: rb.rolledBackGen,
           failedTest: failedUnit,
           error: errorMsg,
+          ...(rb.verificationRequired && { stateChanged: true as const, verificationRequired: true as const }),
         }
       }
 
@@ -1817,6 +1976,15 @@ export class HostReconciler {
       if (err instanceof SimulatedProcessCrashWrapper) {
         throw err.originalError
       }
+      if (journalRecord.phase === 'test' && hasUnverifiedPreActions(journalRecord)) {
+        journalRecord.phase = 'needs_attention'
+        journalRecord.error = `native prerequisite or config check outcome requires verification: ${err instanceof Error ? err.message : String(err)}`.slice(0, 2000)
+        await this.journal.saveJournal(journalRecord)
+        await markFailed(this.deps.db, pendingGen.id, journalRecord.error)
+        return fail('PRECONDITION_FAILED', journalRecord.error, {
+          generationId: pendingGen.id, stateChanged: true, verificationRequired: true,
+        })
+      }
       throw err
     }
   }
@@ -1831,6 +1999,7 @@ export class HostReconciler {
   }
 
   private async rollbackToGenerationAdmitted(genId: number, actor: string, guard: GenerationRollbackGuard): Promise<ReconcileResult & { rollbackTargetGenerationId: number; rollbackTargetChecksum: string; stateChanged: true; verificationRequired?: true; details?: { stateChanged: true; verificationRequired: true } }> {
+    await this.journal.assertNoUnresolvedPreparation()
     if (await this.journal.readActiveJournal()) return fail('PRECONDITION_FAILED', 'an existing reconciliation journal requires review before restoring desired state', { stateChanged: false })
     let restored = false
     let expectedRestoredMailForwarding: MailForwardingConfiguration | undefined

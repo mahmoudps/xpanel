@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 // xPanel zone-editor browser controller. It binds the already-rendered connected-panel hooks
@@ -488,6 +492,9 @@ function bindZoneEditor(askDialog: unknown): void {
     const saveButton = editor.querySelector<HTMLButtonElement>('[data-dns-save]')
     const deleteButton = editor.querySelector<HTMLButtonElement>('[data-dns-delete]')
     if (!zoneSelect || !accountSelect || !newNameInput || !recordsBody || !status || !addRecordButton || !addZoneButton || !saveButton || !deleteButton) return
+    const rowSlots=['name','type','ttl','content','priority','remove'] as const
+    const rowTemplate=clientTemplate(editor,'dns-record-row'),emptyTemplate=clientTemplate(editor,'dns-record-empty')
+    cloneClientTemplate(rowTemplate,'tr',rowSlots);cloneClientTemplate(emptyTemplate,'tr',['message'])
     const controls: (HTMLInputElement | HTMLSelectElement | HTMLButtonElement)[] = [zoneSelect, accountSelect, newNameInput, addRecordButton, addZoneButton, saveButton, deleteButton]
     const setUnavailable = (message: string) => {
       for (const control of controls) control.disabled = true
@@ -507,59 +514,15 @@ function bindZoneEditor(askDialog: unknown): void {
       setUnavailable(t('Zone editing is unavailable here. Saved zone records were not read and no change is possible.'))
       return
     }
-    const fieldLabel = (field: string): string => field === 'name' ? t('Record name') : field === 'type' ? t('Record type') : field === 'ttl' ? 'TTL' : field === 'content' ? t('Record content') : t('Priority')
     const renderRows = (state: ZoneEditorState, locked: boolean) => {
-      recordsBody.textContent = ''
-      if (state.draft.length === 0) {
-        const row = document.createElement('tr'), cell = document.createElement('td')
-        cell.colSpan = 6
-        cell.textContent = !state.loaded
-          ? t('Zone records have not been read.')
-          : state.zone
-            ? t('No records are stored in this zone yet.')
-            : t('No saved zone record was returned for this name. Add a record to create the desired state.')
-        row.append(cell)
-        recordsBody.append(row)
-        return
-      }
-      for (const draftRow of state.draft) {
-        const row = document.createElement('tr')
-        row.dataset.recordId = draftRow.id
-        const cell = (child: HTMLElement) => { const td = document.createElement('td'); td.append(child); row.append(td) }
-        const textInput = (field: 'name' | 'ttl' | 'content' | 'priority', kind: 'text' | 'number', value: string, min?: number, max?: number) => {
-          const input = document.createElement('input')
-          input.className = 'xp-input'
-          input.type = kind
-          input.dir = 'ltr'
-          input.value = value
-          input.disabled = locked
-          input.dataset.zoneField = field
-          input.setAttribute('aria-label', fieldLabel(field))
-          if (kind === 'number') { input.min = String(min ?? 0); input.step = '1'; if (max !== undefined) input.max = String(max) }
-          return input
+      recordsBody.textContent=''
+      if(!state.draft.length){const row=cloneClientTemplate(emptyTemplate,'tr',['message']);clientTemplateSlot(row,'message','td').textContent=!state.loaded?t('Zone records have not been read.'):state.zone?t('No records are stored in this zone yet.'):t('No saved zone record was returned for this name. Add a record to create the desired state.');recordsBody.append(row);return}
+      for(const draftRow of state.draft){const row=cloneClientTemplate(rowTemplate,'tr',rowSlots);row.dataset.recordId=draftRow.id
+        for(const field of ['name','type','ttl','content','priority'] as const){const input=clientTemplateSlot(row,field,field==='type'?'select':'input') as HTMLInputElement|HTMLSelectElement;input.disabled=locked;input.value=draftRow[field]
+          if(field==='type'){const select=input as HTMLSelectElement;for(const type of ZONE_RECORD_TYPES){const option=document.createElement('option');option.value=type;option.textContent=type;select.append(option)}select.value=draftRow.type}
+          else if(field==='ttl'||field==='priority'){const number=input as HTMLInputElement;number.min='0';number.max=String(field==='ttl'?ZONE_TTL_MAX:ZONE_PRIORITY_MAX);number.step='1'}
         }
-        cell(textInput('name', 'text', draftRow.name))
-        const typeSelect = document.createElement('select')
-        typeSelect.className = 'xp-select'
-        typeSelect.dir = 'ltr'
-        typeSelect.disabled = locked
-        typeSelect.dataset.zoneField = 'type'
-        typeSelect.setAttribute('aria-label', fieldLabel('type'))
-        for (const type of ZONE_RECORD_TYPES) { const option = document.createElement('option'); option.value = type; option.textContent = type; typeSelect.append(option) }
-        typeSelect.value = draftRow.type
-        cell(typeSelect)
-        cell(textInput('ttl', 'number', draftRow.ttl, 0, ZONE_TTL_MAX))
-        cell(textInput('content', 'text', draftRow.content))
-        cell(textInput('priority', 'number', draftRow.priority, 0, ZONE_PRIORITY_MAX))
-        const removeButton = document.createElement('button')
-        removeButton.type = 'button'
-        removeButton.className = 'xp-btn'
-        removeButton.dataset.zoneRemove = ''
-        removeButton.disabled = locked
-        removeButton.textContent = t('Remove')
-        removeButton.setAttribute('aria-label', t('Remove this record row'))
-        cell(removeButton)
-        recordsBody.append(row)
+        const remove=clientTemplateSlot(row,'remove','button') as HTMLButtonElement;remove.dataset.zoneRemove='';remove.disabled=locked;remove.setAttribute('aria-label',t('Remove this record row'));recordsBody.append(row)
       }
     }
     const paint = (state: ZoneEditorState) => {
@@ -651,6 +614,6 @@ function bindZoneEditor(askDialog: unknown): void {
     void workspace.refresh()
   })
 }
-export const zoneEditorClientBinding = (bind: (...args: never[]) => void, withRuntime = false): string => `(()=>{const ZONE_RECORD_TYPES=${JSON.stringify([...ZONE_RECORD_TYPES])};const ZONE_TTL_DEFAULT=${ZONE_TTL_DEFAULT};const ZONE_TTL_MAX=${ZONE_TTL_MAX};const ZONE_PRIORITY_MAX=${ZONE_PRIORITY_MAX};const ZONE_SERIAL_MIN=${ZONE_SERIAL_MIN};const ZONE_SERIAL_MAX=${ZONE_SERIAL_MAX};const ZONE_RECORD_NAME_PATTERN=${ZONE_RECORD_NAME_PATTERN.toString()};const ZONE_ID_PATTERN=${ZONE_ID_PATTERN.toString()};const ZONE_UNSAFE_TEXT=${ZONE_UNSAFE_TEXT.toString()};const zoneObject=${zoneObject.toString()};const zoneSafeText=${zoneSafeText.toString()};const zoneCanonicalName=${zoneCanonicalName.toString()};const zoneStable=${zoneStable.toString()};const readZoneRecord=${readZoneRecord.toString()};const readDnsZone=${readDnsZone.toString()};const readDnsZones=${readDnsZones.toString()};const readDnsZoneSaveAck=${readDnsZoneSaveAck.toString()};const readDnsZoneDeleteAck=${readDnsZoneDeleteAck.toString()};const zoneWriteUncertain=${zoneWriteUncertain.toString()};const zoneRecordFromDraft=${zoneRecordFromDraft.toString()};const zoneRecordsFromDraft=${zoneRecordsFromDraft.toString()};const zoneDraftFromRecords=${zoneDraftFromRecords.toString()};const zoneSavePayload=${zoneSavePayload.toString()};const requestZoneEditor=${requestZoneEditor.toString()};const zoneEditorMessage=${zoneEditorMessage.toString()};const createZoneEditor=${createZoneEditor.toString()};return ${withRuntime ? "(askDialog) => (" + bind.toString() + ")(askDialog, { ZONE_ID_PATTERN, ZONE_RECORD_TYPES, ZONE_TTL_DEFAULT, ZONE_TTL_MAX, ZONE_PRIORITY_MAX, readDnsZone, readDnsZoneDeleteAck, zoneCanonicalName, zoneDraftFromRecords, zoneObject, zoneRecordsFromDraft, zoneSavePayload, zoneStable, zoneWriteUncertain })" : bind.toString()};})()`
+export const zoneEditorClientBinding = (bind: (...args: never[]) => void, withRuntime = false): string => `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const ZONE_RECORD_TYPES=${JSON.stringify([...ZONE_RECORD_TYPES])};const ZONE_TTL_DEFAULT=${ZONE_TTL_DEFAULT};const ZONE_TTL_MAX=${ZONE_TTL_MAX};const ZONE_PRIORITY_MAX=${ZONE_PRIORITY_MAX};const ZONE_SERIAL_MIN=${ZONE_SERIAL_MIN};const ZONE_SERIAL_MAX=${ZONE_SERIAL_MAX};const ZONE_RECORD_NAME_PATTERN=${ZONE_RECORD_NAME_PATTERN.toString()};const ZONE_ID_PATTERN=${ZONE_ID_PATTERN.toString()};const ZONE_UNSAFE_TEXT=${ZONE_UNSAFE_TEXT.toString()};const zoneObject=${zoneObject.toString()};const zoneSafeText=${zoneSafeText.toString()};const zoneCanonicalName=${zoneCanonicalName.toString()};const zoneStable=${zoneStable.toString()};const readZoneRecord=${readZoneRecord.toString()};const readDnsZone=${readDnsZone.toString()};const readDnsZones=${readDnsZones.toString()};const readDnsZoneSaveAck=${readDnsZoneSaveAck.toString()};const readDnsZoneDeleteAck=${readDnsZoneDeleteAck.toString()};const zoneWriteUncertain=${zoneWriteUncertain.toString()};const zoneRecordFromDraft=${zoneRecordFromDraft.toString()};const zoneRecordsFromDraft=${zoneRecordsFromDraft.toString()};const zoneDraftFromRecords=${zoneDraftFromRecords.toString()};const zoneSavePayload=${zoneSavePayload.toString()};const requestZoneEditor=${requestZoneEditor.toString()};const zoneEditorMessage=${zoneEditorMessage.toString()};const createZoneEditor=${createZoneEditor.toString()};return ${withRuntime ? "(askDialog) => (" + bind.toString() + ")(askDialog, { ZONE_ID_PATTERN, ZONE_RECORD_TYPES, ZONE_TTL_DEFAULT, ZONE_TTL_MAX, ZONE_PRIORITY_MAX, readDnsZone, readDnsZoneDeleteAck, zoneCanonicalName, zoneDraftFromRecords, zoneObject, zoneRecordsFromDraft, zoneSavePayload, zoneStable, zoneWriteUncertain })" : bind.toString()};})()`
 
 export const ZONE_EDITOR_CLIENT_BINDING = zoneEditorClientBinding(bindZoneEditor)

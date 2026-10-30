@@ -1,3 +1,5 @@
+import { VIEW_RECORD_HELPERS, cloneViewRecord as canonicalCloneViewRecord } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
@@ -65,6 +67,7 @@ function bindConvertAddon(askDialog: ((options: Record<string, unknown>) => Prom
     const confirm = $<HTMLInputElement>('[data-acct-convert-input="confirm"]'), preview = $<HTMLButtonElement>('[data-acct-convert-preview]'), apply = $<HTMLButtonElement>('[data-acct-convert-apply]'), refresh = $<HTMLButtonElement>('[data-acct-convert-refresh]')
     const form = $<HTMLElement>('[data-acct-convert-form]'), facts = $<HTMLElement>('[data-acct-convert-facts]'), loading = $<HTMLElement>('[data-acct-convert-loading]'), empty = $<HTMLElement>('[data-acct-convert-empty]')
     if (!status || !reviewStatus || !capability || !domain || !username || !plan || !confirm || !preview || !apply || !refresh || !form || !facts || !loading || !empty) return
+    try { for (const [kind, values] of Object.entries<Record<string, string>>({ domains: { domain: '', kind: '', 'document-root': '' }, mail: { login: '', service: '' }, dns: { zone: '', records: '' }, conflicts: { reason: '', value: '' } })) { cloneViewRecord(root, 'account-convert-' + kind + '-row', 'tr', values); cloneViewRecord(root, 'account-convert-' + kind + '-empty', 'tr', { message: '' }) }; cloneViewRecord(root, 'account-convert-fact', 'div', { label: '', value: '' }) } catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return }
     let data: ConvertAddonCandidates | null = null, review: ConvertAddonReview | null = null, reviewed = '', busy = false
     const admitted = (): boolean => !!send && root.isConnected && root.dataset.canManage === 'true' && !root.closest('[data-capability-unavailable="true"],[data-read-only="true"],[data-wiring="unavailable"]')
     const announce = (target: HTMLElement, state: string, message: string): void => { target.dataset.state = state; target.textContent = message; target.setAttribute('role', ['failed', 'stale', 'uncertain'].includes(state) ? 'alert' : 'status') }
@@ -79,10 +82,11 @@ function bindConvertAddon(askDialog: ((options: Record<string, unknown>) => Prom
       root.setAttribute('aria-busy', String(busy)); loading.hidden = !busy || data !== null
     }
     const rows = (key: string, values: string[][], none: string): void => {
-      const body = $<HTMLElement>('[data-acct-convert-rows="' + key + '"]'), columns = body.closest('table')?.querySelectorAll('thead th').length ?? 1
-      body.textContent = ''
-      if (!values.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = columns; cell.textContent = none; row.append(cell); body.append(row); return }
-      for (const value of values) { const row = document.createElement('tr'); for (const [index, text] of value.entries()) { const cell = document.createElement('td'), bdi = document.createElement('bdi'); bdi.dir = index === 0 || key === 'dns' ? 'ltr' : 'auto'; bdi.textContent = text; cell.append(bdi); row.append(cell) } body.append(row) }
+      const body = $<HTMLElement>('[data-acct-convert-rows="' + key + '"]')
+      const keys: Record<string, string[]> = { domains: ['domain','kind','document-root'], mail: ['login','service'], dns: ['zone','records'], conflicts: ['reason','value'] }
+      if (!Object.hasOwn(keys,key)) throw new Error('invalid_conversion_record')
+      body.replaceChildren(...values.map(value => cloneViewRecord(root, 'account-convert-' + key + '-row', 'tr', Object.fromEntries(keys[key]!.map((name,index)=>[name,value[index] ?? ''])))))
+      if (!values.length) body.append(cloneViewRecord(root, 'account-convert-' + key + '-empty', 'tr', { message: none }))
     }
     const kinds: Record<string, string> = { addon: msgid('Addon domain'), subdomain: msgid('Subdomain'), alias: msgid('Alias'), primary: msgid('Primary domain') }
     const conflicts: Record<string, string> = {
@@ -95,7 +99,7 @@ function bindConvertAddon(askDialog: ((options: Record<string, unknown>) => Prom
     const paintReview = (): void => {
       facts.textContent = ''
       const notRead = t('Not read')
-      const fact = (label: string, value: string | null, ltr = true): void => { const wrap = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'), bdi = document.createElement('bdi'); wrap.className = 'xp-whm-detail-field'; dt.textContent = label; bdi.dir = ltr ? 'ltr' : 'auto'; bdi.textContent = value ?? notRead; dd.append(bdi); wrap.append(dt, dd); facts.append(wrap) }
+      const fact = (label: string, value: string | null, ltr = true): void => { const wrap = cloneViewRecord(root, 'account-convert-fact', 'div', { label, value: value ?? notRead }); wrap.querySelector<HTMLElement>('[data-xp-slot="value"]')!.dir = ltr ? 'ltr' : 'auto'; facts.append(wrap) }
       if (review) {
         const p = review.plan
         fact(t('Owner account'), p.source.username); fact(t('Current document root'), p.source.docRoot); fact(t('New home directory'), p.target.home); fact(t('New document root'), p.target.documentRoot)
@@ -166,4 +170,4 @@ function bindConvertAddon(askDialog: ((options: Record<string, unknown>) => Prom
   })
 }
 
-export const ACCT_CONVERT_ADDON_CLIENT_BINDING = `(()=>{const readConvertAddonCandidates=${readConvertAddonCandidates.toString()};const readConvertAddonReview=${readConvertAddonReview.toString()};const readConvertAddonResult=${readConvertAddonResult.toString()};const shared=${shared.toString()};return ${bindConvertAddon.toString()};})()`
+export const ACCT_CONVERT_ADDON_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const readConvertAddonCandidates=${readConvertAddonCandidates.toString()};const readConvertAddonReview=${readConvertAddonReview.toString()};const readConvertAddonResult=${readConvertAddonResult.toString()};const shared=${shared.toString()};return ${bindConvertAddon.toString()};})()`

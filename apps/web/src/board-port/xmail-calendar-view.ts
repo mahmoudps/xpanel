@@ -1,3 +1,4 @@
+import { classicMailClientTemplates } from './mail-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -9,7 +10,7 @@ export function renderMailCalendarView(input: { locale: Locale; mailbox: string;
   const field = (key: string, label: string, options: string, wide = false): string => `<div class="xp-field${wide ? ' xp-mail-calview__wide' : ''}"><label for="mail-calview-${key}">${label}</label><input id="mail-calview-${key}" class="xp-input" data-calview-field="${key}" autocomplete="off"${options}${disabled}></div>`
   const date = ' maxlength="10" dir="ltr" inputmode="numeric" placeholder="YYYY-MM-DD" spellcheck="false"', time = ' maxlength="8" dir="ltr" inputmode="numeric" placeholder="HH:MM" spellcheck="false"'
   const unsupported = t('Recurrence, attendees and alarms are not supported here; the calendar service refuses them.')
-  return `<section class="xp-card xp-mail-calview" data-mail-calendar-view data-calendar-view-mailbox="${escapeHtml(input.mailbox)}" data-calendar-view-manage="${input.canManage}" lang="${input.locale}" dir="${localeDirection(input.locale)}" aria-labelledby="mail-calview-range">
+  return `<section class="xp-card xp-mail-calview" data-mail-calendar-view data-calendar-view-mailbox="${escapeHtml(input.mailbox)}" data-calendar-view-manage="${input.canManage}" lang="${input.locale}" dir="${localeDirection(input.locale)}" aria-labelledby="mail-calview-range">${classicMailClientTemplates('calendar-view')}
     <style>
     .xp-mail-calview{display:grid;gap:24px;min-inline-size:0;padding:16px}.xp-mail-calview :is(h2,h3,p,dl,dd,ul){margin:0}.xp-mail-calview [hidden]{display:none}.xp-mail-calview__legend:empty{display:none}
     .xp-mail-calview__group{display:grid;gap:16px;min-inline-size:0}.xp-mail-calview__toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px}.xp-mail-calview__actions{display:flex;flex-wrap:wrap;gap:16px;min-inline-size:0}

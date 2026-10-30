@@ -1,6 +1,9 @@
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const viewAction = canonicalViewAction
 
 export type ShareClientView = { host: string; permission: 'ro' | 'rw'; squashRoot: boolean; subtreeCheck: boolean }
 export type ShareView = { id: string; path: string; clients: ShareClientView[]; exportState?: 'exported' | 'not-exported' | 'conflict' }
@@ -52,10 +55,19 @@ function bindOpsFileSharing(askDialog: ((options: Record<string, unknown>) => Pr
     const denied = '[data-wiring="unavailable"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.sharesCanRead === 'true' && !root.closest(denied)
     const manageable = (): boolean => admitted() && root.dataset.sharesCanManage === 'true'
+    // Reject an incomplete selected-theme contract before any authorized provider read.
+    try {
+      const template0 = cloneViewRecord(root, 'ops-share-row', 'tr', { 'path': '', 'clients': '', 'state': '', 'remove-label': '' })
+      viewAction(template0, 'remove')
+      cloneViewRecord(root, 'ops-share-empty', 'tr', { 'message': '' })
+      cloneViewRecord(root, 'ops-share-foreign', 'li', { 'path': '' })
+    } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return
+    }
     let view: FileSharingView | null = null, draft: ShareView[] = [], dirty = false, busy = false
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'uncertain', 'conflict'].includes(state) ? 'alert' : 'status') }
     const fact = (key: string, value: string): void => { const target = root.querySelector<HTMLElement>('[data-ops-shares-fact="' + key + '"]'); if (target) target.textContent = value }
-    const cell = (row: HTMLTableRowElement, value: string, technical = false): void => { const td = document.createElement('td'), span = document.createElement(technical ? 'bdi' : 'span'); if (technical) span.dir = 'ltr'; span.textContent = value; td.append(span); row.append(td) }
     const exportLabel = (state: ShareView['exportState']): string => state === 'exported' ? t('Exported') : state === 'conflict' ? t('Differs from saved configuration') : t('Not exported')
     const lock = (): void => {
       const can = manageable() && !busy
@@ -63,20 +75,19 @@ function bindOpsFileSharing(askDialog: ((options: Record<string, unknown>) => Pr
       saveButton.disabled = !can || !dirty
       const apply = button('apply'); if (apply) apply.disabled = !can || dirty || !view || view.observed.state !== 'read'
       const read = button('read'); if (read) read.disabled = busy || !admitted()
+      rows.querySelectorAll<HTMLButtonElement>('[data-xp-action="remove"]').forEach(control => { control.disabled = !can })
       root.setAttribute('aria-busy', String(busy))
     }
     const paint = (): void => {
       rows.textContent = ''
-      if (!draft.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 4; td.textContent = view?.observed.state === 'read' ? t('No shares are configured.') : t('No share configuration has been read.'); row.append(td); rows.append(row) }
+      if (!draft.length) rows.append(cloneViewRecord(root, 'ops-share-empty', 'tr', { message: view?.observed.state === 'read' ? t('No shares are configured.') : t('No share configuration has been read.') }))
       for (const share of draft) {
         const exported = view?.observed.shares.find(item => item.path === share.path)
-        const row = document.createElement('tr')
-        cell(row, share.path, true)
-        cell(row, share.clients.map(client => client.permission === 'rw' ? t('{host} (read and write)', { host: client.host }) : t('{host} (read only)', { host: client.host })).join(', '))
-        cell(row, dirty ? t('Not applied') : exported ? exportLabel(exported.exportState) : t('Not applied'))
-        const actions = document.createElement('td')
-        if (manageable()) { const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'xp-btn'; remove.textContent = t('Remove'); remove.addEventListener('click', () => { draft = draft.filter(item => item.id !== share.id); dirty = true; paint(); lock() }); actions.append(remove) }
-        row.append(actions); rows.append(row)
+        const row = cloneViewRecord(root, 'ops-share-row', 'tr', { path: share.path, clients: share.clients.map(client => client.permission === 'rw' ? t('{host} (read and write)', { host: client.host }) : t('{host} (read only)', { host: client.host })).join(', '), state: dirty ? t('Not applied') : exported ? exportLabel(exported.exportState) : t('Not applied'), 'remove-label': t('Remove') })
+        const remove = viewAction<HTMLButtonElement>(row, 'remove')
+        remove.hidden = !manageable(); remove.disabled = busy || !manageable()
+        remove.addEventListener('click', () => { if (busy || !manageable()) return; draft = draft.filter(item => item.id !== share.id); dirty = true; paint(); lock() })
+        rows.append(row)
       }
       fact('count', String(draft.length))
     }
@@ -85,7 +96,7 @@ function bindOpsFileSharing(askDialog: ((options: Record<string, unknown>) => Pr
       fact('nfs', value.observed.state === 'read' ? t('Available') : value.observed.reason === 'nfs_server_unavailable' ? t('Not installed') : t('Not verified'))
       fact('managed', value.observed.managedPresent ? t('Present') : t('Absent'))
       editor.hidden = !manageable()
-      if (foreign && foreignCard) { foreign.textContent = ''; foreignCard.hidden = value.observed.foreignExports.length === 0; for (const path of value.observed.foreignExports) { const item = document.createElement('li'); item.textContent = path; foreign.append(item) } }
+      if (foreign && foreignCard) { foreign.textContent = ''; foreignCard.hidden = value.observed.foreignExports.length === 0; for (const path of value.observed.foreignExports) foreign.append(cloneViewRecord(root, 'ops-share-foreign', 'li', { path })) }
       paint()
       if (value.invalid) note('conflict', t('The saved share configuration could not be read and is shown as empty. Saving will replace it.'))
       else if (value.observed.state !== 'read') note('unavailable', value.observed.reason === 'nfs_server_unavailable' ? t('The NFS server is not available on this host, so shares cannot be exported. Configuration can still be saved.') : t('The export table could not be read. Nothing was changed.'))
@@ -132,4 +143,4 @@ function bindOpsFileSharing(askDialog: ((options: Record<string, unknown>) => Pr
   })
 }
 
-export const OPS_FILE_SHARING_CLIENT_BINDING = `(()=>{const readFileSharingView=${readFileSharingView.toString()};const randomShareId=${randomShareId.toString()};return ${bindOpsFileSharing.toString()};})()`
+export const OPS_FILE_SHARING_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const readFileSharingView=${readFileSharingView.toString()};const randomShareId=${randomShareId.toString()};return ${bindOpsFileSharing.toString()};})()`

@@ -1,6 +1,10 @@
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
+import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
+const mailTemplate = canonicalMailTemplate
+const mailSlot = canonicalMailSlot
+const mailRequireTemplates = canonicalMailRequireTemplates
 import './i18n.ts'
 const formatMailDateTime = formatDisplayDateTime
 
@@ -65,6 +69,8 @@ function bindMailSearch(_askDialog: unknown): void {
     const submit = root.querySelector<HTMLButtonElement>('[data-mail-search-submit]')!, clear = root.querySelector<HTMLButtonElement>('[data-mail-search-clear]')!, next = root.querySelector<HTMLButtonElement>('[data-mail-search-next]')!
     const field = (key: string): HTMLElement | null => root.querySelector<HTMLElement>('[data-mail-search-' + key + ']')
     if (!form || !query || !folder || !results || !status || !article || !submit || !clear || !next || ['subject', 'from', 'to', 'date', 'body', 'truncated'].some(key => !field(key))) return
+    try { mailRequireTemplates(root, [['mail-search-row', 'li', ['open', 'subject', 'sender', 'date', 'preview']]]) }
+    catch { form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Search is unavailable for this mailbox session. No message is shown.'); return }
     const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => root.isConnected && root.dataset.searchEnabled === 'true' && root.dataset.searchMailbox === mailbox && !!mailbox && !root.closest(denied) && !!send
@@ -83,15 +89,14 @@ function bindMailSearch(_askDialog: unknown): void {
     const paintResults = (): void => {
       results.textContent = ''
       for (const message of messages) {
-        const item = document.createElement('li'), button = document.createElement('button'), subject = document.createElement('strong'), sender = document.createElement('bdi'), at = document.createElement('bdi')
-        button.type = 'button'; button.className = 'xp-btn xp-mail-search__result'; button.dataset.mailSearchUid = String(message.uid)
-        subject.dir = 'auto'; subject.textContent = message.subject || t(msgctxt('mail-search-client', '(No subject)'))
-        sender.dir = 'auto'; sender.textContent = message.fromName ? message.fromName + ' <' + message.from + '>' : message.from
+        const item = mailTemplate(root, 'mail-search-row', 'li', ['open', 'subject', 'sender', 'date', 'preview']), button = mailSlot<HTMLButtonElement>(item, 'open', 'button'), subject = mailSlot(item, 'subject', 'strong'), sender = mailSlot(item, 'sender', 'bdi'), at = mailSlot(item, 'date', 'bdi'), preview = mailSlot(item, 'preview')
+        button.dataset.mailSearchUid = String(message.uid)
+        subject.textContent = message.subject || t(msgctxt('mail-search-client', '(No subject)'))
+        sender.textContent = message.fromName ? message.fromName + ' <' + message.from + '>' : message.from
         const fullMailDate = formatMailDateTime(message.receivedAt)
-        at.dir = 'ltr'; at.textContent = fullMailDate === '—' ? formatMailDateTime(new Date(message.receivedAt)) : fullMailDate
-        button.append(subject, sender, at)
-        if (message.preview) { const preview = document.createElement('span'); preview.dir = 'auto'; preview.textContent = message.preview; button.append(preview) }
-        button.addEventListener('click', () => { void openMessage(message) }); item.append(button); results.append(item)
+        at.textContent = fullMailDate === '—' ? formatMailDateTime(new Date(message.receivedAt)) : fullMailDate
+        preview.hidden = !message.preview; preview.textContent = message.preview ?? ''
+        button.addEventListener('click', () => { void openMessage(message) }); results.append(item)
       }
       controls()
     }
@@ -156,4 +161,4 @@ function bindMailSearch(_askDialog: unknown): void {
   })
 }
 
-export const MAIL_SEARCH_CLIENT_BINDING = `(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const MAIL_SEARCH_FOLDER=${MAIL_SEARCH_FOLDER.toString()};const MAIL_SEARCH_CONTROL=${MAIL_SEARCH_CONTROL.toString()};const mailSearchObject=${mailSearchObject.toString()};const mailSearchText=${mailSearchText.toString()};const mailSearchUid=${mailSearchUid.toString()};const mailSearchQuery=${mailSearchQuery.toString()};const readMailSearchSummary=${readMailSearchSummary.toString()};const readMailSearchPage=${readMailSearchPage.toString()};const readMailSearchMessage=${readMailSearchMessage.toString()};return ${bindMailSearch.toString()};})()`
+export const MAIL_SEARCH_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const MAIL_SEARCH_FOLDER=${MAIL_SEARCH_FOLDER.toString()};const MAIL_SEARCH_CONTROL=${MAIL_SEARCH_CONTROL.toString()};const mailSearchObject=${mailSearchObject.toString()};const mailSearchText=${mailSearchText.toString()};const mailSearchUid=${mailSearchUid.toString()};const mailSearchQuery=${mailSearchQuery.toString()};const readMailSearchSummary=${readMailSearchSummary.toString()};const readMailSearchPage=${readMailSearchPage.toString()};const readMailSearchMessage=${readMailSearchMessage.toString()};return ${bindMailSearch.toString()};})()`

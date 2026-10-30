@@ -1,3 +1,4 @@
+import { classicWhmClientTemplates } from './whm-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 export type WhmMailServerPage = 'server' | 'routing' | 'outbound'
 /** `canManage` defaults to `canRead`: both pages are root-only, and the API re-checks root on every save. */
@@ -71,7 +72,7 @@ export function renderWhmMailServerWorkspace({ locale, page, canRead, canManage 
     <div class="xp-whm-mail-server__actions"><button type="button" class="xp-btn" data-whm-mail-settings-preview-button disabled>${t('Preview changes')}</button><button type="submit" class="xp-btn xp-btn--primary" data-whm-mail-settings-save disabled>${t('Save and apply')}</button></div>
   </form>`)
   const listed = `${t('Observed values come from')} <bdi dir="ltr">postconf -n</bdi>${page === 'routing' ? '' : `, <bdi dir="ltr">postconf -M</bdi>`}${page === 'server' ? ` ${t('and')} <bdi dir="ltr">doveconf -h</bdi>` : ''}. ${t('Passwords, keys and lookup table contents are never read.')}`
-  return `<section class="xp-whm-mail-server" data-whm-mail-server-workspace data-mail-server-page="${page}" data-mail-server-can-read="${canRead}" data-mail-server-can-manage="${manage}" lang="${locale}" dir="${localeDirection(locale)}" aria-labelledby="${id('summary')}">
+  return `<section class="xp-whm-mail-server" data-whm-mail-server-workspace data-mail-server-page="${page}" data-mail-server-can-read="${canRead}" data-mail-server-can-manage="${manage}" lang="${locale}" dir="${localeDirection(locale)}" aria-labelledby="${id('summary')}">${classicWhmClientTemplates('mail-server')}
     <style>.xp-whm-mail-server h2{font-size:var(--xp-type-card);line-height:var(--xp-leading-card);font-weight:var(--xp-weight-semibold)}
     .xp-whm-mail-server{display:flex;flex-direction:column;gap:32px;min-inline-size:0}.xp-whm-mail-server :is(h2,h3,p,dl,dd,fieldset){margin:0}.xp-whm-mail-server__card{display:flex;flex-direction:column;gap:24px;padding:16px;min-inline-size:0;border:1px solid var(--xp-border);border-radius:8px;background:var(--xp-bg-surface)}
     .xp-whm-mail-server__heading{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px}.xp-whm-mail-server__facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:16px}.xp-whm-mail-server__facts>div,.xp-whm-mail-server__field{display:flex;flex-direction:column;gap:8px;min-inline-size:0}

@@ -1,6 +1,9 @@
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const viewAction = canonicalViewAction
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import { readSwContainerEngineView, readSwContainersView } from '../../../packages/os/src/sw-container-command.ts'
 import type { SwContainerEngineView, SwContainersView } from '../../../packages/os/src/sw-container-command.ts'
@@ -12,11 +15,10 @@ function bindSwContainers(askDialog: Ask | undefined, parseList: typeof readSwCo
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
   const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   const blocked = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-  const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, technical = false): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); if (text !== undefined) { if (technical) { const value = document.createElement('bdi'); value.dir = 'ltr'; value.textContent = text; node.append(value) } else node.textContent = text } return node }
   const engineName = (engine: string): string => engine === 'podman' ? 'Podman' : 'Docker'
   const stateLabel = (state: string): string => ({ running: t('Running'), exited: t('Exited'), created: t('Created'), paused: t('Paused'), restarting: t('Restarting'), stopped: t('Stopped'), dead: t('Dead') } as Record<string, string>)[state] ?? state
   const engineLabel = (item: { state: string; reason: string | null; version: string | null }): [string, boolean] => item.state === 'read' && item.version ? [item.version, false] : item.reason === 'engine-absent' ? [t('Not installed'), true] : item.reason === 'invalid-engine-output' ? [t('Output could not be verified'), true] : [t('Unreachable'), true]
-  const empty = (body: HTMLElement, columns: number, message: string): void => { body.textContent = ''; const row = el('tr'), cell = el('td', message); cell.colSpan = columns; row.append(cell); body.append(row) }
+  const empty = (root: HTMLElement, body: HTMLElement, name: string, message: string): void => { body.replaceChildren(cloneViewRecord(root, name + '-empty', 'tr', { message })) }
   const unavailableText = (reason: string | null): string => reason === 'unsupported-host' ? t('Container engines cannot be read on this host. Nothing was read or changed.') : reason === 'no-engine' ? t('No Podman or Docker engine is installed. Install Podman from the software center to run containers.') : t('The container engines could not be read or their output could not be verified. No container is shown.')
   const setup = (root: HTMLElement): { status: HTMLElement; refresh: HTMLButtonElement; admitted(): boolean; note(state: string, message: string): void; facts(view: { observedAt: string; engines: { engine: string; state: string; reason: string | null; version: string | null }[] } | null): void } | null => {
     const status = root.querySelector<HTMLElement>('[data-sw-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-sw-refresh]')
@@ -52,18 +54,16 @@ function bindSwContainers(askDialog: Ask | undefined, parseList: typeof readSwCo
       const visible = rows.filter(item => (!wanted || item.engine === wanted) && (!term || item.row.name.toLowerCase().includes(term) || item.row.image.toLowerCase().includes(term)))
       body.textContent = ''
       for (const item of visible) {
-        const tr = el('tr'), actions = el('td'), box = el('div'); box.className = 'xp-whm-detail-actions'
-        tr.append(el('td', item.row.name, true), el('td', engineName(item.engine)), el('td', item.row.image, true), el('td', stateLabel(item.row.state)), el('td', item.row.status, true), el('td', item.row.ports.join(', ') || t('None'), item.row.ports.length > 0))
+        const tr = cloneViewRecord(root, 'software-container-row', 'tr', { name: item.row.name, engine: engineName(item.engine), image: item.row.image, state: stateLabel(item.row.state), status: item.row.status, ports: item.row.ports.join(', ') || t('None'), 'start-label': t('Start'), 'stop-label': t('Stop'), 'restart-label': t('Restart') })
         for (const action of ['start', 'stop', 'restart'] as const) {
-          const button = el('button', action === 'start' ? t('Start') : action === 'stop' ? t('Stop') : t('Restart')); button.type = 'button'; button.className = 'xp-btn'; button.dataset.swAction = action
+          const button = viewAction(tr, action); button.dataset.swAction = action
           button.dataset.swAllowed = String(action === 'start' ? item.row.state !== 'running' : item.row.state === 'running')
           button.setAttribute('aria-label', (action === 'start' ? t('Start container {name}', { name: item.row.name }) : action === 'stop' ? t('Stop container {name}', { name: item.row.name }) : t('Restart container {name}', { name: item.row.name })))
           button.addEventListener('click', () => { void change(item.engine, item.revision, item.row, action) })
-          box.append(button)
         }
-        actions.append(box); tr.append(actions); body.append(tr)
+        body.append(tr)
       }
-      if (!visible.length) empty(body, 7, view?.state !== 'read' ? t('No containers have been read.') : rows.length ? t('No containers match the filters.') : t('The engines report no containers.'))
+      if (!visible.length) empty(root, body, 'software-container', view?.state !== 'read' ? t('No containers have been read.') : rows.length ? t('No containers match the filters.') : t('The engines report no containers.'))
       lock()
     }
     const failure = (error: unknown, change: boolean): void => {
@@ -115,21 +115,21 @@ function bindSwContainers(askDialog: Ask | undefined, parseList: typeof readSwCo
     if (!base || Object.values(bodies).some(node => !node)) return
     const { refresh, admitted, note, facts } = base
     let busy = false
-    const fill = (key: string, columns: number, rows: { text: string; technical: boolean }[][], message: string): void => {
+    const fill = (key: string, rows: Record<string, string>[], message: string): void => {
       const body = bodies[key]!; body.textContent = ''
-      for (const cells of rows) { const tr = el('tr'); for (const cell of cells) tr.append(el('td', cell.text, cell.technical)); body.append(tr) }
-      if (!rows.length) empty(body, columns, message)
+      for (const values of rows) body.append(cloneViewRecord(root, 'software-engine-' + key + '-row', 'tr', values))
+      if (!rows.length) empty(root, body, 'software-engine-' + key, message)
     }
     const paint = (view: SwContainerEngineView | null): void => {
       facts(view)
       const read = (view?.engines ?? []).filter(engine => engine.state === 'read')
       const yes = (value: boolean | null): string => value === null ? t('Not read') : value ? t('Yes') : t('No')
-      const tech = (text: string | null): { text: string; technical: boolean } => text === null ? { text: t('Not read'), technical: false } : { text, technical: true }
-      fill('facts', 5, read.map(engine => [{ text: engineName(engine.engine), technical: false }, tech(engine.facts!.runtime), tech(engine.facts!.storageDriver), tech(engine.facts!.cgroupVersion), { text: yes(engine.facts!.rootless), technical: false }]), view ? t('No engine facts were returned.') : t('No engine facts have been read.'))
-      fill('images', 4, read.flatMap(engine => engine.images.map(image => [tech(image.id.slice(0, 12)), image.tags.length ? tech(image.tags.join(', ')) : { text: t('Untagged'), technical: false }, tech(image.size), { text: engineName(engine.engine), technical: false }])), view ? t('The engines report no images.') : t('No images have been read.'))
-      fill('registries', 2, read.flatMap(engine => engine.facts!.registries.map(registry => [tech(registry), { text: engineName(engine.engine), technical: false }])), view ? t('The engines report no configured registries.') : t('No registries have been read.'))
-      fill('networks', 4, read.flatMap(engine => engine.networks.map(network => [tech(network.name), tech(network.driver), tech(network.id.slice(0, 12)), { text: engineName(engine.engine), technical: false }])), view ? t('The engines report no networks.') : t('No networks have been read.'))
-      fill('volumes', 3, read.flatMap(engine => engine.volumes.map(volume => [tech(volume.name), tech(volume.driver), { text: engineName(engine.engine), technical: false }])), view ? t('The engines report no volumes.') : t('No volumes have been read.'))
+      const value = (text: string | null): string => text === null ? t('Not read') : text
+      fill('facts', read.map(engine => ({ engine: engineName(engine.engine), runtime: value(engine.facts!.runtime), driver: value(engine.facts!.storageDriver), cgroup: value(engine.facts!.cgroupVersion), rootless: yes(engine.facts!.rootless) })), view ? t('No engine facts were returned.') : t('No engine facts have been read.'))
+      fill('images', read.flatMap(engine => engine.images.map(image => ({ reference: image.id.slice(0, 12), tags: image.tags.length ? image.tags.join(', ') : t('Untagged'), size: value(image.size), engine: engineName(engine.engine) }))), view ? t('The engines report no images.') : t('No images have been read.'))
+      fill('registries', read.flatMap(engine => engine.facts!.registries.map(registry => ({ registry, engine: engineName(engine.engine) }))), view ? t('The engines report no configured registries.') : t('No registries have been read.'))
+      fill('networks', read.flatMap(engine => engine.networks.map(network => ({ name: network.name, driver: network.driver, reference: network.id.slice(0, 12), engine: engineName(engine.engine) }))), view ? t('The engines report no networks.') : t('No networks have been read.'))
+      fill('volumes', read.flatMap(engine => engine.volumes.map(volume => ({ name: volume.name, driver: volume.driver, engine: engineName(engine.engine) }))), view ? t('The engines report no volumes.') : t('No volumes have been read.'))
     }
     const load = async (): Promise<void> => {
       if (busy || !admitted()) return
@@ -148,4 +148,4 @@ function bindSwContainers(askDialog: Ask | undefined, parseList: typeof readSwCo
   })
 }
 
-export const SW_CONTAINERS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parseList=${readSwContainersView.toString()};const parseEngine=${readSwContainerEngineView.toString()};const bind=${bindSwContainers.toString()};return (ask)=>bind(ask,parseList,parseEngine);})()`
+export const SW_CONTAINERS_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parseList=${readSwContainersView.toString()};const parseEngine=${readSwContainerEngineView.toString()};const bind=${bindSwContainers.toString()};return (ask)=>bind(ask,parseList,parseEngine);})()`

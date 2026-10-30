@@ -25,10 +25,14 @@ describe('team role rule', () => {
 })
 
 describe('team request gate', () => {
-  it('admits only its own identity, sign-out and the static catalog without a tool', () => {
+  it('admits only its own identity and UI preference, sign-out and the static catalog without a tool', () => {
     expect(allowed([], 'GET', '/api/auth/me')).toBe(true)
     expect(allowed([], 'POST', '/api/auth/logout')).toBe(true)
     expect(allowed([], 'GET', '/api/catalog')).toBe(true)
+    expect(allowed([], 'GET', '/api/auth/ui-preferences')).toBe(true)
+    expect(allowed([], 'PUT', '/api/auth/ui-preferences')).toBe(true)
+    for (const [method, path] of [['POST', '/api/auth/ui-preferences'], ['PATCH', '/api/auth/ui-preferences'], ['GET', '/api/auth/ui-preferences/other'], ['PUT', '/api/admin/preferences']])
+      expect(allowed(['administrator'], method!, path!), path).toBe(false)
     for (const [method, path] of [['POST', '/api/auth/change-password'], ['POST', '/api/auth/2fa/setup'], ['GET', '/api/auth/sessions'], ['POST', '/api/auth/sessions/revoke-others'], ['DELETE', `/api/auth/sessions/${ID}`], ['POST', '/api/auth/team/password']])
       expect(allowed(['administrator'], method!, path!), path).toBe(false)
   })

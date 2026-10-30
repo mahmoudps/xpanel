@@ -646,7 +646,13 @@ const writeManagedConfigWithBackup = (
   })
 }
 
-export const renderSystemdAgentUnit = (nodeBin = '/usr/bin/node'): RenderedFile => ({
+export type ProgramLayout = 'flat' | 'current'
+const programRoot = (layout: ProgramLayout): string => {
+  if (layout !== 'flat' && layout !== 'current') return fail('VALIDATION', 'unsupported program layout')
+  return layout === 'current' ? '/opt/xpanel/current' : '/opt/xpanel'
+}
+
+export const renderSystemdAgentUnit = (nodeBin = '/usr/bin/node', layout: ProgramLayout = 'flat'): RenderedFile => ({
   path: '/etc/systemd/system/xpanel-agent.service',
   mode: 0o644,
   owner: 'root',
@@ -665,14 +671,18 @@ export const renderSystemdAgentUnit = (nodeBin = '/usr/bin/node'): RenderedFile 
     'RuntimeDirectory=xpanel',
     'RuntimeDirectoryMode=0750',
     'RuntimeDirectoryPreserve=no',
-    'WorkingDirectory=/opt/xpanel',
+    `WorkingDirectory=${programRoot(layout)}`,
     'Environment=NODE_ENV=production',
     'EnvironmentFile=/etc/xpanel/runtime.env',
     'Environment=XPANEL_GENERATIONS_DIR=/var/lib/xpanel/generations',
     'Environment=XPANEL_LOG_DIR=/var/log/xpanel',
     'Environment=XPANEL_RUN_DIR=/run/xpanel',
     'ExecStartPre=/usr/bin/test -f /var/lib/xpanel/control.db',
-    `ExecStart=${nodeBin} --max-old-space-size=64 /opt/xpanel/apps/agent/src/main.ts`,
+    ...(layout === 'current' ? [
+      'ExecStartPre=/usr/bin/install -d -o root -g root -m 0700 /run/xpanel/lifecycle-agent',
+      'ExecStartPre=/usr/bin/install -d -o xpanel -g xpanel -m 0700 /run/xpanel/lifecycle-api',
+    ] : []),
+    `ExecStart=${nodeBin} --max-old-space-size=64 ${programRoot(layout)}/apps/agent/src/main.ts`,
     'Restart=always',
     'RestartSec=2',
     'UMask=0007',
@@ -683,7 +693,7 @@ export const renderSystemdAgentUnit = (nodeBin = '/usr/bin/node'): RenderedFile 
   ].join('\n'),
 })
 
-export const renderSystemdApiUnit = (nodeBin = '/usr/bin/node'): RenderedFile => ({
+export const renderSystemdApiUnit = (nodeBin = '/usr/bin/node', layout: ProgramLayout = 'flat'): RenderedFile => ({
   path: '/etc/systemd/system/xpanel-api.service',
   mode: 0o644,
   owner: 'root',
@@ -699,11 +709,11 @@ export const renderSystemdApiUnit = (nodeBin = '/usr/bin/node'): RenderedFile =>
     'User=xpanel',
     'Group=xpanel',
     'SupplementaryGroups=xpanel-agent',
-    'WorkingDirectory=/opt/xpanel',
+    `WorkingDirectory=${programRoot(layout)}`,
     'Environment=NODE_ENV=production',
     'EnvironmentFile=/etc/xpanel/runtime.env',
     'EnvironmentFile=/etc/xpanel/api.env',
-    `ExecStart=${nodeBin} --max-old-space-size=96 /opt/xpanel/apps/api/src/main.ts`,
+    `ExecStart=${nodeBin} --max-old-space-size=96 ${programRoot(layout)}/apps/api/src/main.ts`,
     'Restart=always',
     'RestartSec=2',
     'UMask=0007',
@@ -711,7 +721,7 @@ export const renderSystemdApiUnit = (nodeBin = '/usr/bin/node'): RenderedFile =>
     'PrivateTmp=yes',
     'ProtectHome=yes',
     'ProtectSystem=strict',
-    'ReadWritePaths=/var/lib/xpanel /var/log/xpanel',
+    `ReadWritePaths=/var/lib/xpanel /var/log/xpanel${layout === 'current' ? ' /run/xpanel/lifecycle-api' : ''}`,
     'ProtectKernelTunables=yes',
     'ProtectKernelModules=yes',
     'ProtectControlGroups=yes',

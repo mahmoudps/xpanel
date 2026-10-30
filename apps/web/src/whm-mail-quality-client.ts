@@ -1,3 +1,5 @@
+import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const whmClientNode = canonicalWhmClientNode
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
@@ -143,7 +145,7 @@ function bindWhmMailQuality(): void {
         cell([box]); cell([technical(item.domain)]); cell([item.account ? technical(item.account) : t('None')])
         const result = results[item.domain]
         for (const key of checks) {
-          const check = result?.[key], wrap = document.createElement('div'); wrap.className = 'xp-whm-mail-quality__check'
+          const check = result?.[key], wrap = whmClientNode(root, 'whm-mail-quality-check', 'div')
           const label = document.createElement('strong'); label.dataset.state = check?.state ?? 'unchecked'; label.textContent = check ? stateLabels[check.state]! : t('Not checked'); wrap.append(label)
           if (check) {
             const cause = document.createElement('span')
@@ -217,4 +219,4 @@ function bindWhmMailQuality(): void {
   })
 }
 
-export const WHM_MAIL_QUALITY_CLIENT_BINDING = `(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailQualityList=${readMailQualityList.toString()};const readMailQualityResults=${readMailQualityResults.toString()};return ${bindWhmMailQuality.toString()};})()`
+export const WHM_MAIL_QUALITY_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailQualityList=${readMailQualityList.toString()};const readMailQualityResults=${readMailQualityResults.toString()};return ${bindWhmMailQuality.toString()};})()`

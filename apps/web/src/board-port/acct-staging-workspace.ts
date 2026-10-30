@@ -1,3 +1,4 @@
+import { stagingClientTemplates } from './domain-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -30,5 +31,5 @@ export function renderAccountStagingWorkspace(input: { lang: Locale; accountId: 
       t('Promoting moves every replaced or removed live file to the trash, where you can restore it. Files added by the promotion are not removed by a restore.'),
       t('Discarding moves the staging folder to the trash.'),
     ].map(item => `<li>${item}</li>`).join('')}</ul></section>
-  </div>`
+  ${stagingClientTemplates()}</div>`
 }

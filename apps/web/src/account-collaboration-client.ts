@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 interface CollaborationCalendar { name: string; color: string; timezone: string; eventCount: number; shares: { mailbox: string; permission: 'read' | 'read-write' }[] }
@@ -48,21 +52,24 @@ function bindAccountCollaboration(askDialog: ((options: Record<string, unknown>)
       for (const field of [mailbox, name, color, timezone]) field.disabled = off || locked || !view?.mailboxes.length
       create.disabled = off || locked || !selected()?.canCreateCalendar || !draft() || !askDialog
     }
+    const counters = new WeakMap<HTMLElement, number>()
+    const rowFor = (count: number): HTMLTableRowElement => cloneClientTemplate(clientTemplate(root, 'account-collaboration-row-' + count), 'tr', Array.from({length:count}, (_, i) => 'value-' + i)) as HTMLTableRowElement
     const cell = (row: HTMLTableRowElement, text: string, technical = false) => {
-      const td = document.createElement('td'), span = document.createElement(technical ? 'bdi' : 'span')
-      if (technical) span.dir = 'ltr'
-      span.textContent = collaborationAscii(text); td.append(span); row.append(td)
+      const index = counters.get(row) ?? 0, span = clientTemplateSlot(row, 'value-' + index, 'bdi')
+      span.dir = technical ? 'ltr' : 'auto'; span.textContent = collaborationAscii(text); counters.set(row, index + 1)
     }
-    const empty = (body: HTMLTableSectionElement, count: number, text: string) => { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = count; td.textContent = text; row.append(td); body.append(row) }
+    const empty = (body: HTMLTableSectionElement, count: number, text: string) => { const row = cloneClientTemplate(clientTemplate(root, 'account-collaboration-empty-' + count), 'tr', ['message']); clientTemplateSlot(row, 'message').textContent = text; body.append(row) }
+    try { for (const count of [4,5]) { rowFor(count); cloneClientTemplate(clientTemplate(root, 'account-collaboration-empty-' + count), 'tr', ['message']) } }
+    catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => {control.disabled=true}); status.dataset.state='unavailable'; status.textContent=t('Unavailable'); return }
     const paint = (next: CollaborationView) => {
       const previous = mailbox.value; view = next; mailbox.replaceChildren(); rows.replaceChildren(); shares.replaceChildren()
       for (const item of next.mailboxes) {
         const option = document.createElement('option'); option.value = item.mailbox; option.textContent = item.mailbox; mailbox.append(option)
         for (const calendar of item.calendars) {
-          const row = document.createElement('tr'); cell(row, item.mailbox, true); cell(row, calendar.name); cell(row, t(msgctxt('account-collaboration-client', 'Calendar'))); cell(row, String(calendar.eventCount), true); cell(row, calendar.timezone + ' / ' + calendar.color, true); rows.append(row)
-          for (const share of calendar.shares) { const shared = document.createElement('tr'); cell(shared, item.mailbox, true); cell(shared, calendar.name); cell(shared, share.mailbox, true); cell(shared, share.permission === 'read-write' ? t('Read and write') : t('Read only')); shares.append(shared) }
+          const row = rowFor(5); cell(row, item.mailbox, true); cell(row, calendar.name); cell(row, t(msgctxt('account-collaboration-client', 'Calendar'))); cell(row, String(calendar.eventCount), true); cell(row, calendar.timezone + ' / ' + calendar.color, true); rows.append(row)
+          for (const share of calendar.shares) { const shared = rowFor(4); cell(shared, item.mailbox, true); cell(shared, calendar.name); cell(shared, share.mailbox, true); cell(shared, share.permission === 'read-write' ? t('Read and write') : t('Read only')); shares.append(shared) }
         }
-        const contacts = document.createElement('tr'); cell(contacts, item.mailbox, true); cell(contacts, t('Saved contacts')); cell(contacts, t('Contacts')); cell(contacts, String(item.contacts.count), true); cell(contacts, t('{count} groups', { count: item.contacts.groupCount })); rows.append(contacts)
+        const contacts = rowFor(5); cell(contacts, item.mailbox, true); cell(contacts, t('Saved contacts')); cell(contacts, t('Contacts')); cell(contacts, String(item.contacts.count), true); cell(contacts, t('{count} groups', { count: item.contacts.groupCount })); rows.append(contacts)
       }
       if (next.mailboxes.some(item => item.mailbox === previous)) mailbox.value = previous
       if (!rows.children.length) empty(rows, 5, t('No current email-enabled mailboxes are saved for this account.'))
@@ -105,4 +112,4 @@ function bindAccountCollaboration(askDialog: ((options: Record<string, unknown>)
     controls(); if (admitted()) void load()
   })
 }
-export const ACCOUNT_COLLABORATION_CLIENT_BINDING = `function(askDialog){const collaborationObject=${collaborationObject.toString()};const collaborationText=${collaborationText.toString()};const collaborationMailbox=${collaborationMailbox.toString()};const readAccountCollaboration=${readAccountCollaboration.toString()};const collaborationAscii=${collaborationAscii.toString()};(${bindAccountCollaboration.toString()})(askDialog);}`
+export const ACCOUNT_COLLABORATION_CLIENT_BINDING = `function(askDialog){const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const collaborationObject=${collaborationObject.toString()};const collaborationText=${collaborationText.toString()};const collaborationMailbox=${collaborationMailbox.toString()};const readAccountCollaboration=${readAccountCollaboration.toString()};const collaborationAscii=${collaborationAscii.toString()};(${bindAccountCollaboration.toString()})(askDialog);}`

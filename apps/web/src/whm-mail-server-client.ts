@@ -1,3 +1,5 @@
+import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const whmClientNode = canonicalWhmClientNode
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -134,7 +136,7 @@ function bindWhmMailServer(): void {
       ]), 5, view.sources.master === 'read' ? t('No matching services are configured.') : t('Services were not read.'))
       // The route select is the edit control of the routing policy; it changes nothing until the policy is saved.
       const route = (domain: string, mode: string): HTMLSelectElement => {
-        const select = document.createElement('select'); select.className = 'xp-input'; select.dataset.mailRoute = domain; select.setAttribute('aria-label', t('Routing for {domain}', { domain }))
+        const select = whmClientNode(root, 'whm-mail-route-select', 'select'); select.dataset.mailRoute = domain; select.setAttribute('aria-label', t('Routing for {domain}', { domain }))
         for (const value of ['local', 'backup', 'remote']) { const option = document.createElement('option'); option.value = value; option.textContent = routeLabels[value]!; option.selected = value === mode; select.append(option) }
         select.disabled = true
         return select
@@ -301,4 +303,4 @@ function bindWhmMailServer(): void {
   })
 }
 
-export const WHM_MAIL_SERVER_CLIENT_BINDING = `(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailServerView=${readMailServerView.toString()};const readMailPolicyView=${readMailPolicyView.toString()};return ${bindWhmMailServer.toString()};})()`
+export const WHM_MAIL_SERVER_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailServerView=${readMailServerView.toString()};const readMailPolicyView=${readMailPolicyView.toString()};return ${bindWhmMailServer.toString()};})()`

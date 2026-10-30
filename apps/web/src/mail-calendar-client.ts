@@ -1,3 +1,7 @@
+import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
+const mailTemplate = canonicalMailTemplate
+const mailSlot = canonicalMailSlot
+const mailRequireTemplates = canonicalMailRequireTemplates
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 interface CalendarEventView { id: string; uid: string; summary: string; description: string; location: string; dtstart: string; dtend: string; timezone: string }
@@ -29,6 +33,7 @@ function bindMailCalendar(askDialog: ((options: Record<string, unknown>) => Prom
     const metadata = ['name', 'color', 'timezone'] as const
     const eventFields = ['summary', 'description', 'location', 'start', 'end', 'timezone'] as const
     if (metadata.some(key => !input(key)) || eventFields.some(key => !input('event-' + key)) || !input('share-principal')) return
+    try { mailRequireTemplates(root, [['mail-calendar-share', 'li', ['address', 'permission', 'remove']], ['mail-calendar-share-empty', 'li', ['message']]]) } catch { root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('input,button,select,textarea').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return }
     let workspace: CalendarWorkspaceView | null = null, selected: CalendarView | null = null, selectedEvent: CalendarEventView | null = null
     let busy = false, review = false, downloadSource = ''
     const request = (method: string, path: string, body?: unknown): Promise<unknown> => {
@@ -125,14 +130,14 @@ function bindMailCalendar(askDialog: ((options: Record<string, unknown>) => Prom
       const newEvent = document.createElement('option'); newEvent.value = ''; newEvent.textContent = t('New event'); eventSelect.append(newEvent)
       for (const event of selected?.events ?? []) { const option = document.createElement('option'); option.value = event.id; option.textContent = event.summary + ' · ' + event.dtstart; eventSelect.append(option) }
       fillEvent(null); shareRows.textContent = ''
-      if (!selected?.shares.length) { const row = document.createElement('li'); row.textContent = selected && !selected.canManage ? t('Sharing details are available to the owner.') : t('No mailbox shares were returned.'); shareRows.append(row) }
+      if (!selected?.shares.length) { const row = mailTemplate(root, 'mail-calendar-share-empty', 'li', ['message']); mailSlot(row, 'message').textContent = selected && !selected.canManage ? t('Sharing details are available to the owner.') : t('No mailbox shares were returned.'); shareRows.append(row) }
       for (const share of selected?.shares ?? []) {
-        const row = document.createElement('li'), label = document.createElement('span'), address = document.createElement('bdi'), remove = document.createElement('button')
-        address.dir = 'ltr'; address.textContent = share.principal; label.append(address, ' · ' + (share.permission === 'read-write' ? t('Read and edit events') : t('Read only')))
-        if (!share.effective) label.append(' · ' + t('Access withheld; explicitly save this recipient again to grant current access.'))
-        remove.type = 'button'; remove.className = 'xp-btn'; remove.textContent = t('Revoke sharing'); remove.dataset.calendarRevoke = ''
+        const row = mailTemplate(root, 'mail-calendar-share', 'li', ['address', 'permission', 'remove']), remove = mailSlot<HTMLButtonElement>(row, 'remove', 'button')
+        mailSlot(row, 'address', 'bdi').textContent = share.principal
+        mailSlot(row, 'permission').textContent = ' · ' + (share.permission === 'read-write' ? t('Read and edit events') : t('Read only')) + (!share.effective ? ' · ' + t('Access withheld; explicitly save this recipient again to grant current access.') : '')
+        remove.textContent = t('Revoke sharing'); remove.dataset.calendarRevoke = ''
         remove.addEventListener('click', () => { if (!remove.disabled && selected?.canManage) void mutate('DELETE', '/api/webmail/calendars/' + encodeURIComponent(selected.id) + '/share', { principal: share.principal, expectedRevision: selected.revision }, t('Revoke calendar sharing?'), true) })
-        row.append(label, remove); shareRows.append(row)
+        shareRows.append(row)
       }
       input('share-principal').value = ''; permission.value = 'read'; source.value = ''; clearExport(); lock()
     }
@@ -269,4 +274,4 @@ function bindMailCalendar(askDialog: ((options: Record<string, unknown>) => Prom
   })
 }
 
-export const MAIL_CALENDAR_CLIENT_BINDING = `(${bindMailCalendar.toString()})`
+export const MAIL_CALENDAR_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}return ${bindMailCalendar.toString()};})()`

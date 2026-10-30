@@ -1,3 +1,9 @@
+import { projectActionState, type AsyncActionBannerProps, type AsyncActionStateKind } from './models/action-state.ts'
+export type { AsyncActionBannerProps, AsyncActionStateKind } from './models/action-state.ts'
+import { normalizeAsciiDigits, formatAsciiNumber, formatAsciiPercent, formatAsciiDate, formatDisplayDateTime, DISPLAY_DATETIME_BINDING, formatUtcClock, formatUtcDay, formatAsciiBytes, formatBytes } from './display-format.ts'
+export { normalizeAsciiDigits, formatAsciiNumber, formatAsciiPercent, formatAsciiDate, formatDisplayDateTime, DISPLAY_DATETIME_BINDING, formatUtcClock, formatUtcDay, formatAsciiBytes, formatBytes } from './display-format.ts'
+import { escapeHtml } from './html.ts'
+export { escapeHtml } from './html.ts'
 import { SOURCE_LOCALE, localeDirection, translator, type Locale, type MessageValues } from './i18n.ts'
 // xPanel Design System tokens, CSS stylesheet, and accessible status/meter primitives.
 // Follows docs/STANDARDS.md: OKLCH light & dark themes (no pure #000), logical RTL/LTR properties,
@@ -10,157 +16,6 @@ import { MAIL_LAYOUT_CSS } from './mail-layout.ts'
 
 export type StatusBadgeKind = 'ok' | 'warn' | 'critical' | 'suspended' | 'reconciling'
 export type ThresholdLevel = 'ok' | 'warn' | 'critical'
-export type AsyncActionStateKind =
-  | 'idle'
-  | 'loading'
-  | 'pending'
-  | 'succeeded'
-  | 'denied'
-  | 'failed'
-  | 'unavailable'
-  | 'conflict'
-
-export interface AsyncActionBannerProps {
-  state: AsyncActionStateKind
-  locale?: Locale
-  title?: string
-  message?: string
-  jobId?: string
-  generationId?: number
-  retryable?: boolean
-  preserveDraft?: boolean
-  httpStatus?: number
-  errorCode?: string
-}
-
-const HTML_ESCAPE_MAP: Record<string, string> = {
-  '&': '&amp;',
-  '<': '&lt;',
-  '>': '&gt;',
-  '"': '&quot;',
-  "'": '&#39;',
-}
-
-const EASTERN_ARABIC_ZERO = 0x0660
-const EXTENDED_ARABIC_ZERO = 0x06f0
-
-/**
- * Converts Eastern Arabic (U+0660-U+0669) and Extended Arabic-Indic (U+06F0-U+06F9) numerals to ASCII (0-9).
- */
-export function normalizeAsciiDigits(input: string | number): string {
-  const raw = typeof input === 'number' ? String(input) : input
-  if (raw.length === 0) return ''
-  let out = ''
-  for (let i = 0; i < raw.length; i++) {
-    const code = raw.charCodeAt(i)
-    if (code >= EASTERN_ARABIC_ZERO && code <= EASTERN_ARABIC_ZERO + 9) {
-      out += String(code - EASTERN_ARABIC_ZERO)
-    } else if (code >= EXTENDED_ARABIC_ZERO && code <= EXTENDED_ARABIC_ZERO + 9) {
-      out += String(code - EXTENDED_ARABIC_ZERO)
-    } else if (code === 0x066b) {
-      out += '.'
-    } else if (code === 0x066c) {
-      out += ','
-    } else {
-      out += raw[i]!
-    }
-  }
-  return out
-}
-
-/**
- * Formats a number deterministically using Western ASCII digits (`0-9`) regardless of active locale.
- */
-export function formatAsciiNumber(
-  value: number,
-  opts: { decimals?: number; useGrouping?: boolean } = {},
-): string {
-  if (!Number.isFinite(value)) return '0'
-  const decimals = opts.decimals
-  const useGrouping = opts.useGrouping ?? true
-  const fixed = decimals !== undefined ? value.toFixed(decimals) : String(value)
-  const [intPartRaw, fracPart] = fixed.split('.')
-  const sign = intPartRaw?.startsWith('-') ? '-' : ''
-  const digits = (sign ? intPartRaw!.slice(1) : intPartRaw) ?? '0'
-  const grouped = useGrouping ? digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : digits
-  return fracPart !== undefined && fracPart.length > 0 ? `${sign}${grouped}.${fracPart}` : `${sign}${grouped}`
-}
-
-/**
- * Formats a percentage using Western ASCII digits (`0-9`).
- */
-export function formatAsciiPercent(value: number, decimals = 1): string {
-  if (!Number.isFinite(value)) return '0%'
-  const rounded = Number(value.toFixed(decimals))
-  const text = rounded % 1 === 0 ? String(Math.trunc(rounded)) : rounded.toFixed(decimals)
-  return `${text}%`
-}
-
-/**
- * The product's one display form for instants: `YYYY-MM-DD`, or `YYYY-MM-DD HH:mm UTC` with `includeTime`,
- * ASCII digits in every locale. Readable presentation also rejects anything but an explicit ISO 8601 instant.
- * Machine formats (APIs, logs, `datetime` attributes) stay ISO 8601.
- */
-export function formatAsciiDate(
-  isoOrDate: string | Date,
-  opts: { includeTime?: boolean; presentation?: 'readable' } = {},
-): string {
-  const readable = opts.presentation === 'readable'
-  const input = readable && typeof isoOrDate === 'string' ? normalizeAsciiDigits(isoOrDate) : isoOrDate
-  const supplied = readable && typeof input === 'string'
-    ? /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.exec(input) : null
-  if (readable && typeof input === 'string' && !supplied) return '—'
-  const d = typeof input === 'string' ? new Date(input) : input
-  if (Number.isNaN(d.getTime())) {
-    return readable ? '—' : normalizeAsciiDigits(typeof isoOrDate === 'string' ? isoOrDate : '')
-  }
-  if (supplied) {
-    const calendar = new Date(supplied[1] + 'Z')
-    if (Number.isNaN(calendar.getTime()) || calendar.toISOString().slice(0, 19) !== supplied[1]) return '—'
-  }
-  const iso = d.toISOString()
-  if (readable && !/^\d{4}-\d{2}-\d{2}T/.test(iso)) return '—'
-  return opts.includeTime ? `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC` : iso.slice(0, 10)
-}
-
-/** Readable presentation only; retain original instants for storage, APIs and arithmetic. */
-export function formatDisplayDateTime(value: string | Date | null | undefined): string {
-  return value === null || value === undefined ? '—' : formatAsciiDate(value, { includeTime: true, presentation: 'readable' })
-}
-
-/** One self-contained browser expression generated from the same server implementation. */
-export const DISPLAY_DATETIME_BINDING = `(()=>{
-const EASTERN_ARABIC_ZERO=${EASTERN_ARABIC_ZERO};
-const EXTENDED_ARABIC_ZERO=${EXTENDED_ARABIC_ZERO};
-const normalizeAsciiDigits=${normalizeAsciiDigits.toString()};
-const formatAsciiDate=${formatAsciiDate.toString()};
-return ${formatDisplayDateTime.toString()};
-})()`
-
-/**
- * UTC clock `HH:mm UTC`. The panel stores instants in UTC and has no chosen zone,
- * so every server clock uses this label instead of a bare hour.
- */
-export function formatUtcClock(isoOrDate: string | Date): string {
-  const full = formatAsciiDate(isoOrDate, { includeTime: true })
-  const clock = /^\d{4}-\d{2}-\d{2} (\d{2}:\d{2} UTC)$/.exec(full)
-  return clock ? clock[1]! : full
-}
-
-/** UTC calendar day `YYYY-MM-DD UTC`, the date form of {@link formatUtcClock}. */
-export function formatUtcDay(isoOrDate: string | Date): string {
-  const day = formatAsciiDate(isoOrDate)
-  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? `${day} UTC` : day
-}
-
-/**
- * Escapes arbitrary strings for safe interpolation into HTML text and attributes.
- */
-export function escapeHtml(str: string): string {
-  if (str.length === 0) return ''
-  return str.replace(/[&<>"']/g, (ch) => HTML_ESCAPE_MAP[ch] ?? ch)
-}
-
 /**
  * Wraps a technical LTR identifier (domain, path, IP, email, port, unit, digest, job ID)
  * in `<bdi dir="ltr">` with normalized ASCII digits so RTL context never scrambles token order.
@@ -181,27 +36,6 @@ export function getThresholdLevel(percent: number): ThresholdLevel {
   if (!Number.isFinite(percent) || percent < 80) return 'ok'
   if (percent < 95) return 'warn'
   return 'critical'
-}
-
-/**
- * Formats byte counts in decimal units (powers of 1000), labelled B/KB/MB/GB/TB,
- * so a figure matches `df -H` and a hosting provider's GB. Digits stay ASCII.
- */
-export function formatAsciiBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let val = bytes
-  let unitIdx = 0
-  while (val >= 1000 && unitIdx < units.length - 1) {
-    val /= 1000
-    unitIdx++
-  }
-  const decimals = unitIdx === 0 ? 0 : val >= 100 ? 0 : val >= 10 ? 1 : 2
-  return `${ normalizeAsciiDigits(val.toFixed(decimals)) } ${units[unitIdx]}`
-}
-
-export function formatBytes(bytes: number): string {
-  return formatAsciiBytes(bytes)
 }
 
 /**
@@ -356,111 +190,27 @@ export function classifyHttpActionState(input: {
   return 'failed'
 }
 
-// Source messages; renderAsyncActionState translates them for the page locale.
-const ACTION_STATE_COPY: Record<AsyncActionStateKind, { badge: StatusBadgeKind; badgeText: string; title: string; message: string }> = {
-  idle: {
-    badge: 'ok',
-    badgeText: msgid('Ready'),
-    title: msgid('Workspace ready'),
-    message: msgid('All verified controls are synchronized with the current generation.'),
-  },
-  loading: {
-    badge: 'reconciling',
-    badgeText: msgid('Loading'),
-    title: msgid('Loading live state...'),
-    message: msgid('Fetching verified host and account state from the control plane.'),
-  },
-  pending: {
-    badge: 'reconciling',
-    badgeText: msgid('Queued / Reconciling'),
-    title: msgid('Operation accepted and pending host verification'),
-    message: msgid('Desired state has been recorded, or a background job is queued. Host changes are not yet active until reconciliation and health verification complete.'),
-  },
-  succeeded: {
-    badge: 'ok',
-    badgeText: msgid('Verified & Applied'),
-    title: msgid('Operation verified on host'),
-    message: msgid('Configuration passed syntax and health checks and is now active.'),
-  },
-  denied: {
-    badge: 'critical',
-    badgeText: msgid('Access Denied'),
-    title: msgid('Permission denied for this operation'),
-    message: msgid('Your current role or account scope is not authorized to perform this action.'),
-  },
-  failed: {
-    badge: 'critical',
-    badgeText: msgctxt('action-state', 'Failed'),
-    title: msgid('Operation failed verification'),
-    message: msgid('The host verifier rejected the change and automatically preserved the previous active generation. Your form draft has been retained.'),
-  },
-  unavailable: {
-    badge: 'warn',
-    badgeText: msgid('Unavailable'),
-    title: msgid('Service or runtime dependency unavailable'),
-    message: msgid('A required host tool, socket, or backend dependency is currently unverified or unreachable. No changes were applied.'),
-  },
-  conflict: {
-    badge: 'warn',
-    badgeText: msgid('Conflict (HTTP 409)'),
-    title: msgid('Concurrent state modification or lock conflict'),
-    message: msgid('Another reconciliation or resource update is currently in progress. Please review the latest state and retry; your draft input is preserved.'),
-  },
-}
-
 /**
  * Renders an explicit, accessible async action / availability status banner (`loading`, `pending`,
  * `succeeded`, `denied`, `failed`, `unavailable`, `conflict`) with `<bdi dir="ltr">` isolation on
  * technical job/generation references and draft-preservation metadata.
  */
 export function renderAsyncActionState(props: AsyncActionBannerProps): string {
-  const locale = props.locale ?? SOURCE_LOCALE
-  const tr = translator(locale)
-  const source = ACTION_STATE_COPY[props.state] ?? ACTION_STATE_COPY.failed
-  const copy = { ...source, badgeText: tr(source.badgeText), title: tr(source.title), message: tr(source.message) }
-  const isAlert =
-    props.state === 'denied' ||
-    props.state === 'failed' ||
-    props.state === 'unavailable' ||
-    props.state === 'conflict'
-  const isBusy = props.state === 'loading' || props.state === 'pending'
-  const role = isAlert ? 'alert' : 'status'
-  const preserveDraft =
-    props.preserveDraft ??
-    (props.state !== 'succeeded' && props.state !== 'idle')
-  const title = normalizeAsciiDigits(props.title ?? copy.title)
-  const message = normalizeAsciiDigits(props.message ?? copy.message)
-
-  const metaParts: string[] = []
-  if (props.jobId) {
-    const label = translator(locale)('Job Ref')
-    metaParts.push(
-      `<span>${escapeHtml(label)}: <code class="xp-mono">${renderLtrValue(props.jobId)}</code></span>`,
-    )
-  }
-  if (props.generationId !== undefined && props.generationId > 0) {
-    const label = translator(locale)('Generation')
-    metaParts.push(
-      `<span>${escapeHtml(label)}: <code class="xp-mono">${renderLtrValue(`#${formatAsciiNumber(props.generationId, { useGrouping: false })}`)}</code></span>`,
-    )
-  }
-  if (props.httpStatus !== undefined) {
-    metaParts.push(
-      `<span class="xp-tabular"><code class="xp-mono">${renderLtrValue(`HTTP ${formatAsciiNumber(props.httpStatus, { useGrouping: false })}`)}</code></span>`,
-    )
-  }
-  if (props.errorCode) {
-    metaParts.push(`<code class="xp-mono">${renderLtrValue(props.errorCode)}</code>`)
-  }
+  const view = projectActionState(props)
+  const metaParts = view.metadata.map(meta => meta.kind === 'error'
+    ? `<code class="xp-mono">${renderLtrValue(meta.value)}</code>`
+    : meta.kind === 'http'
+      ? `<span class="xp-tabular"><code class="xp-mono">${renderLtrValue(meta.value)}</code></span>`
+      : `<span>${escapeHtml(meta.label ?? '')}: <code class="xp-mono">${renderLtrValue(meta.value)}</code></span>`)
 
   return (
-    `<section class="xp-action-state xp-action-state--${props.state}" role="${role}" aria-live="${isAlert ? 'assertive' : 'polite'}" aria-busy="${isBusy ? 'true' : 'false'}" data-action-state="${props.state}" data-preserve-draft="${preserveDraft ? 'true' : 'false'}" data-deceptive-success="false">` +
+    `<section class="xp-action-state xp-action-state--${view.state}" role="${view.role}" aria-live="${view.live}" aria-busy="${view.busy ? 'true' : 'false'}" data-action-state="${view.state}" data-preserve-draft="${view.preserveDraft ? 'true' : 'false'}" data-deceptive-success="false">` +
     `<div class="xp-action-state__header">` +
-    renderStatusBadge(copy.badge, normalizeAsciiDigits(copy.badgeText)) +
-    `<strong class="xp-action-state__title">${escapeHtml(title)}</strong>` +
+    renderStatusBadge(view.badge.kind, view.badge.text) +
+    `<strong class="xp-action-state__title">${escapeHtml(view.title)}</strong>` +
     (metaParts.length > 0 ? `<div class="xp-action-state__meta">${metaParts.join(' · ')}</div>` : '') +
     `</div>` +
-    `<p class="xp-prose xp-action-state__message" style="margin: 6px 0 0;">${escapeHtml(message)}</p>` +
+    `<p class="xp-prose xp-action-state__message" style="margin: 6px 0 0;">${escapeHtml(view.message)}</p>` +
     `</section>`
   )
 }

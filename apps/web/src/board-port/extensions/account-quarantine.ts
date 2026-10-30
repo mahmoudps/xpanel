@@ -1,3 +1,4 @@
+import { accountQuarantineClientTemplates } from '../account-routing-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../../i18n.ts'
 import { escapeHtml } from '../../tokens.ts'
 
@@ -27,5 +28,5 @@ export function renderAccountQuarantine(input: { lang: Locale; expectedAccountId
     <div class="xp-quarantine__fields"><dl class="xp-quarantine__fact"><dt>${t('Retention window (days)')}</dt><dd data-quarantine-retention>${t(msgctxt('account-quarantine', 'Not read'))}</dd></dl><div class="xp-field"><label for="quarantine-digest">${t('Digest email')}</label><select id="quarantine-digest" class="xp-select" disabled><option>${t('Unavailable: digest transport is not configured')}</option></select></div></div>
     <p class="xp-help">${t('The configured retention window is read from the active profile. Expiry below is an explicit action for the displayed UID window; automatic expiry and digest delivery are not claimed.')}</p>
     <div class="xp-quarantine__actions"><button type="button" class="xp-btn" data-quarantine-expire disabled>${t('Delete expired messages in this window')}</button></div>
-  </section></div>`
+  </section>${accountQuarantineClientTemplates()}</div>`
 }

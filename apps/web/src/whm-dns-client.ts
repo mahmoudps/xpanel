@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import { zoneEditorClientBinding } from './zone-editor-client.ts'
@@ -22,6 +26,9 @@ function bindWhmDns(askDialog: ((options: Record<string, unknown>) => Promise<un
     const status = root.querySelector<HTMLElement>('[data-dns-status]')!
     const button = (key: string): HTMLButtonElement => root.querySelector<HTMLButtonElement>('[data-dns-' + key + ']')!
     if (!select || !account || !newName || !rows || !status || ['refresh', 'add-record', 'add-zone', 'save', 'delete'].some(key => !button(key))) return
+    const rowSlots=['name','type','ttl','content','priority','remove'] as const
+    const rowTemplate=clientTemplate(root,'dns-record-row'),emptyTemplate=clientTemplate(root,'dns-record-empty'),zoneTemplate=clientTemplate(root,'dns-zone-row'),zoneEmptyTemplate=clientTemplate(root,'dns-zone-empty')
+    cloneClientTemplate(rowTemplate,'tr',rowSlots);cloneClientTemplate(emptyTemplate,'tr',['message']);cloneClientTemplate(zoneTemplate,'tr',['name','account','records','serial','provider']);cloneClientTemplate(zoneEmptyTemplate,'tr',['message'])
     const send = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => root.isConnected && !root.closest(denied)
@@ -61,12 +68,6 @@ function bindWhmDns(askDialog: ((options: Record<string, unknown>) => Promise<un
       return body === undefined ? send(method, path) : send(method, path, body)
     }
     const read = async (): Promise<WhmZone[]> => readCollection(await request('GET', '/api/dns/zones'))
-    const textCell = (row: HTMLTableRowElement, value: string, technical = false): void => {
-      const td = document.createElement('td')
-      const content = technical ? document.createElement('bdi') : document.createElement('span')
-      if (technical) content.dir = 'ltr'
-      content.textContent = value; td.append(content); row.append(td)
-    }
     const summaries = (): void => {
       const count = workspace.querySelector<HTMLElement>('[data-whm-dns-zone-count]')
       const body = workspace.querySelector<HTMLElement>('[data-whm-dns-zone-rows]')
@@ -77,45 +78,25 @@ function bindWhmDns(askDialog: ((options: Record<string, unknown>) => Promise<un
       body.textContent = ''
       for (const zone of zones) {
         const label = zone.accountId === null ? t('Unassigned (server)') : Array.from(account.options).find(option => option.value === zone.accountId)?.textContent ?? t('Not read')
-        const row = document.createElement('tr')
-        textCell(row, zone.name, true); textCell(row, label); textCell(row, String(zone.records.length), true)
-        textCell(row, String(zone.serial), true); textCell(row, t('Not read')); body.append(row)
+        const row=cloneClientTemplate(zoneTemplate,'tr',['name','account','records','serial','provider'])
+        for(const [slot,text] of [['name',zone.name],['account',label],['records',String(zone.records.length)],['serial',String(zone.serial)],['provider',t('Not read')]] as const)clientTemplateSlot(row,slot).textContent=text
+        body.append(row)
       }
-      if (!zones.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 5; cell.textContent = t('The read returned no DNS zones.'); row.append(cell); body.append(row) }
+      if(!zones.length){const row=cloneClientTemplate(zoneEmptyTemplate,'tr',['message']);clientTemplateSlot(row,'message','td').textContent=t('The read returned no DNS zones.');body.append(row)}
     }
+
     const fields = ['name', 'type', 'ttl', 'content', 'priority'] as const
-    const labels = [t('Record name'), t('Record type'), 'TTL', t('Record content'), t('Priority')]
-    const paintRows = (): void => {
-      rows.textContent = ''
-      for (const record of draft) {
-        const row = document.createElement('tr'); row.dataset.recordId = record.id
-        fields.forEach((field, index) => {
-          const td = document.createElement('td'), label = document.createElement('label')
-          const input = document.createElement(field === 'type' ? 'select' : 'input')
-          input.id = 'whm-dns-' + record.id + '-' + field
-          input.className = field === 'type' ? 'xp-select' : 'xp-input'
-          input.dir = 'ltr'; input.dataset.field = field; input.setAttribute('aria-label', labels[index]!)
-          label.htmlFor = input.id; label.textContent = labels[index]!
-          if (input instanceof HTMLSelectElement) for (const type of ZONE_RECORD_TYPES) { const option = document.createElement('option'); option.value = type; option.textContent = type; input.append(option) }
-          if (input instanceof HTMLInputElement) {
-            input.type = field === 'ttl' || field === 'priority' ? 'number' : 'text'
-            if (input.type === 'number') { input.min = '0'; input.max = String(field === 'ttl' ? ZONE_TTL_MAX : ZONE_PRIORITY_MAX); input.step = '1' }
-          }
-          input.value = record[field]
-          input.addEventListener(field === 'type' ? 'change' : 'input', () => {
-            if (input.disabled || !admitted()) return
-            if (field === 'type') record.type = input.value as ZoneRecordType
-            else record[field] = input.value
-            controls()
-          })
-          td.append(label, input); row.append(td)
-        })
-        const td = document.createElement('td'), remove = document.createElement('button')
-        remove.type = 'button'; remove.className = 'xp-btn'; remove.textContent = t('Remove record'); remove.dataset.dnsRemove = ''
-        remove.addEventListener('click', () => { if (!remove.disabled && admitted()) { draft = draft.filter(item => item !== record); paintRows(); controls() } })
-        td.append(remove); row.append(td); rows.append(row)
+    const paintRows=():void=>{
+      rows.textContent=''
+      for(const record of draft){const row=cloneClientTemplate(rowTemplate,'tr',rowSlots);row.dataset.recordId=record.id
+        for(const field of fields){const input=clientTemplateSlot(row,field,field==='type'?'select':'input') as HTMLInputElement|HTMLSelectElement;input.id='whm-dns-'+record.id+'-'+field;const label=clientTemplateSlot(row,field+'-label','label') as HTMLLabelElement;label.htmlFor=input.id
+          if(input instanceof HTMLSelectElement){for(const type of ZONE_RECORD_TYPES){const option=document.createElement('option');option.value=type;option.textContent=type;input.append(option)}}
+          else if(field==='ttl'||field==='priority'){input.min='0';input.max=String(field==='ttl'?ZONE_TTL_MAX:ZONE_PRIORITY_MAX);input.step='1'}
+          input.value=record[field];input.addEventListener(field==='type'?'change':'input',()=>{if(input.disabled||!admitted())return;if(field==='type')record.type=input.value as ZoneRecordType;else record[field]=input.value;controls()})
+        }
+        const remove=clientTemplateSlot(row,'remove','button') as HTMLButtonElement;remove.dataset.dnsRemove='';remove.addEventListener('click',()=>{if(!remove.disabled&&admitted()){draft=draft.filter(item=>item!==record);paintRows();controls()}});rows.append(row)
       }
-      if (!draft.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 6; td.textContent = selected ? t('No saved records. Add a record to this zone.') : t('Select a saved zone or create a new zone.'); row.append(td); rows.append(row) }
+      if(!draft.length){const row=cloneClientTemplate(emptyTemplate,'tr',['message']);clientTemplateSlot(row,'message','td').textContent=selected?t('No saved records. Add a record to this zone.'):t('Select a saved zone or create a new zone.');rows.append(row)}
     }
     const install = (name: string): void => {
       selected = zones.find(zone => zone.name === name) ?? zones[0] ?? null

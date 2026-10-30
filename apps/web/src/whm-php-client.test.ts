@@ -87,6 +87,15 @@ describe('WHM PHP management writes', () => {
     new Function('return ' + WHM_PHP_CLIENT_BINDING)()(ask); return ask
   }
   const reads = (path: string) => path.endsWith('/inventory') ? inventory() : path.endsWith('/usage') ? usage() : manageView()
+  it('hides only the semantic draft extension choices after a host read, independent of theme class names', async () => {
+    bootWith(vi.fn(async (_method: string, path: string) => reads(path)))
+    const section = document.querySelector('[data-whm-detail-section="php-extensions"]')!
+    const draft = document.createElement('div'); draft.dataset.phpExtensionDraftGrid = ''; draft.className = 'v2-host__choices'; draft.textContent = 'Draft only'
+    const independent = document.createElement('div'); independent.className = 'xp-whm-detail-choice-grid'; independent.textContent = 'Independent controls'
+    section.append(draft, independent); await tick()
+    expect(draft.hidden).toBe(true); expect(independent.hidden).toBe(false)
+    expect(section.querySelector('[data-php-extension="opcache"]')).not.toBeNull()
+  })
   it('enables the reviewed controls and paints extension switches from the host observation', async () => {
     bootWith(vi.fn(async (_method: string, path: string) => reads(path))); await tick()
     expect(document.querySelector<HTMLButtonElement>('[data-php-action="set-default"]')!.disabled).toBe(false)
@@ -104,6 +113,26 @@ describe('WHM PHP management writes', () => {
     expect(send.mock.calls.filter(call => call[0] === 'POST')).toEqual([['POST', '/api/server/php/manage/preview', body], ['POST', '/api/server/php/manage/apply', body]])
     expect(ask).toHaveBeenCalledOnce()
     expect(document.querySelector('[data-whm-detail-section="php-configure"] [data-php-manage-status]')!.textContent).toContain('J-1001')
+  })
+  it.each([
+    { referenceCode: null, locale: 'en', expected: 'Unnumbered' },
+    { referenceCode: undefined, locale: 'en', expected: 'Unnumbered' },
+    { referenceCode: '', locale: 'en', expected: 'Unnumbered' },
+    { referenceCode: '  ', locale: 'en', expected: 'Unnumbered' },
+    { referenceCode: 123, locale: 'en', expected: 'Unnumbered' },
+    { referenceCode: null, locale: 'ar', expected: 'غير مرقمة' },
+  ])('shows a localized unnumbered job without exposing its storage id ($locale, $referenceCode)', async ({ referenceCode, locale, expected }) => {
+    const internalId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+    const send = vi.fn(async (method: string, path: string) => method === 'GET' ? reads(path) : path.endsWith('/preview') ? { preview: { state: 'ready', reason: null } } : { job: { id: internalId, referenceCode } })
+    document.documentElement.lang = locale
+    try {
+      bootWith(send); await tick()
+      document.querySelector<HTMLButtonElement>('[data-php-action="apply-ini"]')!.click(); await tick(); await tick()
+      const message = document.querySelector('[data-whm-detail-section="php-configure"] [data-php-manage-status]')!.textContent
+      expect(message).toContain(expected)
+      expect(message).not.toContain(internalId)
+      expect(send.mock.calls.filter(call => call[0] === 'POST').map(call => call[1])).toEqual(['/api/server/php/manage/preview', '/api/server/php/manage/apply'])
+    } finally { document.documentElement.lang = 'en' }
   })
   it('sends nothing when the host refuses the preview or the user cancels', async () => {
     const send = vi.fn(async (method: string, path: string) => method === 'GET' ? reads(path) : { preview: { state: 'blocked', reason: 'nothing-to-do' } })

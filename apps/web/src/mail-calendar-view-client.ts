@@ -1,3 +1,7 @@
+import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
+const mailTemplate = canonicalMailTemplate
+const mailSlot = canonicalMailSlot
+const mailRequireTemplates = canonicalMailRequireTemplates
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 /// <reference lib="dom" />
@@ -163,7 +167,7 @@ function bindMailCalendarView(askDialog: ((options: Record<string, unknown>) => 
   const email = (value: string): boolean => value.length <= 254 && /^[^\s@/\\]+@[^\s@/\\]+$/.test(value)
   const plain = (value: string, maximum: number, multiline = false): boolean => value.isWellFormed() && new TextEncoder().encode(value).length <= maximum && !/[\u0000-\u001f\u007f-\u009f\u2028-\u202e\u2066-\u2069\ufeff]/.test(multiline ? value.replace(/\n/g, '') : value)
   const paint = /^(?:#[0-9a-f]{6}|oklch\(\d*(?:\.\d+)? \d*(?:\.\d+)? \d*(?:\.\d+)?\))$/i
-  const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = ''): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); if (className) node.className = className; if (text) node.textContent = text; return node }
+
   const ltr = (text: string): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = text; return node }
   document.querySelectorAll<HTMLElement>('[data-mail-calendar-view]').forEach(root => {
     if (root.dataset.calendarViewBound === 'true') return
@@ -179,6 +183,12 @@ function bindMailCalendarView(askDialog: ((options: Record<string, unknown>) => 
     const controls = ['nav="prev"', 'nav="today"', 'nav="next"', 'mode="month"', 'mode="week"', 'mode="day"', 'new', 'refresh', 'close', 'agenda-new', 'edit', 'delete', 'save', 'cancel']
     const inputs = ['calendar', 'summary', 'all-day', 'start-date', 'start-time', 'end-date', 'end-time', 'timezone', 'location', 'notes']
     if (parts.some(key => !part(key)) || controls.some(key => !button(key)) || inputs.some(key => !field(key))) return
+    try { mailRequireTemplates(root, [
+      ['calview-row', 'div'], ['calview-head', 'div'], ['calview-day', 'div'], ['calview-week', 'div'], ['calview-gutter', 'div'], ['calview-timeline', 'div'], ['calview-chip', 'button'],
+      ['calview-long', 'span'], ['calview-short', 'span'], ['calview-more', 'span'], ['calview-swatch', 'span'], ['calview-help', 'span'], ['calview-empty', 'li'], ['calview-notes', 'dd'], ['calview-date', 'bdi'],
+    ]) } catch { root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('input,button,select,textarea').forEach(control => { control.disabled = true }); part('status').dataset.state = 'unavailable'; part('status').textContent = t('Unavailable'); return }
+    const element = <K extends keyof HTMLElementTagNameMap>(tag: K, role = '', text = ''): HTMLElementTagNameMap[K] => { const node = (role ? mailTemplate(root, role, tag) : document.createElement(tag)) as HTMLElementTagNameMap[K]; if (text) node.textContent = text; return node }
+
     const grid = part('grid'), status = part('status'), detail = part('detail'), heading = part('detail-heading'), agenda = part('agenda'), eventPane = part('event'), editor = part('editor')
     const select = field<HTMLSelectElement>('calendar'), allDay = field('all-day')
     const cache = new Map<string, Intl.DateTimeFormat>()
@@ -246,16 +256,16 @@ function bindMailCalendarView(askDialog: ((options: Record<string, unknown>) => 
       if (!pane) panel = null
     }
     const chip = (entry: CalendarViewEntry, span: CalendarSpan, day: number): HTMLButtonElement => {
-      const node = element('button', 'xp-mail-calview__chip'), summary = element('span', '', entry.event.summary)
+      const node = element('button', 'calview-chip'), summary = element('span', '', entry.event.summary)
       node.type = 'button'; node.tabIndex = -1; node.dataset.calviewItem = entry.key; node.title = entry.event.summary; summary.dir = 'auto'
       if (paint.test(entry.calendar.color)) node.style.setProperty('--calview-chip', entry.calendar.color)
       node.append(span.allDay ? element('span', '', t('All day')) : day === span.startDay ? ltr(clock(span.startMinutes)) : element('span', '', t('Continues')), summary)
       return node
     }
-    const row = (): HTMLElement => { const node = element('div', 'xp-mail-calview__row'); node.setAttribute('role', 'row'); return node }
-    const columnHeader = (index: number): HTMLElement => { const node = element('div', 'xp-mail-calview__head'); node.setAttribute('role', 'columnheader'); node.append(element('span', 'xp-mail-calview__long', weekdays[index]!), element('span', 'xp-mail-calview__short', shortWeekdays[index]!)); return node }
+    const row = (): HTMLElement => { const node = element('div', 'calview-row'); node.setAttribute('role', 'row'); return node }
+    const columnHeader = (index: number): HTMLElement => { const node = element('div', 'calview-head'); node.setAttribute('role', 'columnheader'); node.append(element('span', 'calview-long', weekdays[index]!), element('span', 'calview-short', shortWeekdays[index]!)); return node }
     const dayCell = (day: number, count: number, now: number): HTMLElement => {
-      const node = element('div', 'xp-mail-calview__day')
+      const node = element('div', 'calview-day')
       node.setAttribute('role', 'gridcell'); node.dataset.calviewDay = calendarDayString(day); node.tabIndex = day === focus ? 0 : -1; node.setAttribute('aria-selected', String(day === focus))
       if (day === now) node.setAttribute('aria-current', 'date')
       const values = { weekday: weekdays[calendarWeekday(day)]!, date: iso(day), count }
@@ -265,33 +275,33 @@ function bindMailCalendarView(askDialog: ((options: Record<string, unknown>) => 
       return node
     }
     const renderMonth = (first: number, last: number, days: CalendarDaySlot<CalendarViewEntry>[], now: number): void => {
-      const month = calendarDayString(anchor).slice(0, 6), header = row(), corner = element('div', 'xp-mail-calview__week', t(msgctxt('mail-calendar-view-client', 'Week')))
+      const month = calendarDayString(anchor).slice(0, 6), header = row(), corner = element('div', 'calview-week', t(msgctxt('mail-calendar-view-client', 'Week')))
       corner.setAttribute('role', 'columnheader'); header.append(corner)
       for (let index = 0; index < 7; index++) header.append(columnHeader(index))
       grid.append(header)
       for (let start = first; start <= last; start += 7) {
-        const line = row(), week = calendarIsoWeek(start).week, label = element('div', 'xp-mail-calview__week')
+        const line = row(), week = calendarIsoWeek(start).week, label = element('div', 'calview-week')
         label.setAttribute('role', 'rowheader'); label.setAttribute('aria-label', t('Week {week}', { week })); label.append(ltr('W' + pad(week))); line.append(label)
         for (let day = start; day < start + 7; day++) {
-          const slot = days[day - first]!, all = [...slot.allDay, ...slot.timed], cell = dayCell(day, all.length, now), date = ltr(String(Number(calendarDayString(day).slice(6))))
+          const slot = days[day - first]!, all = [...slot.allDay, ...slot.timed], cell = dayCell(day, all.length, now), date = element('bdi', 'calview-date', String(Number(calendarDayString(day).slice(6))))
           if (calendarDayString(day).slice(0, 6) !== month) cell.dataset.outside = 'true'
-          date.className = 'xp-mail-calview__date'; cell.append(date)
+          cell.append(date)
           for (const placed of all.slice(0, 3)) cell.append(chip(placed.item, placed.span, day))
-          if (all.length > 3) { const more = element('span', 'xp-mail-calview__more'); const [before = '', after = ''] = t('{count} more').split('{count}'); more.append(before, ltr('+' + (all.length - 3)), after); cell.append(more) }
+          if (all.length > 3) { const more = element('span', 'calview-more'); const [before = '', after = ''] = t('{count} more').split('{count}'); more.append(before, ltr('+' + (all.length - 3)), after); cell.append(more) }
           line.append(cell)
         }
         grid.append(line)
       }
     }
     const renderTimeline = (first: number, last: number, days: CalendarDaySlot<CalendarViewEntry>[], now: number): void => {
-      const header = row(), body = row(), corner = element('div', 'xp-mail-calview__gutter'), gutter = element('div', 'xp-mail-calview__gutter')
+      const header = row(), body = row(), corner = element('div', 'calview-gutter'), gutter = element('div', 'calview-gutter')
       corner.setAttribute('aria-hidden', 'true'); gutter.setAttribute('aria-hidden', 'true'); header.append(corner); body.append(gutter)
       grid.style.setProperty('--calview-days', String(last - first + 1))
       for (let hour = 0; hour < 24; hour++) gutter.append(ltr(pad(hour) + ':00'))
       for (let day = first; day <= last; day++) {
         // All-day chips sit in the header row so every timeline starts at the same height as the hour gutter.
-        const slot = days[day - first]!, head = columnHeader(calendarWeekday(day)), date = ltr(iso(day)), cell = dayCell(day, slot.allDay.length + slot.timed.length, now), timeline = element('div', 'xp-mail-calview__timeline')
-        date.className = 'xp-mail-calview__date'; head.append(date)
+        const slot = days[day - first]!, head = columnHeader(calendarWeekday(day)), date = element('bdi', 'calview-date', iso(day)), cell = dayCell(day, slot.allDay.length + slot.timed.length, now), timeline = element('div', 'calview-timeline')
+        head.append(date)
         if (day === now) head.setAttribute('aria-current', 'date')
         for (const placed of slot.allDay) head.append(chip(placed.item, placed.span, day))
         for (const segment of slot.timed) {
@@ -336,10 +346,10 @@ function bindMailCalendarView(askDialog: ((options: Record<string, unknown>) => 
       const list = part('agenda-list'), slot = calendarPlaceEvents(entries(day, day).placed, day, day)[0]!
       title(weekdays[calendarWeekday(day)] + ' ', ltr(iso(day))); list.textContent = ''
       for (const placed of [...slot.allDay, ...slot.timed]) {
-        const item = element('li'), open = chip(placed.item, placed.span, day), name = element('span', 'xp-help', placed.item.calendar.name)
+        const item = element('li'), open = chip(placed.item, placed.span, day), name = element('span', 'calview-help', placed.item.calendar.name)
         open.tabIndex = 0; name.dir = 'auto'; open.append(name); item.append(open); list.append(item)
       }
-      if (!list.children.length) list.append(element('li', 'xp-help', t('No events on this day.')))
+      if (!list.children.length) list.append(element('li', 'calview-empty', t('No events on this day.')))
       show(agenda); panel = { kind: 'agenda', day }; lock(); detail.focus()
     }
     const openEvent = (key: string): void => {
@@ -357,7 +367,7 @@ function bindMailCalendarView(askDialog: ((options: Record<string, unknown>) => 
         if (entry.event.timezone !== viewer) fact(zoned(t('Event time ({zone})'), entry.event.timezone), [validZone(entry.event.timezone) ? ltr(when(span, entry.event.timezone)) : t('This timezone is not recognized by this browser.')])
       }
       if (entry.event.location) fact([t('Location')], [named(entry.event.location)])
-      if (entry.event.description) fact([t('Notes')], [named(entry.event.description)], 'xp-mail-calview__notes')
+      if (entry.event.description) fact([t('Notes')], [named(entry.event.description)], 'calview-notes')
       show(eventPane); panel = { kind: 'event', key }; lock(); detail.focus()
     }
     const wall = (value: string, zone: string): [string, string] => {
@@ -402,7 +412,7 @@ function bindMailCalendarView(askDialog: ((options: Record<string, unknown>) => 
       const legend = part('legend')
       legend.textContent = ''
       for (const calendar of value.calendars) {
-        const item = element('li'), swatch = element('span', 'xp-mail-calview__swatch'), name = element('span', '', calendar.name)
+        const item = element('li'), swatch = element('span', 'calview-swatch'), name = element('span', '', calendar.name)
         swatch.setAttribute('aria-hidden', 'true'); name.dir = 'auto'
         if (paint.test(calendar.color)) swatch.style.setProperty('--calview-chip', calendar.color)
         item.append(swatch, name, ' · ' + (calendar.canManage ? t('Owner') : calendar.canWrite ? t('Shared: event editing') : t('Shared: read only')))
@@ -412,7 +422,7 @@ function bindMailCalendarView(askDialog: ((options: Record<string, unknown>) => 
         legend.append(item)
       }
       if (!value.calendars.length) {
-        const item = element('li', 'xp-help'), link = element('a', '', t('Calendars and events')), [before = '', after = ''] = t('No calendars are available to this mailbox yet. Create one in {link}.').split('{link}')
+        const item = element('li', 'calview-empty'), link = element('a', '', t('Calendars and events')), [before = '', after = ''] = t('No calendars are available to this mailbox yet. Create one in {link}.').split('{link}')
         link.href = '/mail/settings/calendars'; item.append(before, link, after); legend.append(item)
       }
       show(null); render()
@@ -524,4 +534,4 @@ function bindMailCalendarView(askDialog: ((options: Record<string, unknown>) => 
 }
 
 const helpers = [calendarDayNumber, calendarDayString, calendarWeekday, calendarIsoWeek, calendarShift, calendarRange, calendarZoneParts, calendarInstant, calendarEventSpan, calendarPlaceEvents, calendarViewContext, readCalendarViewCalendar, readCalendarViewWorkspace]
-export const MAIL_CALENDAR_VIEW_CLIENT_BINDING = `(()=>{${helpers.map(helper => helper.toString()).join('\n')}\nreturn ${bindMailCalendarView.toString()};})()`
+export const MAIL_CALENDAR_VIEW_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}${helpers.map(helper => helper.toString()).join('\n')}\nreturn ${bindMailCalendarView.toString()};})()`

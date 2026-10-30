@@ -1,4 +1,8 @@
 import type { MessageValues } from './i18n.ts'
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
@@ -37,6 +41,9 @@ function bindAccountDynamicDns(_askDialog: unknown): void {
     const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const eligible = (): boolean => root.isConnected && root.dataset.ddnsManage === 'true' && !root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
     if (!status || !rows || !zone || !hostname || !type || !description || !confirmation || !issued || !confirmPanel || !secret || !username || !refresh || !create) return
+    const rowSlots = ['hostname', 'type', 'description', 'updated', 'state', 'manage'] as const
+    const rowTemplate = clientTemplate(root, 'ddns-row'), emptyTemplate = clientTemplate(root, 'ddns-empty')
+    cloneClientTemplate(rowTemplate, 'tr', rowSlots); cloneClientTemplate(emptyTemplate, 'tr', ['message'])
     let view: DynamicDnsClientView | null = null, selected: DynamicDnsClientEntry | null = null, busy = false, uncertain = false
     const note = (message: string, state: string): void => { status.textContent = message; status.dataset.state = state; status.setAttribute('role', state === 'error' ? 'alert' : 'status') }
     const hideSecret = (): void => { secret.textContent = ''; username.textContent = ''; issued.hidden = true }
@@ -46,19 +53,19 @@ function bindAccountDynamicDns(_askDialog: unknown): void {
       for (const name of ['rotate', 'delete']) find<HTMLButtonElement>(name).disabled = !eligible() || busy || uncertain || !selected || confirmation.value !== selected.hostname
       root.setAttribute('aria-busy', String(busy))
     }
-    const technical = (text: string): HTMLElement => { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = text; return bdi }
     const paint = (): void => {
       if (!view) return
       rows.textContent = ''; zone.textContent = ''
       for (const item of view.zones) { const option = document.createElement('option'); option.value = item.name; option.textContent = item.name; zone.append(option) }
       find('count').textContent = t('{used} / {limit} credentials', { used: view.entries.length, limit: view.limit })
       for (const item of view.entries) {
-        const row = document.createElement('tr')
-        for (const [text, technicalValue] of [[item.hostname, true], [item.type, true], [item.description || '—', false], [item.lastChangedAt === null ? t('Not updated') : formatDisplayDateTime(item.lastChangedAt), item.lastChangedAt !== null], [item.pending ? t('Publication needs retry or review') : t('Ready'), false]] as const) { const td = document.createElement('td'); if (technicalValue) td.append(technical(text)); else td.textContent = text; row.append(td) }
-        const actions = document.createElement('td'), button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.textContent = t('Manage'); button.setAttribute('aria-label', t('Manage {host}', { host: item.hostname }))
-        button.addEventListener('click', () => { if (!eligible() || busy || uncertain) return; hideSecret(); selected = item; confirmation.value = ''; find('selected').textContent = item.hostname; confirmPanel.hidden = false; confirmation.focus(); lock() }); actions.append(button); row.append(actions); rows.append(row)
+        const row = cloneClientTemplate(rowTemplate, 'tr', rowSlots)
+        for (const [slot, text] of [['hostname', item.hostname], ['type', item.type], ['description', item.description || '—'], ['updated', item.lastChangedAt === null ? t('Not updated') : formatDisplayDateTime(item.lastChangedAt)], ['state', item.pending ? t('Publication needs retry or review') : t('Ready')]] as const) clientTemplateSlot(row, slot).textContent = text
+        const button = clientTemplateSlot(row, 'manage', 'button') as HTMLButtonElement
+        button.setAttribute('aria-label', t('Manage {host}', { host: item.hostname }))
+        button.addEventListener('click', () => { if (!eligible() || busy || uncertain) return; hideSecret(); selected = item; confirmation.value = ''; find('selected').textContent = item.hostname; confirmPanel.hidden = false; confirmation.focus(); lock() }); rows.append(row)
       }
-      if (!view.entries.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 6; td.textContent = t('No dynamic DNS credentials yet.'); row.append(td); rows.append(row) }
+      if (!view.entries.length) { const row = cloneClientTemplate(emptyTemplate, 'tr', ['message']); clientTemplateSlot(row, 'message', 'td').textContent = t('No dynamic DNS credentials yet.'); rows.append(row) }
       lock()
     }
     const errorMessage = (error: unknown, mutation: boolean): string => {
@@ -101,4 +108,4 @@ function bindAccountDynamicDns(_askDialog: unknown): void {
     void run('GET', '/api/account/dynamic-dns')
   })
 }
-export const ACCOUNT_DYNAMIC_DNS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const DDNS_ID=${DDNS_ID.toString()};const DDNS_UUID=${DDNS_UUID.toString()};const ddnsObject=${ddnsObject.toString()};const ddnsHost=${ddnsHost.toString()};const ddnsStamp=${ddnsStamp.toString()};const readDynamicDnsView=${readDynamicDnsView.toString()};return ${bindAccountDynamicDns.toString()};})()`
+export const ACCOUNT_DYNAMIC_DNS_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const DDNS_ID=${DDNS_ID.toString()};const DDNS_UUID=${DDNS_UUID.toString()};const ddnsObject=${ddnsObject.toString()};const ddnsHost=${ddnsHost.toString()};const ddnsStamp=${ddnsStamp.toString()};const readDynamicDnsView=${readDynamicDnsView.toString()};return ${bindAccountDynamicDns.toString()};})()`

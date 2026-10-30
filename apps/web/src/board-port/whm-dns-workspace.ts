@@ -1,3 +1,4 @@
+import { dnsEditorTemplates } from './data-client-templates.ts'
 import type { Account, Principal } from '@xpanel/core'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
@@ -28,5 +29,5 @@ export function renderWhmDnsWorkspace(input: { locale: Locale; accounts: readonl
       <button type="button" class="xp-btn xp-btn--primary" data-dns-save="true" disabled>${t('Save zone')}</button>
       <button type="button" class="xp-btn" data-dns-delete="true" disabled>${t('Delete zone')}</button>
     </div>
-  </section>`
+  ${dnsEditorTemplates(t, true)}</section>`
 }

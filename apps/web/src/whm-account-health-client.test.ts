@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { parseMarkup } from './themes/markup.ts'
 import { renderWhmAccountHealthWorkspace } from './board-port/whm-account-health-workspace.ts'
 import { readAccountHealthReport, WHM_ACCOUNT_HEALTH_CLIENT_BINDING } from './whm-account-health-client.ts'
 
@@ -51,9 +52,9 @@ describe('WHM account health renderer', () => {
     expect(/[٠-٩۰-۹]/.test(html)).toBe(false)
     expect(html).toMatch(/gap:(?:8|16|24|32)px/); expect(html).not.toMatch(/gap:(?:12|20|10)px/)
     const markup = html.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
-    const controls = [...markup.matchAll(/<(?:button|input|select|textarea)\b[^>]*>/gi)].map(match => match[0])
+    const controls = parseMarkup(markup).filter(node => node.template < 0 && ['button', 'input', 'select', 'textarea'].includes(node.tag))
     expect(controls.length).toBeGreaterThan(0)
-    for (const control of controls) expect(control).toMatch(/\sdisabled(?:\s|=|\/?>)/i)
+    for (const control of controls) expect(control.attrs.has('disabled')).toBe(true)
     expect(markup).not.toMatch(/<form\b/i)
   })
 })

@@ -103,6 +103,17 @@ const DEFAULT_LEASE_MS = 30_000
 const MIN_LEASE_MS = 50
 const MAX_LEASE_MS = 3_600_000
 
+/** Sampled only after the caller's transaction has been admitted. An injected test clock stays explicit. */
+const admittedLeaseClock = (
+  injected: Date | undefined,
+): { now: string; expiresAt: (leaseDurationMs: number) => string } => {
+  const date = injected ?? new Date()
+  return {
+    now: date.toISOString(),
+    expiresAt: (leaseDurationMs: number) => new Date(date.getTime() + leaseDurationMs).toISOString(),
+  }
+}
+
 const assertGenericJob = (job: Pick<JobRecord, 'kind'>): void => {
   if (job.kind === 'host.reconcile') fail('PRECONDITION_FAILED', 'host.reconcile requires the dedicated verified operation repository')
 }
@@ -462,9 +473,6 @@ export const acquireJobLease = (
       input.leaseDurationMs === undefined
         ? DEFAULT_LEASE_MS
         : assertInt(input.leaseDurationMs, MIN_LEASE_MS, MAX_LEASE_MS, 'leaseDurationMs')
-    const nowDate = input.now ?? new Date()
-    const now = nowDate.toISOString()
-    const expiresAt = new Date(nowDate.getTime() + leaseDurationMs).toISOString()
 
     const outcome = await db.transaction(
       async (
@@ -475,6 +483,8 @@ export const acquireJobLease = (
         | { kind: 'cancelled_before_lease'; id: Id }
         | { kind: 'exhausted'; id: Id; message: string; attempt: number; maxAttempts: number }
       > => {
+        const { now, expiresAt } = admittedLeaseClock(input.now)
+        const leaseExpiry = expiresAt(leaseDurationMs)
         let targetJobId: Id | null = null
 
         if (input.jobId !== undefined) {
@@ -582,7 +592,7 @@ export const acquireJobLease = (
                attempt = $4,
                updated_at = $5
            WHERE job_id = $6`,
-          [workerId, nextFencingToken, expiresAt, nextAttempt, now, targetJobId],
+          [workerId, nextFencingToken, leaseExpiry, nextAttempt, now, targetJobId],
         )
 
         return {
@@ -669,15 +679,13 @@ export const renewJobLease = (
       input.leaseDurationMs === undefined
         ? DEFAULT_LEASE_MS
         : assertInt(input.leaseDurationMs, MIN_LEASE_MS, MAX_LEASE_MS, 'leaseDurationMs')
-    const nowDate = input.now ?? new Date()
-    const now = nowDate.toISOString()
-    const expiresAt = new Date(nowDate.getTime() + leaseDurationMs).toISOString()
 
     return db.transaction(async (tx) => {
+      const { now, expiresAt } = admittedLeaseClock(input.now)
       await assertActiveLeaseOwnerTx(tx, jobId, workerId, fencingToken, now)
       await tx.query(
         `UPDATE job_runtime_leases SET lease_expires_at = $1, updated_at = $2 WHERE job_id = $3 AND fencing_token = $4`,
-        [expiresAt, now, jobId, fencingToken],
+        [expiresAt(leaseDurationMs), now, jobId, fencingToken],
       )
       await tx.query(`UPDATE jobs SET updated_at = $1 WHERE id = $2`, [now, jobId])
       return mustExist(await queryDurableJobTx(tx, jobId), 'job', jobId)
@@ -709,9 +717,9 @@ export const saveJobCheckpoint = (
     const workerId = assertLine(input.workerId, 128, 'workerId', { allowEmpty: false })
     const fencingToken = assertInt(input.fencingToken, 1, 1_000_000_000, 'fencingToken')
     const step = assertLine(input.step, 128, 'step', { allowEmpty: false })
-    const now = (input.now ?? new Date()).toISOString()
 
     return db.transaction(async (tx) => {
+      const now = admittedLeaseClock(input.now).now
       const current = await assertActiveLeaseOwnerTx(tx, jobId, workerId, fencingToken, now)
       const pct =
         input.progress === undefined
@@ -773,9 +781,9 @@ export const requestJobCancellation = (
     const jobId = assertId(input.jobId, 'jobId')
     const actor = assertLine(input.actor, 255, 'actor', { allowEmpty: false })
     const reason = input.reason !== undefined ? assertLine(input.reason, 512, 'reason') : `cancelled by ${actor}`
-    const now = (input.now ?? new Date()).toISOString()
 
     return db.transaction(async (tx) => {
+      const now = admittedLeaseClock(input.now).now
       const current = mustExist(await queryDurableJobTx(tx, jobId), 'job', jobId)
       assertGenericJob(current)
       if (current.referenceCode === null && current.status === 'running') fail('PRECONDITION_FAILED', 'unnumbered running legacy job requires review before cancellation')
@@ -844,9 +852,9 @@ export const completeJobWithLease = (
     const status = oneOf(input.status, ['succeeded', 'failed', 'cancelled'] as const, 'status')
     const failureClass =
       input.failureClass == null ? null : oneOf(input.failureClass, FAILURE_CLASSES, 'failureClass')
-    const now = (input.now ?? new Date()).toISOString()
 
     return db.transaction(async (tx) => {
+      const now = admittedLeaseClock(input.now).now
       const current = await assertActiveLeaseOwnerTx(tx, jobId, workerId, fencingToken, now)
       const error = input.error ?? null
       if (status === 'failed' && (typeof error !== 'string' || error.length === 0)) {
@@ -942,9 +950,14 @@ export const executeLeasedJobStep = async <T>(
   },
 ): Promise<{ skipped: boolean; cancelled: boolean; result?: T; job: DurableJobRecord }> => {
   await requireOperationalIdentity(db)
-  const now = (opts.now ?? new Date()).toISOString()
   const precheck = await db.transaction(async (tx) =>
-    assertActiveLeaseOwnerTx(tx, assertId(opts.jobId, 'jobId'), opts.workerId, opts.fencingToken, now),
+    assertActiveLeaseOwnerTx(
+      tx,
+      assertId(opts.jobId, 'jobId'),
+      opts.workerId,
+      opts.fencingToken,
+      admittedLeaseClock(opts.now).now,
+    ),
   )
 
   if (precheck.cancelRequested) {

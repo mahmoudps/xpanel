@@ -102,6 +102,11 @@ export interface ReconcileJournalRecord {
   diff: ManifestDiff
   previousFilesBackup: PreviousFileBackup[]
   completedPreActions: number
+  /** Optional for older journals. Intent is durable before a host prerequisite runs. */
+  preActionPlanSha256?: string
+  pendingPreAction?: { index: number; kind: HostAction['kind']; sha256: string }
+  /** File rollback cannot establish that users, groups, directories or quotas were restored. */
+  preActionsNeedVerification?: boolean
   switchedFilePaths: string[]
   removedFilePaths: string[]
   stoppedObsoleteUnits: string[]
@@ -113,6 +118,36 @@ export interface ReconcileJournalRecord {
 
 export const sha256Text = (content: string): string =>
   createHash('sha256').update(content, 'utf8').digest('hex')
+
+/** Old journals did not classify prerequisite effects, including after live activation. */
+export const hasUnverifiedPreActions = (record: ReconcileJournalRecord): boolean =>
+  record.preActionsNeedVerification === true || record.pendingPreAction !== undefined
+  || (record.preActionsNeedVerification === undefined && record.completedPreActions > 0 && record.phase !== 'committed')
+
+/** Persist the action identity before invocation; a thrown action may already have changed the host. */
+export const runJournaledPreActions = async (
+  record: ReconcileJournalRecord,
+  actions: readonly HostAction[],
+  executor: Pick<AgentExecutor, 'runAction'>,
+  save: (record: ReconcileJournalRecord) => Promise<void>,
+  trackHostEffects: boolean,
+): Promise<void> => {
+  if (trackHostEffects) record.preActionPlanSha256 = sha256Text(JSON.stringify(actions))
+  else record.preActionsNeedVerification = false
+  for (const [index, action] of actions.entries()) {
+    if (trackHostEffects) {
+      record.preActionsNeedVerification = true
+      record.pendingPreAction = { index, kind: action.kind, sha256: sha256Text(JSON.stringify(action)) }
+      await save(record)
+    }
+    await executor.runAction(action)
+    record.completedPreActions++
+    if (trackHostEffects) {
+      delete record.pendingPreAction
+      await save(record)
+    }
+  }
+}
 
 /**
  * Computes a deterministic SHA-256 checksum over rendered files including path, mode,
@@ -183,7 +218,7 @@ const inferFileServiceAndOwner = (
   if (path.includes('/postfix/')) {
     return { service: 'postfix', logicalOwner: 'server:postfix', dependentUnits: [os.services.postfix] }
   }
-  if (path.endsWith('.zone')) {
+  if (path.endsWith('.zone') || path === '/etc/powerdns/named.conf.xpanel-zones') {
     return { service: 'powerdns', logicalOwner: `dns:${path}`, dependentUnits: ['pdns.service'] }
   }
   if (path.includes('xpanel-cron-')) {
@@ -421,11 +456,124 @@ const encodeStageFilename = (hostPath: string): string =>
  * Persists manifests, previous file backups (bytes + mode + owner + group), and phase transitions
  * so any mid-flight failure or process crash can be deterministically rolled back or recovered.
  */
+interface HostPreparationEffect {
+  kind: string
+  target: string
+  status: 'pending' | 'acknowledged'
+}
+
+interface HostPreparationRecord {
+  schemaVersion: 1
+  id: string
+  operation: 'opendkim'
+  actor: string
+  stateChecksum: string
+  domainsSha256: string
+  phase: 'running' | 'acknowledged' | 'needs_attention'
+  startedAt: string
+  effects: HostPreparationEffect[]
+}
+
 export class ReconcilerJournal {
   readonly baseDir: string
 
   constructor(stateRootDir: string) {
     this.baseDir = join(stateRootDir, 'generations')
+  }
+
+  private get activePreparationPath(): string {
+    return join(this.baseDir, 'journal', 'active-preparation.json')
+  }
+
+  /** Caller holds the generation lease. Interrupted preparation is never replayed. */
+  async assertNoUnresolvedPreparation(): Promise<void> {
+    let record: HostPreparationRecord
+    try { record = JSON.parse(await readFile(this.activePreparationPath, 'utf8')) as HostPreparationRecord }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
+    if (!record || record.schemaVersion !== 1 || record.phase !== 'acknowledged'
+      || !Array.isArray(record.effects) || record.effects.some(effect => effect.status !== 'acknowledged')) {
+      fail('PRECONDITION_FAILED', 'host preparation requires operator verification before reconciliation', {
+        stateChanged: true, verificationRequired: true,
+      })
+    }
+  }
+
+  /** Persist directory entries from the existing state root down to the journal.
+   * Syncing only the leaf does not durably publish a newly created directory.
+   * Re-sync existing links too: a previous attempt may have failed after mkdir.
+   */
+  private async prepareJournalDirectoryDurably(): Promise<void> {
+    for (const directory of [this.baseDir, dirname(this.activePreparationPath)]) {
+      try { await mkdir(directory) }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+      await claimStateOwnership(directory)
+      await fsyncDir(dirname(directory))
+    }
+  }
+  async runHostPreparation<T>(
+    input: { operation: 'opendkim'; actor: string; stateChecksum: string; domainsSha256: string },
+    executor: AgentExecutor,
+    prepare: (guarded: AgentExecutor) => Promise<T>,
+  ): Promise<T> {
+    await this.assertNoUnresolvedPreparation()
+    await this.prepareJournalDirectoryDurably()
+    const record: HostPreparationRecord = {
+      schemaVersion: 1, id: randomUUID(), ...input,
+      phase: 'running', startedAt: new Date().toISOString(), effects: [],
+    }
+    const save = async (): Promise<void> => {
+      await fsyncWriteJson(join(this.baseDir, 'journal', `preparation-${record.id}.json`), record)
+      await fsyncWriteJson(this.activePreparationPath, record)
+    }
+    // Acknowledged active intent precedes even the first directory or group change.
+    await save()
+    let poisoned = false
+    const effect = async (kind: string, target: string, apply: () => Promise<void>): Promise<void> => {
+      if (poisoned) fail('PRECONDITION_FAILED', 'host preparation has an unresolved effect')
+      const entry: HostPreparationEffect = { kind, target, status: 'pending' }
+      record.effects.push(entry)
+      try {
+        await save()
+        await apply()
+        entry.status = 'acknowledged'
+        await save()
+      } catch (error) {
+        poisoned = true
+        throw error
+      }
+    }
+    const guarded = new Proxy(executor, {
+      get(target, property) {
+        if (property === 'writeFile') return (file: RenderedFile) => effect('write-file', file.path, () => target.writeFile(file))
+        if (property === 'runAction') return (action: HostAction) => effect(
+          action.kind,
+          'path' in action ? String(action.path) : 'unit' in action ? String(action.unit) : action.kind === 'exec' ? action.argv[0] ?? 'exec' : action.kind,
+          () => target.runAction(action),
+        )
+        if (property === 'removePath') return (path: string) => effect('remove-path', path, () => target.removePath(path))
+        const value = Reflect.get(target, property)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    try {
+      const result = await prepare(guarded)
+      // Optional-mail catches inside the helper cannot erase an uncertain effect.
+      if (poisoned) fail('PRECONDITION_FAILED', 'host preparation contains an unresolved effect')
+      record.phase = 'acknowledged'
+      await save()
+      // Retain the durable acknowledgement: unlink failure must not lose recovery authority.
+      return result
+    } catch {
+      record.phase = 'needs_attention'
+      // Never persist helper errors: they can include private file contents.
+      await save()
+      return fail('PRECONDITION_FAILED', 'host preparation outcome requires operator verification', {
+        stateChanged: record.effects.length > 0, verificationRequired: true,
+      })
+    }
   }
 
   private get activeJournalPath(): string {

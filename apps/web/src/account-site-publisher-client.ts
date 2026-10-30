@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues, Locale } from './i18n.ts'
@@ -59,6 +63,8 @@ function bindAccountSitePublisher(askDialog: ((options: Record<string, unknown>)
     const status = find('status'), files = find('files'), path = find('path'), recovery = find('recovery'), created = find('created'), previewNote = find('preview-note'), frame = find<HTMLIFrameElement>('frame')
     const refresh = find<HTMLButtonElement>('refresh'), preview = find<HTMLButtonElement>('preview'), publish = find<HTMLButtonElement>('publish'), rollback = find<HTMLButtonElement>('rollback')
     if (![domain, template, lang, title, message, email, phone, status, files, path, recovery, created, previewNote, frame, refresh, preview, publish, rollback].every(Boolean)) return
+    const rowTemplate = clientTemplate(root, 'publisher-file'), emptyTemplate = clientTemplate(root, 'publisher-empty')
+    cloneClientTemplate(rowTemplate, 'tr', ['name', 'state', 'size']); cloneClientTemplate(emptyTemplate, 'tr', ['message'])
     const eligible = (): boolean => root.isConnected && root.dataset.sitepubManage === 'true' && !root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
     const drafts = [template, lang, title, message, email, phone]
     let view: SitePublisherView | null = null, busy = false, confirming = false, review = false, previewed: { signature: string; hash: string } | null = null
@@ -82,10 +88,10 @@ function bindAccountSitePublisher(askDialog: ((options: Record<string, unknown>)
       if (view?.recovery.createdAt) { const time = document.createElement('time'); time.dateTime = view.recovery.createdAt; time.textContent = formatDisplayDateTime(view.recovery.createdAt); created.append(time) }
       else created.textContent = t('Not available')
       files.textContent = ''
-      if (!view) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 3; cell.textContent = t('The current index files have not been read.'); row.append(cell); files.append(row) }
+      if (!view) { const row = cloneClientTemplate(emptyTemplate, 'tr', ['message']); clientTemplateSlot(row, 'message', 'td').textContent = t('The current index files have not been read.'); files.append(row) }
       for (const file of view?.files ?? []) {
-        const row = document.createElement('tr')
-        for (const [text, technical] of [[file.name, true], [file.exists ? t('Present') : t('Absent'), false], [String(file.sizeBytes), true]] as const) { const cell = document.createElement('td'), content = document.createElement(technical ? 'bdi' : 'span'); if (technical) content.dir = 'ltr'; content.textContent = text; cell.append(content); row.append(cell) }
+        const row = cloneClientTemplate(rowTemplate, 'tr', ['name', 'state', 'size'])
+        for (const [slot, text] of [['name', file.name], ['state', file.exists ? t('Present') : t('Absent')], ['size', String(file.sizeBytes)]] as const) clientTemplateSlot(row, slot).textContent = text
         files.append(row)
       }
       if (view && !view.capabilities.canPublish && status.dataset.state === 'read') note('read', t('Current files were read. Preview is available; publishing requires verified complete-site backup and recovery.'))
@@ -142,4 +148,4 @@ function bindAccountSitePublisher(askDialog: ((options: Record<string, unknown>)
   })
 }
 
-export const ACCOUNT_SITE_PUBLISHER_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const SITEPUB_ID=${SITEPUB_ID.toString()};const SITEPUB_HASH=${SITEPUB_HASH.toString()};const SITEPUB_NAMES=${JSON.stringify(SITEPUB_NAMES)};const sitepubObject=${sitepubObject.toString()};const sitepubExact=${sitepubExact.toString()};const sitepubText=${sitepubText.toString()};const sitepubTime=${sitepubTime.toString()};const readSitePublisherView=${readSitePublisherView.toString()};const readSitePublisherPreview=${readSitePublisherPreview.toString()};const sitePublisherUncertain=${sitePublisherUncertain.toString()};return ${bindAccountSitePublisher.toString()};})()`
+export const ACCOUNT_SITE_PUBLISHER_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const SITEPUB_ID=${SITEPUB_ID.toString()};const SITEPUB_HASH=${SITEPUB_HASH.toString()};const SITEPUB_NAMES=${JSON.stringify(SITEPUB_NAMES)};const sitepubObject=${sitepubObject.toString()};const sitepubExact=${sitepubExact.toString()};const sitepubText=${sitepubText.toString()};const sitepubTime=${sitepubTime.toString()};const readSitePublisherView=${readSitePublisherView.toString()};const readSitePublisherPreview=${readSitePublisherPreview.toString()};const sitePublisherUncertain=${sitePublisherUncertain.toString()};return ${bindAccountSitePublisher.toString()};})()`

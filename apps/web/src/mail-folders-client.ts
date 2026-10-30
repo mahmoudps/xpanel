@@ -1,6 +1,10 @@
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
+import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
+const mailTemplate = canonicalMailTemplate
+const mailSlot = canonicalMailSlot
+const mailRequireTemplates = canonicalMailRequireTemplates
 import './i18n.ts'
 const formatMailDateTime = formatDisplayDateTime
 
@@ -56,16 +60,18 @@ function bindMailFolders(): void {
     const nameInput = create?.elements.namedItem('name') as HTMLInputElement | null, parentSelect = create?.elements.namedItem('parent') as HTMLSelectElement | null
     const renameInput = editor?.elements.namedItem('rename') as HTMLInputElement | null, confirmBox = editor?.elements.namedItem('confirm') as HTMLInputElement | null
     if (!status || !rows || !create || !editor || !nameInput || !parentSelect || !renameInput || !confirmBox) return
+    try { mailRequireTemplates(root, [['mail-folder-admin-row', 'tr', ['tree', 'name', 'system', 'raw', 'messages', 'unseen', 'subscription', 'unknown', 'protected', 'actions']], ['mail-folder-admin-action', 'button', ['label']], ['mail-folder-admin-empty', 'tr', ['message']]]) }
+    catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Folder management is unavailable for this mailbox session. Nothing was read.'); return }
     const admitted = (): boolean => root.isConnected && root.dataset.foldersCanManage === 'true' && root.dataset.foldersMailbox === mailbox && !!mailbox && !root.closest(denied) && !!send
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const fact = (key: string, value: string): void => { const node = root.querySelector<HTMLElement>('[data-mail-folders-fact="' + key + '"]'); if (node) node.textContent = value }
     let busy = false, generation = 0, view: MailFolderList | null = null, editing: { mode: 'rename' | 'delete'; folder: MailFolderRow } | null = null
     const sync = (): void => {
       const blocked = !admitted() || busy
-      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = blocked || (control.matches('[data-mail-folders-subscribe]') && !view?.subscriptionsObserved) })
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = blocked || (control.matches('[data-mail-folders-subscribe]') && (!view?.subscriptionsObserved || Boolean(control.hidden))) })
       root.setAttribute('aria-busy', String(busy))
     }
-    const empty = (message: string): void => { rows.textContent = ''; const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 5; cell.textContent = message; row.append(cell); rows.append(row) }
+    const empty = (message: string): void => { const row = mailTemplate(root, 'mail-folder-admin-empty', 'tr', ['message']); mailSlot(row, 'message').textContent = message; rows.replaceChildren(row) }
     const openEditor = (mode: 'rename' | 'delete', folder: MailFolderRow): void => {
       if (!admitted()) return
       editing = { mode, folder }
@@ -92,31 +98,28 @@ function bindMailFolders(): void {
       parentSelect.value = view.folders.some(folder => folder.folder === selected) ? selected : ''
       rows.textContent = ''
       for (const folder of view.folders) {
-        const row = document.createElement('tr'), cell = (): HTMLTableCellElement => { const td = document.createElement('td'); row.append(td); return td }
-        const name = document.createElement('div'); name.className = 'xp-mail-folders__name'; name.style.paddingInlineStart = folder.depth * 16 + 'px'
-        const label = document.createElement('strong'); label.append(bdi(folder.leaf)); name.append(label)
-        if (folder.system) { const tag = document.createElement('span'); tag.className = 'xp-help'; tag.textContent = folder.specialUse ? special[folder.specialUse]! : t('System folder'); name.append(tag) }
-        if (!folder.nameDecoded) { const raw = document.createElement('span'); raw.className = 'xp-help'; raw.textContent = t('Name shown as stored by the server'); name.append(raw) }
-        cell().append(name)
-        cell().append(bdi(folder.messages === null ? t('Not read') : String(folder.messages), 'ltr'))
-        cell().append(bdi(folder.unseen === null ? t('Not read') : String(folder.unseen), 'ltr'))
-        const shown = cell()
-        if (folder.subscribed === null) shown.textContent = t('Unknown')
-        else {
-          const box = document.createElement('input'); box.type = 'checkbox'; box.checked = folder.subscribed; box.dataset.mailFoldersSubscribe = ''
+        const row = mailTemplate(root, 'mail-folder-admin-row', 'tr', ['tree', 'name', 'system', 'raw', 'messages', 'unseen', 'subscription', 'unknown', 'protected', 'actions'])
+        mailSlot(row, 'tree').style.setProperty('--mail-folder-depth', String(Math.max(0, Math.min(64, folder.depth))))
+        mailSlot(row, 'name', 'bdi').textContent = folder.leaf
+        const tag = mailSlot(row, 'system'), raw = mailSlot(row, 'raw')
+        tag.hidden = !folder.system; tag.textContent = folder.specialUse ? special[folder.specialUse]! : t('System folder')
+        raw.hidden = folder.nameDecoded; raw.textContent = t('Name shown as stored by the server')
+        mailSlot(row, 'messages', 'bdi').textContent = folder.messages === null ? t('Not read') : String(folder.messages)
+        mailSlot(row, 'unseen', 'bdi').textContent = folder.unseen === null ? t('Not read') : String(folder.unseen)
+        const box = mailSlot<HTMLInputElement>(row, 'subscription', 'input'), unknown = mailSlot(row, 'unknown')
+        box.hidden = folder.subscribed === null; unknown.hidden = folder.subscribed !== null; unknown.textContent = t('Unknown')
+        if (folder.subscribed !== null) {
+          box.checked = folder.subscribed
           box.setAttribute('aria-label', t('Show {folder} in mail apps', { folder: folder.name }))
           box.addEventListener('change', () => { const subscribed = box.checked; box.checked = !subscribed; void mutate('/api/webmail/folders/subscription', { folder: folder.folder, subscribed }, subscribed ? t('The folder is shown in mail apps.') : t('The folder is hidden from mail apps.')) })
-          shown.append(box)
         }
-        const actions = cell()
-        if (folder.system) actions.textContent = t('Protected')
-        else {
-          const wrap = document.createElement('div'); wrap.className = 'xp-mail-folders__row-actions'
+        const actions = mailSlot(row, 'actions'), protectedLabel = mailSlot(row, 'protected')
+        actions.hidden = folder.system; protectedLabel.hidden = !folder.system; protectedLabel.textContent = t('Protected')
+        if (!folder.system) {
           for (const [mode, text] of [['rename', t(msgctxt('mail-folders-client', 'Rename'))], ['delete', t('Delete')]] as const) {
-            const button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.textContent = text
-            button.setAttribute('aria-label', text + ' ' + folder.name); button.addEventListener('click', () => openEditor(mode, folder)); wrap.append(button)
+            const button = mailTemplate(root, 'mail-folder-admin-action', 'button', ['label']) as HTMLButtonElement; mailSlot(button, 'label').textContent = text
+            button.setAttribute('aria-label', text + ' ' + folder.name); button.addEventListener('click', () => openEditor(mode, folder)); actions.append(button)
           }
-          actions.append(wrap)
         }
         rows.append(row)
       }
@@ -200,4 +203,4 @@ function bindMailFolders(): void {
   })
 }
 
-export const MAIL_FOLDERS_CLIENT_BINDING = `(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailFolderList=${readMailFolderList.toString()};const readMailFolderChange=${readMailFolderChange.toString()};return ${bindMailFolders.toString()};})()`
+export const MAIL_FOLDERS_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailFolderList=${readMailFolderList.toString()};const readMailFolderChange=${readMailFolderChange.toString()};return ${bindMailFolders.toString()};})()`

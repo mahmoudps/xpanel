@@ -278,6 +278,21 @@ export class StateStore {
     this.writerLock = new WriterLock(rootDir, lockOptions)
   }
 
+  /** Register before startup/request barriers; callbacks must not reenter state operations. */
+  registerAccountContactIndexRecovery(repair: (account: Account & { suspendedAt: string | null }) => Promise<void>): void {
+    this.writerLock.registerAccountContactProjectionRecovery(async recovery => {
+      const current = validateAccountFile(await readJsonIfExists(this.path(recovery.relPath)))
+      if (current.id !== recovery.accountId || current.username !== recovery.username) return fail('CONFLICT', 'contact projection source identity changed; recovery evidence retained')
+      await repair({ ...toPublicAccount(current), suspendedAt: current.suspendedAt })
+    })
+  }
+
+  /** Bounded SQL projection reads only: retain recovery exclusion until the read settles. */
+  withRecoveredAccountProjection<T>(read: () => Promise<T>): Promise<T> {
+    this.assertNotReentrant()
+    return this.mutex.run(() => this.runOperation(() => this.writerLock.readUnderRecoveryLock(read)))
+  }
+
   setHooks(hooks: StateStoreHooks): void {
     this.hooks = hooks
   }

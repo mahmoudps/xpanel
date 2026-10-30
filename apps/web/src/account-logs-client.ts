@@ -1,3 +1,9 @@
+import { VIEW_RECORD_HELPERS, cloneViewRecord as canonicalCloneViewRecord } from './workspace-view-templates.ts'
+import { clientTemplate as canonicalClientTemplate, cloneClientTemplate as canonicalCloneClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot } from './client-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const clientTemplate = canonicalClientTemplate
+const cloneClientTemplate = canonicalCloneClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
@@ -58,21 +64,33 @@ function bindAccountLogs(_askDialog: unknown): void {
     let view: AccountLogsClientView | null = null, busy = false, generation = 0
     const note = (state: string, message: string): void => { statusMessage.dataset.state = state; statusMessage.textContent = message; statusMessage.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const lock = (): void => { const blocked = !eligible() || busy || !domain.value || !kinds.includes(kind.value); read.disabled = blocked; domain.disabled = !eligible() || busy; kind.disabled = !eligible() || busy; for (const control of [statusFilter, levelFilter, text]) control.disabled = !eligible() || !view; root.setAttribute('aria-busy', String(busy)) }
-    const header = (labels: string[]): void => { head.textContent = ''; const row = document.createElement('tr'); for (const label of labels) { const th = document.createElement('th'); th.scope = 'col'; th.textContent = label; row.append(th) }; head.append(row) }
+    try {
+      for (const [name, tag, slots] of [
+        ['account-logs-access', 'tr', ['time', 'status', 'request', 'client', 'bytes', 'referer', 'agent']],
+        ['account-logs-error', 'tr', ['time', 'level', 'message']],
+        ['account-logs-access-head', 'tr', []], ['account-logs-error-head', 'tr', []],
+        ['account-logs-empty-access', 'tr', ['message']], ['account-logs-empty-error', 'tr', ['message']],
+        ['account-logs-stamp', 'bdi', ['value']],
+      ] as const) cloneClientTemplate(clientTemplate(root, name), tag, slots)
+    } catch {
+      for (const control of root.querySelectorAll<HTMLButtonElement | HTMLSelectElement | HTMLInputElement>('button,select,input')) control.disabled = true
+      note('unavailable', t('Site logs are unavailable here. Nothing was read.')); return
+    }
+    const header = (access: boolean): void => { head.replaceChildren(cloneClientTemplate(clientTemplate(root, access ? 'account-logs-access-head' : 'account-logs-error-head'), 'tr', [])) }
     const paint = (): void => {
       rows.textContent = ''
       if (!view) return
       const access = view.kind === 'access', shown = filterAccountLogEntries(view, { status: statusFilter.value, level: levelFilter.value, text: text.value })
       statusFilter.closest<HTMLElement>('[data-logs-field]')!.hidden = !access; levelFilter.closest<HTMLElement>('[data-logs-field]')!.hidden = access
-      header(access ? [t('Time'), t('Status'), t('Request'), t('Client'), t('Bytes'), t('Referrer'), t('User agent')] : [t('Time'), t('Level'), t('Message')])
+      header(access)
       for (const entry of shown) {
-        const row = document.createElement('tr')
         const accessTime = 'status' in entry ? formatDisplayDateTime(entry.time) : null
-        const cells = 'status' in entry ? [accessTime === '—' ? entry.time : accessTime!, String(entry.status), entry.method + ' ' + entry.host + entry.uri, entry.ip, String(entry.bytes), entry.referer || '-', entry.agent || '-'] : [entry.time ?? '-', entry.level ?? '-', entry.message]
-        for (const value of cells) { const td = document.createElement('td'), bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.className = 'xp-mono'; bdi.textContent = value; td.append(bdi); row.append(td) }
-        rows.append(row)
+        const values: Record<string, string> = 'status' in entry
+          ? { time: accessTime === '—' ? entry.time : accessTime!, status: String(entry.status), request: entry.method + ' ' + entry.host + entry.uri, client: entry.ip, bytes: String(entry.bytes), referer: entry.referer || '-', agent: entry.agent || '-' }
+          : { time: entry.time ?? '-', level: entry.level ?? '-', message: entry.message }
+        rows.append(cloneViewRecord(root, access ? 'account-logs-access' : 'account-logs-error', 'tr', values))
       }
-      if (!shown.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = access ? 7 : 3; td.textContent = view.entries.length ? t('No entries match the filters.') : view.exists ? t('The log is empty.') : t('The site has not written this log yet.'); row.append(td); rows.append(row) }
+      if (!shown.length) rows.replaceChildren(cloneViewRecord(root, access ? 'account-logs-empty-access' : 'account-logs-empty-error', 'tr', { message: view.entries.length ? t('No entries match the filters.') : view.exists ? t('The log is empty.') : t('The site has not written this log yet.') }))
       summary.textContent = t('Showing {shown} / {total} entries of the site {site}', { shown: shown.length, total: view.entries.length, site: view.site }) + (view.truncated ? ' · ' + t('older lines are not included') : '') + (view.unparsedLines ? ' · ' + t('{count} lines could not be parsed', { count: view.unparsedLines }) : '')
     }
     async function load(): Promise<void> {
@@ -83,7 +101,7 @@ function bindAccountLogs(_askDialog: unknown): void {
       try {
         const next = readAccountLogsView(await send('GET', '/api/account/logs/' + encodeURIComponent(domainId) + '/' + selected), accountId, domainId, selected)
         if (ticket !== generation) return
-        view = next; paint(); const [before, after] = t('Log read at {time}.').split('{time}'); note('read', before ?? ''); const observed = document.createElement('bdi'); observed.dir = 'ltr'; observed.textContent = formatDisplayDateTime(next.observedAt); statusMessage.append(observed, after ?? '')
+        view = next; paint(); const [before, after] = t('Log read at {time}.').split('{time}'); note('read', before ?? ''); const observed = cloneViewRecord(root, 'account-logs-stamp', 'bdi', { value: formatDisplayDateTime(next.observedAt) }); statusMessage.append(observed, after ?? '')
       } catch { if (ticket === generation) note('failed', t('The log could not be read. Nothing was changed.')) }
       finally { if (ticket === generation) { busy = false; lock() } }
     }
@@ -99,4 +117,4 @@ function bindAccountLogs(_askDialog: unknown): void {
   })
 }
 
-export const ACCOUNT_LOGS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const LOGS_ID=${LOGS_ID.toString()};const LOG_LEVELS=${JSON.stringify(LOG_LEVELS)};const logsObject=${logsObject.toString()};const logsText=${logsText.toString()};const readAccountLogsView=${readAccountLogsView.toString()};const filterAccountLogEntries=${filterAccountLogEntries.toString()};return ${bindAccountLogs.toString()};})()`
+export const ACCOUNT_LOGS_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const LOGS_ID=${LOGS_ID.toString()};const LOG_LEVELS=${JSON.stringify(LOG_LEVELS)};const logsObject=${logsObject.toString()};const logsText=${logsText.toString()};const readAccountLogsView=${readAccountLogsView.toString()};const filterAccountLogEntries=${filterAccountLogEntries.toString()};return ${bindAccountLogs.toString()};})()`

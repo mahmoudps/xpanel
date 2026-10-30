@@ -1,3 +1,9 @@
+import { VIEW_RECORD_HELPERS, cloneViewRecord as canonicalCloneViewRecord } from './workspace-view-templates.ts'
+import { clientTemplate as canonicalClientTemplate, cloneClientTemplate as canonicalCloneClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot } from './client-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const clientTemplate = canonicalClientTemplate
+const cloneClientTemplate = canonicalCloneClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -73,8 +79,20 @@ function bindAccountTeam(askDialog: ((options: Record<string, unknown>) => Promi
     const admitted = (): boolean => root.isConnected && root.dataset.teamCanManage === 'true' && !root.closest(denied) && form.tagName === 'FORM' && typeof request === 'function'
     const controls = [...Object.values(inputs), ...roles]
     let view: AccountTeamView | null = null, editing: AccountTeamMember | null = null, busy = false
-    const element = <K extends keyof HTMLElementTagNameMap>(tag: K, content?: string, ltr = false): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); if (content !== undefined) node.textContent = content; if (ltr) node.setAttribute('dir', 'ltr'); return node }
+
     const note = (target: HTMLElement, state: string, message: string): void => { target.hidden = false; target.dataset.state = state; target.textContent = message; target.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
+    try {
+      for (const [name, tag, slots] of [
+        ['acct-team-member', 'tr', ['username', 'roles', 'email', 'phase', 'reason', 'signin', 'expires', 'actions']],
+        ['acct-team-empty', 'tr', ['message']], ['acct-team-signin', 'div', ['password', 'times']],
+        ['acct-team-signin-time', 'span', ['label', 'stamp']], ['acct-team-value', 'bdi', ['value']],
+        ['acct-team-action', 'button', ['label']], ['acct-team-delete', 'button', ['label']],
+      ] as const) cloneClientTemplate(clientTemplate(root, name), tag, slots)
+    } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,button,select').forEach(control => { control.disabled = true })
+      note(status, 'unavailable', t('The team cannot be read from this page.')); return
+    }
+    const value = (content: string): HTMLElement => cloneViewRecord(root, 'acct-team-value', 'bdi', { value: content })
     const roleLabel = (role: AccountTeamRole): string => role === 'administrator' ? t('Administrator') : role === 'database' ? t('Database') : role === 'email' ? t('Email') : t('Web')
     const phaseLabel = (phase: AccountTeamMember['phase']): string => phase === 'suspended' ? t('Suspended') : phase === 'expired' ? t('Expired') : t('Active')
     const lock = (locked: boolean): void => {
@@ -120,38 +138,39 @@ function bindAccountTeam(askDialog: ((options: Record<string, unknown>) => Promi
         : t('Team members cannot sign in yet: this server has no team sign-in identity. Members and roles you save here are kept, and nobody gains access from them. No password is asked for or stored.')
     }
     const signInCell = (member: AccountTeamMember): Node[] => {
-      const lines: Node[] = [element('span', member.signIn.password === 'set' ? t('Password set') : t('No password yet'))]
-      const line = (label: string, stamp: string): void => { const node = element('span'); node.append(label + ' ', element('bdi', formatDisplayDateTime(stamp), true)); lines.push(node) }
+      const box = cloneViewRecord(root, 'acct-team-signin', 'div', { password: member.signIn.password === 'set' ? t('Password set') : t('No password yet'), times: '' })
+      const line = (label: string, stamp: string): void => { clientTemplateSlot(box, 'times').append(cloneViewRecord(root, 'acct-team-signin-time', 'span', { label, stamp: formatDisplayDateTime(stamp) })) }
       if (member.signIn.linkExpiresAt) line(t('Link valid until'), member.signIn.linkExpiresAt)
       if (member.signIn.lastLoginAt) line(t('Last sign-in'), member.signIn.lastLoginAt)
-      const box = element('div'); box.className = 'xp-acct-team__signin'; box.append(...lines)
       return [box]
     }
     const paint = (next: AccountTeamView): void => {
       view = next
       paintSignIn(next)
       domain.textContent = '@' + next.account.primaryDomain
-      usage.replaceChildren(element('bdi', `${next.limits.roleHoldersUsed} / ${next.limits.roleHolders}`, true))
+      usage.replaceChildren(value(`${next.limits.roleHoldersUsed} / ${next.limits.roleHolders}`))
       rows.replaceChildren(...next.members.map(member => {
-        const row = element('tr'), cell = (...nodes: (Node | string)[]): HTMLTableCellElement => { const node = element('td'); node.append(...nodes); row.append(node); return node }
-        cell(element('bdi', member.username + '@' + next.account.primaryDomain, true))
-        cell(member.roles.length ? member.roles.map(roleLabel).join(', ') : t('No role'))
-        cell(element('bdi', member.contactEmail, true))
-        const chip = element('span', phaseLabel(member.phase)); chip.dataset.stateChip = member.phase === 'active' ? 'ok' : 'unavailable'
-        cell(chip, ...(member.suspendReason ? [' ', element('bdi', member.suspendReason)] : []))
-        cell(...(next.signIn.available ? signInCell(member) : [t('Unavailable')]))
-        cell(member.expiresAt ? element('bdi', formatDisplayDateTime(member.expiresAt), true) : t('Never'))
-        const actions = element('div'); actions.className = 'xp-acct-tool__actions'
-        const button = (action: string, label: string, accessible: string): HTMLButtonElement => { const node = element('button', label); node.type = 'button'; node.className = 'xp-btn'; node.dataset.action = action; node.setAttribute('aria-label', accessible); node.addEventListener('click', () => void act(action, member)); actions.append(node); return node }
+        const row = cloneViewRecord(root, 'acct-team-member', 'tr', {
+          username: member.username + '@' + next.account.primaryDomain, roles: member.roles.length ? member.roles.map(roleLabel).join(', ') : t('No role'),
+          email: member.contactEmail, phase: phaseLabel(member.phase), reason: member.suspendReason ?? '', signin: '',
+          expires: member.expiresAt ? formatDisplayDateTime(member.expiresAt) : t('Never'), actions: '',
+        })
+        clientTemplateSlot(row, 'phase').dataset.stateChip = member.phase === 'active' ? 'ok' : 'unavailable'
+        const signin = clientTemplateSlot(row, 'signin')
+        if (next.signIn.available) signin.replaceChildren(...signInCell(member)); else signin.textContent = t('Unavailable')
+        const actions = clientTemplateSlot(row, 'actions')
+        const button = (action: string, label: string, accessible: string): HTMLButtonElement => {
+          const node = cloneViewRecord(root, action === 'delete' ? 'acct-team-delete' : 'acct-team-action', 'button', { label }) as HTMLButtonElement
+          node.dataset.action = action; node.setAttribute('aria-label', accessible); node.addEventListener('click', () => void act(action, member)); actions.append(node); return node
+        }
         button('edit', t('Edit'), t('Edit {username}', { username: member.username }))
         if (next.signIn.available) { const link = button('link', t('Password link'), t('Create a password link for {username}', { username: member.username })); if (member.phase !== 'active') link.dataset.inactive = 'true' }
         if (member.status === 'suspended') button('reinstate', t('Reinstate'), t('Reinstate {username}', { username: member.username }))
         else button('suspend', t('Suspend'), t('Suspend {username}', { username: member.username }))
-        button('delete', t('Delete'), t('Delete {username}', { username: member.username })).classList.add('xp-btn--danger')
-        cell(actions)
+        button('delete', t('Delete'), t('Delete {username}', { username: member.username }))
         return row
       }))
-      if (!next.members.length) { const row = element('tr'), cellNode = element('td', next.state === 'invalid' ? t('The saved team file cannot be read. Nothing is shown and it cannot be changed here.') : t('No team members')); cellNode.colSpan = 7; row.append(cellNode); rows.replaceChildren(row) }
+      if (!next.members.length) rows.replaceChildren(cloneViewRecord(root, 'acct-team-empty', 'tr', { message: next.state === 'invalid' ? t('The saved team file cannot be read. Nothing is shown and it cannot be changed here.') : t('No team members') }))
       empty.hidden = next.state === 'invalid' || next.members.length > 0
       note(status, next.state === 'invalid' ? 'failed' : 'ready', next.state === 'invalid' ? t('The saved team file requires review by the server administrator.') : t('{count, plural, one {{count} team member read.} other {{count} team members read.}}', { count: next.members.length }))
       if (editing && !next.members.some(member => member.id === editing!.id)) resetForm()
@@ -189,7 +208,7 @@ function bindAccountTeam(askDialog: ((options: Record<string, unknown>) => Promi
           paint(next)
           linkHeading.textContent = t('Password link for {username}', { username: member.username + '@' + next.account.primaryDomain })
           linkUrl.value = window.location.origin + next.passwordLink.path
-          linkExpires.replaceChildren(element('bdi', formatDisplayDateTime(next.passwordLink.expiresAt), true))
+          linkExpires.replaceChildren(value(formatDisplayDateTime(next.passwordLink.expiresAt)))
           linkBox.hidden = false; linkUrl.focus(); linkUrl.select()
           note(listStatus, 'ok', t('The password link is ready. It is shown below only once.'))
         } catch (error) { note(listStatus, 'failed', failText(error, t('No password link was created.'))); lock(false) }
@@ -239,4 +258,4 @@ function bindAccountTeam(askDialog: ((options: Record<string, unknown>) => Promi
   })
 }
 
-export const ACCOUNT_TEAM_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readAccountTeamView=${readAccountTeamView.toString()};return ${bindAccountTeam.toString()};})()`
+export const ACCOUNT_TEAM_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readAccountTeamView=${readAccountTeamView.toString()};return ${bindAccountTeam.toString()};})()`

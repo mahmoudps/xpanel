@@ -1,0 +1,5 @@
+/** Inert presentation for the observed mail-tool controllers; theme markup stays local. */
+export function v2MailToolsClientTemplates(section: 'spam' | 'lists'): string {
+  if (section === 'lists') return `<template data-xp-template="mail-tools-list-row"><tr><th scope="row"><bdi dir="ltr" data-xp-slot="address"></bdi></th><td><bdi dir="ltr" data-xp-slot="members"></bdi></td><td data-xp-slot="state"></td></tr></template><template data-xp-template="mail-tools-list-empty"><tr><td colspan="3" data-xp-slot="message"></td></tr></template>`
+  return `<template data-xp-template="mail-tools-spam-row"><tr><th scope="row"><bdi dir="ltr" data-xp-slot="mailbox"></bdi></th><td data-xp-slot="preference"></td><td data-xp-slot="native"></td><td data-xp-slot="effects"></td><td><div class="v2-panel-extra__actions"><button type="button" class="v2-btn" data-direction="spam" data-xp-slot="learn-spam" disabled></button><button type="button" class="v2-btn" data-direction="ham" data-xp-slot="learn-ham" disabled></button></div></td></tr></template><template data-xp-template="mail-tools-spam-empty"><tr><td colspan="5" data-xp-slot="message"></td></tr></template>`
+}

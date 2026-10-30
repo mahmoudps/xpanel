@@ -1,3 +1,4 @@
+import { classicMailClientTemplates } from './mail-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -6,7 +7,7 @@ export function renderMailForwarders(input: { locale: Locale; mailbox: string; c
   const t = (message: string, values?: MessageValues): string => translator(input.locale)(message, values)
   const mailbox = `<bdi dir="ltr">${escapeHtml(input.mailbox)}</bdi>`
   const [introBefore = '', introAfter = ''] = t('Send a copy of mail that arrives at {mailbox} to up to 10 other addresses. Forwarding set for other addresses is not shown here.').split('{mailbox}')
-  return `<section class="xp-card xp-mail-forwarders" data-mail-forwarders data-forwarders-mailbox="${escapeHtml(input.mailbox)}" data-forwarders-can-manage="${input.canManage}" lang="${input.locale}" dir="${localeDirection(input.locale)}" aria-labelledby="mail-forwarders-heading">
+  return `<section class="xp-card xp-mail-forwarders" data-mail-forwarders data-forwarders-mailbox="${escapeHtml(input.mailbox)}" data-forwarders-can-manage="${input.canManage}" lang="${input.locale}" dir="${localeDirection(input.locale)}" aria-labelledby="mail-forwarders-heading">${classicMailClientTemplates('forwarders')}
     <style>.xp-mail-forwarders{display:flex;flex-direction:column;gap:24px;padding:16px;min-inline-size:0}.xp-mail-forwarders :is(h2,h3,p){margin:0}.xp-mail-forwarders__header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px}.xp-mail-forwarders__intro,.xp-mail-forwarders__add{display:flex;flex-direction:column;gap:16px;min-inline-size:0}.xp-mail-forwarders .xp-field{display:flex;flex-direction:column;gap:8px;min-inline-size:0}.xp-mail-forwarders .xp-input{inline-size:100%;min-block-size:44px;box-sizing:border-box}.xp-mail-forwarders[dir=rtl] .xp-input{text-align:right}.xp-mail-forwarders__check{display:flex;align-items:center;gap:8px;min-block-size:44px}.xp-mail-forwarders__check input{inline-size:16px;block-size:16px;flex:none}.xp-mail-forwarders__actions{display:flex;flex-wrap:wrap;gap:16px;align-items:center}.xp-mail-forwarders .xp-btn{min-block-size:44px}.xp-mail-forwarders td{overflow-wrap:anywhere}.xp-mail-forwarders [hidden]{display:none}@media(min-width:601px){.xp-mail-forwarders{padding:24px}}</style>
     <div class="xp-mail-forwarders__header"><h2 id="mail-forwarders-heading">${t('Forward this mailbox')}</h2><span class="xp-help xp-tabular" data-forwarders-count>${t('Not read')}</span></div>
     <div class="xp-mail-forwarders__intro">

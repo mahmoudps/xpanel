@@ -1,5 +1,6 @@
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
+import { renderWhmServiceClientTemplates } from './whm-service-client-templates.ts'
 
 export function renderWhmServiceManagerWorkspace(input: { locale: Locale; canRead: boolean; canManage: boolean }): string {
   const t = (message: string, values?: MessageValues): string => escapeHtml(translator(input.locale)(message, values))
@@ -30,5 +31,5 @@ export function renderWhmServiceManagerWorkspace(input: { locale: Locale; canRea
   <div class="xp-whm-service-manager__actions"><button type="button" class="xp-btn xp-btn--danger" data-sm-reboot disabled>${t('Submit reboot job')}</button></div>
 </section>
 <section class="xp-whm-service-manager__panel" aria-labelledby="whm-sm-unavailable-heading"><h2 id="whm-sm-unavailable-heading">${t('Other service tools')}</h2><p class="xp-help">${t('These operations are not supported by this workspace. This does not indicate whether the software is installed.')}</p><ul class="xp-whm-service-manager__unavailable">${[msgid('Restart PostgreSQL'),msgid('Restart mailing lists'),msgid('Supervisor management'),msgid('Service watchdog')].map(label => `<li><span>${t(label)}</span><span class="xp-badge xp-badge--suspended">${t('Unavailable here')}</span></li>`).join('')}</ul></section>
-</section>`
+${renderWhmServiceClientTemplates('manager')}</section>`
 }

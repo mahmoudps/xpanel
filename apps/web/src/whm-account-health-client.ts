@@ -2,7 +2,10 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { WHM_DIAGNOSTIC_TEMPLATE_BINDING, whmDiagnosticNode as canonicalDiagnosticNode, assertWhmDiagnosticTemplates as canonicalAssertDiagnosticTemplates } from './whm-diagnostic-client-templates.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
+const whmDiagnosticNode = canonicalDiagnosticNode
+const assertWhmDiagnosticTemplates = canonicalAssertDiagnosticTemplates
 export type HealthStateView = 'ok' | 'problem' | 'unavailable'
 export type HealthItemView = { name: string; state: HealthStateView; reason: string; evidence: string }
 export type HealthCheckView = { id: string; state: HealthStateView; reason: string; evidence: string; items?: HealthItemView[]; omitted?: number }
@@ -145,11 +148,15 @@ function bindWhmAccountHealth(): void {
       dns: ['/whm/dns', msgid('Manage DNS zones'), false],
       php: ['/whm/software/php', msgid('Review PHP versions and handlers'), true],
     }
-    const element = <K extends keyof HTMLElementTagNameMap>(tag: K, value?: string, className?: string): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); if (value !== undefined) node.textContent = value; if (className) node.className = className; return node }
+    try { assertWhmDiagnosticTemplates(root) } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      status.dataset.state = 'failed'; status.textContent = t('The server response could not be verified. Nothing is assumed.'); return
+    }
+    const element = <K extends keyof HTMLElementTagNameMap>(tag: K, value?: string, templateName?: string): HTMLElementTagNameMap[K] => whmDiagnosticNode(root, tag, value, templateName)
     const technical = (value: string): HTMLElement => { const node = element('bdi', value); node.dir = 'ltr'; return node }
     const cause = (reason: string): string => { const known = CAUSES[reason]; return known ? t(known) : reason }
-    const badge = (state: string, label?: string): HTMLElement => element('span', label ?? (state === 'ok' ? t('No problem found') : state === 'problem' ? t('Problem found') : t('Not verified')), 'xp-badge ' + (state === 'ok' ? 'xp-badge--ok' : state === 'problem' ? 'xp-badge--critical' : 'xp-badge--warn'))
-    const evidence = (value: string): HTMLElement => { const details = element('details'), pre = element('pre', value, 'xp-whm-health__evidence'); pre.dir = 'ltr'; pre.tabIndex = 0; details.append(element('summary', t('Evidence')), pre); return details }
+    const badge = (state: string, label?: string): HTMLElement => element('span', label ?? (state === 'ok' ? t('No problem found') : state === 'problem' ? t('Problem found') : t('Not verified')), state === 'ok' ? 'badge-ok' : state === 'problem' ? 'badge-critical' : 'badge-warn')
+    const evidence = (value: string): HTMLElement => { const details = element('details'), pre = element('pre', value, 'evidence'); pre.dir = 'ltr'; pre.tabIndex = 0; details.append(element('summary', t('Evidence')), pre); return details }
     const picks = (): HTMLInputElement[] => [...list.querySelectorAll<HTMLInputElement>('[data-whm-health-pick]')]
     const selected = (): string[] => picks().filter(input => input.checked && !input.closest<HTMLElement>('[data-whm-health-account]')?.hidden).map(input => input.value)
     const lock = (): void => {
@@ -180,37 +187,37 @@ function bindWhmAccountHealth(): void {
       set('observed-at', observedAt ? formatDisplayDateTime(observedAt) : t('Not read'))
     }
     const renderRow = (account: AccountHealthView, checked: boolean): HTMLElement => {
-      const row = element('article', undefined, 'xp-whm-health__account')
+      const row = element('article', undefined, 'account-health-row')
       row.dataset.whmHealthAccount = account.username
       row.dataset.state = account.problems ? 'problem' : account.unavailable ? 'unavailable' : 'ok'
       row.dataset.search = (account.username + ' ' + account.primaryDomain + ' ' + account.checks.flatMap(check => (check.items ?? []).map(entry => entry.name)).join(' ')).toLowerCase()
       const pick = element('input'); pick.type = 'checkbox'; pick.value = account.username; pick.checked = checked; pick.dataset.whmHealthPick = ''
       pick.setAttribute('aria-label', t('Select {name}', { name: account.username })); pick.addEventListener('change', lock)
-      const holder = element('div', undefined, 'xp-whm-health__pick'); holder.append(pick)
-      const details = element('details'), summary = element('summary'), headline = element('span', undefined, 'xp-whm-health__headline')
+      const holder = element('div', undefined, 'account-selection'); holder.append(pick)
+      const details = element('details'), summary = element('summary'), headline = element('span', undefined, 'account-headline')
       const statusText = account.status === 'active' ? t('Active') : account.status === 'suspended' ? t(msgctxt('whm-account-health-client', 'Suspended')) : t('Being removed')
       headline.append(technical(account.username), technical(account.primaryDomain), element('span', statusText),
         account.problems ? badge('problem', t('{count} problems', { count: account.problems })) : account.unavailable ? badge('unavailable', t('{count} not verified', { count: account.unavailable })) : badge('ok', t('No problems found')))
       summary.append(headline); details.append(summary)
-      const checks = element('ul', undefined, 'xp-whm-health__checks')
+      const checks = element('ul', undefined, 'account-checks')
       for (const check of account.checks) {
-        const card = element('li', undefined, 'xp-whm-health__check'), head = element('div', undefined, 'xp-whm-health__check-head'), title = TITLES[check.id]
+        const card = element('li', undefined, 'account-check'), head = element('div', undefined, 'account-check-head'), title = TITLES[check.id]
         card.dataset.whmHealthCheck = check.id; card.dataset.state = check.state
         head.append(element('h4', title ? t(title) : check.id), badge(check.state)); card.append(head, element('p', cause(check.reason)))
         const fix = check.state === 'problem' ? FIXES[check.reason] ?? FIXES[check.id] : undefined
-        if (fix && (isRoot || !fix[2])) { const link = element('a', t(fix[1]), 'xp-btn'); link.href = fix[0]; link.dataset.whmHealthFix = check.id; const actions = element('div', undefined, 'xp-whm-detail-actions'); actions.append(link); card.append(actions) }
-        else if (fix) card.append(element('p', t('Ask the server administrator to repair this.'), 'xp-help'))
+        if (fix && (isRoot || !fix[2])) { const link = element('a', t(fix[1]), 'link'); link.href = fix[0]; link.dataset.whmHealthFix = check.id; const actions = element('div', undefined, 'actions'); actions.append(link); card.append(actions) }
+        else if (fix) card.append(element('p', t('Ask the server administrator to repair this.'), 'note'))
         if (check.evidence) card.append(evidence(check.evidence))
         if (check.items?.length) {
-          const items = element('ul', undefined, 'xp-whm-health__items')
+          const items = element('ul', undefined, 'account-items')
           for (const entry of check.items) {
-            const line = element('li'), label = element('div', undefined, 'xp-whm-health__check-head')
+            const line = element('li'), label = element('div', undefined, 'account-check-head')
             line.dataset.state = entry.state; label.append(technical(entry.name), badge(entry.state)); line.append(label, element('p', cause(entry.reason)))
             if (entry.evidence) line.append(evidence(entry.evidence))
             items.append(line)
           }
           card.append(items)
-          if (check.omitted) card.append(element('p', t('{count} more domains are not listed. The worst results are shown first.', { count: check.omitted }), 'xp-help'))
+          if (check.omitted) card.append(element('p', t('{count} more domains are not listed. The worst results are shown first.', { count: check.omitted }), 'note'))
         }
         checks.append(card)
       }
@@ -283,4 +290,4 @@ function bindWhmAccountHealth(): void {
   })
 }
 
-export const WHM_ACCOUNT_HEALTH_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readAccountHealthReport=${readAccountHealthReport.toString()};return ${bindWhmAccountHealth.toString()};})()`
+export const WHM_ACCOUNT_HEALTH_CLIENT_BINDING = `(()=>{${WHM_DIAGNOSTIC_TEMPLATE_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readAccountHealthReport=${readAccountHealthReport.toString()};return ${bindWhmAccountHealth.toString()};})()`

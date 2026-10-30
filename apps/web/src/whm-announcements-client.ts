@@ -1,3 +1,5 @@
+import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './whm-client-templates.ts'
+const whmClientNode = canonicalWhmClientNode, clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { buildAccountAnnouncementNotice, type AccountAnnouncementLabels } from './board-port/account-announcements-banner-client.ts'
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
@@ -192,28 +194,27 @@ function bindWhmAnnouncements(askDialog: ((options: Record<string, unknown>) => 
     const paintRows = (): void => {
       const list = view?.announcements ?? []
       rows.replaceChildren(...list.map(item => {
-        const row = element('tr'), cells = Array.from({ length: 7 }, () => element('td'))
-        const titles = element('div'); titles.className = 'xp-whm-announcements__cell'
+        const row = cloneClientTemplate(clientTemplate(root, 'whm-announcement-row'), 'tr', ['titles', 'severity', 'audience', 'window', 'phase', 'updated', 'actions'])
+        const titles = whmClientNode(root, 'whm-announcement-cell', 'div')
         const english = element('span', item.title.en); english.lang = 'en'; english.dir = 'ltr'
         const arabic = element('span', item.title.ar); arabic.lang = 'ar'; arabic.dir = 'rtl'
-        titles.append(english, arabic); cells[0]!.append(titles)
-        cells[1]!.textContent = severityLabel(item.severity)
-        cells[2]!.append(...audienceNodes(item.audience))
-        cells[3]!.append(...windowNodes(item))
-        cells[4]!.textContent = phaseLabel(item.phase)
-        const by = element('span'); by.className = 'xp-help'; by.append(...parts(t('by {actor}'), { actor: element('bdi', item.updatedBy, true) }))
-        const updated = element('div'); updated.className = 'xp-whm-announcements__cell'; updated.append(element('bdi', formatDisplayDateTime(item.updatedAt), true), by); cells[5]!.append(updated)
-        const actions = element('div'); actions.className = 'xp-whm-announcements__actions'
+        titles.append(english, arabic); clientTemplateSlot(row, 'titles').append(titles)
+        clientTemplateSlot(row, 'severity').textContent = severityLabel(item.severity)
+        clientTemplateSlot(row, 'audience').append(...audienceNodes(item.audience))
+        clientTemplateSlot(row, 'window').append(...windowNodes(item))
+        clientTemplateSlot(row, 'phase').textContent = phaseLabel(item.phase)
+        const by = whmClientNode(root, 'whm-announcement-note', 'span'); by.append(...parts(t('by {actor}'), { actor: element('bdi', item.updatedBy, true) }))
+        const updated = whmClientNode(root, 'whm-announcement-cell', 'div'); updated.append(element('bdi', formatDisplayDateTime(item.updatedAt), true), by); clientTemplateSlot(row, 'updated').append(updated)
+        const actions = whmClientNode(root, 'whm-announcement-actions', 'div')
         if (item.status === 'active') {
           const label = localized(item.title)
-          const editButton = element('button', t(msgctxt('whm-announcements-client', 'Edit'))); editButton.type = 'button'; editButton.className = 'xp-btn'; editButton.dataset.action = 'edit'; editButton.setAttribute('aria-label', t('Edit: {title}', { title: label }))
-          const archiveButton = element('button', t(msgctxt('whm-announcements-client', 'Archive'))); archiveButton.type = 'button'; archiveButton.className = 'xp-btn'; archiveButton.dataset.action = 'archive'; archiveButton.setAttribute('aria-label', t('Archive: {title}', { title: label }))
+          const editButton = whmClientNode(root, 'whm-announcement-button', 'button', t(msgctxt('whm-announcements-client', 'Edit'))); editButton.dataset.action = 'edit'; editButton.setAttribute('aria-label', t('Edit: {title}', { title: label }))
+          const archiveButton = whmClientNode(root, 'whm-announcement-button', 'button', t(msgctxt('whm-announcements-client', 'Archive'))); archiveButton.dataset.action = 'archive'; archiveButton.setAttribute('aria-label', t('Archive: {title}', { title: label }))
           editButton.addEventListener('click', () => { if (!busy && admitted()) edit(item) })
           archiveButton.addEventListener('click', () => { void archive(item) })
           actions.append(editButton, archiveButton)
         } else actions.append(element('span', t('Archived')))
-        cells[6]!.append(actions)
-        row.append(...cells)
+        clientTemplateSlot(row, 'actions').append(actions)
         return row
       }))
       rows.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = busy || !admitted() || (button.dataset.action === 'archive' && typeof askDialog !== 'function') })
@@ -285,4 +286,4 @@ function bindWhmAnnouncements(askDialog: ((options: Record<string, unknown>) => 
   })
 }
 
-export const WHM_ANNOUNCEMENTS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmAnnouncementsView=${readWhmAnnouncementsView.toString()};const buildNotice=${buildAccountAnnouncementNotice.toString()};return ${bindWhmAnnouncements.toString()};})()`
+export const WHM_ANNOUNCEMENTS_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmAnnouncementsView=${readWhmAnnouncementsView.toString()};const buildNotice=${buildAccountAnnouncementNotice.toString()};return ${bindWhmAnnouncements.toString()};})()`

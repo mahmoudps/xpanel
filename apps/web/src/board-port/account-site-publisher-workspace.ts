@@ -1,3 +1,4 @@
+import { publisherClientTemplates } from './domain-client-templates.ts'
 import { LOCALES, localeDirection, translator, type Locale, type MessageValues } from '../i18n.ts'
 import { escapeHtml, normalizeAsciiDigits } from '../tokens.ts'
 import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
@@ -25,5 +26,5 @@ export function renderAccountSitePublisherWorkspace(input: { lang: Locale; accou
       ${field('email', t('Contact email (optional)'), 254, true)}${field('phone', t('Phone (optional)'), 40, true)}</div>
       <div class="xp-acct-tool__actions"><button type="button" class="xp-btn" data-sitepub-preview${off}>${t('Preview page')}</button><button type="button" class="xp-btn xp-btn--primary" data-sitepub-publish disabled>${t('Publish previewed page')}</button></div></section>
     <section class="xp-acct-tool__card" aria-labelledby="sitepub-preview-heading"><h2 id="sitepub-preview-heading">${t('Page preview')}</h2><p data-sitepub-preview-note>${t('Create a preview to see the generated page here.')}</p><iframe class="xp-sitepub__preview" title="${t('Static page preview')}" sandbox="" referrerpolicy="no-referrer" data-sitepub-frame hidden></iframe></section>
-  </div>`
+  ${publisherClientTemplates()}</div>`
 }

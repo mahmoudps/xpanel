@@ -20,17 +20,19 @@ export const HELP = `Usage: xpanel-ctl <command> [options]
 Commands:
   help, version              Show usage or runtime versions
   status, doctor             Read lifecycle state and prerequisites
-  install, adopt             Plan or apply a verified installation/adoption
+  install, adopt             Plan installation/adoption (native apply unavailable)
   update                     Check or update within the current major version
   upgrade                    Plan or apply an explicit major-version upgrade
-  rollback-release           Plan or recover an owned release (--release X.Y.Z)
+  rollback-release           Plan release recovery; native apply unavailable
   recover                    Plan or recover an interrupted operation
-  uninstall                  Remove owned program files while preserving data
+  uninstall                  Plan removal preserving data (native apply unavailable)
   verify-install-source      Diagnose authenticated source and installed bytes
   verify-install-ready       Diagnose actual runtime readiness
 
 Changes default to --plan. Applying requires --apply --yes and genuine native
-prerequisites. Only update supports --check. No purge or OS-upgrade command exists.
+prerequisites. Native apply currently supports update, upgrade and recover only;
+other change commands refuse before effects. Only update supports --check.
+No purge or OS-upgrade command exists.
 
 Authenticated artifact input (all required together):
   --artifact FILE --sha256 HEX --signing-key FILE --key-id ID

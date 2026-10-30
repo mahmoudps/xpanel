@@ -1,6 +1,9 @@
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const viewAction = canonicalViewAction
 import { readSwAddonServicesView } from '../../../packages/os/src/sw-addon-command.ts'
 import type { SwAddonServicesView } from '../../../packages/os/src/sw-addon-command.ts'
 export { readSwAddonServicesView }
@@ -32,31 +35,26 @@ function bindSwAddons(askDialog: Ask | undefined, parse: typeof readSwAddonServi
     let busy = false, review = false, view: SwAddonServicesView | null = null, packages: Record<string, string> | null = null
     const manageable = (): boolean => admitted() && root.dataset.swCanManage === 'true' && view?.state === 'read' && view.actions.control && typeof askDialog === 'function' && !review
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status') }
-    const cell = (row: HTMLElement, text: string, technical = false): void => { const td = document.createElement('td'); if (technical) { const value = document.createElement('bdi'); value.dir = 'ltr'; value.textContent = text; td.append(value) } else td.textContent = text; row.append(td) }
     const name = (id: string): string => ({ memcached: 'Memcached', rabbitmq: 'RabbitMQ', elasticsearch: 'Elasticsearch', opensearch: 'OpenSearch' } as Record<string, string>)[id] ?? id
     const kind = (id: string): string => id === 'memcached' ? t('Memory cache') : id === 'rabbitmq' ? t('Message broker') : t('Search engine')
     const lock = (): void => { refresh.disabled = busy || !admitted(); for (const button of body.querySelectorAll<HTMLButtonElement>('button')) button.disabled = busy || !manageable() || button.dataset.swAllowed !== 'true' }
     const paint = (): void => {
       body.textContent = ''
       for (const service of view?.services ?? []) {
-        const row = document.createElement('tr'), installed = service.state === 'read' && service.load === 'loaded'
-        cell(row, name(service.id)); cell(row, kind(service.id))
+        const installed = service.state === 'read' && service.load === 'loaded'
         const pkg = service.componentId === null ? t('No reviewed package') : packages === null ? t('Not read') : packages[service.componentId] === 'installed' ? t('Installed') : packages[service.componentId] === 'partial' ? t('Partially installed') : packages[service.componentId] === 'absent' ? t('Not installed') : t('Unavailable on this system')
-        cell(row, pkg); cell(row, service.unit, true)
-        cell(row, service.state !== 'read' ? t('Could not be read') : service.load === 'not-found' ? t('Not installed') : service.active === 'active' ? t('Running') : service.active === 'failed' ? t('Failed') : service.active === 'inactive' ? t('Stopped') : (service.active ?? ''))
-        cell(row, service.boot === null ? t('Not read') : service.boot === 'enabled' ? t('Yes') : service.boot === 'disabled' ? t('No') : service.boot, service.boot !== null && !['enabled', 'disabled'].includes(service.boot))
-        const td = document.createElement('td'), box = document.createElement('div'); box.className = 'xp-whm-detail-actions'
+        const row = cloneViewRecord(root, 'software-addon-row', 'tr', { service: name(service.id), kind: kind(service.id), package: pkg, unit: service.unit,
+          state: service.state !== 'read' ? t('Could not be read') : service.load === 'not-found' ? t('Not installed') : service.active === 'active' ? t('Running') : service.active === 'failed' ? t('Failed') : service.active === 'inactive' ? t('Stopped') : (service.active ?? ''),
+          boot: service.boot === null ? t('Not read') : service.boot === 'enabled' ? t('Yes') : service.boot === 'disabled' ? t('No') : service.boot, 'start-label': t('Start'), 'stop-label': t('Stop'), 'restart-label': t('Restart') })
         for (const action of ['start', 'stop', 'restart'] as const) {
-          const button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.dataset.swAction = action
-          button.textContent = action === 'start' ? t('Start') : action === 'stop' ? t('Stop') : t('Restart')
+          const button = viewAction(row, action); button.dataset.swAction = action
           button.setAttribute('aria-label', action === 'start' ? t('Start {service}', { service: name(service.id) }) : action === 'stop' ? t('Stop {service}', { service: name(service.id) }) : t('Restart {service}', { service: name(service.id) }))
           button.dataset.swAllowed = String(installed && service.boot !== 'masked' && (action === 'start' ? service.active !== 'active' : service.active === 'active'))
           button.addEventListener('click', () => { void change(service, action) })
-          box.append(button)
         }
-        td.append(box); row.append(td); body.append(row)
+        body.append(row)
       }
-      if (!body.childElementCount) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 7; td.textContent = view ? t('Add-on services cannot be read on this host. Nothing was read or changed.') : t('No services have been read.'); row.append(td); body.append(row) }
+      if (!body.childElementCount) body.append(cloneViewRecord(root, 'software-addon-empty', 'tr', { message: view ? t('Add-on services cannot be read on this host. Nothing was read or changed.') : t('No services have been read.') }))
       lock()
     }
     const failure = (error: unknown, change: boolean): void => {
@@ -99,4 +97,4 @@ function bindSwAddons(askDialog: Ask | undefined, parse: typeof readSwAddonServi
     void load()
   })
 }
-export const SW_ADDON_SERVICES_CLIENT_BINDING = `(()=>{const parse=${readSwAddonServicesView.toString()};const parsePackages=${readAddonPackageStates.toString()};const bind=${bindSwAddons.toString()};return (ask)=>bind(ask,parse,parsePackages);})()`
+export const SW_ADDON_SERVICES_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const parse=${readSwAddonServicesView.toString()};const parsePackages=${readAddonPackageStates.toString()};const bind=${bindSwAddons.toString()};return (ask)=>bind(ask,parse,parsePackages);})()`

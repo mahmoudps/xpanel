@@ -20,6 +20,7 @@ import {
   runUnifiedInstaller,
   verifyInstallPreflight,
 } from './install.ts'
+import { renderSystemdAgentUnit, renderSystemdApiUnit } from './install-runner.ts'
 import type { InstallerExecutionHost, PreflightHostProbe, VirtualFileEntry } from './install-runner.ts'
 import type { InstallAction, InstallOptions, XpanelOsProfile } from './types.ts'
 import { SAFE_ARG, assertUnitName } from './validate.ts'
@@ -36,6 +37,23 @@ const error = (fn: () => unknown): XpanelError => {
 }
 
 const full: InstallOptions = { engine: 'apache', phpVersions: ['8.3'], withMail: true, withDns: true, withFtp: true }
+
+describe('optional versioned program source paths', () => {
+  it('keeps flat defaults and renders current startup with narrowly writable participant sockets', () => {
+    expect(renderSystemdAgentUnit().content).toContain('WorkingDirectory=/opt/xpanel\n')
+    expect(renderSystemdApiUnit().content).not.toContain('/run/xpanel/lifecycle-api')
+    const agent = renderSystemdAgentUnit('/usr/bin/node', 'current').content
+    const api = renderSystemdApiUnit('/usr/bin/node', 'current').content
+    expect(agent).toContain('WorkingDirectory=/opt/xpanel/current\n')
+    expect(agent).toContain('/opt/xpanel/current/apps/agent/src/main.ts')
+    expect(agent).toContain('ExecStartPre=/usr/bin/install -d -o root -g root -m 0700 /run/xpanel/lifecycle-agent')
+    expect(agent).toContain('ExecStartPre=/usr/bin/install -d -o xpanel -g xpanel -m 0700 /run/xpanel/lifecycle-api')
+    expect(api).toContain('/opt/xpanel/current/apps/api/src/main.ts')
+    expect(api).toContain('ReadWritePaths=/var/lib/xpanel /var/log/xpanel /run/xpanel/lifecycle-api\n')
+    expect(api).toContain('ProtectSystem=strict')
+    expect(() => renderSystemdAgentUnit('/usr/bin/node', 'arbitrary' as never)).toThrow()
+  })
+})
 const execs = (plan: InstallAction[]): string[][] => plan.flatMap(a => (a.kind === 'exec' ? [a.argv] : []))
 const installed = (plan: InstallAction[]): string[] => execs(plan).filter(a => a.includes('install')).flatMap(a => a)
 const unitsFor = (plan: InstallAction[], verb: string): string[] =>
@@ -76,7 +94,7 @@ describe('Ubuntu install plan', () => {
       expect(pkgs).toContain(p)
     }
     for (const p of ['mariadb-server', 'postgresql', 'redis-server', 'nftables', 'quota', 'certbot', 'openssh-server']) expect(pkgs).toContain(p)
-    for (const p of ['postfix', 'dovecot-imapd', 'dovecot-pop3d', 'dovecot-lmtpd', 'pdns-server', 'pdns-backend-pgsql', 'pure-ftpd']) {
+    for (const p of ['postfix', 'dovecot-imapd', 'dovecot-pop3d', 'dovecot-lmtpd', 'pdns-server', 'pdns-backend-bind', 'bind9-utils', 'dnsutils', 'pure-ftpd']) {
       expect(pkgs).toContain(p)
     }
     expect(pkgs).not.toContain('httpd')
@@ -206,7 +224,7 @@ describe('RHEL install plan', () => {
     expect(tx).toHaveLength(1)
     const pkgs = tx[0]!
     expect(pkgs.slice(0, 4)).toEqual(['/usr/bin/dnf', 'install', '-y', '--setopt=install_weak_deps=False'])
-    for (const p of ['nginx', 'httpd', 'mod_ssl', 'mod_fcgid', 'mariadb-server', 'postgresql-server', 'valkey', 'postfix', 'dovecot', 'pdns', 'pdns-backend-postgresql', 'pure-ftpd', 'certbot', 'php83-php-fpm']) {
+    for (const p of ['nginx', 'httpd', 'mod_ssl', 'mod_fcgid', 'mariadb-server', 'postgresql-server', 'valkey', 'postfix', 'dovecot', 'pdns', 'bind-utils', 'pure-ftpd', 'certbot', 'php83-php-fpm']) {
       expect(pkgs).toContain(p)
     }
     expect(new Set(pkgs).size).toBe(pkgs.length)
@@ -248,7 +266,7 @@ describe('optional services and engines', () => {
 
   it('adds each toggle on its own', () => {
     const base = { engine: 'apache' as const, phpVersions: [], withMail: false, withDns: false, withFtp: false }
-    expect(installed(installPlan(ubuntu24, { ...base, withDns: true }))).toContain('pdns-backend-pgsql')
+    expect(installed(installPlan(ubuntu24, { ...base, withDns: true }))).toContain('pdns-backend-bind')
     expect(installed(installPlan(ubuntu24, { ...base, withDns: true }))).not.toContain('postfix')
     expect(installed(installPlan(ubuntu24, { ...base, withFtp: true }))).toContain('pure-ftpd')
     expect(installed(installPlan(ubuntu24, { ...base, withMail: true }))).toContain('dovecot-lmtpd')

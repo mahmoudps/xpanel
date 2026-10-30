@@ -1,3 +1,5 @@
+import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const whmClientNode = canonicalWhmClientNode
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -172,12 +174,12 @@ function bindWhmMailLog(): void {
       if (!body) return
       page = Math.min(page, pages - 1); body.textContent = ''
       for (const message of messages.slice(page * 50, page * 50 + 50)) {
-        const row = document.createElement('tr'), list = document.createElement('span'), view = document.createElement('button')
+        const row = document.createElement('tr'), list = document.createElement('span'), view = whmClientNode(root, 'whm-mail-timeline-button', 'button')
         message.recipients.slice(0, 3).forEach((item, index) => { if (index) list.append(', '); list.append(bdi(item.address)) })
         const more = message.recipients.length - 3 + message.recipientsOmitted
         if (more > 0) list.append(' ', t('and {n} more', { n: more }))
         if (!message.recipients.length) list.append(t('None logged'))
-        view.type = 'button'; view.className = 'xp-btn'; view.textContent = t('View timeline'); view.addEventListener('click', () => showDetail(message))
+        view.type = 'button'; view.disabled = !admitted(); view.textContent = t('View timeline'); view.addEventListener('click', () => showDetail(message))
         cell(row, time(message.lastSeen), true); cell(row, message.queueId ?? t('Not queued'), !!message.queueId); cell(row, message.sender === null ? t('Not logged') : message.sender || '<>', true); cell(row, list); cell(row, statusLabel[message.status]!); cell(row, message.dsn ?? '-', true); cell(row, view)
         body.append(row)
       }
@@ -238,4 +240,4 @@ function bindWhmMailLog(): void {
   })
 }
 
-export const WHM_MAIL_LOG_CLIENT_BINDING = `(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const mailLogObject=${mailLogObject.toString()};const mailLogText=${mailLogText.toString()};const mailLogNullable=${mailLogNullable.toString()};const mailLogInstant=${mailLogInstant.toString()};const mailLogCount=${mailLogCount.toString()};const mailLogDsn=${mailLogDsn.toString()};const mailLogBase=${mailLogBase.toString()};const mailLogCounts=${mailLogCounts.toString()};const readMailLogMessage=${readMailLogMessage.toString()};const readMailDeliveryView=${readMailDeliveryView.toString()};const readMailMonitorView=${readMailMonitorView.toString()};return ${bindWhmMailLog.toString()};})()`
+export const WHM_MAIL_LOG_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const mailLogObject=${mailLogObject.toString()};const mailLogText=${mailLogText.toString()};const mailLogNullable=${mailLogNullable.toString()};const mailLogInstant=${mailLogInstant.toString()};const mailLogCount=${mailLogCount.toString()};const mailLogDsn=${mailLogDsn.toString()};const mailLogBase=${mailLogBase.toString()};const mailLogCounts=${mailLogCounts.toString()};const readMailLogMessage=${readMailLogMessage.toString()};const readMailDeliveryView=${readMailDeliveryView.toString()};const readMailMonitorView=${readMailMonitorView.toString()};return ${bindWhmMailLog.toString()};})()`

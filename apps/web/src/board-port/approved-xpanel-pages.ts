@@ -1,6 +1,7 @@
 import type { ApprovedXpanelWorkspaceProps } from './approved-xpanel-workspaces.ts';
 import { formatBytes } from '../tokens.ts';
 import { translator } from '../i18n.ts'
+import { parseWebsiteAnalyticsSnapshot, WEBSITE_ANALYTICS_WINDOWS } from '../models/website-analytics.ts'
 type Copy = string;
 export interface PanelWorkspaceField {
     label: Copy;
@@ -733,13 +734,20 @@ export const buildApprovedPanelPage = (p: ApprovedXpanelWorkspaceProps): PanelWo
                 f(msgid('Zone'), domain?.name), f(msgid('Records read'), p.dnsRecords?.length)
             ]), d('dns-change', msgid('How a change is applied'), msgid('Saving a record is separate from public DNS propagation and mail-delivery checks.'))
         ]);
-        case '/metrics/traffic': {
-            const x = p.websiteAnalytics;
-            return page(msgid('Metrics'), msgid('Traffic, response status and bandwidth from log observations.'), [
+        case '/metrics/traffic':
+        case '/metrics/web-stats': {
+            const trafficDomain = p.activeDomain !== undefined
+                ? domains?.find(row => row.name === p.activeDomain)
+                : domains?.find(row => row.name === a?.primaryDomain) ?? domains?.find(row => row.kind === 'primary') ?? domains?.[0];
+            const x = p.websiteAnalyticsUnavailable !== true && trafficDomain && a
+                ? parseWebsiteAnalyticsSnapshot(p.websiteAnalytics, { accountId: a.id, domain: trafficDomain.name }) ?? undefined
+                : undefined;
+            const rangeLabels = { '1h': msgid('Last hour'), '24h': msgid('Last 24 hours'), '7d': msgid('Last 7 days'), '30d': msgid('Last 30 days') };
+            const window = p.websiteAnalyticsWindow && WEBSITE_ANALYTICS_WINDOWS.includes(p.websiteAnalyticsWindow) ? p.websiteAnalyticsWindow : undefined;
+            return page(p.route === '/metrics/web-stats' ? msgid('Web statistics') : msgid('Metrics'), msgid('Traffic, response status and bandwidth from log observations.'), [
                 s('metrics-scope', msgid('Traffic selection'), [
-                    f(msgid('Domain'), undefined, undefined, (domains ?? []).map(row => row.name)), f(msgid('Range'), undefined, undefined, [
-                        msgid('Last 7 days'), msgid('Last 30 days')
-                    ])
+                    f(msgid('Domain'), trafficDomain?.name, undefined, (domains ?? []).map(row => row.name), { technicalChoices: true }),
+                    f(msgid('Range'), window ? rangeLabels[window] : undefined, undefined, WEBSITE_ANALYTICS_WINDOWS.map(value => rangeLabels[value]))
                 ]),
                 {
                     ...s('visitors', msgid('Unique visitors per day'), [
@@ -761,7 +769,7 @@ export const buildApprovedPanelPage = (p: ApprovedXpanelWorkspaceProps): PanelWo
                 ]), x !== undefined)
             ], [
                 s('bandwidth', msgid('Bandwidth by domain'), [
-                    f(msgid('Domain'), x?.domain), f(msgid('Transferred'), x ? formatBytes(x.totals.bytes) : undefined)
+                    f(msgid('Domain'), trafficDomain?.name), f(msgid('Transferred'), x ? formatBytes(x.totals.bytes) : undefined)
                 ]), s('raw-logs', msgid('Raw access logs'), [], [
                     msgid('Download logs')
                 ])

@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -95,6 +99,9 @@ function bindDbEngines(ask: ((options: Record<string, unknown>) => Promise<unkno
     const page = root.dataset.dbEngine ?? '', account = page.startsWith('account-'), accountId = root.dataset.account ?? '', username = root.dataset.username ?? ''
     const status = root.querySelector<HTMLElement>('[data-db-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-db-action="refresh"]'), open = root.querySelector<HTMLButtonElement>('[data-db-action="open"]'), upgrade = root.querySelector<HTMLButtonElement>('[data-db-action="upgrade"]')
     if (!status) return
+    const rowSlots:Readonly<Record<string,readonly string[]>>={packages:['name','installed','candidate','origin','security'],databases:['name','owner','size','state','actions'],roles:['name','login','actions']}
+    const tableTemplates=new Map([...root.querySelectorAll<HTMLElement>('[data-db-rows]')].map(body=>{const name=body.dataset.dbRows!,slots=rowSlots[name];if(!slots)throw new Error('unknown_database_table');const template=clientTemplate(root,'engine-'+name+'-row'),empty=clientTemplate(root,'engine-'+name+'-empty');cloneClientTemplate(template,'tr',slots);cloneClientTemplate(empty,'tr',['message']);return[name,{body,slots,template,empty}] as const}))
+    const actionTemplate=clientTemplate(root,'engine-action'),actionsTemplate=clientTemplate(root,'engine-actions');cloneClientTemplate(actionTemplate,'button',['label']);cloneClientTemplate(actionsTemplate,'div',['actions'])
     const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const eligible = (): boolean => root.isConnected && root.dataset.dbCanRead === 'true' && !root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
     let busy = false, ready = false, revision: string | null = null, uncertain = false, pgReady = false, pgUsers = 0
@@ -114,12 +121,11 @@ function bindDbEngines(ask: ((options: Record<string, unknown>) => Promise<unkno
     const notSet = (): string => t('Not set (server default)')
     const yes = (value: boolean): string => value ? t(msgctxt('db-engines-client', 'Yes')) : t(msgctxt('db-engines-client', 'No'))
     const unknown = (): string => t(msgctxt('db-engines-client', 'Unknown'))
-    const rows = (name: string, items: readonly (readonly (string | HTMLElement)[])[], empty: string): void => {
-      const body = root.querySelector<HTMLElement>('[data-db-rows="' + name + '"]')
-      if (!body) return
-      body.replaceChildren()
-      for (const cells of items) { const tr = document.createElement('tr'); for (const cell of cells) { const td = document.createElement('td'); td.append(cell); tr.append(td) } body.append(tr) }
-      if (!items.length) { const tr = document.createElement('tr'), td = document.createElement('td'); td.colSpan = Number(body.dataset.columns ?? '1'); td.textContent = empty; tr.append(td); body.append(tr) }
+    const rows=(name:string,items:readonly(readonly(string|HTMLElement)[])[],empty:string):void=>{
+      const contract=tableTemplates.get(name);if(!contract)return
+      contract.body.replaceChildren()
+      for(const cells of items){const row=cloneClientTemplate(contract.template,'tr',contract.slots);contract.slots.forEach((slot,index)=>clientTemplateSlot(row,slot).replaceChildren(cells[index]!));contract.body.append(row)}
+      if(!items.length){const row=cloneClientTemplate(contract.empty,'tr',['message']);clientTemplateSlot(row,'message','td').textContent=empty;contract.body.append(row)}
     }
     const bytes = (value: number): string => { const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']; let size = value, unit = 0; while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++ } return (unit === 0 ? String(size) : size.toFixed(1)) + ' ' + units[unit] }
     const serviceState = (active: string): string => ({ active: t(msgctxt('db-engines-client', 'Running')), inactive: t(msgctxt('db-engines-client', 'Stopped')), failed: t(msgctxt('db-engines-client', 'Failed')), activating: t('Starting'), deactivating: t('Stopping') } as Record<string, string>)[active] ?? active
@@ -190,8 +196,8 @@ function bindDbEngines(ask: ((options: Record<string, unknown>) => Promise<unkno
       fact('limit', saved.limit.max === null ? t('{used} of unlimited', { used: saved.limit.used }) : t('{used} of {max}', { used: saved.limit.used, max: saved.limit.max }))
       pgReady = state === 'read'; pgUsers = saved.users.length
       const sizes = new Map((view.databases as { name: string; owner: string; sizeBytes: number }[]).map(item => [item.name, item])), logins = new Map((view.roles as { name: string; login: boolean }[]).map(item => [item.name, item.login]))
-      const act = (label: string, action: string, id: string, name: string, trashedAt?: string): HTMLButtonElement => { const button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.textContent = label; Object.assign(button.dataset, { dbPgAct: action, id, name }, trashedAt ? { trashedAt } : {}); return button }
-      const actions = (...buttons: HTMLButtonElement[]): HTMLElement => { const box = document.createElement('div'); box.className = 'xp-acct-tool__actions'; box.append(...buttons); return box }
+      const act=(label:string,action:string,id:string,name:string,trashedAt?:string):HTMLButtonElement=>{const button=cloneClientTemplate(actionTemplate,'button',['label']) as HTMLButtonElement;clientTemplateSlot(button,'label').textContent=label;Object.assign(button.dataset,{dbPgAct:action,id,name},trashedAt?{trashedAt}:{});return button}
+      const actions=(...buttons:HTMLButtonElement[]):HTMLElement=>{const box=cloneClientTemplate(actionsTemplate,'div',['actions']);clientTemplateSlot(box,'actions').append(...buttons);return box}
       const waiting = (): string => pgReady ? t('Waiting to be created on the server') : unknown()
       rows('databases', [
         ...saved.databases.map(db => [technical(db.name), technical(db.owner), sizes.has(db.name) ? technical(bytes(sizes.get(db.name)!.sizeBytes)) : '—',
@@ -312,4 +318,4 @@ function bindDbEngines(ask: ((options: Record<string, unknown>) => Promise<unkno
   })
 }
 export { dbReadReply }
-export const DB_ENGINES_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const dbObject=${dbObject.toString()};const dbExact=${dbExact.toString()};const dbReadReply=${dbReadReply.toString()};return ${bindDbEngines.toString()};})()`
+export const DB_ENGINES_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const dbObject=${dbObject.toString()};const dbExact=${dbExact.toString()};const dbReadReply=${dbReadReply.toString()};return ${bindDbEngines.toString()};})()`

@@ -110,7 +110,7 @@ function bindAccountContact(askDialog:(options:Record<string,unknown>)=>Promise<
       if(!request)throw new Error('session_request_unavailable')
       return requestContactPreferences(request,canManage,method,body)
     },changed(state){
-      if(saved){saved.textContent=state.observed?(state.observed.contactEmail||t('Not set')):t(msgctxt('account-contact-client', 'Not read'));saved.dir=state.observed?.contactEmail?'ltr':document.documentElement.dir === 'rtl' ? 'rtl' : 'ltr';saved.style.unicodeBidi='isolate';saved.style.textAlign=rtl?'right':'left'}
+      if(saved){const value=document.createElement('bdi');value.textContent=state.observed?(state.observed.contactEmail||t('Not set')):t(msgctxt('account-contact-client', 'Not read'));value.dir=state.observed?.contactEmail?'ltr':'auto';saved.replaceChildren(value)}
       if(input){if(input.value!==state.draft)input.value=state.draft;input.disabled=!canManage()||state.busy||state.uncertain||!state.baseline}
       if(refresh)refresh.disabled=blocked()||state.busy
       if(reload)reload.disabled=!canManage()||state.busy

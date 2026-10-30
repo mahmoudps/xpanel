@@ -99,6 +99,21 @@ describe('approved workspace browser bindings', () => {
     resolve({ featureList: { id, name: 'Standard tools', disabled: ['SSL/TLS'] } }); await tick(); submit()
     expect(send).toHaveBeenCalledTimes(1)
   })
+  it('submits the owning matrix column including associated controls while retaining unread and disabled membership', async () => {
+    let finish!: (value: unknown) => void
+    const send = vi.fn<Request>().mockResolvedValueOnce({ featureLists: [{ id, disabled: ['legacy-flag', 'SSL/TLS', 'popaccts (Email Accounts)'] }] })
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    request(send)
+    boot(`<form id="matrix-list" data-feature-list-update-form data-feature-list-id="${id}">${field('name', 'Matrix tools')}<button type="submit">Save</button></form><form id="other-list"></form><table><tbody><tr><td><input form="matrix-list" name="disabled" type="checkbox" value="SSL/TLS"><input form="matrix-list" name="disabled" type="checkbox" value="Email Filtering Manager" checked><input form="matrix-list" name="disabled" type="checkbox" value="popaccts (Email Accounts)" disabled><input form="other-list" name="disabled" type="checkbox" value="unregistered foreign" checked></td></tr></tbody></table>`)
+    submit(); await tick()
+    expect(send.mock.calls[1]).toEqual(['PATCH', '/api/feature-lists/' + id, { name: 'Matrix tools', disabled: ['legacy-flag', 'popaccts (Email Accounts)', 'Email Filtering Manager'] }])
+    const associated = [...document.querySelectorAll<HTMLInputElement>('input[form="matrix-list"]')]
+    expect(associated.every(input => input.disabled)).toBe(true)
+    expect(document.querySelector<HTMLInputElement>('input[form="other-list"]')!.disabled).toBe(false)
+    finish({ featureList: { id, name: 'Matrix tools', disabled: ['legacy-flag', 'popaccts (Email Accounts)', 'Email Filtering Manager'] } }); await tick()
+    expect(status().dataset.state).toBe('stored')
+    expect(associated.every(input => input.disabled)).toBe(true)
+  })
   it.each(['<fieldset disabled>', '<section data-capability-unavailable="true">', '<section data-wiring="soon">'])('sends no requests from unavailable UI: %s', async prefix => {
     const send = vi.fn<Request>(); request(send); boot(prefix + featureForm() + (prefix.startsWith('<fieldset') ? '</fieldset>' : '</section>'))
     submit(); await tick(); expect(send).not.toHaveBeenCalled()

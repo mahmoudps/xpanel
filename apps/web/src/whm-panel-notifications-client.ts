@@ -1,3 +1,5 @@
+import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const whmClientNode = canonicalWhmClientNode
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
@@ -130,8 +132,8 @@ function bindWhmPanelNotifications(): void {
         const next = readPanelNotificationsView(await request!('POST', '/api/server/panel/notifications/webhook-key'))
         if (!next.createdSigningKey) throw Object.assign(new Error('unverified'), { details: { verificationRequired: true } })
         paint(next)
-        note(keyStatus, 'read', [t('Copy this signing key now. It is not shown again.'), technical(next.createdSigningKey, 'code')])
-        keyStatus.querySelector('code')?.classList.add('xp-whm-notifications__secret')
+        const revealed = whmClientNode(root, 'whm-notifications-secret', 'code', next.createdSigningKey); revealed.dir = 'ltr'
+        note(keyStatus, 'read', [t('Copy this signing key now. It is not shown again.'), revealed])
       }, t('No signing key was created.'))
     })
     test.addEventListener('click', () => {
@@ -165,4 +167,4 @@ function bindWhmPanelNotifications(): void {
   })
 }
 
-export const WHM_PANEL_NOTIFICATIONS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readPanelNotificationsView=${readPanelNotificationsView.toString()};return ${bindWhmPanelNotifications.toString()};})()`
+export const WHM_PANEL_NOTIFICATIONS_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readPanelNotificationsView=${readPanelNotificationsView.toString()};return ${bindWhmPanelNotifications.toString()};})()`

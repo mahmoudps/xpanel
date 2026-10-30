@@ -1,3 +1,5 @@
+import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const whmClientNode = canonicalWhmClientNode
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -89,7 +91,7 @@ function bindWhmSupport(): void {
     let view: SupportView | null = null, busy = false
     const notRead = t('Not read')
     const note = (target: HTMLElement, state: string, message: string): void => { target.dataset.state = state; target.textContent = message; target.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
-    const ltr = (content: string, wrap = false): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = content; if (wrap) node.style.overflowWrap = 'anywhere'; return node }
+    const ltr = (content: string, wrap = false): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = content; if (wrap) node.dataset.wrap = 'anywhere'; return node }
     const fact = (key: string, content: string | Node): void => { root.querySelector('[data-whm-support-fact="' + key + '"]')?.replaceChildren(content) }
     const when = (iso: string): string => formatDisplayDateTime(iso)
     const rows = (marker: string, cells: (string | Node)[][], empty: string, span: number): void => {
@@ -138,8 +140,8 @@ function bindWhmSupport(): void {
     }
     const paintContact = (contact: SupportView['contact']): void => {
       const line = (label: string, href: string, text: string): HTMLElement => { const p = document.createElement('p'), a = document.createElement('a'); p.append(label + ' '); a.href = href; a.rel = 'noopener noreferrer'; a.append(ltr(text)); p.append(a); return p }
-      if (contact.state === 'unavailable') { const p = document.createElement('p'); p.className = 'xp-help'; p.dataset.contactState = 'unavailable'; p.textContent = t('The support contact setting could not be read. Nothing is assumed.'); contactBox.replaceChildren(p); return }
-      if (contact.state === 'not-configured') { const p = document.createElement('p'); p.className = 'xp-help'; p.dataset.contactState = 'not-configured'; p.textContent = t('No support contact is configured. A contact appears here only after the server owner saves one; none is suggested.'); contactBox.replaceChildren(p); return }
+      if (contact.state === 'unavailable') { const p = whmClientNode(root, 'whm-support-note', 'p'); p.dataset.contactState = 'unavailable'; p.textContent = t('The support contact setting could not be read. Nothing is assumed.'); contactBox.replaceChildren(p); return }
+      if (contact.state === 'not-configured') { const p = whmClientNode(root, 'whm-support-note', 'p'); p.dataset.contactState = 'not-configured'; p.textContent = t('No support contact is configured. A contact appears here only after the server owner saves one; none is suggested.'); contactBox.replaceChildren(p); return }
       contactBox.replaceChildren(...[contact.url ? line(t('Support website:'), contact.url, contact.url) : null, contact.email ? line(t('Support email:'), 'mailto:' + contact.email, contact.email) : null].filter((node): node is HTMLElement => node !== null))
       contactBox.dataset.contactState = 'configured'
     }
@@ -201,4 +203,4 @@ function bindWhmSupport(): void {
   })
 }
 
-export const WHM_SUPPORT_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readSupportView=${readSupportView.toString()};return ${bindWhmSupport.toString()};})()`
+export const WHM_SUPPORT_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readSupportView=${readSupportView.toString()};return ${bindWhmSupport.toString()};})()`

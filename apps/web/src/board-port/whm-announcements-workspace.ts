@@ -1,3 +1,4 @@
+import { classicWhmClientTemplates } from './whm-client-templates.ts'
 import { LOCALES, languageName, localeDirection, translator, type Locale, type MessageValues } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 import { ACCOUNT_ANNOUNCEMENT_SEVERITY_LABELS, ACCOUNT_ANNOUNCEMENT_STYLES } from './account-announcements-banner.ts'
@@ -33,7 +34,7 @@ export function renderWhmAnnouncementsWorkspace(input: { locale: Locale; canMana
   const severities = Object.entries(ACCOUNT_ANNOUNCEMENT_SEVERITY_LABELS).map(([key, label]) => option(key, t(label))).join('')
   const usernamesHelp = t('Account usernames, one per line or comma-separated, up to 100. Each must exist.')
   const startsHelp = t('Empty starts as soon as it is saved.'), endsHelp = t('Empty keeps it shown until you archive it.')
-  return `${ACCOUNT_ANNOUNCEMENT_STYLES}${styles}<section class="xp-whm-detail xp-whm-announcements" data-whm-detail-route="/whm/accounts/announcements" data-whm-announcements-workspace data-announcements-can-manage="${input.canManage}" data-capability-state="${input.canManage ? 'authorized' : 'unavailable'}" lang="${input.locale}" dir="${localeDirection(input.locale)}">
+  return `${ACCOUNT_ANNOUNCEMENT_STYLES}${styles}<section class="xp-whm-detail xp-whm-announcements" data-whm-detail-route="/whm/accounts/announcements" data-whm-announcements-workspace data-announcements-can-manage="${input.canManage}" data-capability-state="${input.canManage ? 'authorized' : 'unavailable'}" lang="${input.locale}" dir="${localeDirection(input.locale)}">${classicWhmClientTemplates('announcements')}
   <header class="xp-whm-detail-heading"><h1>${t('Announcements')}</h1><p>${t("Notices shown on account owners' xPanel home page while they are live, in English and Arabic. Owners can dismiss a notice for their own account. Nothing is emailed.")}</p></header>
   <div class="xp-whm-detail-column">
     <section class="xp-whm-detail-card" data-whm-detail-section="announcements-list" aria-labelledby="whm-announcements-list-heading">

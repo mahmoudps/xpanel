@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MAIL_COMPOSE_ATTACHMENTS_CLIENT_BINDING, readComposeAttachmentPayload } from './mail-compose-attachments-client.ts'
 import type { ComposeAttachmentPayload } from '@xpanel/core'
+import { classicMailClientTemplates } from './board-port/mail-client-templates.ts'
+import { v2MailClientTemplates } from './themes/v2/pages/xmail/client-templates.ts'
 
 type Group = HTMLElement & { xpanelReadComposeAttachments: (payload?: Record<string, unknown>) => readonly ComposeAttachmentPayload[] }
 const group = () => document.querySelector<Group>('[data-compose-form]')!
@@ -17,10 +19,32 @@ const realFile = (bytes = Uint8Array.from([0, 255, 128, 13, 10]), name = 'invoic
 const choose = (files: readonly File[]) => { Object.defineProperty(input(), 'files', { value: files, configurable: true }); input().dispatchEvent(new Event('change', { bubbles: true })) }
 beforeEach(() => {
   document.body.innerHTML = '<section data-compose-form="true" data-compose-identities data-compose-mailbox="owner@example.test"><section data-compose-attachments data-compose-attachment-enabled="true"><span data-compose-attachment-summary>0 files</span><button type="button" data-compose-attachment-open>Attach</button><input hidden type="file" multiple data-compose-attachment-input><ul data-compose-attachment-list></ul><div role="status" data-compose-attachment-status></div></section><button data-mail-send data-mail-send-busy="false">Send</button></section>'
+  document.querySelector('[data-compose-attachments]')!.insertAdjacentHTML('beforeend', classicMailClientTemplates('compose-attachments'))
 })
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks() })
 
 describe('one browser attachment collector for Send and Save draft', () => {
+  it.each(['missing', 'duplicate'] as const)('fails closed before reading bytes when the selected-theme template is %s', async contract => {
+    const template = document.querySelector<HTMLTemplateElement>('[data-xp-template="mail-compose-attachment-row"]')!
+    if (contract === 'missing') template.remove()
+    else template.parentElement!.append(template.cloneNode(true))
+    const file = realFile()
+    boot(); choose([file]); await tick()
+    expect(file.arrayBuffer).not.toHaveBeenCalled()
+    expect(input().disabled).toBe(true)
+    expect(document.querySelector<HTMLButtonElement>('[data-compose-attachment-open]')!.disabled).toBe(true)
+    expect(status().textContent).toBe('Attachments are unavailable here.')
+    expect(() => readComposeAttachmentPayload(group())).toThrow('ATTACHMENTS_UNBOUND')
+  })
+  it.each([['classic', classicMailClientTemplates], ['v2', v2MailClientTemplates]] as const)('collects actual bytes using the real %s attachment templates', async (_theme, templates) => {
+    const root = document.querySelector('[data-compose-attachments]')!
+    root.querySelectorAll('template').forEach(template => template.remove())
+    root.insertAdjacentHTML('beforeend', templates('compose-attachments'))
+    boot(); choose([realFile()]); await tick()
+    expect(readComposeAttachmentPayload(group())).toEqual([{ filename: 'invoice.bin', contentType: 'application/octet-stream', contentBase64: 'AP+ADQo=' }])
+    expect(root.querySelector('[data-compose-attachment-list] bdi[dir="auto"]')!.textContent).toBe('invoice.bin')
+    expect(root.querySelector('[data-compose-attachment-list] bdi[dir="ltr"]')!.textContent).toBe('5 B')
+  })
   it('fails closed before binding and returns an immutable actual-byte snapshot after binding', async () => {
     expect(() => readComposeAttachmentPayload(group())).toThrow('ATTACHMENTS_UNBOUND')
     boot(); choose([realFile()]); await tick()

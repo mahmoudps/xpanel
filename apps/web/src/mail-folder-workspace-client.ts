@@ -1,3 +1,7 @@
+import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
+const mailTemplate = canonicalMailTemplate
+const mailSlot = canonicalMailSlot
+const mailRequireTemplates = canonicalMailRequireTemplates
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
@@ -185,6 +189,7 @@ export function bindMailFolderWorkspace(askDialog:(options:Record<string,unknown
     const rowTemplate=root.querySelector<HTMLTemplateElement>('[data-mail-folder-row-template]'),readingTemplate=root.querySelector<HTMLTemplateElement>('[data-mail-folder-reading-template]'),empty=root.querySelector<HTMLTemplateElement>('#xmail-empty')
     const query=root.querySelector<HTMLInputElement>('#xmail-query'),pager=root.querySelector<HTMLElement>('[data-mail-pager]')
     if(!list||!article||!rowTemplate||!readingTemplate||!status)return
+    try{mailRequireTemplates(root,[['mail-folder-message-row','li'],['mail-folder-message-reading','div'],['mail-folder-filter-empty','p'],['mail-folder-move-menu','ul'],['mail-folder-move-choice','li',['label']],['mail-folder-attachment-info','li',['button','badge','name','size']]]);for(const [name,tag,selectors] of [['mail-folder-message-row','li',['[data-mail-open]','[data-mail-name]','[data-mail-subject]','[data-mail-time] time','[data-mail-preview]']],['mail-folder-message-reading','div',['[data-mail-detail-subject]','[data-mail-detail-name]','[data-mail-detail-from]','[data-mail-detail-to]','[data-mail-detail-date]','[data-mail-detail-body]']]] as const){const fragment=mailTemplate(root,name,tag);for(const selector of selectors)if(!fragment.querySelector(selector))throw new Error('invalid_mail_folder_template')}}catch{root.querySelectorAll<HTMLButtonElement|HTMLInputElement>('button,input').forEach(control=>{control.disabled=true});status.dataset.state='unavailable';status.textContent=t('Unavailable');return}
     let filter='all',lastRows:FolderSummary[]|null=null,lastMessage:FolderMessage|null|undefined
     const blocked=()=>!root.isConnected||root.dataset.mailFolderWorkspace!=='true'||root.dataset.mailbox!==mailbox||root.dataset.mailFolder!==folder||!!root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled,[data-capability-state="unavailable"],[data-page-state="unavailable"],[data-readonly="true"],[data-qualified="false"]')
     const send=async(method:'GET'|'POST',path:string,body?:unknown)=>{
@@ -192,7 +197,7 @@ export function bindMailFolderWorkspace(askDialog:(options:Record<string,unknown
       if(blocked()||typeof transport!=='function')throw {details:{stateChanged:false}}
       return transport(method,path,body)
     }
-    const set=(node:ParentNode,selector:string,value:string)=>{const target=node.querySelector<HTMLElement>(selector);if(target){target.textContent=value;target.dir=/detail-(?:from|to|cc|date)\]|mail-time/.test(selector)?'ltr':'auto';target.style.unicodeBidi='isolate';target.style.textAlign=rtl?'right':'left'}}
+    const set=(node:ParentNode,selector:string,value:string)=>{const target=node.querySelector<HTMLElement>(selector);if(target){const technical=/detail-(?:from|to|cc|date)\]|mail-time/.test(selector);let content=target.tagName==='BDI'?target:target.querySelector<HTMLElement>('bdi');if(!content&&technical){content=document.createElement('bdi');content.dir='ltr';target.replaceChildren(content)}if(content){content.textContent=value;content.dir=technical?'ltr':'auto'}else{target.textContent=value;target.dir='auto'}}}
     const size=(bytes:number)=>bytes<1024?bytes+' B':bytes<1048576?(bytes/1024).toFixed(1)+' KB':(bytes/1048576).toFixed(1)+' MB'
     const stamp=(raw:string,compact=false)=>{const date=new Date(raw);if(Number.isNaN(date.getTime()))return raw;if(compact)return date.toISOString().slice(11,16);const full=formatMailDateTime(raw);return full==='—'?formatMailDateTime(date):full}
     let invalidated=false,refreshTimer:number|undefined
@@ -201,23 +206,22 @@ export function bindMailFolderWorkspace(askDialog:(options:Record<string,unknown
       const q=(query?.value??'').trim().toLowerCase();let shown=0
       list.querySelectorAll<HTMLElement>('[data-mail-open]').forEach(button=>{const hit=(filter!=='unread'||button.dataset.unread==='true')&&(filter!=='attachments'||button.dataset.attach==='1')&&(!q||(button.dataset.search??'').toLowerCase().includes(q));button.parentElement!.hidden=!hit;if(hit)shown++})
       if(pager&&workspace.state.loaded)pager.textContent=t('{shown} of {total}',{shown,total:workspace.state.messages.length})
-      root.querySelectorAll<HTMLElement>('[data-mail-filter]').forEach(button=>{const on=button.dataset.mailFilter===filter;button.setAttribute('aria-pressed',String(on));button.style.background=on?'light-dark(#FFFFFF,var(--xp-bg-surface))':'transparent';button.style.fontWeight=on?'600':'500'})
+      root.querySelectorAll<HTMLElement>('[data-mail-filter]').forEach(button=>{const on=button.dataset.mailFilter===filter;button.setAttribute('aria-pressed',String(on))})
       let note=root.querySelector<HTMLElement>('[data-mail-filter-empty]')
-      if(workspace.state.loaded&&shown===0){if(!note){note=document.createElement('p');note.dataset.mailFilterEmpty='true';note.style.cssText='margin:0;padding:32px 24px;font-size:14px;line-height:1.75;text-align:center';list.after(note)}note.textContent=workspace.state.messages.length?t('No messages match this search or filter.'):t('No messages in this folder.')}
+      if(workspace.state.loaded&&shown===0){if(!note){note=mailTemplate(root,'mail-folder-filter-empty','p');list.after(note)}note.textContent=workspace.state.messages.length?t('No messages match this search or filter.'):t('No messages in this folder.')}
       else note?.remove()
     }
     const paintRows=(state:FolderWorkspaceState)=>{
       list.replaceChildren()
       state.messages.forEach(message=>{
-        const fragment=rowTemplate.content.cloneNode(true) as DocumentFragment,button=fragment.querySelector<HTMLElement>('[data-mail-open]')!
+        const fragment=mailTemplate(root,'mail-folder-message-row','li'),button=fragment.querySelector<HTMLElement>('[data-mail-open]')!
         button.dataset.mailOpen='uid-'+message.uid;button.dataset.mailUid=String(message.uid);button.dataset.unread=String(message.unread);button.dataset.attach=message.attachments?.length?'1':'0';button.dataset.search=[message.fromName,message.from,message.subject,message.preview].join(' ')
         button.setAttribute('aria-label',[message.fromName??message.from,message.subject,stamp(message.receivedAt)].join('. '))
         set(fragment,'[data-mail-name]',message.fromName??message.from);set(fragment,'[data-mail-subject]',message.subject);set(fragment,'[data-mail-time] time',stamp(message.receivedAt,true));set(fragment,'[data-mail-preview]',message.preview??'')
-        fragment.querySelectorAll<HTMLElement>('[data-mail-name],[data-mail-subject],[data-mail-time]').forEach(node=>{node.style.fontWeight=message.unread?'600':'400'})
-        const attachmentIcon=fragment.querySelector<SVGElement>('[data-mail-time] svg');if(attachmentIcon)attachmentIcon.style.display=message.attachments?.length?'':'none'
-        const time=fragment.querySelector('time');if(time){time.setAttribute('datetime',message.receivedAt);time.title=stamp(message.receivedAt);time.style.cssText='max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'}
-        const timeHolder=fragment.querySelector<HTMLElement>('[data-mail-time]');if(timeHolder){timeHolder.style.maxWidth='45%';timeHolder.style.minWidth='0'}
-        const dot=fragment.querySelector<HTMLElement>('[data-mail-dot]');if(dot)dot.style.background=message.unread?'light-dark(#1D5BD6,var(--xp-accent))':'transparent'
+        set(fragment,'[data-mail-row-avatar]',(message.fromName??message.from).trim().charAt(0))
+        const attachmentIcon=fragment.querySelector<SVGElement>('[data-mail-time] svg');if(attachmentIcon)attachmentIcon.toggleAttribute('hidden',!message.attachments?.length)
+        const time=fragment.querySelector('time');if(time){time.setAttribute('datetime',message.receivedAt);time.title=stamp(message.receivedAt)}
+
         list.append(fragment)
       })
       root.querySelectorAll('[data-mail-empty-list],[data-mail-list-state]').forEach(node=>node.remove())
@@ -227,18 +231,18 @@ export function bindMailFolderWorkspace(askDialog:(options:Record<string,unknown
     }
     const paintMessage=(message:FolderMessage|null)=>{
       if(!message){if(empty)article.replaceChildren(empty.content.cloneNode(true));return}
-      const fragment=readingTemplate.content.cloneNode(true) as DocumentFragment
+      const fragment=mailTemplate(root,'mail-folder-message-reading','div')
       set(fragment,'[data-mail-detail-subject]',message.subject);set(fragment,'[data-mail-detail-name]',message.fromName??message.from);set(fragment,'[data-mail-detail-from]','<'+message.from+'>');set(fragment,'[data-mail-detail-to]',message.to);set(fragment,'[data-mail-detail-cc]',message.cc??'')
-      const cc=fragment.querySelector('[data-mail-detail-cc]');if(cc?.parentElement){cc.parentElement.hidden=!message.cc;cc.parentElement.style.display=message.cc?'grid':'none'}
+      const cc=fragment.querySelector('[data-mail-detail-cc]');if(cc?.parentElement){cc.parentElement.hidden=!message.cc;cc.parentElement.dataset.mailCcVisible=String(!!message.cc)}
       set(fragment,'[data-mail-detail-date]',stamp(message.receivedAt));fragment.querySelector('[data-mail-detail-date]')?.setAttribute('datetime',message.receivedAt)
-      const date=fragment.querySelector<HTMLElement>('[data-mail-detail-date]');if(date)date.style.overflowWrap='anywhere'
+
       set(fragment,'[data-mail-detail-avatar]',(message.fromName??message.from).slice(0,2));set(fragment,'[data-mail-detail-auth]',t('DKIM / SPF / DMARC: not checked'))
-      const body=fragment.querySelector<HTMLElement>('[data-mail-detail-body]');if(body){body.textContent=message.body;body.dir='auto';body.style.whiteSpace='pre-wrap';body.style.overflowWrap='anywhere'}
+      const body=fragment.querySelector<HTMLElement>('[data-mail-detail-body]');if(body){body.textContent=message.body;body.dir='auto'}
       const attachments=fragment.querySelector<HTMLElement>('[data-mail-detail-attachments]')
-      if(attachments&&!attachments.matches('[data-mail-attachments]')){
-        const ul=attachments.querySelector('ul'),sample=ul?.firstElementChild?.cloneNode(true) as HTMLElement|undefined
+      if(attachments&&!attachments.hasAttribute('data-mail-attachments')){
+        const ul=attachments.querySelector('ul')
         if(!message.attachments?.length)attachments.remove()
-        else if(ul&&sample){ul.replaceChildren();message.attachments.forEach(file=>{const item=sample.cloneNode(true) as HTMLElement,button=item.querySelector('button')!;button.disabled=true;button.setAttribute('aria-label',file.name+', '+size(file.sizeBytes));const labels=button.querySelectorAll('span');if(labels[0])labels[0].textContent=file.name.split('.').pop()?.slice(0,4).toUpperCase()??'FILE';if(labels[2])labels[2].textContent=file.name;if(labels[3])labels[3].textContent=size(file.sizeBytes);ul.append(item)});set(attachments,'h3',t('{count} attachments',{count:message.attachments.length}))}
+        else if(ul){ul.replaceChildren();message.attachments.forEach(file=>{const item=mailTemplate(root,'mail-folder-attachment-info','li',['button','badge','name','size']),button=mailSlot<HTMLButtonElement>(item,'button','button');button.disabled=true;button.setAttribute('aria-label',file.name+', '+size(file.sizeBytes));mailSlot(item,'badge').textContent=file.name.split('.').pop()?.slice(0,4).toUpperCase()??'FILE';mailSlot(item,'name','bdi').textContent=file.name;mailSlot(item,'size','bdi').textContent=size(file.sizeBytes);ul.append(item)});set(attachments,'h3',t('{count} attachments',{count:message.attachments.length}))}
       }
       fragment.querySelectorAll<HTMLAnchorElement>('[data-mail-reply]').forEach(link=>{const href=new URL('/mail/compose',window.location.href);href.searchParams.set('mode',link.dataset.mailReply!);href.searchParams.set('uid',String(message.uid));href.searchParams.set('folder',folder);link.href=href.pathname+href.search})
       article.replaceChildren(fragment)
@@ -251,7 +255,7 @@ export function bindMailFolderWorkspace(askDialog:(options:Record<string,unknown
       if(blocked())return
       if(state.loaded&&lastRows!==state.messages){lastRows=state.messages;paintRows(state)}
       if(lastMessage!==state.message){lastMessage=state.message;paintMessage(state.message)}
-      list.querySelectorAll<HTMLElement>('[data-mail-open]').forEach(button=>{const selected=Number(button.dataset.mailUid)===state.selectedUid;button.setAttribute('aria-current',String(selected));button.style.background=selected?'light-dark(#F3F7FE,var(--xp-accent-soft))':'light-dark(#FFFFFF,var(--xp-bg-surface))';button.style.boxShadow=selected?(rtl?'inset -3px 0 0 light-dark(#1D5BD6,var(--xp-accent))':'inset 3px 0 0 light-dark(#1D5BD6,var(--xp-accent))'):'none';(button as HTMLButtonElement).disabled=state.busy})
+      list.querySelectorAll<HTMLElement>('[data-mail-open]').forEach(button=>{const selected=Number(button.dataset.mailUid)===state.selectedUid;button.setAttribute('aria-current',String(selected));(button as HTMLButtonElement).disabled=state.busy})
       status.dataset.state=state.status;status.textContent=state.reason==='identity_unobserved'||state.reason==='identity_changed'?t('Message identity is unverified or changed. Read it again before moving.'):state.reason==='message_changed'?t('The message changed. Read it again before moving.'):state.reason==='reviewed'?t('Folder reviewed. The previous move remains unverified.'):messages[state.status]
       if(state.loaded&&!state.canMove&&state.status==='read')status.textContent+=' '+t('Message moves are unavailable for this mailbox transport.')
       const review=root.querySelector<HTMLButtonElement>('[data-mail-folder-review]');if(review){review.hidden=!state.uncertain;review.disabled=state.busy||state.reading}
@@ -278,8 +282,8 @@ export function bindMailFolderWorkspace(askDialog:(options:Record<string,unknown
       if(name==='toggle-move'){
         const old=root.querySelector('[data-mail-move]');if(old){old.remove();action.setAttribute('aria-expanded','false');return}
         if(workspace.state.busy||workspace.state.uncertain||!workspace.state.canMove||mailFolderObservedUidValidity(workspace.state.message)===null)return
-        const menu=document.createElement('ul');menu.id='move-list';menu.dataset.mailMove='true';menu.style.cssText='position:absolute;top:50px;inset-inline-start:0;z-index:2;list-style:none;margin:0;padding:6px;min-width:200px;max-width:calc(100vw - 48px);border-radius:10px;border:1px solid light-dark(#E2E6EC,var(--xp-border));background:light-dark(#FFFFFF,var(--xp-bg-surface));box-shadow:0 8px 24px rgba(16,24,40,.12);display:flex;flex-direction:column;gap:2px'
-        try{const targets=JSON.parse(root.dataset.moveTargets??'[]') as Array<{id:string;label:string}>;targets.forEach(item=>{if(canonicalMailFolder(item.id)!==item.id||item.id===folder||typeof item.label!=='string')return;const li=document.createElement('li'),button=document.createElement('button');button.type='button';button.dataset.mailAction='move';button.dataset.folder=item.id;button.textContent=item.label;button.style.cssText='width:100%;min-height:44px;padding:0 12px;border:none;background:transparent;font:inherit;text-align:start;color:light-dark(#101828,var(--xp-text-primary))';li.append(button);menu.append(li)})}catch{return}
+        const menu=mailTemplate(root,'mail-folder-move-menu','ul')
+        try{const targets=JSON.parse(root.dataset.moveTargets??'[]') as Array<{id:string;label:string}>;targets.forEach(item=>{if(canonicalMailFolder(item.id)!==item.id||item.id===folder||typeof item.label!=='string')return;const li=mailTemplate(root,'mail-folder-move-choice','li',['label']),button=mailSlot<HTMLButtonElement>(li,'label','button');button.dataset.folder=item.id;button.textContent=item.label;menu.append(li)})}catch{return}
         action.parentElement?.append(menu);action.setAttribute('aria-expanded','true')
       }
     })
@@ -289,4 +293,4 @@ export function bindMailFolderWorkspace(askDialog:(options:Record<string,unknown
   })
 }
 
-export const MAIL_FOLDER_WORKSPACE_CLIENT_BINDING=`(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const canonicalMailFolder=${canonicalMailFolder.toString()};const mailFolderUid=${mailFolderUid.toString()};const mailFolderUidValidity=${mailFolderUidValidity.toString()};const mailFolderObservedUidValidity=${mailFolderObservedUidValidity.toString()};const mailFolderObject=${mailFolderObject.toString()};const mailFolderFlags=${mailFolderFlags.toString()};const readFolderSummary=${readFolderSummary.toString()};const readFolderList=${readFolderList.toString()};const readFolderMessage=${readFolderMessage.toString()};const readFolderMove=${readFolderMove.toString()};const mailFolderWriteUncertain=${mailFolderWriteUncertain.toString()};const mailFolderFingerprint=${mailFolderFingerprint.toString()};const createMailFolderWorkspace=${createMailFolderWorkspace.toString()};return ${bindMailFolderWorkspace.toString()};})()`
+export const MAIL_FOLDER_WORKSPACE_CLIENT_BINDING=`(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const canonicalMailFolder=${canonicalMailFolder.toString()};const mailFolderUid=${mailFolderUid.toString()};const mailFolderUidValidity=${mailFolderUidValidity.toString()};const mailFolderObservedUidValidity=${mailFolderObservedUidValidity.toString()};const mailFolderObject=${mailFolderObject.toString()};const mailFolderFlags=${mailFolderFlags.toString()};const readFolderSummary=${readFolderSummary.toString()};const readFolderList=${readFolderList.toString()};const readFolderMessage=${readFolderMessage.toString()};const readFolderMove=${readFolderMove.toString()};const mailFolderWriteUncertain=${mailFolderWriteUncertain.toString()};const mailFolderFingerprint=${mailFolderFingerprint.toString()};const createMailFolderWorkspace=${createMailFolderWorkspace.toString()};return ${bindMailFolderWorkspace.toString()};})()`

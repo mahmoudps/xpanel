@@ -33,7 +33,8 @@ export const dnfProfile = (release: OsRelease): XpanelOsProfile => {
       postgresql: ['postgresql-server'],
       postfix: ['postfix'],
       dovecot: ['dovecot', 'dovecot-pigeonhole'],
-      powerdns: ['pdns', 'pdns-backend-postgresql'],
+      // EPEL pdns includes libbindbackend.so; named-checkzone/dig are in these BIND tools.
+      powerdns: ['pdns', 'bind-utils'],
       redis: [redis],
       ftp: ['pure-ftpd'],
       sshd: ['openssh-server'],

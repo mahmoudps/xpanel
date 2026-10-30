@@ -2,6 +2,9 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const viewAction = canonicalViewAction
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 
 export interface TransferCredentialsView { revision: string; limit: number; credentials: { id: string; label: string; kind: 'api-token'; fingerprint: string; createdAt: string; createdBy: string }[]; changed: string | null }
@@ -43,20 +46,13 @@ function bindTransferCredentials(askDialog: ((options: Record<string, unknown>) 
       rows.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = locked || reviewRequired })
       root.setAttribute('aria-busy', String(busy)); loading.hidden = !busy || view !== null
     }
-    const cell = (text: string, ltr = false): HTMLTableCellElement => {
-      const td = document.createElement('td')
-      if (ltr) { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = text; td.append(bdi) } else td.textContent = text
-      return td
-    }
     const paint = (): void => {
       rows.textContent = ''
       for (const item of view?.credentials ?? []) {
-        const row = document.createElement('tr'), name = document.createElement('td'), bdi = document.createElement('bdi'), actions = document.createElement('td'), remove = document.createElement('button')
-        bdi.dir = 'auto'; bdi.textContent = item.label; name.append(bdi)
-        remove.type = 'button'; remove.className = 'xp-btn'; remove.textContent = t('Remove'); remove.setAttribute('aria-label', t('Remove source token {label}', { label: item.label }))
+        const row = cloneViewRecord(root, 'transfer-credential-row', 'tr', { label: item.label, fingerprint: item.fingerprint, created: formatDisplayDateTime(item.createdAt), actor: item.createdBy, 'remove-label': t('Remove') })
+        const remove = viewAction(row, 'remove')
+        remove.setAttribute('aria-label', t('Remove source token {label}', { label: item.label }))
         remove.addEventListener('click', () => { void removeOne(item.id, item.label) })
-        actions.append(remove)
-        row.append(name, cell(item.fingerprint, true), cell(formatDisplayDateTime(item.createdAt), true), cell(item.createdBy, true), actions)
         rows.append(row)
       }
       empty.hidden = !view || view.credentials.length > 0
@@ -115,4 +111,4 @@ function bindTransferCredentials(askDialog: ((options: Record<string, unknown>) 
   })
 }
 
-export const ACCT_TRANSFER_CREDENTIALS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readTransferCredentialsView=${readTransferCredentialsView.toString()};return ${bindTransferCredentials.toString()};})()`
+export const ACCT_TRANSFER_CREDENTIALS_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readTransferCredentialsView=${readTransferCredentialsView.toString()};return ${bindTransferCredentials.toString()};})()`

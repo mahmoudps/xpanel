@@ -1,5 +1,5 @@
 import { localeDirection, translator, type Locale } from './i18n.ts'
-import { escapeHtml } from './tokens.ts'
+import { escapeHtml } from './html.ts'
 
 /**
  * Human copy (source messages) for every action the panel writes. The target stays a separate line or
@@ -268,11 +268,11 @@ export const auditActionLabel = (action: string, locale: Locale, source?: AuditL
 
 const OPAQUE_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|mbx[0-9a-f]{8,})$/i
 
-/** A mailbox principal id is not an address. The address is substituted before display. */
+/** Opaque principal ids are not public actor names. Readable identities are supplied before display. */
 export const auditActorLabel = (actor: string): string => {
   const value = actor.trim()
   const body = value.replace(/^user:/i, '')
-  return OPAQUE_ID.test(body) && /^mbx/i.test(body) ? '' : value
+  return OPAQUE_ID.test(body) ? '' : value
 }
 
 /** A target a person can read. An opaque id contributes nothing. */

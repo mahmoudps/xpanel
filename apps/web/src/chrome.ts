@@ -68,6 +68,8 @@ export interface UserMenuModel {
   signedIn: boolean
   activityHref?: string
   menuLinks?: readonly { label: string; href: string }[]
+  /** Unqualified documents keep the chooser visible as markup and do not submit it. */
+  themeChooserWritable?: boolean
 }
 
 export const surfaceContextHref = (model: UserMenuModel, patch: Partial<Pick<UserMenuModel, 'locale' | 'theme' | 'density'>> = {}): string => {
@@ -102,6 +104,13 @@ const renderMenuLinks = (model: UserMenuModel): string => {
   return links.length ? `<div class="xp-menu-navigation" role="group" aria-label="${translator(model.locale)('Navigation')}">${links.join('')}</div>` : ''
 }
 
+const renderInterfaceChoice = (model: UserMenuModel): string => !model.signedIn ? '' : `<style>
+.xp-ui-theme{display:grid;gap:24px;padding:24px;border-block:1px solid var(--xp-border)}.xp-ui-theme[hidden],.xp-ui-theme [hidden]{display:none!important}.xp-ui-theme :is(form,[data-ui-theme-form]){display:grid;gap:16px}.xp-ui-theme label{display:grid;gap:8px}.xp-ui-theme label>span{padding-inline-start:var(--xp-control-content-inset)}.xp-ui-theme p{margin:0;overflow-wrap:anywhere}.xp-ui-theme__actions{display:flex;flex-wrap:wrap;gap:16px}@media(max-width:640px){.xp-ui-theme{padding:16px}}
+</style><section class="xp-ui-theme" data-ui-theme-preferences data-ui-theme-can-read="true" hidden>
+${model.themeChooserWritable === false ? '<div' : '<form'} data-ui-theme-form hidden><label for="xp-ui-theme-choice"><span class="xp-label">${escapeHtml(translator(model.locale)('Interface theme'))}</span><select class="xp-select" id="xp-ui-theme-choice" name="uiTheme" data-ui-theme-choice disabled><option value="classic">${escapeHtml(translator(model.locale)('Classic'))}</option><option value="v2">V2</option></select></label><button class="xp-btn" type="${model.themeChooserWritable === false ? 'button' : 'submit'}" data-ui-theme-save disabled>${escapeHtml(translator(model.locale)('Save'))}</button>${model.themeChooserWritable === false ? '</div>' : '</form>'}
+<p class="xp-help" data-ui-theme-status role="status" aria-live="polite" hidden></p><div class="xp-ui-theme__actions"><button class="xp-btn xp-btn--ghost" type="button" data-ui-theme-reload disabled hidden>${escapeHtml(translator(model.locale)('Reload'))}</button></div>
+</section>`
+
 /** Account menu in the top bar: identity, language, theme, row spacing and sign-out. */
 export function renderUserMenu(model: UserMenuModel): string {
   const nextTheme: ThemeChoice = model.theme === 'dark' ? 'light' : 'dark'
@@ -127,6 +136,7 @@ export function renderUserMenu(model: UserMenuModel): string {
     <div class="xp-user-menu__panel">
       ${alternateLocales(model.locale).map(info => `<a class="xp-menu-choice" href="${escapeHtml(surfaceContextHref(model, { locale: info.tag }))}" lang="${info.tag}" data-lang-switch="${info.tag}">${escapeHtml(info.nativeName)}</a>`).join('')}
       <a class="xp-menu-choice" href="${escapeHtml(surfaceContextHref(model, { theme: nextTheme }))}" data-theme-toggle="${nextTheme}" title="${escapeHtml(themeLabel)}">${escapeHtml(themeLabel)}</a>
+      ${renderInterfaceChoice(model)}
       <div class="xp-menu-density" role="group" aria-label="${escapeHtml(translator(model.locale)('Row spacing'))}">
         ${densityLink('comfortable', translator(model.locale)('Comfortable rows'))}
         ${densityLink('compact', translator(model.locale)('Compact rows'))}

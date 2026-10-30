@@ -1,3 +1,4 @@
+import { dnsToolsTemplates } from './data-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 export interface WhmDnsToolsWorkspaceInput { locale: Locale; canRead: boolean; canManage: boolean }
 
@@ -63,5 +64,5 @@ export function renderWhmDnsToolsWorkspace({ locale, canRead, canManage }: WhmDn
       ${table(t('TTL change preview'), [t('Zone'), t('Records'), t('Records that change'), t('Current TTL range'), t(msgctxt('whm-dns-tools-workspace', 'Preview'))], 'preview', t('No preview has been made.'))}
       <p class="xp-whm-detail-status" data-whm-dns-tools-result="ttl" role="status" hidden></p>
       ${table(t('TTL change results'), [t('Zone'), t('Records changed'), t('Result')], 'applied', t('No change has been applied.'))}`)}
-  </section>`
+  ${dnsToolsTemplates()}</section>`
 }

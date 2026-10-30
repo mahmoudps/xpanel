@@ -2,7 +2,13 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { WHM_DIAGNOSTIC_TEMPLATE_BINDING, whmDiagnosticNode as canonicalDiagnosticNode, whmDiagnosticTemplate as canonicalDiagnosticTemplate, assertWhmDiagnosticTemplates as canonicalAssertDiagnosticTemplates } from './whm-diagnostic-client-templates.ts'
+import { clientTemplateSlot as canonicalDiagnosticSlot } from './client-templates.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
+const whmDiagnosticNode = canonicalDiagnosticNode
+const whmDiagnosticTemplate = canonicalDiagnosticTemplate
+const assertWhmDiagnosticTemplates = canonicalAssertDiagnosticTemplates
+const clientTemplateSlot = canonicalDiagnosticSlot
 export type AlertBoundView = { unit: 'per-processor' | 'percent' | 'days'; direction: 'above' | 'below'; min: number; max: number; decimals: 0 | 1; default: number }
 export type AlertRuleView = { id: string; enabled: boolean; threshold: number | null }
 export type AlertHealthView = 'ok' | 'warning' | 'problem' | 'unavailable'
@@ -121,7 +127,11 @@ function bindWhmMonitoringAlerts(): void {
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => root.isConnected && root.dataset.alertsCanManage === 'true' && !root.closest(denied) && form.tagName === 'FORM' && typeof request === 'function'
     const note = (target: HTMLElement, state: string, message: string): void => { target.hidden = false; target.dataset.state = state; target.textContent = message; target.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
-    const element = <K extends keyof HTMLElementTagNameMap>(tag: K, content?: string, className?: string): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); if (content !== undefined) node.textContent = content; if (className) node.className = className; return node }
+    try { assertWhmDiagnosticTemplates(root) } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      status.dataset.state = 'failed'; status.textContent = t('The server response could not be verified. Nothing is assumed.'); return
+    }
+    const element = <K extends keyof HTMLElementTagNameMap>(tag: K, content?: string, templateName?: string): HTMLElementTagNameMap[K] => whmDiagnosticNode(root, tag, content, templateName)
     const technical = (content: string): HTMLElement => { const node = element('bdi', content); node.dir = 'ltr'; return node }
     // One whole message split at its {placeholders}, each replaced by its node.
     const parts = (message: string, nodes: Record<string, string | Node>): (string | Node)[] => message.split(/(\{\w+\})/).filter(Boolean).map(part => nodes[part] ?? part)
@@ -183,19 +193,23 @@ function bindWhmMonitoringAlerts(): void {
       fact('scheduler', schedule)
       fact('pending', technical(String(delivery.pending.length)))
       log.replaceChildren(...(delivery.log.length ? delivery.log.map(entry => {
-        const row = element('tr'), time = element('td')
-        row.dataset.result = entry.result; time.append(technical(formatDisplayDateTime(entry.at)))
-        row.append(time, element('td', entry.ruleId ? titleOf(entry.ruleId) : t('Test message')), element('td', kindName(entry.kind)), element('td', channelName(entry.channel)), element('td', resultText(entry)))
+        const row = whmDiagnosticTemplate(root, 'alert-delivery-row')
+        row.dataset.result = entry.result
+        clientTemplateSlot(row, 'at').replaceChildren(technical(formatDisplayDateTime(entry.at)))
+        clientTemplateSlot(row, 'rule').textContent = entry.ruleId ? titleOf(entry.ruleId) : t('Test message')
+        clientTemplateSlot(row, 'kind').textContent = kindName(entry.kind)
+        clientTemplateSlot(row, 'channel').textContent = channelName(entry.channel)
+        clientTemplateSlot(row, 'result').textContent = resultText(entry)
         return row
-      }) : [(() => { const row = element('tr'), cell = element('td', delivery.state === 'invalid' ? t('The delivery record could not be verified. The next evaluation starts a new one.') : t('No message has been sent or attempted.'), 'xp-help'); cell.colSpan = 5; row.append(cell); return row })()]))
+      }) : [(() => { const row = whmDiagnosticTemplate(root, 'alert-delivery-empty'); clientTemplateSlot(row, 'message').textContent = delivery.state === 'invalid' ? t('The delivery record could not be verified. The next evaluation starts a new one.') : t('No message has been sent or attempted.'); return row })()]))
     }
-    const BADGES: Record<string, readonly [string, string]> = { critical: [msgid('Critical'), 'xp-badge xp-badge--critical'], warning: [msgid('Warning'), 'xp-badge xp-badge--warn'], ok: [msgid('Not firing'), 'xp-badge xp-badge--ok'], unavailable: [msgid('Not verified'), 'xp-badge'], disabled: [msgctxt('whm-monitoring-alerts', 'Disabled'), 'xp-badge'] }
+    const BADGES: Record<string, readonly [string, string]> = { critical: [msgid('Critical'), 'badge-critical'], warning: [msgid('Warning'), 'badge-warn'], ok: [msgid('Not firing'), 'badge-ok'], unavailable: [msgid('Not verified'), 'badge'], disabled: [msgctxt('whm-monitoring-alerts', 'Disabled'), 'badge'] }
     const badge = (key: string): HTMLElement => element('span', t(BADGES[key]![0]), BADGES[key]![1])
     const paintEvaluation = (next: MonitoringAlertsView): void => {
       const record = next.evaluation
       if (!record) {
         for (const key of ['evaluated-at', 'observed-at', 'firing', 'unavailable', 'quiet']) fact(key, t('Not evaluated'))
-        results.replaceChildren(element('li', t('No results have been recorded.'), 'xp-help'))
+        results.replaceChildren(element('li', t('No results have been recorded.'), 'note-item'))
         note(evalStatus, next.evaluationState === 'invalid' ? 'failed' : 'read', next.evaluationState === 'invalid' ? t('The last evaluation record could not be verified, so it is not shown. Evaluating again replaces it.')
           : t('No evaluation has been recorded yet. The schedule evaluates the rules, or select Evaluate now.'))
         return
@@ -204,9 +218,9 @@ function bindWhmMonitoringAlerts(): void {
       fact('evaluated-at', technical(formatDisplayDateTime(record.evaluatedAt))); fact('observed-at', technical(formatDisplayDateTime(record.observedAt))); fact('firing', technical(String(firing.length))); fact('unavailable', technical(String(unverified.length)))
       fact('quiet', !next.quiet ? t(msgctxt('whm-monitoring-alerts-client', 'Not set')) : record.quiet ? t('Active at the last evaluation') : t('Not active at the last evaluation'))
       results.replaceChildren(...record.results.map(result => {
-        const item = element('li', undefined, 'xp-whm-alerts__result'), head = element('div', undefined, 'xp-whm-alerts__head'), badges = element('span', undefined, 'xp-whm-alerts__badges')
+        const item = element('li', undefined, 'alert-result'), head = element('div', undefined, 'alert-head'), badges = element('span', undefined, 'alert-badges')
         item.dataset.whmAlertsResult = result.id; item.dataset.state = result.state; if (result.severity) item.dataset.severity = result.severity
-        badges.append(badge(result.severity ?? result.state)); if (result.state === 'firing' && record.quiet) badges.append(element('span', t('Quiet window'), 'xp-badge'))
+        badges.append(badge(result.severity ?? result.state)); if (result.state === 'firing' && record.quiet) badges.append(element('span', t('Quiet window'), 'badge'))
         head.append(element('h3', titleOf(result.id)), badges); item.append(head)
         if (result.state === 'disabled') { item.append(element('p', t('This rule is disabled, so it was not evaluated.'))); return item }
         const measured = element('p')
@@ -225,7 +239,7 @@ function bindWhmMonitoringAlerts(): void {
           last.append(...parts(t('Last message ({kind}) {at}: {summary}.'), { '{kind}': kindName(latest.kind), '{at}': technical(formatDisplayDateTime(latest.at)), '{summary}': summary }))
         } else last.append(t('No message has been sent for this alert.'))
         item.append(last)
-        if (result.evidence) { const details = element('details'), pre = element('pre', result.evidence, 'xp-whm-alerts__evidence'); pre.dir = 'ltr'; pre.tabIndex = 0; details.append(element('summary', t('Health evidence')), pre); item.append(details) }
+        if (result.evidence) { const details = element('details'), pre = element('pre', result.evidence, 'evidence'); pre.dir = 'ltr'; pre.tabIndex = 0; details.append(element('summary', t('Health evidence')), pre); item.append(details) }
         return item
       }))
       note(evalStatus, firing.some(entry => entry.severity === 'critical') ? 'problem' : firing.length ? 'warning' : unverified.length ? 'partial' : 'read',
@@ -291,4 +305,4 @@ function bindWhmMonitoringAlerts(): void {
   })
 }
 
-export const WHM_MONITORING_ALERTS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readMonitoringAlertsView=${readMonitoringAlertsView.toString()};return ${bindWhmMonitoringAlerts.toString()};})()`
+export const WHM_MONITORING_ALERTS_CLIENT_BINDING = `(()=>{${WHM_DIAGNOSTIC_TEMPLATE_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readMonitoringAlertsView=${readMonitoringAlertsView.toString()};return ${bindWhmMonitoringAlerts.toString()};})()`

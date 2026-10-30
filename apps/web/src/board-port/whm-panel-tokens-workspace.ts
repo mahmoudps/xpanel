@@ -1,3 +1,4 @@
+import { classicWhmClientTemplates } from './whm-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -57,7 +58,7 @@ export function renderWhmPanelTokensWorkspace(input: { locale: Locale; canManage
     const box = (access: 'read' | 'write', label: string): string => `<td><input type="checkbox" name="scope" value="${resource}:${access}" aria-label="${label}: ${t(label)}" data-whm-tokens-scope${disabled}></td>`
     return `<tr><th scope="row">${t(label)}</th><td><bdi dir="ltr">${resource}</bdi></td>${box('read', t('Read'))}${box('write', t('Write'))}</tr>`
   }).join('')
-  return `${styles}<section class="xp-whm-detail xp-whm-tokens" data-whm-detail-route="/whm/panel/api-tokens" data-whm-panel-tokens-workspace data-tokens-can-manage="${input.canManage}" data-capability-state="${input.canManage ? 'authorized' : 'unavailable'}" lang="${input.locale}" dir="${localeDirection(input.locale)}">
+  return `${styles}<section class="xp-whm-detail xp-whm-tokens" data-whm-detail-route="/whm/panel/api-tokens" data-whm-panel-tokens-workspace data-tokens-can-manage="${input.canManage}" data-capability-state="${input.canManage ? 'authorized' : 'unavailable'}" lang="${input.locale}" dir="${localeDirection(input.locale)}">${classicWhmClientTemplates('tokens')}
   <header class="xp-whm-detail-heading"><h1>${t('API tokens')}</h1><p>${t('Scoped, expiring tokens for scripts and automation that act as root on the API listener. Only a hash of each token is stored.')}</p></header>
   <div class="xp-whm-detail-column">
     <section class="xp-whm-detail-card" data-whm-detail-section="api-tokens-list" aria-labelledby="whm-tokens-list-heading">

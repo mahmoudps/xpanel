@@ -95,7 +95,8 @@ function bindTerminals(): void {
     const emulator = async (): Promise<Emulator> => {
       await loadEmulator()
       if (term) return term
-      term = new host.Terminal!({ cursorBlink: true, scrollback: 2000, disableStdin: true, fontSize: 13, fontFamily: getComputedStyle(screenEl).fontFamily || 'monospace', theme: { background: '#0E1726', foreground: '#E6EDF7' } })
+      const screenStyle = getComputedStyle(screenEl)
+      term = new host.Terminal!({ cursorBlink: true, scrollback: 2000, disableStdin: true, fontSize: 13, fontFamily: screenStyle.fontFamily || 'monospace', theme: { background: screenStyle.backgroundColor, foreground: screenStyle.color } })
       fit = new host.FitAddon!.FitAddon!()
       term.loadAddon(fit)
       screenEl.replaceChildren()

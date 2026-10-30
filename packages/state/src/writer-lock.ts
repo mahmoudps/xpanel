@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { constants } from 'node:fs'
 import { chmod, chown, lstat, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
@@ -17,6 +18,9 @@ const RESTORE_ENTRIES = ['feature-lists', 'plans', 'resellers', 'accounts', 'cer
   // saved mail routing (StateStore MAIL_ROUTING_FILES) and mailbox autoresponders, below extended/
   'extended/mail/forwarders.json', 'extended/mail/domain-forwarders.json', 'extended/mail/default-addresses.json', 'extended/mail/filters.json', 'extended/mail/autoresponders.json', 'extended/webmail/vacation'] as const
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+// Shared across WriterLock instances so callbacks cannot recursively take a
+// state guard through another store and wait on their own retained OS mutex.
+const projectionReadScope = new AsyncLocalStorage<{ active: boolean }>()
 
 export const isProcessAlive = (pid: number): boolean => {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false
@@ -35,7 +39,20 @@ export interface WriteIntentRecord {
   backups: WriteIntentBackup[]
   recordedAt: string
 }
-export interface WriterLockOptions { acquireTimeoutMs?: number; retryIntervalMs?: number; deadOwnerGraceMs?: number; isPidAlive?: (pid: number) => boolean }
+export interface AccountContactProjectionRecovery {
+  readonly accountId: string
+  readonly username: string
+  readonly relPath: string
+  readonly committed: boolean
+}
+export interface WriterLockOptions {
+  acquireTimeoutMs?: number
+  retryIntervalMs?: number
+  deadOwnerGraceMs?: number
+  isPidAlive?: (pid: number) => boolean
+  /** Runs under the permanent writer mutex after selecting the surviving canonical account. */
+  recoverAccountContactProjection?: (recovery: AccountContactProjectionRecovery) => Promise<void>
+}
 export interface WriterLease {
   readonly pid: number
   readonly fencingToken: number
@@ -63,11 +80,17 @@ export class WriterLock {
   private readonly acquireTimeoutMs: number
   private readonly retryIntervalMs: number
   private readonly isPidAlive: (pid: number) => boolean
+  private recoverAccountContactProjection: WriterLockOptions['recoverAccountContactProjection']
   constructor(stateDir: string, opts: WriterLockOptions = {}) {
     this.stateDir = resolve(stateDir)
     this.acquireTimeoutMs = assertInt(opts.acquireTimeoutMs ?? 15_000, 0, 600_000, 'acquireTimeoutMs')
     this.retryIntervalMs = assertInt(opts.retryIntervalMs ?? 15, 1, 60_000, 'retryIntervalMs')
     this.isPidAlive = opts.isPidAlive ?? isProcessAlive
+    this.recoverAccountContactProjection = opts.recoverAccountContactProjection
+  }
+  /** Trusted startup wiring; installing a port does not itself acquire or recover a lease. */
+  registerAccountContactProjectionRecovery(repair: NonNullable<WriterLockOptions['recoverAccountContactProjection']>): void {
+    this.recoverAccountContactProjection = repair
   }
   get lockDirPath(): string { return join(this.stateDir, LOCK_DIR) }
   get ownerFilePath(): string { return join(this.lockDirPath, LOCK_OWNER_FILE) }
@@ -94,6 +117,7 @@ export class WriterLock {
     return authority
   }
   private async guard(timeoutMs = this.acquireTimeoutMs): Promise<WriterMutexGuard> {
+    if (projectionReadScope.getStore()?.active) return fail('PRECONDITION_FAILED', 'a recovered projection read cannot reenter a state barrier or mutation')
     await mkdir(this.stateDir, { recursive: true, mode: 0o750 })
     return acquireWriterMutex(this.mutexFilePath, timeoutMs, this.retryIntervalMs)
   }
@@ -267,6 +291,21 @@ export class WriterLock {
       else if (await lstat(target).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })) return fail('CONFLICT', 'rollback absence could not be verified')
     }
   }
+  private contactProjection(journal: WriteIntentRecord, committed: boolean): AccountContactProjectionRecovery | null {
+    if (journal.op !== 'updateAccountContactEmail') return null
+    // The existing contact intent is also the durable projection-repair marker,
+    // including intents left by versions predating projection recovery.
+    const backup = journal.backups[0]
+    if (journal.restore || journal.createdRelPaths.length || journal.backups.length !== 1 || !backup?.existed
+      || !/^accounts\/[a-z][a-z0-9_]{0,31}\/account\.json$/.test(backup.relPath)) {
+      return fail('VALIDATION', 'contact projection intent must identify one canonical account')
+    }
+    const preimage = JSON.parse(Buffer.from(backup.contentBase64!, 'base64').toString('utf8')) as Record<string, unknown> | null
+    const username = backup.relPath.split('/')[1]!
+    if (!preimage || Array.isArray(preimage) || typeof preimage.id !== 'string' || !UUID.test(preimage.id)
+      || preimage.username !== username) return fail('VALIDATION', 'contact projection intent identity is invalid')
+    return { accountId: preimage.id, username, relPath: backup.relPath, committed }
+  }
   /** Must be called only while holding the OS guard, before ANY rollback or owner cleanup. */
   private async recoverOrphan(guard: WriterMutexGuard): Promise<void> {
     await guard.assertStable()
@@ -286,8 +325,21 @@ export class WriterLock {
       const committed = journal.leaseId !== undefined && authority.committedLeaseId === journal.leaseId
       if (!committed && authority.revision !== journal.baseRevision) return fail('VALIDATION', 'recovery intent commit status is inconsistent; evidence retained')
       if (committed && authority.revision < journal.baseRevision) return fail('VALIDATION', 'committed recovery revision is inconsistent')
+      const contactProjection = this.contactProjection(journal, committed)
+      // Never clear the marker or alter the surviving source without a trusted
+      // projection port: a state-only recovery would conceal stale SQLite data.
+      if (contactProjection && !this.recoverAccountContactProjection) return fail('PRECONDITION_FAILED', 'contact projection recovery requires a registered index repair port')
+      if (contactProjection) {
+        const source = await readJsonIfExists<Record<string, unknown>>(await this.confinedPath(contactProjection.relPath))
+        if (!source || source.id !== contactProjection.accountId || source.username !== contactProjection.username) return fail('CONFLICT', 'contact projection source identity changed; recovery evidence retained')
+      }
       if (journal.restore) await this.recoverRestore(journal.restore, committed, journal)
       else if (!committed) await this.recoverGeneric(journal)
+      if (contactProjection) {
+        await guard.assertStable()
+        await this.recoverAccountContactProjection!(contactProjection)
+        await guard.assertStable()
+      }
       // Retain the complete intent if any validation/rollback write above fails.
       await rm(this.intentFilePath)
     } else if (holder.fencingToken < authority.fencingToken) {
@@ -306,6 +358,24 @@ export class WriterLock {
   async waitForUnlocked(timeoutMs = this.acquireTimeoutMs): Promise<void> {
     const guard = await this.guard(timeoutMs)
     try { await this.recoverOrphan(guard) } finally { await guard.release() }
+  }
+  /**
+   * Recover and execute one bounded derived SQL read under the SAME OS mutex.
+   * Unlike a wait-then-read barrier, a writer cannot publish an uncommitted SQL
+   * projection between recovery and observation. No state lease/epoch is issued.
+   * The callback must not acquire state guards, authenticate or render a request.
+   */
+  async readUnderRecoveryLock<T>(read: () => Promise<T>): Promise<T> {
+    const guard = await this.guard()
+    const context = { active: true }
+    try {
+      return await projectionReadScope.run(context, async () => {
+        await this.recoverOrphan(guard)
+        const result = await read()
+        await guard.assertStable()
+        return result
+      })
+    } finally { context.active = false; await guard.release() }
   }
   /** Explicit recovery cannot revoke a live/paused kernel owner. Terminate it and await OS release first. */
   async forceRecoverLease(): Promise<StateAuthorityMetadata> {

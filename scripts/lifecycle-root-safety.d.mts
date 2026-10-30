@@ -1,5 +1,6 @@
 import type { Db } from '../packages/db/src/index.ts'
 import type { UpgradeLayout, ReleaseInfo, UpgradeSafetyPort } from '../packages/lifecycle/src/index.ts'
+export const NATIVE_RUNTIME_ABI_PROBE: string
 export function createNativeUpgradeSafety(options: { db: Db; actorId: string; operation: 'upgrade' | 'recover' | 'rollback' | 'uninstall' | 'adopt'; release?: ReleaseInfo; layout?: Partial<UpgradeLayout> }): Promise<UpgradeSafetyPort>
 export function assertLifecycleRootSafetyHeld(capability: unknown, input: { effect: 'service.stop' | 'service.start' | 'service.observe' | 'barrier.retire' | 'filesystem.write' }): Promise<void>
 export function getLifecycleRootSafetyInfo(capability: unknown): Readonly<{ operationId: string; kind: string; coordinatorUnit: string }>

@@ -1,3 +1,4 @@
+import { directoryPrivacyClientTemplates } from './board-port/directory-privacy-client-templates.ts'
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -24,7 +25,7 @@ const root = () => `<section data-directory-privacy data-account-username="${use
   <button type="button" data-directory-privacy-add>Add</button>
   <button type="button" data-directory-privacy-save>Save</button>
   <div data-directory-privacy-preview-wrap hidden><pre data-directory-privacy-preview></pre></div>
-</section>`
+${directoryPrivacyClientTemplates()}</section>`
 const status = () => document.querySelector<HTMLElement>('[data-directory-privacy-status]')!
 const rows = () => document.querySelectorAll('[data-directory-privacy-rows] tr')
 const save = () => document.querySelector<HTMLButtonElement>('[data-directory-privacy-save]')!

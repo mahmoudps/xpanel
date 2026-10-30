@@ -1,6 +1,9 @@
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const viewAction = canonicalViewAction
 
 export type EndpointView = { id: string; url: string; events: string[]; active: boolean; secretPresent: boolean }
 export type DeliveryView = { id: string; endpointId: string; event: string; createdAt: string; state: string; attempts: number; lastStatus: number | null }
@@ -51,38 +54,58 @@ function bindOpsIntegrations(): void {
     const denied = '[data-wiring="unavailable"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.intCanRead === 'true' && !root.closest(denied)
     const manageable = (): boolean => admitted() && root.dataset.intCanManage === 'true'
+    // Reject an incomplete selected-theme contract before any authorized provider read.
+    try {
+      const template0 = cloneViewRecord(root, 'ops-endpoint-row', 'tr', { 'url': '', 'events': '', 'secret': '', 'active': '', 'test-label': '', 'remove-label': '' })
+      viewAction(template0, 'test')
+      viewAction(template0, 'remove')
+      cloneViewRecord(root, 'ops-endpoint-empty', 'tr', { 'message': '' })
+      cloneViewRecord(root, 'ops-delivery-row', 'tr', { 'reference': '', 'event': '', 'state': '', 'attempts': '', 'status': '' })
+      cloneViewRecord(root, 'ops-delivery-empty', 'tr', { 'message': '' })
+      const template4 = cloneViewRecord(root, 'ops-event', 'label', { 'event': '' })
+      viewAction(template4, 'select', 'input')
+    } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return
+    }
     let view: IntegrationsView | null = null, draft: EndpointView[] = [], dirty = false, busy = false
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'conflict'].includes(state) ? 'alert' : 'status') }
     const fact = (key: string, value: string): void => { const target = root.querySelector<HTMLElement>('[data-ops-int-fact="' + key + '"]'); if (target) target.textContent = value }
-    const cell = (row: HTMLTableRowElement, value: string, technical = false): void => { const td = document.createElement('td'), span = document.createElement(technical ? 'bdi' : 'span'); if (technical) span.dir = 'ltr'; span.textContent = value; td.append(span); row.append(td) }
     const eventCheckboxes = (): HTMLInputElement[] => Array.from(eventsFieldset.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
-    const buildEvents = (): void => { eventsFieldset.querySelectorAll('label').forEach(node => node.remove()); for (const event of view?.events ?? []) { const label = document.createElement('label'); const input = document.createElement('input'); input.type = 'checkbox'; input.value = event; const span = document.createElement('span'); span.textContent = event; label.append(input, span); eventsFieldset.append(label) } }
+    const buildEvents = (): void => {
+      eventsFieldset.querySelectorAll('label').forEach(node => node.remove())
+      for (const event of view?.events ?? []) {
+        const label = cloneViewRecord(root, 'ops-event', 'label', { event }), input = viewAction<HTMLInputElement>(label, 'select', 'input')
+        input.value = event; input.disabled = busy || !manageable(); eventsFieldset.append(label)
+      }
+    }
     const lock = (): void => {
       const can = manageable() && !busy
       urlInput.disabled = !can; eventsFieldset.disabled = !can; addButton.disabled = !can; saveButton.disabled = !can || !dirty
       const read = button('read'); if (read) read.disabled = busy || !admitted()
       root.querySelectorAll<HTMLButtonElement>('[data-ops-int-test]').forEach(element => { element.disabled = busy || !manageable() || dirty || view?.egress.state !== 'available' })
+      eventCheckboxes().forEach(input => { input.disabled = !can })
+      rows.querySelectorAll<HTMLButtonElement>('[data-xp-action="remove"]').forEach(control => { control.disabled = !can })
       root.setAttribute('aria-busy', String(busy))
     }
     const paintLog = (): void => {
       logBody.textContent = ''
-      if (!view?.deliveries.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 5; td.textContent = t('No deliveries have been recorded.'); row.append(td); logBody.append(row); return }
-      for (const delivery of view.deliveries.slice().reverse()) { const row = document.createElement('tr'); cell(row, delivery.id, true); cell(row, delivery.event, true); cell(row, delivery.state === 'delivered' ? t('Delivered') : delivery.state === 'exhausted' ? t('Exhausted') : t('Failed')); cell(row, String(delivery.attempts), true); cell(row, delivery.lastStatus === null ? t('None') : String(delivery.lastStatus), true); logBody.append(row) }
+      if (!view?.deliveries.length) { logBody.append(cloneViewRecord(root, 'ops-delivery-empty', 'tr', { message: t('No deliveries have been recorded.') })); return }
+      // Delivery IDs are transport identities; this contract has no issued public reference.
+      for (const delivery of view.deliveries.slice().reverse()) logBody.append(cloneViewRecord(root, 'ops-delivery-row', 'tr', { reference: t('Not issued'), event: delivery.event, state: delivery.state === 'delivered' ? t('Delivered') : delivery.state === 'exhausted' ? t('Exhausted') : t('Failed'), attempts: delivery.attempts, status: delivery.lastStatus === null ? t('None') : String(delivery.lastStatus) }))
     }
     const paint = (): void => {
       rows.textContent = ''
-      if (!draft.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 5; td.textContent = view ? t('No webhook endpoints are configured.') : t('No webhook configuration has been read.'); row.append(td); rows.append(row) }
+      if (!draft.length) rows.append(cloneViewRecord(root, 'ops-endpoint-empty', 'tr', { message: view ? t('No webhook endpoints are configured.') : t('No webhook configuration has been read.') }))
       for (const endpoint of draft) {
-        const row = document.createElement('tr')
-        cell(row, endpoint.url, true); cell(row, endpoint.events.join(', '), true)
-        cell(row, dirty && !endpoint.secretPresent ? t('Generated on save') : endpoint.secretPresent ? t('Stored') : t('Generated on save'))
-        cell(row, endpoint.active ? t('Yes') : t('No'))
-        const actions = document.createElement('td')
-        if (manageable()) {
-          if (!dirty && endpoint.secretPresent) { const test = document.createElement('button'); test.type = 'button'; test.className = 'xp-btn'; test.dataset.opsIntTest = endpoint.id; test.textContent = t('Send test'); test.addEventListener('click', () => { if (!test.disabled) void sendTest(endpoint.id) }); actions.append(test) }
-          const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'xp-btn'; remove.textContent = t('Remove'); remove.addEventListener('click', () => { draft = draft.filter(item => item.id !== endpoint.id); dirty = true; paint(); lock() }); actions.append(remove)
-        }
-        row.append(actions); rows.append(row)
+        const row = cloneViewRecord(root, 'ops-endpoint-row', 'tr', { url: endpoint.url, events: endpoint.events.join(', '), secret: dirty && !endpoint.secretPresent ? t('Generated on save') : endpoint.secretPresent ? t('Stored') : t('Generated on save'), active: endpoint.active ? t('Yes') : t('No'), 'test-label': t('Send test'), 'remove-label': t('Remove') })
+        const test = viewAction<HTMLButtonElement>(row, 'test'), remove = viewAction<HTMLButtonElement>(row, 'remove')
+        test.hidden = !manageable() || dirty || !endpoint.secretPresent; test.dataset.opsIntTest = endpoint.id
+        remove.hidden = !manageable(); remove.disabled = busy || !manageable()
+        test.disabled = busy || !manageable() || dirty || !endpoint.secretPresent || view?.egress.state !== 'available'
+        test.addEventListener('click', () => { if (!test.disabled) void sendTest(endpoint.id) })
+        remove.addEventListener('click', () => { if (busy || !manageable()) return; draft = draft.filter(item => item.id !== endpoint.id); dirty = true; paint(); lock() })
+        rows.append(row)
       }
     }
     const render = (value: IntegrationsView): void => {
@@ -130,4 +153,4 @@ function bindOpsIntegrations(): void {
   })
 }
 
-export const OPS_INTEGRATIONS_CLIENT_BINDING = `(()=>{const readIntegrationsView=${readIntegrationsView.toString()};const randomWebhookId=${randomWebhookId.toString()};return ${bindOpsIntegrations.toString()};})()`
+export const OPS_INTEGRATIONS_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const readIntegrationsView=${readIntegrationsView.toString()};const randomWebhookId=${randomWebhookId.toString()};return ${bindOpsIntegrations.toString()};})()`

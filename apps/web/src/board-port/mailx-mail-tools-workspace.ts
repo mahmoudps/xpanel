@@ -1,4 +1,5 @@
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
+import { classicMailToolsClientTemplates } from './mailx-mail-tools-client-templates.ts'
 import { MAILX_STYLE } from './mailx-whm-workspace.ts'
 export type MailxMailToolsSection = 'spam' | 'lists'
 export interface MailxMailToolsWorkspaceInput { locale: Locale; section: MailxMailToolsSection; canManage: boolean }
@@ -39,5 +40,5 @@ export function renderMailxMailToolsWorkspace({ locale, section, canManage }: Ma
       <div class="xp-mailx__actions"><button type="button" class="xp-btn xp-btn--primary" data-mailx-lists-apply disabled>${t('Apply saved lists')}</button></div>
       ${check('mailx-lists-hold', t('Hold posts from non-members for review'))}${area('mailx-lists-moderators', t('Moderators'))}
       <p class="xp-help">${t('Moderation needs a list manager (for example Mailman or mlmmj) that holds posts for approval. None is installed or connected.')}</p>`)
-  return `<section class="xp-mailx" data-mailx-tools data-mailx-tools-section="${section}" data-mailx-can-manage="${canManage}" lang="${locale}" dir="${localeDirection(locale)}" aria-label="${t('Mail tools')}">${MAILX_STYLE}<style>[data-mailx-tools] .xp-mailx__field>label[for]{padding-inline:var(--xp-control-content-inset)}[data-mailx-tools] .xp-whm-detail-scroll{overflow-x:auto;max-inline-size:100%}</style>${body}</section>`
+  return `<section class="xp-mailx" data-mailx-tools data-mailx-tools-section="${section}" data-mailx-can-manage="${canManage}" lang="${locale}" dir="${localeDirection(locale)}" aria-label="${t('Mail tools')}">${MAILX_STYLE}<style>[data-mailx-tools] .xp-mailx__field>label[for]{padding-inline:var(--xp-control-content-inset)}[data-mailx-tools] .xp-whm-detail-scroll{overflow-x:auto;max-inline-size:100%}</style>${body}${classicMailToolsClientTemplates(section)}</section>`
 }

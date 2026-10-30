@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'vitest'
 import type { AgentApp } from '@xpanel/agent'
-import { tools } from '@xpanel/catalog'
+import { qualifyHostTools, tools, type HostQualificationReport } from '@xpanel/catalog'
 import { createRootPrincipal, createTestDb } from '@xpanel/db'
 import type { TestDbHandle } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
@@ -41,7 +41,11 @@ describe('GET /api/catalog', () => {
     await db.close()
   })
 
-  const open = (agent: AgentApp | undefined, token = 'b'.repeat(64)): ApiApp => createApiApp({
+  const open = (agent: AgentApp | undefined, token = 'b'.repeat(64), syntheticAcceptance = false): ApiApp => createApiApp({
+    ...(syntheticAcceptance ? { catalogProvider: { acceptanceIdentity: 'synthetic-unit-acceptance', reset: () => {}, load: async () => {
+      const response = await agent!.fetch(new Request('http://agent.local/health'))
+      return qualifyHostTools(tools.map(tool => ({ ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } })), await response.json() as HostQualificationReport, true)
+    } } } : {}),
     db: db.db,
     store: state.store,
     serverSecret: TEST_SERVER_SECRET,
@@ -71,6 +75,7 @@ describe('GET /api/catalog', () => {
     const body = await catalog(open(healthAgent({
       executor: 'linux',
       probes: {
+        'control-plane': 'passed',
         'linux-account': 'passed',
         apache: 'failed',
         mariadb: 'failed',
@@ -78,7 +83,7 @@ describe('GET /api/catalog', () => {
         files: 'failed',
         acme: 'failed',
       },
-    })))
+    }), 'b'.repeat(64), true))
     const ids = new Set(body.tools.map(tool => tool.id))
     assert.equal(body.tools.every(tool => tool.status === 'verified'), true)
     assert.equal(ids.has('list-accounts'), true)
@@ -88,6 +93,11 @@ describe('GET /api/catalog', () => {
     const routes = body.navigation.flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
     assert.equal(routes.includes('/whm/accounts'), true)
     assert.equal(routes.includes('/files/manager'), false)
+  })
+
+  it('healthy reports alone never establish default acceptance', async () => {
+    const body = await catalog(open(healthAgent({ executor: 'linux', probes: { 'control-plane': 'passed', 'linux-account': 'passed' } })))
+    assert.deepEqual(body.tools, [])
   })
 
   it('stays unqualified for a fake executor and for a disconnected agent', async () => {

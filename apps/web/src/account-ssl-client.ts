@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { WHM_SSL_PARSER_BINDING } from './whm-ssl-client.ts'
 import type { readSslWorkspace, sslCoversHost, sslObject, sslWriteUncertain } from './whm-ssl-client.ts'
@@ -41,6 +45,9 @@ function bindAccountSsl(askDialog: ((options: Record<string, unknown>) => Promis
     const rows = control<HTMLElement>('rows'), status = control<HTMLElement>('status'), autossl = control<HTMLElement>('autossl'), chip = control<HTMLElement>('autossl-chip')
     const domain = control<HTMLSelectElement>('domain'), key = control<HTMLTextAreaElement>('key'), cert = control<HTMLTextAreaElement>('cert'), bundle = control<HTMLTextAreaElement>('bundle'), install = control<HTMLButtonElement>('install')
     if (![rows, status, autossl, chip, domain, key, cert, bundle, install, control('detail'), control('facts')].every(Boolean)) return
+    const rowSlots = ['names','issuer','issuer-note','expires','expiry-note','renewal','renewal-note','installed','actions'] as const
+    const templates = {row:clientTemplate(root,'account-ssl-row'),empty:clientTemplate(root,'account-ssl-empty'),fact:clientTemplate(root,'account-ssl-fact'),name:clientTemplate(root,'account-ssl-name'),action:clientTemplate(root,'account-ssl-action')}
+    cloneClientTemplate(templates.row,'tr',rowSlots);cloneClientTemplate(templates.empty,'tr',['message']);cloneClientTemplate(templates.fact,'div',['label','value']);cloneClientTemplate(templates.name,'div',['value']);cloneClientTemplate(templates.action,'button',['label'])
     const username = root.dataset.accountUsername ?? ''
     const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const admitted = (): boolean => root.isConnected && root.dataset.sslCanManage === 'true' && /^[a-z][a-z0-9]{0,15}$/.test(username)
@@ -55,48 +62,41 @@ function bindAccountSsl(askDialog: ((options: Record<string, unknown>) => Promis
       rows.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = blocked || button.dataset.available !== 'true' })
       root.setAttribute('aria-busy', String(busy))
     }
-    const cellText = (cell: HTMLElement, text: string, note?: string): void => {
-      const main = document.createElement('bdi'); main.dir = 'auto'; main.textContent = text; cell.append(main)
-      if (note) { const extra = document.createElement('p'); extra.className = 'xp-help'; extra.textContent = note; cell.append(extra) }
-    }
     const details = (certificate: SslCertificateView): void => {
       const facts = control<HTMLElement>('facts'); facts.textContent = ''
       const values: [string, string][] = [[t('Names'), certificate.names.join(', ')], [t('Installed on'), certificate.assignedDomains.join(', ') || t('Not installed')],
         [t('Not before (UTC)'), certificate.notBefore === null ? t('Not read') : displayDateTime(certificate.notBefore)], [t('Expires (UTC)'), displayDateTime(certificate.notAfter)],
         [t('Validation'), certificate.challenge ?? t('Not needed')], ['SHA-256', certificate.fingerprintSha256 ?? t('Not read')]]
-      for (const [label, text] of values) { const group = document.createElement('div'), term = document.createElement('dt'), value = document.createElement('dd'), isolated = document.createElement('bdi'); term.textContent = label; isolated.dir = 'ltr'; isolated.textContent = text; value.append(isolated); group.append(term, value); facts.append(group) }
+      for (const [label, text] of values) { const group = cloneClientTemplate(templates.fact,'div',['label','value']);clientTemplateSlot(group,'label').textContent=label;clientTemplateSlot(group,'value').textContent=text;facts.append(group) }
       control<HTMLElement>('detail').hidden = false
     }
     const show = (): void => {
       rows.textContent = ''
       const now = Date.now()
       for (const certificate of workspace?.certificates ?? []) {
-        const row = document.createElement('tr'), cells = Array.from({ length: 6 }, () => document.createElement('td'))
-        const names = cells[0]!; for (const name of certificate.names) { const line = document.createElement('bdi'); line.dir = 'ltr'; line.style.display = 'block'; line.textContent = name; names.append(line) }
-        cellText(cells[1]!, certificate.source === 'acme' ? t('ACME (Let’s Encrypt)') : certificate.source === 'upload' ? t('Uploaded') : t('Self-signed'),
-          certificate.fingerprintSha256 ? 'SHA-256 ' + certificate.fingerprintSha256.slice(0, 16) : undefined)
-        const days = Math.floor((Date.parse(certificate.notAfter) - now) / DAY_MS)
-        cellText(cells[2]!, displayDateTime(certificate.notAfter), days < 0 ? t('Expired') : t('{days, plural, one {# day left} other {# days left}}', { days }))
-        if (certificate.source !== 'acme' || !certificate.autoRenew) cellText(cells[3]!, t('Not available'), certificate.source === 'upload' ? t('Uploaded certificates are renewed by you') : undefined)
-        else cellText(cells[3]!, scheduled ? t('On') : t('Requested'), scheduled
-          ? t('Renews from {date}', { date: displayDateTime(new Date(Date.parse(certificate.notAfter) - 30 * DAY_MS).toISOString()) })
-          : t('Not scheduled on this server. Use Renew now.'))
-        cellText(cells[4]!, certificate.assignedDomains.join(', ') || t('Not installed'))
-        const group = document.createElement('div'); group.className = 'xp-panel-detail__actions'
-        const action = (label: string, aria: string, available: boolean, run: () => void, reason?: string): void => {
-          const button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.textContent = label; button.setAttribute('aria-label', aria)
-          button.dataset.available = String(available); if (!available && reason) button.title = reason
-          button.addEventListener('click', () => { if (!button.disabled) run() }); group.append(button)
-        }
+        const row = cloneClientTemplate(templates.row,'tr',rowSlots)
+        const names = clientTemplateSlot(row,'names');for (const name of certificate.names) {const line=cloneClientTemplate(templates.name,'div',['value']);clientTemplateSlot(line,'value').textContent=name;names.append(line)}
+        const set = (slot:string,text:string):void => {clientTemplateSlot(row,slot).textContent=text}
+        const note = (slot:string,text:string|undefined):void => {const node=clientTemplateSlot(row,slot);node.textContent=text??'';node.hidden=!text}
+        set('issuer',certificate.source === 'acme' ? t('ACME (Let’s Encrypt)') : certificate.source === 'upload' ? t('Uploaded') : t('Self-signed'))
+        note('issuer-note',certificate.fingerprintSha256?'SHA-256 '+certificate.fingerprintSha256.slice(0,16):undefined)
+        const expiry=clientTemplateSlot(row,'expires','time') as HTMLTimeElement;expiry.dateTime=certificate.notAfter;expiry.textContent=displayDateTime(certificate.notAfter)
+        const days=Math.floor((Date.parse(certificate.notAfter)-now)/DAY_MS)
+        note('expiry-note',days<0?t('Expired'):t('{days, plural, one {# day left} other {# days left}}',{days}))
+        if(certificate.source !== 'acme'||!certificate.autoRenew){set('renewal',t('Not available'));note('renewal-note',certificate.source==='upload'?t('Uploaded certificates are renewed by you'):undefined)}
+        else {set('renewal',scheduled?t('On'):t('Requested'));note('renewal-note',scheduled?t('Renews from {date}',{date:displayDateTime(new Date(Date.parse(certificate.notAfter)-30*DAY_MS).toISOString())}):t('Not scheduled on this server. Use Renew now.'))}
+        set('installed',certificate.assignedDomains.join(', ')||t('Not installed'))
+        const group=clientTemplateSlot(row,'actions')
+        const action = (label:string,aria:string,available:boolean,run:()=>void,reason?:string):void => {const button=cloneClientTemplate(templates.action,'button',['label']) as HTMLButtonElement;clientTemplateSlot(button,'label').textContent=label;button.setAttribute('aria-label',aria);button.dataset.available=String(available);if(!available&&reason)button.title=reason;button.addEventListener('click',()=>{if(!button.disabled)run()});group.append(button)}
         const first = certificate.names[0] ?? ''
         action(t('View'), t('View certificate for {name}', { name: first }), true, () => details(certificate))
         const renewable = certificate.source === 'acme' && certificate.challenge === 'http-01' && certificate.assignedDomains.length > 0 && workspace?.capabilities.renew === true
         action(t('Renew now'), t('Renew now: certificate for {name}', { name: first }), renewable, () => { void mutate('renew', certificate) },
           certificate.source === 'acme' ? t('Renewal needs an installed HTTP-01 certificate and a connected host.') : t('Uploaded certificates are renewed by you'))
         action(t('Remove'), t('Remove certificate for {name} expiring {date}', { name: first, date: displayDateTime(certificate.notAfter) }), workspace?.capabilities.remove === true, () => { void mutate('remove', certificate) })
-        cells[5]!.append(group); row.append(...cells); rows.append(row)
+        rows.append(row)
       }
-      if (!workspace?.certificates.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 6; cell.textContent = t('No certificates are installed on this account yet.'); row.append(cell); rows.append(row) }
+      if (!workspace?.certificates.length) {const row=cloneClientTemplate(templates.empty,'tr',['message']);clientTemplateSlot(row,'message','td').textContent=t('No certificates are installed on this account yet.');rows.append(row)}
       lock()
     }
     const read = async (): Promise<void> => {
@@ -173,4 +173,4 @@ function bindAccountSsl(askDialog: ((options: Record<string, unknown>) => Promis
   })
 }
 
-export const ACCOUNT_SSL_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};const DAY_MS=${DAY_MS};${WHM_SSL_PARSER_BINDING};const accountSslRefusal=${accountSslRefusal.toString()};const bind=${bindAccountSsl.toString()};return(askDialog)=>bind(askDialog,{readSslWorkspace,sslCoversHost,sslObject,sslWriteUncertain});})()`
+export const ACCOUNT_SSL_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const DAY_MS=${DAY_MS};${WHM_SSL_PARSER_BINDING};const accountSslRefusal=${accountSslRefusal.toString()};const bind=${bindAccountSsl.toString()};return(askDialog)=>bind(askDialog,{readSslWorkspace,sslCoversHost,sslObject,sslWriteUncertain});})()`

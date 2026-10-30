@@ -12,7 +12,7 @@ import { fail, isUuid, isXpanelError, validateDomainName } from '@xpanel/core'
 import { profileFor } from '@xpanel/os'
 import { edge } from '@xpanel/render'
 import type { Account, ErrorCode, Id, LiveEvent, Principal } from '@xpanel/core'
-import { appendAudit, getPrincipal, latestActive } from '@xpanel/db'
+import { appendAudit, getDurableJob, getPrincipal, latestActive } from '@xpanel/db'
 import type { Db } from '@xpanel/db'
 import type { StateStore } from '@xpanel/state'
 import { parseGenerationRollbackRequest } from '@xpanel/state'
@@ -44,6 +44,7 @@ import { probeDkimOutcome } from './services/dkim-probe.ts'
 import { createSignRateLimit, signMailboxSubmission, submissionFromDomains } from './services/dkim-sign.ts'
 import { readOpenDkimPublicMaterial } from './services/opendkim-live.ts'
 import { parseDf, parseDfInodes, parseLoadavg, parseMeminfo } from './host-info.ts'
+import { readHostDiskInventory } from './host-info-disks.ts'
 import { readHostServices, restartHostService } from './host-services.ts'
 import { readDefaultSiteRequests } from './default-site-observation.ts'
 import { readGenerationRollbackAdmission } from './generation-rollback-admission.ts'
@@ -57,6 +58,7 @@ import type { RhelCacheRecovery } from './repair-center.ts'
 import { handleConfigurationHealthRoute } from './configuration-health.ts'
 import { handleAccountHealthRoute, nativeAccountHealthHost } from './account-health.ts'
 import { handleHostJobsRoute } from './host-jobs-routes.ts'
+import { handleAccountProvisioning, type AgentAccountProvisioningRuntime } from './account-provisioning-handler.ts'
 import type { HostJobRunner } from './host-jobs.ts'
 import { handleSoftwareCenterRoute } from './software-center-routes.ts'
 import { handlePhpManagerRoute } from './php-manager-routes.ts'
@@ -307,6 +309,8 @@ const problemResponse = (err: unknown, instance: string): Response => {
 
 export interface AgentServerDeps {
   reconciler: HostReconciler
+  /** Absent until trusted startup supplies the account-provisioning runtime. Missing means the route refuses before effects. */
+  accountProvisioning?: AgentAccountProvisioningRuntime
   store: StateStore
   db: Db
   executor?: AgentExecutor
@@ -774,6 +778,28 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
 
       const caller = await authenticateCaller(req)
 
+      if (method === 'POST' && pathname === '/host/account-provisioning') {
+        const trustedPrincipalId = req.headers.get('x-xpanel-principal-id')
+        if (!trustedPrincipalId || trustedPrincipalId !== caller.principalId) {
+          return fail('UNAUTHENTICATED', 'an authenticated principal is required', { stateChanged: false })
+        }
+        return handleAccountProvisioning({
+          principalId: trustedPrincipalId,
+          request: req,
+          runtime: deps.accountProvisioning,
+          executor: process.platform === 'linux' && deps.executor instanceof LinuxHostExecutor ? deps.executor : undefined,
+          ports: {
+            getPrincipal: id => getPrincipal(deps.db, id),
+            getDurableJob: id => getDurableJob(deps.db, id),
+            getAccount: id => deps.store.getAccount(id),
+            readSnapshot: () => deps.store.readSnapshot(),
+            getDnsZone: name => deps.store.getDnsZone(name),
+            getPlan: id => deps.store.getPlan(id),
+            getReseller: id => deps.store.getReseller(id),
+          },
+        })
+      }
+
       if (method === 'GET' && pathname === '/host/dkim-probe') {
         const outcome = probeDkimOutcome()
         return jsonResponse(outcome.selector ? outcome : { status: outcome.status })
@@ -933,6 +959,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         if (!loadText || !memText || !diskResult.ok) return fail('PRECONDITION_FAILED', 'host measurements could not be read')
         try {
           const disk = parseDf(diskResult.stdout)
+          const { disks, diskCoverage } = await readHostDiskInventory(host)
           const identity = await readHostIdentity({
             readFile: (path) => host.readFile(path),
             runCommand: (argv) => host.runCommand(argv),
@@ -968,6 +995,8 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
             load: parseLoadavg(loadText),
             memory: parseMeminfo(memText),
             disk,
+            disks,
+            diskCoverage,
             ...(inodes ? { inodes } : {}),
             ...(homeOnRoot ? { homeOnRoot: true } : {}),
             identity,

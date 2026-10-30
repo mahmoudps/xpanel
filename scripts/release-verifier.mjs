@@ -185,7 +185,7 @@ const verifyMetadata = (manifest, metadata, bounds) => {
     }
     for (const [index, directive] of directives.entries()) if ((values.get(directive) ?? null) !== unit[fields[index]]) refuse('MANIFEST_INVALID', 'Service metadata differs from actual unit')
     const agent = unit.name === 'xpanel-agent.service'
-    if (unit.user !== (agent ? 'root' : 'xpanel') || unit.group !== (agent ? 'xpanel-agent' : 'xpanel') || unit.supplementaryGroups !== (agent ? 'xpanel' : 'xpanel-agent') || unit.umask !== '0007' || typeof unit.execStart !== 'string' || !unit.execStart.endsWith(`/opt/xpanel/apps/${agent ? 'agent' : 'api'}/src/main.ts`)
+    if (unit.user !== (agent ? 'root' : 'xpanel') || unit.group !== (agent ? 'xpanel-agent' : 'xpanel') || unit.supplementaryGroups !== (agent ? 'xpanel' : 'xpanel-agent') || unit.umask !== '0007' || typeof unit.execStart !== 'string' || !['/opt/xpanel', '/opt/xpanel/current'].some(root => unit.execStart.endsWith(` ${root}/apps/${agent ? 'agent' : 'api'}/src/main.ts`))
       || (agent ? unit.runtimeDirectory !== 'xpanel' || unit.runtimeDirectoryMode !== '0750' || unit.runtimeDirectoryPreserve !== 'no' : unit.noNewPrivileges !== 'yes')) refuse('MANIFEST_INVALID', 'Unsupported service security contract')
   }
 }

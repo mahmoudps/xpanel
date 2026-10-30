@@ -1,6 +1,10 @@
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 const displayDateTime = formatDisplayDateTime
 
 /**
@@ -86,35 +90,42 @@ function bindAccountSessions(askDialog: ((options: Record<string, unknown>) => P
       if (!session.userAgent) return copy('Unknown client')
       return session.userAgent.length > 96 ? session.userAgent.slice(0, 93) + '…' : session.userAgent
     }
+    let templates: { row: HTMLTemplateElement; action: HTMLTemplateElement; empty: HTMLTemplateElement }
+    const rowSlots = ['title', 'verification', 'network-label', 'network', 'client-label', 'client', 'last-active-label', 'last-active', 'expires-label', 'expires', 'actions'] as const
+    try {
+      templates = { row: clientTemplate(root, 'account-session-row'), action: clientTemplate(root, 'account-session-action'), empty: clientTemplate(root, 'account-session-empty') }
+      cloneClientTemplate(templates.row, 'article', rowSlots)
+      cloneClientTemplate(templates.action, 'button', ['label'])
+      cloneClientTemplate(templates.empty, 'p', ['message'])
+    } catch {
+      controls().forEach(control => { control.disabled = true })
+      setStatus(copy('Session management is unavailable here. No sessions were read or changed.'), 'unavailable'); return
+    }
     const paint = (): void => {
       rows.textContent = ''
       if (!sessions.length) {
-        const empty = document.createElement('p'); empty.className = 'xp-help'
-        empty.textContent = copy('No active sessions were returned.')
+        const empty = cloneClientTemplate(templates.empty, 'p', ['message'])
+        clientTemplateSlot(empty, 'message').textContent = copy('No active sessions were returned.')
         rows.appendChild(empty); lock(); return
       }
       for (const session of sessions) {
-        const card = document.createElement('article'); card.className = 'xp-panel-detail__native'; card.dataset.sessionId = session.id
-        const header = document.createElement('header')
-        const title = document.createElement('strong'); title.textContent = session.current ? copy('This device') : copy('Another device')
-        const badge = document.createElement('span'); badge.className = 'xp-help'
-        badge.textContent = session.mfaVerified ? copy('Two-factor verified') : copy('Password only')
-        header.append(title, badge); card.appendChild(header)
-        const list = document.createElement('dl'); list.className = 'xp-panel-detail__facts'
-        const entry = (label: string, value: string) => { const dt = document.createElement('dt'); dt.textContent = label; const dd = document.createElement('dd'); const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = value; dd.appendChild(bdi); const pair = document.createElement('div'); pair.append(dt, dd); list.append(pair) }
-        entry(copy('Network'), session.ip ?? copy('Not recorded'))
-        entry(copy('Client'), describeAgent(session))
-        entry(copy('Last active'), displayDateTime(session.lastSeenAt))
-        entry(copy('Expires'), displayDateTime(session.expiresAt))
-        card.appendChild(list)
-        const actions = document.createElement('div'); actions.className = 'xp-panel-detail__actions'
+        const card = cloneClientTemplate(templates.row, 'article', rowSlots); card.dataset.sessionId = session.id
+        clientTemplateSlot(card, 'title').textContent = session.current ? copy('This device') : copy('Another device')
+        clientTemplateSlot(card, 'verification').textContent = session.mfaVerified ? copy('Two-factor verified') : copy('Password only')
+        for (const [name, label, value] of [['network', copy('Network'), session.ip ?? copy('Not recorded')], ['client', copy('Client'), describeAgent(session)], ['last-active', copy('Last active'), displayDateTime(session.lastSeenAt)], ['expires', copy('Expires'), displayDateTime(session.expiresAt)]] as const) {
+          clientTemplateSlot(card, name + '-label').textContent = label
+          clientTemplateSlot(card, name).textContent = value
+        }
+        clientTemplateSlot(card, 'last-active', 'time').setAttribute('datetime', session.lastSeenAt)
+        clientTemplateSlot(card, 'expires', 'time').setAttribute('datetime', session.expiresAt)
+        const actions = clientTemplateSlot(card, 'actions')
         if (!session.current) {
-          const signOut = document.createElement('button'); signOut.type = 'button'; signOut.className = 'xp-btn'; signOut.dataset.sessionAction = 'revoke'
-          signOut.textContent = copy('Sign out this session')
+          const signOut = cloneClientTemplate(templates.action, 'button', ['label']) as HTMLButtonElement
+          clientTemplateSlot(signOut, 'label').textContent = copy('Sign out this session')
           signOut.addEventListener('click', () => { if (!signOut.disabled && eligible()) void revoke(session) })
           actions.appendChild(signOut)
         }
-        card.appendChild(actions); rows.appendChild(card)
+        rows.appendChild(card)
       }
       lock()
     }
@@ -124,7 +135,7 @@ function bindAccountSessions(askDialog: ((options: Record<string, unknown>) => P
     }
     const revoke = async (session: SessionView): Promise<void> => {
       if (!askDialog) { setStatus(copy('Ending a session needs confirmation; nothing was sent.'), 'failed'); return }
-      const confirmed = await askDialog({ title: copy('Sign out session'), body: session.userAgent ?? session.ip ?? session.id, confirm: copy('Sign out'), danger: true })
+      const confirmed = await askDialog({ title: copy('Sign out session'), body: session.userAgent ?? session.ip ?? copy('Unknown client'), confirm: copy('Sign out'), danger: true })
       if (confirmed !== true) { setStatus(copy('Cancelled. Nothing was sent.'), 'cancelled'); return }
       busy = true; lock()
       try {
@@ -167,4 +178,4 @@ function bindAccountSessions(askDialog: ((options: Record<string, unknown>) => P
   })
 }
 
-export const ACCOUNT_SESSIONS_CLIENT_BINDING = `(function(askDialog){const displayDateTime=${DISPLAY_DATETIME_BINDING};const SESSION_UUID=${SESSION_UUID.toString()};const sessionObject=${sessionObject.toString()};const sessionDate=${sessionDate.toString()};const readSession=${readSession.toString()};const readSessions=${readSessions.toString()};(${bindAccountSessions.toString()})(askDialog);})`
+export const ACCOUNT_SESSIONS_CLIENT_BINDING = `(function(askDialog){${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const SESSION_UUID=${SESSION_UUID.toString()};const sessionObject=${sessionObject.toString()};const sessionDate=${sessionDate.toString()};const readSession=${readSession.toString()};const readSessions=${readSessions.toString()};(${bindAccountSessions.toString()})(askDialog);})`

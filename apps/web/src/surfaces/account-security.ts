@@ -15,6 +15,8 @@ export interface AccountSecurityCardProps {
   mfaMode?: MfaRuntimeMode
   principalKind: Principal['kind']
   surface: 'xwhm' | 'xpanel' | 'xmail'
+  /** Server-derived handed-off sessions can observe factor state but cannot manage it. */
+  readOnly?: boolean
 }
 
 const line = (locale: Locale, message: string): string => escapeHtml(translator(locale)(message))
@@ -34,6 +36,13 @@ export const renderAccountSecurityCard = (props: AccountSecurityCardProps): stri
     return `<section class="xp-card xp-account-security" style="display:flex;flex-direction:column;gap:var(--xp-space-card)" data-account-security="two-factor" data-auth-state="development-disabled" data-mfa-disabled data-mfa-configured="${totpEnabled}" aria-labelledby="account-security-heading">
       <h2 id="account-security-heading">${line(locale, 'Two-factor authentication')}</h2>
       <p class="xp-prose" role="status">${escapeHtml(notice)}</p>
+    </section>`
+  }
+  if (props.readOnly) {
+    return `<section class="xp-card xp-account-security" style="display:flex;flex-direction:column;gap:var(--xp-space-card)" data-account-security="two-factor" data-auth-state="read-only" data-auth-readonly="true" data-mfa-configured="${totpEnabled}" aria-labelledby="account-security-heading">
+      <h2 id="account-security-heading">${line(locale, 'Two-factor authentication')}</h2>
+      <p class="xp-prose" role="status">${line(locale, msgctxt('account-security', 'Two-factor settings cannot be changed from a handed-off session.'))}</p>
+      <p class="xp-prose">${totpEnabled ? line(locale, 'Sign-in asks for an authenticator code because two-factor authentication is enabled.') : line(locale, msgctxt('account-security', 'Password sign-in is active.'))}</p>
     </section>`
   }
   if (totpEnabled) {

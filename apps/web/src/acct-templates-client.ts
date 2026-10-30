@@ -1,3 +1,6 @@
+import { VIEW_RECORD_HELPERS, cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const viewAction = canonicalViewAction
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -47,10 +50,10 @@ function bindWhmAccountTemplates(askDialog: ((options: Record<string, unknown>) 
     const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const names = ['name', 'zone', 'defaultPage.title', 'defaultPage.body', 'suspendedPage.title', 'suspendedPage.body']
     if (!status || !loading || !rows || !empty || !refresh || !listStatus || !plansBox || !preview || !form || !heading || !save || !cancel || !saveStatus || !names.every(name => inputs[name])) return
+    try { const row=cloneViewRecord(root, 'account-template-row','tr',{name:'',plans:'',records:'',updated:'','edit-label':'','delete-label':''}); viewAction(row,'edit');viewAction(row,'delete');cloneViewRecord(root,'account-template-empty','tr',{message:''});cloneViewRecord(root,'account-template-preview-row','tr',{name:'',ttl:'',type:'',priority:'',content:''});cloneViewRecord(root,'account-template-preview-empty','tr',{message:''});viewAction(cloneViewRecord(root,'account-template-plan','label',{name:''}),'select','input');cloneViewRecord(root,'account-template-plan-empty','p',{message:''}) } catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control=>{control.disabled=true});status.dataset.state='unavailable';status.textContent=t('Unavailable');return }
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => root.isConnected && root.dataset.templatesCanManage === 'true' && !root.closest(denied) && form.tagName === 'FORM' && typeof request === 'function'
     let view: WhmAccountTemplatesView | null = null, editing = '', busy = false
-    const element = <K extends keyof HTMLElementTagNameMap>(tag: K, content?: string, ltr = false): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); if (content !== undefined) node.textContent = content; if (ltr) node.setAttribute('dir', 'ltr'); return node }
     const note = (target: HTMLElement, state: string, message: string): void => { target.hidden = false; target.dataset.state = state; target.textContent = message; target.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const planBoxes = (): HTMLInputElement[] => Array.from(plansBox.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
     const lock = (locked: boolean): void => {
@@ -70,12 +73,12 @@ function bindWhmAccountTemplates(askDialog: ((options: Record<string, unknown>) 
                 : failed?.status === 400 || failed?.status === 422 ? t('The server refused these values. Check the zone records and the page text.') : fallback
     }
     const paintPlans = (selected: readonly string[]): void => {
-      if (!view?.plans.length) { plansBox.replaceChildren(element('p', view ? t('No plans exist') : t('Plans have not been read.'))); return }
-      plansBox.replaceChildren(...view.plans.map(plan => { const label = element('label'), box = element('input'); box.type = 'checkbox'; box.value = plan.id; box.checked = selected.includes(plan.id); label.append(box, element('bdi', plan.name)); return label }))
+      if (!view?.plans.length) { plansBox.replaceChildren(cloneViewRecord(root, 'account-template-plan-empty', 'p', { message: view ? t('No plans exist') : t('Plans have not been read.') })); return }
+      plansBox.replaceChildren(...view.plans.map(plan => { const label = cloneViewRecord(root, 'account-template-plan', 'label', { name: plan.name }), box = viewAction<HTMLInputElement>(label, 'select', 'input'); box.value = plan.id; box.checked = selected.includes(plan.id); return label }))
     }
     const paintPreview = (template: WhmAccountTemplate | null): void => {
-      if (!template) { const row = element('tr'), cell = element('td', t('No template selected')); cell.colSpan = 5; row.append(cell); preview.replaceChildren(row); return }
-      preview.replaceChildren(...template.preview.map(record => { const row = element('tr'); for (const value of [record.name, String(record.ttl), record.type, record.priority === null ? '-' : String(record.priority), record.content]) { const cell = element('td'); cell.append(element('bdi', value, true)); row.append(cell) }; return row }))
+      if (!template) { preview.replaceChildren(cloneViewRecord(root, 'account-template-preview-empty', 'tr', { message: t('No template selected') })); return }
+      preview.replaceChildren(...template.preview.map(record => cloneViewRecord(root, 'account-template-preview-row', 'tr', { name: record.name, ttl: String(record.ttl), type: record.type, priority: record.priority === null ? '-' : String(record.priority), content: record.content })))
     }
     const resetForm = (): void => {
       editing = ''
@@ -97,21 +100,15 @@ function bindWhmAccountTemplates(askDialog: ((options: Record<string, unknown>) 
       view = next
       const planName = (id: string): string => next.plans.find(plan => plan.id === id)?.name ?? t('deleted plan')
       rows.replaceChildren(...next.templates.map(template => {
-        const row = element('tr'), cell = (...nodes: (Node | string)[]): void => { const node = element('td'); node.append(...nodes); row.append(node) }
-        cell(element('bdi', template.name))
-        cell(template.planIds.length ? element('bdi', template.planIds.map(planName).join(', ')) : t('No plan'))
-        cell(element('bdi', String(template.recordCount), true))
-        cell(element('bdi', formatDisplayDateTime(template.updatedAt), true))
-        const actions = element('div'); actions.className = 'xp-whm-detail-actions'
-        for (const [action, label] of [['edit', t('Edit')], ['delete', t('Delete')]] as const) {
-          const button = element('button', label); button.type = 'button'; button.className = action === 'delete' ? 'xp-btn xp-btn--danger' : 'xp-btn'; button.dataset.action = action
+        const row = cloneViewRecord(root, 'account-template-row', 'tr', { name: template.name, plans: template.planIds.length ? template.planIds.map(planName).join(', ') : t('No plan'), records: String(template.recordCount), updated: formatDisplayDateTime(template.updatedAt), 'edit-label': t('Edit'), 'delete-label': t('Delete') })
+        for (const action of ['edit','delete'] as const) {
+          const button = viewAction<HTMLButtonElement>(row, action)
           button.setAttribute('aria-label', action === 'edit' ? t('Edit {name}', { name: template.name }) : t('Delete {name}', { name: template.name }))
-          button.addEventListener('click', () => void act(action, template)); actions.append(button)
+          button.addEventListener('click', () => void act(action, template))
         }
-        cell(actions)
         return row
       }))
-      if (!next.templates.length) { const row = element('tr'), cell = element('td', next.state === 'invalid' ? t('The saved templates file cannot be read. Nothing is shown and it cannot be changed here.') : t('No templates')); cell.colSpan = 5; row.append(cell); rows.replaceChildren(row) }
+      if (!next.templates.length) rows.replaceChildren(cloneViewRecord(root, 'account-template-empty', 'tr', { message: next.state === 'invalid' ? t('The saved templates file cannot be read. Nothing is shown and it cannot be changed here.') : t('No templates') }))
       empty.hidden = next.state === 'invalid' || next.templates.length > 0
       note(status, next.state === 'invalid' ? 'failed' : 'ready', next.state === 'invalid' ? t('The saved templates file requires review.') : t('{count, plural, one {{count} template read.} other {{count} templates read.}}', { count: next.templates.length }))
       const current = next.templates.find(template => template.id === editing)
@@ -164,4 +161,4 @@ function bindWhmAccountTemplates(askDialog: ((options: Record<string, unknown>) 
   })
 }
 
-export const WHM_ACCOUNT_TEMPLATES_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmAccountTemplatesView=${readWhmAccountTemplatesView.toString()};return ${bindWhmAccountTemplates.toString()};})()`
+export const WHM_ACCOUNT_TEMPLATES_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmAccountTemplatesView=${readWhmAccountTemplatesView.toString()};return ${bindWhmAccountTemplates.toString()};})()`

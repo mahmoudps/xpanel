@@ -3,6 +3,12 @@ import { escapeHtml } from '../tokens.ts'
 
 const styles = `<style>.xp-acct-enh{display:flex;flex-direction:column;gap:32px;min-inline-size:0}.xp-acct-enh :is(h2,h3,p){margin:0}.xp-acct-enh .xp-whm-detail-field{display:flex;flex-direction:column;gap:8px;min-inline-size:0;text-align:start}.xp-acct-enh .xp-whm-detail-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:16px}.xp-acct-enh form,.xp-acct-enh [data-acct-enh-form]{display:flex;flex-direction:column;gap:24px;min-inline-size:0}.xp-acct-enh [dir=ltr]{unicode-bidi:isolate}.xp-acct-enh[dir=rtl] :is(input,textarea)[dir=auto]{text-align:right}@media(min-width:801px){.xp-acct-enh .xp-whm-detail-card{padding:24px}}</style>`
 
+function enhancementTemplates(): string {
+  const technical = (slot: string): string => `<td><bdi dir="ltr" data-xp-slot="${slot}"></bdi></td>`
+  const cell = (slot: string): string => `<td data-xp-slot="${slot}"></td>`
+  return `<template data-xp-template="enhancement-definition-row"><tr>${technical('id')}<td><bdi data-xp-slot="label"></bdi></td>${cell('kind')}${technical('range')}<td><div class="xp-whm-detail-actions"><button type="button" class="xp-btn" data-xp-slot="edit" disabled></button><button type="button" class="xp-btn xp-btn--danger" data-xp-slot="delete" disabled></button></div></td></tr></template><template data-xp-template="enhancement-assignment-row"><tr>${cell('target')}<td><bdi data-xp-slot="label"></bdi></td>${technical('value')}${cell('actions')}</tr></template><template data-xp-template="enhancement-limit-row"><tr>${technical('reseller')}<td><bdi data-xp-slot="label"></bdi></td>${technical('limit')}${technical('used')}${cell('actions')}</tr></template><template data-xp-template="enhancement-remove"><button type="button" class="xp-btn" data-xp-slot="label" disabled></button></template><template data-xp-template="enhancement-empty-five"><tr><td colspan="5" data-xp-slot="message"></td></tr></template><template data-xp-template="enhancement-empty-four"><tr><td colspan="4" data-xp-slot="message"></td></tr></template>`
+}
+
 /** /whm/plans/enhancements body: definitions, plan/account assignments and per-reseller caps. Root only. */
 export function renderWhmAccountEnhancementsWorkspace(input: { locale: Locale; canManage: boolean }): string {
   const t = (message: string, values?: MessageValues): string => escapeHtml(translator(input.locale)(message, values)), off = input.canManage ? '' : ' disabled'
@@ -54,5 +60,5 @@ export function renderWhmAccountEnhancementsWorkspace(input: { locale: Locale; c
       ${field('limit-value', t('Limit'), number('limit-value', ' aria-describedby="acct-enh-limit-value-help"'), t('Empty is unlimited.'))}
     </div>`, t('Save limit'))}
   </section>
-</div>`
+${enhancementTemplates()}</div>`
 }

@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -52,6 +56,15 @@ function bindSiteHealth(_askDialog: unknown): void {
     const find = <T extends HTMLElement>(key: string): T => root.querySelector<T>('[data-health-' + key + ']')!
     const run = find<HTMLButtonElement>('run'), rows = find('rows'), status = find('status')
     if (!run || !rows || !status || !find('at') || !find('count') || !find('problems')) return
+    try {
+      const preview = cloneClientTemplate(clientTemplate(root, 'site-health-result'), 'tr', ['domain', 'kind', 'state', 'detail', 'fix'])
+      for (const [slot, tag] of [['domain', 'bdi'], ['kind', 'td'], ['state', 'span'], ['detail', 'td'], ['fix', 'td']]) clientTemplateSlot(preview, slot!, tag!)
+      cloneClientTemplate(clientTemplate(root, 'site-health-fix'), 'a', ['label'])
+      cloneClientTemplate(clientTemplate(root, 'site-health-empty'), 'tr', ['message'])
+      cloneClientTemplate(clientTemplate(root, 'site-health-instant'), 'bdi', [])
+    } catch {
+      run.disabled = true; status.dataset.state = 'unavailable'; status.textContent = t('Site health checks are unavailable here. Nothing was checked.'); return
+    }
     let busy = false
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const label = (id: string): string => ({ dns: t('DNS'), http: t('Website'), certificate: t('Certificate'), php: t('PHP') } as Record<string, string>)[id] ?? id
@@ -59,8 +72,8 @@ function bindSiteHealth(_askDialog: unknown): void {
     const explain = (check: SiteHealthCheck): string | DocumentFragment => {
       const d = check.detail, http = d.status === undefined ? null : { status: d.status }, found = d.found ? [...d.found.ipv4, ...d.found.ipv6].join(', ') : ''
       if (check.id === 'certificate' && ['valid', 'expiring', 'expired'].includes(check.cause)) {
-        const fragment = document.createDocumentFragment(), instant = document.createElement('bdi')
-        instant.dir = 'ltr'; instant.textContent = formatDisplayDateTime(d.notAfter)
+        const fragment = document.createDocumentFragment(), instant = cloneClientTemplate(clientTemplate(root, 'site-health-instant'), 'bdi', [])
+         instant.textContent = formatDisplayDateTime(d.notAfter)
         const [before, after] = (check.cause === 'expiring' ? t('Expires in {days} days ({time}).', { days: d.daysLeft ?? '' }) : check.cause === 'valid' ? t('Valid until {time}.') : t('Expired on {time}.')).split('{time}')
         fragment.append(before ?? '', instant, after ?? '')
         return fragment
@@ -87,16 +100,16 @@ function bindSiteHealth(_askDialog: unknown): void {
       let problems = 0
       for (const domain of view.domains) for (const check of domain.checks) {
         if (check.state === 'problem') problems++
-        const row = document.createElement('tr'), name = document.createElement('td'), bdi = document.createElement('bdi')
-        bdi.dir = 'ltr'; bdi.textContent = domain.name; name.append(bdi); row.append(name)
-        const kind = document.createElement('td'); kind.textContent = label(check.id); row.append(kind)
-        const result = document.createElement('td'), chip = document.createElement('span'); chip.dataset.stateChip = check.state; chip.textContent = stateText(check.state); result.append(chip); row.append(result)
-        const detail = document.createElement('td'); detail.dir = 'auto'; detail.append(explain(check)); row.append(detail)
-        const fix = document.createElement('td')
-        if (check.state === 'problem') { const link = document.createElement('a'); link.className = 'xp-btn'; link.href = check.fix + '?lang=' + document.documentElement.lang; link.textContent = t(msgctxt('site-health-client', 'Open')); link.setAttribute('aria-label', t('Fix {check}: {domain}', { check: label(check.id), domain: domain.name })); fix.append(link) } else fix.textContent = '-'
-        row.append(fix); rows.append(row)
+        const row = cloneClientTemplate(clientTemplate(root, 'site-health-result'), 'tr', ['domain', 'kind', 'state', 'detail', 'fix'])
+        clientTemplateSlot(row, 'domain', 'bdi').textContent = domain.name
+        clientTemplateSlot(row, 'kind', 'td').textContent = label(check.id)
+        const chip = clientTemplateSlot(row, 'state', 'span'); chip.dataset.stateChip = check.state; chip.textContent = stateText(check.state)
+        clientTemplateSlot(row, 'detail', 'td').append(explain(check))
+        const fix = clientTemplateSlot(row, 'fix', 'td')
+        if (check.state === 'problem') { const link = cloneClientTemplate(clientTemplate(root, 'site-health-fix'), 'a', ['label']) as HTMLAnchorElement; link.href = check.fix + '?lang=' + document.documentElement.lang; clientTemplateSlot(link, 'label').textContent = t(msgctxt('site-health-client', 'Open')); link.setAttribute('aria-label', t('Fix {check}: {domain}', { check: label(check.id), domain: domain.name })); link.removeAttribute('aria-disabled'); link.removeAttribute('tabindex'); fix.append(link) } else fix.textContent = '-'
+        rows.append(row)
       }
-      if (!view.domains.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 5; td.textContent = t('This account has no domains to check.'); row.append(td); rows.append(row) }
+      if (!view.domains.length) { const row = cloneClientTemplate(clientTemplate(root, 'site-health-empty'), 'tr', ['message']); clientTemplateSlot(row, 'message', 'td').textContent = t('This account has no domains to check.'); rows.append(row) }
       find('at').textContent = formatDisplayDateTime(view.checkedAt); find('count').textContent = String(view.domains.length) + (view.truncated ? ' / ' + String(view.total) : ''); find('problems').textContent = String(problems)
     }
     async function check(): Promise<void> {
@@ -111,4 +124,4 @@ function bindSiteHealth(_askDialog: unknown): void {
   })
 }
 
-export const SITE_HEALTH_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const HEALTH_ID=${HEALTH_ID.toString()};const HEALTH_CHECKS=${JSON.stringify(HEALTH_CHECKS)};const healthObject=${healthObject.toString()};const healthText=${healthText.toString()};const healthAddresses=${healthAddresses.toString()};const readSiteHealthView=${readSiteHealthView.toString()};return ${bindSiteHealth.toString()};})()`
+export const SITE_HEALTH_CLIENT_BINDING = `(()=>{const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const HEALTH_ID=${HEALTH_ID.toString()};const HEALTH_CHECKS=${JSON.stringify(HEALTH_CHECKS)};const healthObject=${healthObject.toString()};const healthText=${healthText.toString()};const healthAddresses=${healthAddresses.toString()};const readSiteHealthView=${readSiteHealthView.toString()};return ${bindSiteHealth.toString()};})()`

@@ -14,9 +14,8 @@ export interface VisibilityContext {
 export const surfacesFor = (p: Principal): Surface[] =>
   p.kind === 'user' ? ['xpanel', 'xmail'] : ['xwhm', 'aapanel']
 
-/** Only verified tools are shown. Visibility does not replace server-side authorization. */
-export const isVisible = (tool: CatalogTool, ctx: VisibilityContext): boolean => {
-  if (tool.status !== 'verified' || tool.delivery.status !== 'verified') return false
+/** Role, feature and team visibility, independent of delivery qualification. This never grants API admission. */
+export const isToolAuthorized = (tool: CatalogTool, ctx: VisibilityContext): boolean => {
   if (!surfacesFor(ctx.principal).includes(tool.surface)) return false
   switch (ctx.principal.kind) {
     case 'root':
@@ -29,6 +28,10 @@ export const isVisible = (tool: CatalogTool, ctx: VisibilityContext): boolean =>
       return tool.featureKey === null || (ctx.disabledFeatures !== undefined && !ctx.disabledFeatures.has(tool.featureKey))
   }
 }
+
+/** Only verified tools are shown. Visibility does not replace server-side authorization. */
+export const isVisible = (tool: CatalogTool, ctx: VisibilityContext): boolean =>
+  tool.status === 'verified' && tool.delivery.status === 'verified' && isToolAuthorized(tool, ctx)
 
 export const visibleTools = (tools: readonly CatalogTool[], ctx: VisibilityContext): CatalogTool[] =>
   tools.filter(t => isVisible(t, ctx))

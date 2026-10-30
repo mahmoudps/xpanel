@@ -3,6 +3,8 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { computeSourceDigest } from '../evidence/shared.mjs'
+export { computeSourceDigest } from '../evidence/shared.mjs'
 
 // Explicit source roots prevent credentials, Git internals and local dependency
 // caches from being copied to a disposable qualification host.
@@ -33,11 +35,6 @@ export const EXCLUDED_NAMES = new Set([
 ])
 
 const hash = value => createHash('sha256').update(value).digest('hex')
-
-export function computeSourceDigest(entries) {
-  const sorted = [...entries].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
-  return hash(sorted.map(file => `${file.path}\0${file.sha256}\n`).join(''))
-}
 
 export function isAllowedSnapshotPath(path) {
   if (typeof path !== 'string' || path.length === 0 || path.length > 240) return false

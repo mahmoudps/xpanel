@@ -2,6 +2,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmServiceManagerWorkspace } from './board-port/whm-service-manager-workspace.ts'
 import { readServiceManagerSubmission, readServiceManagerView, WHM_SERVICE_MANAGER_CLIENT_BINDING } from './whm-service-manager-client.ts'
+import { renderV2WhmServiceManager } from './themes/v2/pages/xwhm/host/services.ts'
+
+// Retain the real theme catalog checks while using Node file URLs in the DOM test realm.
+vi.mock('./themes/v2/messages.ts', async () => {
+  const { createThemeMessages } = await import('./theme-messages.ts')
+  const { readFileSync } = await import('node:fs')
+  const { URL: NodeURL, fileURLToPath } = await import('node:url')
+  const read = (locale: string) => readFileSync(fileURLToPath(new NodeURL(`./themes/v2/locales/${locale}.po`, import.meta.url)), 'utf8')
+  return { v2Messages: createThemeMessages('v2', read('en'), { ar: read('ar') }) }
+})
 
 const revision = 'a'.repeat(64), at = '2026-10-27T06:00:00.000Z', bootTime = 1793000000
 const row = (unit: string, extra: Record<string, unknown> = {}) => ({ unit, load: 'loaded', active: 'active', sub: 'running', boot: 'enabled', restart: false, bootEditable: false, ...extra })
@@ -19,6 +29,7 @@ const input = (selector: string, value: string) => { const node = q<HTMLInputEle
 beforeEach(() => { mount(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
 
 describe('service manager browser boundary', () => {
+  it('serializes a closed browser helper graph without SSR import bindings', () => { expect(WHM_SERVICE_MANAGER_CLIENT_BINDING).not.toContain('__vite_ssr_import_') })
   it('projects only validated service facts and refuses unsafe flags or inconsistent reads', () => {
     expect(JSON.stringify(readServiceManagerView({ ...view(), secret: 'hidden', units: [row('nginx.service', { secret: 'hidden' })] }))).not.toContain('hidden')
     for (const bad of [view({ revision: null }), view({ state: 'unavailable' }), view({ units: [row('nginx.service', { restart: true })] }), view({ units: [row('ssh.service', { bootEditable: true })] }), view({ units: [row('memcached.service', { bootEditable: true, boot: 'static' })] }), view({ units: [row('a.service'), row('a.service')] }), view({ units: [row('<script>.service')] }), view({ units: [row('a.service', { load: null })] }), view({ bootTime: -1 }), view({ observedAt: 'today' })]) expect(() => readServiceManagerView(bad)).toThrow()
@@ -34,6 +45,25 @@ describe('service manager browser boundary', () => {
 })
 
 describe('service manager client actions', () => {
+  it('uses v2 unit/action/empty templates while retaining protected-unit restrictions and revision-bound boot jobs', async () => {
+    document.body.innerHTML = renderV2WhmServiceManager({ locale: 'en', principal: { kind: 'root', id: 'operator', username: 'operator' }, activeRoute: '/whm/services/more' })
+    const send = vi.fn(async (method: string, _path: string, body?: any) => method === 'GET' ? view() : accepted(body.action, body.unit))
+    boot(send, async () => true); await tick()
+    expect(q('[data-sm-action="enable"]').classList.contains('v2-btn')).toBe(true)
+    expect(q('[data-sm-rows]').querySelector('[class*="xp-"]')).toBeNull()
+    expect(document.querySelector('[data-sm-unit="nginx.service"]')).toBeNull()
+    click('enable', 'memcached.service'); await tick()
+    expect(send).toHaveBeenLastCalledWith('POST', '/api/server/service-manager/action', { action: 'enable', unit: 'memcached.service', expectedRevision: revision })
+    q<HTMLButtonElement>('[data-sm-refresh]').click(); await tick()
+    input('[data-sm-search]', 'no-match')
+    expect(q<HTMLTableCellElement>('[data-sm-rows] [data-xp-slot="message"]').colSpan).toBe(6)
+  })
+  it('sends no read or job when the manager row template is absent', async () => {
+    document.querySelector('template[data-xp-template="service-manager-row"]')!.remove()
+    const send = vi.fn(); boot(send, async () => true); await tick()
+    expect(send).not.toHaveBeenCalled(); expect(q<HTMLElement>('[data-sm-status]').dataset.state).toBe('unavailable')
+    expect([...document.querySelectorAll<HTMLButtonElement>('button')].every(button => button.disabled)).toBe(true)
+  })
   it('keeps all controls inert with no transport, authority or qualification', async () => {
     boot(); expect(q<HTMLElement>('[data-sm-status]').dataset.state).toBe('unavailable')
     for (const extra of [{ canRead: false }, { capability: 'unavailable' }]) {

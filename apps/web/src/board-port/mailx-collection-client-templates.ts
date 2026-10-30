@@ -1,0 +1,10 @@
+/** Inert selected-theme markup; the authorized controller supplies values and labels. */
+export function mailxArchiveClientTemplates(): string { return `
+<template data-xp-template="mailx-archive-row"><tr><th scope="row"><bdi dir="ltr" class="xp-mono" data-xp-slot="domain"></bdi></th><td><select class="xp-input" data-archive-mailbox data-xp-slot="mailbox" disabled></select></td><td><input type="checkbox" data-archive-direction="incoming" data-xp-slot="incoming" disabled></td><td><input type="checkbox" data-archive-direction="outgoing" data-xp-slot="outgoing" disabled></td><td><input type="number" class="xp-input" min="0" max="3650" step="1" inputmode="numeric" dir="ltr" data-archive-days data-xp-slot="days" disabled></td><td data-xp-slot="state"></td><td><button type="button" class="xp-btn" data-xp-slot="retention" disabled></button></td></tr></template>
+<template data-xp-template="mailx-archive-empty"><tr><td colspan="7" data-xp-slot="message"></td></tr></template>` }
+
+export function mailxCollectionsClientTemplates(): string { return `
+<template data-xp-template="mailx-collection-row"><tr><td><input type="text" class="xp-input" maxlength="200" data-item-name data-xp-slot="name" disabled></td><td><input type="text" class="xp-input" maxlength="500" data-item-description data-xp-slot="description" disabled></td><td><input type="radio" data-item-default data-xp-slot="default" disabled></td><td><button type="button" class="xp-btn" data-xp-slot="remove" disabled></button></td></tr></template>
+<template data-xp-template="mailx-collection-empty"><tr><td colspan="4" data-xp-slot="message"></td></tr></template>
+<template data-xp-template="mailx-calendar-description"><div class="xp-mailx__field" style="display:flex;flex-direction:column;gap:8px;min-inline-size:0"><label data-xp-slot="label"></label><textarea class="xp-input" rows="2" maxlength="500" data-xp-slot="description" disabled></textarea></div></template>
+<template data-xp-template="mailx-calendar-empty"><p data-xp-slot="message"></p></template>` }

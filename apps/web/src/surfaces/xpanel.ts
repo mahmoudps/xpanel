@@ -34,6 +34,7 @@ import { renderComposedXpanel } from '../board-port/composed/render.ts'
 import { renderAccountTerminalPage } from '../board-port/ops-terminal-workspace.ts'
 import { composedRouteSpecs } from '../board-port/composed/all.ts'
 import { copyOf } from '../board-port/composed/types.ts'
+import { classicFileTemplates } from '../board-port/classic-file-templates.ts'
 import { renderEmailAccountsExtension, emailAccountsRouteSpec } from '../board-port/extensions/email-accounts.ts'
 import { renderAccountPagesExtension, accountPageRouteSpecs } from '../board-port/extensions/account-pages.ts'
 import { renderStoreExtension, storeRouteSpecs } from '../board-port/extensions/store.ts'
@@ -70,13 +71,15 @@ export interface PanelSurfaceProps {
   websiteAnalytics?: WebsiteAnalyticsSnapshot
   /** The traffic window the supplied analytics observation was read for. */
   websiteAnalyticsWindow?: WebsiteAnalyticsWindow
+  /** Trusted core validates the selected owned domain before its account-scoped traffic read. */
+  websiteAnalyticsDomainSelectionAvailable?: boolean
   /** The account-scoped traffic read failed or was unavailable; no empty result is assumed. */
   websiteAnalyticsUnavailable?: boolean
   /** Account certificates read from stored state; served TLS is never inferred from them. */
   certificates?: Certificate[]
   files?: JailedFileEntry[]
   databases?: Database[]
-  databaseUsers?: Pick<DatabaseUser, 'id' | 'name' | 'grants'>[]
+  databaseUsers?: (Pick<DatabaseUser, 'id' | 'name' | 'grants'> & Partial<Pick<DatabaseUser, 'accountId'>>)[]
   serviceUsers?: ServiceUser[]
   dnsRecords?: DnsRecord[]
   lastSignInAt?: string
@@ -425,7 +428,7 @@ ${section === 'resources' ? `<div style="display:grid;gap:32px;min-inline-size:0
         </div>
         ${activeRoute === '/files/trash' ? `<p class="xp-help" data-file-status role="status" aria-live="polite" hidden style="margin-block: 0 var(--xp-space-group);"></p>` : ''}
 
-        <div class="xp-table-wrap" role="region" tabindex="0" aria-label="${translator(locale)('Account files')}">
+        <div class="xp-table-wrap" data-file-table-wrap role="region" tabindex="0" aria-label="${translator(locale)('Account files')}">
           <table class="xp-table" data-file-manager-table="true">
             <thead>
               <tr>
@@ -504,6 +507,7 @@ ${section === 'resources' ? `<div style="display:grid;gap:32px;min-inline-size:0
             </div>
           </div>
         </div>` : ''}
+        ${classicFileTemplates}
       </section>
 
 ` : ''}

@@ -1,3 +1,4 @@
+import { classicWhmClientTemplates } from './whm-client-templates.ts'
 import { type Locale, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -17,7 +18,7 @@ export function renderWhmSupportWorkspace(input: WhmSupportPageInput): string {
   const table = (label: Copy, marker: string, headers: readonly Copy[], empty: Copy): string => `<div class="xp-whm-detail-scroll" role="region" tabindex="0" aria-label="${t(label)}"><table class="xp-whm-detail-table xp-table"><caption class="xp-sr-only">${t(label)}</caption><thead><tr>${headers.map(header => `<th scope="col">${t(header)}</th>`).join('')}</tr></thead><tbody data-whm-support-${marker}><tr><td colspan="${headers.length}">${t(empty)}</td></tr></tbody></table></div>`
   const link = (href: string, copy: Copy): string => `<a class="xp-btn" href="${href}">${t(copy)}</a>`
   const list = (marker: string, title: Copy): string => `<div class="xp-whm-support__group"><h3>${t(title)}</h3><ul class="xp-whm-support__list" data-whm-support-${marker}><li>${t(msgid('The manifest has not been read.'))}</li></ul></div>`
-  return `<div class="xp-whm-support" data-whm-support-workspace data-support-can-read="${on}" lang="${input.locale}" dir="${localeDirection(input.locale)}">${STYLE}`
+  return `<div class="xp-whm-support" data-whm-support-workspace data-support-can-read="${on}" lang="${input.locale}" dir="${localeDirection(input.locale)}">${classicWhmClientTemplates('support')}${STYLE}`
     + card('summary', msgid('Support summary'),
       help(msgid('Facts read from this server for a support request. A value that could not be read is shown as not read or not verified, never assumed.'))
       + `<div class="xp-whm-detail-actions"><button type="button" class="xp-btn xp-btn--primary" data-whm-support-refresh${disabled}>${t(msgctxt('whm-support-workspace', 'Read again'))}</button></div>`

@@ -12,14 +12,39 @@ const restore = { id: '44444444-4444-4444-8444-444444444444', actor: 'root', use
 const view = (over: Record<string, unknown> = {}) => ({ available: true, reason: null, revision: 'b'.repeat(64), schedule: { enabled: true, cron: '0 2 * * *', nextRunAt: '2026-10-29T02:00:00.000Z', lastScheduledAt: '2026-10-28T02:00:30.000Z' }, storage: { freeBytes: 1000, totalBytes: 4000 }, activeId: null, runs: [run], recoveries: [], restores: [restore], nativeQualified: false, ...over })
 const lifecycle = { revision: 'c'.repeat(64), destinations: [{ id: ID, name: 'Offsite', effectiveActive: true }] }
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
-const boot = (send: unknown, canManage = true, ask?: unknown) => {
+const boot = (send: unknown, canManage = true, ask?: unknown, beforeBind?: (root: HTMLElement) => void) => {
   document.body.innerHTML = renderWhmBackupRunsWorkspace({ locale: 'en', canManage })
+  beforeBind?.(document.querySelector<HTMLElement>('[data-whm-backup-runs]')!)
   ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
   ;(new Function('return ' + WHM_BACKUP_RUNS_CLIENT_BINDING)() as (ask: unknown) => void)(ask)
 }
 afterEach(() => { document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr'; document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
 
 describe('backup runs client', () => {
+  it('keeps a selected template column order and recovery button paint', async () => {
+    const send = vi.fn(async (_method: string, path: string) => path.endsWith('/runs') ? view() : lifecycle)
+    boot(send, true, undefined, root => {
+      const row = root.querySelector<HTMLTemplateElement>('template[data-xp-template="whm-backup-copies-row"]')!.content.querySelector('tr')!
+      row.append(row.firstElementChild!)
+      row.querySelector('button')!.className = 'alternate-recovery-control'
+    }); await settle()
+    const row = document.querySelector<HTMLTableSectionElement>('[data-backup-runs-rows="copies"]')!.rows[0]!
+    expect(row.cells[0]!.textContent).toBe('Offsite')
+    expect(row.cells[5]!.textContent).toBe('alice')
+    expect(row.querySelector('button')!.className).toBe('alternate-recovery-control')
+  })
+  it('does not display an internal destination identifier when its label is missing', async () => {
+    boot(vi.fn(async (_method: string, path: string) => path.endsWith('/runs') ? view() : { ...lifecycle, destinations: [] })); await settle()
+    const copies = document.querySelector('[data-backup-runs-rows="copies"]')!
+    expect(copies.textContent).toContain('Not read')
+    expect(copies.textContent).not.toContain(ID)
+  })
+  it('refuses missing theme templates before reading backup state', async () => {
+    const send = vi.fn()
+    boot(send, true, undefined, root => root.querySelector('template[data-xp-template="whm-backup-copies-row"]')!.remove()); await settle()
+    expect(send).not.toHaveBeenCalled()
+    expect(document.querySelector<HTMLButtonElement>('[data-backup-runs-start]')!.disabled).toBe(true)
+  })
   it('renders every section with strict spacing and nests inside the destinations page in both directions', () => {
     for (const locale of ['en', 'ar'] as const) {
       const html = renderWhmBackupDestinationsWorkspace({ locale, canManage: true })
