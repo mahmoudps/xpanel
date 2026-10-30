@@ -4,6 +4,8 @@
 
 import { canonicalNavigationRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { catalogText, localeInfo, type Locale, type Translate } from '../../../i18n.ts'
+import { brandingProductName } from '../../../branding.ts'
+import type { ThemeViewProps } from '../../contract.ts'
 import { attr, escapeHtml, hookAttrs, type HookAttributes, type Tone } from '../html.ts'
 import { catalogIcon, icon } from '../icons.ts'
 import { toastRegion } from '../components/toast-region.ts'
@@ -28,7 +30,7 @@ export interface NavContext {
   meta?: readonly string[]
 }
 
-export interface V2ShellProps {
+export interface V2ShellProps extends ThemeViewProps {
   surface: V2Surface
   /** The canonical current route; registered aliases mark their parent page. */
   activeRoute: string
@@ -37,6 +39,12 @@ export interface V2ShellProps {
   catalog?: readonly CatalogTool[]
   homeHref: string
   context?: NavContext
+  /** Theme-owned account/domain controls below the context summary. */
+  contextControlHtml?: string
+  /** Theme-owned surface navigation, such as mailbox folders. Omit to use the authorized catalog. */
+  sidebarHtml?: string
+  /** Theme-owned search control, bound to the surface's existing core controller. */
+  searchHtml?: string
   /** Links under the navigation, such as "Open xMail". */
   footerLinks?: readonly { label: string; href: string; external?: boolean }[]
   realtimeEnabled: boolean
@@ -99,14 +107,14 @@ function contextCard(context: NavContext): string {
 }
 
 function sidebar(t: Translate, props: V2ShellProps): string {
-  const product = PRODUCT[props.surface]
+  const product = brandingProductName(props.branding, PRODUCT[props.surface])
   const subtitle = props.surface === 'xwhm' ? `<span class="v2-brand__sub">${escapeHtml(t('Server administration'))}</span>` : ''
   const footer = props.footerLinks?.length
     ? `<div class="v2-side__foot">${props.footerLinks.map(link => `<a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}${link.external ? icon('external', 16) : ''}</a>`).join('')}</div>` : ''
   return `<aside class="v2-side" id="xp-sidebar" data-xp-sidebar tabindex="-1" aria-label="${escapeHtml(`${product} ${t('navigation')}`)}">
-<div class="v2-side__top"><a class="v2-brand" href="${escapeHtml(props.homeHref)}"><span class="v2-brand__mark" aria-hidden="true">x</span><span class="v2-brand__text"><span class="v2-brand__name">${product}</span>${subtitle}</span></a><button type="button" class="v2-btn v2-btn--icon v2-side__close" data-action="close-mobile-nav" aria-controls="xp-sidebar" aria-label="${escapeHtml(t(msgctxt('shell', 'Close navigation')))}">${icon('x', 16)}</button></div>
-${props.context ? contextCard(props.context) : ''}
-${sidebarNavigation(t, props)}
+<div class="v2-side__top"><a class="v2-brand" href="${escapeHtml(props.homeHref)}"><span class="v2-brand__mark" aria-hidden="true">x</span><span class="v2-brand__text"><span class="v2-brand__name">${escapeHtml(product)}</span>${subtitle}</span></a><button type="button" class="v2-btn v2-btn--icon v2-side__close" data-action="close-mobile-nav" aria-controls="xp-sidebar" aria-label="${escapeHtml(t(msgctxt('shell', 'Close navigation')))}">${icon('x', 16)}</button></div>
+${props.context ? contextCard(props.context) : ''}${props.contextControlHtml ?? ''}
+${props.sidebarHtml ?? sidebarNavigation(t, props)}
 ${footer}
 </aside>`
 }
@@ -128,7 +136,8 @@ function accountMenu(t: Translate, props: V2ShellProps): string {
   const session = account.signedIn
     ? `<button type="button" class="v2-menu__item v2-menu__item--danger" data-action="logout">${escapeHtml(t('Sign out'))}</button>`
     : account.signInHref ? `<a class="v2-menu__item" href="${escapeHtml(account.signInHref)}">${escapeHtml(t('Sign in'))}</a>` : ''
-  return `<details class="v2-account" data-user-menu><summary class="v2-btn v2-account__summary" aria-label="${escapeHtml(`${t('User menu for')} ${name}${account.roleLabel ? ` ${account.roleLabel}` : ''}`)}"><span class="v2-account__avatar" aria-hidden="true">${escapeHtml(initial)}</span><span class="v2-account__id"><span${account.username ? ' dir="ltr"' : ''}>${escapeHtml(name)}</span>${account.roleLabel ? `<span>${escapeHtml(account.roleLabel)}</span>` : ''}</span></summary><div class="v2-account__panel">${links}${session}</div></details>`
+  const interfaceChoice = !account.signedIn ? '' : `<section class="v2-ui-theme" data-ui-theme-preferences data-ui-theme-can-read="true" hidden><form data-ui-theme-form hidden><label for="v2-ui-theme-choice"><span>${escapeHtml(t(msgctxt('theme:v2', 'Interface theme')))}</span><select id="v2-ui-theme-choice" name="uiTheme" data-ui-theme-choice disabled><option value="classic">${escapeHtml(t('Classic'))}</option><option value="v2">V2</option></select></label><button class="v2-btn" type="submit" data-ui-theme-save disabled>${escapeHtml(t('Save'))}</button></form><p data-ui-theme-status role="status" aria-live="polite" hidden></p><button class="v2-btn v2-btn--ghost" type="button" data-ui-theme-reload disabled hidden>${escapeHtml(t('Reload'))}</button></section>`
+  return `<details class="v2-account" data-user-menu><summary class="v2-btn v2-account__summary" aria-label="${escapeHtml(`${t('User menu for')} ${name}${account.roleLabel ? ` ${account.roleLabel}` : ''}`)}"><span class="v2-account__avatar" aria-hidden="true">${escapeHtml(initial)}</span><span class="v2-account__id"><span${account.username ? ' dir="ltr"' : ''}>${escapeHtml(name)}</span>${account.roleLabel ? `<span>${escapeHtml(account.roleLabel)}</span>` : ''}</span></summary><div class="v2-account__panel">${links}${interfaceChoice}${session}</div></details>`
 }
 
 function topbar(t: Translate, props: V2ShellProps): string {
@@ -144,9 +153,9 @@ function topbar(t: Translate, props: V2ShellProps): string {
     ? `<button type="button" class="v2-btn v2-btn--icon v2-top__bell" data-action="open-activity-drawer" aria-controls="xp-activity-drawer" aria-label="${escapeHtml(t(msgctxt('theme:v2', '{count, plural, =0 {Notifications, none unread} one {Notifications, # unread} other {Notifications, # unread}}'), { count: unread }))}">${icon('bell')}${unread > 0 ? `<span class="v2-top__badge v2-num" aria-hidden="true">${unread > 99 ? '99+' : unread}</span>` : ''}</button>` : ''
   return `<header class="v2-top" role="banner">
 <button type="button" class="v2-btn v2-btn--icon v2-top__menu" data-action="toggle-mobile-nav" aria-controls="xp-sidebar" aria-expanded="false" aria-label="${escapeHtml(t('Menu'))}">${icon('menu')}</button>
-<a class="v2-top__brand" href="${escapeHtml(props.homeHref)}">${PRODUCT[props.surface]}</a>
+<a class="v2-top__brand" href="${escapeHtml(props.homeHref)}">${escapeHtml(brandingProductName(props.branding, PRODUCT[props.surface]))}</a>
 <details class="v2-tools" open data-xp-toolbar-options><summary class="v2-btn">${escapeHtml(t('Search & account'))}</summary><div class="v2-tools__content">
-<button type="button" class="v2-search" data-action="open-cmdk" aria-keyshortcuts="Control+K Meta+K" aria-label="${escapeHtml(`${searchLabel} Ctrl K`)}">${icon('search')}<span>${escapeHtml(searchLabel)}</span><kbd aria-hidden="true">Ctrl K</kbd></button>
+${props.searchHtml ?? `<button type="button" class="v2-search" data-action="open-cmdk" aria-keyshortcuts="Control+K Meta+K" aria-label="${escapeHtml(`${searchLabel} Ctrl K`)}">${icon('search')}<span>${escapeHtml(searchLabel)}</span><kbd aria-hidden="true">Ctrl K</kbd></button>`}
 <span class="v2-top__spacer"></span>${liveIndicator(t, props.realtimeEnabled)}${server}${languages}${scheme}${bell}${accountMenu(t, props)}
 </div></details>
 </header>`
@@ -254,6 +263,7 @@ ${SIDE}__foot a:hover{background:var(--nav-2);color:var(--nav-strong)}
 .v2-account__id>:first-child{font-size:13px;font-weight:600}
 .v2-account__id>:nth-child(2){font-size:12px;font-weight:400;color:var(--muted)}
 .v2-account__panel{position:absolute;z-index:40;inset-inline-end:0;top:calc(100% + 4px);min-inline-size:220px;display:flex;flex-direction:column;padding:4px;border-radius:var(--radius-notice);background:var(--surface);border:1px solid var(--line-strong);box-shadow:0 8px 24px rgba(0,0,0,.12)}
+.v2-ui-theme{display:grid;gap:var(--space-3);padding:var(--space-3);border-block:1px solid var(--line)}.v2-ui-theme form{display:grid;gap:var(--space-2)}.v2-ui-theme label{display:grid;gap:var(--space-1)}.v2-ui-theme label>span{padding-inline-start:13px}.v2-ui-theme p{overflow-wrap:anywhere}
 .v2-main{flex:1 1 auto;outline:none}
 .v2-page{inline-size:100%;max-inline-size:1320px;margin:0 auto;padding:var(--space-3) clamp(16px,3vw,32px) 48px;display:flex;flex-direction:column;gap:var(--space-4)}
 @media (max-width:959px){
@@ -267,4 +277,5 @@ ${SIDE}__close{display:inline-flex}
 .v2-tools__content{inline-size:100%;padding-top:12px}
 .v2-search{max-width:none}
 }
+@media(max-width:640px){.v2-ui-theme{padding:var(--space-2)}}
 `

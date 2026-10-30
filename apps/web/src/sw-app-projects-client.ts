@@ -1,6 +1,8 @@
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { cloneViewRecord as canonicalCloneViewRecord, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
 
 export interface SwRuntimeRow { id: 'golang' | 'openjdk-17' | 'openjdk-21'; state: 'installed' | 'partial' | 'absent' | 'unavailable'; versions: string[] }
 /** Reads only the Go and Java rows of the existing software center runtime view. Self-contained for serialization. */
@@ -28,10 +30,17 @@ function bindSwProjects(parse: typeof readSwProjectRuntimes): void {
     root.dataset.swBound = 'true'
     const status = root.querySelector<HTMLElement>('[data-sw-projects-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-sw-projects-refresh]'), body = root.querySelector<HTMLElement>('[data-sw-projects-runtimes]')
     if (!status || !refresh || !body) return
+    try {
+      cloneViewRecord(root, 'software-project-runtime-row', 'tr', { name: '', state: '', version: '' })
+      cloneViewRecord(root, 'software-project-runtime-empty', 'tr', { message: '' })
+    } catch {
+      root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button,input,select').forEach(control => { control.disabled = true })
+      status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return
+    }
     const admitted = (): boolean => root.isConnected && root.dataset.swCanRead === 'true' && !root.closest(blocked) && typeof transport === 'function'
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const name = (id: string): string => id === 'golang' ? 'Go' : id === 'openjdk-17' ? 'OpenJDK 17' : 'OpenJDK 21'
-    const empty = (message: string): void => { body.textContent = ''; const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 3; cell.textContent = message; row.append(cell); body.append(row) }
+    const empty = (message: string): void => { body.replaceChildren(cloneViewRecord(root, 'software-project-runtime-empty', 'tr', { message })) }
     let busy = false
     const load = async (): Promise<void> => {
       if (busy || !admitted()) return
@@ -41,10 +50,7 @@ function bindSwProjects(parse: typeof readSwProjectRuntimes): void {
         if (!admitted()) return
         body.textContent = ''
         for (const runtime of view.runtimes) {
-          const row = document.createElement('tr'), label = document.createElement('td'), state = document.createElement('td'), version = document.createElement('td')
-          label.textContent = name(runtime.id); state.textContent = runtime.state === 'installed' ? t('Installed') : runtime.state === 'partial' ? t('Partially installed') : runtime.state === 'absent' ? t('Not installed') : t('Unavailable on this system')
-          if (runtime.versions.length) { const value = document.createElement('bdi'); value.dir = 'ltr'; value.textContent = runtime.versions.join(', '); version.append(value) } else version.textContent = t('None')
-          row.append(label, state, version); body.append(row)
+          body.append(cloneViewRecord(root, 'software-project-runtime-row', 'tr', { name: name(runtime.id), state: runtime.state === 'installed' ? t('Installed') : runtime.state === 'partial' ? t('Partially installed') : runtime.state === 'absent' ? t('Not installed') : t('Unavailable on this system'), version: runtime.versions.length ? runtime.versions.join(', ') : t('None') }))
         }
         if (!body.childElementCount) empty(view.state === 'read' ? t('No Go or Java runtime is offered for this system.') : t('The package database could not be read. Nothing is shown as installed.'))
         note(view.state === 'read' ? 'read' : 'unavailable', view.state === 'read' ? t('Runtimes read from the package database. Projects remain unavailable until a confined service runner is connected.') : t('The package database could not be read. Nothing is shown as installed.'))
@@ -56,4 +62,4 @@ function bindSwProjects(parse: typeof readSwProjectRuntimes): void {
     void load()
   })
 }
-export const SW_APP_PROJECTS_CLIENT_BINDING = `(()=>{const parse=${readSwProjectRuntimes.toString()};const bind=${bindSwProjects.toString()};return ()=>bind(parse);})()`
+export const SW_APP_PROJECTS_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const parse=${readSwProjectRuntimes.toString()};const bind=${bindSwProjects.toString()};return ()=>bind(parse);})()`

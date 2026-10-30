@@ -2,7 +2,10 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { WHM_DIAGNOSTIC_TEMPLATE_BINDING, whmDiagnosticNode as canonicalDiagnosticNode, assertWhmDiagnosticTemplates as canonicalAssertDiagnosticTemplates } from './whm-diagnostic-client-templates.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
+const whmDiagnosticNode = canonicalDiagnosticNode
+const assertWhmDiagnosticTemplates = canonicalAssertDiagnosticTemplates
 export type RepairDiagnosticView = {
   id: string
   area: 'packages' | 'services' | 'configuration'
@@ -116,7 +119,11 @@ function bindWhmRepair(askDialog: ((options: Record<string, unknown>) => Promise
       root.querySelectorAll<HTMLButtonElement>('[data-whm-repair-preview-action]').forEach(button => { button.disabled = busy || !repairable() || !report })
       root.setAttribute('aria-busy', String(busy))
     }
-    const element = <K extends keyof HTMLElementTagNameMap>(tag: K, textValue?: string, className?: string): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); if (textValue !== undefined) node.textContent = textValue; if (className) node.className = className; return node }
+    try { assertWhmDiagnosticTemplates(root) } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      status.dataset.state = 'failed'; status.textContent = t('The server response could not be verified. Nothing is assumed.'); return
+    }
+    const element = <K extends keyof HTMLElementTagNameMap>(tag: K, textValue?: string, templateName?: string): HTMLElementTagNameMap[K] => whmDiagnosticNode(root, tag, textValue, templateName)
     const technical = (value: string): HTMLElement => { const node = element('bdi', value); node.dir = 'ltr'; return node }
     const setFact = (name: string, value: string): void => { const node = find(name); if (node) node.textContent = value }
     const fillList = (name: string, items: readonly string[]): void => {
@@ -131,22 +138,22 @@ function bindWhmRepair(askDialog: ((options: Record<string, unknown>) => Promise
       setFact('count-problem', count('problem')); setFact('count-ok', count('ok')); setFact('count-unavailable', count('unavailable'))
       setFact('observed-at', formatDisplayDateTime(value.observedAt))
       listRoot.textContent = ''
-      if (!value.diagnostics.length) listRoot.append(element('p', t('The host returned no diagnostics. Nothing is assumed healthy.'), 'xp-help'))
+      if (!value.diagnostics.length) listRoot.append(element('p', t('The host returned no diagnostics. Nothing is assumed healthy.'), 'note'))
       for (const item of value.diagnostics) {
-        const card = element('article', undefined, 'xp-whm-repair__item'), header = element('header', undefined, 'xp-whm-repair__item-head'), heading = element('h3')
+        const card = element('article', undefined, 'repair-item'), header = element('header', undefined, 'repair-head'), heading = element('h3')
         card.dataset.whmRepairDiagnostic = item.id; card.dataset.state = item.state
         if (item.id.startsWith('service-config:')) { const [before = '', after = ''] = t('Service configuration test {service}').split('{service}'); heading.append(before, technical(item.id.slice('service-config:'.length)), after) }
         else { const title = titles[item.id]; heading.textContent = title ? t(title) : item.id }
-        const badge = element('span', item.state === 'ok' ? t('No problem found') : item.state === 'problem' ? t('Problem found') : t('Not verified'), 'xp-badge ' + (item.state === 'ok' ? 'xp-badge--ok' : item.state === 'problem' ? 'xp-badge--critical' : 'xp-badge--warn'))
+        const badge = element('span', item.state === 'ok' ? t('No problem found') : item.state === 'problem' ? t('Problem found') : t('Not verified'), item.state === 'ok' ? 'badge-ok' : item.state === 'problem' ? 'badge-critical' : 'badge-warn')
         header.append(heading, badge); card.append(header, element('p', t(item.cause)))
-        if (item.evidence) { const details = element('details'), pre = element('pre', item.evidence, 'xp-whm-repair__evidence'); pre.dir = 'ltr'; pre.tabIndex = 0; details.append(element('summary', t('Evidence')), pre); card.append(details) }
-        const actions = element('div', undefined, 'xp-whm-detail-actions')
-        if (item.repair.available && item.repair.kind === 'existing-workflow' && item.repair.href === '/whm/services/web') { const link = element('a', t('Review configuration generations'), 'xp-btn'); link.href = '/whm/services/web'; actions.append(link) }
+        if (item.evidence) { const details = element('details'), pre = element('pre', item.evidence, 'evidence'); pre.dir = 'ltr'; pre.tabIndex = 0; details.append(element('summary', t('Evidence')), pre); card.append(details) }
+        const actions = element('div', undefined, 'actions')
+        if (item.repair.available && item.repair.kind === 'existing-workflow' && item.repair.href === '/whm/services/web') { const link = element('a', t('Review configuration generations'), 'link'); link.href = '/whm/services/web'; actions.append(link) }
         else if (item.repair.available && item.repair.kind === 'job' && (item.repair.id === 'dpkg-configure' || item.repair.id === 'apt-fix-broken' || item.repair.id === 'dnf-cache-refresh' || item.repair.id === 'rpmdb-rebuild')) {
           const repairId = item.repair.id
-          if (root.dataset.repairCanRepair === 'true') { const button = element('button', t('Preview repair'), 'xp-btn'); button.type = 'button'; button.dataset.whmRepairPreviewAction = repairId; button.addEventListener('click', () => { if (!button.disabled) void requestPreview(repairId) }); actions.append(button) }
-          else actions.append(element('p', t('Repairs are unavailable in this session.'), 'xp-help'))
-        } else if (item.state !== 'ok') actions.append(element('p', reasonText(item.repair.reason), 'xp-help'))
+          if (root.dataset.repairCanRepair === 'true') { const button = element('button', t('Preview repair'), 'action'); button.type = 'button'; button.dataset.whmRepairPreviewAction = repairId; button.addEventListener('click', () => { if (!button.disabled) void requestPreview(repairId) }); actions.append(button) }
+          else actions.append(element('p', t('Repairs are unavailable in this session.'), 'note'))
+        } else if (item.state !== 'ok') actions.append(element('p', reasonText(item.repair.reason), 'note'))
         if (actions.childElementCount) card.append(actions)
         listRoot.append(card)
       }
@@ -185,7 +192,7 @@ function bindWhmRepair(askDialog: ((options: Record<string, unknown>) => Promise
           if (removalText) removalText.textContent = t('This repair removes packages ({count}). Removed packages stop working until they are reinstalled.', { count: String(value.remove.length) })
           const evidence = find('preview-evidence'); if (evidence) evidence.textContent = value.evidence
           start.textContent = value.remove.length ? t('Run repair and remove packages') : t('Run repair')
-          start.className = value.remove.length ? 'xp-btn xp-btn--danger' : 'xp-btn xp-btn--primary'
+          start.dataset.severity = value.remove.length ? 'danger' : 'normal'
           previewPanel.hidden = false
           note(value.state === 'ready' ? 'previewed' : 'failed', value.state === 'ready' ? t('Preview ready. Review it before running the repair.') : reasonText(value.reason))
         }
@@ -227,4 +234,4 @@ function bindWhmRepair(askDialog: ((options: Record<string, unknown>) => Promise
   })
 }
 
-export const WHM_REPAIR_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readRepairReport=${readRepairReport.toString()};const readRepairPreview=${readRepairPreview.toString()};const readRepairJobAck=${readRepairJobAck.toString()};return ${bindWhmRepair.toString()};})()`
+export const WHM_REPAIR_CLIENT_BINDING = `(()=>{${WHM_DIAGNOSTIC_TEMPLATE_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readRepairReport=${readRepairReport.toString()};const readRepairPreview=${readRepairPreview.toString()};const readRepairJobAck=${readRepairJobAck.toString()};return ${bindWhmRepair.toString()};})()`

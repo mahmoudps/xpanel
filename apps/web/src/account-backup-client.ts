@@ -2,6 +2,10 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
 
 const ACCOUNT_ARCHIVE_MAX_BYTES = 2 * 1024 * 1024 * 1024
@@ -65,6 +69,25 @@ function bindAccountBackup(askDialog: ((options: Record<string, unknown>) => Pro
     const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const blocked = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => root.isConnected && root.dataset.accountBackupManage === 'true' && !root.closest(blocked)
+    let archiveTemplate: HTMLTemplateElement, differenceTemplate: HTMLTemplateElement, emptyTemplate: HTMLTemplateElement
+    const columns = (target: HTMLElement): number => {
+      const value = Number(target.dataset.xpColumns)
+      if (!Number.isSafeInteger(value) || value < 1 || value > 32) throw new Error('invalid_backup_table_columns')
+      return value
+    }
+    try {
+      archiveTemplate = clientTemplate(root, 'account-backup-archive-row')
+      differenceTemplate = clientTemplate(root, 'account-backup-difference-row')
+      emptyTemplate = clientTemplate(root, 'account-backup-empty-row')
+      const archiveRow = cloneClientTemplate(archiveTemplate, 'tr', ['file', 'created', 'bytes', 'integrity']) as HTMLTableRowElement
+      const differenceRow = cloneClientTemplate(differenceTemplate, 'tr', ['path', 'result', 'archive-bytes', 'current-bytes']) as HTMLTableRowElement
+      if (archiveRow.cells.length !== columns(table) || differenceRow.cells.length !== columns(differences)) throw new Error('invalid_backup_table_shape')
+      cloneClientTemplate(emptyTemplate, 'tr', ['message'])
+      clientTemplateSlot(archiveRow, 'created', 'time')
+    } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      status.dataset.state = 'unavailable'; status.textContent = t('Account backup service is unavailable here. No archive was read or changed.'); return
+    }
     let archives: AccountArchive[] = [], selected = '', preview: RestorePreview | null = null
     let loaded = false, busy = false, uncertain = false, confirming = false
     const announce = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'stale', 'uncertain'].includes(state) ? 'alert' : 'status') }
@@ -79,16 +102,19 @@ function bindAccountBackup(askDialog: ((options: Record<string, unknown>) => Pro
       confirmation.disabled = locked || !preview
       acknowledgement.disabled = locked || !preview
       button('restore').disabled = locked || !preview || preview.counts.add + preview.counts.replace === 0 || !acknowledgement.checked || confirmation.value !== username
+      table.querySelectorAll<HTMLButtonElement>('[data-xp-action="review"]').forEach(action => {
+        const archive = archives.find(item => item.file === action.dataset.accountBackupReview)
+        action.disabled = locked || !archive || archive.bytes <= 0 || archive.bytes > ACCOUNT_ARCHIVE_MAX_BYTES
+      })
       for (const link of [download, csv]) { link.removeAttribute('href'); link.setAttribute('aria-disabled', 'true') }
       if (!locked && available()) { download.href = '/api/account/backups/' + encodeURIComponent(selected) + '/download'; download.setAttribute('download', selected); download.setAttribute('aria-disabled', 'false') }
       if (!locked && preview) { csv.href = '/api/account/backups/' + encodeURIComponent(selected) + '/preview.csv?revision=' + preview.revision; csv.setAttribute('aria-disabled', 'false') }
       root.setAttribute('aria-busy', String(busy || confirming))
     }
-    const emptyRow = (target: HTMLElement, count: number, text: string): void => { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = count; td.textContent = text; row.append(td); target.append(row) }
-    const cell = (row: HTMLTableRowElement, text: string, technical = false): void => { const td = document.createElement('td'), content = document.createElement(technical ? 'bdi' : 'span'); if (technical) content.dir = 'ltr'; content.textContent = text; td.append(content); row.append(td) }
+    const emptyRow = (target: HTMLElement, text: string): void => { const row = cloneClientTemplate(emptyTemplate, 'tr', ['message']); const td = clientTemplateSlot(row, 'message', 'td') as HTMLTableCellElement; td.colSpan = columns(target); td.textContent = text; target.append(row) }
     const clearPreview = (): void => {
       preview = null; confirmation.value = ''; acknowledgement.checked = false
-      differences.textContent = ''; emptyRow(differences, 4, t('No archive has been compared.'))
+      differences.textContent = ''; emptyRow(differences, t('No archive has been compared.'))
       root.querySelectorAll<HTMLElement>('[data-account-backup-count]').forEach(count => { count.textContent = t(msgctxt('account-backup-client', 'Not read')) })
       limit.hidden = true
     }
@@ -101,11 +127,23 @@ function bindAccountBackup(askDialog: ((options: Record<string, unknown>) => Pro
         const date = stamp ? stamp[1] + '-' + stamp[2] + '-' + stamp[3] + 'T' + stamp[4] + ':' + stamp[5] + ':' + stamp[6] + 'Z' : ''
         const createdAt = date && Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0, 19) === date.slice(0, 19) ? date : null
         const created = createdAt ? formatDisplayDateTime(createdAt) : t(msgctxt('account-backup-client', 'Not read'))
-        const row = document.createElement('tr'); cell(row, archive.file, true); cell(row, created, true); cell(row, String(archive.bytes), true)
-        if (createdAt) { const time = document.createElement('time'); time.dateTime = createdAt; time.textContent = created; row.cells[1]!.querySelector('bdi')!.replaceChildren(time) }
-        cell(row, archive.bytes <= 0 || archive.bytes > ACCOUNT_ARCHIVE_MAX_BYTES ? t('Empty or over the 2 GiB limit') : t('Stored; not yet inspected')); table.append(row)
+        const row = cloneClientTemplate(archiveTemplate, 'tr', ['file', 'created', 'bytes', 'integrity'])
+        clientTemplateSlot(row, 'file').textContent = archive.file
+        clientTemplateSlot(row, 'bytes').textContent = String(archive.bytes)
+        const time = clientTemplateSlot(row, 'created', 'time') as HTMLTimeElement; time.textContent = created
+        if (createdAt) time.dateTime = createdAt; else time.removeAttribute('datetime')
+        clientTemplateSlot(row, 'integrity').textContent = archive.bytes <= 0 || archive.bytes > ACCOUNT_ARCHIVE_MAX_BYTES ? t('Empty or over the 2 GiB limit') : t('Stored; not yet inspected')
+        row.querySelectorAll<HTMLButtonElement>('[data-xp-action="review"]').forEach(action => {
+          action.dataset.accountBackupReview = archive.file
+          action.disabled = !admitted() || archive.bytes <= 0 || archive.bytes > ACCOUNT_ARCHIVE_MAX_BYTES
+          action.addEventListener('click', () => {
+            if (!admitted() || busy || confirming || uncertain || action.disabled) return
+            selected = archive.file; select.value = selected; clearPreview(); controls(); void review()
+          })
+        })
+        table.append(row)
       }
-      if (!archives.length) emptyRow(table, 4, t('The host returned no account archives.'))
+      if (!archives.length) emptyRow(table, t('The host returned no account archives.'))
       select.value = selected; clearPreview()
     }
     const request = (method: string, path: string, body?: unknown): Promise<unknown> => {
@@ -136,8 +174,12 @@ function bindAccountBackup(askDialog: ((options: Record<string, unknown>) => Pro
         preview = readAccountBackupPreview(await request('POST', '/api/account/backups/' + encodeURIComponent(file) + '/preview', {}), accountId, username, file)
         differences.textContent = ''
         const label = (state: ArchiveState) => state === 'add' ? t('Add') : state === 'replace' ? t('Replace (recovery archive first)') : state === 'unchanged' ? t('Unchanged') : state === 'preserve-mail' ? t('Preserve mailbox/settings') : t('Keep current file')
-        for (const entry of preview.rows.slice(0, 1000)) { const row = document.createElement('tr'); cell(row, entry.path, true); cell(row, label(entry.state)); cell(row, entry.archiveBytes === null ? '—' : String(entry.archiveBytes), true); cell(row, entry.currentBytes === null ? '—' : String(entry.currentBytes), true); differences.append(row) }
-        if (!preview.rows.length) emptyRow(differences, 4, t('No file differences were returned.'))
+        for (const entry of preview.rows.slice(0, 1000)) {
+          const row = cloneClientTemplate(differenceTemplate, 'tr', ['path', 'result', 'archive-bytes', 'current-bytes'])
+          for (const [slot, text] of [['path', entry.path], ['result', label(entry.state)], ['archive-bytes', entry.archiveBytes === null ? '—' : String(entry.archiveBytes)], ['current-bytes', entry.currentBytes === null ? '—' : String(entry.currentBytes)]]) clientTemplateSlot(row, slot!).textContent = text!
+          differences.append(row)
+        }
+        if (!preview.rows.length) emptyRow(differences, t('No file differences were returned.'))
         root.querySelectorAll<HTMLElement>('[data-account-backup-count]').forEach(count => { const key = count.dataset.accountBackupCount as ArchiveState; count.textContent = String(preview!.counts[key]) })
         limit.hidden = preview.rows.length <= 1000
         limit.textContent = t('Showing the first 1000 rows. Download the full CSV for every reviewed difference.')
@@ -185,4 +227,4 @@ function bindAccountBackup(askDialog: ((options: Record<string, unknown>) => Pro
     controls(); void reload()
   })
 }
-export const ACCOUNT_BACKUP_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const ACCOUNT_ARCHIVE_MAX_BYTES=${ACCOUNT_ARCHIVE_MAX_BYTES};const ACCOUNT_ARCHIVE_STATES=${JSON.stringify(ACCOUNT_ARCHIVE_STATES)};const backupObject=${backupObject.toString()};const backupFile=${backupFile.toString()};const backupContext=${backupContext.toString()};const backupArchive=${backupArchive.toString()};const readAccountBackups=${readAccountBackups.toString()};const readAccountBackupPreview=${readAccountBackupPreview.toString()};return ${bindAccountBackup.toString()};})()`
+export const ACCOUNT_BACKUP_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const ACCOUNT_ARCHIVE_MAX_BYTES=${ACCOUNT_ARCHIVE_MAX_BYTES};const ACCOUNT_ARCHIVE_STATES=${JSON.stringify(ACCOUNT_ARCHIVE_STATES)};const backupObject=${backupObject.toString()};const backupFile=${backupFile.toString()};const backupContext=${backupContext.toString()};const backupArchive=${backupArchive.toString()};const readAccountBackups=${readAccountBackups.toString()};const readAccountBackupPreview=${readAccountBackupPreview.toString()};return ${bindAccountBackup.toString()};})()`

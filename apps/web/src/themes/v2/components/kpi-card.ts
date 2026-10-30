@@ -41,7 +41,7 @@ ${meter}${spark}${props.note ? `<p class="v2-kpi__note v2-num${props.noteTone ? 
 }
 
 export const KPI_CARD_CSS = `.v2-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr));gap:var(--space-2)}
-.v2-kpi{display:flex;flex-direction:column;gap:var(--space-2);padding:20px;border-radius:var(--radius-card);background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);min-width:0}
+.v2-kpi{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--v2-panel-padding);border-radius:var(--radius-card);background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);min-width:0}
 .v2-kpi__head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-1)}
 .v2-kpi__head>:is(h2,h3){font-size:13px;font-weight:600;color:var(--muted)}
 .v2-kpi__value{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px}

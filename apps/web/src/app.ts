@@ -34,8 +34,8 @@ import {
   type LiveEventState,
 } from './ws-client.ts'
 
-import { findUiThemeAsset, resolveUiTheme } from './themes/registry.ts'
-import type { UnavailableProps, WorkspaceSummaryView } from './themes/contract.ts'
+import { findUiThemeAsset, registeredUiThemeIds, resolveUiTheme } from './themes/registry.ts'
+import type { ThemePackageView, UnavailableProps, WorkspaceSummaryView } from './themes/contract.ts'
 
 export type WebSurfaceKind = 'login' | 'xwhm' | 'xpanel' | 'xmail'
 export type ThemeMode = 'dark' | 'light'
@@ -134,6 +134,11 @@ export const workspacePageHeading = (surface: WebSurfaceKind, locale: Locale, ac
   return getSurfacePageTitle(panel, resolveSurfaceSection(panel, activeRoute), locale, activeRoute)
 }
 
+export const installedThemePackages = (locale: Locale): readonly ThemePackageView[] => Object.freeze(registeredUiThemeIds().map(id => Object.freeze({
+  id, label: id === 'classic' ? translator(locale)('Classic') : 'V2',
+  surfaces: Object.freeze(['xpanel', 'xwhm', 'xmail'] as const), available: true,
+})))
+
 export const unavailableView = (
   state: WebAppRenderState,
   locale: Locale,
@@ -150,14 +155,20 @@ export const unavailableView = (
   // The theme receives only the active account identity used by the read-only store.
   const storeTarget = admitted && !securityPage && principal?.kind === 'user'
     && storeAccount?.id === principal.accountId && storeAccount.status === 'active' ? storeAccount : undefined
+  // The descriptor has no back-reference. Its facts come only from the matching server surface.
+  const readOnlyFacts = admitted ? surface === 'xpanel' && state.panel ? { surface: 'xpanel' as const, panel: state.panel }
+    : surface === 'xwhm' && state.whm ? { surface: 'xwhm' as const, whm: state.whm }
+      : surface === 'xmail' && state.mail ? { surface: 'xmail' as const, mail: state.mail } : undefined : undefined
   return {
     surface, locale, theme, density, route: activeRoute,
     branding: state.branding,
+    themePackages: installedThemePackages(locale),
     heading: workspacePageHeading(state.surface, locale, activeRoute),
     admitted,
     securityPage,
     qualifiedRoutes: new Set((state.visibility ? visibleNavigation(state.visibility, state.catalog) : [])
       .filter(item => item.surface === surface).flatMap(item => item.sections.flatMap(section => section.pages.map(page => page.route)))),
+    ...(state.catalog ? { catalog: state.catalog } : {}),
     ...(state.visibility ? { visibility: state.visibility } : {}),
     ...(state.accountId ? { accountId: state.accountId } : {}),
     ...(principal ? { session: { username: principal.username, role: roleLabel(principal.kind, locale), ...(state.accountId ? { accountId: state.accountId } : {}) } } : {}),
@@ -166,6 +177,7 @@ export const unavailableView = (
     ...(summary ? { summary } : {}),
     ...(storeTarget ? { storeAccount: { id: storeTarget.id, status: storeTarget.status } } : {}),
     ...(state.supportEmail ? { supportEmail: state.supportEmail } : {}),
+    ...(readOnlyFacts ? { readOnlyFacts } : {}),
   }
 }
 
@@ -222,8 +234,12 @@ export function renderWebApp(state: WebAppRenderState): string {
     ))
   }
   const hasVerifiedSurface = !state.error && routeReady
+  const statusError = state.error && isStatusCode(state.error.status) ? state.error : undefined
+  const bodyCategory: 'status' | 'login' | 'workspace' = statusError ? 'status' : state.surface === 'login' ? 'login' : 'workspace'
   const statusSurface = state.error?.surface ?? (state.surface === 'xwhm' || state.surface === 'xmail' ? state.surface : 'xpanel')
   const pageHeading = workspacePageHeading(state.surface, locale, activeRoute)
+  const unavailableDescriptor = unavailableView(state, locale, theme, density, activeRoute)
+  const themePackages = unavailableDescriptor.themePackages
   const pageTitle = state.title ?? (state.error && isStatusCode(state.error.status)
     ? `${statusPageCopy(state.error.status, locale).title} — ${brandingProductName(state.branding, panelLabel(statusSurface))}`
     : loginIdentity
@@ -231,11 +247,11 @@ export function renderWebApp(state: WebAppRenderState): string {
       : state.surface === 'login'
         ? `${translator(locale)('xPanel Sign In')} — ${translator(locale)('xPanel Control Plane')}`
         : `${pageHeading} — ${brandingProductName(state.branding, panelLabel(state.surface === 'xwhm' || state.surface === 'xmail' ? state.surface : 'xpanel'))}`)
-  if (state.error && isStatusCode(state.error.status)) {
+  if (statusError) {
     const principal = state.visibility?.principal
     surfaceBodyHtml = uiTheme.renderStatus({
-      ...state.error,
-      status: state.error.status,
+      ...statusError,
+      status: statusError.status,
       locale,
       theme,
       density,
@@ -247,9 +263,11 @@ export function renderWebApp(state: WebAppRenderState): string {
       ...(state.accountId ? { accountId: state.accountId } : {}),
       ...(state.supportEmail ? { supportEmail: state.supportEmail } : {}),
       branding: state.branding,
+      themePackages,
+      unavailableView: unavailableDescriptor,
     })
   } else if (state.surface !== 'login' && !hasVerifiedSurface)
-    surfaceBodyHtml = uiTheme.renderUnavailable(unavailableView(state, locale, theme, density, activeRoute))
+    surfaceBodyHtml = uiTheme.renderUnavailable(unavailableDescriptor)
   else switch (state.surface) {
     case 'login':
       surfaceBodyHtml = uiTheme.renderLogin({
@@ -259,6 +277,8 @@ export function renderWebApp(state: WebAppRenderState): string {
         ...state.login,
         mfaMode: state.mfaRuntimeMode ?? 'optional',
         branding: state.branding,
+        themePackages,
+        unavailableView: unavailableDescriptor,
       })
       break
     case 'xwhm':
@@ -274,6 +294,8 @@ export function renderWebApp(state: WebAppRenderState): string {
         ...(state.catalog ? { catalog: state.catalog } : {}),
         visibility: state.visibility,
         branding: state.branding,
+        themePackages,
+        unavailableView: unavailableDescriptor,
       })
       break
     case 'xpanel':
@@ -289,6 +311,8 @@ export function renderWebApp(state: WebAppRenderState): string {
         ...(state.catalog ? { catalog: state.catalog } : {}),
         visibility: state.visibility,
         branding: state.branding,
+        themePackages,
+        unavailableView: unavailableDescriptor,
       })
       break
     case 'xmail':
@@ -303,11 +327,13 @@ export function renderWebApp(state: WebAppRenderState): string {
         ...(state.catalog ? { catalog: state.catalog } : {}),
         visibility: state.visibility,
         branding: state.branding,
+        themePackages,
+        unavailableView: unavailableDescriptor,
       })
       break
   }
 
-  if (state.surface !== 'login' && state.security && securityPrincipal && ACCOUNT_SECURITY_ROUTES.has(activeRoute)) {
+  if (bodyCategory === 'workspace' && state.surface !== 'login' && state.security && securityPrincipal && ACCOUNT_SECURITY_ROUTES.has(activeRoute)) {
     surfaceBodyHtml = uiTheme.slots.accountSecurity({
       bodyHtml: surfaceBodyHtml,
       security: {
@@ -316,6 +342,7 @@ export function renderWebApp(state: WebAppRenderState): string {
         mfaMode: state.mfaRuntimeMode ?? 'optional',
         principalKind: securityPrincipal,
         surface: state.surface,
+        ...(state.impersonation ? { readOnly: true } : {}),
       },
     })
   }
@@ -356,6 +383,8 @@ export function renderWebApp(state: WebAppRenderState): string {
   const htmlAttributes = `lang="${locale}" dir="${dir}" data-theme="${theme}" data-density="${density}" data-surface="${state.error ? statusSurface : state.surface}" data-mfa-mode="${state.mfaRuntimeMode === 'disabled' ? 'disabled' : 'optional'}" data-realtime-enabled="${hasVerifiedSurface && state.realtimeEnabled !== false}"`
   const htmlAttributeSuffix = `${state.error && isStatusCode(state.error.status) ? ` data-status="${state.error.status}"` : ''}${uiTheme.id === 'classic' ? '' : ` data-ui-theme="${escapeHtml(uiTheme.id)}"`}`
   return uiTheme.renderDocument({
+    viewKind: statusError ? 'status' : state.surface === 'login' ? 'login' : !hasVerifiedSurface ? 'unavailable' : 'workspace',
+    ...(state.error ? {} : { route: activeRoute, surface: state.surface }),
     htmlAttributes,
     htmlAttributeSuffix,
     title: pageTitle,

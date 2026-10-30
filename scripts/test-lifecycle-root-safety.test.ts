@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { admitSchemaTransition, createNativeUpgradeSafety, assertLifecycleRootSafetyHeld, getLifecycleRootSafetyInfo, parseCoordinatorCgroup, parseLifecycleHead } from './lifecycle-root-safety.mjs'
+import { spawnSync } from 'node:child_process'
+import { admitSchemaTransition, createNativeUpgradeSafety, assertLifecycleRootSafetyHeld, getLifecycleRootSafetyInfo, NATIVE_RUNTIME_ABI_PROBE, parseCoordinatorCgroup, parseLifecycleHead } from './lifecycle-root-safety.mjs'
 
 describe('native lifecycle authority boundary', () => {
+  it('executes the actual Node Argon2id and production SQLite ABI probe without an uninstalled npm addon', () => {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', NATIVE_RUNTIME_ABI_PROBE], {
+      env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' }, encoding: 'utf8', timeout: 10_000,
+    })
+    expect(result.status, result.stderr).toBe(0)
+    expect(result.signal).toBeNull()
+  })
   it('parses only a finite actual coordinator location, without granting authority', () => {
     expect(parseCoordinatorCgroup('0::/system.slice/xpanel-lifecycle.service\n')).toBe('xpanel-lifecycle.service')
     expect(parseCoordinatorCgroup('0::/system.slice/xpanel-upgrade.service\n')).toBe('xpanel-upgrade.service')

@@ -90,24 +90,30 @@ const toggle = (item: MatrixSwitch, contentHtml = ''): string =>
 
 export function matrixTable(t: Translate, props: MatrixPageProps['matrix']): string {
   const lead = 1 + (props.leadColumns?.length ?? 0)
+  const fixedPrefix = props.channels.findIndex(channel => channel.fixed === undefined)
+  const groupedChannels = fixedPrefix < 0 ? props.channels.length : fixedPrefix
   const captionId = `${props.titleId}-caption`
   // Switch lists skip fixed channels, so each channel maps to its position among the switchable ones.
-  const switchable = props.channels.map((channel, index) => channel.fixed ? -1 : props.channels.slice(0, index).filter(other => !other.fixed).length)
-  const cells = (render: (channel: MatrixChannel, position: number) => string): string => props.channels.map((channel, index) => `<td>${render(channel, switchable[index]!)}</td>`).join('')
+  const switchable = props.channels.map((channel, index) => channel.fixed !== undefined ? -1 : props.channels.slice(0, index).filter(other => other.fixed === undefined).length)
+  const cells = (render: (channel: MatrixChannel, position: number) => string, start = 0): string => props.channels.slice(start).map((channel, index) => `<td>${render(channel, switchable[index + start]!)}</td>`).join('')
   const channelHead = (channel: MatrixChannel): string => {
     const labelHtml = `<span class="v2-matrix__channel"><span>${escapeHtml(channel.label)}</span>${channel.note ? `<span${channel.noteTone ? ` class="v2-text--${channel.noteTone}"` : ''}>${escapeHtml(channel.note)}</span>` : ''}</span>`
-    return `<th scope="col">${channel.all ? toggle(channel.all, labelHtml) : labelHtml}</th>`
+    return `<th scope="col">${channel.fixed === undefined && channel.all ? toggle(channel.all, labelHtml) : labelHtml}</th>`
   }
   const head = `<tr><th scope="col">${escapeHtml(props.eventColumn)}</th>${(props.leadColumns ?? []).map(column => `<th scope="col">${escapeHtml(column)}</th>`).join('')}${props.channels.map(channelHead).join('')}</tr>`
-  const groupRow = (group: MatrixGroup): string => `<tr class="v2-matrix__group"><th scope="rowgroup" colspan="${lead}">${escapeHtml(group.label)}${group.countText ? ` <span class="v2-num">${escapeHtml(group.countText)}</span>` : ''}</th>${cells((_, position) => {
+  const groupRow = (group: MatrixGroup): string => `<tr class="v2-matrix__group"><th scope="rowgroup" colspan="${lead + groupedChannels}">${escapeHtml(group.label)}${group.countText ? ` <span class="v2-num">${escapeHtml(group.countText)}</span>` : ''}</th>${cells((_, position) => {
     const item = position < 0 ? undefined : group.switches?.[position]
     return item ? toggle(item, `<span>${escapeHtml(t(msgctxt('theme:v2', 'All in group')))}</span>`) : ''
-  })}</tr>`
-  const eventRow = (event: MatrixEvent): string => `<tr${hookAttrs(event.hooks)}><th scope="row"><div class="v2-matrix__event">${leadCell({ iconHtml: event.icon ? icon(event.icon, 16) : undefined, title: event.label, meta: event.key })}${event.changed ? statusPill({ tone: 'info', label: event.changed }) : ''}</div></th>${(event.cellsHtml ?? []).map(cell => `<td>${cell}</td>`).join('')}${cells((channel, position) => {
-    if (channel.fixed) return `<span class="v2-matrix__fixed">${icon('check', 16)}${escapeHtml(channel.fixed)}</span>`
+  }, groupedChannels)}</tr>`
+  const eventRow = (event: MatrixEvent): string => {
+    if ((event.cellsHtml?.length ?? 0) > lead - 1) throw new RangeError('Matrix event has more cells than declared lead columns')
+    const leadCells = Array.from({ length: lead - 1 }, (_, index) => `<td>${event.cellsHtml?.[index] ?? ''}</td>`).join('')
+    return `<tr${hookAttrs(event.hooks)}><th scope="row"><div class="v2-matrix__event">${leadCell({ iconHtml: event.icon ? icon(event.icon, 16) : undefined, title: event.label, meta: event.key })}${event.changed ? statusPill({ tone: 'info', label: event.changed }) : ''}</div></th>${leadCells}${cells((channel, position) => {
+    if (channel.fixed !== undefined) return `<span class="v2-matrix__fixed">${icon('check', 16)}${escapeHtml(channel.fixed)}</span>`
     const item = event.switches[position]
     return item ? toggle(item) : ''
-  })}</tr>`
+    })}</tr>`
+  }
   const groups = props.groups.map(group => `<tbody${hookAttrs(group.hooks)}>${groupRow(group)}${group.events.map(eventRow).join('')}</tbody>`).join('')
   return `<div class="v2-table-scroll" role="region" aria-labelledby="${escapeHtml(captionId)}" tabindex="0"><table class="v2-table v2-matrix"><caption id="${escapeHtml(captionId)}" class="v2-sr">${escapeHtml(props.caption)}</caption><thead>${head}</thead>${groups}</table></div>`
 }

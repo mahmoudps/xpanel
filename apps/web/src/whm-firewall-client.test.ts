@@ -1,15 +1,27 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFirewallView, WHM_FIREWALL_CLIENT_BINDING } from './whm-firewall-client.ts'
+import { renderWhmFirewallClientTemplates } from './board-port/whm-firewall-client-templates.ts'
+import { renderV2WhmFirewall } from './themes/v2/pages/xwhm/host/firewall.ts'
+import { tools } from '@xpanel/catalog'
+
+// Use the actual catalog parser with Node URLs in the DOM test realm.
+vi.mock('./themes/v2/messages.ts', async () => {
+  const { createThemeMessages } = await import('./theme-messages.ts')
+  const { readFileSync } = await import('node:fs')
+  const { URL: NodeURL, fileURLToPath } = await import('node:url')
+  const read = (locale: string) => readFileSync(fileURLToPath(new NodeURL(`./themes/v2/locales/${locale}.po`, import.meta.url)), 'utf8')
+  return { v2Messages: createThemeMessages('v2', read('en'), { ar: read('ar') }) }
+})
 
 const tick = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const rule = (id: string, over: Record<string, unknown> = {}) => ({ id, kind: 'port', action: 'accept', protocol: 'tcp', port: '443', source: null, forwardTo: null, list: null, comment: id, enabled: true, ...over })
 const view = (over: Record<string, unknown> = {}) => ({ rules: [rule('default-https'), rule('default-backend-drop', { action: 'drop', port: '8080' }), rule('office', { port: '3306', source: '203.0.113.0/28' })], prefixLists: [{ name: 'office_v4', entries: ['203.0.113.0/28', '203.0.113.16/28'] }], revision: 'd'.repeat(64), session: { ip: '203.0.113.7' }, pending: null, confirmWindowSeconds: 120, ...over })
-const markup = `<div data-approved-whm-operations="/whm/security/firewall" data-operation-state="qualified"><section data-whm-ops-section="firewall-rule-categories"><h2>Rules</h2>
-  <section data-whm-firewall-panel="port"><table><thead><tr><th>Position</th><th>Action</th><th>Protocol</th><th>Port</th><th>Source</th><th>Note</th></tr></thead><tbody></tbody></table><div class="xp-whm-ops-actions"><button disabled>Edit</button></div><p class="xp-whm-ops-status">not connected</p></section>
+const markup = `<div data-approved-whm-operations="/whm/security/firewall" data-operation-state="qualified"><section data-whm-ops-section="firewall-rule-categories"><h2>Rules</h2><p data-firewall-manage-status role="status"></p>
+  <section data-whm-firewall-panel="port"><table><thead><tr><th>Position</th><th>Action</th><th>Protocol</th><th>Port</th><th>Source</th><th>Note</th></tr></thead><tbody></tbody></table><div class="xp-whm-ops-actions" data-firewall-static-management><button disabled>Edit</button></div><p class="xp-whm-ops-status" data-firewall-static-management>not connected</p></section>
   <section data-whm-firewall-panel="prefix-list"><table><thead><tr><th>Name</th><th>Action</th><th>Entries</th><th>Ports</th><th>File</th><th>Updated</th></tr></thead><tbody></tbody></table><input name="firewall-prefix-name" disabled><input type="file" name="firewall-prefix-file" disabled><input name="firewall-prefix-ports" disabled><select name="firewall-prefix-action" disabled><option value="">Choose</option><option value="drop">Drop</option></select><button data-firewall-action="upload-list" disabled>Upload prefix list</button><button data-firewall-action="replace-list" disabled>Replace file</button></section>
   <section data-whm-firewall-panel="banned"><table><thead><tr><th>Address</th><th>Reason</th><th>Source</th><th>Banned at</th><th>Expires</th></tr></thead><tbody></tbody></table><input name="firewall-unban-address" disabled><button data-firewall-action="unban" disabled>Unban</button></section></section>
-  <section data-whm-ops-section="firewall-import-export"><input type="file" name="firewall-import-file" disabled><textarea name="firewall-import-json" disabled></textarea><button data-firewall-action="import" disabled>Import JSON</button><button data-firewall-action="export" disabled>Export JSON</button></section></div>`
+  <section data-whm-ops-section="firewall-import-export"><input type="file" name="firewall-import-file" disabled><textarea name="firewall-import-json" disabled></textarea><button data-firewall-action="import" disabled>Import JSON</button><button data-firewall-action="export" disabled>Export JSON</button></section>${renderWhmFirewallClientTemplates()}</div>`
 
 const boot = (send: (method: string, path: string, body?: unknown) => Promise<unknown>, ask = vi.fn(async (_options?: unknown) => true)) => {
   (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
@@ -22,6 +34,31 @@ const buttons = (id: string) => [...document.querySelector(`[data-firewall-rule-
 beforeEach(() => { document.body.innerHTML = markup })
 
 describe('WHM firewall management', () => {
+  it('serializes a closed browser helper graph without SSR import bindings', () => { expect(WHM_FIREWALL_CLIENT_BINDING).not.toContain('__vite_ssr_import_') })
+  it('retains actual v2 rows, inline editor controls and actions while submitting the existing revision-bound change', async () => {
+    document.body.innerHTML = renderV2WhmFirewall({ locale: 'en', principal: { kind: 'root', id: 'operator', username: 'operator' }, activeRoute: '/whm/security/firewall', catalog: tools.map(tool => ({ ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } })) })
+    const send = vi.fn(async (_method: string, path: string, _body?: unknown) => path === '/api/firewall/bans' ? { state: 'read', bans: [] } : view())
+    boot(send); await tick()
+    const row = document.querySelector<HTMLElement>('[data-firewall-rule-id="office"]')!
+    expect(row.children).toHaveLength(7); expect(row.querySelector('[class*="xp-"]')).toBeNull()
+    ;[...row.querySelectorAll('button')].find(button => button.textContent === 'Edit')!.click()
+    const form = document.querySelector<HTMLFormElement>('[data-firewall-editor="office"] form')!
+    expect(form.querySelector('[class*="xp-"]')).toBeNull()
+    const source = form.elements.namedItem('source') as HTMLInputElement
+    expect(source.dir).toBe('ltr'); expect(source.id).toBe(form.querySelector<HTMLLabelElement>(`label[for="${source.id}"]`)!.htmlFor)
+    source.value = '203.0.113.16/28'
+    expect(form.dispatchEvent(new Event('submit', { cancelable: true }))).toBe(false)
+    expect(send.mock.calls.some(call => call[0] === 'PATCH')).toBe(false)
+    ;[...form.querySelectorAll('button')].find(button => button.textContent === 'Check and save')!.click(); await tick()
+    expect(send).toHaveBeenCalledWith('PATCH', '/api/firewall/rules/office', { action: 'accept', protocol: 'tcp', port: '3306', source: '203.0.113.16/28', comment: 'office', expectedRevision: 'd'.repeat(64) })
+    expect(document.querySelector('[data-firewall-rule-id="office"] [class*="xp-"]')).toBeNull()
+  })
+  it('refuses ambiguous firewall templates before reading or applying rules', async () => {
+    const root = document.querySelector('[data-approved-whm-operations]')!, template = root.querySelector('template[data-xp-template="firewall-port-row"]')!
+    root.append(template.cloneNode(true)); const send = vi.fn(async () => view()); boot(send); await tick()
+    expect(send).not.toHaveBeenCalled(); expect(document.querySelector<HTMLElement>('[data-firewall-manage-status]')!.dataset.state).toBe('unavailable')
+    expect([...root.querySelectorAll<HTMLButtonElement>('button')].every(button => button.disabled)).toBe(true)
+  })
   it('paints live rules with move, edit and delete actions; system rules narrow only and backend rules stay locked', async () => {
     boot(vi.fn(async () => view())); await tick()
     expect(rows().map(row => row.dataset.firewallRuleId)).toEqual(['default-https', 'default-backend-drop', 'office'])

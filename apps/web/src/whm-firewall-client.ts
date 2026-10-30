@@ -1,6 +1,9 @@
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDisplayDateTime } from './tokens.ts'
+import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const viewAction = canonicalViewAction
 
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
 
@@ -49,11 +52,27 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
     let view: FirewallView | null = null, busy = false
     const card = root.querySelector<HTMLElement>('[data-whm-ops-section="firewall-rule-categories"]')
     if (!card) return
-    const status = document.createElement('p'); status.className = 'xp-whm-ops-status'; status.dataset.firewallManageStatus = ''; card.querySelector('h2')?.after(status)
+    const status = card.querySelector<HTMLElement>('[data-firewall-manage-status]')
+    if (!status) return
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
+    try {
+      const values = { position: '', action: '', protocol: '', port: '', source: '', comment: '', added: '', expires: '', destination: '', name: '', entries: '', file: '', updated: '', address: '', reason: '', since: '' }
+      for (const kind of ['port', 'ip', 'forward', 'prefix', 'ban']) {
+        const row = cloneViewRecord(root, 'firewall-' + kind + '-row', 'tr', values)
+        if (kind !== 'prefix') viewAction(row, 'actions', 'div')
+      }
+      const empty = cloneViewRecord(root, 'firewall-empty', 'tr', { message: '' }); viewAction(empty, 'cell', 'td')
+      cloneViewRecord(root, 'firewall-action', 'button', { label: '' })
+      const editor = cloneViewRecord(root, 'firewall-editor', 'tr', { title: '' })
+      viewAction(editor, 'cell', 'td'); viewAction(editor, 'form', 'form'); viewAction(editor, 'fields', 'div'); viewAction(editor, 'actions', 'div')
+      for (const kind of ['input', 'select']) { const field = cloneViewRecord(root, 'firewall-edit-' + kind, 'div', { label: '' }); viewAction(field, 'label', 'label'); viewAction(field, 'control', kind) }
+    } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+      note('unavailable', t('Saving is unavailable. No changes were sent.')); return
+    }
     const failure = (error: unknown): string => { const message = error && typeof error === 'object' ? (error as { message?: unknown }).message : null; return typeof message === 'string' && message.length < 300 ? message : t('The request failed. Nothing was changed.') }
-    const technical = (value: string): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = value; return node }
-    const button = (label: string, run: () => void, disabled = false): HTMLButtonElement => { const node = document.createElement('button'); node.type = 'button'; node.className = 'xp-btn'; node.textContent = label; node.disabled = disabled || busy; node.addEventListener('click', () => { if (!busy) run() }); return node }
+    const button = (label: string, run: () => void, disabled = false): HTMLButtonElement => { const node = cloneViewRecord(root, 'firewall-action', 'button', { label }) as HTMLButtonElement; node.disabled = disabled || busy; node.addEventListener('click', () => { if (!busy) run() }); return node }
+    const emptyRow = (body: HTMLElement, columns: number, message: string): void => { const row = cloneViewRecord(root, 'firewall-empty', 'tr', { message }); viewAction<HTMLTableCellElement>(row, 'cell', 'td').colSpan = columns; body.append(row) }
     const system = (rule: FirewallRuleView): boolean => rule.id.startsWith('default-')
     const locked = (rule: FirewallRuleView): boolean => /^default-backend(?:-tls)?-/.test(rule.id)
     const action = (rule: FirewallRuleView): string => rule.action === 'accept' ? t('Allow') : rule.action === 'reject' ? t('Reject') : t('Drop')
@@ -78,15 +97,16 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
     const editor = (rule: FirewallRuleView, row: HTMLTableRowElement, columns: number): void => {
       const existing = row.nextElementSibling
       if (existing instanceof HTMLTableRowElement && existing.dataset.firewallEditor === rule.id) { existing.remove(); return }
-      const tr = document.createElement('tr'), td = document.createElement('td'); tr.dataset.firewallEditor = rule.id; td.colSpan = columns
-      const form = document.createElement('form'); form.className = 'xp-whm-ops-fields'
+      const tr = cloneViewRecord(root, 'firewall-editor', 'tr', { title: system(rule) ? t('Narrow source') : t('Edit') }) as HTMLTableRowElement
+      tr.dataset.firewallEditor = rule.id; viewAction<HTMLTableCellElement>(tr, 'cell', 'td').colSpan = columns
+      const form = viewAction<HTMLFormElement>(tr, 'form', 'form'), fields = viewAction(tr, 'fields', 'div'), actions = viewAction(tr, 'actions', 'div')
+      form.addEventListener('submit', event => event.preventDefault())
       const input = (name: string, label: string, value: string, choices?: readonly (readonly [string, string])[]): void => {
-        const wrap = document.createElement('div'), title = document.createElement('label'), id = 'fw-edit-' + rule.id + '-' + name
-        wrap.className = 'xp-whm-ops-field'; title.htmlFor = id; title.textContent = label
-        const control = choices ? document.createElement('select') : document.createElement('input')
+        const wrap = cloneViewRecord(root, choices ? 'firewall-edit-select' : 'firewall-edit-input', 'div', { label }), id = 'fw-edit-' + rule.id + '-' + name
+        viewAction<HTMLLabelElement>(wrap, 'label', 'label').htmlFor = id
+        const control = choices ? viewAction<HTMLSelectElement>(wrap, 'control', 'select') : viewAction<HTMLInputElement>(wrap, 'control', 'input')
         if (control instanceof HTMLSelectElement) for (const [key, text] of choices!) { const option = document.createElement('option'); option.value = key; option.textContent = text; control.append(option) }
-        else control.dir = 'ltr'
-        control.id = id; control.name = name; control.value = value; wrap.append(title, control); form.append(wrap)
+        control.id = id; control.name = name; control.value = value; fields.append(wrap)
       }
       if (!system(rule)) {
         input('action', t('Action'), rule.action, [['accept', t('Allow')], ['drop', t('Drop')], ['reject', t('Reject')]])
@@ -95,25 +115,21 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
       }
       input('source', t('Source'), rule.source ?? '')
       if (!system(rule)) input('comment', t('Note'), rule.comment)
-      const actions = document.createElement('div'); actions.className = 'xp-whm-ops-actions'
       actions.append(button(t('Cancel'), () => tr.remove()), button(t('Check and save'), () => {
         const data = new FormData(form), patch: Record<string, unknown> = {}
         for (const [key, value] of data) patch[key] = typeof value === 'string' ? value.trim() : ''
         if (patch.source === '') patch.source = null
         void write('PATCH', '/api/firewall/rules/' + encodeURIComponent(rule.id), patch)
       }))
-      form.append(actions); td.append(form); tr.append(td); row.after(tr)
+      row.after(tr)
     }
 
-    const COLUMNS: Record<string, (rule: FirewallRuleView, index: number) => (string | HTMLElement)[]> = {
-      port: (rule, index) => [String(index + 1), action(rule), technical(rule.protocol ?? ''), technical(rule.port ?? ''), rule.source === null ? t('Any source') : technical(rule.source), rule.comment],
-      ip: rule => [action(rule), technical(rule.source ?? ''), rule.port === null ? t('All ports') : technical(rule.port), rule.comment, '—', '—'],
-      forward: rule => [technical(rule.protocol ?? ''), technical(rule.port ?? ''), technical(rule.forwardTo ?? ''), rule.source === null ? t('Any source') : technical(rule.source), rule.comment],
-    }
+    const values = (rule: FirewallRuleView, index: number): Record<string, string | number> => ({ position: index + 1, action: action(rule), protocol: rule.protocol ?? '', port: rule.port ?? (rule.kind === 'ip' ? t('All ports') : ''),
+      source: rule.source ?? (rule.kind === 'ip' ? '' : t('Any source')), comment: rule.comment, added: '—', expires: '—', destination: rule.forwardTo ?? '' })
     const paint = (): void => {
       if (!view) return
       const rules = view.rules
-      for (const kind of Object.keys(COLUMNS)) {
+      for (const kind of ['port', 'ip', 'forward']) {
         const table = card.querySelector<HTMLTableElement>('[data-whm-firewall-panel="' + kind + '"] table')
         if (!table) continue
         const head = table.tHead?.rows[0]
@@ -123,10 +139,9 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
         body.textContent = ''
         const selected = rules.filter(rule => rule.kind === kind)
         for (const rule of selected) {
-          const index = rules.indexOf(rule), row = document.createElement('tr')
+          const index = rules.indexOf(rule), row = cloneViewRecord(root, 'firewall-' + kind + '-row', 'tr', values(rule, index)) as HTMLTableRowElement
           row.dataset.firewallRuleId = rule.id
-          for (const value of COLUMNS[kind]!(rule, index)) { const td = document.createElement('td'); td.append(value); row.append(td) }
-          const manage = document.createElement('td'), group = document.createElement('div'); group.className = 'xp-whm-ops-actions'
+          const group = viewAction(row, 'actions', 'div')
           if (locked(rule)) group.textContent = t('Locked to loopback')
           else {
             group.append(button(system(rule) ? t('Narrow source') : t('Edit'), () => editor(rule, row, columns)))
@@ -134,11 +149,11 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
             group.append(button(t('Move down'), () => { void write('POST', '/api/firewall/rules/' + encodeURIComponent(rule.id) + '/move', { position: index + 1 }) }, index === rules.length - 1))
             if (!system(rule)) group.append(button(t('Delete'), () => { void ask(t('Delete this rule?'), t('Rule {position} is removed in the next generation. Saves that would block your session are refused.', { position: String(index + 1) }), true).then(yes => { if (yes) void write('DELETE', '/api/firewall/rules/' + encodeURIComponent(rule.id), {}) }) }))
           }
-          manage.append(group); row.append(manage); body.append(row)
+          body.append(row)
         }
-        if (!selected.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = columns; td.textContent = t('No saved rules of this type.'); row.append(td); body.append(row) }
+        if (!selected.length) emptyRow(body, columns, t('No saved rules of this type.'))
         // the static edit and discard placeholders of this panel are superseded by the live row actions
-        table.closest('[data-whm-firewall-panel]')?.querySelectorAll<HTMLElement>(':scope > .xp-whm-ops-actions, :scope > .xp-whm-ops-status').forEach(node => { node.hidden = true })
+        table.closest('[data-whm-firewall-panel]')?.querySelectorAll<HTMLElement>(':scope > [data-firewall-static-management]').forEach(node => { node.hidden = true })
       }
       paintLists()
       if (view.pending) {
@@ -155,11 +170,10 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
       if (!body || !view) return
       body.textContent = ''
       for (const item of view.prefixLists) {
-        const rule = view.rules.find(entry => entry.kind === 'prefix-list' && entry.list === item.name), row = document.createElement('tr')
-        for (const value of [technical(item.name), rule ? action(rule) : '—', String(item.entries), rule?.port ? technical(rule.port) : t('All ports'), '—', '—']) { const td = document.createElement('td'); td.append(value); row.append(td) }
+        const rule = view.rules.find(entry => entry.kind === 'prefix-list' && entry.list === item.name), row = cloneViewRecord(root, 'firewall-prefix-row', 'tr', { name: item.name, action: rule ? action(rule) : '—', entries: item.entries, port: rule?.port ?? t('All ports'), file: '—', updated: '—' })
         body.append(row)
       }
-      if (!body.childElementCount) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 6; td.textContent = t('No prefix lists yet.'); row.append(td); body.append(row) }
+      if (!body.childElementCount) emptyRow(body, 6, t('No prefix lists yet.'))
     }
     const listField = (name: string): HTMLInputElement | HTMLSelectElement | null => listsPanel?.querySelector<HTMLInputElement | HTMLSelectElement>('[name="' + name + '"]') ?? null
     const uploadList = async (replace: boolean): Promise<void> => {
@@ -195,11 +209,10 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
       if (head && !head.querySelector('[data-firewall-manage-head]')) { const th = document.createElement('th'); th.scope = 'col'; th.dataset.firewallManageHead = ''; th.textContent = t('Manage'); head.append(th) }
       body.textContent = ''
       for (const item of bans.bans) {
-        const row = document.createElement('tr')
-        for (const value of [technical(item.address), '—', '—', '—', item.expiresSec === null ? '—' : t('{seconds} s left', { seconds: String(item.expiresSec) })]) { const td = document.createElement('td'); td.append(value); row.append(td) }
-        const td = document.createElement('td'); td.append(button(t('Unban'), () => { void unban([item.address]) })); row.append(td); body.append(row)
+        const row = cloneViewRecord(root, 'firewall-ban-row', 'tr', { address: item.address, reason: '—', source: '—', since: '—', expires: item.expiresSec === null ? '—' : t('{seconds} s left', { seconds: String(item.expiresSec) }) })
+        viewAction(row, 'actions', 'div').append(button(t('Unban'), () => { void unban([item.address]) })); body.append(row)
       }
-      if (!body.childElementCount) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 6; td.textContent = bans.state === 'read' ? t('No address is banned now.') : t('The live ban sets have not been applied on this host yet.'); row.append(td); body.append(row) }
+      if (!body.childElementCount) emptyRow(body, 6, bans.state === 'read' ? t('No address is banned now.') : t('The live ban sets have not been applied on this host yet.'))
     }
     const unbanHook = bansPanel?.querySelector<HTMLButtonElement>('[data-firewall-action="unban"]')
     if (unbanHook) { unbanHook.removeAttribute('data-wiring'); unbanHook.disabled = false; unbanHook.addEventListener('click', () => { const field = bansPanel!.querySelector<HTMLInputElement>('[name="firewall-unban-address"]'); void unban((field?.value ?? '').split(/[\s,]+/).filter(Boolean)) }) }
@@ -236,4 +249,4 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
   })
 }
 
-export const WHM_FIREWALL_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readFirewallView=${readFirewallView.toString()};const readBanView=${readBanView.toString()};return ${bindWhmFirewall.toString()};})()`
+export const WHM_FIREWALL_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readFirewallView=${readFirewallView.toString()};const readBanView=${readBanView.toString()};return ${bindWhmFirewall.toString()};})()`

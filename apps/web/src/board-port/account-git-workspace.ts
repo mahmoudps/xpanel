@@ -1,12 +1,13 @@
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
+import { gitHistoryClientTemplates } from './account-utility-client-templates.ts'
 
 /** Account Git follows the approved Files table, field and action hierarchy. */
 export function renderAccountGitWorkspace(input: { lang: Locale; accountId: string; canManage: boolean }): string {
   const t = (message: string, values?: MessageValues): string => translator(input.lang)(message, values), off = input.canManage ? '' : ' disabled'
   const button = (id: string, message: string): string => `<button type="button" class="xp-btn" data-git-${id}${off}>${t(message)}</button>`
-  return `<div class="xp-acct-tool" data-account-git data-account="${escapeHtml(input.accountId)}" data-git-manage="${input.canManage}" lang="${input.lang}" dir="${localeDirection(input.lang)}">${ACCOUNT_TOOL_STYLE}<style>[data-account-git] label:is([for="git-repository"],[for="git-branch"]){padding-inline:var(--xp-control-content-inset)}[data-account-git] .xp-acct-tool__card{border-radius:var(--xp-radius-md)}[data-account-git] .xp-acct-tool__card>h2{font-size:var(--xp-type-card);line-height:var(--xp-leading-card);font-weight:var(--xp-weight-semibold)}@media(min-width:601px){[data-account-git] .xp-acct-tool__card{padding:var(--xp-space-card)}}</style>
+  return `<div class="xp-acct-tool" data-account-git data-account="${escapeHtml(input.accountId)}" data-git-manage="${input.canManage}" lang="${input.lang}" dir="${localeDirection(input.lang)}">${gitHistoryClientTemplates()}${ACCOUNT_TOOL_STYLE}<style>[data-account-git] label:is([for="git-repository"],[for="git-branch"]){padding-inline:var(--xp-control-content-inset)}[data-account-git] .xp-acct-tool__card{border-radius:var(--xp-radius-md)}[data-account-git] .xp-acct-tool__card>h2{font-size:var(--xp-type-card);line-height:var(--xp-leading-card);font-weight:var(--xp-weight-semibold)}@media(min-width:601px){[data-account-git] .xp-acct-tool__card{padding:var(--xp-space-card)}}</style>
     <section class="xp-acct-tool__card" aria-labelledby="git-repositories"><h2 id="git-repositories">${t('Your repositories')}</h2>
       <p>${t('Manage up to 20 repositories within your home directory. Removing an entry keeps its files.')}</p>
       <div class="xp-field"><label for="git-repository">${t('Repository')}</label><select id="git-repository" class="xp-input" dir="ltr" data-git-repository${off}><option value="">${t('Read the list first')}</option></select></div>

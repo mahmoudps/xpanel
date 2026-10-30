@@ -44,6 +44,7 @@ import { probeDkimOutcome } from './services/dkim-probe.ts'
 import { createSignRateLimit, signMailboxSubmission, submissionFromDomains } from './services/dkim-sign.ts'
 import { readOpenDkimPublicMaterial } from './services/opendkim-live.ts'
 import { parseDf, parseDfInodes, parseLoadavg, parseMeminfo } from './host-info.ts'
+import { readHostDiskInventory } from './host-info-disks.ts'
 import { readHostServices, restartHostService } from './host-services.ts'
 import { readDefaultSiteRequests } from './default-site-observation.ts'
 import { readGenerationRollbackAdmission } from './generation-rollback-admission.ts'
@@ -933,6 +934,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         if (!loadText || !memText || !diskResult.ok) return fail('PRECONDITION_FAILED', 'host measurements could not be read')
         try {
           const disk = parseDf(diskResult.stdout)
+          const { disks, diskCoverage } = await readHostDiskInventory(host)
           const identity = await readHostIdentity({
             readFile: (path) => host.readFile(path),
             runCommand: (argv) => host.runCommand(argv),
@@ -968,6 +970,8 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
             load: parseLoadavg(loadText),
             memory: parseMeminfo(memText),
             disk,
+            disks,
+            diskCoverage,
             ...(inodes ? { inodes } : {}),
             ...(homeOnRoot ? { homeOnRoot: true } : {}),
             identity,

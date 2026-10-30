@@ -1,6 +1,8 @@
 import type { PanelSurfaceProps } from '../surfaces/xpanel.ts';
 import { type Locale, translator } from '../i18n.ts'
 import { escapeHtml, normalizeAsciiDigits } from '../tokens.ts';
+import { contextualizeNavigationHref } from '../document-routes.ts';
+import { parseWebsiteAnalyticsSnapshot, WEBSITE_ANALYTICS_WINDOWS } from '../models/website-analytics.ts';
 import { buildApprovedPanelPage } from './approved-xpanel-pages.ts';
 import { renderAccountBackupWorkspace } from './account-backup-workspace.ts';
 import { renderAccountCronWorkspace } from './account-cron-workspace.ts';
@@ -39,7 +41,7 @@ export interface ApprovedXpanelWorkspaceProps extends Omit<PanelSurfaceProps, 'l
     readOnly: boolean;
     nativeHtml?: string;
 }
-export const approvedXpanelWorkspaceRoutes: ReadonlySet<string> = new Set(['/domains/reverse-proxy', '/resources', '/email/accounts', '/files/manager', '/files/trash', '/files/directory-privacy', '/domains/site-settings', '/files/backup', '/databases/mariadb', '/domains', '/domains/zone-editor', '/metrics/traffic', '/security/ssl', '/security/account', '/software/php', '/software/htaccess', '/advanced/cron', '/advanced/error-pages', '/advanced/indexes', '/advanced/mime-types', '/advanced/handlers', '/security/hotlink', '/security/ip-blocker', '/domains/redirects', '/security/ssh', '/metrics/logs', '/health', '/security/virus-scanner', '/advanced/network-tools', '/databases/insights', '/domains/dynamic-dns', '/domains/site-publisher', '/files/git', '/email/encryption', '/software/packages', '/databases/remote-access', '/email/calendars-contacts', '/advanced/api-shell', '/email/archive', '/domains/staging', '/preferences/team', '/databases/phpmyadmin', '/databases/postgresql', '/databases/phppgadmin', '/software/apps', '/software/containers', '/software/cache', '/software/optimize', '/security/waf', '/domains/cloudflare']);
+export const approvedXpanelWorkspaceRoutes: ReadonlySet<string> = new Set(['/domains/reverse-proxy', '/resources', '/email/accounts', '/files/manager', '/files/trash', '/files/directory-privacy', '/domains/site-settings', '/files/backup', '/databases/mariadb', '/domains', '/domains/zone-editor', '/metrics/traffic', '/metrics/web-stats', '/security/ssl', '/security/account', '/software/php', '/software/htaccess', '/advanced/cron', '/advanced/error-pages', '/advanced/indexes', '/advanced/mime-types', '/advanced/handlers', '/security/hotlink', '/security/ip-blocker', '/domains/redirects', '/security/ssh', '/metrics/logs', '/health', '/security/virus-scanner', '/advanced/network-tools', '/databases/insights', '/domains/dynamic-dns', '/domains/site-publisher', '/files/git', '/email/encryption', '/software/packages', '/databases/remote-access', '/email/calendars-contacts', '/advanced/api-shell', '/email/archive', '/domains/staging', '/preferences/team', '/databases/phpmyadmin', '/databases/postgresql', '/databases/phppgadmin', '/software/apps', '/software/containers', '/software/cache', '/software/optimize', '/security/waf', '/domains/cloudflare']);
 const copy = (p: ApprovedXpanelWorkspaceProps, x: Copy): string => escapeHtml(translator(p.locale)(x));
 const value = (x: unknown): string => escapeHtml(normalizeAsciiDigits(x == null ? '' : String(x)));
 const unread: Copy = msgctxt('approved-xpanel-workspaces', 'Not read');
@@ -153,6 +155,26 @@ const styles = `<style>.xp-approved-panel{display:flex;flex-direction:column;gap
   }
 }
 </style>`;
+const renderClassicTrafficSelection = (p: ApprovedXpanelWorkspaceProps): { html: string; nativeAllowed: boolean } => {
+    const domains = p.account ? (p.domains ?? []).filter(domain => domain.accountId === p.account!.id) : [];
+    const selected = p.activeDomain !== undefined ? domains.find(domain => domain.name === p.activeDomain)
+        : domains.find(domain => domain.name === p.account?.primaryDomain) ?? domains.find(domain => domain.kind === 'primary') ?? domains[0];
+    const window = p.websiteAnalyticsWindow && WEBSITE_ANALYTICS_WINDOWS.includes(p.websiteAnalyticsWindow) ? p.websiteAnalyticsWindow : undefined;
+    const labels = { '1h': msgid('Last hour'), '24h': msgid('Last 24 hours'), '7d': msgid('Last 7 days'), '30d': msgid('Last 30 days') };
+    const enabled = !p.readOnly && p.websiteAnalyticsDomainSelectionAvailable === true && selected !== undefined;
+    const contextHref = contextualizeNavigationHref(p.route, { locale: p.locale, theme: p.theme ?? 'dark', density: p.density ?? 'comfortable',
+        ...(p.account && p.visibility?.principal.kind !== 'user' && p.visibility !== undefined ? { accountId: p.account.id } : {}),
+    });
+    const context = new URL(contextHref, 'http://xpanel.invalid').searchParams;
+    const hiddenContext = [...context].map(([name, content]) => `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(content)}">`).join('');
+    const domainButtons = domains.map(domain => `<button type="submit" name="domain" value="${escapeHtml(domain.name)}" class="xp-btn${domain.name === selected?.name ? ' xp-btn--primary' : ''}" aria-pressed="${domain.name === selected?.name}"${enabled ? '' : ' disabled'}><bdi dir="ltr" class="xp-mono">${escapeHtml(domain.name)}</bdi></button>`).join('');
+    const rangeButtons = WEBSITE_ANALYTICS_WINDOWS.map(value => `<button type="submit" name="window" value="${value}" class="xp-btn${value === window ? ' xp-btn--primary' : ''}" aria-pressed="${value === window}"${enabled ? '' : ' disabled'}>${copy(p, labels[value])}</button>`).join('');
+    const reading = selected && p.account ? parseWebsiteAnalyticsSnapshot(p.websiteAnalytics, { accountId: p.account.id, domain: selected.name }) : null;
+    return {
+        nativeAllowed: p.websiteAnalytics === undefined || reading !== null && p.websiteAnalyticsUnavailable !== true,
+        html: `<section class="xp-panel-detail__card" data-workspace-section="metrics-scope" aria-labelledby="panel-detail-metrics-scope"><h2 id="panel-detail-metrics-scope">${copy(p, msgid('Traffic selection'))}</h2><div class="xp-panel-detail__fields"><form method="get" action="${escapeHtml(p.route)}" class="xp-field" aria-labelledby="panel-traffic-domain-label">${hiddenContext}${window ? `<input type="hidden" name="window" value="${window}">` : ''}<span id="panel-traffic-domain-label" class="xp-label">${copy(p, msgid('Domain'))}</span><div class="xp-panel-detail__actions" role="group" aria-labelledby="panel-traffic-domain-label">${domainButtons || `<span>${copy(p, unread)}</span>`}</div></form><form method="get" action="${escapeHtml(p.route)}" class="xp-field" aria-labelledby="panel-traffic-range-label">${hiddenContext}${selected ? `<input type="hidden" name="domain" value="${escapeHtml(selected.name)}">` : ''}<span id="panel-traffic-range-label" class="xp-label">${copy(p, msgid('Range'))}</span><div class="xp-panel-detail__actions" role="group" aria-labelledby="panel-traffic-range-label">${rangeButtons}</div></form></div></section>`,
+    };
+};
 export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): string | undefined => {
     if (!approvedXpanelWorkspaceRoutes.has(p.route))
         return undefined;
@@ -266,12 +288,14 @@ export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): 
     const ssl = renderConnectedPanelSsl(p);
     const sessions = renderConnectedPanelSessions(p);
     const replacesNative = p.route === '/software/php' || p.route === '/files/backup' || dns !== undefined || directoryPrivacy !== undefined || ssl !== undefined;
-    const nativeHtml = !p.readOnly && !replacesNative ? p.nativeHtml : undefined;
+    const trafficSelection = p.route === '/metrics/traffic' || p.route === '/metrics/web-stats' ? renderClassicTrafficSelection(p) : undefined;
+    const nativeHtml = !p.readOnly && !replacesNative && trafficSelection?.nativeAllowed !== false ? p.nativeHtml : undefined;
     const sections = page.sections.filter(section => php === undefined || !['php-domain', 'php-pool', 'php-ini'].includes(section.id))
         .filter(section => dns === undefined || !['dns-add-record', 'dns-records-unread'].includes(section.id))
         .filter(section => directoryPrivacy === undefined || !['protected-folders', 'protect-folder'].includes(section.id))
-        .filter(section => ssl === undefined || !['certificate-wizard', 'installed-certificates'].includes(section.id));
+        .filter(section => ssl === undefined || !['certificate-wizard', 'installed-certificates'].includes(section.id))
+        .filter(section => trafficSelection === undefined || section.id !== 'metrics-scope');
     const heading = nativeHtml ? '' : `<header class="xp-panel-detail__heading"><h1>${copy(p, page.title)}</h1><p>${copy(p, page.description)}</p></header>`;
-    return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="${escapeHtml(p.route)}" data-workspace-mode="${p.readOnly ? 'read-only' : 'connected'}">${heading}<div class="xp-panel-detail__layout"><div class="xp-panel-detail__main">${nativeHtml ? `<div class="xp-panel-detail__native">${nativeHtml}</div>` : ''}${php ?? ''}${dns ?? ''}${directoryPrivacy ?? ''}${ssl ?? ''}${sessions ?? ''}${accountBackup ?? ''}${sections.map(section => renderSection(p, section)).join('')}</div><aside class="xp-panel-detail__aside" aria-label="${copy(p, msgid('Workspace information'))}">${page.aside.map(section => renderSection(p, section, true)).join('')}</aside></div></section>`;
+    return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="${escapeHtml(p.route)}" data-workspace-mode="${p.readOnly ? 'read-only' : 'connected'}">${heading}<div class="xp-panel-detail__layout"><div class="xp-panel-detail__main">${trafficSelection?.html ?? ''}${nativeHtml ? `<div class="xp-panel-detail__native">${nativeHtml}</div>` : ''}${php ?? ''}${dns ?? ''}${directoryPrivacy ?? ''}${ssl ?? ''}${sessions ?? ''}${accountBackup ?? ''}${sections.map(section => renderSection(p, section)).join('')}</div><aside class="xp-panel-detail__aside" aria-label="${copy(p, msgid('Workspace information'))}">${page.aside.map(section => renderSection(p, section, true)).join('')}</aside></div></section>`;
 };
 const pageFor = buildApprovedPanelPage;

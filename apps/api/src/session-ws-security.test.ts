@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { networkInterfaces, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeAll, describe, it } from 'vitest'
+import { afterEach, beforeAll, describe, it, vi } from 'vitest'
 import WebSocket from 'ws'
 import type { LiveEvent } from '@xpanel/core'
 import {
@@ -48,7 +48,7 @@ const openWire = async (
   port: number,
   headers: Record<string, string> = {},
   path = '/api/ws',
-  timeoutMs = 1500,
+  timeoutMs: number | null = 1500,
 ): Promise<WireClient> => {
   const socket = connect(port, '127.0.0.1')
   const client: WireClient = { socket, bytes: Buffer.alloc(0), status: null, closed: false }
@@ -77,7 +77,7 @@ const openWire = async (
     ...Object.entries(requestHeaders).map(([key, value]) => `${key}: ${value}`),
     '\r\n',
   ].join('\r\n'))
-  await eventually(() => client.status !== null || client.closed, timeoutMs)
+  if (timeoutMs !== null) await eventually(() => client.status !== null || client.closed, timeoutMs)
   return client
 }
 
@@ -284,27 +284,49 @@ describe('WebSocket live authorization and transport security', () => {
     assert.equal(hub.clientCount, 0)
   })
 
-  it('releases pending upgrade capacity after authorization hangs beyond its deadline', async () => {
-    let authorize = false
-    let waiting = 0
-    const port = await serve(new LiveEventHub(), async () => {
-      if (authorize) return ROOT
-      waiting++
-      return new Promise<EventSubscriber | null>(() => {})
-    })
-    const pending = Array.from({ length: 32 }, () => openWire(port, {}, '/api/ws', 12_000))
-    await eventually(() => waiting === 32)
-    assert.equal((await openWire(port)).status, 503)
-    await Promise.all(pending)
-    authorize = true
-    let recovered: WireClient | undefined
-    const deadline = Date.now() + 1500
-    do {
-      recovered = await openWire(port)
-      if (recovered.status === 101) break
-      await new Promise((resolve) => setTimeout(resolve, 5))
-    } while (Date.now() < deadline)
-    assert.equal(recovered.status, 101)
+  it('releases pending upgrade capacity after authorization hangs beyond its deadline', { tags: ['feature'] }, async () => {
+    // TCP and authorization remain real; only the JavaScript deadline clock is controlled.
+    const observeWire = async (predicate: () => boolean): Promise<void> => {
+      const deadline = Date.now() + 1500
+      while (!predicate()) {
+        if (Date.now() >= deadline) assert.fail('wire state did not settle before its real deadline')
+        await new Promise<void>((resolve) => setImmediate(resolve))
+      }
+    }
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      let authorize = false
+      let waiting = 0
+      const port = await serve(new LiveEventHub(), async () => {
+        if (authorize) return ROOT
+        waiting++
+        return new Promise<EventSubscriber | null>(() => {})
+      })
+      const pending = await Promise.all(Array.from({ length: 32 }, () => openWire(port, {}, '/api/ws', null)))
+      await observeWire(() => waiting === 32)
+      const refused = await openWire(port, {}, '/api/ws', null)
+      await observeWire(() => refused.status !== null || refused.closed)
+      assert.equal(refused.status, 503)
+
+      await vi.advanceTimersByTimeAsync(9999)
+      assert.equal(pending.every((client) => !client.closed && client.status === null), true)
+      await vi.advanceTimersByTimeAsync(1)
+      await observeWire(() => pending.every((client) => client.closed))
+      assert.equal(pending.every((client) => client.status !== 101), true)
+
+      authorize = true
+      let recovered: WireClient | undefined
+      const recoveryDeadline = Date.now() + 1500
+      do {
+        recovered = await openWire(port, {}, '/api/ws', null)
+        await observeWire(() => recovered!.status !== null || recovered!.closed)
+        if (recovered.status === 101) break
+        await new Promise<void>((resolve) => setImmediate(resolve))
+      } while (Date.now() < recoveryDeadline)
+      assert.equal(recovered.status, 101)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
@@ -664,11 +686,24 @@ describe('WebSocket authentication against real API and SQLite authority', () =>
       lockoutThreshold: 2,
       lockoutDurationMs: 60_000,
     })
+    // A closed transport can still have an already-started authorization waiting
+    // for the state mutex. Retire those real operations before deleting SQLite.
+    const pendingAuthorizations = new Set<Promise<unknown>>()
+    const authenticateUpgrade = app.authenticateUpgrade
+    app.authenticateUpgrade = async (...args) => {
+      const pending = authenticateUpgrade(...args)
+      pendingAuthorizations.add(pending)
+      try { return await pending }
+      finally { pendingAuthorizations.delete(pending) }
+    }
     const socketPath = process.platform === 'win32'
       ? `\\\\.\\pipe\\xpanel-ingress-${randomBytes(8).toString('hex')}`
       : join(dir, 'api-ingress.sock')
     const listener = await listenApiServer(app, { ingressSocketPath: socketPath })
-    cleanup.push(async () => { await listener.close() })
+    cleanup.push(async () => {
+      await listener.close()
+      await Promise.all(pendingAuthorizations)
+    })
 
     const ingressHttp = async (path: string, opts: { method?: string; headers?: Record<string, string>; body?: unknown } = {}) =>
       new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; text: string }>((resolve, reject) => {

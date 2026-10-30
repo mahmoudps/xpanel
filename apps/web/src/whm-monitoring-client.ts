@@ -1,3 +1,5 @@
+import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const whmClientNode = canonicalWhmClientNode
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -161,9 +163,9 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
           if (item.protection) action.textContent = protections[item.protection] ?? t(msgctxt('whm-monitoring-client', 'Protected'))
           else if (!canSignal) action.textContent = t('Signals unavailable')
           else {
-            const group = document.createElement('div'); group.className = 'xp-whm-detail-actions'
+            const group = whmClientNode(root, 'whm-process-actions', 'div')
             for (const signal of termAttempted.has(identity(item)) ? ['TERM', 'KILL'] as const : ['TERM'] as const) {
-              const button = document.createElement('button'); button.type = 'button'; button.className = signal === 'KILL' ? 'xp-btn xp-btn--danger' : 'xp-btn'; button.dataset.whmMonitoringSignal = signal; button.disabled = busy
+              const button = whmClientNode(root, signal === 'KILL' ? 'whm-process-kill' : 'whm-process-term', 'button'); button.dataset.whmMonitoringSignal = signal; button.disabled = busy
               button.textContent = signal === 'KILL' ? t('Force stop (KILL)') : t('Stop (TERM)')
               button.addEventListener('click', () => { if (!button.disabled) void send(item, signal) }); group.append(button)
             }
@@ -358,4 +360,4 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
   })
 }
 
-export const WHM_MONITORING_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[monitoringObject, monitoringText, monitoringIso, monitoringCount, monitoringNumber, monitoringAccount].map(helper => helper.toString()).join(';')};const readProcessesView=${readProcessesView.toString()};const readSignalOutcome=${readSignalOutcome.toString()};const readDiskView=${readDiskView.toString()};const readLogsView=${readLogsView.toString()};const readPerformanceView=${readPerformanceView.toString()};return ${bindWhmMonitoring.toString()};})()`
+export const WHM_MONITORING_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[monitoringObject, monitoringText, monitoringIso, monitoringCount, monitoringNumber, monitoringAccount].map(helper => helper.toString()).join(';')};const readProcessesView=${readProcessesView.toString()};const readSignalOutcome=${readSignalOutcome.toString()};const readDiskView=${readDiskView.toString()};const readLogsView=${readLogsView.toString()};const readPerformanceView=${readPerformanceView.toString()};return ${bindWhmMonitoring.toString()};})()`

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, it } from 'vitest'
 import assert from 'node:assert/strict'
-import { AUDIT_LABELS, auditActionHtml, auditActionLabel } from './audit-labels.ts'
+import { AUDIT_LABELS, auditActionHtml, auditActionLabel, auditActorLabel } from './audit-labels.ts'
 
 const SOURCES = [
   'apps/api/src/server.ts',
@@ -76,6 +76,16 @@ const literalsIn = (text: string): string[] => {
 }
 
 describe('audit action copy', () => {
+  it('keeps opaque actor references private and preserves readable actors', () => {
+    const uuid = '300ecfad-626d-4b52-a84a-f94db0b16cc1'
+    for (const opaque of [uuid, `user:${uuid}`, uuid.toUpperCase(), `USER:${uuid.toUpperCase()}`, 'mbx1234567890', 'user:mbx1234567890']) {
+      assert.equal(auditActorLabel(opaque), '')
+    }
+    for (const readable of ['root', 'user:sam', 'info@example.test', 'uid:0', 'service-worker']) {
+      assert.equal(auditActorLabel(` ${readable} `), readable)
+    }
+  })
+
   it('names every recorded action in English and Arabic', () => {
     const root = new URL('../../../', import.meta.url)
     const seen = new Set<string>()

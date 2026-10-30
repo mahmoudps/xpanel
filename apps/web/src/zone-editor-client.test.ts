@@ -1,6 +1,7 @@
 /// <reference lib="dom" />
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { dnsEditorTemplates } from './board-port/data-client-templates.ts'
 import {
   ZONE_EDITOR_CLIENT_BINDING,
   ZONE_RECORD_TYPES,
@@ -423,6 +424,7 @@ describe('serialized browser binding', () => {
     <select data-dns-account><option value="${accountId}">alice</option></select>
     <input data-dns-new-name>
     <table><tbody data-dns-records></tbody></table>
+    ${dnsEditorTemplates(message => message)}
     <p data-dns-status role="status">Reading zone records…</p>
     <button type="button" data-dns-add-record>Add record</button>
     <button type="button" data-dns-add-zone>Add zone</button>

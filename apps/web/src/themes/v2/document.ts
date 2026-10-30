@@ -4,6 +4,7 @@
 import { brandingHeadStyle, brandingRootAttributes } from '../../branding.ts'
 import type { DocumentProps } from '../contract.ts'
 import { v2FontsHref, v2Stylesheet } from './assets.ts'
+import { v2SharedStylesheets, v2StylesheetsForDocument } from './route-assets.ts'
 import { escapeHtml } from './html.ts'
 
 export type V2DocumentProps = DocumentProps
@@ -20,6 +21,7 @@ export const renderV2Document = (props: V2DocumentProps): string => `<!doctype h
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="${escapeHtml(v2FontsHref)}">
 <link rel="stylesheet" href="${escapeHtml(v2Stylesheet.href)}">
+${[...v2SharedStylesheets, ...v2StylesheetsForDocument(props)].map(asset => `<link rel="stylesheet" href="${escapeHtml(asset.href)}">`).join('\n')}
 ${brandingHeadStyle(props.branding)}
 ${props.headHtml}
 </head>

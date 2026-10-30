@@ -1,4 +1,7 @@
 import type { MessageValues } from './i18n.ts'
+import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const viewAction = canonicalViewAction
 /// <reference lib="dom" />
 type ConfirmRestart = (options: Record<string, unknown>) => Promise<string | boolean | null>
 type HostRow = { id: string; label: string; unit: string | null; state: string }
@@ -27,6 +30,10 @@ function bindApprovedHostServices(confirmRestart?: ConfirmRestart): void {
     status.textContent = message; status.hidden = false; status.dataset.state = state
     status.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status')
   }
+  try {
+    const example = cloneViewRecord(root, 'host-service-row', 'tr', { service: '', unit: '', state: '', 'restart-label': '' })
+    viewAction(example, 'restart'); cloneViewRecord(root, 'host-service-empty', 'tr', { message: '' })
+  } catch { rows.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = true }); note(copy('Saving is unavailable. No changes were sent.'), 'unavailable'); return }
   const definiteRefusal = (error: unknown): boolean => {
     if (!record(error)) return false
     const details = record(error.details) ? error.details : {}
@@ -39,15 +46,10 @@ function bindApprovedHostServices(confirmRestart?: ConfirmRestart): void {
   const paint = (services: HostRow[]) => {
     rows.replaceChildren()
     services.forEach(service => {
-      const row = document.createElement('tr')
-      for (const value of [service.label, service.unit || copy('Not installed'), service.state]) {
-        const cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell)
-      }
-      const action = document.createElement('td')
+      const row = cloneViewRecord(root, 'host-service-row', 'tr', { service: service.label, unit: service.unit || copy('Not installed'), state: service.state, 'restart-label': copy('Restart') })
+      const button = viewAction(row, 'restart')
       if (service.unit) {
-        const button = document.createElement('button')
-        button.type = 'button'; button.className = 'xp-btn'; button.dataset.serviceId = service.id
-        button.textContent = copy('Restart')
+        button.dataset.serviceId = service.id
         button.addEventListener('click', async () => {
           if (busy || review.has(service.id) || button.disabled || root.closest(unavailable)) return
           if (typeof confirmRestart !== 'function') { note(copy('Restart confirmation is unavailable. No restart was sent.'), 'failed'); return }
@@ -72,10 +74,10 @@ function bindApprovedHostServices(confirmRestart?: ConfirmRestart): void {
             note(uncertain ? copy('The restart outcome is unverified. Inspect the service before retrying.') : copy('The restart was refused or could not be prepared. No automatic retry was sent.'), uncertain ? 'uncertain' : 'failed')
           } finally { busy = false; lockButtons() }
         })
-        action.appendChild(button)
-      }
-      row.appendChild(action); rows.appendChild(row)
+      } else button.remove()
+      rows.appendChild(row)
     })
+    if (!services.length) rows.append(cloneViewRecord(root, 'host-service-empty', 'tr', { message: copy('No services were reported by the host.') }))
     lockButtons()
   }
   request('GET', '/api/server/services').then(value => {
@@ -85,4 +87,4 @@ function bindApprovedHostServices(confirmRestart?: ConfirmRestart): void {
   }).catch(() => { rows.replaceChildren(); note(copy('Service status could not be read.'), 'failed') })
 }
 
-export const APPROVED_HOST_SERVICES_CLIENT = bindApprovedHostServices.toString()
+export const APPROVED_HOST_SERVICES_CLIENT = `(function(confirmRestart){${VIEW_RECORD_HELPERS}return (${bindApprovedHostServices.toString()})(confirmRestart);})`

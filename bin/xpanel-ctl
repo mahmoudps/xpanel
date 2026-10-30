@@ -4,8 +4,15 @@ unset NODE_OPTIONS NODE_PATH
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 SELF="$(readlink -f -- "${BASH_SOURCE[0]}")"
 ROOT="$(cd -- "$(dirname -- "$SELF")/.." && pwd -P)"
-CLI="$ROOT/scripts/xpanel-ctl.mjs"
 NODE=/usr/bin/node
+if [[ "$ROOT" == /opt/xpanel && -L /opt/xpanel/current ]]; then
+  RELEASE="$(readlink -- /opt/xpanel/current)"
+  [[ "$RELEASE" =~ ^/opt/xpanel/releases/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { printf '%s\n' 'LIFECYCLE_BOOTSTRAP_UNTRUSTED: Invalid current release.' >&2; exit 3; }
+  [[ -d "$RELEASE" && ! -L "$RELEASE" && "$(readlink -f -- /opt/xpanel/current)" == "$RELEASE" ]] || { printf '%s\n' 'LIFECYCLE_BOOTSTRAP_UNTRUSTED: Invalid current release.' >&2; exit 3; }
+  ROOT="$RELEASE"
+  NODE=/opt/xpanel/bin/node
+fi
+CLI="$ROOT/scripts/xpanel-ctl.mjs"
 
 fail() { printf '%s\n' 'LIFECYCLE_BOOTSTRAP_UNTRUSTED: Trusted lifecycle bootstrap is unavailable.' >&2; exit 3; }
 trusted() {

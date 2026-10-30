@@ -1,8 +1,8 @@
-// The v2 stylesheet: tokens, base, every component, the page layouts and the shell in one cached asset that core serves as
-// /assets/themes/v2/styles.css?v=<version>. The version changes whenever the stylesheet does.
+// The shared v2 foundation is cached once; independently versioned page chunks load only on their own routes.
 
-import { createHash } from 'node:crypto'
 import type { ThemeAsset } from '../contract.ts'
+import { createV2Stylesheet } from './stylesheet.ts'
+import { v2RouteStylesheets, v2SharedStylesheets, v2SupplementalStylesheets, v2ViewStylesheets } from './route-assets.ts'
 import { V2_BASE_CSS } from './base.ts'
 import { V2_TOKENS_CSS } from './tokens.ts'
 import { BULK_BAR_CSS } from './components/bulk-bar.ts'
@@ -26,6 +26,7 @@ import { STATUS_PILL_CSS } from './components/status-pill.ts'
 import { STEPPER_CSS } from './components/stepper.ts'
 import { TABS_CSS } from './components/tabs.ts'
 import { TOAST_REGION_CSS } from './components/toast-region.ts'
+import { ACTION_STATE_CSS } from './components/action-state.ts'
 import { LAYOUTS_CSS } from './layouts/index.ts'
 import { OVERLAYS_CSS } from './shell/overlays.ts'
 import { SHELL_CSS } from './shell/shell.ts'
@@ -36,21 +37,15 @@ const SOURCES = [
   V2_TOKENS_CSS, V2_BASE_CSS, STATUS_PILL_CSS, PAGE_HEADER_CSS, CARD_CSS, KPI_CARD_CSS, CHART_CSS, NOTICE_CSS,
   DATA_TABLE_CSS, FILTER_BAR_CSS, BULK_BAR_CSS, DRAWER_CSS, DIALOG_CSS, ROW_MENU_CSS, TABS_CSS, STEPPER_CSS,
   PAGINATION_CSS, CHANGE_REVIEW_CSS, FORM_FIELD_CSS, CODE_BLOCK_CSS, METER_CSS, STATE_BLOCK_CSS, TOAST_REGION_CSS,
-  LAYOUTS_CSS, OVERLAYS_CSS, SHELL_CSS,
+  LAYOUTS_CSS, OVERLAYS_CSS, SHELL_CSS, ACTION_STATE_CSS,
 ]
 
-const css = SOURCES.map(source => source.trim()).join('\n') + '\n'
-const version = createHash('sha256').update(css).digest('hex').slice(0, 16)
+export const v2Stylesheet = createV2Stylesheet('styles', SOURCES)
 
-export const v2Stylesheet = Object.freeze({
-  path: '/assets/themes/v2/styles.css',
-  href: `/assets/themes/v2/styles.css?v=${version}`,
-  contentType: 'text/css; charset=utf-8',
-  version,
-  body: css,
-} satisfies ThemeAsset & { readonly version: string })
-
-export const v2Assets: readonly ThemeAsset[] = Object.freeze([v2Stylesheet])
+export const v2Assets: readonly ThemeAsset[] = Object.freeze([
+  v2Stylesheet, ...v2SharedStylesheets, ...Object.values(v2ViewStylesheets), ...v2RouteStylesheets.map(entry => entry.stylesheet),
+  ...v2SupplementalStylesheets.map(entry => entry.stylesheet),
+])
 
 /** Latin text uses Plex Sans and Mono. The stylesheet keeps Arabic in generic sans-serif. */
 export const v2FontsHref = 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap'

@@ -1,4 +1,8 @@
 import type { MessageValues } from './i18n.ts'
+import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
+const mailTemplate = canonicalMailTemplate
+const mailSlot = canonicalMailSlot
+const mailRequireTemplates = canonicalMailRequireTemplates
 /// <reference lib="dom" />
 export interface MailboxForwardersSnapshot { mailbox: string; revision: string; limit: number; review: 'managed_elsewhere' | 'duplicate_records' | null; destinations: string[]; application: { state: 'applied' | 'pending' | 'failed'; reason: string | null } | null }
 
@@ -39,6 +43,8 @@ function bindMailForwarders(askDialog: (options: Record<string, unknown>) => Pro
     const status = root.querySelector<HTMLElement>('[data-forwarders-status]'), rows = root.querySelector<HTMLElement>('[data-forwarders-rows]'), count = root.querySelector<HTMLElement>('[data-forwarders-count]')
     const input = root.querySelector<HTMLInputElement>('input[name="destination"]'), add = root.querySelector<HTMLButtonElement>('[data-forwarders-add]'), refresh = root.querySelector<HTMLButtonElement>('[data-forwarders-refresh]')
     if (!status || !rows || !count || !input || !add || !refresh) return
+    try { mailRequireTemplates(root, [['mail-forwarder-row', 'tr', ['address', 'remove']], ['mail-forwarder-empty', 'tr', ['message']]]) }
+    catch { input.disabled = true; add.disabled = true; refresh.disabled = true; status.dataset.state = 'unavailable'; status.textContent = t('Forwarders are unavailable for this mailbox session. Nothing was read.'); return }
     const admitted = (): boolean => root.isConnected && root.dataset.forwardersCanManage === 'true' && root.dataset.forwardersMailbox === mailbox && !!mailbox && !root.closest(denied) && !!send
     let snapshot: MailboxForwardersSnapshot | null = null, busy = false, lock = ''
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status') }
@@ -48,17 +54,17 @@ function bindMailForwarders(askDialog: (options: Record<string, unknown>) => Pro
       rows.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = !editable })
       root.setAttribute('aria-busy', String(busy))
     }
-    const message = (text: string): void => { rows.textContent = ''; const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 2; cell.textContent = text; row.append(cell); rows.append(row) }
+    const message = (text: string): void => { const row = mailTemplate(root, 'mail-forwarder-empty', 'tr', ['message']); mailSlot(row, 'message').textContent = text; rows.replaceChildren(row) }
     const paint = (view: MailboxForwardersSnapshot): void => {
       count.textContent = t('{count} of {limit} addresses', { count: view.destinations.length, limit: view.limit })
       if (!view.destinations.length) { message(view.review ? t('Forwarding for this address is managed by the account owner.') : t('No forwarders. Mail stays in this mailbox only.')); return }
       rows.textContent = ''
       for (const destination of view.destinations) {
-        const row = document.createElement('tr'), name = document.createElement('td'), action = document.createElement('td'), bdi = document.createElement('bdi'), remove = document.createElement('button')
-        bdi.dir = 'ltr'; bdi.textContent = destination; name.append(bdi)
-        remove.type = 'button'; remove.className = 'xp-btn'; remove.dataset.forwardersRemove = destination; remove.textContent = t('Remove')
+        const row = mailTemplate(root, 'mail-forwarder-row', 'tr', ['address', 'remove']), bdi = mailSlot(row, 'address', 'bdi'), remove = mailSlot<HTMLButtonElement>(row, 'remove', 'button')
+        bdi.textContent = destination
+        remove.dataset.forwardersRemove = destination; remove.textContent = t('Remove')
         remove.setAttribute('aria-label', t('Remove forwarding to {destination}', { destination }))
-        action.append(remove); row.append(name, action); rows.append(row)
+        rows.append(row)
       }
     }
     const read = async (): Promise<MailboxForwardersSnapshot> => readMailboxForwarders(await send!('GET', '/api/webmail/forwarders'), mailbox)
@@ -125,4 +131,4 @@ function bindMailForwarders(askDialog: (options: Record<string, unknown>) => Pro
   })
 }
 
-export const MAIL_MAILBOX_FORWARDERS_CLIENT_BINDING = `(()=>{const forwardAddress=${forwardAddress.toString()};const readMailboxForwarders=${readMailboxForwarders.toString()};return ${bindMailForwarders.toString()};})()`
+export const MAIL_MAILBOX_FORWARDERS_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const forwardAddress=${forwardAddress.toString()};const readMailboxForwarders=${readMailboxForwarders.toString()};return ${bindMailForwarders.toString()};})()`

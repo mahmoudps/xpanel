@@ -1,3 +1,4 @@
+import { classicOpsClientTemplates } from '../themes/classic/ops-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 
 /** Server NFS shares editor for /whm/server/file-sharing. Host data is filled by OPS_FILE_SHARING_CLIENT_BINDING from authorized reads only. */
@@ -36,5 +37,6 @@ export function renderOpsFileSharingWorkspace(input: { locale: Locale; canRead: 
       <p class="xp-help">${t('These directories are exported outside xPanel and are left unchanged.')}</p>
       <ul class="xp-ops-shares__foreign" dir="ltr" data-ops-shares-foreign></ul>
     </section>
+    ${classicOpsClientTemplates('shares')}
   </div>`
 }

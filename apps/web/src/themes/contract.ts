@@ -2,7 +2,7 @@
 // controllers keep working. Types and pure helpers only. Core imports themes only through the registry; this file
 // imports no theme.
 
-import { navigation, registeredDocumentAliases, type PageTemplate, type VisibilityContext } from '@xpanel/catalog'
+import { navigation, registeredDocumentAliases, type CatalogTool, type PageTemplate, type VisibilityContext } from '@xpanel/catalog'
 import type { Account } from '@xpanel/core'
 import type { WebBranding } from '../branding.ts'
 import type { AccountSecurityCardProps } from '../surfaces/account-security.ts'
@@ -30,7 +30,24 @@ export type ThemeSurface = 'xpanel' | 'xwhm' | 'xmail'
 
 export interface ThemeViewProps {
   readonly branding?: WebBranding
+  /** Core derives installed presentation packages from the same registry used by personal preferences. */
+  readonly themePackages?: readonly ThemePackageView[]
+  /** Already computed by core; themes never reconstruct route admission or missing-account policy. */
+  readonly unavailableView?: UnavailableProps
 }
+
+export interface ThemePackageView {
+  readonly id: UiThemeId
+  readonly label: string
+  readonly surfaces: readonly ThemeSurface[]
+  readonly available: boolean
+}
+
+/** Supplied only by core after role admission; provider reads and mutations remain independently qualified. */
+export type ReadOnlySurfaceFacts =
+  | { readonly surface: 'xpanel'; readonly panel: PanelSurfaceProps }
+  | { readonly surface: 'xwhm'; readonly whm: WhmSurfaceProps }
+  | { readonly surface: 'xmail'; readonly mail: MailSurfaceProps }
 
 /** A static file core serves under `/assets/` with an immutable cache; `href` carries the content version. */
 export interface ThemeAsset {
@@ -44,6 +61,11 @@ export interface ThemeAsset {
  *  data-surface, data-mfa-mode, data-realtime-enabled, data-status) and the head and body markup; the theme adds
  *  its own assets and never changes those attributes. */
 export interface DocumentProps {
+  /** Trusted dispatched document context, for theme-owned route assets only. It grants no page authority. */
+  readonly route?: string
+  readonly surface?: ThemeSurface | 'login'
+  /** The server's actual render branch; never inferred from body markup or a query preference. */
+  readonly viewKind?: 'workspace' | 'login' | 'status' | 'unavailable'
   readonly branding?: WebBranding
   readonly htmlAttributeSuffix: string
   /** Escaped by core in its protected attribute order; the theme must preserve this string. */
@@ -81,6 +103,7 @@ export interface UnavailableProps extends ThemeViewProps {
   readonly securityPage: boolean
   /** Routes the sidebar may link to. */
   readonly qualifiedRoutes: ReadonlySet<string>
+  readonly catalog?: readonly CatalogTool[]
   readonly visibility?: VisibilityContext
   readonly session?: { readonly username: string; readonly role: string; readonly accountId?: string }
   readonly signedIn: boolean
@@ -89,6 +112,7 @@ export interface UnavailableProps extends ThemeViewProps {
   readonly actionState?: AsyncActionBannerProps
   readonly summary?: WorkspaceSummaryView
   readonly supportEmail?: string
+  readonly readOnlyFacts?: ReadOnlySurfaceFacts
 }
 
 export interface ActivityDrawerProps {

@@ -1,3 +1,5 @@
+import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './whm-client-templates.ts'
+const whmClientNode = canonicalWhmClientNode, clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -78,6 +80,7 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
     if (!status || !rows || !form || !statusFilter || !kindFilter || !refresh || !clear || !apply || !detailStatus || !steps || !outcome || !failure || !errorText || !verification || !verificationDetail || !logView || !logStatus || !logMore || !cancel || !cancelStatus) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => root.isConnected && root.dataset.jobsCanRead === 'true' && !root.closest(denied) && typeof request === 'function'
+    const manageable = (): boolean => admitted() && root.dataset.jobsCanManage === 'true'
     const POLL_MS = 5000, LOG_PAGE = 65536, LOG_DISPLAY_MAX = 1048576, MAX_FAILURES = 3
     let jobs: JobView[] = [], selected: JobView | null = null, wanted: string | null = null, filters = { status: '', kindPrefix: '' }
     let log = { id: '', text: '', nextOffset: 0, total: 0, available: false, truncated: false }
@@ -89,24 +92,17 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
     const statusLabel = (value: JobStatusView): string => ({ queued: t(msgctxt('whm-jobs-client', 'Queued')), running: t('Running'), succeeded: t('Succeeded'), failed: t(msgctxt('whm-jobs-client', 'Failed')), cancelled: t(msgctxt('whm-jobs-client', 'Cancelled')) })[value]
     const stepLabel = (value: JobStepStateView): string => ({ pending: t('Pending'), running: t('Running'), succeeded: t('Succeeded'), failed: t(msgctxt('whm-jobs-client', 'Failed')), skipped: t('Did not run'), unknown: t('Outcome unknown') })[value]
     const badge = (value: JobStatusView): HTMLElement => {
-      const tone = value === 'succeeded' ? 'ok' : value === 'failed' ? 'critical' : value === 'running' ? 'reconciling' : 'suspended'
-      const node = document.createElement('span'), label = document.createElement('span'), ns = 'http://www.w3.org/2000/svg'
-      node.className = 'xp-badge xp-badge--' + tone; node.dataset.status = value; label.className = 'xp-badge__label'; label.textContent = statusLabel(value)
-      const svg = document.createElementNS(ns, 'svg'), circle = document.createElementNS(ns, 'circle'), mark = document.createElementNS(ns, 'path')
-      svg.setAttribute('class', 'xp-status-icon'); svg.setAttribute('width', '14'); svg.setAttribute('height', '14'); svg.setAttribute('viewBox', '0 0 16 16'); svg.setAttribute('fill', 'none'); svg.setAttribute('aria-hidden', 'true')
-      circle.setAttribute('cx', '8'); circle.setAttribute('cy', '8'); circle.setAttribute('r', '6.5'); circle.setAttribute('stroke', 'currentColor'); circle.setAttribute('stroke-width', '1.5')
-      mark.setAttribute('d', tone === 'ok' ? 'M5.2 8.2l1.9 1.9 3.7-4' : tone === 'critical' ? 'M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4' : tone === 'reconciling' ? 'M8 4.8V8l2.2 1.4' : 'M6.4 5.6v4.8M9.6 5.6v4.8')
-      mark.setAttribute('stroke', 'currentColor'); mark.setAttribute('stroke-width', '1.6'); mark.setAttribute('stroke-linecap', 'round')
-      svg.append(circle, mark); node.append(svg, label)
+      const node = whmClientNode(root, 'whm-jobs-state-' + value, 'span', statusLabel(value))
+      node.dataset.status = value
       return node
     }
     const meter = (job: JobView): HTMLElement => {
-      const wrap = document.createElement('div'), track = document.createElement('div'), fill = document.createElement('span')
-      wrap.className = 'xp-whm-jobs__progress'; track.className = 'xp-meter__track'; fill.className = 'xp-meter__fill' + (job.status === 'failed' ? ' xp-meter__fill--critical' : job.status === 'succeeded' ? ' xp-meter__fill--ok' : '')
-      track.setAttribute('role', 'progressbar'); track.setAttribute('aria-valuemin', '0'); track.setAttribute('aria-valuemax', '100'); track.setAttribute('aria-valuenow', String(job.progress))
-      track.setAttribute('aria-valuetext', job.progress + '%'); track.setAttribute('aria-label', t('Progress'))
-      fill.style.width = job.progress + '%'; track.append(fill); wrap.append(track, ltr(job.progress + '%'))
-      return wrap
+      const node = cloneClientTemplate(clientTemplate(root, 'whm-jobs-progress-' + (job.status === 'failed' ? 'failed' : job.status === 'succeeded' ? 'succeeded' : 'other')), 'div', ['track', 'fill', 'content'])
+      const track = clientTemplateSlot(node, 'track'), fill = clientTemplateSlot(node, 'fill')
+      track.setAttribute('aria-valuenow', String(job.progress)); track.setAttribute('aria-valuetext', job.progress + '%'); track.setAttribute('aria-label', t('Progress'))
+      fill.style.inlineSize = job.progress + '%'
+      clientTemplateSlot(node, 'content').textContent = job.progress + '%'
+      return node
     }
     const cell = (row: HTMLTableRowElement, content: Node | string): void => { const td = document.createElement('td'); td.append(content); row.append(td) }
     const placeholder = (body: HTMLElement, columns: number, message: string): void => { body.textContent = ''; const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = columns; td.textContent = message; row.append(td); body.append(row) }
@@ -117,7 +113,7 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
           : job.status === 'cancelled' ? t('The job was cancelled before its next step. Steps marked "Did not run" made no change.')
             : t('The failure was not classified. Treat the host state as unverified.')
     const field = (key: string, content: Node | string): void => { const target = root.querySelector<HTMLElement>('[data-whm-jobs-field="' + key + '"]'); if (target) { target.textContent = ''; target.append(content) } }
-    const lockCancel = (): void => { cancel.disabled = !selected || !active(selected) || selected.cancelRequested || cancelling || !admitted() || typeof askDialog !== 'function' }
+    const lockCancel = (): void => { cancel.disabled = !selected || !active(selected) || selected.cancelRequested || cancelling || !manageable() || typeof askDialog !== 'function' }
     const paintLog = (): void => {
       logView.textContent = log.text
       logMore.disabled = !selected || logBusy || !log.available || log.nextOffset >= log.total || log.text.length >= LOG_DISPLAY_MAX || !admitted()
@@ -141,8 +137,9 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
       field('cancellation', job.cancelRequested ? (active(job) ? t('Requested; takes effect before the next step') : t('Requested')) : t('Not requested'))
       steps.textContent = ''
       job.steps.forEach((step, index) => {
-        const row = document.createElement('tr')
-        cell(row, ltr(String(index + 1))); cell(row, t(step.title, step.titleValues)); cell(row, stepLabel(step.state)); cell(row, step.exitCode === null ? t('None') : ltr(String(step.exitCode)))
+        const row = cloneClientTemplate(clientTemplate(root, 'whm-jobs-step'), 'tr', ['order', 'title', 'state', 'exit'])
+        clientTemplateSlot(row, 'order').replaceChildren(ltr(String(index + 1))); clientTemplateSlot(row, 'title').textContent = t(step.title, step.titleValues)
+        clientTemplateSlot(row, 'state').textContent = stepLabel(step.state); clientTemplateSlot(row, 'exit').replaceChildren(step.exitCode === null ? t('None') : ltr(String(step.exitCode)))
         row.dataset.stepState = step.state; steps.append(row)
       })
       if (!job.steps.length) placeholder(steps, 4, t('The job record has no readable steps.'))
@@ -157,11 +154,13 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
     const paintRows = (): void => {
       rows.textContent = ''
       for (const job of jobs) {
-        const row = document.createElement('tr'), select = document.createElement('button')
-        select.type = 'button'; select.className = 'xp-whm-jobs__select'; select.dataset.whmJobsSelect = job.id; select.setAttribute('aria-controls', 'whm-jobs-detail'); select.setAttribute('aria-pressed', String(wanted === job.id)); select.append(ltr(job.kind))
+        const row = cloneClientTemplate(clientTemplate(root, 'whm-jobs-row'), 'tr', ['reference', 'kind', 'summary', 'state', 'progress', 'created', 'started', 'finished', 'actor'])
+        const select = whmClientNode(root, 'whm-jobs-select', 'button')
+        select.disabled = !admitted(); select.dataset.whmJobsSelect = job.id; select.setAttribute('aria-controls', 'whm-jobs-detail'); select.setAttribute('aria-pressed', String(wanted === job.id)); select.append(ltr(job.kind))
         select.addEventListener('click', () => { if (admitted()) void choose(job.id) })
-        cell(row, job.referenceCode === null ? t('Unnumbered') : ltr(job.referenceCode)); cell(row, select); cell(row, job.summary); cell(row, badge(job.status)); cell(row, meter(job)); cell(row, utc(job.createdAt, ''))
-        cell(row, utc(job.startedAt, t('Not started'))); cell(row, utc(job.finishedAt, t('Not finished'))); cell(row, ltr(job.actor))
+        const put = (slot: string, value: Node | string): void => clientTemplateSlot(row, slot).replaceChildren(value)
+        put('reference', job.referenceCode === null ? t('Unnumbered') : ltr(job.referenceCode)); put('kind', select); put('summary', job.summary); put('state', badge(job.status)); put('progress', meter(job)); put('created', utc(job.createdAt, ''))
+        put('started', utc(job.startedAt, t('Not started'))); put('finished', utc(job.finishedAt, t('Not finished'))); put('actor', ltr(job.actor))
         rows.append(row)
       }
       if (!jobs.length) placeholder(rows, 9, t('No jobs were returned.'))
@@ -248,7 +247,7 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
     logMore.addEventListener('click', () => { void loadLog(false) })
     cancel.addEventListener('click', async () => {
       const job = selected
-      if (!job || !active(job) || cancelling || !admitted() || !request || typeof askDialog !== 'function') return
+      if (!job || !active(job) || cancelling || !manageable() || !request || typeof askDialog !== 'function') return
       cancelling = true; lockCancel()
       let confirmed = false
       try {
@@ -256,7 +255,7 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
           body: job.status === 'queued' ? t('The job has not started. Cancelling it now means none of its steps will run.')
             : t('The step that is running now will finish. The job stops before its next step; steps already completed are not undone.') }) === true
       } catch { confirmed = false }
-      if (!confirmed || selected?.id !== job.id) { cancelling = false; lockCancel(); return }
+      if (!confirmed || selected?.id !== job.id || !manageable()) { cancelling = false; lockCancel(); return }
       note(cancelStatus, 'reading', t('Recording the cancellation…'))
       try {
         const updated = readJobView((await request('POST', '/api/jobs/' + job.id + '/cancel') as { job?: unknown })?.job)
@@ -278,4 +277,4 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
   })
 }
 
-export const WHM_JOBS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readJobView=${readJobView.toString()};const readJobListView=${readJobListView.toString()};const readJobLogView=${readJobLogView.toString()};return ${bindWhmJobs.toString()};})()`
+export const WHM_JOBS_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readJobView=${readJobView.toString()};const readJobListView=${readJobListView.toString()};const readJobLogView=${readJobLogView.toString()};return ${bindWhmJobs.toString()};})()`

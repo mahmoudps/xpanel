@@ -3,6 +3,10 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import { readBackupFilesReply } from './whm-backup-files-client.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 const displayDateTime = formatDisplayDateTime
 // Module-local alias: the binding source refers to it by this name, defined again in ACCT_RESTORE_CLIENT_BINDING.
 const readFilesReply = readBackupFilesReply
@@ -81,6 +85,25 @@ function bindRestoreMore(): void {
     const status = find('status'), account = find<HTMLSelectElement>('account'), archives = find('archives'), components = find('components'), mailboxes = find('mailboxes'), selectionNote = find('selection')
     const previewButton = find<HTMLButtonElement>('preview'), review = find('review'), ack = find<HTMLInputElement>('ack'), restoreButton = find<HTMLButtonElement>('restore'), results = find('results'), more = find<HTMLButtonElement>('continue'), steps = find('steps')
     if (!status || !account || !archives || !components || !mailboxes || !selectionNote || !previewButton || !review || !ack || !restoreButton || !results || !more || !steps) return
+    const templates = new Map<string, HTMLTemplateElement>()
+    const shapes = { archives: ['created', 'archive', 'bytes', 'integrity', 'open'], components: ['name', 'contents', 'action'], mailboxes: ['select', 'address', 'messages', 'bytes', 'state'], review: ['path', 'bytes'], results: ['path', 'result', 'reason'], empty: ['message'], link: ['label'] } as const
+    const tables = { archives, components, mailboxes, review, results }
+    try {
+      for (const [kind, slots] of Object.entries(shapes)) {
+        const template = clientTemplate(root, 'restore-more-' + kind)
+        const clone = cloneClientTemplate(template, kind === 'link' ? 'a' : 'tr', slots)
+        if (kind === 'archives') clientTemplateSlot(clone, 'open', 'button')
+        if (kind === 'mailboxes' && (clientTemplateSlot(clone, 'select', 'input') as HTMLInputElement).type !== 'checkbox') throw new Error('invalid_restore_selection')
+        if (kind in tables) {
+          const columns = Number(tables[kind as keyof typeof tables].dataset.xpColumns)
+          if (!Number.isSafeInteger(columns) || columns < 1 || columns > 32 || (clone as HTMLTableRowElement).cells.length !== columns) throw new Error('invalid_restore_table_shape')
+        }
+        templates.set(kind, template)
+      }
+    } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      status.dataset.state = 'failed'; status.textContent = t('The server response could not be verified. Nothing is assumed.'); return
+    }
     const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.restoreMoreCanRead === 'true' && !root.closest(denied)
@@ -111,10 +134,17 @@ function bindRestoreMore(): void {
     const element = <K extends keyof HTMLElementTagNameMap>(tag: K, value?: string): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); if (value !== undefined) node.textContent = value; return node }
     const technical = (value: string): HTMLElement => { const node = element('bdi', value); node.dir = 'ltr'; return node }
     const size = (bytes: number): string => bytes < 1024 ? bytes + ' B' : bytes < 1048576 ? (bytes / 1024).toFixed(1) + ' KiB' : bytes < 1073741824 ? (bytes / 1048576).toFixed(1) + ' MiB' : (bytes / 1073741824).toFixed(2) + ' GiB'
-    const cell = (...nodes: (Node | string)[]): HTMLTableCellElement => { const td = element('td'); td.append(...nodes); return td }
-    const fill = (body: HTMLElement, rows: HTMLTableRowElement[], empty: string, columns: number): void => {
+    const themedRow = (kind: 'archives' | 'components' | 'mailboxes' | 'review' | 'results', values: Record<string, Node | string>): HTMLTableRowElement => {
+      const row = cloneClientTemplate(templates.get(kind)!, 'tr', shapes[kind]) as HTMLTableRowElement
+      for (const [key, value] of Object.entries(values)) clientTemplateSlot(row, key).replaceChildren(value)
+      return row
+    }
+    const fill = (body: HTMLElement, rows: HTMLTableRowElement[], empty: string): void => {
       if (rows.length) { body.replaceChildren(...rows); return }
-      const row = element('tr'), td = cell(empty); td.colSpan = columns; row.append(td); body.replaceChildren(row)
+      const columns = Number(body.dataset.xpColumns)
+      if (!Number.isSafeInteger(columns) || columns < 1 || columns > 32) throw new Error('invalid_restore_table_columns')
+      const row = cloneClientTemplate(templates.get('empty')!, 'tr', shapes.empty), td = clientTemplateSlot(row, 'message', 'td') as HTMLTableCellElement
+      td.colSpan = columns; td.textContent = empty; body.replaceChildren(row)
     }
     const fact = (name: string, value: Node | string): void => { find(name)?.replaceChildren(value) }
     const step = (name: string): void => steps.querySelectorAll<HTMLElement>('li').forEach(item => { if (item.dataset.step === name) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current') })
@@ -133,8 +163,8 @@ function bindRestoreMore(): void {
       selectionNote.textContent = selected.size ? t('Mailboxes selected: {count} of 50.', { count: selected.size }) : t('No mailbox is selected. Up to 50 mailboxes can be selected.')
     }
     const resetFacts = (names: readonly string[]): void => names.forEach(name => fact(name, t('Not read')))
-    const invalidate = (): void => { reviewed = null; ack.checked = false; fill(review, [], t('No restore has been reviewed.'), 2); resetFacts(['count-messages', 'count-present', 'count-batch', 'count-remaining', 'count-refused', 'planned', 'quota', 'writer']) }
-    const resetResults = (): void => { again = false; fill(results, [], t('No restore has run.'), 3); resetFacts(['count-restored', 'count-skipped', 'count-failed', 'count-pending']) }
+    const invalidate = (): void => { reviewed = null; ack.checked = false; fill(review, [], t('No restore has been reviewed.')); resetFacts(['count-messages', 'count-present', 'count-batch', 'count-remaining', 'count-refused', 'planned', 'quota', 'writer']) }
+    const resetResults = (): void => { again = false; fill(results, [], t('No restore has run.')); resetFacts(['count-restored', 'count-skipped', 'count-failed', 'count-pending']) }
     const run = async (loading: string, operation: () => Promise<void>): Promise<void> => {
       if (busy || !admitted()) return
       busy = true; sync(); note('loading', loading)
@@ -142,34 +172,43 @@ function bindRestoreMore(): void {
       finally { busy = false; sync() }
     }
     const renderComponents = (view: RestoreMoreInventory | null): void => {
-      const row = (name: string, contents: string, action: Node | string): HTMLTableRowElement => { const line = element('tr'); line.append(cell(name), cell(contents), cell(action)); return line }
-      const link = element('a', t('Restore files')); link.href = '/whm/backups/files'; link.className = 'xp-btn'
+      const row = (name: string, contents: string, action: Node | string): HTMLTableRowElement => themedRow('components', { name, contents, action })
+      const link = cloneClientTemplate(templates.get('link')!, 'a', shapes.link) as HTMLAnchorElement
+      const locale = document.documentElement.lang === 'ar' ? 'ar' : 'en'
+      clientTemplateSlot(link, 'label').textContent = t('Restore files'); link.href = '/whm/backups/files?lang=' + locale
+      const part = (name: string, state: RestoreMorePartState, entries: readonly RestoreMoreDatabase[]): HTMLTableRowElement => {
+        const contents = state === 'not-in-archive' ? t('Not in this backup') : entries.map(entry => entry.name).join(', ')
+        if (state !== 'available') return row(name, contents, state === 'not-in-archive' ? t('Nothing to restore') : t('Unavailable'))
+        const reviewLink = cloneClientTemplate(templates.get('link')!, 'a', shapes.link) as HTMLAnchorElement
+        clientTemplateSlot(reviewLink, 'label').textContent = t('Review differences'); reviewLink.href = '/whm/backups/restore?lang=' + locale
+        return row(name, contents, reviewLink)
+      }
       fill(components, view ? [
         row(t('Home files'), t('{count, plural, one {# file} other {# files}}, {size}', { count: view.files.files, size: size(view.files.bytes) }), view.files.files ? link : t('Nothing to restore')),
         row(t('Mail'), t('{count, plural, one {# mailbox} other {# mailboxes}}', { count: view.mail.mailboxes.length }), view.mail.state === 'available' ? t('Select mailboxes below') : t('Unavailable: the confined account file writer is not installed on this server')),
         row(t('Mail settings'), t('{count, plural, one {# file} other {# files}}', { count: view.mailSettingsFiles }), t('Not restored: account mail settings are rendered from saved configuration')),
-        row(t('Databases'), t('Not in this backup'), t('Unavailable: server account backups contain no database dumps. Restore a database from its own export in Databases.')),
-        row('DNS', t('Not in this backup'), t('Unavailable: DNS zones are rendered from saved configuration. Review the zone in DNS zones.')),
-      ] : [], t('No backup has been opened.'), 3)
+        part(t('Databases'), view.databases.state, view.databases.databases),
+        part('DNS', view.dns.state, view.dns.zones),
+      ] : [], t('No backup has been opened.'))
       fill(mailboxes, (view?.mail.mailboxes ?? []).map(box => {
-        const line = element('tr'), check = element('input')
-        check.type = 'checkbox'; check.value = box.address; check.dataset.current = box.current; check.setAttribute('aria-label', t('Select {name}', { name: box.address }))
-        line.append(cell(check), cell(technical(box.address)), cell(technical(String(box.messages))), cell(technical(size(box.bytes))), cell(box.current === 'exists' ? t('Exists') : t('Missing: create the mailbox again before restoring its mail')))
+        const line = themedRow('mailboxes', { address: box.address, messages: String(box.messages), bytes: size(box.bytes), state: box.current === 'exists' ? t('Exists') : t('Missing: create the mailbox again before restoring its mail') })
+        const check = clientTemplateSlot(line, 'select', 'input') as HTMLInputElement
+        check.value = box.address; check.dataset.current = box.current; check.setAttribute('aria-label', t('Select {name}', { name: box.address }))
         return line
-      }), view ? t('This backup contains no mailbox messages.') : t('No backup has been opened.'), 5)
+      }), view ? t('This backup contains no mailbox messages.') : t('No backup has been opened.'))
     }
     const renderArchives = (list: { file: string; bytes: number; createdAt: string; integrity: string; reason: string | null }[]): void => fill(archives, list.map(item => {
-      const row = element('tr'), open = element('button', t(msgctxt('acct-restore-client', 'Open')))
-      open.type = 'button'; open.className = 'xp-btn'; open.dataset.file = item.file; open.dataset.rejected = String(item.integrity === 'rejected')
+      const row = themedRow('archives', { created: displayDateTime(item.createdAt), archive: item.file, bytes: size(item.bytes), integrity: item.integrity === 'rejected' ? t('Rejected: {reason}', { reason: reason(item.reason) }) : t('Not yet inspected; opening inspects every member') })
+      const open = clientTemplateSlot(row, 'open', 'button') as HTMLButtonElement
+      open.textContent = t(msgctxt('acct-restore-client', 'Open')); open.dataset.file = item.file; open.dataset.rejected = String(item.integrity === 'rejected')
       open.setAttribute('aria-label', t('Open backup {file}', { file: item.file }))
-      row.append(cell(technical(displayDateTime(item.createdAt))), cell(technical(item.file)), cell(technical(size(item.bytes))), cell(item.integrity === 'rejected' ? t('Rejected: {reason}', { reason: reason(item.reason) }) : t('Not yet inspected; opening inspects every member')), cell(open))
       return row
-    }), username ? t('This account has no backups in the server backup store.') : t('No account is selected.'), 5)
+    }), username ? t('This account has no backups in the server backup store.') : t('No account is selected.'))
     const preview = (): Promise<void> => run(t('Reviewing the restore…'), async () => {
       const chosen = [...selected].sort()
       const view = readRestoreMoreReply('preview', await transport!('POST', base() + '/preview', { file, mailboxes: chosen }), { username, file, mailboxes: chosen })
       reviewed = { ...view, mailboxes: chosen }; ack.checked = false; resetResults(); step('review')
-      fill(review, view.rows.map(item => { const line = element('tr'); line.append(cell(technical(item.path)), cell(technical(size(item.bytes)))); return line }), t('Every selected message is already present.'), 2)
+      fill(review, view.rows.map(item => themedRow('review', { path: item.path, bytes: size(item.bytes) })), t('Every selected message is already present.'))
       fact('count-messages', String(view.counts.messages)); fact('count-present', String(view.counts.present)); fact('count-batch', String(view.counts.batch)); fact('count-remaining', String(view.counts.remaining)); fact('count-refused', String(view.counts.refused))
       fact('planned', technical(size(view.quota.plannedBytes))); fact('quota', view.quota.limitMb === 'unlimited' ? t(msgctxt('acct-restore-client', 'Unlimited')) : (view.quota.fits ? t('Fits within {limit} MiB', { limit: view.quota.limitMb }) : t('Exceeds {limit} MiB', { limit: view.quota.limitMb })))
       fact('writer', view.writer === 'available' ? t('Available') : t('Not installed on this server'))
@@ -216,7 +255,7 @@ function bindRestoreMore(): void {
         if (!current) return
         const view = readRestoreMoreReply('restore', await transport!('POST', base() + '/restore', { file, mailboxes: current.mailboxes, expectedRevision: current.revision }), { username, file, mailboxes: current.mailboxes, revision: current.revision })
         const label: Record<RestoreMoreResult, string> = { restored: msgid('Restored and verified'), 'skipped-exists': msgctxt('acct-restore-client', 'Skipped, already present'), failed: msgid('Failed'), 'not-attempted': msgctxt('acct-restore-client', 'Not attempted yet') }
-        fill(results, view.results.map(row => { const line = element('tr'); line.dataset.result = row.result; line.append(cell(technical(row.path)), cell(t(label[row.result])), cell(reason(row.reason) + (row.verificationRequired ? ' ' + t('Verification required.') : ''))); return line }), t('No message was processed.'), 3)
+        fill(results, view.results.map(row => { const line = themedRow('results', { path: row.path, result: t(label[row.result]), reason: reason(row.reason) + (row.verificationRequired ? ' ' + t('Verification required.') : '') }); line.dataset.result = row.result; return line }), t('No message was processed.'))
         fact('count-restored', String(view.counts.restored)); fact('count-skipped', String(view.counts['skipped-exists'])); fact('count-failed', String(view.counts.failed)); fact('count-pending', String(view.counts['not-attempted']))
         reviewed = null; ack.checked = false; again = !view.complete || view.remaining > 0 || view.counts['not-attempted'] > 0; step('result')
         const summary = t('{restored} restored, {skipped} skipped, {failed} failed, {notAttempted} not attempted.', { restored: view.counts.restored, skipped: view.counts['skipped-exists'], failed: view.counts.failed, notAttempted: view.counts['not-attempted'] })
@@ -233,4 +272,4 @@ function bindRestoreMore(): void {
   })
 }
 
-export const ACCT_RESTORE_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};const readFilesReply=${readBackupFilesReply.toString()};const readRestoreMoreReply=${readRestoreMoreReply.toString()};return ${bindRestoreMore.toString()};})()`
+export const ACCT_RESTORE_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const readFilesReply=${readBackupFilesReply.toString()};const readRestoreMoreReply=${readRestoreMoreReply.toString()};return ${bindRestoreMore.toString()};})()`

@@ -1,3 +1,4 @@
+import { logsClientTemplates } from './team-logs-client-templates.ts'
 import type { Domain } from '@xpanel/core'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
@@ -23,5 +24,5 @@ export function renderAccountLogsWorkspace(input: { lang: Locale; accountId: str
       <p class="xp-help" data-logs-summary>${t('No log has been read.')}</p>
       <div class="xp-acct-tool__table" tabindex="0" role="region" aria-label="${t('Log entries')}"><table class="xp-table"><thead data-logs-head><tr><th scope="col">${t('Entries')}</th></tr></thead><tbody data-logs-rows><tr><td>${t('No log has been read.')}</td></tr></tbody></table></div>
       <p data-logs-status role="status" data-state="unread">${kinds.length ? domains.length ? t('Choose a domain and read its log.') : t('This account has no domains to read logs for.') : t('Site logs are unavailable here. Nothing was read.')}</p></section>
-  </div>`
+${logsClientTemplates(t)}  </div>`
 }

@@ -1,3 +1,4 @@
+import { classicWhmClientTemplates } from '../themes/classic/whm-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 export interface WhmMailQueueWorkspaceInput { locale: Locale; canRead: boolean; canManage: boolean }
 
@@ -9,7 +10,7 @@ export function renderWhmMailQueueWorkspace({ locale, canRead, canManage }: WhmM
   const field = (id: string, label: string, control: string): string => `<div class="xp-whm-mail-queue__field"><label for="${id}">${label}</label>${control}</div>`
   const actions: [string, string][] = [['deliver', t('Retry now')], ['hold', t(msgctxt('whm-mail-queue-workspace', 'Hold'))], ['release', t('Release')], ['delete', t('Delete')]]
   const headers = [t('Queue ID'), t('Queue'), t('Arrived (UTC)'), t('Age'), t('Size'), t('Sender'), t('Recipients'), t('Delay reason'), t('Actions')]
-  return `<section class="xp-whm-mail-queue" data-whm-mail-queue-workspace data-mail-queue-can-read="${canRead}" data-mail-queue-can-manage="${canRead && canManage}" lang="${locale}" dir="${localeDirection(locale)}" aria-labelledby="whm-mail-queue-summary-heading">
+  return `<section class="xp-whm-mail-queue" data-whm-mail-queue-workspace data-mail-queue-can-read="${canRead}" data-mail-queue-can-manage="${canRead && canManage}" lang="${locale}" dir="${localeDirection(locale)}" aria-labelledby="whm-mail-queue-summary-heading">${classicWhmClientTemplates('mail-queue')}
     <style>.xp-whm-mail-queue h2{font-size:var(--xp-type-card);line-height:var(--xp-leading-card);font-weight:var(--xp-weight-semibold)}
     .xp-whm-mail-queue{display:flex;flex-direction:column;gap:32px;min-inline-size:0}.xp-whm-mail-queue :is(h2,p,dl,dd,ol){margin:0}.xp-whm-mail-queue__card{display:flex;flex-direction:column;gap:24px;padding:16px;min-inline-size:0;border:1px solid var(--xp-border);border-radius:8px;background:var(--xp-bg-surface)}
     .xp-whm-mail-queue__heading{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px}.xp-whm-mail-queue__facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));gap:16px}.xp-whm-mail-queue__facts>div,.xp-whm-mail-queue__field{display:flex;flex-direction:column;gap:8px;min-inline-size:0}.xp-whm-mail-queue dt{font-weight:600}.xp-whm-mail-queue dd{overflow-wrap:anywhere}

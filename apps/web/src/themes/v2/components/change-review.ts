@@ -66,7 +66,7 @@ export interface ChangeReviewProps {
 const facts = (rows: readonly ReviewRow[], side: 'current' | 'proposed'): string =>
   `<dl>${rows.map(row => {
     const changed = side === 'proposed' && row.current !== row.proposed
-    return `<div><dt>${escapeHtml(row.label)}</dt><dd class="v2-num${row.mono ? ' v2-mono' : ''}${changed ? ' v2-review__changed' : ''}">${escapeHtml(row[side])}</dd></div>`
+    return `<div><dt>${escapeHtml(row.label)}</dt><dd${changed ? ' class="v2-review__changed"' : ''}><bdi class="v2-num${row.mono ? ' v2-mono' : ''}" dir="${row.mono ? 'ltr' : 'auto'}">${escapeHtml(row[side])}</bdi></dd></div>`
   }).join('')}</dl>`
 
 // One per-field row. Without a row it is the `review-row` template: core fills its text slots, sets data-xp-field and
@@ -134,10 +134,10 @@ export const CHANGE_REVIEW_CSS = `.v2-review:has(.v2-review__rows>li,>.v2-review
 .v2-review__side h3{font-size:12px;font-weight:600;color:var(--muted)}
 .v2-review__side--proposed{background:var(--accent-soft);border-color:var(--accent-line)}
 .v2-review__side--proposed h3{color:var(--accent)}
-.v2-review__side dl{display:flex;flex-direction:column;gap:var(--space-1)}
-.v2-review__side dl>div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.v2-review__side dl{display:flex;flex-direction:column;gap:var(--space-2)}
+.v2-review__side dl>div{display:flex;flex-direction:column;gap:var(--space-1);min-width:0}
 .v2-review__side dt{font-size:12px;color:var(--muted)}
-.v2-review__side dd{font-size:13px;overflow-wrap:anywhere}
+.v2-review__side dd{font-size:13px;text-align:start;overflow-wrap:anywhere}
 .v2-review__changed{font-weight:600}
 .v2-review__rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-2)}
 .v2-review__rows:not(:empty)+.v2-review__empty{display:none}
@@ -148,7 +148,7 @@ export const CHANGE_REVIEW_CSS = `.v2-review:has(.v2-review__rows>li,>.v2-review
 .v2-review__undo{padding:0 var(--space-1);font-size:13px}
 .v2-review__pair{display:flex;align-items:stretch;gap:var(--space-1)}
 .v2-review__pair>.v2-icon{flex:none;align-self:center;color:var(--muted)}
-.v2-review__box{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:2px;padding:10px 12px;border-radius:var(--radius-control);background:var(--subtle);border:1px solid var(--line)}
+.v2-review__box{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:var(--space-1);padding:var(--space-2);border-radius:var(--radius-control);background:var(--subtle);border:1px solid var(--line)}
 .v2-review__box>:first-child{font-size:12px;color:var(--muted)}
 .v2-review__box>:last-child{font-size:13px;overflow-wrap:anywhere}
 .v2-review__box--proposed{background:var(--accent-soft);border-color:var(--accent-line)}
@@ -156,7 +156,7 @@ export const CHANGE_REVIEW_CSS = `.v2-review:has(.v2-review__rows>li,>.v2-review
 .v2-review__row[data-state=invalid] .v2-review__box--proposed>:last-child{color:var(--bad)}
 .v2-review__detail{font-size:12px;color:var(--text-2);overflow-wrap:anywhere}
 .v2-review__detail[data-empty]{display:none}
-.v2-review__gate{display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--space-2) var(--space-3)}
+.v2-review__gate{display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--space-2) var(--space-3);padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--subtle)}
 .v2-review__tests{flex:1 1 420px;min-width:0;display:flex;flex-direction:column;gap:var(--space-1)}
 .v2-review__tests ol{margin:0;padding-inline-start:20px;display:flex;flex-direction:column;gap:6px;font-size:13px;line-height:1.55;color:var(--text-2)}
 .v2-review__tests code{font-family:var(--font-mono);font-size:12px;color:var(--text)}

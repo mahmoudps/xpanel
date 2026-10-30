@@ -1,3 +1,4 @@
+import { databaseRemoteTemplates } from './data-client-templates.ts'
 import { localeDirection, translator, type Locale, type MessageValues } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
@@ -22,5 +23,5 @@ export function renderAccountDatabaseRemoteWorkspace(input: { lang: Locale; acco
       <div class="xp-acct-tool__actions"><button type="button" class="xp-btn xp-btn--primary" data-remote-save${off}>${t('Add host')}</button><button type="button" class="xp-btn xp-btn--danger" data-remote-remove disabled>${t('Remove selected host')}</button><button type="button" class="xp-btn" data-remote-cancel${off}>${t('Cancel selection')}</button></div>
       <p class="xp-help remote-note">${t('Changes require fresh account authorization, exact grant and source-scoped TCP/3306 firewall readback, and verified recovery. An unavailable or unverified provider keeps changes disabled. Removing one host preserves every other host and all localhost grants.')}</p>
     </section>
-  </div>`
+  ${databaseRemoteTemplates(t)}</div>`
 }

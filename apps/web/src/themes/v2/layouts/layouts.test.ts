@@ -244,7 +244,7 @@ describe('v2 page layouts', () => {
     expect(html).toMatch(/<button type="button" class="v2-btn" data-retry="follow" data-log-follow-retry hidden>/)
     // Each entry is a disclosure: the time is the expand toggle and its details row starts hidden with the slot.
     expect(html).toMatch(/<template data-xp-template="log-entry"><tr data-level="info"><td><button type="button" class="v2-log__toggle" data-xp-action="expand" aria-expanded="false"><svg[^>]*>.*?<\/svg><span data-xp-slot="time"><\/span><\/button><\/td>/)
-    expect(html).toContain('<tr class="v2-log__details"><td colspan="2"><div class="v2-log__detail"><dl class="v2-log__facts" data-xp-slot="details" hidden></dl><template data-xp-template="log-fact"><div class="v2-log__fact"><dt data-xp-slot="label"></dt><dd dir="ltr" data-xp-slot="value"></dd></div></template><div class="v2-log__detail-actions"><button type="button" class="v2-btn" data-xp-action="copy">')
+    expect(html).toContain('<tr class="v2-log__details"><td colspan="2"><div class="v2-log__detail"><dl class="v2-log__facts" data-xp-slot="details" hidden></dl><template data-xp-template="log-fact"><div class="v2-log__fact"><dt data-xp-slot="label"></dt><dd><bdi dir="ltr" data-xp-slot="value"></bdi></dd></div></template><div class="v2-log__detail-actions"><button type="button" class="v2-btn" data-xp-action="copy">')
     expect(html).toContain('data-log-read>Logs</button>')
     // A caller cannot start the stream in another state.
     const forced = layouts.logPage(t, { header: header(), stream: { title: 'L', titleId: 'l', table, streamHooks: { 'data-log-follow-state': 'following' } } })
@@ -281,14 +281,14 @@ describe('v2 page layouts', () => {
   it('matrix: grouped events, channel columns with group switches, the review and the save bar', () => {
     const html = matrix()
     expect(html).toMatch(/<div class="v2-table-scroll" role="region" aria-labelledby="matrix-title-caption" tabindex="0"><table class="v2-table v2-matrix"><caption id="matrix-title-caption" class="v2-sr">/)
-    expect(html).toContain('<tbody data-group="accounts"><tr class="v2-matrix__group"><th scope="rowgroup" colspan="2">')
-    expect(html).toMatch(/<td><\/td><td><label class="v2-matrix__switch"><input type="checkbox" role="switch" aria-label="Notifications" checked data-group-all="accounts"><span>All in group<\/span><\/label><\/td>/)
+    expect(html).toContain('<tbody data-group="accounts"><tr class="v2-matrix__group"><th scope="rowgroup" colspan="3">')
+    expect(html).toMatch(/<\/th><td><label class="v2-matrix__switch"><input type="checkbox" role="switch" aria-label="Notifications" checked data-group-all="accounts"><span>All in group<\/span><\/label><\/td>/)
     expect(html).toMatch(/<th scope="col"><label class="v2-matrix__switch"><input type="checkbox" role="switch" aria-label="Notifications" data-channel-all="email">/)
     expect(html).toMatch(/<tr data-event-row="account.created"><th scope="row">.*<td>Reconciler<\/td><td><span class="v2-matrix__fixed">.*<\/td><td><label class="v2-matrix__switch"><input type="checkbox" role="switch" aria-label="Notifications" checked data-event="account.created"><\/label><\/td><\/tr>/s)
     expect(html).toContain('<aside class="v2-aside" aria-label="Notifications">')
     expect(html).toContain('<span class="v2-matrix__channel"><span>Notifications</span><span class="v2-text--warn">Notifications</span></span>')
     expect(html).toMatch(/<section class="v2-card v2-review" id="nt-review" aria-labelledby="review-title">\n<div class="v2-card__head"><div class="v2-card__title"><h2 id="review-title">Notifications<\/h2><\/div><span class="v2-review__meta v2-num">Notifications<\/span><\/div>/)
-    expect(html).toContain('<div class="v2-review__side"><h3>Current · saved 2026-10-22 14:05 UTC</h3><dl><div><dt>Notifications</dt><dd class="v2-num">Off</dd></div></dl></div>')
+    expect(html).toContain('<div class="v2-review__side"><h3>Current · saved 2026-10-22 14:05 UTC</h3><dl><div><dt>Notifications</dt><dd><bdi class="v2-num" dir="auto">Off</bdi></dd></div></dl></div>')
     expect(html).not.toContain('v2-review__gate')
     // In review: what saving does, then Back to editing and Save settings.
     expect(html).toMatch(/<ul class="v2-review__steps" aria-label="What saving does"><li><svg[^>]*>.*?<\/svg><span>Notifications<\/span><\/li>/)

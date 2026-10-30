@@ -2,6 +2,11 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { clientTemplateSlot as canonicalClientTemplateSlot } from './client-templates.ts'
+const clientTemplateSlot = canonicalClientTemplateSlot
+import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const viewAction = canonicalViewAction
 const displayDateTime = formatDisplayDateTime
 
 /** Self-contained browser binding over the persisted transfer workspace contract. */
@@ -24,6 +29,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
   document.querySelectorAll<HTMLElement>('[data-transfer-workspace]').forEach(root => {
     if (root.dataset.transferBound === 'true') return
     root.dataset.transferBound = 'true'
+    const pageRoot = root.closest<HTMLElement>('[data-whm-detail-route]') ?? root
     const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const field = (id: string): HTMLInputElement => root.querySelector<HTMLInputElement>('[data-transfer-field="' + id + '"]')!
     const button = (name: string): HTMLButtonElement => root.querySelector<HTMLButtonElement>('[data-transfer-' + name + ']')!
@@ -97,9 +103,10 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       const checked = new Set(Array.isArray(selection) ? selection.filter(value => typeof value === 'string') : [])
       for (const value of values) {
         if (!object(value) || typeof value[key] !== 'string') continue
-        const label = document.createElement('label'), input = document.createElement('input'), name = document.createElement('bdi')
-        label.className = 'xp-transfer-workspace__choice'; input.type = 'checkbox'; input.value = value[key] as string; input.checked = wholeServer || checked.has(input.value)
-        name.dir = 'ltr'; name.textContent = input.value; label.append(input, name); container.append(label)
+        const label = cloneViewRecord(root, 'transfer-choice', 'label', { name: value[key] as string })
+        const input = viewAction<HTMLInputElement>(label, 'select', 'input')
+        input.value = value[key] as string; input.checked = wholeServer || checked.has(input.value)
+        container.append(label)
       }
     }
     const resolutionLabels: Record<string, string> = { skip: msgid('Skip'), rename: msgid('Rename'), 'new-uid': msgid('Allocate a new UID'), 'drop-domain': msgid('Omit conflicting domain'), 'map-plan': msgid('Map to a local plan') }
@@ -113,32 +120,28 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       }
       controls()
     }
-    const table = (container: HTMLElement, headers: string[], rows: unknown[][]): void => {
-      container.textContent = ''
-      if (!rows.length) { const note = document.createElement('p'); note.textContent = t('No reviewed records were returned.'); container.append(note); return }
-      const wrapper = document.createElement('div'), element = document.createElement('table'), thead = document.createElement('thead'), heading = document.createElement('tr'), tbody = document.createElement('tbody')
-      wrapper.className = 'xp-transfer-workspace__scroll'
-      element.className = 'xp-table'
-      for (const value of headers) { const cell = document.createElement('th'); cell.scope = 'col'; cell.textContent = value; heading.append(cell) }
-      thead.append(heading)
-      for (const values of rows) { const row = document.createElement('tr'); for (const value of values) { const cell = document.createElement('td'), content = document.createElement('bdi'); content.dir = /[\u0600-\u06ff]/.test(display(value)) ? 'auto' : 'ltr'; content.textContent = display(value); cell.append(content); row.append(cell) } tbody.append(row) }
-      element.append(thead, tbody); wrapper.append(element); container.append(wrapper)
-    }
-    const fillBody = (body: Element | null, values: unknown[][], empty: string): void => {
+    type TransferRow = Record<string, unknown>
+    const fillBody = (body: Element | null, name: string, values: TransferRow[], empty: string): void => {
       if (!body) return
-      body.textContent = ''
-      if (!values.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = body.closest('table')?.querySelectorAll('thead th').length || 1; cell.textContent = empty; row.append(cell); body.append(row); return }
-      for (const valuesRow of values) { const row = document.createElement('tr'); for (const value of valuesRow) { const cell = document.createElement('td'), content = document.createElement('bdi'); content.dir = /[\u0600-\u06ff]/.test(display(value)) ? 'auto' : 'ltr'; content.textContent = display(value); cell.append(content); row.append(cell) } body.append(row) }
+      body.replaceChildren()
+      if (!values.length) { body.append(cloneViewRecord(root, name + '-empty', 'tr', { message: empty })); return }
+      for (const value of values) body.append(cloneViewRecord(root, name + '-row', 'tr', Object.fromEntries(Object.entries(value).map(([key, item]) => [key, display(item)]))))
+    }
+    const table = (container: HTMLElement, name: string, rows: TransferRow[], append = false): void => {
+      if (!append) container.replaceChildren()
+      const wrapper = cloneViewRecord(root, name + '-table', 'div', { rows: '' })
+      fillBody(clientTemplateSlot(wrapper, 'rows', 'tbody'), name, rows, t('No reviewed records were returned.'))
+      container.append(wrapper)
     }
     const paintArchive = (value: unknown): void => {
       archiveBox.textContent = ''
-      const approved = document.querySelector<HTMLElement>('[data-whm-detail-section="transfer-import"]')
-      const approvedNotice = approved?.querySelector<HTMLElement>('.xp-whm-detail-status')
-      const detailBodies = [...(approved?.querySelectorAll('details table tbody') ?? [])]
-      const warningsBody = [...(approved?.querySelectorAll('table tbody') ?? [])].at(-1) ?? null
+      const approved = pageRoot.querySelector<HTMLElement>('[data-whm-detail-section="transfer-import"]')
+      const approvedNotice = approved?.querySelector<HTMLElement>('[data-transfer-import-observation]')
+      const partBody = (key: string) => approved?.querySelector(`[data-transfer-import-${key}]`) ?? approved?.querySelector(`[data-transfer-import-part="${key}"] tbody`) ?? null
+      const warningsBody = partBody('warnings')
       const absent = t('No parsed archive review was returned.')
-      for (const body of detailBodies) fillBody(body, [], absent)
-      fillBody(warningsBody, [], absent)
+      for (const key of ['domains', 'home', 'databases', 'mail', 'dns']) fillBody(partBody(key), 'transfer-import-part', [], absent)
+      fillBody(warningsBody, 'transfer-import-warnings', [], absent)
       if (approvedNotice) approvedNotice.textContent = t('No parsed archive review was returned.')
       if (!object(value) || !object(value.plan) || !object(value.plan.account)) return
       if (approvedNotice) approvedNotice.textContent = t('The server parsed this archive. Review what is not imported, choose a plan and import the account.')
@@ -147,25 +150,25 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       const notRead = t(msgctxt('whm-transfer-client', 'Not read')), reviewOnly = t('Imported')
       const returned = (items: unknown): Record<string, unknown>[] => Array.isArray(items) ? items.filter(object) : []
       const empty = t('No records were returned for this part of the parsed review.')
-      fillBody(detailBodies[0] ?? null, returned(plan.domains).map(domain => [domain.name, domain.name, domain.docRoot, reviewOnly]), empty)
+      fillBody(partBody('domains'), 'transfer-import-part', returned(plan.domains).map(domain => ({ item: domain.name, source: domain.name, target: domain.docRoot, state: reviewOnly })), empty)
       const home = object(plan.home) ? plan.home : {}
       const metrics: Array<readonly [string, string]> = [['files', t('Files')], ['directories', t('Directories')], ['symlinks', t('Symbolic links')], ['bytes', t('Bytes')], ['skipped', t('Skipped entries')]]
-      fillBody(detailBodies[1] ?? null, metrics.filter(([key]) => typeof home[key] === 'number').map(([key, label]) => [label, home[key], t('Restored into the new home'), reviewOnly]), empty)
-      fillBody(detailBodies[2] ?? null, [...returned(plan.databases).map(database => [t(msgctxt('whm-transfer-client', 'Database')), database.sourceName, database.name, reviewOnly]), ...returned(plan.dbUsers).map(user => [t(msgctxt('whm-transfer-client', 'Database user')), user.sourceName, user.name, t('Password reset required')])], empty)
-      fillBody(detailBodies[3] ?? null, returned(plan.mailboxes).map(mailbox => [mailbox.address, mailbox.hasMaildir === true ? mailbox.maildir : t('No archived mail directory'), mailbox.maildir, t('Password reset required')]), empty)
-      fillBody(detailBodies[4] ?? null, returned(plan.dnsZones).flatMap(zone => returned(zone.records).map(record => [display(record.name) + ' · ' + display(record.type), record.content ?? notRead, zone.zone, reviewOnly])), empty)
+      fillBody(partBody('home'), 'transfer-import-part', metrics.filter(([key]) => typeof home[key] === 'number').map(([key, label]) => ({ item: label, source: home[key], target: t('Restored into the new home'), state: reviewOnly })), empty)
+      fillBody(partBody('databases'), 'transfer-import-part', [...returned(plan.databases).map(database => ({ item: t(msgctxt('whm-transfer-client', 'Database')), source: database.sourceName, target: database.name, state: reviewOnly })), ...returned(plan.dbUsers).map(user => ({ item: t(msgctxt('whm-transfer-client', 'Database user')), source: user.sourceName, target: user.name, state: t('Password reset required') }))], empty)
+      fillBody(partBody('mail'), 'transfer-import-part', returned(plan.mailboxes).map(mailbox => ({ item: mailbox.address, source: mailbox.hasMaildir === true ? mailbox.maildir : t('No archived mail directory'), target: mailbox.maildir, state: t('Password reset required') })), empty)
+      fillBody(partBody('dns'), 'transfer-import-part', returned(plan.dnsZones).flatMap(zone => returned(zone.records).map(record => ({ item: display(record.name) + ' · ' + display(record.type), source: record.content ?? notRead, target: zone.zone, state: reviewOnly }))), empty)
       const tags: Record<string, string> = { skipped: msgid('Skipped'), partial: msgid('Partial'), paused: msgid('Paused'), reset: msgid('Reset required') }
-      fillBody(warningsBody, returned(value.unmapped).map(item => [xpT(tags[String(item.tag)] ?? msgid('Skipped')), item.message, item.path ?? notRead]), empty)
+      fillBody(warningsBody, 'transfer-import-warnings', returned(value.unmapped).map(item => ({ state: xpT(tags[String(item.tag)] ?? msgid('Skipped')), detail: item.message, path: item.path ?? notRead })), empty)
       const rows = [
-        [t('Domains'), Array.isArray(plan.domains) ? plan.domains.length : notRead],
-        [t('Databases'), Array.isArray(plan.databases) ? plan.databases.length : notRead],
-        [t('Mailboxes'), Array.isArray(plan.mailboxes) ? plan.mailboxes.length : notRead],
-        [t('Conflicts'), Array.isArray(value.conflicts) ? value.conflicts.length : notRead],
+        { part: t('Domains'), count: Array.isArray(plan.domains) ? plan.domains.length : notRead },
+        { part: t('Databases'), count: Array.isArray(plan.databases) ? plan.databases.length : notRead },
+        { part: t('Mailboxes'), count: Array.isArray(plan.mailboxes) ? plan.mailboxes.length : notRead },
+        { part: t('Conflicts'), count: Array.isArray(value.conflicts) ? value.conflicts.length : notRead },
       ]
-      const summary = document.createElement('div'); table(summary, [t(msgctxt('whm-transfer-client', 'Part')), t('Count')], rows); archiveBox.append(summary)
-      if (Array.isArray(value.conflicts) && value.conflicts.length) { const details = document.createElement('div'); table(details, [t('Conflict'), t('Value')], value.conflicts.filter(object).map(item => [item.kind === 'username' ? t('Account name') : t('Domain'), item.value])); archiveBox.append(details) }
+      table(archiveBox, 'transfer-archive-summary', rows, true)
+      if (Array.isArray(value.conflicts) && value.conflicts.length) table(archiveBox, 'transfer-archive-conflicts', value.conflicts.filter(object).map(item => ({ kind: item.kind === 'username' ? t('Account name') : t('Domain'), value: item.value })), true)
       const unmapped = returned(value.unmapped)
-      if (unmapped.length) { const details = document.createElement('div'); table(details, [t('Not imported or changed'), t('Detail'), t('Path')], unmapped.map(item => [xpT(tags[String(item.tag)] ?? msgid('Skipped')), item.message, item.path ?? ''])); archiveBox.append(details) }
+      if (unmapped.length) table(archiveBox, 'transfer-archive-unmapped', unmapped.map(item => ({ state: xpT(tags[String(item.tag)] ?? msgid('Skipped')), detail: item.message, path: item.path ?? '' })), true)
       const outcome = document.createElement('p')
       outcome.textContent = value.state === 'imported' ? t('Imported as {username}. Owners must set new passwords.', { username: display(object(value.result) ? value.result.username : '') }) : value.state === 'failed' ? t('Import failed: {reason}', { reason: display(value.error) }) : value.state === 'importing' ? t('Importing. The page refreshes while it runs.') : ''
       if (outcome.textContent) archiveBox.append(outcome)
@@ -208,29 +211,30 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       for (const item of conflicts) if (object(item) && typeof item.id === 'string' && typeof item.subject === 'string') { const option = document.createElement('option'); option.value = item.id; option.textContent = item.subject + ' · ' + (conflictLabels[String(item.kind)] ?? t(msgctxt('whm-transfer-client', 'Conflict'))); conflict.append(option) }
       paintResolution()
       const reviewed = Array.isArray(selected?.review?.accounts) ? selected.review.accounts : []
-      table(reviewBox, [t('Source account'), t('Destination account'), t('Plan'), t('Domains'), t('Mailboxes')], reviewed.filter(object).map(item => [item.source, item.target, item.plan, Array.isArray(item.domains) ? item.domains.join(', ') : '', item.mailboxes]))
-      const fillApproved = (key: string, values: unknown[][]): void => {
-        fillBody(document.querySelector('[data-whm-detail-section="' + key + '"] table tbody'), values, t('No observed records are available for this saved session.'))
+      table(reviewBox, 'transfer-review', reviewed.filter(object).map(item => ({ source: item.source, target: item.target, plan: item.plan, domains: Array.isArray(item.domains) ? item.domains.join(', ') : '', mailboxes: item.mailboxes })))
+      const fillApproved = (key: 'transfer-identities' | 'transfer-progress' | 'transfer-plans', values: TransferRow[]): void => {
+        const hook = { 'transfer-identities': 'data-transfer-inventory-rows', 'transfer-progress': 'data-transfer-progress-rows', 'transfer-plans': 'data-transfer-plan-rows' }[key]
+        fillBody(pageRoot.querySelector('[' + hook + ']'), key === 'transfer-identities' ? 'transfer-inventory' : key, values, t('No observed records are available for this saved session.'))
       }
       fillApproved('transfer-identities', []); fillApproved('transfer-progress', []); fillApproved('transfer-plans', [])
-      const planNotice = document.querySelector<HTMLElement>('[data-whm-detail-section="transfer-plans"] .xp-whm-detail-status')
+      const planNotice = pageRoot.querySelector<HTMLElement>('[data-transfer-plan-observation]')
       if (planNotice) planNotice.textContent = t('No authenticated source plans were returned for this saved session.')
-      const sourceNotice = document.querySelector<HTMLElement>('[data-whm-detail-section="transfer-source"] .xp-whm-detail-status')
+      const sourceNotice = pageRoot.querySelector<HTMLElement>('[data-transfer-source-observation]')
       if (sourceNotice) sourceNotice.textContent = t('Source identity, inventory and execution facts come only from trusted server adapters. The controls show their current availability.')
-      const inventoryNotice = document.querySelector<HTMLElement>('[data-whm-detail-section="transfer-identities"] .xp-whm-detail-status')
+      const inventoryNotice = pageRoot.querySelector<HTMLElement>('[data-transfer-identities-observation]')
       if (inventoryNotice) inventoryNotice.textContent = t('No authenticated source inventory was returned for this saved session.')
-      const progressNotice = document.querySelector<HTMLElement>('[data-transfer-progress-state]')
+      const progressNotice = pageRoot.querySelector<HTMLElement>('[data-transfer-progress-state]')
       if (progressNotice) { progressNotice.dataset.transferProgressState = 'not-read'; progressNotice.textContent = t('No native per-account progress was returned for this saved session.') }
       if (object(selected?.session.inventory)) {
         const selectedNames = new Set(Array.isArray(selection.accounts) ? selection.accounts : [])
         const sourceAccounts = Array.isArray(inventory.accounts) ? inventory.accounts.filter(object) : []
-        fillApproved('transfer-identities', sourceAccounts.map(account => [selectedNames.has(account.username) ? t('Yes') : t('No'), account.username, account.primaryDomain, account.plan, account.diskBytes, Array.isArray(account.databases) ? account.databases.length : t(msgctxt('whm-transfer-client', 'Not read')), account.mailboxes, conflicts.filter(value => object(value) && value.subject === account.username).map(value => object(value) ? conflictLabels[String(value.kind)] ?? t(msgctxt('whm-transfer-client', 'Conflict')) : '').join(', '), t('Review selection')]))
+        fillApproved('transfer-identities', sourceAccounts.map(account => ({ selected: selectedNames.has(account.username) ? t('Yes') : t('No'), username: account.username, domain: account.primaryDomain, uid: typeof account.uid === 'number' ? account.uid : t(msgctxt('whm-transfer-client', 'Not read')), plan: account.plan, disk: account.diskBytes, databases: Array.isArray(account.databases) ? account.databases.length : t(msgctxt('whm-transfer-client', 'Not read')), mailboxes: account.mailboxes, conflict: conflicts.filter(value => object(value) && value.subject === account.username).map(value => object(value) ? conflictLabels[String(value.kind)] ?? t(msgctxt('whm-transfer-client', 'Conflict')) : '').join(', '), resolution: t('Review selection') })))
         fillApproved('transfer-plans', (Array.isArray(inventory.plans) ? inventory.plans.filter(object) : []).map(plan => {
           const mapped = reviewed.filter(object).find(account => sourceAccounts.some(source => source.username === account.source && source.plan === plan.name))
-          return [plan.name, mapped?.plan ?? t(msgctxt('whm-transfer-client', 'Not read')), t(msgctxt('whm-transfer-client', 'Not read')), conflicts.filter(value => object(value) && value.kind === 'plan' && value.subject === plan.name).map(() => t('Review selection')).join(', ')]
+          return { source: plan.name, target: mapped?.plan ?? t(msgctxt('whm-transfer-client', 'Not read')), owner: t(msgctxt('whm-transfer-client', 'Not read')), conflict: conflicts.filter(value => object(value) && value.kind === 'plan' && value.subject === plan.name).map(() => t('Review selection')).join(', ') }
         }))
         if (planNotice) planNotice.textContent = t('The source plans came from authenticated inventory. Destination mappings appear only after review; ownership has not been read.')
-        const notice = document.querySelector<HTMLElement>('[data-whm-detail-section="transfer-identities"] .xp-whm-detail-status')
+        const notice = pageRoot.querySelector<HTMLElement>('[data-transfer-identities-observation]')
         if (notice) notice.textContent = t('Authenticated source inventory was returned. Save the selection to read current destination conflicts.')
       }
       const progress = object(selected?.session.progress) ? selected.session.progress : {}
@@ -242,11 +246,11 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
         fillApproved('transfer-progress', progressRows.map(([name, value]) => {
           const result = object(results[name]) ? results[name] as Record<string, unknown> : {}, done = object(value) && value.phase === 'done'
           const count = (key: string): string => Array.isArray(result[key]) ? String((result[key] as unknown[]).length) : typeof result[key] === 'number' ? String(result[key]) : waiting
-          return [name + (object(value) && typeof value.targetUsername === 'string' && value.targetUsername !== name ? ' → ' + value.targetUsername : ''),
-            done && object(result.home) ? t('{bytes} bytes, compared', { bytes: Number(result.home.bytes) }) : waiting, done ? count('databases') : waiting, done ? count('mailboxes') : waiting, done ? count('zones') : waiting,
-            (object(value) ? (phases[String(value.phase)] ?? t(msgctxt('whm-transfer-client', 'Not read'))) + ' · ' + String(value.bytes) + ' / ' + String(value.totalBytes) : '') + (object(value) && typeof value.error === 'string' ? ' · ' + value.error : '')]
+          return { account: name + (object(value) && typeof value.targetUsername === 'string' && value.targetUsername !== name ? ' → ' + value.targetUsername : ''),
+            home: done && object(result.home) ? t('{bytes} bytes, compared', { bytes: Number(result.home.bytes) }) : waiting, databases: done ? count('databases') : waiting, mail: done ? count('mailboxes') : waiting, dns: done ? count('zones') : waiting,
+            state: (object(value) ? (phases[String(value.phase)] ?? t(msgctxt('whm-transfer-client', 'Not read'))) + ' · ' + String(value.bytes) + ' / ' + String(value.totalBytes) : '') + (object(value) && typeof value.error === 'string' ? ' · ' + value.error : '') }
         }))
-        const note = document.querySelector<HTMLElement>('[data-transfer-progress-state]')
+        const note = pageRoot.querySelector<HTMLElement>('[data-transfer-progress-state]')
         if (note) { note.dataset.transferProgressState = 'read'; note.textContent = selected?.stopRequested && selected.session.state === 'applying' ? t('The transfer stops after the current account.') : t('Accounts are copied one at a time. The source is only read; a failed account is removed again.') }
       }
       root.querySelector<HTMLElement>('[data-transfer-execution-note]')!.textContent = capabilities.execute ? t('Accounts are copied one at a time. The source is only read; a failed account is removed again.') : t('Transfers are unavailable here: they need the host agent on this server.')
@@ -423,4 +427,4 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
   })
 }
 
-export const WHM_TRANSFER_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};return ${bindWhmTransfer.toString()};})()`
+export const WHM_TRANSFER_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const displayDateTime=${DISPLAY_DATETIME_BINDING};return ${bindWhmTransfer.toString()};})()`

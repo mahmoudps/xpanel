@@ -31,6 +31,32 @@ const CONTRACT = {
 } as const
 
 describe('v2 shell', () => {
+  it('uses surface-owned navigation and search without duplicating shell landmarks', () => {
+    const html = shell('en', {
+      surface: 'xmail', homeHref: '/mail/inbox', activeRoute: '/mail/inbox',
+      sidebarHtml: '<nav data-mail-folders>Folders</nav>',
+      contextControlHtml: '<select data-authorized-domain><option>example.test</option></select>',
+      searchHtml: '<input type="search" data-mail-search aria-label="Search messages">',
+    })
+    expect(html).toContain('<nav data-mail-folders>Folders</nav>')
+    expect(html).toContain('data-authorized-domain')
+    expect(html).toContain('data-mail-search')
+    expect(html).not.toContain('class="v2-nav"')
+    expect(html).not.toContain('class="v2-search"')
+    expect(html.match(/<main\b/g)).toHaveLength(1)
+    expect(html.match(/id="xp-sidebar"/g)).toHaveLength(1)
+    expect(html.match(/id="xp-cmdk-modal"/g)).toHaveLength(1)
+  })
+
+  it('escapes configured product identity in desktop and phone navigation', () => {
+    const html = shell('en', { branding: {
+      companyName: '', productName: 'Host <script>bad()</script>', footerText: '', hidePoweredBy: false,
+      primaryColor: '', accentColor: '', supportUrl: '', supportEmail: '', logoUrl: null, faviconUrl: null,
+    } })
+    expect(html.match(/Host &lt;script&gt;bad\(\)&lt;\/script&gt;/g)).toHaveLength(3)
+    expect(html).not.toContain('<script>bad()')
+  })
+
   it('emits every hook of the realtime shell contract', () => {
     const html = shell()
     for (const name of CONTRACT.attributes) expect(html, name).toMatch(new RegExp(`\\s${name}(?:[\\s=>])`))

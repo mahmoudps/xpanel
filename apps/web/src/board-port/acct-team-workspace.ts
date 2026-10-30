@@ -1,3 +1,4 @@
+import { teamClientTemplates } from './team-logs-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
@@ -59,5 +60,5 @@ export function renderAccountTeamWorkspace(input: { lang: Locale; accountId: str
       <p role="status" data-acct-team-save-status hidden></p>
     </${container}>
   </section>
-</div>`
+${teamClientTemplates()}</div>`
 }

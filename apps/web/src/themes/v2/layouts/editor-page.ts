@@ -1,11 +1,12 @@
-// Editor family (TplEditor): a code editor with line numbers, an insert-snippet slot and a test gate: the draft
-// is tested before it can be saved, and Save stays aria-disabled with its reason until the test passes.
+// Editor family: code or structured rules with the product's actual save contract. A separate test gate is
+// present only when the operation supports it; validate-on-save pages supply their truthful current status.
 
 import type { Translate } from '../../../i18n.ts'
 import { attr, escapeHtml, hookAttrs, type HookAttributes } from '../html.ts'
 import { icon } from '../icons.ts'
 import { card, type CardProps } from '../components/card.ts'
 import { codeBlock } from '../components/code-block.ts'
+import { dataTable, type DataTableProps } from '../components/data-table.ts'
 import { statusPill, type StatusPillProps } from '../components/status-pill.ts'
 import { tabPanel, tabs, type TabsProps } from '../components/tabs.ts'
 import { cards, commitRegion, factList, layoutRoot, splitWithAside, stateBlock, xpTemplate, type Fact, type LayoutState, type PageBaseProps, type StateSlots } from './common.ts'
@@ -18,7 +19,7 @@ export interface EditorSnippet {
   hooks?: HookAttributes
 }
 
-export interface EditorPageProps extends PageBaseProps {
+interface EditorPageBaseProps extends PageBaseProps {
   /** Error and loading replace the editor: nothing is editable before the protected file is read. */
   state?: Exclude<LayoutState, 'empty'>
   states?: StateSlots
@@ -34,13 +35,20 @@ export interface EditorPageProps extends PageBaseProps {
     field: { id: string; name?: string; label: string; value: string; readonly?: boolean; hooks?: HookAttributes }
     /** Hooks on the line-number gutter, which core renumbers as lines change. */
     gutterHooks?: HookAttributes
+    /** Structured rules generate the read-only file block; they are not raw file edits. */
+    rules?: { title: string; titleId: string; description?: string; actionsHtml?: string; table: DataTableProps }
     /** The draft against the saved version, line by line, shown in the tab panel `panelId` (the board's
      *  Changes tab) with +/- markers in its gutter. Without tabs it follows the editor. */
     diff?: CodeDiffProps
     footer?: { meta?: string; note?: string }
   }
   snippets?: { title: string; titleId: string; description?: string; items: readonly EditorSnippet[] }
-  test: {
+  aside?: readonly CardProps[]
+  asideLabel?: string
+  extra?: readonly CardProps[]
+}
+
+interface EditorTestProps {
     title?: string
     titleId: string
     description?: string
@@ -51,19 +59,21 @@ export interface EditorPageProps extends PageBaseProps {
     outputLabel: string
     outputHooks?: HookAttributes
     facts?: readonly Fact[]
-  }
-  save: {
+}
+
+interface EditorSaveProps {
     label: string
     hooks: HookAttributes
-    /** False until the current draft passed its test; core flips it after a passing run. */
+    /** Core's current readiness state; this does not establish that a separate test ran. */
     ready: boolean
     blockedReason?: string
     discard?: { label?: string; hooks: HookAttributes }
-  }
-  aside?: readonly CardProps[]
-  asideLabel?: string
-  extra?: readonly CardProps[]
 }
+
+export type EditorPageProps = EditorPageBaseProps & (
+  | { test: EditorTestProps; save: EditorSaveProps & { kind?: 'tested' } }
+  | { test?: never; save: EditorSaveProps & { kind: 'validate-on-save'; statusText: string } }
+)
 
 export interface DiffLine {
   text: string
@@ -107,7 +117,14 @@ export function editorPage(t: Translate, props: EditorPageProps): string {
   const context = props.context ? card(props.context) : ''
   if (state !== 'ready') return layoutRoot(t, props, `${context}${stateBlock(t, state, props.states)}`)
   const { editor, test, save } = props
-  const region = codeEditor(editor)
+  if (editor.rules && props.snippets) throw new Error('Structured rule editors do not accept raw insert snippets')
+  const region = editor.rules
+    ? `<div id="${escapeHtml(editor.field.id)}">${codeBlock(t, { title: editor.field.label, code: editor.field.value, hooks: editor.field.hooks })}</div>`
+    : codeEditor(editor)
+  const rulesCard = editor.rules ? card({
+    title: editor.rules.title, titleId: editor.rules.titleId, description: editor.rules.description,
+    actionsHtml: editor.rules.actionsHtml, flush: true, bodyHtml: dataTable(t, editor.rules.table),
+  }) : ''
   const diff = editor.diff ? codeDiff(t, editor.diff) : ''
   // The Changes tab owns the diff panel; every other tab shows the editor, and only the selected panel is visible.
   const diffTab = editor.tabs?.tabs.find(tab => editor.diff?.panelId !== undefined && tab.panelId === editor.diff.panelId)
@@ -120,18 +137,21 @@ export function editorPage(t: Translate, props: EditorPageProps): string {
     footerHtml: editor.footer ? `<div class="v2-editor__foot">${editor.footer.meta ? `<span class="v2-num v2-mono">${escapeHtml(editor.footer.meta)}</span>` : ''}${editor.footer.note ? `<span>${escapeHtml(editor.footer.note)}</span>` : ''}</div>` : undefined,
   })
   const reasonId = `${editor.field.id}-save-reason`
-  const gate = `<div class="v2-apply"><p class="v2-apply__text"${save.ready ? '' : ` id="${escapeHtml(reasonId)}"`}>${escapeHtml(save.ready ? t(msgctxt('theme:v2', 'The draft passed its test. Saving writes exactly the tested draft.')) : save.blockedReason ?? t(msgctxt('theme:v2', 'Save is available after the draft passes its test.')))}</p><span class="v2-apply__actions">${save.discard ? `<button type="button" class="v2-btn"${hookAttrs(save.discard.hooks)}>${escapeHtml(save.discard.label ?? t('Discard'))}</button>` : ''}<button type="button" class="v2-btn v2-btn--primary"${save.ready ? '' : ` aria-disabled="true" aria-describedby="${escapeHtml(reasonId)}"`}${hookAttrs(save.hooks)}>${escapeHtml(save.label)}</button></span></div>`
-  const testCard = card({
+  const saveStatus = save.kind === 'validate-on-save' ? save.statusText
+    : save.ready ? t(msgctxt('theme:v2', 'The draft passed its test. Saving writes exactly the tested draft.'))
+    : save.blockedReason ?? t(msgctxt('theme:v2', 'Save is available after the draft passes its test.'))
+  const gate = `<div class="v2-apply"><p class="v2-apply__text"${save.ready ? '' : ` id="${escapeHtml(reasonId)}"`}>${escapeHtml(saveStatus)}</p><span class="v2-apply__actions">${save.discard ? `<button type="button" class="v2-btn"${hookAttrs(save.discard.hooks)}>${escapeHtml(save.discard.label ?? t('Discard'))}</button>` : ''}<button type="button" class="v2-btn v2-btn--primary"${save.ready ? '' : ` aria-disabled="true" aria-describedby="${escapeHtml(reasonId)}"`}${hookAttrs(save.hooks)}>${escapeHtml(save.label)}</button></span></div>`
+  const testCard = test ? card({
     title: test.title ?? t(msgctxt('theme:v2', 'Test before the switch')), titleId: test.titleId, description: test.description,
     actionsHtml: `${statusPill({ ...test.status, live: true })}<button type="button" class="v2-btn"${hookAttrs(test.run.hooks)}>${icon('check', 16)}${escapeHtml(test.run.label)}</button>`,
     bodyHtml: `${codeBlock(t, { title: test.outputLabel, code: test.output ?? '', live: true, hooks: test.outputHooks })}${test.facts?.length ? factList(test.facts) : ''}`,
-  })
+  }) : ''
   const snippets = props.snippets ? card({
     title: props.snippets.title, titleId: props.snippets.titleId, description: props.snippets.description,
     bodyHtml: `<ul class="v2-snippets">${props.snippets.items.map(item => `<li><button type="button" class="v2-btn" aria-controls="${escapeHtml(editor.field.id)}"${hookAttrs(item.hooks)}>${icon('plus', 16)}${escapeHtml(item.label)}</button>${item.description ? `<span>${escapeHtml(item.description)}</span>` : ''}${xpTemplate('snippet', escapeHtml(item.code))}</li>`).join('')}</ul>`,
   }) : ''
   const side = `${snippets}${cards(props.aside)}`
-  return layoutRoot(t, props, `${context}${splitWithAside(`${editorCard}${testCard}`, side ? { label: props.asideLabel ?? props.snippets?.title ?? editor.title, html: side } : undefined)}${cards(props.extra)}${commitRegion(t('Save changes'), gate)}`)
+  return layoutRoot(t, props, `${context}${splitWithAside(`${rulesCard}${editorCard}${testCard}`, side ? { label: props.asideLabel ?? props.snippets?.title ?? editor.title, html: side } : undefined)}${cards(props.extra)}${commitRegion(t('Save changes'), gate)}`)
 }
 
 export const EDITOR_LAYOUT_CSS = `.v2-editor{display:flex;background:var(--code);color:var(--code-text)}

@@ -1,3 +1,4 @@
+import { classicWhmClientTemplates, classicWhmGenerationCurrent } from '../themes/classic/whm-client-templates.ts'
 import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import type {
   Account,
@@ -23,6 +24,8 @@ import { renderHandoffButton } from '../panel-handoff-controls.ts'
 import { renderWhmDetailPage, renderWhmAuditExports, renderWhmAuditSupplement, renderWhmDnsSupplement, renderWhmMailOutboundSupplement } from '../board-port/approved-xwhm.ts'
 import { renderApprovedWhmBackups } from '../board-port/approved-whm-backups.ts'
 import { renderWhmDnsWorkspace } from '../board-port/whm-dns-workspace.ts'
+import { renderWhmIpClientTemplates } from '../board-port/whm-ip-client-templates.ts'
+import { renderWhmServiceClientTemplates } from '../board-port/whm-service-client-templates.ts'
 import { renderApprovedWhmResellers, resellerDetailAnchor } from '../board-port/approved-whm-resellers.ts'
 import { renderApprovedWhmOperationsSupplement } from '../board-port/approved-whm-operations-components.ts'
 import { renderApprovedWhmPlanSupplement } from '../board-port/approved-whm-plan-components.ts'
@@ -124,7 +127,7 @@ export interface WhmSurfaceProps {
   rollbackGenerationId?: number
   generationActivatedAt?: string
   nearLimits?: Array<{ name: string; note: string }>
-  certificates?: readonly Pick<Certificate, 'names' | 'notAfter'>[]
+  certificates?: readonly (Pick<Certificate, 'names' | 'notAfter'> & Partial<Pick<Certificate, 'accountId'>>)[]
   actionState?: AsyncActionBannerProps
 }
 
@@ -313,17 +316,21 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
             <tbody data-host-service-rows="true"><tr><td colspan="4">${translator(locale)('Reading service status.')}</td></tr></tbody>
           </table>
           <p class="xp-help" data-host-service-status role="status"></p>
+          ${renderWhmServiceClientTemplates('host')}
         </div>
       </section>
 
 ` : ''}
       ${section === 'dns' ? renderWhmDnsWorkspace({ locale, accounts, principal, title: pageTitle }) : ''}
-      ${section === 'backups' ? `<section class="xp-card" data-account-backups="true" aria-labelledby="whm-backup-heading">
+      ${section === 'backups' ? `<section class="xp-card" data-account-backups="true" data-backup-manage="${isRoot}" aria-labelledby="whm-backup-heading">
         <div class="xp-card__header"><h1 id="whm-backup-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1></div>
         <p class="xp-prose">${translator(locale)('The archive is stored in the local backup directory, limited to 2 GiB, and restored only into that account home.')}</p>
         <div class="xp-field"><label class="xp-label" for="backup-account">${translator(locale)('Account')}</label><select id="backup-account" class="xp-select" data-backup-account="true">${accounts.map(account => `<option value="${escapeHtml(account.username)}">${escapeHtml(account.username)}</option>`).join('')}</select></div>
         <div class="xp-table-wrap"><table class="xp-table"><thead><tr><th>${translator(locale)('File')}</th><th>${translator(locale)('Size')}</th><th></th></tr></thead><tbody data-backup-files="true"></tbody></table></div>
+        <template data-xp-template="whm-local-archive-row"><tr><td><bdi dir="ltr" data-xp-slot="archive"></bdi></td><td><bdi dir="ltr" data-xp-slot="bytes"></bdi></td><td><a class="xp-btn" href="/whm/backups/files" data-xp-slot="review"></a></td></tr></template>
+        <p class="xp-help">${translator(locale)('Choose an account to list its backups.')} ${translator(locale)('Open a backup to browse its files.')} ${translator(locale)('Select files or folders, then review the restore.')}</p>
         <p class="xp-help" data-backup-status role="status"></p>
+        <button type="button" class="xp-btn" data-backup-local-read>${translator(locale)('Read again')}</button>
         <button type="button" class="xp-btn xp-btn--primary" data-backup-create="true">${translator(locale)('Create backup')}</button>
       </section>` : ''}
       ${section === 'server-info' ? `<section class="xp-card" data-host-info="true" aria-labelledby="whm-server-info-heading" style="display:flex;flex-direction:column;gap:var(--xp-space-group,24px)">
@@ -452,7 +459,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           ${renderApprovedWhmAccountTableCells({ ...props, locale }, acc.username)}
           <td>
           <span class="xp-accounts__mobile-label" aria-hidden="true">${translator(locale)('Status')}</span>
-          <span data-account-status>${renderStatusBadge(acc.status === 'active' ? 'ok' : acc.status === 'suspended' ? 'suspended' : 'critical', statusLabel)}</span>
+          <span data-account-status data-state="${acc.status}">${renderStatusBadge(acc.status === 'active' ? 'ok' : acc.status === 'suspended' ? 'suspended' : 'critical', statusLabel)}</span><template data-account-status-pending>${renderStatusBadge('warn', translator(locale)('Verification required'))}</template>
           </td>
           <td>
           <div class="xp-accounts__actions">${canLogIn ? renderHandoffButton(locale, { audience: 'xpanel', accountId: acc.id, label: msgid('Log in to xPanel') }) : ''}${canSuspend && acc.status !== 'terminating' ? `<button type="button" class="xp-btn xp-btn--ghost" data-action="${acc.status === 'suspended' ? 'unsuspend-account' : 'suspend-account'}" ${attributes}>${acc.status === 'suspended' ? (translator(locale)('Unsuspend')) : (translator(locale)('Suspend'))}</button>` : ''}${canTerminate && acc.status !== 'terminating' ? `<button type="button" class="xp-btn xp-btn--ghost xp-accounts__delete" data-action="terminate-account" ${attributes}>${translator(locale)('Delete')}</button>` : ''}${!canSuspend && !canTerminate && !canLogIn ? `<span class="xp-help">${translator(locale)(msgctxt('xwhm', 'Read only'))}</span>` : ''}</div>
@@ -710,10 +717,10 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
             <h1 id="whm-ip-pool-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
             <p class="xp-prose">${translator(locale)('Manage IP addresses, account and reseller assignments, and outbound mail routing.')}</p>
           </div>
-          ${section === 'ips' ? `<span data-ip-pool-count style="display:contents">${renderStatusBadge('ok', translator(locale)('{count, plural, one {{count} address} other {{count} addresses}}', { count: ipPool.length }))}</span>` : renderStatusBadge('ok', mailIpConfig!.mode)}
+          ${section === 'ips' ? `<span data-ip-pool-count style="display:contents">${renderStatusBadge('ok', translator(locale)('{count, plural, one {{count} address} other {{count} addresses}}', { count: ipPool.length })).replace('class="xp-badge__label"', 'class="xp-badge__label" data-ip-pool-count-label')}</span>` : renderStatusBadge('ok', mailIpConfig!.mode)}
         </div>
 
-${section === 'ips' ? `        <!-- Server IP Pool Table -->
+${section === 'ips' ? `        ${renderWhmIpClientTemplates()}<!-- Server IP Pool Table -->
         <div class="xp-table-wrap">
           <table class="xp-table" data-ip-pool-table="true">
             <thead>
@@ -892,14 +899,14 @@ ${section === 'mail-ips' && mailIpConfig ? `          <form class="xp-card xp-fo
       </section>
 
 ` : ''}
-      ${section === 'generations' ? `        <section class="xp-card" data-section="config-generations" data-whm-generations data-generations-editable="${isRoot ? 'true' : 'false'}" aria-labelledby="whm-generations-heading" style="display:flex;flex-direction:column;gap:var(--xp-space-group,24px)">
+      ${section === 'generations' ? `        <section class="xp-card" data-section="config-generations" data-whm-generations data-generations-editable="${isRoot ? 'true' : 'false'}" aria-labelledby="whm-generations-heading" style="display:flex;flex-direction:column;gap:var(--xp-space-group,24px)">${classicWhmClientTemplates('panel-data')}
           <style>[data-section="config-generations"] .xp-table th{white-space:nowrap;overflow-wrap:normal;word-break:normal}[data-section="config-generations"] .xp-table td{overflow-wrap:normal;word-break:normal}</style>
           <div class="xp-card__header" style="margin-block-end:0">
             <div>
               <h1 id="whm-generations-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
               <p class="xp-prose">${translator(locale)('Configuration is checked before applying. Previous generations are kept for rollback.')}</p>
             </div>
-            ${generationId !== undefined ? `<span data-generations-current style="display:contents">${renderStatusBadge('ok', translator(locale)('Generation {generationId}', { generationId }))}</span>` : ''}
+            <span data-generations-current style="display:contents">${classicWhmGenerationCurrent(generationId !== undefined ? translator(locale)('Generation {generationId}', { generationId }) : translator(locale)('Not read'), generationId !== undefined)}</span>
           </div>
 
           <div class="xp-table-wrap">

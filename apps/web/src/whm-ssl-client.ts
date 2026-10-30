@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { WHM_SSL_OBSERVATIONS_BINDING } from './whm-ssl-observations-client.ts'
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
@@ -77,6 +81,9 @@ function bindWhmSsl(askDialog: ((options: Record<string, unknown>) => Promise<un
     const search = control<HTMLInputElement>('search'), accountFilter = control<HTMLSelectElement>('account-filter'), statusFilter = control<HTMLSelectElement>('status-filter')
     const chain = control<HTMLTextAreaElement>('chain'), key = control<HTMLTextAreaElement>('key'), status = control<HTMLElement>('status'), rows = control<HTMLElement>('rows')
     if (![account, domain, renewal, search, accountFilter, statusFilter, chain, key, status, rows, control('refresh'), control('issue'), control('install')].every(Boolean)) return
+    const rowSlots=['names','account','source','challenge','expires','renewal','status','actions'] as const
+    const templates={row:clientTemplate(root,'whm-ssl-row'),empty:clientTemplate(root,'whm-ssl-empty'),fact:clientTemplate(root,'whm-ssl-fact'),action:clientTemplate(root,'whm-ssl-action')}
+    cloneClientTemplate(templates.row,'tr',rowSlots);cloneClientTemplate(templates.empty,'tr',['message']);cloneClientTemplate(templates.fact,'div',['label','value']);cloneClientTemplate(templates.action,'button',['label'])
     const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => root.isConnected && root.dataset.sslCanManage === 'true' && !root.closest(denied)
@@ -111,7 +118,7 @@ function bindWhmSsl(askDialog: ((options: Record<string, unknown>) => Promise<un
     const details = (certificate: SslCertificateView): void => {
       const panel = control<HTMLElement>('detail'), facts = control<HTMLElement>('facts'); facts.textContent = ''
       const values = [[t('Names'), certificate.names.join(', ')], [t('Account'), certificate.username ?? t(msgctxt('whm-ssl-client', 'Unassigned'))], [t('Assigned domains'), certificate.assignedDomains.join(', ') || t('None')], [t('Not before (UTC)'), certificate.notBefore === null ? t('Not read') : displayDateTime(certificate.notBefore)], [t('Expires (UTC)'), displayDateTime(certificate.notAfter)], ['SHA-256', certificate.fingerprintSha256 ?? t('Not read')]]
-      for (const [label, text] of values) { const group = document.createElement('div'), term = document.createElement('dt'), value = document.createElement('dd'), isolated = document.createElement('bdi'); term.textContent = label!; isolated.dir = 'ltr'; isolated.style.overflowWrap = 'anywhere'; isolated.textContent = text!; value.append(isolated); group.append(term, value); facts.append(group) }
+      for(const [label,text]of values){const group=cloneClientTemplate(templates.fact,'div',['label','value']);clientTemplateSlot(group,'label').textContent=label!;clientTemplateSlot(group,'value').textContent=text!;facts.append(group)}
       panel.hidden = false
     }
     const showRows = (): void => {
@@ -123,12 +130,13 @@ function bindWhmSsl(askDialog: ((options: Record<string, unknown>) => Promise<un
           && (statusFilter.value === 'all' || statusFilter.value === 'expired' && remaining <= 0 || statusFilter.value === 'expiring' && remaining > 0 && remaining <= 30 * 86400000 || statusFilter.value === 'later' && remaining > 30 * 86400000)
       })
       for (const certificate of certificates) {
-        const row = document.createElement('tr')
+        const row=cloneClientTemplate(templates.row,'tr',rowSlots)
         const source = certificate.source === 'acme' ? 'ACME' : certificate.source === 'upload' ? t(msgctxt('whm-ssl-client', 'Uploaded')) : t('Self-signed')
         const values = [certificate.names.join(', '), certificate.username ?? t(msgctxt('whm-ssl-client', 'Unassigned')), source, certificate.challenge ?? t(msgctxt('whm-ssl-client', 'Not configured')), displayDateTime(certificate.notAfter), certificate.autoRenew ? t(msgctxt('whm-ssl-client', 'Requested on')) : t(msgctxt('whm-ssl-client', 'Requested off')), t('Stored; served TLS unverified')]
-        for (const text of values) { const cell = document.createElement('td'), isolated = document.createElement('bdi'); isolated.dir = 'auto'; isolated.textContent = text; cell.append(isolated); row.append(cell) }
-        const actions = document.createElement('td'), group = document.createElement('div'); group.className = 'xp-whm-ssl__actions'
-        const action = (label: string, callback: () => void): HTMLButtonElement => { const button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.textContent = label; button.addEventListener('click', () => { if (!button.disabled && admitted()) callback() }); group.append(button); return button }
+        const fieldSlots=['names','account','source','challenge','expires','renewal','status'] as const
+        fieldSlots.forEach((slot,index)=>{clientTemplateSlot(row,slot).textContent=values[index]!})
+        const group=clientTemplateSlot(row,'actions')
+        const action=(label:string,callback:()=>void):HTMLButtonElement=>{const button=cloneClientTemplate(templates.action,'button',['label']) as HTMLButtonElement;clientTemplateSlot(button,'label').textContent=label;button.addEventListener('click',()=>{if(!button.disabled&&admitted())callback()});group.append(button);return button}
         action(t('Details'), () => details(certificate))
         const renew = action(certificate.source === 'acme' ? t('Renew') : t('Replace'), () => {
           if (!certificate.username || !certificate.assignedDomains.length) return
@@ -139,9 +147,9 @@ function bindWhmSsl(askDialog: ((options: Record<string, unknown>) => Promise<un
         renew.dataset.sslRenew = certificate.id; renew.dataset.sslActionAvailable = String(!!certificate.username && certificate.assignedDomains.length > 0 && (certificate.source === 'acme' ? certificate.challenge === 'http-01' : workspace?.capabilities.install === true))
         renew.dataset.sslOperation = certificate.source === 'acme' ? 'renew' : 'install'
         const remove = action(t('Remove stored certificate'), () => { void mutate('remove', certificate) }); remove.dataset.sslRemove = certificate.id
-        actions.append(group); row.append(actions); rows.append(row)
+        rows.append(row)
       }
-      if (!certificates.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 8; cell.textContent = t('No stored certificates match these filters.'); row.append(cell); rows.append(row) }
+      if(!certificates.length){const row=cloneClientTemplate(templates.empty,'tr',['message']);clientTemplateSlot(row,'message','td').textContent=t('No stored certificates match these filters.');rows.append(row)}
       lock()
     }
     const installRead = (value: SslWorkspaceView): void => {
@@ -225,4 +233,4 @@ function bindWhmSsl(askDialog: ((options: Record<string, unknown>) => Promise<un
 
 /** Browser declarations of the shared certificate read/acknowledgement parsers, reused by the account SSL page. */
 export const WHM_SSL_PARSER_BINDING = `const SSL_ID=${SSL_ID.toString()};const SSL_NAME=${SSL_NAME.toString()};const sslObject=${sslObject.toString()};const sslId=${sslId.toString()};const sslDate=${sslDate.toString()};const sslNames=${sslNames.toString()};const sslCoversHost=${sslCoversHost.toString()};const readSslWorkspace=${readSslWorkspace.toString()};const sslWriteUncertain=${sslWriteUncertain.toString()}`
-export const WHM_SSL_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};${WHM_SSL_PARSER_BINDING};const bindMain=${bindWhmSsl.toString()};const bindObservations=${WHM_SSL_OBSERVATIONS_BINDING};return(askDialog)=>{bindMain(askDialog);bindObservations(readSslWorkspace)};})()`
+export const WHM_SSL_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};${WHM_SSL_PARSER_BINDING};const bindMain=${bindWhmSsl.toString()};const bindObservations=${WHM_SSL_OBSERVATIONS_BINDING};return(askDialog)=>{bindMain(askDialog);bindObservations(readSslWorkspace)};})()`

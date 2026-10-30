@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   DEV_ONLY_PACKAGES,
   DESIGN_REFERENCE_INPUTS,
@@ -11,6 +11,7 @@ import {
   REQUIRED_SYSTEMD_UNITS,
   ReleaseArtifactError,
   buildReleaseArtifact,
+  collectProductionSbom,
   createTarGzBuffer,
   scanReleasePrivacy,
   parseTarGzBuffer,
@@ -20,26 +21,34 @@ import {
   verifyReleaseArchive,
   verifyReleaseArtifact,
 } from './package-release.mjs'
+import { createPublisherManifest } from './release-publisher.mjs'
+import { createHash, generateKeyPairSync } from 'node:crypto'
+import { parseSignedReleaseManifest, verifySignedManifestForRelease } from '../apps/agent/src/lifecycle/upgrade-runner.ts'
+import { ALMA_9, CENTOS_STREAM_9, ROCKY_9, UBUNTU_2204, UBUNTU_2404 } from '../packages/os/src/fixtures.ts'
 
 const tempDirs: string[] = []
+const suiteTempDirs: string[] = []
 
-const makeTempDir = (prefix = 'xpanel-release-test-'): string => {
+const makeTempDir = (prefix = 'xpanel-release-test-', lifetime: 'test' | 'suite' = 'test'): string => {
   const root = resolve(tmpdir())
   const dir = mkdtempSync(join(root, prefix))
-  tempDirs.push(dir)
+  ;(lifetime === 'suite' ? suiteTempDirs : tempDirs).push(dir)
   return dir
 }
 
-afterEach(() => {
+const removeTempDirs = (dirs: string[]): void => {
   const root = resolve(tmpdir())
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()!
+  while (dirs.length > 0) {
+    const dir = dirs.pop()!
     const target = resolve(dir)
     if (dirname(target) === root && basename(target).startsWith('xpanel-release-test-')) {
       rmSync(target, { recursive: true, force: true })
     }
   }
-})
+}
+
+afterEach(() => removeTempDirs(tempDirs))
+afterAll(() => removeTempDirs(suiteTempDirs))
 
 const expectReleaseError = async (fn: () => Promise<unknown> | unknown, expectedCode: string): Promise<ReleaseArtifactError> => {
   try {
@@ -73,8 +82,7 @@ const writeSourceFile = (root: string, path: string, content: string | Buffer): 
   writeFileSync(join(root, path), content)
 }
 
-const makeSourceFixture = (): string => {
-  const root = makeTempDir()
+const makeSourceFixture = (root = makeTempDir()): string => {
   const workspace = resolve(import.meta.dirname, '..')
   for (const path of [...REQUIRED_ROOT_FILES, ...REQUIRED_SYSTEMD_UNITS]) {
     writeSourceFile(root, path, readFileSync(join(workspace, path)))
@@ -88,8 +96,68 @@ const makeSourceFixture = (): string => {
   return root
 }
 
+const fixtureSigningKey = 'xpanel-release-signing-key-2026-10-22'
+type BuiltRelease = Awaited<ReturnType<typeof buildReleaseArtifact>>
+let signedReleaseFixture: BuiltRelease | undefined
+
+const cloneSignedReleaseFixture = (): BuiltRelease => {
+  if (!signedReleaseFixture?.archivePath) throw new Error('Signed release fixture is not ready')
+  const outputDir = makeTempDir()
+  const stagingDir = join(outputDir, 'staging')
+  const archivePath = join(outputDir, basename(signedReleaseFixture.archivePath))
+  cpSync(signedReleaseFixture.stagingDir, stagingDir, { recursive: true, force: false, errorOnExist: true })
+  copyFileSync(signedReleaseFixture.archivePath, archivePath)
+  return { ...signedReleaseFixture, stagingDir, archivePath }
+}
+
 describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', () => {
-  it('builds a deterministic, signed release bundle with verified entrypoints, systemd units, migrations, and SBOM', async () => {
+  beforeAll(async () => {
+    const sourceRoot = makeSourceFixture(makeTempDir('xpanel-release-test-source-', 'suite'))
+    signedReleaseFixture = await buildReleaseArtifact({
+      sourceRoot,
+      outputDir: makeTempDir('xpanel-release-test-built-', 'suite'),
+      version: '0.1.0',
+      signingKey: fixtureSigningKey,
+      keyId: 'release-key-1',
+    })
+  })
+
+  it('binds the publisher sidecar to a real small HMAC-authenticated archive and records source uncertainty', async () => {
+    const fixture = signedReleaseFixture!
+    const verified = await verifyReleaseArchive(fixture.archivePath!, { expectedArchiveSha256: fixture.archiveSha256!, signingKey: fixtureSigningKey, requireSignature: true })
+    const source = JSON.parse(readFileSync(join(fixture.stagingDir, 'source-provenance.json'), 'utf8'))
+    expect(source).toMatchObject({ schemaVersion: 1, fingerprintAlgorithm: 'sha256-release-inputs-v1', commit: null, verificationSource: null })
+    expect(source.inputFingerprint).toMatch(/^[a-f0-9]{64}$/)
+    const release = { version: fixture.version, schemaVersion: fixture.schemaVersion, sha256: verified.archiveSha256, bytes: verified.manifest.totalUnpackedBytes }
+    const pair = generateKeyPairSync('ed25519')
+    const signed = createPublisherManifest(release, { keyId: 'small-fixture', privateKey: pair.privateKey })
+    const trust = [{ keyId: 'small-fixture', kind: 'ed25519-pem' as const, publicKeyOrSecret: pair.publicKey.export({ type: 'spki', format: 'pem' }).toString() }]
+    expect(() => verifySignedManifestForRelease(parseSignedReleaseManifest(signed), release, trust)).not.toThrow()
+    expect(() => verifySignedManifestForRelease(signed, { ...release, sha256: '0'.repeat(64) }, trust)).toThrow()
+    expect(() => verifySignedManifestForRelease(signed, { ...release, bytes: fixture.archiveBytes }, trust)).toThrow()
+    expect(fixture.publisherManifest).toBeNull()
+    expect(fixture.artifactProvenance).toBeNull()
+  })
+
+  it('derives SBOM workspace metadata from the captured archive inputs instead of rereading changed source', () => {
+    const root = makeTempDir()
+    const captured = new Map([['apps/api/package.json', { bytes: Buffer.from(JSON.stringify({ name: '@xpanel/api', version: '0.1.0', dependencies: {} })) }]])
+    writeSourceFile(root, 'apps/api/package.json', JSON.stringify({ name: '@xpanel/api', version: '9.9.9', dependencies: { vitest: '5.0.5' } }))
+    const sbom = collectProductionSbom(root, '0.1.0', '26.12.1', 'pnpm@12.15.0', 'a'.repeat(64), captured)
+    expect(sbom.workspacePackages).toEqual([{ name: '@xpanel/api', version: '0.1.0', path: 'apps/api', private: false, dependencies: [] }])
+  })
+
+  it('rejects publisher builds with native-incompatible archive trust before creating output', async () => {
+    const sourceRoot = makeSourceFixture()
+    const pair = generateKeyPairSync('ed25519')
+    for (const trust of [{ signingKey: 'a'.repeat(31), keyId: 'valid' }, { signingKey: 'a'.repeat(4097), keyId: 'valid' }, { signingKey: 'a'.repeat(32), keyId: 'a'.repeat(65) }, { signingKey: 'a'.repeat(32), keyId: 'bad/id' }]) {
+      const outputDir = makeTempDir()
+      await expectReleaseError(() => buildReleaseArtifact({ sourceRoot, outputDir, ...trust, publisher: { keyId: 'publisher-test', privateKey: pair.privateKey } }), 'PUBLISHER_TRUST_REQUIRED')
+      expect(readdirSync(outputDir)).toEqual([])
+    }
+  })
+
+  it('builds a deterministic, signed release bundle with verified entrypoints, systemd units, migrations, and SBOM', { tags: ['slow'] }, async () => {
     const outDir = makeTempDir()
     const signingKey = 'xpanel-release-signing-key-2026-10-22'
     const built = await buildReleaseArtifact({
@@ -328,14 +396,8 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
   })
 
   it('rejects a tampered artifact when any file byte or manifest payload is modified', async () => {
-    const outDir = makeTempDir()
-    const signingKey = 'xpanel-release-signing-key-2026-10-22'
-    const built = await buildReleaseArtifact({
-      outputDir: outDir,
-      version: '0.1.0',
-      signingKey,
-      createTarball: false,
-    })
+    const signingKey = fixtureSigningKey
+    const built = cloneSignedReleaseFixture()
 
     // Corrupt a single byte in apps/api/src/main.ts
     const apiMainPath = join(built.stagingDir, 'apps/api/src/main.ts')
@@ -367,12 +429,7 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
   })
 
   it('rejects an artifact with a missing entrypoint or invalid systemd unit contract', async () => {
-    const outDir = makeTempDir()
-    const built = await buildReleaseArtifact({
-      outputDir: outDir,
-      version: '0.1.0',
-      createTarball: false,
-    })
+    const built = cloneSignedReleaseFixture()
 
     // Remove apps/agent/src/main.ts from staging
     unlinkSync(join(built.stagingDir, 'apps/agent/src/main.ts'))
@@ -396,6 +453,18 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
         '[Service]\nUser=root\nGroup=xpanel\nSupplementaryGroups=xpanel-agent\nRuntimeDirectory=xpanel\nRuntimeDirectoryMode=0750\nRuntimeDirectoryPreserve=no\nUMask=0007\nExecStart=/usr/bin/node /opt/xpanel/apps/agent/src/main.ts\n',
       ),
     ).toThrow(/violates the verified S03\/H01 unit contract/)
+  })
+
+  it('accepts only the flat or current program entrypoints while preserving unit security metadata', () => {
+    const workspace = resolve(import.meta.dirname, '..')
+    for (const role of ['api', 'agent']) {
+      const name = `xpanel-${role}.service`
+      const flat = readFileSync(join(workspace, 'deploy/systemd', name), 'utf8')
+      const current = flat.replaceAll('/opt/xpanel/apps/', '/opt/xpanel/current/apps/')
+      expect(parseSystemdUnitContract(name, flat).execStart).toContain(`/opt/xpanel/apps/${role}/src/main.ts`)
+      expect(parseSystemdUnitContract(name, current).execStart).toContain(`/opt/xpanel/current/apps/${role}/src/main.ts`)
+      expect(() => parseSystemdUnitContract(name, flat.replaceAll('/opt/xpanel/apps/', '/tmp/opt/xpanel/apps/'))).toThrow()
+    }
   })
 
   it('rejects path traversal, symlinks, world-writable permissions, and non-root owners in pre-unpack archive verification', async () => {
@@ -442,38 +511,31 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
   })
 
   it('rejects world-writable or non-root runtime parent paths before any service mutation', async () => {
-    const outDir = makeTempDir()
-    const built = await buildReleaseArtifact({
-      outputDir: outDir,
-      version: '0.1.0',
-      createTarball: false,
-    })
+    const built = cloneSignedReleaseFixture()
 
-    await expectReleaseError(
-      () =>
-        verifyReleaseArtifact({
-          artifactDir: built.stagingDir,
-          runtimePathsToVerify: ['/opt/xpanel', '/usr/bin/node'],
-          statProvider: (p) => ({
-            uid: p === '/opt/xpanel' ? 0 : 0,
-            gid: 0,
-            mode: p === '/opt/xpanel' ? 0o777 : 0o755,
-            isSymbolicLink: false,
-            isDirectory: p === '/opt/xpanel',
-            isFile: p !== '/opt/xpanel',
+    for (const unsafe of [{ uid: 0, mode: 0o777 }, { uid: 1000, mode: 0o755 }]) {
+      await expectReleaseError(
+        () =>
+          verifyReleaseArtifact({
+            artifactDir: built.stagingDir,
+            runtimePathsToVerify: ['/opt/xpanel', '/usr/bin/node'],
+            statProvider: (p) => ({
+              uid: p === '/opt/xpanel' ? unsafe.uid : 0,
+              gid: 0,
+              mode: p === '/opt/xpanel' ? unsafe.mode : 0o755,
+              isSymbolicLink: false,
+              isDirectory: p === '/opt/xpanel',
+              isFile: p !== '/opt/xpanel',
+            }),
           }),
-        }),
-      'UNSAFE_RUNTIME_PATH',
-    )
+        'UNSAFE_RUNTIME_PATH',
+      )
+    }
   })
 
   it('cleans up partial staging directory and preserves existing release when unpack fails mid-flight (ENOSPC)', async () => {
-    const outDir = makeTempDir()
-    const built = await buildReleaseArtifact({
-      outputDir: outDir,
-      version: '0.1.0',
-      createTarball: true,
-    })
+    const built = cloneSignedReleaseFixture()
+    const outDir = dirname(built.stagingDir)
 
     const targetDir = join(outDir, 'installed-current')
     const stagingRoot = join(outDir, 'unpack-staging')
@@ -486,6 +548,8 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
       unpackVerifiedRelease({
         archivePath: built.archivePath!,
         expectedArchiveSha256: built.archiveSha256!,
+        signingKey: fixtureSigningKey,
+        requireSignature: true,
         stagingRoot,
         targetDir,
         writeFileHook: () => {
@@ -501,8 +565,8 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
 
     // Previous installation at targetDir must remain untouched, and partial staging dir must be removed
     expect(readFileSync(join(targetDir, 'VERSION'), 'utf8')).toBe('0.0.9\n')
-    const remainingStaging = existsSync(stagingRoot) ? readFileSync(join(targetDir, 'VERSION'), 'utf8') : ''
-    expect(remainingStaging).toBe('0.0.9\n')
+    expect(filesWritten).toBe(6)
+    expect(readdirSync(stagingRoot)).toEqual([])
   })
 
   it('verifies scripts/install.sh dry-run matches deploy/systemd units and enforces opt-in service flags', () => {
@@ -554,6 +618,11 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
     expect(optInPkgLine).toContain('postfix')
     expect(optInPkgLine).toContain('dovecot-sieve')
     expect(optInPkgLine).toContain('pdns-server')
+    expect(optInPkgLine).toContain('pdns-backend-bind')
+    expect(optInPkgLine).toContain('bind9-utils')
+    expect(optInPkgLine).toContain('dnsutils')
+    expect(optInPkgLine).not.toContain('pdns-backend-pgsql')
+    expect(optInRun.stdout).toContain('Existing daemon backend and zones are preserved')
     expect(optInPkgLine).toContain('pure-ftpd')
     expect(optInPkgLine).toContain('mariadb-server')
 
@@ -564,11 +633,72 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
     expect(dryRunNormalized).toContain(agentUnitDisk)
     expect(dryRunNormalized).toContain(apiUnitDisk)
   })
+
+  it.each([
+    ['ubuntu-22.04', UBUNTU_2204], ['ubuntu-24.04', UBUNTU_2404], ['almalinux-9', ALMA_9],
+    ['rocky-9', ROCKY_9], ['centos-stream-9', CENTOS_STREAM_9],
+  ])('plans explicit authenticated current layout for %s without reading credentials or running native effects', (_profile, osRelease) => {
+    const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : '/bin/bash'
+    const directory = makeTempDir(), file = join(directory, 'os-release').replaceAll('\\', '/')
+    writeFileSync(file, osRelease)
+    const args = ['scripts/install.sh', '--dry-run', `--os-release=${file}`, '--new-install',
+      '--artifact=/root/protected/release.tar.gz', `--artifact-sha256=${'a'.repeat(64)}`,
+      '--release-trust-file=/root/protected/trust.json', '--release-keys-file=/root/protected/publishers.json']
+    // Git Bash must pass these Linux-only grammar inputs unchanged to native Windows Node.
+    // Keep conversion enabled for the real script path; production path validation stays strict.
+    const result = spawnSync(bash, args, { cwd: resolve(import.meta.dirname, '..'), env: { ...process.env,
+      ...(process.platform === 'win32' ? { MSYS2_ARG_CONV_EXCL: '--artifact=;--release-trust-file=;--release-keys-file=' } : {}),
+      XPANEL_NODE_BIN: process.execPath.replaceAll('\\', '/') }, encoding: 'utf8', timeout: 10_000 })
+    expect(result.status, result.stderr).toBe(0)
+    expect(result.stdout).toContain('source/dependency proof pending real execution')
+    expect(result.stdout).toContain('WorkingDirectory=/opt/xpanel/current')
+    expect(result.stdout).toContain('/opt/xpanel/current/apps/agent/src/main.ts')
+    expect(result.stdout).toContain('/opt/xpanel/current/apps/api/src/main.ts')
+    expect(result.stdout).toContain('ExecStartPre=/usr/bin/install -d -o xpanel -g xpanel -m 0700 /run/xpanel/lifecycle-api')
+    expect(result.stdout).toContain('ReadWritePaths=/var/lib/xpanel /var/log/xpanel /run/xpanel/lifecycle-api')
+    expect(result.stdout).toContain('no host files mutated')
+  })
+
+  it.each(['debian', 'rhel'])('checks fresh %s package config metadata and preserves modified vendor bytes (diagnostic model)', family => {
+    const root = resolve(import.meta.dirname, '..'), directory = makeTempDir()
+    const config = join(directory, 'pdns.conf').replaceAll('\\', '/')
+    const vendor = '# Diagnostic vendor PowerDNS configuration\nlaunch=bind\n'
+    writeFileSync(config, vendor)
+    const source = readFileSync(join(root, 'scripts/install.sh'), 'utf8')
+    const declaration = /^verify_fresh_pdns_vendor\(\) \{[\s\S]*?^\}/m.exec(source)?.[0]
+    expect(declaration).toBeDefined()
+    const script = `set -euo pipefail
+die() { printf '%s' "$*" >&2; exit 3; }
+assert_root_file() { [[ -f "$1" && ! -L "$1" ]]; }
+record_install_phase() { printf '%s' "$3"; }
+dpkg-query() { if [[ "$1" == -S ]]; then printf 'pdns-server: %s\\n' "$VENDOR_CONFIG"; else printf ' %s %s\\n' "$VENDOR_CONFIG" "$EXPECTED_DIGEST"; fi; }
+rpm() { case "$*" in *FILEDIGESTALGO*) printf 8;; *FILENAMES*) printf '%s %s\\n' "$VENDOR_CONFIG" "$EXPECTED_DIGEST";; *) printf pdns;; esac; }
+${declaration}
+verify_fresh_pdns_vendor "$VENDOR_CONFIG"
+`
+    const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : '/bin/bash'
+    const env = { ...process.env, OS_FAMILY: family, VENDOR_CONFIG: config, EXPECTED_DIGEST: createHash(family === 'debian' ? 'md5' : 'sha256').update(vendor).digest('hex') }
+    const run = () => spawnSync(bash, ['-s'], { input: script, env, encoding: 'utf8', timeout: 10_000 })
+    const accepted = run()
+    expect(accepted.status, accepted.stderr).toBe(0)
+    expect(accepted.stdout).toBe(createHash('sha256').update(vendor).digest('hex'))
+    const operatorBytes = vendor + 'operator-setting=preserve\n'
+    writeFileSync(config, operatorBytes)
+    const refused = run()
+    expect(refused.status).toBe(3)
+    expect(refused.stderr).toContain('differs from package metadata; preserved')
+    expect(readFileSync(config, 'utf8')).toBe(operatorBytes)
+  })
 })
 
 describe('release privacy scan', () => {
   it('accepts the skill, the design-doc test, the data-token attribute, and the fidelity script from the repo config', () => {
-    const sourceRoot = resolve(import.meta.dirname, '..')
+    const sourceRoot = makeSourceFixture()
+    const workspace = resolve(import.meta.dirname, '..')
+    writeSourceFile(sourceRoot, 'scripts/release-privacy.json', readFileSync(join(workspace, 'scripts/release-privacy.json')))
+    writeSourceFile(sourceRoot, '.cursor/skills/design-board-pixel-port/SKILL.md', '# skill\n')
+    writeSourceFile(sourceRoot, 'apps/web/src/design-board.test.ts', 'expect(page).toContain(\'data-token="accent"\')\n')
+    writeSourceFile(sourceRoot, 'scripts/board-fidelity.mjs', 'export {}\n')
     expect(scanReleasePrivacy(sourceRoot).violations).toEqual([])
   })
 

@@ -32,7 +32,7 @@ export function card(props: CardProps): string {
   return `<section class="${cls}"${attr('id', props.id)} aria-labelledby="${escapeHtml(props.titleId)}"${hookAttrs(props.hooks)}>${head}<div class="v2-card__body">${props.bodyHtml}</div>${footer}</section>`
 }
 
-export const CARD_CSS = `.v2-card{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-3);border-radius:var(--radius-card);background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);min-width:0}
+export const CARD_CSS = `.v2-card{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--v2-panel-padding);border-radius:var(--radius-card);background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);min-width:0}
 .v2-card__head{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:var(--space-1) var(--space-2)}
 .v2-card__title{display:flex;flex-direction:column;gap:4px;min-width:0}
 .v2-card__title p{font-size:13px;color:var(--muted)}
@@ -41,6 +41,6 @@ export const CARD_CSS = `.v2-card{display:flex;flex-direction:column;gap:var(--s
 .v2-card__foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:var(--space-1)}
 .v2-card--flush{padding:0;gap:0;overflow:hidden}
 .v2-card--flush>.v2-card__body{gap:0}
-.v2-card--flush>:is(.v2-card__head,.v2-card__foot){padding:20px var(--space-3)}
+.v2-card--flush>:is(.v2-card__head,.v2-card__foot){padding:var(--v2-panel-padding)}
 .v2-card--flush>.v2-card__foot{padding-block:var(--space-1);border-top:1px solid var(--line)}
 `

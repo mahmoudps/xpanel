@@ -1,3 +1,7 @@
+import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
+const mailTemplate = canonicalMailTemplate
+const mailSlot = canonicalMailSlot
+const mailRequireTemplates = canonicalMailRequireTemplates
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -59,6 +63,7 @@ function bindMailTrackDelivery(): void {
     const form = root.querySelector<HTMLFormElement>('[data-mail-track-form]'), status = root.querySelector<HTMLElement>('[data-mail-track-status]'), rows = root.querySelector<HTMLElement>('[data-mail-track-rows]'), detail = root.querySelector<HTMLElement>('[data-mail-track-detail]')
     const range = form?.elements.namedItem('range') as HTMLSelectElement | null, filter = form?.elements.namedItem('status') as HTMLSelectElement | null
     if (!form || !status || !rows || !detail || !range || !filter) return
+    try { mailRequireTemplates(root, [['mail-track-row', 'tr', ['time', 'direction', 'counterpart', 'status', 'dsn', 'view']], ['mail-track-empty', 'tr', ['message']]]) } catch { form.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button,select').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Delivery tracking is unavailable for this mailbox session. Nothing was read.'); return }
     const admitted = (): boolean => root.isConnected && root.dataset.trackCanRead === 'true' && root.dataset.trackMailbox === mailbox && !!mailbox && !root.closest(denied) && !!send
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const fact = (key: string, value: string): void => { const node = root.querySelector<HTMLElement>('[data-mail-track-fact="' + key + '"]'); if (node) node.textContent = value }
@@ -90,9 +95,9 @@ function bindMailTrackDelivery(): void {
       const visible = messages.filter(message => !filter.value || message.status === filter.value), pages = Math.max(1, Math.ceil(visible.length / 50))
       page = Math.min(page, pages - 1); rows.textContent = ''
       for (const message of visible.slice(page * 50, page * 50 + 50)) {
-        const row = document.createElement('tr'), view = document.createElement('button')
-        view.type = 'button'; view.className = 'xp-btn'; view.textContent = t('View timeline'); view.addEventListener('click', () => showDetail(message))
-        cell(row, time(message.lastSeen), true); cell(row, direction[message.role]!); cell(row, counterpart(message)); cell(row, statusLabel[message.status]!); cell(row, message.dsn ?? '-', true); cell(row, view); rows.append(row)
+        const row = mailTemplate(root, 'mail-track-row', 'tr', ['time', 'direction', 'counterpart', 'status', 'dsn', 'view']), view = mailSlot<HTMLButtonElement>(row, 'view', 'button')
+        view.textContent = t('View timeline'); view.addEventListener('click', () => showDetail(message))
+        mailSlot(row, 'time', 'bdi').textContent = time(message.lastSeen); mailSlot(row, 'direction').textContent = direction[message.role]!; mailSlot(row, 'counterpart').append(counterpart(message)); mailSlot(row, 'status').textContent = statusLabel[message.status]!; mailSlot(row, 'dsn', 'bdi').textContent = message.dsn ?? '-'; rows.append(row)
       }
       if (!visible.length) empty(rows, 6, messages.length ? t('No messages have this status in the window.') : t('No mail was sent or received by this mailbox in this window.'))
       const label = root.querySelector<HTMLElement>('[data-mail-track-page-label]')
@@ -129,4 +134,4 @@ function bindMailTrackDelivery(): void {
   })
 }
 
-export const MAIL_TRACK_DELIVERY_CLIENT_BINDING = `(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readTrackDeliveryView=${readTrackDeliveryView.toString()};return ${bindMailTrackDelivery.toString()};})()`
+export const MAIL_TRACK_DELIVERY_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readTrackDeliveryView=${readTrackDeliveryView.toString()};return ${bindMailTrackDelivery.toString()};})()`

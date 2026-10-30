@@ -2,6 +2,10 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
 
 export const WORKSPACE_EDIT_BYTES=1024*1024
@@ -123,6 +127,32 @@ export function workspaceTrash(value:unknown,path?:string):{id:string;originalPa
   return value as unknown as {id:string;originalPath:string;name:string;sizeBytes:number;deletedAt:string}
 }
 export function workspaceTrashList(value:unknown):unknown[]{if(!workspaceObject(value)||!Array.isArray(value.items)||value.items.length>10000)throw new Error('invalid_trash_list');const ids=new Set<string>();for(const raw of value.items){const item=workspaceTrash(raw);if(ids.has(item.id))throw new Error('duplicate_trash_id');ids.add(item.id)}return value.items}
+
+function fileWorkspaceTemplates(root:HTMLElement,trash:boolean){
+  const row=clientTemplate(root,trash?'trash-row':'file-row')
+  const action=clientTemplate(root,trash?'trash-action':'file-action')
+  const empty=trash?undefined:clientTemplate(root,'file-empty-row')
+  const purge=trash?clientTemplate(root,'trash-purge-action'):undefined
+  const cloneRow=()=>{
+    const element=cloneClientTemplate(row,'tr',['name','kind','size','mode','modified','actions'])
+    clientTemplateSlot(element,'modified','time');clientTemplateSlot(element,'actions','td')
+    if(element.querySelector('[data-xp-slot="path"]'))clientTemplateSlot(element,'path')
+    return element
+  }
+  const cloneAction=(purging=false)=>{
+    const element=cloneClientTemplate(purging?purge!:action,'button',['label']) as HTMLButtonElement
+    if(element.getAttribute('type')!=='button')throw new Error('invalid_file_action_template')
+    return element
+  }
+  const cloneEmpty=()=>{
+    const element=cloneClientTemplate(empty!,'tr',['message'])
+    if(clientTemplateSlot(element,'message','td').getAttribute('colspan')!=='6')throw new Error('invalid_file_empty_template')
+    return element
+  }
+  cloneRow();cloneAction();if(trash)cloneAction(true);else cloneEmpty()
+  return{cloneRow,cloneAction,cloneEmpty}
+}
+
 function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
   document.querySelectorAll<HTMLElement>('[data-file-manager="browse"]').forEach(root=>{
     if(root.dataset.fileWorkspaceBound==='true')return
@@ -135,19 +165,23 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
     const current=root.querySelector<HTMLElement>('[data-file-current-path]'),selected=root.querySelector<HTMLElement>('[data-file-selected-path]')
     const eligible=()=>root.isConnected&&root.dataset.fileManager==='browse'&&!root.closest(denied)&&root.dataset.accountUsername===username&&/^[a-z][a-z0-9]{0,15}$/.test(username)
     if(!eligible()||typeof transport!=='function'){root.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLTextAreaElement>('button,input,textarea').forEach(node=>{node.disabled=true});status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('File operations are unavailable.');return}
+    let templates:ReturnType<typeof fileWorkspaceTemplates>
+    try{templates=fileWorkspaceTemplates(root,false)}catch{root.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLTextAreaElement>('button,input,textarea').forEach(node=>{node.disabled=true});status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('File operations are unavailable.');return}
     const send:WorkspaceSend=body=>{if(!eligible())return Promise.reject(Object.assign(new Error('workspace_context_changed'),{stateChanged:false}));return transport('POST','/api/accounts/'+encodeURIComponent(username)+'/files',body)}
     let renderedEntries:WorkspaceEntry[]|null=null,renderedRead=false
-    const setTechnical=(node:HTMLElement,value:string)=>{const bdi=document.createElement('bdi');bdi.dir='ltr';bdi.className='xp-mono xp-chart-technical-value';bdi.textContent=value;node.replaceChildren(bdi)}
     const size=(bytes:number)=>{const units=['B','KiB','MiB','GiB','TiB'];let amount=bytes,index=0;while(amount>=1024&&index<units.length-1){amount/=1024;index++}return amount.toFixed(index===0?0:amount>=10?1:2)+' '+units[index]}
     const when=(value:string)=>formatDisplayDateTime(value)
-    const actionButton=(parent:HTMLElement,label:string,kind:string,path:string,action:()=>void)=>{const button=document.createElement('button');button.type='button';button.className='xp-btn';button.dataset.fileWorkspaceAction=kind;button.dataset.path=path;button.textContent=label;button.addEventListener('click',event=>{event.stopPropagation();if(button.disabled||!eligible())return;action()});parent.appendChild(button);return button}
+    const actionButton=(parent:HTMLElement,label:string,kind:string,path:string,action:()=>void)=>{const button=templates.cloneAction();button.dataset.fileWorkspaceAction=kind;button.dataset.path=path;clientTemplateSlot(button,'label').textContent=label;button.addEventListener('click',event=>{event.stopPropagation();if(button.disabled||!eligible())return;action()});parent.appendChild(button);return button}
     const paint=(entries:WorkspaceEntry[],observed:boolean)=>{
       tbody.textContent=''
       for(const entry of entries){
-        const row=document.createElement('tr');row.dataset.filePath=entry.path
-        const cell=(text:string,technical=false)=>{const node=document.createElement('td');if(technical)setTechnical(node,text);else node.textContent=text;row.appendChild(node);return node}
-        cell(entry.name,true);cell(entry.kind==='directory'?copy(msgctxt('file-workspace-client', 'Folder')):entry.kind==='symlink'?copy('Symbolic link'):copy(msgctxt('file-workspace-client', 'File')));cell(size(entry.sizeBytes),true);cell(entry.mode.toString(8).padStart(4,'0'),true);const modifiedCell=cell('',true),modifiedTime=document.createElement('time');modifiedTime.dateTime=entry.mtime;modifiedTime.textContent=when(entry.mtime);modifiedCell.querySelector('bdi')!.appendChild(modifiedTime)
-        const actions=document.createElement('td');actions.className='xp-file-row-actions'
+        const row=templates.cloneRow();row.dataset.filePath=entry.path;row.dataset.fileKind=entry.kind
+        clientTemplateSlot(row,'name').textContent=entry.name
+        if(row.querySelector('[data-xp-slot="path"]'))clientTemplateSlot(row,'path').textContent=entry.path
+        clientTemplateSlot(row,'kind').textContent=entry.kind==='directory'?copy(msgctxt('file-workspace-client', 'Folder')):entry.kind==='symlink'?copy('Symbolic link'):copy(msgctxt('file-workspace-client', 'File'))
+        clientTemplateSlot(row,'size').textContent=size(entry.sizeBytes);clientTemplateSlot(row,'mode').textContent=entry.mode.toString(8).padStart(4,'0')
+        const modifiedTime=clientTemplateSlot(row,'modified','time') as HTMLTimeElement;modifiedTime.dateTime=entry.mtime;modifiedTime.textContent=when(entry.mtime)
+        const actions=clientTemplateSlot(row,'actions','td')
         if(entry.kind==='symlink'){actions.textContent=copy('Link actions are unavailable.')}
         else{
           actionButton(actions,entry.kind==='directory'?copy(msgctxt('file-workspace-client', 'Open')):copy(msgctxt('file-workspace-client', 'Edit')),entry.kind==='directory'?'directory':'open',entry.path,()=>{if(controller.state.uncertain){void controller.review();return}void(entry.kind==='directory'?controller.navigate(entry.path):controller.open(entry.path))})
@@ -166,9 +200,9 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
           })()})
           actionButton(actions,copy(msgctxt('file-workspace-client', 'Move to trash')),'trash',entry.path,()=>{void controller.perform(async()=>{const ok=await askDialog?.({title:copy(msgctxt('file-workspace-client', 'Move to trash')),body:entry.path,confirm:copy(msgctxt('file-workspace-client', 'Move to trash')),danger:true});return ok===true?{op:'trash',path:entry.path}:null},async(request,body,result)=>{workspaceTrash(result,entry.path);const rows=workspaceListing(await request({op:'list',path:entry.path.split('/').slice(0,-1).join('/')}),entry.path.split('/').slice(0,-1).join('/'));if(rows.some(item=>item.path===entry.path))throw new Error('trash_not_observed')},async request=>{workspaceListing(await request({op:'list',path:entry.path.split('/').slice(0,-1).join('/')}),entry.path.split('/').slice(0,-1).join('/'))})})
         }
-        row.appendChild(actions);tbody.appendChild(row)
+        tbody.appendChild(row)
       }
-      if(!entries.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=6;cell.textContent=observed?copy('This directory is empty.'):copy('Directory contents have not been read.');row.appendChild(cell);tbody.appendChild(row)}
+      if(!entries.length){const row=templates.cloneEmpty();clientTemplateSlot(row,'message').textContent=observed?copy('This directory is empty.'):copy('Directory contents have not been read.');tbody.appendChild(row)}
     }
     const render=(state:WorkspaceState)=>{
       root.setAttribute('aria-busy',String(state.busy));root.dataset.fileLoading=String(state.loading);root.dataset.fileUncertain=String(state.uncertain);root.dataset.fileRead=String(state.hasListed)
@@ -221,28 +255,31 @@ function bindTrashWorkspace(askDialog?:WorkspaceConfirm):void{
     const eligible=()=>root.isConnected&&root.dataset.fileManager==='trash'&&!root.closest(denied)&&root.dataset.accountUsername===username&&/^[a-z][a-z0-9]{0,15}$/.test(username)
     const disable=()=>root.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLTextAreaElement>('button,input,textarea').forEach(node=>{node.disabled=true})
     if(!eligible()||typeof transport!=='function'){disable();status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('Trash operations are unavailable.');return}
+    let templates:ReturnType<typeof fileWorkspaceTemplates>
+    const table=tbody.closest<HTMLElement>('[data-file-table-wrap]')
+    try{if(!table||!root.contains(table))throw new Error('file_table_unavailable');templates=fileWorkspaceTemplates(root,true)}catch{disable();status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('Trash operations are unavailable.');return}
     const send:WorkspaceSend=body=>{if(!eligible())return Promise.reject(Object.assign(new Error('workspace_context_changed'),{stateChanged:false}));return transport('POST','/api/accounts/'+encodeURIComponent(username)+'/files',body)}
     const size=(bytes:number)=>{const units=['B','KiB','MiB','GiB','TiB'];let amount=bytes,index=0;while(amount>=1024&&index<units.length-1){amount/=1024;index++}return amount.toFixed(index===0?0:amount>=10?1:2)+' '+units[index]}
     const when=(value:string)=>formatDisplayDateTime(value)
     let busy=false,uncertain=false
     const setStatus=(text:string,kind:string)=>{status.hidden=!text;status.dataset.state=kind;status.setAttribute('role',kind==='failed'||kind==='uncertain'?'alert':'status');status.textContent=text}
     const sync=()=>{root.setAttribute('aria-busy',String(busy));root.dataset.fileUncertain=String(uncertain);root.querySelectorAll<HTMLButtonElement>('button').forEach(button=>{const review=button.dataset.action==='refresh-files';button.disabled=busy||!eligible()||(uncertain&&!review)})}
-    const empty=root.querySelector<HTMLElement>('[data-trash-empty]'),table=tbody.closest<HTMLElement>('.xp-table-wrap')
+    const empty=root.querySelector<HTMLElement>('[data-trash-empty]')
     const paint=(items:{id:string;originalPath:string;name:string;sizeBytes:number;deletedAt:string}[])=>{
       tbody.textContent=''
       // An observed empty read swaps the table for the approved empty-state block.
       if(empty)empty.hidden=items.length>0
       if(table)table.hidden=!items.length
       for(const item of items){
-        const row=document.createElement('tr');row.dataset.filePath=item.originalPath;row.dataset.trashId=item.id
-        const cell=(value:string,technical=false)=>{const node=document.createElement('td');if(technical){const bdi=document.createElement('bdi');bdi.dir='ltr';bdi.className='xp-mono xp-chart-technical-value';bdi.textContent=value;node.replaceChildren(bdi)}else node.textContent=value;row.appendChild(node);return node}
-        cell(item.originalPath,true);cell(copy('Trashed item'));cell(size(item.sizeBytes),true);cell(copy('Not recorded'));const deletedCell=cell('',true),deletedTime=document.createElement('time');deletedTime.dateTime=item.deletedAt;deletedTime.textContent=when(item.deletedAt);deletedCell.querySelector('bdi')!.appendChild(deletedTime)
-        const actions=document.createElement('td')
-        const restore=document.createElement('button');restore.type='button';restore.className='xp-btn';restore.dataset.fileWorkspaceAction='restore';restore.dataset.path=item.originalPath;restore.textContent=copy('Restore')
+        const row=templates.cloneRow();row.dataset.filePath=item.originalPath;row.dataset.trashId=item.id
+        clientTemplateSlot(row,'name').textContent=item.originalPath;clientTemplateSlot(row,'kind').textContent=copy('Trashed item');clientTemplateSlot(row,'size').textContent=size(item.sizeBytes);clientTemplateSlot(row,'mode').textContent=copy('Not recorded')
+        const deletedTime=clientTemplateSlot(row,'modified','time') as HTMLTimeElement;deletedTime.dateTime=item.deletedAt;deletedTime.textContent=when(item.deletedAt)
+        const actions=clientTemplateSlot(row,'actions','td')
+        const restore=templates.cloneAction();restore.dataset.fileWorkspaceAction='restore';restore.dataset.path=item.originalPath;clientTemplateSlot(restore,'label').textContent=copy('Restore')
         restore.addEventListener('click',event=>{event.stopPropagation();if(restore.disabled||!eligible())return;void restoreItem(item)})
-        const purge=document.createElement('button');purge.type='button';purge.className='xp-btn xp-btn--quiet';purge.dataset.fileWorkspaceAction='purge';purge.dataset.path=item.originalPath;purge.textContent=copy('Delete for good…');purge.setAttribute('aria-label',copy('Delete {path} for good',{path:item.originalPath}))
+        const purge=templates.cloneAction(true);purge.dataset.fileWorkspaceAction='purge';purge.dataset.path=item.originalPath;clientTemplateSlot(purge,'label').textContent=copy('Delete for good…');purge.setAttribute('aria-label',copy('Delete {path} for good',{path:item.originalPath}))
         purge.addEventListener('click',event=>{event.stopPropagation();if(purge.disabled||!eligible())return;void purgeItem(item)})
-        actions.append(restore,purge);row.appendChild(actions);tbody.appendChild(row)
+        actions.append(restore,purge);tbody.appendChild(row)
       }
     }
     const read=async()=>{paint(workspaceTrashList(await send({op:'list-trash'})) as {id:string;originalPath:string;name:string;sizeBytes:number;deletedAt:string}[])}
@@ -306,4 +343,4 @@ function bindTrashWorkspace(askDialog?:WorkspaceConfirm):void{
   })
 }
 
-export const FILE_WORKSPACE_CLIENT_BINDING = `(function(askDialog) { const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const WORKSPACE_EDIT_BYTES=${WORKSPACE_EDIT_BYTES};const WORKSPACE_BINARY_BYTES=${WORKSPACE_BINARY_BYTES};${workspaceObject.toString()};${workspacePath.toString()};${workspaceLeaf.toString()};${workspaceMode.toString()};${workspaceTextBytes.toString()};${workspaceTime.toString()};${workspaceEntry.toString()};${workspaceListing.toString()};${workspaceText.toString()};${workspaceBinary.toString()};${workspaceWriteUncertain.toString()};${createFileWorkspace.toString()};${workspaceTrash.toString()};${workspaceTrashList.toString()};(${bindFileWorkspace.toString()})(askDialog);(${bindTrashWorkspace.toString()})(askDialog); })`
+export const FILE_WORKSPACE_CLIENT_BINDING = `(function(askDialog) { const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const WORKSPACE_EDIT_BYTES=${WORKSPACE_EDIT_BYTES};const WORKSPACE_BINARY_BYTES=${WORKSPACE_BINARY_BYTES};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${fileWorkspaceTemplates.toString()};${workspaceObject.toString()};${workspacePath.toString()};${workspaceLeaf.toString()};${workspaceMode.toString()};${workspaceTextBytes.toString()};${workspaceTime.toString()};${workspaceEntry.toString()};${workspaceListing.toString()};${workspaceText.toString()};${workspaceBinary.toString()};${workspaceWriteUncertain.toString()};${createFileWorkspace.toString()};${workspaceTrash.toString()};${workspaceTrashList.toString()};(${bindFileWorkspace.toString()})(askDialog);(${bindTrashWorkspace.toString()})(askDialog); })`

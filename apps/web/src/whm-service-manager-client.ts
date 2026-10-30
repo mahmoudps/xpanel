@@ -1,6 +1,9 @@
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
+import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const viewAction = canonicalViewAction
 import './i18n.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 export interface ServiceManagerClientRow { unit: string; load: string | null; active: string | null; sub: string | null; boot: string | null; restart: boolean; bootEditable: boolean }
@@ -52,7 +55,14 @@ function bindWhmServiceManager(askDialog: ((options: Record<string, unknown>) =>
     const manageable = (): boolean => admitted() && root.dataset.smCanManage === 'true' && view?.state === 'read' && view.manage && typeof askDialog === 'function' && !review
     const note = (state: string, text: string): void => { status.dataset.state = state; status.textContent = text }
     const outcome = (state: string, text: string): void => { result.dataset.state = state; result.textContent = text; result.hidden = false }
-    const technical = (text: string): HTMLElement => { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = text; return bdi }
+    try {
+      const example = cloneViewRecord(root, 'service-manager-row', 'tr', { unit: '', load: '', active: '', sub: '', boot: '', 'restart-label': '', 'boot-label': '', 'protected-label': '' })
+      viewAction(example, 'restart'); viewAction(example, 'boot'); viewAction(example, 'protected', 'span')
+      cloneViewRecord(root, 'service-manager-empty', 'tr', { message: '' })
+    } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      note('unavailable', t('Saving is unavailable. No changes were sent.')); return
+    }
     const date = (seconds: number | null): string => seconds === null ? t('Unavailable') : formatDisplayDateTime(new Date(seconds * 1000))
     const controls = (): void => {
       refresh.disabled = busy || !admitted()
@@ -69,16 +79,14 @@ function bindWhmServiceManager(askDialog: ((options: Record<string, unknown>) =>
       const query = search.value.trim().toLowerCase()
       const visible = (view?.units ?? []).filter(row => row.unit.toLowerCase().includes(query) && (filter.value === 'active' ? row.active === 'active' : filter.value === 'attention' ? row.active === 'failed' || row.load !== 'loaded' : filter.value === 'editable' ? row.bootEditable : true))
       for (const row of visible) {
-        const tr = document.createElement('tr')
-        for (const value of [row.unit, row.load, row.active, row.sub, row.boot]) { const td = document.createElement('td'); td.append(value === null ? document.createTextNode(t('Not observed')) : technical(value)); tr.append(td) }
-        const actions = document.createElement('td'), group = document.createElement('div'); group.className = 'xp-whm-service-manager__actions'
-        const button = (action: string, label: string) => { const control = document.createElement('button'); control.type = 'button'; control.className = 'xp-btn'; control.dataset.smAction = action; control.dataset.smUnit = row.unit; control.textContent = label; control.disabled = true; group.append(control) }
-        if (row.restart) button('restart', t(msgctxt('whm-service-manager-client', 'Restart')))
-        if (row.bootEditable) button(row.boot === 'enabled' ? 'disable' : 'enable', row.boot === 'enabled' ? t('Disable at boot') : t('Enable at boot'))
-        if (!row.restart && !row.bootEditable) group.textContent = t('Protected or not reviewed')
-        actions.append(group); tr.append(actions); rows.append(tr)
+        const tr = cloneViewRecord(root, 'service-manager-row', 'tr', { unit: row.unit, load: row.load ?? t('Not observed'), active: row.active ?? t('Not observed'), sub: row.sub ?? t('Not observed'), boot: row.boot ?? t('Not observed'),
+          'restart-label': t(msgctxt('whm-service-manager-client', 'Restart')), 'boot-label': row.boot === 'enabled' ? t('Disable at boot') : t('Enable at boot'), 'protected-label': !row.restart && !row.bootEditable ? t('Protected or not reviewed') : '' })
+        const restart = viewAction(tr, 'restart'), boot = viewAction(tr, 'boot')
+        if (row.restart) { restart.dataset.smAction = 'restart'; restart.dataset.smUnit = row.unit } else restart.remove()
+        if (row.bootEditable) { boot.dataset.smAction = row.boot === 'enabled' ? 'disable' : 'enable'; boot.dataset.smUnit = row.unit } else boot.remove()
+        rows.append(tr)
       }
-      if (!visible.length) { const tr = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 6; td.textContent = view?.state === 'read' ? t('No services match these filters.') : t('No service state is available.'); tr.append(td); rows.append(tr) }
+      if (!visible.length) rows.append(cloneViewRecord(root, 'service-manager-empty', 'tr', { message: view?.state === 'read' ? t('No services match these filters.') : t('No service state is available.') }))
       controls()
     }
     const load = async (): Promise<void> => {
@@ -130,4 +138,4 @@ function bindWhmServiceManager(askDialog: ((options: Record<string, unknown>) =>
   })
 }
 
-export const WHM_SERVICE_MANAGER_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readServiceManagerView=${readServiceManagerView.toString()};const readServiceManagerSubmission=${readServiceManagerSubmission.toString()};return ${bindWhmServiceManager.toString()};})()`
+export const WHM_SERVICE_MANAGER_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readServiceManagerView=${readServiceManagerView.toString()};const readServiceManagerSubmission=${readServiceManagerSubmission.toString()};return ${bindWhmServiceManager.toString()};})()`

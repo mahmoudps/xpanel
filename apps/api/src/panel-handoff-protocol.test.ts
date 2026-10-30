@@ -35,12 +35,22 @@ describe('one-time handoff protocol rules', () => {
 
   it('keeps an impersonated session away from the sign-in identity of its target', () => {
     for (const [method, path] of [['POST', '/api/auth/change-password'], ['POST', '/api/auth/2fa/setup'], ['POST', '/api/auth/2fa/disable'], ['PATCH', '/api/account/preferences'],
-      ['POST', '/api/account/team'], ['PUT', '/api/account/team/77777777-7777-4777-8777-000000000001'], ['POST', '/api/server/panel/api-tokens'], ['PATCH', '/api/accounts/alice'], ['POST', '/api/handoff/xmail']] as const) {
+      ['POST', '/api/account/team'], ['PUT', '/api/account/team/77777777-7777-4777-8777-000000000001'], ['POST', '/api/server/panel/api-tokens'], ['PATCH', '/api/accounts/alice'], ['POST', '/api/handoff/xmail'], ['PUT', '/api/auth/ui-preferences']] as const) {
       expect(impersonationForbidsRoute(path, method), `${method} ${path}`).toBe(true)
     }
-    for (const [method, path] of [['GET', '/api/auth/me'], ['POST', '/api/auth/logout'], ['GET', '/api/account/preferences'], ['GET', '/api/account/team'], ['POST', '/api/domains'], ['GET', '/api/webmail/inbox']] as const) {
+    for (const [method, path] of [['GET', '/api/auth/me'], ['POST', '/api/auth/logout'], ['GET', '/api/account/preferences'], ['GET', '/api/account/team'], ['POST', '/api/domains'], ['GET', '/api/webmail/inbox'], ['GET', '/api/auth/ui-preferences']] as const) {
       expect(impersonationForbidsRoute(path, method), `${method} ${path}`).toBe(false)
     }
+  })
+
+  it('admits only the exact UI preference read and write on all interactive listeners', () => {
+    for (const entry of ['xpanel', 'xwhm', 'xmail'] as const) {
+      for (const method of ['GET', 'PUT']) expect(entryPointAllowsApiRoute(entry, '/api/auth/ui-preferences', method)).toBe(true)
+      for (const method of ['POST', 'PATCH', 'DELETE', 'HEAD']) expect(entryPointAllowsApiRoute(entry, '/api/auth/ui-preferences', method)).toBe(false)
+      expect(entryPointAllowsApiRoute(entry, '/api/auth/ui-preferences/other', 'GET')).toBe(false)
+    }
+    expect(policyForRequest('/api/auth/ui-preferences', 'GET')).toEqual({ resource: 'auth' })
+    expect(policyForRequest('/api/auth/ui-preferences', 'PUT')).toEqual({ resource: 'auth' })
   })
 
   it('admits mailbox identities only on xMail and confines issuance to the one crossing each listener owns', () => {

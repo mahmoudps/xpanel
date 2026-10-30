@@ -1,3 +1,4 @@
+import { classicOpsClientTemplates } from '../themes/classic/ops-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 
 /** Managed server nodes for /whm/server/nodes. Host data is filled by OPS_NODES_CLIENT_BINDING from authorized reads only. */
@@ -33,5 +34,6 @@ export function renderOpsNodesWorkspace(input: { locale: Locale; canRead: boolea
       <div class="xp-whm-detail-actions"><button type="button" class="xp-btn" data-ops-nodes-add disabled>${t('Add node')}</button><button type="button" class="xp-btn" data-ops-nodes-save disabled>${t('Save registry')}</button></div>
       <p class="xp-help">${t('Registration records the node and its pinned key fingerprint. A node stays pending until its authenticated channel is verified from this server.')}</p>
     </section>
+    ${classicOpsClientTemplates('nodes')}
   </div>`
 }

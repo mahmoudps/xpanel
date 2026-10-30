@@ -1,9 +1,13 @@
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, createPrivateKey, timingSafeEqual } from 'node:crypto'
 import {
+  closeSync,
+  constants,
   chmodSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -16,6 +20,8 @@ import { gunzipSync, gzipSync } from 'node:zlib'
 import { init, parse as parseModules } from 'es-module-lexer'
 import { withAuthenticatedReleaseArchive, stageAuthenticatedReleaseArchive } from './release-verifier.mjs'
 import { REQUIRED_LIFECYCLE_CONTROL_FILES } from './release-verifier.mjs'
+import { captureReleaseSource, createPublisherManifest, publisherManifestPath, writePublisherOutput } from './release-publisher.mjs'
+import { identifySource, assertSameSource } from './evidence/identity.mjs'
 
 // The parser is a pinned development dependency; no parser or test tool enters the release.
 await init()
@@ -47,6 +53,12 @@ export const REQUIRED_ROOT_FILES = Object.freeze([
   'scripts/management-tls.mjs',
   'scripts/release-verifier.mjs',
   'scripts/release-verifier.d.mts',
+  'scripts/evidence/runtime.mjs',
+  'scripts/evidence/runtime.d.mts',
+  'scripts/evidence/contracts.mjs',
+  'scripts/evidence/reports.mjs',
+  'scripts/evidence/files.mjs',
+  'scripts/evidence/shared.mjs',
   'helpers/account-files/build.mjs',
   'helpers/account-files/xpanel-account-files.c',
   'helpers/terminal-pty/build.mjs',
@@ -183,7 +195,7 @@ export const parseSystemdUnitContract = (unitName, content) => {
       runtimeDirectoryMode !== '0750' ||
       runtimeDirectoryPreserve !== 'no' ||
       umask !== '0007' ||
-      !execStart.endsWith('/opt/xpanel/apps/agent/src/main.ts')
+      !['/opt/xpanel/apps/agent/src/main.ts', '/opt/xpanel/current/apps/agent/src/main.ts'].some(path => execStart.endsWith(` ${path}`))
     ) {
       failRelease('INVALID_SYSTEMD_UNIT', `xpanel-agent.service violates the verified S03/H01 unit contract`, {
         unitName,
@@ -204,7 +216,7 @@ export const parseSystemdUnitContract = (unitName, content) => {
       supplementaryGroups !== 'xpanel-agent' ||
       umask !== '0007' ||
       noNewPrivileges !== 'yes' ||
-      !execStart.endsWith('/opt/xpanel/apps/api/src/main.ts')
+      !['/opt/xpanel/apps/api/src/main.ts', '/opt/xpanel/current/apps/api/src/main.ts'].some(path => execStart.endsWith(` ${path}`))
     ) {
       failRelease('INVALID_SYSTEMD_UNIT', `xpanel-api.service violates the verified S03/H01 unit contract`, {
         unitName,
@@ -236,6 +248,8 @@ const isIncludedRuntimeSource = (relPath) => {
   if (isDesignReference(relPath)) return false
   if (REQUIRED_ROOT_FILES.includes(relPath)) return true
   if (REQUIRED_LIFECYCLE_CONTROL_FILES.includes(relPath)) return true
+  // Fresh-install tooling is shipped when present, without changing legacy upgrade/recovery admission.
+  if (['scripts/install-bootstrap.mjs', 'scripts/install-bootstrap.d.mts'].includes(relPath)) return true
   if (REQUIRED_SYSTEMD_UNITS.includes(relPath)) return true
   if (/^(?:apps|packages)\/[^/]+\/package\.json$/.test(relPath)) return true
   if (/^packages\/db\/src\/migrations\/\d{4}_[a-z0-9_]+\.sql$/.test(relPath)) return true
@@ -451,33 +465,42 @@ const verifySourceClosure = (files) => {
   return { checkedSources, checkedImports }
 }
 
-export const collectProductionSbom = (sourceRoot, version, nodeVersion, packageManager, lockfileSha256) => {
+export const collectProductionSbom = (sourceRoot, version, nodeVersion, packageManager, lockfileSha256, capturedFiles) => {
   const workspacePackages = []
-  for (const group of ['apps', 'packages']) {
-    const groupDir = join(sourceRoot, group)
-    if (!existsSync(groupDir)) continue
-    for (const entry of readdirSync(groupDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      if (!entry.isDirectory()) continue
-      const pkgPath = join(groupDir, entry.name, 'package.json')
-      if (!existsSync(pkgPath)) continue
-      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
-      const prodDeps = Object.entries(pkg.dependencies ?? {}).map(([name, spec]) => ({ name, specifier: String(spec) }))
-      for (const dep of prodDeps) {
-        if (DEV_ONLY_PACKAGES.has(dep.name)) {
-          failRelease('DEV_DEPENDENCY_IN_RUNTIME', `Workspace package ${pkg.name} lists dev-only package ${dep.name} in dependencies`, {
-            workspacePackage: pkg.name,
-            dependency: dep.name,
-          })
-        }
+  const packagePaths = []
+  if (capturedFiles) {
+    packagePaths.push(...[...capturedFiles.keys()].filter(path => /^(?:apps|packages)\/[^/]+\/package\.json$/.test(path)).sort())
+  } else {
+    for (const group of ['apps', 'packages']) {
+      const groupDir = join(sourceRoot, group)
+      if (!existsSync(groupDir)) continue
+      for (const entry of readdirSync(groupDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+        if (!entry.isDirectory()) continue
+        const pkgPath = join(groupDir, entry.name, 'package.json')
+        if (!existsSync(pkgPath)) continue
+        packagePaths.push(`${group}/${entry.name}/package.json`)
       }
-      workspacePackages.push({
-        name: pkg.name,
-        version: pkg.version ?? version,
-        path: `${group}/${entry.name}`,
-        private: Boolean(pkg.private),
-        dependencies: prodDeps,
-      })
     }
+  }
+  for (const path of packagePaths) {
+    // The builder supplies captured inventory bytes, never a second mutable source read.
+    const pkg = JSON.parse(capturedFiles ? capturedFiles.get(path).bytes.toString('utf8') : readFileSync(join(sourceRoot, path), 'utf8'))
+    const prodDeps = Object.entries(pkg.dependencies ?? {}).map(([name, spec]) => ({ name, specifier: String(spec) }))
+    for (const dep of prodDeps) {
+      if (DEV_ONLY_PACKAGES.has(dep.name)) {
+        failRelease('DEV_DEPENDENCY_IN_RUNTIME', `Workspace package ${pkg.name} lists dev-only package ${dep.name} in dependencies`, {
+          workspacePackage: pkg.name,
+          dependency: dep.name,
+        })
+      }
+    }
+    workspacePackages.push({
+      name: pkg.name,
+      version: pkg.version ?? version,
+      path: posix.dirname(path),
+      private: Boolean(pkg.private),
+      dependencies: prodDeps,
+    })
   }
 
   // Verified production external packages from lockfile & runtime policy
@@ -670,7 +693,7 @@ export const parseTarGzBuffer = (gzBuffer, maximumTarBytes = 512 * 1024 * 1024) 
   return parsed
 }
 
-const writeDeterministicTarGz = async (filesMap, archivePath) => {
+const writeDeterministicTarGz = async (filesMap, archivePath, exclusive = false) => {
   const sortedPaths = [...filesMap.keys()].sort()
   const entries = sortedPaths.map((relPath) => {
     const item = filesMap.get(relPath)
@@ -686,7 +709,8 @@ const writeDeterministicTarGz = async (filesMap, archivePath) => {
     }
   })
   const archiveBytes = createTarGzBuffer(entries)
-  writeFileSync(archivePath, archiveBytes)
+  if (exclusive) writePublisherOutput(archivePath, archiveBytes)
+  else writeFileSync(archivePath, archiveBytes)
   return {
     sha256: sha256Hex(archiveBytes),
     bytes: archiveBytes.byteLength,
@@ -701,9 +725,10 @@ const writeDeterministicTarGz = async (filesMap, archivePath) => {
  *   sourceRoot?: string
  *   outputDir: string
  *   version?: string
- *   signingKey?: string
+ *   signingKey?: string | Buffer
  *   keyId?: string
  *   createTarball?: boolean
+ *   publisher?: { keyId: string, privateKey: import('node:crypto').KeyObject | string | Buffer }
  * }} options
  */
 export const buildReleaseArtifact = async (options) => {
@@ -715,17 +740,41 @@ export const buildReleaseArtifact = async (options) => {
   if (!existsSync(rootPkgPath)) {
     failRelease('MISSING_SOURCE_MANIFEST', `package.json not found at ${rootPkgPath}`)
   }
-  const rootPkg = JSON.parse(readFileSync(rootPkgPath, 'utf8'))
-  const version = options.version ?? rootPkg.version ?? '0.1.0'
-  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+  const rootPkgBytes = readFileSync(rootPkgPath)
+  const rootPkg = JSON.parse(rootPkgBytes.toString('utf8'))
+  const version = options.version ?? rootPkg.version
+  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
     failRelease('INVALID_VERSION', `Release version must be valid SemVer: ${version}`, { version })
+  }
+  const archiveKey = typeof options.signingKey === 'string' || Buffer.isBuffer(options.signingKey) ? Buffer.from(options.signingKey) : null
+  const archiveKeyId = options.keyId ?? 'xpanel-release-anchor'
+  if (options.publisher && (!createTarball || archiveKey === null || archiveKey.length < 32 || archiveKey.length > 4096
+    || typeof archiveKeyId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(archiveKeyId))) {
+    failRelease('PUBLISHER_TRUST_REQUIRED', 'Publisher signing requires a tarball and the independent archive HMAC key.')
+  }
+  if (options.publisher && !/^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$/.test(version)) {
+    failRelease('PUBLISHER_VERSION_UNSUPPORTED', 'The native publisher manifest requires an exact stable release version.')
+  }
+  if (options.publisher) {
+    let key
+    try { key = options.publisher.privateKey?.type === 'private' ? options.publisher.privateKey : createPrivateKey(options.publisher.privateKey) }
+    catch { failRelease('PUBLISHER_KEY_INVALID', 'An Ed25519 publisher private key is required.') }
+    if (key?.asymmetricKeyType !== 'ed25519' || typeof options.publisher.keyId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(options.publisher.keyId)) {
+      failRelease('PUBLISHER_KEY_INVALID', 'An Ed25519 publisher private key and key ID are required.')
+    }
+    const namedArchive = join(outputDir, `xpanel-release-${version}.tar.gz`)
+    if (existsSync(namedArchive) || existsSync(publisherManifestPath(namedArchive))
+      || existsSync(namedArchive.slice(0, -'.tar.gz'.length) + '.provenance.json')) {
+      failRelease('PUBLISHER_OUTPUT_EXISTS', 'Refusing to replace an existing publisher release artifact.')
+    }
   }
 
   const nodeVersionPath = join(sourceRoot, '.node-version')
   if (!existsSync(nodeVersionPath)) {
     failRelease('MISSING_NODE_VERSION', `.node-version not found at ${nodeVersionPath}`)
   }
-  const nodeVersion = readFileSync(nodeVersionPath, 'utf8').trim()
+  const nodeVersionBytes = readFileSync(nodeVersionPath)
+  const nodeVersion = nodeVersionBytes.toString('utf8').trim()
   if (!/^\d+\.\d+\.\d+$/.test(nodeVersion)) {
     failRelease('INVALID_NODE_VERSION', `.node-version must contain an exact version: ${nodeVersion}`)
   }
@@ -739,6 +788,18 @@ export const buildReleaseArtifact = async (options) => {
   assertReleasePrivacy(sourceRoot)
 
   const relFiles = collectSourceFiles(sourceRoot)
+  const sourceCapture = captureReleaseSource(sourceRoot, relFiles, { requireClean: !!options.publisher })
+  if (!rootPkgBytes.equals(sourceCapture.readInput('package.json')) || !nodeVersionBytes.equals(sourceCapture.readInput('.node-version'))) {
+    failRelease('SOURCE_CHANGED_DURING_BUILD', 'Release version/runtime inputs changed during source admission.')
+  }
+  const verificationSource = sourceCapture.source.commit === null ? null : identifySource(sourceRoot, { requireClean: !!options.publisher })
+  if (verificationSource) {
+    const canonicalFiles = new Map(verificationSource.files.map(file => [file.path, file]))
+    for (const path of relFiles) {
+      const canonical = canonicalFiles.get(path)
+      if (canonical && sha256Hex(sourceCapture.readInput(path)) !== canonical.sha256) failRelease('SOURCE_CHANGED_DURING_BUILD', 'Release source differs from the qualification identity.')
+    }
+  }
   /** @type {Map<string, { bytes: Buffer, sha256: string, mode: number }>} */
   const stagedFiles = new Map()
 
@@ -748,7 +809,7 @@ export const buildReleaseArtifact = async (options) => {
         failRelease('FORBIDDEN_ARTIFACT_FILE', `Forbidden file matched release exclusion policy: ${relPath}`, { path: relPath })
       }
     }
-    const raw = readFileSync(join(sourceRoot, relPath))
+    const raw = sourceCapture.readInput(relPath)
     const normalized = normalizeArtifactBytes(relPath, raw)
     // Check web assets and source files for accidental embedded credentials
     if (relPath.startsWith('apps/web/')) {
@@ -766,6 +827,16 @@ export const buildReleaseArtifact = async (options) => {
   }
 
   const sourceClosure = verifySourceClosure(stagedFiles)
+
+  // This authenticated inventory member records input provenance without changing the HMAC wire grammar.
+  // Its digest domain covers release input files; it is not a full-checkout evidence fingerprint.
+  const sourceProvenance = { ...sourceCapture.source, verificationSource: verificationSource === null ? null : {
+    algorithm: verificationSource.algorithm, commit: verificationSource.commit, tree: verificationSource.tree,
+    dirty: verificationSource.dirty, sourceFingerprint: verificationSource.sourceFingerprint,
+    node: verificationSource.node, lockfileSha256: verificationSource.lockfileSha256,
+  } }
+  const sourceBytes = Buffer.from(`${JSON.stringify(sourceProvenance, null, 2)}\n`, 'utf8')
+  stagedFiles.set('source-provenance.json', { bytes: sourceBytes, sha256: sha256Hex(sourceBytes), mode: 0o644 })
 
   const versionBytes = Buffer.from(`${version}\n`, 'utf8')
   stagedFiles.set('VERSION', {
@@ -818,7 +889,7 @@ export const buildReleaseArtifact = async (options) => {
   const packageManager = String(rootPkg.packageManager ?? 'pnpm@12.15.0')
   const typescriptVersion = String(rootPkg.devDependencies?.typescript ?? '7.0.2')
 
-  const sbom = collectProductionSbom(sourceRoot, version, nodeVersion, packageManager, lockfileSha256)
+  const sbom = collectProductionSbom(sourceRoot, version, nodeVersion, packageManager, lockfileSha256, stagedFiles)
   const sbomBytes = Buffer.from(`${JSON.stringify(sbom, null, 2)}\n`, 'utf8')
   const sbomSha256 = sha256Hex(sbomBytes)
   stagedFiles.set('sbom-provenance.json', {
@@ -897,10 +968,14 @@ export const buildReleaseArtifact = async (options) => {
   })
 
   const stagingDir = join(outputDir, 'staging')
-  if (existsSync(stagingDir)) {
+  if (options.publisher) {
+    mkdirSync(outputDir, { recursive: true })
+    // Exclusive directory admission serializes producers before they can replace staged bytes.
+    mkdirSync(stagingDir)
+  } else if (existsSync(stagingDir)) {
     rmSync(stagingDir, { recursive: true, force: true })
   }
-  mkdirSync(stagingDir, { recursive: true })
+  if (!options.publisher) mkdirSync(stagingDir, { recursive: true })
 
   for (const [relPath, info] of stagedFiles.entries()) {
     const dest = join(stagingDir, relPath)
@@ -911,12 +986,34 @@ export const buildReleaseArtifact = async (options) => {
   let archivePath = null
   let archiveSha256 = null
   let archiveBytes = 0
+  let publisherManifest = null
+  let publisherPath = null
 
   if (createTarball) {
     archivePath = join(outputDir, `xpanel-release-${version}.tar.gz`)
-    const tarResult = await writeDeterministicTarGz(stagedFiles, archivePath)
+    const tarResult = await writeDeterministicTarGz(stagedFiles, archivePath, !!options.publisher)
     archiveSha256 = tarResult.sha256
     archiveBytes = tarResult.bytes
+  }
+
+  sourceCapture.assertUnchanged()
+  if (verificationSource) assertSameSource(verificationSource, identifySource(sourceRoot, { requireClean: !!options.publisher }))
+  if (options.publisher) {
+    publisherManifest = createPublisherManifest({ version, schemaVersion, sha256: archiveSha256, bytes: totalUnpackedBytes }, options.publisher)
+    publisherPath = publisherManifestPath(archivePath)
+    // Exclusive creation refuses to replace a previously reviewed publisher sidecar.
+    writePublisherOutput(publisherPath, `${JSON.stringify(publisherManifest, null, 2)}\n`)
+  }
+  const artifactProvenance = verificationSource === null || archivePath === null ? null : {
+    schemaVersion: 1, kind: 'xpanel-artifact-provenance',
+    source: { algorithm: verificationSource.algorithm, commit: verificationSource.commit, sourceFingerprint: verificationSource.sourceFingerprint },
+    artifact: { sha256: archiveSha256, bytes: archiveBytes },
+  }
+  const provenancePath = artifactProvenance === null ? null : archivePath.slice(0, -'.tar.gz'.length) + '.provenance.json'
+  if (provenancePath !== null) {
+    const bytes = `${JSON.stringify(artifactProvenance, null, 2)}\n`
+    if (options.publisher) writePublisherOutput(provenancePath, bytes)
+    else writeFileSync(provenancePath, bytes, { mode: 0o644 })
   }
 
   return {
@@ -930,6 +1027,11 @@ export const buildReleaseArtifact = async (options) => {
     manifestSha256,
     sbom,
     sbomSha256,
+    source: sourceProvenance,
+    artifactProvenance,
+    artifactProvenancePath: provenancePath,
+    publisherManifest,
+    publisherManifestPath: publisherPath,
   }
 }
 
@@ -1391,13 +1493,37 @@ export const unpackAuthenticatedRelease = async (options) => {
   return value
 }
 
-if (import.meta.url === `file://${process.argv[1]?.replaceAll('\\', '/')}`) {
+const readSigningInput = path => {
+  let fd
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    const before = fstatSync(fd, { bigint: true })
+    if (!before.isFile() || before.nlink !== 1n || before.size < 1n || before.size > 4096n
+      || process.platform !== 'win32' && ((before.mode & 0o077n) !== 0n || before.uid !== BigInt(process.getuid()))) throw new Error()
+    const bytes = readFileSync(fd), after = fstatSync(fd, { bigint: true })
+    if (bytes.length !== Number(before.size) || before.dev !== after.dev || before.ino !== after.ino
+      || before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) throw new Error()
+    return bytes
+  } catch { failRelease('SIGNING_INPUT_UNSAFE', 'Signing input must be a protected, stable regular file.') }
+  finally { if (fd !== undefined) closeSync(fd) }
+}
+
+if (import.meta.main) {
   const outArg = process.argv.find((a) => a.startsWith('--out='))
   const verArg = process.argv.find((a) => a.startsWith('--version='))
+  const hmacPath = process.argv.find(a => a.startsWith('--hmac-key-file='))?.slice('--hmac-key-file='.length)
+  const hmacId = process.argv.find(a => a.startsWith('--hmac-key-id='))?.slice('--hmac-key-id='.length)
+  const publisherPath = process.argv.find(a => a.startsWith('--publisher-key-file='))?.slice('--publisher-key-file='.length)
+  const publisherId = process.argv.find(a => a.startsWith('--publisher-key-id='))?.slice('--publisher-key-id='.length)
   const outputDir = outArg ? outArg.slice('--out='.length) : resolve(import.meta.dirname, '..', '.xpanel-data', 'release-build')
-  buildReleaseArtifact({
+  Promise.resolve().then(() => {
+    if (!!hmacPath !== !!hmacId || !!publisherPath !== !!publisherId || publisherPath && !hmacPath) failRelease('SIGNING_INPUT_INCOMPLETE', 'Signing files and their IDs must be supplied together; publisher signing also requires archive HMAC trust.')
+    return buildReleaseArtifact({
     outputDir,
     ...(verArg ? { version: verArg.slice('--version='.length) } : {}),
+    ...(hmacPath ? { signingKey: readSigningInput(hmacPath), keyId: hmacId } : {}),
+    ...(publisherPath ? { publisher: { privateKey: readSigningInput(publisherPath), keyId: publisherId } } : {}),
+    })
   })
     .then((res) => {
       process.stdout.write(
@@ -1410,6 +1536,9 @@ if (import.meta.url === `file://${process.argv[1]?.replaceAll('\\', '/')}`) {
           manifestSha256: res.manifestSha256,
           sbomSha256: res.sbomSha256,
           filesCount: res.manifest.files.length,
+          publisherManifestPath: res.publisherManifestPath,
+          source: res.source,
+          artifactProvenancePath: res.artifactProvenancePath,
         })}\n`,
       )
     })

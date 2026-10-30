@@ -7,7 +7,8 @@ export interface NoticeProps {
   /** Bold lead, such as "Not enforced." */
   lead?: string
   text: string
-  action?: { label: string; href: string; hooks?: HookAttributes }
+  action?: { label: string; href: string; kind?: 'link'; hooks?: HookAttributes }
+    | { label: string; kind: 'button'; hooks: HookAttributes; disabled?: boolean }
   /** Interrupting notices (failed test, risky action) use role="alert"; the default is role="status". */
   urgent?: boolean
   /** Hooks of the controller that dismisses this notice; without them no dismiss button is shown. */
@@ -18,7 +19,9 @@ export interface NoticeProps {
 const NOTICE_ICONS: Readonly<Record<NoticeProps['tone'], IconName>> = { info: 'info', ok: 'okCircle', warn: 'alert', bad: 'xCircle' }
 
 export function notice(t: Translate, props: NoticeProps): string {
-  const action = props.action ? `<a class="v2-notice__action" href="${escapeHtml(props.action.href)}"${hookAttrs(props.action.hooks)}>${escapeHtml(props.action.label)}</a>` : ''
+  const action = !props.action ? '' : props.action.kind === 'button'
+    ? `<button type="button" class="v2-notice__action"${props.action.disabled ? ' disabled' : ''}${hookAttrs(props.action.hooks)}>${escapeHtml(props.action.label)}</button>`
+    : `<a class="v2-notice__action" href="${escapeHtml(props.action.href)}"${hookAttrs(props.action.hooks)}>${escapeHtml(props.action.label)}</a>`
   const dismiss = props.dismiss ? `<button type="button" class="v2-notice__dismiss" aria-label="${escapeHtml(t('Dismiss'))}"${hookAttrs(props.dismiss)}>${icon('x', 16)}</button>` : ''
   return `<div class="v2-notice v2-notice--${props.tone}" role="${props.urgent ? 'alert' : 'status'}"${hookAttrs(props.hooks)}>${icon(NOTICE_ICONS[props.tone])}<div class="v2-notice__body"><p>${props.lead ? `<strong>${escapeHtml(props.lead)}</strong> ` : ''}${escapeHtml(props.text)}</p>${action}</div>${dismiss}</div>`
 }
@@ -28,6 +31,8 @@ export const NOTICE_CSS = `.v2-notice{display:flex;align-items:flex-start;gap:12
 .v2-notice__body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;align-items:flex-start}
 .v2-notice__body strong{font-weight:600}
 .v2-notice__action{display:inline-flex;align-items:center;min-height:var(--target);font-weight:600}
+.v2-notice__action:is(button){padding:0;border:0;background:transparent;text-align:start;cursor:pointer}
+.v2-notice__action:disabled{color:var(--muted);cursor:not-allowed}
 .v2-notice:has(.v2-notice__action){padding-block-end:0}
 .v2-notice__dismiss{flex:none;display:inline-flex;align-items:center;justify-content:center;width:var(--target);height:var(--target);margin:-10px;margin-inline-start:0;border:0;border-radius:var(--radius-control);background:transparent;cursor:pointer}
 .v2-notice__dismiss:hover{background:var(--surface)}

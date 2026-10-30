@@ -1,3 +1,4 @@
+import { accountCollaborationClientTemplates } from './account-routing-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { renderHandoffButton } from '../panel-handoff-controls.ts'
 
@@ -36,5 +37,5 @@ export function renderAccountCollaborationWorkspace(input: { locale: Locale; can
       <p class="xp-help">${t('Opens the selected mailbox in xMail in a new tab with a sign-in link that works once. The account session and password are not transferred; reading messages there still requires the mailbox password.')}</p>
       <p class="xp-help">${t('CalDAV/CardDAV service URLs, principal paths, direct DAV collection URLs, synchronization and device discovery have not been qualified. No DAV port or credential endpoint is assumed. iOS, macOS, Thunderbird and third-party Android/Outlook sync setup remain unavailable until a verified DAV provider supplies those settings.')}</p>
     </section>
-  </div>`
+  ${accountCollaborationClientTemplates()}</div>`
 }

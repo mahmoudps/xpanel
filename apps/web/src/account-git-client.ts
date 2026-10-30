@@ -2,6 +2,10 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
 
 export interface GitClientView { revision: string; repositories: string[]; nativeAvailable: boolean; selected: { path: string; branch: string; head: string | null; dirty: boolean; changedFiles: number; remote: string | null; branches: { name: string; hash: string; current: boolean }[]; commits: { hash: string; at: string; subject: string }[] } | null }
@@ -52,6 +56,15 @@ function bindAccountGit(askDialog: ((input: Record<string, unknown>) => Promise<
       }
       root.setAttribute('aria-busy', String(busy))
     }
+    let templates: { row: HTMLTemplateElement; empty: HTMLTemplateElement }
+    try {
+      templates = { row: clientTemplate(root, 'git-history-row'), empty: clientTemplate(root, 'git-history-empty') }
+      cloneClientTemplate(templates.row, 'tr', ['hash', 'at', 'subject'])
+      cloneClientTemplate(templates.empty, 'tr', ['message'])
+    } catch {
+      for (const control of root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button,input,select')) control.disabled = true
+      note('unavailable', t('Git is unavailable here. Nothing was read or changed.')); return
+    }
     const paint = (next: GitClientView): void => {
       view = next
       const previous = next.selected?.path ?? repository.value; repository.textContent = ''
@@ -63,8 +76,13 @@ function bindAccountGit(askDialog: ((input: Record<string, unknown>) => Promise<
       get('tree').textContent = !selected ? t(msgctxt('account-git-client', 'Not read')) : selected.dirty ? t('{count} changed files', { count: selected.changedFiles }) : t('Clean')
       branch.textContent = ''; for (const item of selected?.branches ?? []) branch.add(new Option(item.name, item.name)); if (selected) branch.value = selected.branch
       history.textContent = ''
-      for (const commit of selected?.commits ?? []) { const row = document.createElement('tr'); for (const [text, technical] of [[commit.hash, true], ['', true], [commit.subject, false]] as const) { const cell = document.createElement('td'), value = document.createElement(technical ? 'bdi' : 'span'); if (technical) value.dir = 'ltr'; value.textContent = gitAscii(text); cell.append(value); row.append(cell) } const time = document.createElement('time'); time.dateTime = commit.at; time.textContent = formatDisplayDateTime(commit.at); row.cells[1]!.querySelector('bdi')!.replaceChildren(time); history.append(row) }
-      if (!selected?.commits.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 3; cell.textContent = selected ? t('No commits yet.') : t('Select a repository and read its details.'); row.append(cell); history.append(row) }
+      for (const commit of selected?.commits ?? []) {
+        const row = cloneClientTemplate(templates.row, 'tr', ['hash', 'at', 'subject'])
+        clientTemplateSlot(row, 'hash').textContent = gitAscii(commit.hash)
+        const time = clientTemplateSlot(row, 'at', 'time'); time.setAttribute('datetime', commit.at); time.textContent = formatDisplayDateTime(commit.at)
+        clientTemplateSlot(row, 'subject').textContent = gitAscii(commit.subject); history.append(row)
+      }
+      if (!selected?.commits.length) { const row = cloneClientTemplate(templates.empty, 'tr', ['message']); clientTemplateSlot(row, 'message', 'td').textContent = selected ? t('No commits yet.') : t('Select a repository and read its details.'); history.append(row) }
     }
     async function perform(sent: Record<string, unknown>): Promise<void> {
       if (!eligible() || busy || !send) return
@@ -104,4 +122,4 @@ function bindAccountGit(askDialog: ((input: Record<string, unknown>) => Promise<
     lock(); void perform({ op: 'list' })
   })
 }
-export const ACCOUNT_GIT_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const GIT_ID=${GIT_ID.toString()};const GIT_PATH=${GIT_PATH.toString()};const gitObject=${gitObject.toString()};const gitBranch=${gitBranch.toString()};const gitUrl=${gitUrl.toString()};const gitAscii=${gitAscii.toString()};const readGitClientView=${readGitClientView.toString()};return ${bindAccountGit.toString()};})()`
+export const ACCOUNT_GIT_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const GIT_ID=${GIT_ID.toString()};const GIT_PATH=${GIT_PATH.toString()};const gitObject=${gitObject.toString()};const gitBranch=${gitBranch.toString()};const gitUrl=${gitUrl.toString()};const gitAscii=${gitAscii.toString()};const readGitClientView=${readGitClientView.toString()};return ${bindAccountGit.toString()};})()`

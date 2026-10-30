@@ -4,6 +4,8 @@
 #   - Ubuntu 22.04 LTS (jammy) & Ubuntu 24.04 LTS (noble) via apt-get
 #   - CentOS Stream 9/10, AlmaLinux 9, Rocky Linux 9 via dnf
 set -euo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+unset NODE_OPTIONS NODE_PATH
 
 DRY_RUN=0
 OS_RELEASE_FILE="${XPANEL_OS_RELEASE:-/etc/os-release}"
@@ -16,6 +18,13 @@ WITH_FTP=0
 WITH_MARIADB=0
 WITH_MODSECURITY=0
 INSTALL_ROOT="/opt/xpanel"
+INSTALL_SOURCE_ROOT="$INSTALL_ROOT"
+PROGRAM_ROOT="$INSTALL_ROOT"
+NEW_INSTALL=0
+NEW_INSTALL_ARGS=()
+DNS_ADDRESS=""
+FRESH_DNS=0
+FRESH_MARIADB=0
 INSTALL_JOURNAL="/var/lib/xpanel/install-journal.json"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PINNED_NODE_VERSION="$(tr -d '\r\n' < "$SCRIPT_DIR/../.node-version")"
@@ -28,6 +37,16 @@ for arg in "$@"; do
   case "$arg" in
     --dry-run)
       DRY_RUN=1
+      ;;
+    --new-install)
+      NEW_INSTALL=1
+      PROGRAM_ROOT=/opt/xpanel/current
+      ;;
+    --artifact=*|--artifact-sha256=*|--release-trust-file=*|--release-keys-file=*)
+      NEW_INSTALL_ARGS+=("$arg")
+      ;;
+    --dns-address=*)
+      DNS_ADDRESS="${arg#*=}"
       ;;
     --os-release=*)
       OS_RELEASE_FILE="${arg#*=}"
@@ -72,7 +91,7 @@ for arg in "$@"; do
       MANAGEMENT_TLS_ARGS+=("$arg")
       ;;
     --help|-h)
-      echo "Usage: $0 [--dry-run] [--os-release=/etc/os-release] [--engine=apache|openlitespeed] [--php=8.3] [--apache-mpm=itk|prefork] [--with-mail] [--with-dns] [--with-ftp] [--with-mariadb] [--with-modsecurity] [--management-hostname=NAME --management-address=IP --acme-email=EMAIL --accept-acme-terms]"
+      echo "Usage: $0 [--dry-run] [--new-install --artifact=FILE --artifact-sha256=HEX --release-trust-file=FILE --release-keys-file=FILE] [--os-release=/etc/os-release] [--engine=apache|openlitespeed] [--php=8.3] [--apache-mpm=itk|prefork] [--with-mail] [--with-dns --dns-address=IP] [--with-ftp] [--with-mariadb] [--with-modsecurity] [--management-hostname=NAME --management-address=IP --acme-email=EMAIL --accept-acme-terms]"
       exit 0
       ;;
     *)
@@ -81,6 +100,14 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+if [[ "$NEW_INSTALL" -eq 0 && ( ${#NEW_INSTALL_ARGS[@]} -gt 0 || -n "$DNS_ADDRESS" ) ]]; then
+  echo "ERROR: Explicit release trust and DNS address options require --new-install." >&2
+  exit 1
+fi
+if [[ "$NEW_INSTALL" -eq 1 && "$DRY_RUN" -eq 1 ]]; then
+  "$NODE_BIN" "$SCRIPT_DIR/install-bootstrap.mjs" plan "${NEW_INSTALL_ARGS[@]}" > /dev/null
+fi
 
 if [[ ! -f "$OS_RELEASE_FILE" ]]; then
   echo "ERROR: OS release file not found at $OS_RELEASE_FILE" >&2
@@ -177,7 +204,7 @@ if [[ "$OS_FAMILY" == "debian" ]]; then
   )
   [[ "$WITH_MARIADB" -eq 1 ]] && PACKAGES+=(mariadb-server)
   [[ "$WITH_MAIL" -eq 1 ]] && PACKAGES+=(postfix dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-sieve)
-  [[ "$WITH_DNS" -eq 1 ]] && PACKAGES+=(pdns-server pdns-backend-pgsql)
+  [[ "$WITH_DNS" -eq 1 ]] && PACKAGES+=(pdns-server pdns-backend-bind bind9-utils dnsutils)
   [[ "$WITH_FTP" -eq 1 ]] && PACKAGES+=(pure-ftpd)
   [[ "$WITH_MODSECURITY" -eq 1 ]] && PACKAGES+=(libapache2-mod-security2 modsecurity-crs)
 else
@@ -216,7 +243,8 @@ else
   )
   [[ "$WITH_MARIADB" -eq 1 ]] && PACKAGES+=(mariadb-server)
   [[ "$WITH_MAIL" -eq 1 ]] && PACKAGES+=(postfix dovecot dovecot-pigeonhole)
-  [[ "$WITH_DNS" -eq 1 ]] && PACKAGES+=(pdns pdns-backend-postgresql)
+  # EPEL pdns contains the BIND backend; no separate pdns-backend-bind RPM exists.
+  [[ "$WITH_DNS" -eq 1 ]] && PACKAGES+=(pdns bind-utils)
   [[ "$WITH_FTP" -eq 1 ]] && PACKAGES+=(pure-ftpd)
   [[ "$WITH_MODSECURITY" -eq 1 ]] && PACKAGES+=(mod_security mod_security_crs)
 fi
@@ -279,10 +307,10 @@ assert_pinned_runtime() {
   [[ -x "$NODE_BIN" ]] || die "The pinned Node executable is not executable."
   [[ "$("$NODE_BIN" --version)" == "v$PINNED_NODE_VERSION" ]] || die "Install the verified Node $PINNED_NODE_VERSION runtime before provisioning."
   for file in .node-version package.json apps/api/src/main.ts apps/agent/src/main.ts; do
-    assert_root_file "$INSTALL_ROOT/$file"
+    assert_root_file "$INSTALL_SOURCE_ROOT/$file"
   done
-  [[ "$(tr -d '\r\n' < "$INSTALL_ROOT/.node-version")" == "$PINNED_NODE_VERSION" ]] || die "Installer and installed artifact runtime pins differ."
-  [[ -d "$INSTALL_ROOT/node_modules" ]] || die "Install the artifact's locked workspace dependencies before provisioning."
+  [[ "$(tr -d '\r\n' < "$INSTALL_SOURCE_ROOT/.node-version")" == "$PINNED_NODE_VERSION" ]] || die "Installer and installed artifact runtime pins differ."
+  [[ -d "$INSTALL_SOURCE_ROOT/node_modules" ]] || die "Install the artifact's locked workspace dependencies before provisioning."
 }
 
 assert_cgroup_and_quota_preflight() {
@@ -295,18 +323,18 @@ assert_cgroup_and_quota_preflight() {
 }
 
 record_install_phase() {
-  local phase="$1" status="$2"
+  local phase="$1" status="$2" detail="${3:-}"
   if [[ -d /var/lib/xpanel ]]; then
-    "$NODE_BIN" --input-type=module - "$INSTALL_JOURNAL" "$phase" "$status" "$OS_ID" "$OS_VERSION_ID" <<'NODE'
+    "$NODE_BIN" --input-type=module - "$INSTALL_JOURNAL" "$phase" "$status" "$OS_ID" "$OS_VERSION_ID" "$detail" <<'NODE'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-const [journalPath, phase, status, osId, osVersionId] = process.argv.slice(2)
+const [journalPath, phase, status, osId, osVersionId, detail] = process.argv.slice(2)
 const now = new Date().toISOString()
 let state = { schemaVersion: 1, startedAt: now, updatedAt: now, osId, osVersionId, completedPhases: [], lastFailedPhase: null, entries: [] }
 if (existsSync(journalPath)) {
   try { state = JSON.parse(readFileSync(journalPath, 'utf8')) } catch {}
 }
 state.updatedAt = now
-state.entries.push({ phase, status, at: now })
+state.entries.push({ phase, status, at: now, detail: detail || null })
 if (status === 'completed' && !state.completedPhases.includes(phase)) state.completedPhases.push(phase)
 if (status === 'failed') state.lastFailedPhase = phase
 writeFileSync(journalPath, JSON.stringify(state, null, 2) + '\n', { mode: 0o640 })
@@ -332,6 +360,85 @@ write_config() {
   chown "root:$group" "$temporary"
   chmod "$mode" "$temporary"
   mv -fT -- "$temporary" "$target"
+}
+
+render_fresh_pdns() {
+  cat <<EOF
+# Managed by xPanel fresh BIND installation v1.
+launch=bind
+bind-config=/etc/powerdns/named.conf.xpanel-zones
+local-address=$DNS_ADDRESS,127.0.0.1
+local-port=53
+allow-axfr-ips=127.0.0.1
+setuid=pdns
+setgid=pdns
+security-poll-suffix=
+EOF
+}
+
+render_empty_named_catalog() {
+  printf '// Managed by xPanel: PowerDNS BIND zone catalog\n'
+}
+
+verify_fresh_pdns_vendor() {
+  local config="$1" package expected actual algorithm
+  assert_root_file "$config"
+  if [[ "$OS_FAMILY" == debian ]]; then
+    [[ "$(dpkg-query -S -- "$config")" == "pdns-server: $config" ]] || die "The new PowerDNS configuration is not owned by the expected package; preserved."
+    expected="$(dpkg-query -W -f='${Conffiles}\n' pdns-server | awk -v target="$config" '$1 == target { print $2 }')"
+    [[ "$expected" =~ ^[a-f0-9]{32}$ ]] || die "PowerDNS package conffile metadata is unavailable; preserved."
+    actual="$(md5sum -- "$config" | cut -d' ' -f1)"
+  else
+    package="$(rpm -qf --qf '%{NAME}' -- "$config")"
+    [[ "$package" == pdns ]] || die "The new PowerDNS configuration is not owned by the expected package; preserved."
+    algorithm="$(rpm -qf --qf '%{FILEDIGESTALGO}' -- "$config")"
+    [[ "$algorithm" == 8 ]] || die "PowerDNS package SHA256 metadata is unavailable; preserved."
+    expected="$(rpm -qf --qf '[%{FILENAMES} %{FILEDIGESTS}\n]' -- "$config" | awk -v target="$config" '$1 == target { print $2 }')"
+    [[ "$expected" =~ ^[a-f0-9]{64}$ ]] || die "PowerDNS package file metadata is unavailable; preserved."
+    actual="$(sha256sum -- "$config" | cut -d' ' -f1)"
+  fi
+  [[ "$actual" == "$expected" ]] || die "The freshly installed PowerDNS configuration differs from package metadata; preserved for review."
+  record_install_phase dns-vendor completed "$(sha256sum -- "$config" | cut -d' ' -f1)"
+}
+
+provision_fresh_dns() {
+  [[ "$FRESH_DNS" -eq 1 ]] || die "DNS backend migration is not admitted by this fresh installer."
+  local directory=/etc/powerdns config=/etc/powerdns/pdns.conf
+  if [[ "$OS_FAMILY" == rhel ]]; then directory=/etc/pdns; config=/etc/pdns/pdns.conf; fi
+  assert_root_owned_path "$directory"
+  [[ "$(id -u pdns)" != 0 ]] || die "PowerDNS requires its own unprivileged daemon identity."
+  verify_fresh_pdns_vendor "$config"
+  install -d -o root -g root -m 0755 /etc/powerdns /var/lib/powerdns /var/lib/powerdns/zones
+  write_config "$config" render_fresh_pdns 0644 root
+  [[ ! -e /etc/powerdns/named.conf.xpanel-zones && ! -L /etc/powerdns/named.conf.xpanel-zones ]] || die "An unexpected DNS catalog appeared; preserved for review."
+  write_config /etc/powerdns/named.conf.xpanel-zones render_empty_named_catalog 0644 root
+  pdns_server --config=check > /dev/null
+  systemctl enable pdns.service
+  systemctl restart pdns.service
+  systemctl is-active --quiet pdns.service || die "The new BIND backend is not active; preserve its configuration for review."
+}
+
+provision_mariadb_admin() {
+  local admin=/etc/xpanel/mariadb-admin.cnf socket=/run/mysqld/mysqld.sock observed
+  [[ "$OS_FAMILY" != rhel ]] || socket=/var/lib/mysql/mysql.sock
+  if [[ "$FRESH_MARIADB" -eq 1 ]]; then
+    systemctl enable mariadb.service
+    systemctl start mariadb.service
+  fi
+  systemctl is-active --quiet mariadb.service || die "Existing MariaDB was preserved; a running verified local administrator service is required."
+  if [[ -e "$admin" || -L "$admin" ]]; then
+    assert_root_file "$admin"
+    [[ "$(stat -c '%U:%G:%a:%h' -- "$admin")" == root:root:600:1 ]] || die "Existing MariaDB administrator file requires root:root 0600 single-link protection; preserved."
+    observed="$(mariadb --defaults-extra-file="$admin" --protocol=SOCKET --socket="$socket" --batch --skip-column-names --execute='SELECT @@socket' 2>/dev/null)" || die "Existing local MariaDB administrator access is unavailable; credentials were preserved."
+  else
+    observed="$(mariadb --no-defaults --protocol=SOCKET --socket="$socket" --user=root --batch --skip-column-names --execute='SELECT @@socket' 2>/dev/null)" || die "Local root socket authentication is unavailable; provide a protected administrator configuration without resetting credentials."
+    [[ "$observed" == "$socket" ]] || die "MariaDB reported another socket; no administrator configuration was created."
+    assert_root_owned_path /etc/xpanel
+    (umask 0077; set -o noclobber; printf '[client]\nuser=root\nprotocol=SOCKET\nsocket=%s\n' "$socket" > "$admin")
+    [[ "$(stat -c '%U:%G:%a:%h' -- "$admin")" == root:root:600:1 ]] || die "MariaDB administrator file protection could not be verified."
+  fi
+  [[ "$observed" == "$socket" ]] || die "MariaDB reported another socket; the existing administrator configuration was preserved."
+  [[ "$(mariadb --defaults-extra-file="$admin" --protocol=SOCKET --socket="$socket" --batch --skip-column-names --execute='SELECT 1' 2>/dev/null)" == 1 ]] || die "MariaDB local administrator health is unverified."
 }
 
 provision_credential() {
@@ -531,6 +638,9 @@ EOF
 
 render_tmpfiles_conf() {
   printf 'd /run/xpanel 0750 root xpanel-agent -\n'
+  if [[ "$NEW_INSTALL" -eq 1 ]]; then
+    printf 'd /run/xpanel/lifecycle-agent 0700 root root -\nd /run/xpanel/lifecycle-api 0700 xpanel xpanel -\n'
+  fi
 }
 
 assert_service_groups() {
@@ -570,7 +680,7 @@ EOF
 install_native_helper() {
   local name="$1" target="$2" build digest
   build="$(mktemp -d)"
-  if ! "$NODE_BIN" "$INSTALL_ROOT/helpers/$name/build.mjs" --output "$build/helper" > "$build/receipt.json"; then
+  if ! "$NODE_BIN" "$INSTALL_SOURCE_ROOT/helpers/$name/build.mjs" --output "$build/helper" > "$build/receipt.json"; then
     rm -rf -- "$build"
     die "The native helper $name could not be built."
   fi
@@ -633,6 +743,10 @@ EOF
 render_agent_service() {
   # systemd owns RuntimeDirectory using User=/Group= before service commands.
   # Keep IPC as the primary group; setgid data directories retain the API group.
+  local participant_pre=""
+  if [[ "$NEW_INSTALL" -eq 1 ]]; then
+    participant_pre=$'\nExecStartPre=/usr/bin/install -d -o root -g root -m 0700 /run/xpanel/lifecycle-agent\nExecStartPre=/usr/bin/install -d -o xpanel -g xpanel -m 0700 /run/xpanel/lifecycle-api'
+  fi
   cat <<EOF
 [Unit]
 Description=xPanel Privileged Host Reconciler & Isolation Agent
@@ -647,14 +761,14 @@ SupplementaryGroups=xpanel
 RuntimeDirectory=xpanel
 RuntimeDirectoryMode=0750
 RuntimeDirectoryPreserve=no
-WorkingDirectory=/opt/xpanel
+WorkingDirectory=$PROGRAM_ROOT
 Environment=NODE_ENV=production
 EnvironmentFile=/etc/xpanel/runtime.env
 Environment=XPANEL_GENERATIONS_DIR=/var/lib/xpanel/generations
 Environment=XPANEL_LOG_DIR=/var/log/xpanel
 Environment=XPANEL_RUN_DIR=/run/xpanel
-ExecStartPre=/usr/bin/test -f /var/lib/xpanel/control.db
-ExecStart=$NODE_BIN --max-old-space-size=64 /opt/xpanel/apps/agent/src/main.ts
+ExecStartPre=/usr/bin/test -f /var/lib/xpanel/control.db$participant_pre
+ExecStart=$NODE_BIN --max-old-space-size=64 $PROGRAM_ROOT/apps/agent/src/main.ts
 Restart=always
 RestartSec=2
 UMask=0007
@@ -665,6 +779,8 @@ EOF
 }
 
 render_api_service() {
+  local participant_rw=""
+  [[ "$NEW_INSTALL" -eq 0 ]] || participant_rw=" /run/xpanel/lifecycle-api"
   cat <<EOF
 [Unit]
 Description=xPanel Control Plane API (xPanel / xWHM / xMail private backends)
@@ -676,11 +792,11 @@ Type=simple
 User=xpanel
 Group=xpanel
 SupplementaryGroups=xpanel-agent
-WorkingDirectory=/opt/xpanel
+WorkingDirectory=$PROGRAM_ROOT
 Environment=NODE_ENV=production
 EnvironmentFile=/etc/xpanel/runtime.env
 EnvironmentFile=/etc/xpanel/api.env
-ExecStart=$NODE_BIN --max-old-space-size=96 /opt/xpanel/apps/api/src/main.ts
+ExecStart=$NODE_BIN --max-old-space-size=96 $PROGRAM_ROOT/apps/api/src/main.ts
 Restart=always
 RestartSec=2
 UMask=0007
@@ -688,7 +804,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectHome=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/xpanel /var/log/xpanel
+ReadWritePaths=/var/lib/xpanel /var/log/xpanel$participant_rw
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
@@ -707,6 +823,9 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "Detected OS       : ${OS_PRETTY_NAME:-$OS_ID $OS_VERSION_ID} (id=${OS_ID}, version=${OS_VERSION_ID}, family=${OS_FAMILY})"
   echo "Package Manager   : ${PKG_MGR}"
   echo "Required Node     : ${PINNED_NODE_VERSION} (preinstalled, checksum-verified artifact runtime)"
+  if [[ "$NEW_INSTALL" -eq 1 ]]; then
+    echo "Program layout    : authenticated releases/<version> with absolute current; source/dependency proof pending real execution"
+  fi
   echo "Web Engine        : ${ENGINE} (Apache MPM=${APACHE_MPM})"
   if [[ "$ENGINE" != apache || "$APACHE_MPM" != itk ]]; then
     echo "Production preflight rejects this engine/MPM plan; Apache itk is required."
@@ -755,6 +874,11 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "Postfix submission 127.0.0.1:587 with reject_sender_login_mismatch"
     echo "virtual_transport = lmtp:unix:private/dovecot-lmtp"
   fi
+  if [[ "$WITH_DNS" -eq 1 ]]; then
+    echo "--- Authoritative DNS prerequisites ---"
+    echo "PowerDNS BIND backend, named-checkzone candidate validation and dig observations"
+    echo "Existing daemon backend and zones are preserved; reviewed launch=bind and bind-config wiring remains required."
+  fi
   echo "=== Dry-Run Complete (no host files mutated) ==="
   exit 0
 fi
@@ -765,11 +889,12 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 [[ "$(uname -s)" == "Linux" ]] || die "Provisioning requires Linux; dry-run is portable."
+[[ "$NEW_INSTALL" -eq 1 ]] || die "Live provisioning requires --new-install and explicit authenticated release trust. Existing flat installations require a separate reviewed migration."
+[[ "$OS_RELEASE_FILE" == /etc/os-release ]] || die "Live provisioning uses the actual host os-release only."
 [[ "$ENGINE" == "apache" && "$APACHE_MPM" == "itk" ]] || die "This provisioner requires Apache itk; no shared-identity fallback is permitted."
 command -v runuser > /dev/null || die "runuser is required for unprivileged schema initialization."
 command -v systemctl > /dev/null || die "systemd is required for service provisioning."
 [[ -d /run/systemd/system ]] || die "A running systemd instance is required for provisioning."
-assert_pinned_runtime
 assert_cgroup_and_quota_preflight
 if systemctl is-active --quiet xpanel-api.service || systemctl is-active --quiet xpanel-agent.service; then
   die "Stop the existing xPanel services before changing provisioning; no live reconfiguration is attempted."
@@ -778,6 +903,35 @@ if [[ -e /var/lib/xpanel/control.db || -L /var/lib/xpanel/control.db ]]; then
   [[ -f /var/lib/xpanel/control.db && ! -L /var/lib/xpanel/control.db ]] || die "control.db must be a regular file."
   [[ "$(stat -c %U:%G:%a /var/lib/xpanel/control.db)" == "xpanel:xpanel:660" ]] || die "Existing control.db ownership/mode requires an explicit reviewed repair."
 fi
+if [[ "$WITH_DNS" -eq 1 ]]; then
+  [[ -n "$DNS_ADDRESS" ]] || die "Fresh authoritative DNS requires --dns-address with an assigned host address."
+  for existing_dns in /etc/powerdns/pdns.conf /etc/pdns/pdns.conf /etc/powerdns/named.conf.xpanel-zones; do
+    [[ ! -e "$existing_dns" && ! -L "$existing_dns" ]] || die "An existing DNS configuration requires a reviewed backend migration; it was preserved."
+  done
+  for dns_directory in /etc/powerdns /etc/pdns /var/lib/powerdns /var/lib/powerdns/zones; do
+    [[ ! -L "$dns_directory" ]] || die "An existing DNS directory is symbolic; preserved for review."
+    if [[ -e "$dns_directory" ]]; then assert_root_owned_path "$dns_directory"; fi
+  done
+  if [[ -d /var/lib/powerdns/zones ]]; then
+    [[ -z "$(find /var/lib/powerdns/zones -mindepth 1 -maxdepth 1 -print -quit)" ]] || die "Existing DNS zones require reviewed migration; preserved."
+  fi
+  FRESH_DNS=1
+fi
+if [[ "$WITH_MARIADB" -eq 1 ]]; then
+  FRESH_MARIADB=1
+  for database_directory in /var/lib/mysql /var/lib/mariadb; do
+    [[ ! -L "$database_directory" ]] || die "An existing MariaDB data directory is symbolic; preserved for review."
+    if [[ -d "$database_directory" && -n "$(find "$database_directory" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then FRESH_MARIADB=0; fi
+  done
+fi
+assert_root_file "$NODE_BIN"
+[[ -x "$NODE_BIN" && "$("$NODE_BIN" --version)" == "v$PINNED_NODE_VERSION" ]] || die "A trusted pinned Node executable is required before staging."
+if [[ "$WITH_DNS" -eq 1 ]]; then
+  "$NODE_BIN" --input-type=module -e 'import{isIP}from"node:net";import{networkInterfaces}from"node:os";const ip=process.argv[1];if(!isIP(ip)||ip.includes("%")||!Object.values(networkInterfaces()).flat().some(x=>x&&!x.internal&&x.address===ip))process.exit(1)' "$DNS_ADDRESS" || die "DNS address must be an actual assigned non-loopback host address."
+fi
+prepared_release="$("$NODE_BIN" "$SCRIPT_DIR/install-bootstrap.mjs" prepare "${NEW_INSTALL_ARGS[@]}")"
+INSTALL_SOURCE_ROOT="$(printf '%s' "$prepared_release" | "$NODE_BIN" --input-type=module -e 'let s="";for await(const c of process.stdin)s+=c;const v=JSON.parse(s);if(v.status!=="prepared"||!/^\/opt\/xpanel\/releases\/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(v.releaseRoot))process.exit(1);process.stdout.write(v.releaseRoot)')"
+assert_pinned_runtime
 for directory in /home /var/lib/xpanel "${XPANEL_DIRS[@]}"; do
   [[ ! -L "$directory" ]] || die "Managed directory is symbolic: $directory"
   if [[ -e "$directory" ]]; then
@@ -858,6 +1012,14 @@ if [[ "$WITH_MAIL" -eq 1 ]]; then
   echo "[2c/6] Configuring Dovecot mailboxes, LMTP delivery, and loopback submission..."
   install_local_mail
 fi
+if [[ "$WITH_DNS" -eq 1 ]]; then
+  echo "[2d/6] Configuring the new PowerDNS BIND backend with candidate validation tools..."
+  provision_fresh_dns
+fi
+if [[ "$WITH_MARIADB" -eq 1 ]]; then
+  echo "[2e/6] Verifying protected local MariaDB administrator access..."
+  provision_mariadb_admin
+fi
 
 echo "[3/6] Installing xpanel-jailshell at ${JAILSHELL_BIN}..."
 write_config "$JAILSHELL_BIN" render_jailshell 0755
@@ -883,19 +1045,50 @@ write_config "$SLICE_UNIT" render_xpanel_slice
 write_config "$AGENT_UNIT" render_agent_service
 write_config "$API_UNIT" render_api_service
 write_config "$TMPFILES_CONF" render_tmpfiles_conf
+systemctl daemon-reload
 
 # Initialize the database under the API identity before the root daemon opens it.
 # SQLite WAL/SHM sidecars inherit the database's group-readable/writable mode.
-(umask 0007; runuser -u xpanel -- env XPANEL_DB_PATH=/var/lib/xpanel/control.db XPANEL_STATE_DIR=/var/lib/xpanel/state "$NODE_BIN" /opt/xpanel/apps/api/src/main.ts status > /dev/null)
+(umask 0007; runuser -u xpanel -- env XPANEL_DB_PATH=/var/lib/xpanel/control.db XPANEL_STATE_DIR=/var/lib/xpanel/state "$NODE_BIN" "$PROGRAM_ROOT/apps/api/src/main.ts" status > /dev/null)
 chmod 0660 /var/lib/xpanel/control.db
+install -d -o root -g root -m 0755 /var/lib/xpanel-lifecycle
+install -d -o root -g root -m 0700 /var/lib/xpanel-agent/file-worker-incidents /var/lib/xpanel-lifecycle/backups
+install -d -o root -g root -m 0700 /run/xpanel/lifecycle-agent
+install -d -o xpanel -g xpanel -m 0700 /run/xpanel/lifecycle-api
+"$NODE_BIN" "$INSTALL_SOURCE_ROOT/scripts/install-bootstrap.mjs" admission > /dev/null
+if [[ ! -e /opt/xpanel/bin/xpanel-ctl && ! -L /opt/xpanel/bin/xpanel-ctl ]]; then
+  install -o root -g root -m 0755 "$INSTALL_SOURCE_ROOT/bin/xpanel-ctl" /opt/xpanel/bin/xpanel-ctl
+else
+  assert_root_file /opt/xpanel/bin/xpanel-ctl
+  cmp -s "$INSTALL_SOURCE_ROOT/bin/xpanel-ctl" /opt/xpanel/bin/xpanel-ctl || die "Existing CLI wrapper differs; preserved for review."
+fi
+if [[ ! -e /opt/xpanel/bin/node && ! -L /opt/xpanel/bin/node ]]; then
+  ln -s "$NODE_BIN" /opt/xpanel/bin/node
+else
+  [[ -L /opt/xpanel/bin/node && "$(readlink /opt/xpanel/bin/node)" == "$NODE_BIN" ]] || die "Existing CLI runtime link differs; preserved for review."
+fi
+if [[ ! -e /usr/local/bin/xpanel-ctl && ! -L /usr/local/bin/xpanel-ctl ]]; then
+  assert_root_owned_path /usr/local/bin
+  ln -s /opt/xpanel/bin/xpanel-ctl /usr/local/bin/xpanel-ctl
+else
+  [[ -L /usr/local/bin/xpanel-ctl && "$(readlink /usr/local/bin/xpanel-ctl)" == /opt/xpanel/bin/xpanel-ctl ]] || die "Existing CLI entrypoint was preserved for review."
+fi
 
 echo "[6/6] Reloading systemd daemon and enabling services..."
 if ((${#MANAGEMENT_TLS_ARGS[@]})); then
-  "$NODE_BIN" "$INSTALL_ROOT/scripts/management-tls.mjs" configure "${MANAGEMENT_TLS_ARGS[@]}"
-  "$NODE_BIN" "$INSTALL_ROOT/scripts/management-tls.mjs" prepare
+  "$NODE_BIN" "$INSTALL_SOURCE_ROOT/scripts/management-tls.mjs" configure "${MANAGEMENT_TLS_ARGS[@]}"
+  "$NODE_BIN" "$INSTALL_SOURCE_ROOT/scripts/management-tls.mjs" prepare
 fi
-systemctl daemon-reload
 systemctl enable xpanel.slice xpanel-agent.service xpanel-api.service
+if ((${#MANAGEMENT_TLS_ARGS[@]})); then
+  "$NODE_BIN" "$INSTALL_SOURCE_ROOT/scripts/install-bootstrap.mjs" capture > /dev/null
+else
+  record_install_phase ownership pending
+  echo "Installation ownership remains pending until the real management TLS/4-unit surface exists; no active ownership receipt was issued."
+fi
 echo "xPanel provisioning steps completed; live host qualification remains pending."
 echo "Services are enabled but not started. Provision the root identity locally via reset-password --password-stdin, verify configured HTTPS origins, and choose optional MFA before administrative use."
 echo "Live installation, reboot, tenant isolation and restore qualification remain required."
+if [[ "$WITH_DNS" -eq 1 ]]; then
+  echo "The fresh PowerDNS BIND backend is active; independent served-zone qualification remains required."
+fi

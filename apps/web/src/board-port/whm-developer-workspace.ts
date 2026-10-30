@@ -1,3 +1,4 @@
+import { classicWhmClientTemplates } from '../themes/classic/whm-client-templates.ts'
 import { SOURCE_LOCALE, localeDirection, type Locale, type MessageValues, translator } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -14,7 +15,7 @@ export function renderWhmDeveloperWorkspace(input: { locale: Locale; canRead: bo
   const pending = surface === 'integrations'
     ? [msgid('Billing and WHMCS'), msgid('Cloudflare and external DNS'), msgid('Backup storage and SMTP relay'), msgid('Notification delivery'), msgid('Signed webhooks')]
     : [msgid('Hooks and callbacks'), msgid('Registered applications'), msgid('Plugin generator'), msgid('Metrics export and debug tools')]
-  return `${styles}<section class="xp-dev" data-developer-workspace data-developer-surface="${surface}" data-developer-enabled="${input.canRead}" lang="${input.locale}" dir="${localeDirection(input.locale)}">
+  return `${styles}<section class="xp-dev" data-developer-workspace data-developer-surface="${surface}" data-developer-enabled="${input.canRead}" lang="${input.locale}" dir="${localeDirection(input.locale)}">${classicWhmClientTemplates('developer')}
   <div class="xp-dev__layout"><div class="xp-dev__column">
     <section class="xp-dev__card" aria-labelledby="${prefix}-request"><h2 id="${prefix}-request">${surface === 'integrations' ? t('Inspect this integration') : t('API request explorer')}</h2>
       <p class="xp-help">${t('Read live data using your current signed-in session. Choose a supported operation; its method and route are fixed. No server setting is changed.')}</p>

@@ -94,4 +94,37 @@ describe('capability delivery evidence', () => {
     expect(assessment.reason).toBe(excluded.outOfScopeReason)
     expect(assessment.evidence).toEqual([])
   })
+
+  it('requires a complete tier on every declared distribution', () => {
+    const profiles = ['ubuntu-22.04', 'ubuntu-24.04', 'alma-9', 'rocky-9', 'centos-stream-9']
+    const multiTarget = { ...target, supportedProfiles: profiles }
+    const complete = profiles.flatMap(profile => completeEvidence().map(item => ({ ...item, profile })))
+    expect(assess(complete, multiTarget).status).toBe('verified')
+    for (const profile of profiles) {
+      expect(assess(complete.filter(item => item.profile !== profile || item.environment !== 'external'), multiTarget).status).toBe('integrated')
+      expect(assess(complete.filter(item => item.profile !== profile || item.stage !== 'implemented'), multiTarget).status).toBe('researched')
+    }
+  })
+
+  it('does not pool a browser pass from one profile with Linux and external results from another', () => {
+    const multiTarget = { ...target, supportedProfiles: ['fixture-profile', 'other-profile'] }
+    const evidence = [
+      ...completeEvidence().filter(item => item.stage !== 'verified' || item.environment === 'browser'),
+      ...completeEvidence().map(item => ({ ...item, profile: 'other-profile' })).filter(item => item.stage !== 'verified' || item.environment !== 'browser'),
+    ]
+    expect(assess(evidence, multiTarget).status).toBe('integrated')
+  })
+
+  it('fails closed on empty, duplicate or malformed target profiles', () => {
+    for (const supportedProfiles of [[], ['fixture-profile', 'fixture-profile'], [''], [' fixture-profile']]) {
+      expect(assess(completeEvidence(), { ...target, supportedProfiles }).status).toBe('researched')
+    }
+    expect(assess(completeEvidence(), { ...target, artifactSha256: 'invalid' }).status).toBe('researched')
+  })
+
+  it('does not let observation ordering hide a failure at the same timestamp', () => {
+    const failed = proof({ stage: 'verified', environment: 'linux', result: 'failed' })
+    expect(assess([failed, ...completeEvidence()]).status).toBe('integrated')
+    expect(assess([...completeEvidence(), failed]).status).toBe('integrated')
+  })
 })

@@ -2,7 +2,13 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { WHM_DIAGNOSTIC_TEMPLATE_BINDING, whmDiagnosticNode as canonicalDiagnosticNode, whmDiagnosticTemplate as canonicalDiagnosticTemplate, assertWhmDiagnosticTemplates as canonicalAssertDiagnosticTemplates } from './whm-diagnostic-client-templates.ts'
+import { clientTemplateSlot as canonicalDiagnosticSlot } from './client-templates.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
+const whmDiagnosticNode = canonicalDiagnosticNode
+const whmDiagnosticTemplate = canonicalDiagnosticTemplate
+const assertWhmDiagnosticTemplates = canonicalAssertDiagnosticTemplates
+const clientTemplateSlot = canonicalDiagnosticSlot
 export type ServerHealthStateView = 'ok' | 'warning' | 'problem' | 'unavailable'
 export type ServerHealthItemView = { name: string; state: ServerHealthStateView; reason: string; evidence: string }
 export type ServerHealthCheckView = { id: string; state: ServerHealthStateView; reason: string; evidence: string; items: ServerHealthItemView[]; omitted: number }
@@ -103,12 +109,9 @@ function bindWhmServerHealth(): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
   const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
   const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-  const element = <K extends keyof HTMLElementTagNameMap>(tag: K, value?: string, className?: string): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); if (value !== undefined) node.textContent = value; if (className) node.className = className; return node }
-  const technical = (value: string): HTMLElement => { const node = element('bdi', value); node.dir = 'ltr'; return node }
   const utc = (value: string | null): string => value ? formatDisplayDateTime(value) : t('Not read')
   const fixed = (value: number): string => String(Math.round(value * 10) / 10)
   const bytes = (value: number): string => value >= 1048576 ? fixed(value / 1048576) + ' MiB' : value >= 1024 ? fixed(value / 1024) + ' KiB' : String(value) + ' B'
-  const evidence = (value: string): HTMLElement => { const details = element('details'), pre = element('pre', value, 'xp-whm-server-health__evidence'); pre.dir = 'ltr'; pre.tabIndex = 0; details.append(element('summary', t('Evidence')), pre); return details }
   document.querySelectorAll<HTMLElement>('[data-whm-server-health]').forEach(root => {
     if (root.dataset.serverHealthBound === 'true') return
     root.dataset.serverHealthBound = 'true'
@@ -116,6 +119,13 @@ function bindWhmServerHealth(): void {
     const find = <T extends HTMLElement>(name: string): T | null => root.querySelector<T>('[data-whm-server-health-' + name + ']')
     const status = find('status'), refresh = find<HTMLButtonElement>('refresh')
     if (!status || !refresh || kind !== 'health' && kind !== 'limits') return
+    try { assertWhmDiagnosticTemplates(root) } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      status.dataset.state = 'failed'; status.textContent = t('The server response could not be verified. Nothing is assumed.'); return
+    }
+    const element = <K extends keyof HTMLElementTagNameMap>(tag: K, value?: string, templateName?: string): HTMLElementTagNameMap[K] => whmDiagnosticNode(root, tag, value, templateName)
+    const technical = (value: string): HTMLElement => { const node = element('bdi', value); node.dir = 'ltr'; return node }
+    const evidence = (value: string): HTMLElement => { const details = element('details'), pre = element('pre', value, 'evidence'); pre.dir = 'ltr'; pre.tabIndex = 0; details.append(element('summary', t('Evidence')), pre); return details }
     const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.serverHealthCanRead === 'true' && !root.closest(denied)
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const fact = (name: string, value: string): void => { const node = find(name); if (node) node.textContent = value }
@@ -177,29 +187,29 @@ function bindWhmServerHealth(): void {
         reboot: ['/whm/software/updates', msgid('Open system updates')], bandwidth: ['/whm/accounts/bandwidth', msgid('Review bandwidth')],
       }
       const LABELS: Record<string, string> = { ok: msgid('No problem found'), warning: msgid('Warning'), problem: msgid('Problem found'), unavailable: msgid('Not verified') }
-      const badge = (state: string): HTMLElement => element('span', t(LABELS[state]!), 'xp-badge' + (state === 'ok' ? ' xp-badge--ok' : state === 'problem' ? ' xp-badge--critical' : state === 'warning' ? ' xp-badge--warn' : ''))
+      const badge = (state: string): HTMLElement => element('span', t(LABELS[state]!), state === 'ok' ? 'badge-ok' : state === 'problem' ? 'badge-critical' : state === 'warning' ? 'badge-warn' : 'badge')
       const cause = (reason: string): string => { const known = CAUSES[reason]; return known ? t(known) : reason }
       const paint = (report: ServerHealthReportView): void => {
         fact('observed-at', utc(report.observedAt))
         for (const state of ['ok', 'warning', 'problem', 'unavailable'] as const) fact('count-' + state, String(report.counts[state]))
         list.replaceChildren()
         for (const check of report.checks) {
-          const card = element('li', undefined, 'xp-whm-server-health__item'), head = element('div', undefined, 'xp-whm-server-health__head'), title = TITLES[check.id]!
+          const card = element('li', undefined, 'server-health-item'), head = element('div', undefined, 'server-health-head'), title = TITLES[check.id]!
           card.dataset.whmServerHealthCheck = check.id; card.dataset.state = check.state
           head.append(element('h3', t(title)), badge(check.state)); card.append(head, element('p', cause(check.reason)))
           const fix = FIXES[check.id]
-          if (fix && check.state !== 'ok') { const link = element('a', t(fix[1]), 'xp-btn'); link.href = fix[0]; link.dataset.whmServerHealthFix = check.id; const actions = element('div', undefined, 'xp-whm-detail-actions'); actions.append(link); card.append(actions) }
+          if (fix && check.state !== 'ok') { const link = element('a', t(fix[1]), 'link'); link.href = fix[0]; link.dataset.whmServerHealthFix = check.id; const actions = element('div', undefined, 'actions'); actions.append(link); card.append(actions) }
           if (check.evidence) card.append(evidence(check.evidence))
           if (check.items.length) {
-            const items = element('ul', undefined, 'xp-whm-server-health__items')
+            const items = element('ul', undefined, 'server-health-items')
             for (const entry of check.items) {
-              const line = element('li'), label = element('div', undefined, 'xp-whm-server-health__head')
+              const line = element('li'), label = element('div', undefined, 'server-health-head')
               line.dataset.state = entry.state; label.append(technical(entry.name), badge(entry.state)); line.append(label, element('p', cause(entry.reason)))
               if (entry.evidence) line.append(evidence(entry.evidence))
               items.append(line)
             }
             card.append(items)
-            if (check.omitted) card.append(element('p', t('{count} more entries are not listed. The worst results are shown first.', { count: check.omitted }), 'xp-help'))
+            if (check.omitted) card.append(element('p', t('{count} more entries are not listed. The worst results are shown first.', { count: check.omitted }), 'note'))
           }
           list.append(card)
         }
@@ -212,7 +222,13 @@ function bindWhmServerHealth(): void {
           [t('Certificate validity left'), t('< {count} days', { count: limits.certificateExpiryDays }), t(msgctxt('whm-server-health-client', 'Expired'))],
           [t('Monthly bandwidth used'), '>= ' + String(limits.bandwidthUsedPercent.warning) + '%', '>= ' + String(limits.bandwidthUsedPercent.problem) + '%'],
         ]
-        thresholds.replaceChildren(...rows.map(([label, warning, problem]) => { const tr = element('tr'), first = element('td', label); const second = element('td'), third = element('td'); second.dataset.numeric = ''; third.dataset.numeric = ''; second.append(technical(warning)); third.append(technical(problem)); tr.append(first, second, third); return tr }))
+        thresholds.replaceChildren(...rows.map(([label, warning, problem]) => {
+          const row = whmDiagnosticTemplate(root, 'threshold-row')
+          clientTemplateSlot(row, 'label').textContent = label
+          clientTemplateSlot(row, 'warning').replaceChildren(technical(warning))
+          clientTemplateSlot(row, 'problem').replaceChildren(technical(problem))
+          return row
+        }))
         const host = report.host === 'unavailable' ? ' ' + t('This server could not be observed natively, so host checks were not run.') : ''
         note(report.counts.problem ? 'problem' : report.counts.warning ? 'warning' : report.counts.unavailable ? 'partial' : 'read',
           (report.counts.problem ? t('Checks found problems. Each one links to the page that fixes it.') : report.counts.warning ? t('Checks found warnings.')
@@ -255,11 +271,11 @@ function bindWhmServerHealth(): void {
       const empty = find('empty')
       if (empty) { empty.hidden = rows.size > 0 && shown > 0; empty.textContent = rows.size ? t('No account matches this filter.') : t('No accounts have been read.') }
     }
-    const badge = (label: string, tone: string): HTMLElement => element('span', label, 'xp-badge' + (tone ? ' xp-badge--' + tone : ''))
+    const badge = (label: string, tone: string): HTMLElement => element('span', label, tone === 'ok' ? 'badge-ok' : tone === 'critical' ? 'badge-critical' : tone === 'warn' ? 'badge-warn' : 'badge')
     const renderAccount = (account: AccountLimitsView): HTMLElement => {
-      const item = element('li', undefined, 'xp-whm-server-health__item')
+      const item = element('li', undefined, 'server-health-item')
       item.dataset.whmServerHealthAccount = account.username; item.dataset.state = account.drift ? 'problem' : account.high ? 'warning' : account.unavailable ? 'unavailable' : 'ok'
-      const details = element('details'), summary = element('summary'), headline = element('span', undefined, 'xp-whm-server-health__head')
+      const details = element('details'), summary = element('summary'), headline = element('div', undefined, 'server-health-head')
       const status = account.status === 'active' ? t('Active') : account.status === 'suspended' ? t(msgctxt('whm-server-health-client', 'Suspended')) : t('Being removed')
       headline.append(technical(account.username), element('span', account.plan ?? t('Plan missing')), element('span', status))
       if (account.drift) headline.append(badge(t('{count} differ from plan', { count: account.drift }), 'critical'))
@@ -271,25 +287,26 @@ function bindWhmServerHealth(): void {
       if (account.slice === 'not-active') notes.push(t('The account has no running cgroup, so memory, processes and CPU caps were not read.'))
       if (account.slice === 'unavailable') notes.push(t('The account cgroup could not be read.'))
       if (account.quota === 'unavailable') notes.push(t('The disk quota report has no row for this account.'))
-      for (const text of notes) details.append(element('p', text, 'xp-help'))
-      const scroll = element('div', undefined, 'xp-whm-detail-scroll'), table = element('table', undefined, 'xp-whm-detail-table xp-table'), head = element('tr'), body = element('tbody')
+      for (const text of notes) details.append(element('p', text, 'note'))
+      const scroll = whmDiagnosticTemplate(root, 'limits-table'), body = clientTemplateSlot(scroll, 'rows', 'tbody')
       scroll.setAttribute('role', 'region'); scroll.tabIndex = 0; scroll.setAttribute('aria-label', t('Limits for {username}', { username: account.username }))
-      for (const [label, numeric] of [[t('Resource'), false], [t('Plan limit'), true], [t('Enforced on the server'), false], [t('Compared with plan'), false], [t('Usage'), true], [t(msgctxt('whm-server-health-client', 'Use')), true]] as const) {
-        const th = element('th', label); th.scope = 'col'; if (numeric) th.dataset.numeric = ''; head.append(th)
-      }
+      for (const [key, label] of [['resource', t('Resource')], ['plan', t('Plan limit')], ['enforced', t('Enforced on the server')], ['comparison', t('Compared with plan')], ['usage', t('Usage')], ['percent', t(msgctxt('whm-server-health-client', 'Use'))]] as const)
+        clientTemplateSlot(scroll, 'heading-' + key).textContent = label
       const ENFORCEMENT: Record<string, [string, string]> = { match: [msgid('Matches plan'), 'ok'], drift: [msgid('Differs from plan'), 'critical'], unavailable: [msgid('Not verified'), ''] }
       for (const row of account.rows) {
-        const tr = element('tr'), name = NAMES[row.id]!, enforcement = ENFORCEMENT[row.enforcement]!
+        const tr = whmDiagnosticTemplate(root, 'limits-row'), name = NAMES[row.id]!, enforcement = ENFORCEMENT[row.enforcement]!
         tr.dataset.whmServerHealthResource = row.id; tr.dataset.usageState = row.usageState; tr.dataset.enforcement = row.enforcement
-        const cells: (string | Node)[] = [t(name), row.limit === null ? t('Plan missing') : row.limit === 'unlimited' ? t('Unlimited') : technical(amount(row.id, row.limit)),
-          row.enforced === null ? t('Not read') : row.enforced === '' || row.enforced === 'max' ? t('No cap') : technical(row.enforced), badge(t(enforcement[0]), enforcement[1]),
-          row.usage === null ? t('Not measured') : technical(amount(row.id, row.usage)),
-          row.usageState === 'high' ? badge(fixed(row.percent!) + '%', 'warn') : row.percent !== null ? technical(fixed(row.percent) + '%') : row.usageState === 'unlimited' ? t('No limit') : '-']
-        cells.forEach((content, index) => { const td = element('td'); if (index === 1 || index >= 4) td.dataset.numeric = ''; td.append(content); tr.append(td) })
+        const cells: Record<string, string | Node> = {
+          resource: t(name), plan: row.limit === null ? t('Plan missing') : row.limit === 'unlimited' ? t('Unlimited') : technical(amount(row.id, row.limit)),
+          enforced: row.enforced === null ? t('Not read') : row.enforced === '' || row.enforced === 'max' ? t('No cap') : technical(row.enforced), comparison: badge(t(enforcement[0]), enforcement[1]),
+          usage: row.usage === null ? t('Not measured') : technical(amount(row.id, row.usage)),
+          percent: row.usageState === 'high' ? badge(fixed(row.percent!) + '%', 'warn') : row.percent !== null ? technical(fixed(row.percent) + '%') : row.usageState === 'unlimited' ? t('No limit') : '-',
+        }
+        for (const [key, content] of Object.entries(cells)) clientTemplateSlot(tr, key).replaceChildren(content)
         body.append(tr)
       }
-      const thead = element('thead'); thead.append(head); table.append(thead, body); scroll.append(table); details.append(scroll)
-      if (account.drift || account.high) { const actions = element('div', undefined, 'xp-whm-detail-actions'), link = element('a', t('Review the plan limits'), 'xp-btn'); link.href = '/whm/plans'; link.dataset.whmServerHealthFix = account.username; actions.append(link); details.append(actions) }
+      details.append(scroll)
+      if (account.drift || account.high) { const actions = element('div', undefined, 'actions'), link = element('a', t('Review the plan limits'), 'link'); link.href = '/whm/plans'; link.dataset.whmServerHealthFix = account.username; actions.append(link); details.append(actions) }
       item.append(details)
       return item
     }
@@ -341,4 +358,4 @@ function bindWhmServerHealth(): void {
   })
 }
 
-export const WHM_SERVER_HEALTH_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[shObject, shFail, shText, shIso, shCount, shAmount, shOneOf].map(helper => helper.toString()).join(';')};const readServerHealthReport=${readServerHealthReport.toString()};const readServerLimitsReport=${readServerLimitsReport.toString()};return ${bindWhmServerHealth.toString()};})()`
+export const WHM_SERVER_HEALTH_CLIENT_BINDING = `(()=>{${WHM_DIAGNOSTIC_TEMPLATE_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[shObject, shFail, shText, shIso, shCount, shAmount, shOneOf].map(helper => helper.toString()).join(';')};const readServerHealthReport=${readServerHealthReport.toString()};const readServerLimitsReport=${readServerLimitsReport.toString()};return ${bindWhmServerHealth.toString()};})()`

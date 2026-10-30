@@ -10,3 +10,4 @@ export { escapeHtml, hookAttrs, xpTemplate, type HookAttributes, type Tone } fro
 export { icon, type IconName } from './icons.ts'
 export * from './components/index.ts'
 export * from './layouts/index.ts'
+export { v2Theme } from './theme.ts'

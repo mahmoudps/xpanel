@@ -4,6 +4,7 @@ import { isolateLtrRuns, metaPieces } from '../bidi-runs.ts'
 import { formatDisplayName } from '../display-name.ts'
 import { escapeHtml, formatAsciiBytes, formatUtcClock } from '../tokens.ts'
 import { renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
+import { HOME_TOOL_MATCHING_FUNCTIONS } from '../home-tools-client.ts'
 
 
 // Preserve the approved light swatches; dark paint uses the existing semantic theme roles.
@@ -1057,6 +1058,7 @@ export const renderPhone = (model: HomePhoneModel): string => {
 
 export const HOME_SCRIPT = `<script>
 (function () {
+  ${HOME_TOOL_MATCHING_FUNCTIONS}
   var wireFilter = function (inputId, countId, rootSel, phone, peerId) {
     var input = document.getElementById(inputId)
     var peer = peerId ? document.getElementById(peerId) : null
@@ -1067,7 +1069,7 @@ export const HOME_SCRIPT = `<script>
     var update = function () {
       if (peer) peer.value = input.value
       var raw = input.value.trim()
-      var q = raw.toLowerCase()
+      var q = normalizeHomeToolQuery(raw)
       var groups = root.querySelectorAll('[data-tool-group]')
       var shown = 0
       var total = 0
@@ -1075,14 +1077,13 @@ export const HOME_SCRIPT = `<script>
         var group = groups[i]
         var size = Number(group.getAttribute('data-size') || '0')
         total += size
-        var label = (group.getAttribute('data-group-label') || '').toLowerCase()
-        var groupHit = q !== '' && label.indexOf(q) !== -1
+        var label = group.getAttribute('data-group-label') || ''
         var tools = group.querySelectorAll('[data-tool]')
         var hits = 0
         for (var j = 0; j < tools.length; j++) {
           var tool = tools[j]
-          var keys = (tool.getAttribute('data-tool-keys') || '').toLowerCase()
-          var hit = q === '' || groupHit || keys.indexOf(q) !== -1
+          var keys = tool.getAttribute('data-tool-keys') || ''
+          var hit = homeToolMatches(q, label, keys)
           tool.hidden = !hit
           if (hit) hits += 1
         }

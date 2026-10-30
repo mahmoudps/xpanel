@@ -1,4 +1,8 @@
 import type { MessageValues } from './i18n.ts'
+import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
+const mailTemplate = canonicalMailTemplate
+const mailSlot = canonicalMailSlot
+const mailRequireTemplates = canonicalMailRequireTemplates
 /// <reference lib="dom" />
 interface AttachmentView { filename: string; contentType: string; sizeBytes: number; sha256: string; downloadPath: string; expiresAt: string }
 interface AttachmentManifest { context: { mailbox: string; folder: string; uid: number; uidValidity: number }; attachments: AttachmentView[] }
@@ -29,6 +33,8 @@ function bindMailAttachments(_askDialog: unknown): void {
     root.dataset.attachmentsBound = 'true'
     const status = root.querySelector<HTMLElement>('[data-attachment-status]'), list = root.querySelector<HTMLElement>('[data-attachment-list]'), refresh = root.querySelector<HTMLButtonElement>('[data-attachment-refresh]')
     if (!status || !list || !refresh) return
+    try { mailRequireTemplates(root, [['mail-attachment-row', 'li', ['link', 'badge', 'name', 'size']]]) }
+    catch { refresh.disabled = true; status.dataset.state = 'unavailable'; status.textContent = t('Attachment reading is unavailable here.'); return }
     const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const eligible = (): boolean => root.isConnected && root.dataset.attachmentCanRead === 'true' && !root.closest(denied)
@@ -56,23 +62,19 @@ function bindMailAttachments(_askDialog: unknown): void {
         if (!manifest.attachments.length) { announce('empty', t('The message has no attachments.')); return }
         if (heading) heading.textContent = t('Attachments · {count} · {bytes} B', { count: manifest.attachments.length, bytes: manifest.attachments.reduce((sum, item) => sum + item.sizeBytes, 0) })
         for (const attachment of manifest.attachments) {
-          const row = document.createElement('li'), details = document.createElement('span'), name = document.createElement('bdi'), nameWrap = document.createElement('span'), size = document.createElement('span'), sizeValue = document.createElement('bdi'), badge = document.createElement('span'), link = document.createElement('a')
-          details.className = 'xp-mail-attachments__file'; name.dir = 'auto'; name.textContent = digits(attachment.filename)
-          nameWrap.append(name); size.className = 'xp-mail-attachments__size'; sizeValue.dir = 'ltr'; sizeValue.textContent = String(attachment.sizeBytes) + ' B'; size.append(sizeValue)
-          details.append(nameWrap, size)
+          const row = mailTemplate(root, 'mail-attachment-row', 'li', ['link', 'badge', 'name', 'size'])
+          const link = mailSlot<HTMLAnchorElement>(row, 'link', 'a'), badge = mailSlot(row, 'badge'), name = mailSlot(row, 'name', 'bdi'), sizeValue = mailSlot(row, 'size', 'bdi')
+          name.textContent = digits(attachment.filename); sizeValue.textContent = String(attachment.sizeBytes) + ' B'
           const extension = attachment.filename.includes('.') ? attachment.filename.split('.').at(-1)! : ''
-          badge.className = 'xp-mail-attachments__badge'; badge.setAttribute('aria-hidden', 'true'); badge.textContent = /^[a-z0-9]{1,6}$/i.test(extension) ? extension.toUpperCase() : 'FILE'
-          const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-          icon.setAttribute('viewBox', '0 0 24 24'); icon.setAttribute('width', '18'); icon.setAttribute('height', '18'); icon.setAttribute('fill', 'none'); icon.setAttribute('stroke', 'currentColor'); icon.setAttribute('stroke-width', '2'); icon.setAttribute('aria-hidden', 'true')
-          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', 'M12 4v11M7 10l5 5 5-5M5 20h14'); icon.append(path)
-          link.className = 'xp-btn xp-mail-attachments__download'; link.href = attachment.downloadPath; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.dataset.attachmentDownload = ''; link.append(badge, details, icon)
+          badge.textContent = /^[a-z0-9]{1,6}$/i.test(extension) ? extension.toUpperCase() : 'FILE'
+          link.href = attachment.downloadPath
           link.setAttribute('aria-label', t('Download {file}', { file: digits(attachment.filename) }))
           link.addEventListener('click', event => {
             if (!eligible() || Date.parse(attachment.expiresAt) <= Date.now() || JSON.stringify(selected()) !== JSON.stringify(expected)) {
               event.preventDefault(); announce('failed', t('Read attachments again before downloading.'))
             }
           })
-          row.append(link); list.append(row)
+          list.append(row)
         }
         announce('read', t('Attachments read from this message. Download links expire after 5 minutes.'))
       } catch { if (token === generation) announce('failed', t('Attachments could not be read. No file was downloaded.')) }
@@ -85,4 +87,4 @@ function bindMailAttachments(_askDialog: unknown): void {
   })
 }
 
-export const MAIL_ATTACHMENTS_CLIENT_BINDING = `(()=>{const readAttachmentManifest=${readAttachmentManifest.toString()};return ${bindMailAttachments.toString()};})()`
+export const MAIL_ATTACHMENTS_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const readAttachmentManifest=${readAttachmentManifest.toString()};return ${bindMailAttachments.toString()};})()`

@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 /// <reference lib="dom" />
@@ -152,6 +156,18 @@ function bindAccountWebDirectives(askDialog: unknown): void {
     const inputs = [...root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-wd-field]')]
     const list = feature !== 'indexes' && feature !== 'hotlink'
     if (!select || !status || !rows || !notice || !issues || ['refresh', 'discard', 'save', ...(list ? ['add', 'clear'] : [])].some(key => !button(key))) return
+    const template = (name: string, tag: string, slots: readonly string[]): HTMLElement => cloneClientTemplate(clientTemplate(root, name), tag, slots)
+    let redirectTemplates: { row: HTMLTemplateElement; action: HTMLTemplateElement; empty: HTMLTemplateElement; error: HTMLTemplateElement } | null = null
+    try {
+      if (feature === 'redirects') redirectTemplates = {
+        row: clientTemplate(root, 'redirect-row'), action: clientTemplate(root, 'redirect-action'), empty: clientTemplate(root, 'redirect-empty'), error: clientTemplate(root, 'redirect-error'),
+      }
+      if (redirectTemplates) { cloneClientTemplate(redirectTemplates.row, 'tr', ['status', 'path', 'target', 'actions']); cloneClientTemplate(redirectTemplates.action, 'button', ['label']); cloneClientTemplate(redirectTemplates.empty, 'tr', ['message']); cloneClientTemplate(redirectTemplates.error, 'tr', ['message']) }
+      for (const [name, tag, slots] of [['web-directive-notice', 'p', ['message']], ['web-directive-issue', 'li', ['message']], ...(!redirectTemplates ? [['web-directive-row', 'tr', ['actions']], ['web-directive-text-cell', 'td', ['value']], ['web-directive-technical-cell', 'td', ['value']], ['web-directive-action', 'button', ['label']], ['web-directive-error', 'tr', ['message']], ['web-directive-empty', 'tr', ['message']], ['web-directive-summary', 'tr', ['label', 'value']]] : [])] as [string, string, string[]][]) template(name, tag, slots)
+    } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+      status.dataset.state = 'unavailable'; status.textContent = copy('These protected rules are unavailable here. Nothing was read or changed.'); return
+    }
     const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => root.isConnected && root.dataset.wdManage === 'true' && !root.closest(denied)
@@ -174,8 +190,8 @@ function bindAccountWebDirectives(askDialog: unknown): void {
       ? [[copy('Document root listing'), model.listing === 'enabled' ? copy('Shown') : model.listing === 'disabled' ? copy('Hidden') : copy('Server default'), false]]
       : [[copy('Hotlink protection'), yes(model.enabled), false], [copy('Sites allowed to embed'), (model.allowedHosts as string[]).join(' '), true], [copy('File types'), (model.extensions as string[]).join(' '), true], [copy('Requests with no referrer'), yes(model.allowEmptyReferrer), false], [copy('Blocked requests'), model.redirectUrl === null ? 'HTTP 403' : String(model.redirectUrl), true]]
     let local: { field: string; code: string }[] = []
-    const cell = (text: string, technical: boolean): HTMLTableCellElement => { const node = document.createElement('td'), value = document.createElement(technical ? 'bdi' : 'span'); if (technical) value.dir = 'ltr'; value.textContent = text; node.append(value); return node }
-    const line = (text: string): HTMLParagraphElement => { const node = document.createElement('p'); node.textContent = text; return node }
+    const cell = (text: string, technical: boolean): HTMLTableCellElement => { const node = template(technical ? 'web-directive-technical-cell' : 'web-directive-text-cell', 'td', ['value']) as HTMLTableCellElement; clientTemplateSlot(node, 'value').textContent = text; return node }
+    const line = (text: string): HTMLParagraphElement => { const node = template('web-directive-notice', 'p', ['message']) as HTMLParagraphElement; clientTemplateSlot(node, 'message').textContent = text; return node }
     const paint = (state: WebDirectivesClientState): void => {
       const view = state.view, blocked = state.busy || state.review || !admitted(), editable = !blocked && !!view?.capabilities.canSave
       root.setAttribute('aria-busy', String(state.busy)); status.textContent = state.message; status.dataset.state = state.status
@@ -194,22 +210,23 @@ function bindAccountWebDirectives(askDialog: unknown): void {
       if (list) {
         const entries = (draft?.entries ?? []) as Entry[], adapter = adapters[feature]!
         entries.forEach((entry, index) => {
-          const row = document.createElement('tr')
-          for (const [text, technical] of adapter.cells(entry)) row.append(cell(text, technical))
-          const actions = document.createElement('td')
+          const row = redirectTemplates ? cloneClientTemplate(redirectTemplates.row, 'tr', ['status', 'path', 'target', 'actions']) : template('web-directive-row', 'tr', ['actions'])
+          if (redirectTemplates) { const value = entry as Record<string, unknown>; for (const slot of ['status', 'path', 'target'] as const) clientTemplateSlot(row, slot).textContent = String(value[slot]) }
+          else for (const [text, technical] of adapter.cells(entry)) row.insertBefore(cell(text, technical), clientTemplateSlot(row, 'actions'))
+          const actions = clientTemplateSlot(row, 'actions', 'td')
           for (const [label, run] of [[copy('Edit'), () => { fill(adapter.to(entry)); local = []; inputs[0]?.focus() }], [copy('Remove'), () => controller.edit({ ...draft, entries: entries.filter((_item, position) => position !== index) })]] as const) {
-            const action = document.createElement('button'); action.type = 'button'; action.className = 'xp-btn'; action.textContent = label; action.disabled = !editable; action.addEventListener('click', run); actions.append(action)
+            const action = (redirectTemplates ? cloneClientTemplate(redirectTemplates.action, 'button', ['label']) : template('web-directive-action', 'button', ['label'])) as HTMLButtonElement; clientTemplateSlot(action, 'label').textContent = label; action.disabled = !editable; action.addEventListener('click', run); actions.append(action)
           }
-          row.append(actions); rows.append(row)
+          rows.append(row)
           const rowErrors = errors.filter(item => item.field === 'entries.' + index || item.field.startsWith('entries.' + index + '.'))
           if (rowErrors.length) {
             rowErrors.forEach(item => known.add(item.field))
-            const errorRow = document.createElement('tr'), errorCell = document.createElement('td'); errorCell.colSpan = adapter.cells(entry).length + 1; errorCell.className = 'xp-wd__error'; errorCell.textContent = rowErrors.map(item => pick(FIELD, item.code, FIELD.type!)).join(' '); errorRow.append(errorCell); rows.append(errorRow)
+            const errorRow = redirectTemplates ? cloneClientTemplate(redirectTemplates.error, 'tr', ['message']) : template('web-directive-error', 'tr', ['message']), errorCell = clientTemplateSlot(errorRow, 'message', 'td') as HTMLTableCellElement; if (!redirectTemplates) errorCell.colSpan = adapter.cells(entry).length + 1; errorCell.textContent = rowErrors.map(item => pick(FIELD, item.code, FIELD.type!)).join(' '); rows.append(errorRow)
           }
         })
-        if (!entries.length) { const row = document.createElement('tr'), empty = document.createElement('td'); empty.colSpan = rows.closest('table')?.querySelectorAll('th').length ?? 1; empty.textContent = view ? copy('No rules are managed for this domain yet.') : copy('The current rules have not been read.'); row.append(empty); rows.append(row) }
+        if (!entries.length) { const row = redirectTemplates ? cloneClientTemplate(redirectTemplates.empty, 'tr', ['message']) : template('web-directive-empty', 'tr', ['message']), empty = clientTemplateSlot(row, 'message', 'td') as HTMLTableCellElement; if (!redirectTemplates) empty.colSpan = rows.closest('table')?.querySelectorAll('th').length ?? 1; empty.textContent = view ? copy('No rules are managed for this domain yet.') : copy('The current rules have not been read.'); rows.append(row) }
       } else if (view) {
-        for (const [label, text, technical] of summary(view.model)) { const row = document.createElement('tr'); row.append(cell(label, false), cell(text, technical)); rows.append(row) }
+        for (const [label, text, technical] of summary(view.model)) { const row = template('web-directive-summary', 'tr', ['label', 'value']); clientTemplateSlot(row, 'label').textContent = label; const value = clientTemplateSlot(row, 'value'); value.textContent = text; value.dir = technical ? 'ltr' : 'auto'; rows.append(row) }
         if (draft && JSON.stringify(settings(values())) !== JSON.stringify(draft)) fill(settingsForm(draft))
       }
       for (const node of root.querySelectorAll<HTMLElement>('[data-wd-error-for]')) {
@@ -225,7 +242,7 @@ function bindAccountWebDirectives(askDialog: unknown): void {
       issues.textContent = ''
       const messages = [...(state.status === 'invalid' ? (view?.validation?.issues ?? []).map(issue => copy('Line {line}: refused by the protected check ({code})', { line: issue.line, code: issue.code })) : []),
         ...errors.filter(item => !known.has(item.field)).map(item => pick(FIELD, item.code, FIELD.type!))]
-      for (const text of messages.length ? messages : [view ? copy('No refusals were reported for the last request.') : copy('Diagnostics have not been read.')]) { const item = document.createElement('li'); item.textContent = text; issues.append(item) }
+      for (const text of messages.length ? messages : [view ? copy('No refusals were reported for the last request.') : copy('Diagnostics have not been read.')]) { const item = template('web-directive-issue', 'li', ['message']); clientTemplateSlot(item, 'message').textContent = text; issues.append(item) }
     }
     const controller = createWebDirectivesController({ feature, domainId: select.value, accountId: root.dataset.wdAccount ?? '', admitted, changed: paint,
       request: (method, path, body) => { if (!transport || !admitted()) return Promise.reject({ stateChanged: false }); return body === undefined ? transport(method, path) : transport(method, path, body) },
@@ -256,4 +273,4 @@ function bindAccountWebDirectives(askDialog: unknown): void {
     void controller.load()
   })
 }
-export const ACCOUNT_WEB_DIRECTIVES_CLIENT_BINDING = `(()=>{const WD_FEATURES=${JSON.stringify(WD_FEATURES)};const WD_UUID=${WD_UUID.toString()};const WD_REVISION=${WD_REVISION.toString()};const wdObject=${wdObject.toString()};const wdExact=${wdExact.toString()};const readWebDirectiveModel=${readWebDirectiveModel.toString()};const readWebDirectivesView=${readWebDirectivesView.toString()};const wdUncertain=${wdUncertain.toString()};const createWebDirectivesController=${createWebDirectivesController.toString()};return ${bindAccountWebDirectives.toString()};})()`
+export const ACCOUNT_WEB_DIRECTIVES_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const WD_FEATURES=${JSON.stringify(WD_FEATURES)};const WD_UUID=${WD_UUID.toString()};const WD_REVISION=${WD_REVISION.toString()};const wdObject=${wdObject.toString()};const wdExact=${wdExact.toString()};const readWebDirectiveModel=${readWebDirectiveModel.toString()};const readWebDirectivesView=${readWebDirectivesView.toString()};const wdUncertain=${wdUncertain.toString()};const createWebDirectivesController=${createWebDirectivesController.toString()};return ${bindAccountWebDirectives.toString()};})()`

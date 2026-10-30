@@ -1,3 +1,5 @@
+import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const whmClientNode = canonicalWhmClientNode
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -133,7 +135,7 @@ function bindWhmMailboxMaintenance(askDialog: Ask | undefined): void {
       toggle('[data-whm-mailbox-maintenance-limited]', matches.length > SHOWN_MAX)
       fill('mailboxes', matches.slice(0, SHOWN_MAX).map(item => {
         const box = document.createElement('input'); box.type = 'checkbox'; box.checked = selected.has(item.login); box.dataset.whmMailboxMaintenancePick = item.login; box.setAttribute('aria-label', t('Select {mailbox}', { mailbox: item.login }))
-        const inspect = document.createElement('button'); inspect.type = 'button'; inspect.className = 'xp-btn'; inspect.textContent = t('Inspect'); inspect.dataset.whmMailboxMaintenanceInspect = item.login; inspect.setAttribute('aria-label', t('Inspect {mailbox}', { mailbox: item.login }))
+        const inspect = whmClientNode(root, 'whm-mailbox-inspect', 'button'); inspect.type = 'button'; inspect.disabled = !admitted() || busy; inspect.textContent = t('Inspect'); inspect.dataset.whmMailboxMaintenanceInspect = item.login; inspect.setAttribute('aria-label', t('Inspect {mailbox}', { mailbox: item.login }))
         return [box, technical(item.login), technical(item.account), item.savedQuotaMb === null ? t('Unlimited') : technical(item.savedQuotaMb + ' MB'), inspect]
       }), !current ? t('No mailboxes have been read.') : current.mailboxes.length ? t('No mailboxes match.') : t('No saved email accounts exist.'), 5)
       controls()
@@ -212,4 +214,4 @@ function bindWhmMailboxMaintenance(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_MAILBOX_MAINTENANCE_CLIENT_BINDING = `(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailboxMaintenanceView=${readMailboxMaintenanceView.toString()};const readMaintenanceJobAck=${readMaintenanceJobAck.toString()};return ${bindWhmMailboxMaintenance.toString()};})()`
+export const WHM_MAILBOX_MAINTENANCE_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailboxMaintenanceView=${readMailboxMaintenanceView.toString()};const readMaintenanceJobAck=${readMaintenanceJobAck.toString()};return ${bindWhmMailboxMaintenance.toString()};})()`

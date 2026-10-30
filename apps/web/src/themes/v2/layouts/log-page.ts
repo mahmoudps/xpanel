@@ -48,7 +48,7 @@ export interface LogPageProps extends PageBaseProps {
       /** The initial follow status line; core rewrites it as following starts, pauses or stops. */
       status?: string
       retryHooks?: HookAttributes
-    }
+    } & ({ state?: 'stopped' } | { state: 'following' | 'paused'; status: string })
     /** Hooks on the stream root besides the follow contract. */
     streamHooks?: HookAttributes
     footer?: ListFooter
@@ -63,7 +63,7 @@ const FOLLOW_STATES = [['following', 'ok'], ['paused', 'neutral'], ['stopped', '
 
 // One known field of an entry (unit, PID, host, request…). Core clones it once per fact into the details slot, with the
 // label from the catalog; unknown fields are skipped, so raw keys never show.
-const LOG_FACT_TEMPLATE = xpTemplate('log-fact', '<div class="v2-log__fact"><dt data-xp-slot="label"></dt><dd dir="ltr" data-xp-slot="value"></dd></div>')
+const LOG_FACT_TEMPLATE = xpTemplate('log-fact', '<div class="v2-log__fact"><dt data-xp-slot="label"></dt><dd><bdi dir="ltr" data-xp-slot="value"></bdi></dd></div>')
 
 /** The `log-entry` template: the entry row (data-level on the clone root) and its details row, hidden with the
  *  details slot. Levels are the journald and web server names. */
@@ -80,16 +80,17 @@ export function logPage(t: Translate, props: LogPageProps): string {
   const { stream } = props
   const state = stream.state ?? 'ready'
   const follow = stream.follow ?? {}
+  const followState = follow.state ?? 'stopped'
   // The visible state word follows [data-log-follow-state] through CSS; the status line is what is announced.
   const words = [t(msgctxt('theme:v2', 'Following')), t('Paused'), t('Stopped')]
   const indicator = `<span class="v2-follow" aria-hidden="true">${FOLLOW_STATES.map(([value, tone], index) => `<span class="v2-follow__${value}">${statusPill({ tone, label: words[index]!, hollow: value === 'stopped' })}</span>`).join('')}</span>`
-  const toggle = `<button type="button" class="v2-btn" aria-pressed="false"${hookAttrs({ ...follow.hooks, 'data-log-follow': true })}>${icon('activity', 16)}${escapeHtml(t(msgctxt('theme:v2', 'Follow')))}</button>`
+  const toggle = `<button type="button" class="v2-btn" aria-pressed="${followState === 'following'}"${hookAttrs({ ...follow.hooks, 'data-log-follow': true })}>${icon('activity', 16)}${escapeHtml(t(msgctxt('theme:v2', 'Follow')))}</button>`
   const band = `<div class="v2-log__band"><span class="v2-log__dot" aria-hidden="true"></span><p class="v2-num" role="status" data-log-follow-status>${escapeHtml(follow.status ?? t(msgctxt('theme:v2', 'Not following. The entries below are from one read.')))}</p><button type="button" class="v2-btn"${hookAttrs({ ...follow.retryHooks, 'data-log-follow-retry': true })} hidden>${icon('refresh', 16)}${escapeHtml(t('Retry'))}</button></div>`
   const inset = (html: string): string => `<div class="v2-inset">${html}</div>`
   const entries = state === 'empty' && stream.empty ? inset(emptyState(stream.empty))
     : state === 'no-match' && stream.noMatch ? inset(emptyState(stream.noMatch))
     : dataTable(t, { ...stream.table, state: state === 'loading' ? 'loading' : state === 'ready' || state === 'error' ? undefined : 'empty' })
-  const root = `<div class="v2-log__stream" role="log" aria-labelledby="${escapeHtml(stream.titleId)}"${hookAttrs({ ...stream.streamHooks, 'data-log-stream': true, 'data-log-follow-state': 'stopped' })}>${entries}</div>`
+  const root = `<div class="v2-log__stream" role="log" aria-labelledby="${escapeHtml(stream.titleId)}"${hookAttrs({ ...stream.streamHooks, 'data-log-stream': true, 'data-log-follow-state': followState })}>${entries}</div>`
   const streamCard = card({
     title: stream.title, titleId: stream.titleId, description: stream.meta, flush: true, hooks: stream.hooks,
     actionsHtml: `${indicator}${toggle}${stream.actionsHtml ?? ''}`,
@@ -122,10 +123,11 @@ ${STATE('following')} .v2-log__dot{background:var(--ok)}
 .v2-log__details:has([data-xp-slot=details][hidden]){display:none}
 .v2-log__stream tbody .v2-log__details>td,.v2-log__stream tbody .v2-log__details:hover>td{padding:0 var(--space-3) var(--space-2);border-top:0;background:var(--subtle)}
 .v2-log__detail{display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--space-2) var(--space-3);padding:var(--space-2);border-radius:var(--radius-notice);border:1px solid var(--line);background:var(--surface)}
-.v2-log__facts{flex:2 1 420px;min-width:0;margin:0;padding:12px var(--space-2);border-radius:var(--radius-control);background:var(--surface);border:1px solid var(--line);display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px var(--space-2);font-size:12px;line-height:1.6}
-.v2-log__fact{display:contents}
+.v2-log__facts{flex:2 1 420px;min-width:0;margin:0;padding:var(--space-2);border-radius:var(--radius-control);background:var(--surface);border:1px solid var(--line);display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:var(--space-2);font-size:12px;line-height:1.6}
+.v2-log__fact{display:flex;flex-direction:column;gap:var(--space-1);min-width:0}
 .v2-log__facts dt{color:var(--muted)}
-.v2-log__facts dd{margin:0;font-family:var(--font-mono);overflow-wrap:anywhere}
+.v2-log__facts dd{margin:0;text-align:start;overflow-wrap:anywhere}
+.v2-log__facts bdi{font-family:var(--font-mono)}
 .v2-log__detail-actions{flex:1 1 200px;display:flex;flex-wrap:wrap;gap:var(--space-1)}
 .v2-log__detail-actions>a:not([href]){display:none}
 ${stateTones('.v2-log__stream tr', 'data-level', LEVELS)}

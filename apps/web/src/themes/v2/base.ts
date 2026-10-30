@@ -7,7 +7,9 @@ const R = '[data-ui-theme="v2"]'
 const W = `:where(${R})`
 const CONTROL = 'input:not([type=checkbox],[type=radio],[type=range],[type=file],[type=hidden],[type=color])'
 
-export const V2_BASE_CSS = `${R} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--font-sans);-webkit-font-smoothing:antialiased;text-size-adjust:100%}
+export const V2_BASE_CSS = `${R}{--v2-panel-padding:var(--space-3);--v2-control-align:start}
+${R}:dir(rtl){--v2-control-align:end}
+${R} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--font-sans);-webkit-font-smoothing:antialiased;text-size-adjust:100%}
 ${R} *,${R} *::before,${R} *::after{box-sizing:border-box}
 ${R} [hidden]{display:none!important}
 ${W} :is(h1,h2,h3,h4,p,figure,dl,dd,pre){margin:0}
@@ -54,13 +56,14 @@ ${W} table{width:100%;border-collapse:collapse;font-size:14px}
 ${W} caption{padding:0 0 8px;text-align:start;font-weight:600}
 ${W} th{padding:12px 16px;background:var(--subtle);color:var(--muted);font-size:12px;font-weight:600;text-align:start;white-space:nowrap}
 ${W} td{padding:14px 16px;border-top:1px solid var(--line);vertical-align:middle}
-${W} :is(th,td):first-child{padding-inline-start:24px}
-${W} :is(th,td):last-child{padding-inline-end:24px}
+${W} :is(th,td):first-child{padding-inline-start:var(--v2-panel-padding)}
+${W} :is(th,td):last-child{padding-inline-end:var(--v2-panel-padding)}
 ${W} tbody tr:hover>td{background:var(--subtle)}
 ${W} .v2-table-scroll{overflow-x:auto;border-top:1px solid var(--line)}
 ${W} .v2-table-scroll:focus-visible{outline-offset:-2px}
 @keyframes v2-pulse{0%,100%{opacity:1}50%{opacity:.55}}
 @keyframes v2-spin{to{transform:rotate(360deg)}}
 @keyframes v2-drain{from{inline-size:100%}to{inline-size:0}}
+@media (max-width:600px){${R}{--v2-panel-padding:var(--space-2)}}
 @media (prefers-reduced-motion:reduce){${R} *,${R} *::before,${R} *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 `

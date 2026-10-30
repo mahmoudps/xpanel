@@ -1,23 +1,10 @@
-import type { Account, Principal, ResellerAcl } from '@xpanel/core'
 import type { WhmSurfaceProps } from '../surfaces/xwhm.ts'
 import { escapeHtml, renderLtrValue } from '../tokens.ts'
 import { formatDisplayName } from '../display-name.ts'
 import { SOURCE_LOCALE, translator } from '../i18n.ts'
 type Copy = string
 const copy = (props: WhmSurfaceProps, text: Copy): string => escapeHtml(translator(props.locale)(text))
-const qualified = (props: WhmSurfaceProps, id: string): boolean => props.catalog?.some(tool => tool.id === id && tool.status === 'verified' && tool.delivery.status === 'verified') === true
-const principalOf = (props: WhmSurfaceProps): Principal | undefined => props.visibility?.principal ?? props.principal
-const allowed = (props: WhmSurfaceProps, acl: ResellerAcl): boolean => {
-  const principal = principalOf(props)
-  return principal?.kind === 'root' || principal?.kind === 'reseller' && (props.visibility?.reseller?.acl ?? props.activeReseller?.acl ?? []).includes(acl)
-}
-const readableAccounts = (props: WhmSurfaceProps): readonly Account[] | undefined => {
-  if (props.capabilityUnavailable || !allowed(props, 'list-accounts') || !qualified(props, 'list-accounts')) return undefined
-  const principal = principalOf(props)!
-  return props.accounts?.filter(account => principal.kind === 'root' || account.ownerId === principal.id)
-}
-const accountFor = (props: WhmSurfaceProps, username: string): Account | undefined => /^[a-z][a-z0-9]{0,15}$/.test(username) ? readableAccounts(props)?.find(account => account.username === username) : undefined
-const canCreate = (props: WhmSurfaceProps): boolean => props.capabilityUnavailable !== true && allowed(props, 'create-account') && qualified(props, 'create-account')
+import { qualified, principalOf, allowed, readableAccounts, accountFor, canCreate } from '../models/whm-account-access.ts'
 
 const styles = `<style>
 .xp-whm-account-components{display:flex;flex-direction:column;gap:var(--xp-space-group,24px);min-inline-size:0}.xp-whm-account-components[data-approved-account-create-status]{gap:var(--xp-space-section,32px)}.xp-whm-account-components :is(h2,h3,p,ol,dl,dd){margin:0}.xp-whm-account-components :is(h2,h3){line-height:1.6}.xp-whm-account-components p{line-height:1.8;overflow-wrap:anywhere}.xp-whm-account-components fieldset{display:flex;flex-direction:column;gap:var(--xp-space-field,16px);min-inline-size:0;margin:0;padding:var(--xp-space-field,16px);border:1px solid var(--xp-border,#e2e6ec);border-radius:8px}.xp-whm-account-components legend{padding-inline:var(--xp-space-label,8px);font-weight:600}.xp-whm-account-choice-grid,.xp-whm-account-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--xp-space-field,16px)}.xp-whm-account-choice{display:flex;align-items:flex-start;gap:var(--xp-space-label,8px);min-block-size:44px;line-height:1.8}.xp-whm-account-choice input{flex:none;inline-size:20px;block-size:20px;margin:3px 0 0}.xp-whm-account-choice span{display:flex;flex-direction:column;gap:var(--xp-space-label,8px);min-inline-size:0}.xp-whm-account-field{display:flex;flex-direction:column;gap:var(--xp-space-label,8px);align-items:stretch;min-inline-size:0;text-align:start}.xp-whm-account-field>label[for]{padding-inline-start:var(--xp-control-content-inset)}.xp-whm-account-field :is(input,select,textarea){box-sizing:border-box;inline-size:100%;min-block-size:44px;font:inherit}.xp-whm-account-field :is(input,textarea)[dir=ltr]{direction:ltr;unicode-bidi:isolate;text-align:left}html[dir=rtl] .xp-whm-account-field :is(input,textarea)[dir=ltr]{text-align:right}.xp-whm-account-actions{display:flex;flex-wrap:wrap;gap:var(--xp-space-field,16px);align-items:center}.xp-whm-account-mutations{display:flex;flex-direction:column;gap:var(--xp-space-group,24px);padding-block-start:var(--xp-space-group,24px)}.xp-whm-account-mutations form{display:flex;flex-direction:column;gap:var(--xp-space-field,16px)}.xp-whm-account-progress{display:flex;flex-direction:column;gap:var(--xp-space-field,16px);list-style:none;padding:0}.xp-whm-account-progress li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--xp-space-field,16px);align-items:start}.xp-whm-account-preview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--xp-space-field,16px)}.xp-whm-account-preview>div{display:flex;flex-direction:column;gap:var(--xp-space-label,8px);min-inline-size:0;text-align:start}.xp-whm-account-preview dt{font-weight:600}.xp-whm-account-preview dd{overflow-wrap:anywhere}.xp-whm-account-selection{display:inline-flex;min-inline-size:44px;min-block-size:44px;align-items:center;gap:var(--xp-space-label,8px)}.xp-whm-account-selection input{inline-size:20px;block-size:20px;margin:0}.xp-whm-account-components :is(button,input,select):focus-visible{outline:2px solid var(--xp-accent,#1d5bd6);outline-offset:2px}.xp-whm-account-components :disabled{cursor:not-allowed;opacity:.75}

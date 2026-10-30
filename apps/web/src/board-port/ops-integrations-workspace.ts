@@ -1,3 +1,4 @@
+import { classicOpsClientTemplates } from '../themes/classic/ops-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 
 /** Signed webhook integrations for the developer/integrations workspace. Filled by OPS_INTEGRATIONS_CLIENT_BINDING. */
@@ -35,5 +36,6 @@ export function renderOpsIntegrationsWorkspace(input: { locale: Locale; canRead:
       <h2 id="ops-int-log">${t('Delivery log')}</h2>
       <div class="xp-whm-detail-scroll" role="region" tabindex="0" aria-label="${t('Webhook delivery log')}"><table class="xp-whm-detail-table"><caption class="xp-sr-only">${t('Webhook delivery log')}</caption><thead><tr>${logHeaders.map(label => `<th scope="col">${label}</th>`).join('')}</tr></thead><tbody data-ops-int-log><tr><td colspan="5">${t('No deliveries have been recorded.')}</td></tr></tbody></table></div>
     </section>
+    ${classicOpsClientTemplates('integrations')}
   </div>`
 }

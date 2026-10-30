@@ -3,6 +3,7 @@
 // with built-in text take the page translator as their first argument, so the catalog tooling extracts their messages.
 
 export { bulkBar, type BulkBarProps } from './bulk-bar.ts'
+export { actionState } from './action-state.ts'
 export { card, type CardProps } from './card.ts'
 export { applyBar, changeReview, type ApplyBarProps, type ChangeReviewProps, type ReviewRow, type ReviewStep } from './change-review.ts'
 export { barChart, lineChart, type BarChartProps, type LineChartProps, type LineSeries } from './chart.ts'

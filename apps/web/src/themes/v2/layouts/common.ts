@@ -43,6 +43,8 @@ export interface Fact {
   value: string
   /** Technical values (paths, users, versions) in the monospace face. */
   mono?: boolean
+  /** Keep an LTR reference or date isolated within the field's normal alignment edge. */
+  ltr?: boolean
 }
 
 export const kpiStrip = (props: KpiStripProps): string =>
@@ -62,7 +64,7 @@ export function stateBlock(t: Translate, state: LayoutState, slots: StateSlots =
 }
 
 export const factList = (facts: readonly Fact[], label?: string): string =>
-  `<dl class="v2-facts"${label ? ` aria-label="${escapeHtml(label)}"` : ''}>${facts.map(fact => `<div><dt>${escapeHtml(fact.label)}</dt><dd class="v2-num${fact.mono ? ' v2-mono' : ''}">${escapeHtml(fact.value)}</dd></div>`).join('')}</dl>`
+  `<dl class="v2-facts"${label ? ` aria-label="${escapeHtml(label)}"` : ''}>${facts.map(fact => `<div><dt>${escapeHtml(fact.label)}</dt><dd><bdi class="v2-num${fact.mono ? ' v2-mono' : ''}" dir="${fact.ltr || fact.mono ? 'ltr' : 'auto'}">${escapeHtml(fact.value)}</bdi></dd></div>`).join('')}</dl>`
 
 /** Main column beside an aside of cards; the aside stacks under the main column on narrow screens. */
 export function splitWithAside(mainHtml: string, aside: { label: string; html: string } | undefined): string {
@@ -107,10 +109,10 @@ export const COMMON_LAYOUT_CSS = `.v2-layout{display:flex;flex-direction:column;
 .v2-fields--row{display:flex;flex-wrap:wrap}
 .v2-fields--row>.v2-field{flex:1 1 160px}
 .v2-fields>.v2-switch-row+.v2-switch-row{padding-top:var(--space-2);border-top:1px solid var(--line)}
-.v2-facts>div{display:flex;justify-content:space-between;gap:var(--space-2);padding:var(--space-1) 0;font-size:13px}
-.v2-facts>div+div{border-top:1px solid var(--line)}
+.v2-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:var(--space-2)}
+.v2-facts>div{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;font-size:13px}
 .v2-facts dt{color:var(--muted)}
-.v2-facts dd{text-align:end;overflow-wrap:anywhere}
+.v2-facts dd{text-align:start;overflow-wrap:anywhere}
 .v2-inset{padding:var(--space-2) var(--space-3) var(--space-3)}
 .v2-card__actions>.v2-filter{padding:0}
 .v2-foot{display:flex;flex-wrap:wrap;justify-content:space-between;gap:var(--space-1) var(--space-2);padding:var(--space-2) var(--space-3);border-top:1px solid var(--line);font-size:12px;color:var(--muted)}

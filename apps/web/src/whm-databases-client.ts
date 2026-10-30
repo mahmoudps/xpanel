@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -140,23 +144,19 @@ function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Prom
       if (technical && value !== null) node.dir = 'ltr'
       node.textContent = value ?? notObserved; target.append(node)
     }
-    const tbody = (name: string): HTMLElement | null => root.querySelector<HTMLElement>('[data-whm-db-rows="' + name + '"]')
-    const placeholder = (body: HTMLElement | null, message: string): void => {
-      if (!body) return
-      body.textContent = ''
-      const row = document.createElement('tr'), cell = document.createElement('td')
-      cell.colSpan = Number(body.dataset.columns) || 1; cell.textContent = message; row.append(cell); body.append(row)
-    }
-    const cell = (row: HTMLTableRowElement, value: string, technical = false): HTMLTableCellElement => {
-      const td = document.createElement('td'), node = document.createElement(technical ? 'bdi' : 'span')
-      if (technical) node.dir = 'ltr'
-      node.textContent = value; td.append(node); row.append(td); return td
-    }
-    const driftLabels: Record<string, string> = { 'in-sync': t('In sync'), 'saved-only': t('Saved only'), 'server-only': t('Server only'), system: t(msgctxt('whm-databases-client', 'System')), unverified: t(msgctxt('whm-databases-client', 'Not verified')) }
-    const badge = (row: HTMLTableRowElement, drift: string): void => {
-      const td = document.createElement('td'), span = document.createElement('span')
-      span.className = 'xp-badge' + (drift === 'in-sync' ? ' xp-badge--ok' : drift === 'saved-only' || drift === 'server-only' ? ' xp-badge--warn' : drift === 'system' ? ' xp-badge--suspended' : '')
-      span.textContent = driftLabels[drift] ?? drift; td.append(span); row.append(td); row.dataset.drift = drift
+    const tbody=(name:string):HTMLElement|null=>root.querySelector<HTMLElement>('[data-whm-db-rows="'+name+'"]')
+    const rowSlots:Readonly<Record<string,readonly string[]>>={accounts:['account','owner','status','databases','trash','users','grants','size'],databases:['name','account','state','size','tables','drift'],users:['user','host','account','grants','role','drift'],processes:['connection','user','account','host','database','command','seconds','state','actions'],engines:['engine','state','unit','version','databases']}
+    const templates=new Map([...root.querySelectorAll<HTMLElement>('[data-whm-db-rows]')].map(body=>{const name=body.dataset.whmDbRows!,slots=rowSlots[name];if(!slots)throw new Error('unknown_whm_database_table');const row=clientTemplate(root,'whm-db-'+name+'-row'),empty=clientTemplate(root,'whm-db-'+name+'-empty');cloneClientTemplate(row,'tr',slots);cloneClientTemplate(empty,'tr',['message']);return[name,{body,slots,row,empty}] as const}))
+    const killTemplate=clientTemplate(root,'whm-db-kill');cloneClientTemplate(killTemplate,'button',['label'])
+    const driftLabels:Record<string,string>={'in-sync':t('In sync'),'saved-only':t('Saved only'),'server-only':t('Server only'),system:t(msgctxt('whm-databases-client','System')),unverified:t(msgctxt('whm-databases-client','Not verified'))}
+    const drifts=new Map(Object.keys(driftLabels).map(state=>{const template=clientTemplate(root,'whm-db-drift-'+state);cloneClientTemplate(template,'span',['label']);return[state,template] as const}))
+    const placeholder=(body:HTMLElement|null,message:string):void=>{if(!body)return;const contract=templates.get(body.dataset.whmDbRows!)!;const row=cloneClientTemplate(contract.empty,'tr',['message']);clientTemplateSlot(row,'message','td').textContent=message;body.replaceChildren(row)}
+    const paintRow=(name:string,values:Record<string,string>,search?:string,drift?:string):HTMLTableRowElement=>{
+      const contract=templates.get(name)!,row=cloneClientTemplate(contract.row,'tr',contract.slots) as HTMLTableRowElement
+      for(const [slot,text]of Object.entries(values))clientTemplateSlot(row,slot).textContent=text
+      if(search!==undefined){row.dataset.whmDbRow='';row.dataset.search=search.toLowerCase()}
+      if(drift){const chip=cloneClientTemplate(drifts.get(drift)!,'span',['label']);clientTemplateSlot(chip,'label').textContent=driftLabels[drift]!;clientTemplateSlot(row,'drift').replaceChildren(chip);row.dataset.drift=drift}
+      return row
     }
     const bytes = (value: number | null): string => {
       if (value === null) return notObserved
@@ -166,7 +166,6 @@ function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Prom
       return (unit === 0 ? String(size) : size.toFixed(1)) + ' ' + units[unit]
     }
     const amount = (value: number | null): string => value === null ? notObserved : String(value)
-    const dataRow = (search: string): HTMLTableRowElement => { const row = document.createElement('tr'); row.dataset.whmDbRow = ''; row.dataset.search = search.toLowerCase(); return row }
     const applyFilter = (): void => {
       const query = (search?.value ?? '').trim().toLowerCase(), wanted = driftFilter?.value ?? ''
       let total = 0, shown = 0
@@ -199,48 +198,29 @@ function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Prom
         for (const [key, value] of Object.entries(view.saved.totals)) fact(key, String(value))
         fact('savedOnly', view.drift ? String(view.drift.savedOnly) : null); fact('serverOnly', view.drift ? String(view.drift.serverOnly) : null)
         fill('accounts', view.saved.accounts, t('No hosting accounts are saved.'), '', item => {
-          const row = document.createElement('tr')
-          cell(row, item.account, true); cell(row, item.owner ?? 'root', true); cell(row, accountStatus[item.status] ?? item.status)
-          for (const value of [item.databases, item.trashedDatabases, item.users, item.grants]) cell(row, String(value), true)
-          cell(row, bytes(item.observedSizeBytes), item.observedSizeBytes !== null); return row
+          return paintRow('accounts',{account:item.account,owner:item.owner??'root',status:accountStatus[item.status]??item.status,databases:String(item.databases),trash:String(item.trashedDatabases),users:String(item.users),grants:String(item.grants),size:bytes(item.observedSizeBytes)})
         })
         fill('databases', view.databases, t('No databases are saved or observed.'), '', item => {
-          const row = dataRow(item.name + ' ' + (item.account ?? ''))
-          cell(row, item.name, true); cell(row, item.account ?? t(msgctxt('whm-databases-client', 'Not attributed')), item.account !== null)
-          cell(row, item.trashed === null ? t(msgctxt('whm-databases-client', 'Not saved')) : item.trashed ? t('In trash') : t(msgctxt('whm-databases-client', 'Live')))
-          cell(row, bytes(item.sizeBytes), item.sizeBytes !== null); cell(row, amount(item.tables), item.tables !== null); badge(row, item.drift); return row
+          return paintRow('databases',{name:item.name,account:item.account??t(msgctxt('whm-databases-client','Not attributed')),state:item.trashed===null?t(msgctxt('whm-databases-client','Not saved')):item.trashed?t('In trash'):t(msgctxt('whm-databases-client','Live')),size:bytes(item.sizeBytes),tables:amount(item.tables)},item.name+' '+(item.account??''),item.drift)
         })
       } else if (view.kind === 'users') {
         fact('observedAt', view.observed.observedAt === null ? null : displayDateTime(view.observed.observedAt), true); fact('savedOnly', view.drift ? String(view.drift.savedOnly) : null); fact('serverOnly', view.drift ? String(view.drift.serverOnly) : null)
         fill('users', view.users, t('No database users are saved or observed.'), '', item => {
-          const row = dataRow(item.user + ' ' + item.host + ' ' + (item.account ?? ''))
-          cell(row, item.user || t('(anonymous)'), item.user !== ''); cell(row, item.host || t('(no host)'), item.host !== ''); cell(row, item.account ?? t('Not attributed'), item.account !== null)
-          cell(row, item.grants === null ? t(msgctxt('whm-databases-client', 'Not saved')) : item.grants.length ? item.grants.map(grant => grant.database + ': ' + grant.privileges.join(', ')).join('; ') : t('No grants'), !!item.grants?.length)
-          cell(row, item.role === null ? notObserved : item.role ? t('Yes') : t('No')); badge(row, item.drift); return row
+          return paintRow('users',{user:item.user||t('(anonymous)'),host:item.host||t('(no host)'),account:item.account??t('Not attributed'),grants:item.grants===null?t(msgctxt('whm-databases-client','Not saved')):item.grants.length?item.grants.map(grant=>grant.database+': '+grant.privileges.join(', ')).join('; '):t('No grants'),role:item.role===null?notObserved:item.role?t('Yes'):t('No')},item.user+' '+item.host+' '+(item.account??''),item.drift)
         })
       } else if (view.kind === 'processes') {
         fact('observedAt', view.observed.observedAt === null ? null : displayDateTime(view.observed.observedAt), true); fact('count', view.processes ? String(view.processes.length) : null)
         fill('processes', view.processes, t('No database processes were returned.'), t('The process list is unavailable. Nothing can be killed until it is read.'), item => {
-          const row = dataRow([item.id, item.user, item.host, item.db ?? '', item.command, item.account ?? ''].join(' '))
-          cell(row, String(item.id), true); cell(row, item.user || t('(anonymous)'), item.user !== ''); cell(row, item.account ?? t('Not attributed'), item.account !== null)
-          cell(row, item.host, true); cell(row, item.db ?? t('None'), item.db !== null); cell(row, item.command, true); cell(row, String(item.timeSeconds), true); cell(row, item.threadState || '-', item.threadState !== '')
-          const action = document.createElement('td')
-          if (item.protected) action.textContent = protectedLabels[item.protectedReason ?? ''] ?? t('Protected')
-          else for (const mode of (item.command === 'Sleep' ? ['connection'] : ['query', 'connection']) as ('query' | 'connection')[]) {
-            const button = document.createElement('button')
-            button.type = 'button'; button.className = 'xp-btn'; button.dataset.whmDbKill = mode
-            button.textContent = mode === 'query' ? t('Kill query') : t('Kill connection')
-            button.addEventListener('click', () => { if (!button.disabled) void kill(item, mode) })
-            action.append(button)
-          }
-          row.append(action); return row
+          const row=paintRow('processes',{connection:String(item.id),user:item.user||t('(anonymous)'),account:item.account??t('Not attributed'),host:item.host,database:item.db??t('None'),command:item.command,seconds:String(item.timeSeconds),state:item.threadState||'-'},[item.id,item.user,item.host,item.db??'',item.command,item.account??''].join(' '))
+          const actions=clientTemplateSlot(row,'actions','td')
+          if(item.protected)actions.textContent=protectedLabels[item.protectedReason??'']??t('Protected')
+          else for(const mode of(item.command==='Sleep'?['connection']:['query','connection']) as ('query'|'connection')[]){const button=cloneClientTemplate(killTemplate,'button',['label']) as HTMLButtonElement;button.dataset.whmDbKill=mode;clientTemplateSlot(button,'label').textContent=mode==='query'?t('Kill query'):t('Kill connection');button.addEventListener('click',()=>{if(!button.disabled)void kill(item,mode)});actions.append(button)}
+          return row
         })
       } else {
         const engine = view.engine, o = engine.observed
         fill('engines', [engine], '', '', item => {
-          const row = document.createElement('tr')
-          cell(row, 'MariaDB', true); cell(row, item.service ? serviceLabels[item.service.state] ?? item.service.state : notObserved); cell(row, item.service?.unit ?? notObserved, !!item.service?.unit)
-          cell(row, o.version ?? notObserved, o.version !== null); cell(row, String(item.savedDatabases), true); return row
+          return paintRow('engines',{engine:'MariaDB',state:item.service?serviceLabels[item.service.state]??item.service.state:notObserved,unit:item.service?.unit??notObserved,version:o.version??notObserved,databases:String(item.savedDatabases)})
         })
         fact('protocol', engine.configuration ? engine.configuration.protocol === 'socket' ? t('Unix socket') : t('Client default') : null)
         fact('clientSocket', engine.configuration?.socket ?? null, true); fact('observedAt', o.observedAt === null ? null : displayDateTime(o.observedAt), true)
@@ -300,4 +280,4 @@ function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Prom
   })
 }
 
-export const WHM_DATABASES_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmDatabasesView=${readWhmDatabasesView.toString()};const readWhmDatabaseKillOutcome=${readWhmDatabaseKillOutcome.toString()};return ${bindWhmDatabases.toString()};})()`
+export const WHM_DATABASES_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmDatabasesView=${readWhmDatabasesView.toString()};const readWhmDatabaseKillOutcome=${readWhmDatabaseKillOutcome.toString()};return ${bindWhmDatabases.toString()};})()`

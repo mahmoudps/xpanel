@@ -1,3 +1,7 @@
+import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
+const mailTemplate = canonicalMailTemplate
+const mailSlot = canonicalMailSlot
+const mailRequireTemplates = canonicalMailRequireTemplates
 /// <reference lib="dom" />
 import { mailToolsExact as importedMailToolsExact, mailToolsObject as importedMailToolsObject, mailToolsUncertain as importedMailToolsUncertain } from './mail-spam-client.ts'
 import type { MessageValues } from './i18n.ts'
@@ -25,17 +29,19 @@ function bindMailMailingLists(askDialog: ((options: Record<string, unknown>) => 
     const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest, mailbox = root.dataset.listsMailbox ?? ''
     const status = root.querySelector<HTMLElement>('[data-lists-status]')!, rows = root.querySelector<HTMLTableSectionElement>('[data-lists-rows]')!, refresh = root.querySelector<HTMLButtonElement>('[data-lists-refresh]')!
     if (!status || !rows || !refresh) return
+    try { mailRequireTemplates(root, [['mail-membership-row', 'tr', ['address', 'name', 'observed', 'subscription', 'posting', 'membership', 'action']], ['mail-membership-empty', 'tr', ['message']]]) }
+    catch { refresh.disabled = true; status.dataset.state = 'unavailable'; status.textContent = t('Mailing lists are unavailable for this mailbox session. Nothing was read.'); return }
     const admitted = (): boolean => root.isConnected && root.dataset.listsManage === 'true' && root.dataset.listsMailbox === mailbox && !!mailbox && !!send && !root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
     let snapshot: MailListsSnapshot | null = null, busy = false, locked = false
     const note = (state: string, text: string): void => { status.dataset.state = state; status.textContent = text; status.setAttribute('role', ['failed', 'stale', 'uncertain'].includes(state) ? 'alert' : 'status') }
     const sync = (): void => { refresh.disabled = !admitted() || busy; for (const button of rows.querySelectorAll<HTMLButtonElement>('button[data-list-action]')) { const list = snapshot?.lists.find(item => item.id === button.dataset.listId); button.disabled = !admitted() || busy || locked || !list || !(button.dataset.listAction === 'subscribe' ? list.canSubscribe : list.canUnsubscribe) } root.setAttribute('aria-busy', String(busy)) }
     const paint = (): void => {
       rows.textContent = ''
-      if (!snapshot?.lists.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 7; cell.textContent = snapshot ? t('No public lists or verified memberships are available for this mailbox.') : t('The mailing lists have not been read.'); row.append(cell); rows.append(row) }
+      if (!snapshot?.lists.length) { const row = mailTemplate(root, 'mail-membership-empty', 'tr', ['message']); mailSlot(row, 'message').textContent = snapshot ? t('No public lists or verified memberships are available for this mailbox.') : t('The mailing lists have not been read.'); rows.append(row) }
       for (const list of snapshot?.lists ?? []) {
-        const row = document.createElement('tr'), values = [list.address, list.name, t(msgctxt('mail-mailing-lists-client', 'Not observed')), list.subscriptionPolicy === 'open' ? t('Public subscription') : t('Private list'), t('Not exposed'), list.membership === 'subscribed' ? t('Subscribed (saved)') : list.membership === 'review_required' ? t('Provider review required') : t('Not subscribed')]
-        for (const [index, value] of values.entries()) { const cell = document.createElement('td'), content = document.createElement(index === 0 ? 'bdi' : 'span'); if (index === 0) content.dir = 'ltr'; content.textContent = value; cell.append(content); row.append(cell) }
-        const cell = document.createElement('td'), button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.dataset.listId = list.id; button.dataset.listAction = list.membership === 'subscribed' ? 'unsubscribe' : 'subscribe'; button.textContent = list.membership === 'subscribed' ? t('Unsubscribe') : t('Subscribe'); button.addEventListener('click', () => { void mutate(list) }); cell.append(button); row.append(cell); rows.append(row)
+        const row = mailTemplate(root, 'mail-membership-row', 'tr', ['address', 'name', 'observed', 'subscription', 'posting', 'membership', 'action'])
+        for (const [key, value] of [['address', list.address], ['name', list.name], ['observed', t(msgctxt('mail-mailing-lists-client', 'Not observed'))], ['subscription', list.subscriptionPolicy === 'open' ? t('Public subscription') : t('Private list')], ['posting', t('Not exposed')], ['membership', list.membership === 'subscribed' ? t('Subscribed (saved)') : list.membership === 'review_required' ? t('Provider review required') : t('Not subscribed')]] as const) mailSlot(row, key).textContent = value
+        const button = mailSlot<HTMLButtonElement>(row, 'action', 'button'); button.dataset.listId = list.id; button.dataset.listAction = list.membership === 'subscribed' ? 'unsubscribe' : 'subscribe'; button.textContent = list.membership === 'subscribed' ? t('Unsubscribe') : t('Subscribe'); button.addEventListener('click', () => { void mutate(list) }); rows.append(row)
       }
       sync()
     }
@@ -61,4 +67,4 @@ function bindMailMailingLists(askDialog: ((options: Record<string, unknown>) => 
     if (!admitted()) { sync(); note('unavailable', t('Mailing lists are unavailable for this mailbox session. Nothing was read.')); return } void load()
   })
 }
-export const MAIL_MAILING_LISTS_CLIENT_BINDING = `(()=>{const mailToolsObject=${mailToolsObject.toString()};const mailToolsExact=${mailToolsExact.toString()};const mailToolsUncertain=${mailToolsUncertain.toString()};const readMailMailingLists=${readMailMailingLists.toString()};return ${bindMailMailingLists.toString()};})()`
+export const MAIL_MAILING_LISTS_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const mailToolsObject=${mailToolsObject.toString()};const mailToolsExact=${mailToolsExact.toString()};const mailToolsUncertain=${mailToolsUncertain.toString()};const readMailMailingLists=${readMailMailingLists.toString()};return ${bindMailMailingLists.toString()};})()`

@@ -1,3 +1,4 @@
+import { classicWhmClientTemplates } from '../themes/classic/whm-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 export interface WhmMailQualityWorkspaceInput { locale: Locale; canRead: boolean }
 
@@ -7,7 +8,7 @@ export function renderWhmMailQualityWorkspace({ locale, canRead }: WhmMailQualit
   const notRead = t('Not read')
   const fact = (label: string, key: string): string => `<div><dt>${label}</dt><dd><bdi dir="ltr" data-whm-mail-quality-fact="${key}">${notRead}</bdi></dd></div>`
   const headers = [t('Domain'), t('Account'), 'MX', 'SPF', 'DKIM', 'DMARC', t('Reverse DNS'), t('Checked (UTC)')]
-  return `<section class="xp-whm-mail-quality" data-whm-mail-quality-workspace data-mail-quality-can-read="${canRead}" lang="${locale}" dir="${localeDirection(locale)}" aria-labelledby="whm-mail-quality-summary-heading">
+  return `<section class="xp-whm-mail-quality" data-whm-mail-quality-workspace data-mail-quality-can-read="${canRead}" lang="${locale}" dir="${localeDirection(locale)}" aria-labelledby="whm-mail-quality-summary-heading">${classicWhmClientTemplates('mail-quality')}
     <style>.xp-whm-mail-quality h2{font-size:var(--xp-type-card);line-height:var(--xp-leading-card);font-weight:var(--xp-weight-semibold)}
     .xp-whm-mail-quality{display:flex;flex-direction:column;gap:32px;min-inline-size:0}.xp-whm-mail-quality :is(h2,p,dl,dd,ul){margin:0}.xp-whm-mail-quality__card{display:flex;flex-direction:column;gap:24px;padding:16px;min-inline-size:0;border:1px solid var(--xp-border);border-radius:8px;background:var(--xp-bg-surface)}
     .xp-whm-mail-quality__heading{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px}.xp-whm-mail-quality__facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:16px}.xp-whm-mail-quality__facts>div,.xp-whm-mail-quality__check{display:flex;flex-direction:column;gap:8px;min-inline-size:0}

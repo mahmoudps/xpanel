@@ -1,6 +1,9 @@
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const viewAction = canonicalViewAction
 
 export type NodeView = { id: string; label: string; hostname: string; port: number; fingerprint: string; role: 'web' | 'dns' | 'mail' | 'db' | 'all' }
 export type NodesView = {
@@ -41,11 +44,20 @@ function bindOpsNodes(): void {
     const denied = '[data-wiring="unavailable"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.nodesCanRead === 'true' && !root.closest(denied)
     const manageable = (): boolean => admitted() && root.dataset.nodesCanManage === 'true'
+    // Reject an incomplete selected-theme contract before any authorized provider read.
+    try {
+      const template0 = cloneViewRecord(root, 'ops-node-row', 'tr', { 'label': '', 'hostname': '', 'role': '', 'enrollment': '', 'verify-label': '', 'remove-label': '' })
+      viewAction(template0, 'verify')
+      viewAction(template0, 'remove')
+      cloneViewRecord(root, 'ops-node-empty', 'tr', { 'message': '' })
+    } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return
+    }
     let view: NodesView | null = null, draft: NodeView[] = [], dirty = false, busy = false
     const verification = new Map<string, string>()
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'conflict'].includes(state) ? 'alert' : 'status') }
     const fact = (key: string, value: string): void => { const target = root.querySelector<HTMLElement>('[data-ops-nodes-fact="' + key + '"]'); if (target) target.textContent = value }
-    const cell = (row: HTMLTableRowElement, value: string, technical = false): void => { const td = document.createElement('td'), span = document.createElement(technical ? 'bdi' : 'span'); if (technical) span.dir = 'ltr'; span.textContent = value; td.append(span); row.append(td) }
     const roleLabel = (role: string): string => ({ all: t('All roles'), web: t('Web'), dns: 'DNS', mail: t('Mail'), db: t('Database') } as Record<string, string>)[role] ?? role
     const enrollLabel = (id: string): string => ({ verified: t('Verified'), unreachable: t('Unreachable'), pending: t('Pending') } as Record<string, string>)[verification.get(id) ?? 'pending'] ?? t('Pending')
     const lock = (): void => {
@@ -54,22 +66,20 @@ function bindOpsNodes(): void {
       addButton.disabled = !can; saveButton.disabled = !can || !dirty
       const read = button('read'); if (read) read.disabled = busy || !admitted()
       root.querySelectorAll<HTMLButtonElement>('[data-ops-nodes-verify]').forEach(element => { element.disabled = busy || !manageable() || dirty })
+      rows.querySelectorAll<HTMLButtonElement>('[data-xp-action="remove"]').forEach(control => { control.disabled = !can })
       root.setAttribute('aria-busy', String(busy))
     }
     const paint = (): void => {
       rows.textContent = ''
-      if (!draft.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 5; td.textContent = view ? t('No additional nodes are registered.') : t('No node registry has been read.'); row.append(td); rows.append(row) }
+      if (!draft.length) rows.append(cloneViewRecord(root, 'ops-node-empty', 'tr', { message: view ? t('No additional nodes are registered.') : t('No node registry has been read.') }))
       for (const node of draft) {
-        const row = document.createElement('tr')
-        cell(row, node.label); cell(row, node.hostname + ':' + String(node.port), true); cell(row, roleLabel(node.role))
-        cell(row, dirty ? t('Pending') : enrollLabel(node.id))
-        const actions = document.createElement('td')
-        if (manageable()) {
-          const verifyButton = document.createElement('button'); verifyButton.type = 'button'; verifyButton.className = 'xp-btn'; verifyButton.dataset.opsNodesVerify = node.id; verifyButton.textContent = t('Verify channel')
-          verifyButton.addEventListener('click', () => { if (!verifyButton.disabled) void verify(node.id) }); actions.append(verifyButton)
-          const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'xp-btn'; remove.textContent = t('Remove'); remove.addEventListener('click', () => { draft = draft.filter(item => item.id !== node.id); dirty = true; paint(); lock() }); actions.append(remove)
-        }
-        row.append(actions); rows.append(row)
+        const row = cloneViewRecord(root, 'ops-node-row', 'tr', { label: node.label, hostname: node.hostname + ':' + String(node.port), role: roleLabel(node.role), enrollment: dirty ? t('Pending') : enrollLabel(node.id), 'verify-label': t('Verify channel'), 'remove-label': t('Remove') })
+        const verifyButton = viewAction<HTMLButtonElement>(row, 'verify'), remove = viewAction<HTMLButtonElement>(row, 'remove')
+        verifyButton.hidden = remove.hidden = !manageable(); verifyButton.dataset.opsNodesVerify = node.id
+        verifyButton.disabled = busy || !manageable() || dirty; remove.disabled = busy || !manageable()
+        verifyButton.addEventListener('click', () => { if (!verifyButton.disabled) void verify(node.id) })
+        remove.addEventListener('click', () => { if (busy || !manageable()) return; draft = draft.filter(item => item.id !== node.id); dirty = true; paint(); lock() })
+        rows.append(row)
       }
       fact('count', String(draft.length))
     }
@@ -125,4 +135,4 @@ function bindOpsNodes(): void {
   })
 }
 
-export const OPS_NODES_CLIENT_BINDING = `(()=>{const readNodesView=${readNodesView.toString()};const randomNodeId=${randomNodeId.toString()};return ${bindOpsNodes.toString()};})()`
+export const OPS_NODES_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const readNodesView=${readNodesView.toString()};const randomNodeId=${randomNodeId.toString()};return ${bindOpsNodes.toString()};})()`

@@ -272,7 +272,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     }
     assert.equal(wizPostBody.ok, true)
     assert.equal(wizPostBody.setupComplete, true)
-    assert.equal(wizPostBody.quotaInitialized, true)
+    assert.equal(wizPostBody.quotaInitialized, false)
     assert.equal(wizPostBody.settings.hostname, 'whm.xpanel.test')
 
     // Change hostname
@@ -296,11 +296,10 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
       method: 'POST',
       body: { filesystem: '/home' },
     })
-    assert.equal(quotaRes.status, 200)
-    const quotaBody = (await quotaRes.json()) as { ok: boolean; status: string; commands: string[][] }
-    assert.equal(quotaBody.ok, true)
-    assert.equal(quotaBody.status, 'enabled')
-    assert.equal(quotaBody.commands.length, 2)
+    assert.equal(quotaRes.status, 503)
+    const quotaBody = (await quotaRes.json()) as { details: { stateChanged: boolean; reason: string } }
+    assert.equal(quotaBody.details.stateChanged, false)
+    assert.equal(quotaBody.details.reason, 'host_quota_initialization_not_connected')
 
     // Create a plan and hosting account for tenant-scoped features
     const planRes = await root.request('/api/plans', {

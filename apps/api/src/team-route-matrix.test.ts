@@ -41,8 +41,10 @@ describe('authorization route matrix', () => {
       expect(row.listeners, label).toEqual((['xpanel', 'xwhm', 'xmail'] as const).filter(entry => entryPointAllowsApiRoute(entry, row.sample!, row.method)))
     }
   })
-  it('records that a team session reaches only its identity and sign-out among the auth routes', () => {
+  it('records that a team session reaches only its identity, personal UI preference and sign-out among the auth routes', () => {
     const auth = matrix.routes.filter(row => row.surface === 'api' && row.path.startsWith('/api/auth/'))
-    expect(auth.filter(row => row.allowedPrincipals.includes('team')).map(row => `${row.method} ${row.path}`).sort()).toEqual(['GET /api/auth/me', 'POST /api/auth/logout'])
+    expect(auth.filter(row => row.allowedPrincipals.includes('team')).map(row => `${row.method} ${row.path}`).sort()).toEqual([
+      'GET /api/auth/me', 'GET /api/auth/ui-preferences', 'POST /api/auth/logout', 'PUT /api/auth/ui-preferences',
+    ])
   })
 })

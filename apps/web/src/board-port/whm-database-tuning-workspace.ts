@@ -1,3 +1,4 @@
+import { databaseTuningTemplates } from './data-client-templates.ts'
 import { type Locale, translator, localeDirection } from '../i18n.ts'
 type Copy = string
 export function renderWhmDatabaseTuningWorkspace(input: { locale: Locale; canRead: boolean }): string {
@@ -13,5 +14,5 @@ ${card('overview', msgid('MariaDB observations'), msgid('Current server values a
 ${card('settings', msgid('Runtime settings'), msgid('Observed values may differ from startup configuration. This page cannot save or apply settings.'), table('variables', msgid('Observed runtime settings')))}
 ${card('counters', msgid('Status counters'), msgid('Cumulative counters describe the observed status interval. One reading does not establish a workload trend.'), table('status', msgid('MariaDB status counters')))}
 ${card('plan', msgid('Tuning review plan'), msgid('Review the evidence and collect representative measurements before changing settings. No changes have been applied.'), `<div class="xp-db-tuning__plan" data-db-tuning-plan><p>${t(msgid('Read MariaDB to prepare the advisory plan.'))}</p></div>`)}
-</div>`
+${databaseTuningTemplates()}</div>`
 }

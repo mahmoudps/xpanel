@@ -13,6 +13,7 @@ import { isAccountRuntimeCommand } from './account-runtime.ts'
 import { isSwContainerCommand } from '../../../packages/os/src/sw-container-command.ts'
 import { isSwAddonServiceCommand } from '../../../packages/os/src/sw-addon-command.ts'
 import { isRpmInstalledIdentityCommand } from '../../../packages/os/src/ops-package-recovery-command.ts'
+import { applyObservedUserQuota } from './services/quota.ts'
 
 export interface ConfigTestResult {
   ok: boolean
@@ -783,17 +784,17 @@ export class LinuxHostExecutor implements AgentExecutor {
         await this.removePath(action.path)
         return
       case 'set-quota': {
-        const res = await execArgv([
-          '/usr/sbin/setquota',
-          '-u',
-          action.user,
-          String(action.blockSoftKb),
-          String(action.blockHardKb),
-          '0',
-          '0',
-          action.filesystem,
-        ])
-        if (!res.ok) fail('CONFIG_TEST_FAILED', `setquota ${action.user} failed: ${res.stderr}`)
+        await applyObservedUserQuota(argv => {
+          assertValidCommandArgv(argv)
+          // quotaon --print-state deliberately exits 1 when user accounting is active.
+          // Keep its real stderr separate from execFile's generic nonzero-exit message.
+          return new Promise<ConfigTestResult>(resolve => execFile('/usr/bin/env', ['LC_ALL=C', ...argv], {
+            timeout: this.timeoutMs, maxBuffer: this.maxOutputBytes, windowsHide: true,
+          }, (error, stdout, stderr) => {
+            const code = error?.killed || error?.signal ? 124 : !error ? 0 : typeof error.code === 'number' ? error.code : 127
+            resolve({ ok: code === 0, code, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') })
+          }))
+        }, action)
         return
       }
       case 'systemd-daemon-reload': {

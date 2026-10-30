@@ -1,3 +1,5 @@
+import { WHM_CLIENT_TEMPLATE_BINDING, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './whm-client-templates.ts'
+const clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -67,7 +69,7 @@ function bindWhmDeveloper(): void {
     const clear = (): void => { result = null; tokenTable.hidden = true; tokenRows.textContent = ''; resultFields.textContent = ''; fact('status', null); fact('observed', null); const p = q('[data-dev-copy-status]'); if (p) { p.hidden = true; p.textContent = '' }; lock() }
     const paint = (value: DeveloperBrowserResult): void => {
       result = value; fact('status', String(value.status)); fact('observed', formatDisplayDateTime(value.observedAt)); resultFields.textContent = ''
-      for (const f of value.fields) { const group = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'); group.className = 'xp-dev__field'; dt.textContent = labels[f.key] ?? f.key; dd.append(f.value === null ? t('Unavailable') : ltr(f.value)); group.append(dt, dd); resultFields.append(group) }
+      for (const f of value.fields) { const group = cloneClientTemplate(clientTemplate(root, 'whm-developer-field'), 'div', ['label', 'value']); clientTemplateSlot(group, 'label', 'dt').textContent = labels[f.key] ?? f.key; clientTemplateSlot(group, 'value', 'dd').replaceChildren(f.value === null ? t('Unavailable') : ltr(f.value)); resultFields.append(group) }
       tokenTable.hidden = value.operation !== 'tokens' || value.state !== 'read'; tokenRows.textContent = ''
       for (const item of value.tokens) { const row = document.createElement('tr'); for (const v of [item.name, item.scopes.join(', '), formatDisplayDateTime(item.expiresAt), item.state === 'active' ? t('Active') : item.state === 'expired' ? t(msgctxt('whm-developer-client', 'Expired')) : t('Revoked')]) { const td = document.createElement('td'); td.append(ltr(v)); row.append(td) }; tokenRows.append(row) }
       if (!value.tokens.length && !tokenTable.hidden) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 4; td.textContent = t('You have no API tokens.'); row.append(td); tokenRows.append(row) }
@@ -91,4 +93,4 @@ function bindWhmDeveloper(): void {
     void load()
   })
 }
-export const WHM_DEVELOPER_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parseDeveloperView=${parseDeveloperView.toString()};return ${bindWhmDeveloper.toString()};})()`
+export const WHM_DEVELOPER_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parseDeveloperView=${parseDeveloperView.toString()};return ${bindWhmDeveloper.toString()};})()`

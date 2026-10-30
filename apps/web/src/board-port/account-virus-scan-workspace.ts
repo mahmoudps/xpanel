@@ -1,6 +1,7 @@
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
+import { virusScanClientTemplates } from './account-utility-client-templates.ts'
 
 /** ClamAV scan of the owner's own home as a host job; results come from the job log, nothing is quarantined. */
 export function renderAccountVirusScanWorkspace(input: { lang: Locale; accountId: string; canManage: boolean }): string {
@@ -8,7 +9,7 @@ export function renderAccountVirusScanWorkspace(input: { lang: Locale; accountId
   const unread = t(msgctxt('account-virus-scan-workspace', 'Not read'))
   const fact = (key: string, label: string, technical = false) => `<div><dt>${label}</dt><dd>${technical ? `<bdi dir="ltr" data-vscan-${key}>${unread}</bdi>` : `<span data-vscan-${key}>${unread}</span>`}</dd></div>`
   const manager = input.canManage ? `<a class="xp-btn" href="/files/manager" data-vscan-files>${t('Open File manager')}</a>` : `<span>${t('File manager')}</span>`
-  return `<div class="xp-acct-tool" data-account-virus-scan data-account="${escapeHtml(input.accountId)}" data-vscan-manage="${input.canManage}" lang="${input.lang}" dir="${localeDirection(input.lang)}">${ACCOUNT_TOOL_STYLE}
+  return `<div class="xp-acct-tool" data-account-virus-scan data-account="${escapeHtml(input.accountId)}" data-vscan-manage="${input.canManage}" lang="${input.lang}" dir="${localeDirection(input.lang)}">${virusScanClientTemplates()}${ACCOUNT_TOOL_STYLE}
     <style>@media(min-width:601px){[data-account-virus-scan] .xp-acct-tool__card{padding:var(--xp-space-card)}}</style>
     <section class="xp-acct-tool__card" aria-labelledby="account-vscan-engine"><h2 id="account-vscan-engine">${t('Scanner')}</h2>
       <dl class="xp-acct-tool__facts">${fact('engine', t('ClamAV'))}${fact('version', t('Engine version'), true)}${fact('signatures', t('Signature database'), true)}${fact('signature-date', t('Signatures dated'), true)}</dl>

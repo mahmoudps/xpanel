@@ -1,3 +1,4 @@
+import { classicAccountLifecycleTemplates } from './account-lifecycle-client-templates.ts'
 import { type Locale, type MessageValues, localeDirection, translator } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -41,5 +42,5 @@ export function renderAcctConvertAddonWorkspace(input: { locale: Locale; canMana
     ${field('confirm', t('Type the confirmation'), `<input class="xp-input" id="acct-convert-confirm" type="text" autocomplete="off" spellcheck="false" dir="ltr" aria-describedby="acct-convert-confirm-help" data-acct-convert-input="confirm" disabled>`, t('Type convert followed by the domain name, for example convert shop.example.com.'))}
     <div class="xp-acct-convert-addon__actions"><button type="button" class="xp-btn xp-btn--primary" data-acct-convert-apply disabled>${t('Convert to account')}</button></div>
   </section>
-</div>`
+${classicAccountLifecycleTemplates('convert')}</div>`
 }

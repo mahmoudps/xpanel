@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 
@@ -151,56 +155,60 @@ function bindDirectoryPrivacy(askDialog: ((options: Record<string, unknown>) => 
       status.textContent = message
     }
     const lock = (): void => { const blocked = busy || uncertain || !eligible(); controls().forEach(control => { control.disabled = blocked }) }
-    const cell = (parent: HTMLElement, content: string, technical = false): HTMLElement => {
-      const node = document.createElement('td')
-      if (technical) { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.className = 'xp-mono'; bdi.textContent = content; node.replaceChildren(bdi) } else node.textContent = content
-      parent.appendChild(node)
-      return node
-    }
-    const smallButton = (parent: HTMLElement, label: string, kind: string, onClick: () => void): HTMLButtonElement => {
-      const button = document.createElement('button')
-      button.type = 'button'; button.className = 'xp-btn'; button.dataset.directoryPrivacyAction = kind; button.textContent = label
-      button.addEventListener('click', event => { event.stopPropagation(); if (!button.disabled && eligible()) onClick() })
-      parent.appendChild(button)
-      return button
+    const ruleSlots = ['path', 'prompt', 'users', 'enabled', 'remove']
+    const userSlots = ['name-label', 'username', 'password-label', 'password', 'remove']
+    const clone = (name: string, tag: string, slots: readonly string[]): HTMLElement => cloneClientTemplate(clientTemplate(root, name), tag, slots)
+    try {
+      const rule = clone('directory-privacy-rule', 'tr', ruleSlots)
+      clientTemplateSlot(rule, 'path', 'bdi'); clientTemplateSlot(rule, 'users', 'div')
+      if ((clientTemplateSlot(rule, 'enabled', 'input') as HTMLInputElement).type !== 'checkbox') throw new Error('invalid_directory_template')
+      clientTemplateSlot(rule, 'remove', 'button')
+      const user = clone('directory-privacy-user', 'div', userSlots)
+      clientTemplateSlot(user, 'username', 'bdi'); clientTemplateSlot(user, 'password-label', 'label')
+      if ((clientTemplateSlot(user, 'password', 'input') as HTMLInputElement).type !== 'password') throw new Error('invalid_directory_template')
+      clientTemplateSlot(user, 'remove', 'button')
+      clone('directory-privacy-empty', 'tr', ['message'])
+    } catch {
+      controls().forEach(control => { control.disabled = true })
+      setStatus(copy('Directory privacy editing is unavailable here. No rules were read or changed.'), 'unavailable')
+      return
     }
     const paint = (): void => {
       rows.textContent = ''
       draft.forEach((rule, index) => {
-        const row = document.createElement('tr'); row.dataset.directoryPrivacyRule = rule.path
-        cell(row, rule.path, true); cell(row, rule.authName)
-        const usersCell = document.createElement('td')
-        const list = document.createElement('div'); list.className = 'xp-directory-privacy-users'; list.style.display = 'flex'; list.style.flexDirection = 'column'; list.style.gap = 'var(--xp-space-field)'
+        const row = clone('directory-privacy-rule', 'tr', ruleSlots); row.dataset.directoryPrivacyRule = rule.path
+        clientTemplateSlot(row, 'path', 'bdi').textContent = rule.path
+        clientTemplateSlot(row, 'prompt').textContent = rule.authName
+        const list = clientTemplateSlot(row, 'users', 'div')
         rule.users.forEach((user, userIndex) => {
-          const line = document.createElement('div'); line.className = 'xp-directory-privacy-user'; line.style.display = 'flex'; line.style.alignItems = 'end'; line.style.gap = 'var(--xp-space-field)'; line.style.flexWrap = 'wrap'
-          const name = document.createElement('bdi'); name.dir = 'ltr'; name.className = 'xp-mono'; name.textContent = user.username
-          const nameField = document.createElement('div'); nameField.className = 'xp-field'; nameField.style.flex = '1 1 8rem'
-          const nameLabel = document.createElement('span'); nameLabel.className = 'xp-label'; nameLabel.textContent = copy('Username'); nameField.append(nameLabel, name)
-          const password = document.createElement('input'); password.type = 'password'; password.className = 'xp-input'; password.dir = 'ltr'; password.autocomplete = 'new-password'
+          const line = clone('directory-privacy-user', 'div', userSlots)
+          clientTemplateSlot(line, 'username', 'bdi').textContent = user.username
+          clientTemplateSlot(line, 'name-label').textContent = copy('Username')
+          const password = clientTemplateSlot(line, 'password', 'input') as HTMLInputElement
           password.id = 'directory-privacy-user-password-' + index + '-' + userIndex
-          const passwordField = document.createElement('div'); passwordField.className = 'xp-field'; passwordField.style.flex = '1 1 12rem'
-          const passwordLabel = document.createElement('label'); passwordLabel.className = 'xp-label'; passwordLabel.htmlFor = password.id; passwordLabel.style.paddingInline = 'var(--xp-control-content-inset)'; passwordLabel.textContent = copy('Password'); passwordField.append(passwordLabel, password)
+          const passwordLabel = clientTemplateSlot(line, 'password-label', 'label') as HTMLLabelElement
+          passwordLabel.htmlFor = password.id; passwordLabel.textContent = copy('Password')
           password.placeholder = copy('Password (required on save)')
           password.dataset.directoryPrivacyUserPassword = user.username
           password.addEventListener('input', event => { user.password = (event.target as HTMLInputElement).value })
-          const removeUser = document.createElement('button'); removeUser.type = 'button'; removeUser.className = 'xp-btn'; removeUser.textContent = copy('Remove user')
+          const removeUser = clientTemplateSlot(line, 'remove', 'button') as HTMLButtonElement
+          removeUser.textContent = copy('Remove user')
           removeUser.addEventListener('click', event => { event.stopPropagation(); if (busy || uncertain || !eligible()) return; rule.users.splice(userIndex, 1); paint(); lock() })
-          line.append(nameField, passwordField, removeUser); list.appendChild(line)
+          list.appendChild(line)
         })
-        usersCell.appendChild(list); row.appendChild(usersCell)
-        const enabledCell = document.createElement('td')
-        const enabled = document.createElement('input'); enabled.type = 'checkbox'; enabled.checked = rule.enabled; enabled.dataset.directoryPrivacyEnabled = rule.path
+        const enabled = clientTemplateSlot(row, 'enabled', 'input') as HTMLInputElement
+        enabled.checked = rule.enabled; enabled.dataset.directoryPrivacyEnabled = rule.path
+        enabled.setAttribute('aria-label', copy('Enabled') + ': ' + rule.path)
         enabled.addEventListener('change', event => { rule.enabled = (event.target as HTMLInputElement).checked })
-        enabledCell.appendChild(enabled); row.appendChild(enabledCell)
-        const actionCell = document.createElement('td')
-        smallButton(actionCell, copy('Remove folder'), 'remove-rule', () => { if (busy || uncertain) return; draft.splice(index, 1); paint(); lock() })
-        row.appendChild(actionCell); rows.appendChild(row)
+        const removeRule = clientTemplateSlot(row, 'remove', 'button') as HTMLButtonElement
+        removeRule.textContent = copy('Remove folder')
+        removeRule.addEventListener('click', event => { event.stopPropagation(); if (removeRule.disabled || busy || uncertain || !eligible()) return; draft.splice(index, 1); paint(); lock() })
+        rows.appendChild(row)
       })
       if (!draft.length) {
-        const row = document.createElement('tr'), empty = document.createElement('td')
-        empty.colSpan = 5
-        empty.textContent = baseline ? copy('No protected folders are saved.') : copy('Protected folders have not been read.')
-        row.appendChild(empty); rows.appendChild(row)
+        const row = clone('directory-privacy-empty', 'tr', ['message'])
+        clientTemplateSlot(row, 'message').textContent = baseline ? copy('No protected folders are saved.') : copy('Protected folders have not been read.')
+        rows.appendChild(row)
       }
       if (previewWrap) previewWrap.hidden = draft.length === 0
       lock()
@@ -290,4 +298,4 @@ function bindDirectoryPrivacy(askDialog: ((options: Record<string, unknown>) => 
   })
 }
 
-export const DIRECTORY_PRIVACY_CLIENT_BINDING = `(function(askDialog){const USERNAME=${USERNAME.toString()};const unsafe=${unsafe.toString()};const directoryPrivacyObject=${directoryPrivacyObject.toString()};const directoryPrivacyPath=${directoryPrivacyPath.toString()};const directoryPrivacyPrompt=${directoryPrivacyPrompt.toString()};const directoryPrivacyUsername=${directoryPrivacyUsername.toString()};const directoryPrivacyPassword=${directoryPrivacyPassword.toString()};const directoryPrivacyConfig=${directoryPrivacyConfig.toString()};const directoryPrivacySignature=${directoryPrivacySignature.toString()};const directoryPrivacyDraft=${directoryPrivacyDraft.toString()};const directoryPrivacyDraftKey=${directoryPrivacyDraftKey.toString()};const directoryPrivacyDraftMatchesSnapshot=${directoryPrivacyDraftMatchesSnapshot.toString()};const directoryPrivacyPayload=${directoryPrivacyPayload.toString()};(${bindDirectoryPrivacy.toString()})(askDialog);})`
+export const DIRECTORY_PRIVACY_CLIENT_BINDING = `(function(askDialog){const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const USERNAME=${USERNAME.toString()};const unsafe=${unsafe.toString()};const directoryPrivacyObject=${directoryPrivacyObject.toString()};const directoryPrivacyPath=${directoryPrivacyPath.toString()};const directoryPrivacyPrompt=${directoryPrivacyPrompt.toString()};const directoryPrivacyUsername=${directoryPrivacyUsername.toString()};const directoryPrivacyPassword=${directoryPrivacyPassword.toString()};const directoryPrivacyConfig=${directoryPrivacyConfig.toString()};const directoryPrivacySignature=${directoryPrivacySignature.toString()};const directoryPrivacyDraft=${directoryPrivacyDraft.toString()};const directoryPrivacyDraftKey=${directoryPrivacyDraftKey.toString()};const directoryPrivacyDraftMatchesSnapshot=${directoryPrivacyDraftMatchesSnapshot.toString()};const directoryPrivacyPayload=${directoryPrivacyPayload.toString()};(${bindDirectoryPrivacy.toString()})(askDialog);})`

@@ -164,7 +164,7 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
         td.append(box); row.append(td)
         cell(row, !item.installed ? t('Package not installed') : item.enabled ? t('On') : t('Off')); body.append(row)
       }
-      page.querySelectorAll<HTMLElement>('[data-whm-detail-section="php-extensions"] .xp-whm-detail-choice-grid').forEach(grid => { grid.hidden = true })
+      page.querySelectorAll<HTMLElement>('[data-whm-detail-section="php-extensions"] [data-php-extension-draft-grid]').forEach(grid => { grid.hidden = true })
     }
     const paintManage = (): void => {
       if (!manage) return
@@ -212,8 +212,9 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
         busy = false
         if (!await confirmed(title, body, danger)) { sectionNote(section, 'read', t('Cancelled. Nothing was changed.')); return }
         busy = true
-        const applied = await request!('POST', '/api/server/php/manage/apply', payload) as { job?: { id?: string; referenceCode?: string | null } }
-        sectionNote(section, 'stored', t('Submitted as job {reference}. php-fpm -t runs before pools reload; a failed test restores the previous configuration.', { reference: String(applied.job?.referenceCode ?? applied.job?.id ?? '') }))
+        const applied = await request!('POST', '/api/server/php/manage/apply', payload) as { job?: { referenceCode?: unknown } }
+        const reference = applied.job?.referenceCode
+        sectionNote(section, 'stored', t('Submitted as job {reference}. php-fpm -t runs before pools reload; a failed test restores the previous configuration.', { reference: typeof reference === 'string' && reference.trim() ? reference : t('Unnumbered') }))
       } catch (error) { sectionNote(section, 'failed', failure(error)) }
       finally { busy = false; root.setAttribute('aria-busy', 'false') }
     }

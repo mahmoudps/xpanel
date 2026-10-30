@@ -1,3 +1,4 @@
+import { whmDatabaseTemplates } from './data-client-templates.ts'
 import { type Locale, translator, localeDirection } from '../i18n.ts'
 export type WhmDatabasesKind = 'overview' | 'users' | 'processes' | 'servers'
 export const WHM_DATABASES_ROUTES: Readonly<Record<string, WhmDatabasesKind>> = { '/whm/databases': 'overview', '/whm/databases/users': 'users', '/whm/databases/processes': 'processes', '/whm/databases/servers': 'servers' }
@@ -33,5 +34,5 @@ export function renderWhmDatabasesWorkspace(input: { kind: WhmDatabasesKind; loc
     <div class="xp-whm-detail-actions"><button type="button" class="xp-btn" data-whm-db-refresh${input.canRead ? '' : ' disabled'}>${t(msgid('Read again'))}</button></div>
     <p class="xp-whm-detail-status" data-whm-db-status data-state="unread" role="status">${t(msgid('Database information has not been read yet.'))}</p>
     ${body}
-  </div>`
+  ${whmDatabaseTemplates()}</div>`
 }

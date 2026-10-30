@@ -5,6 +5,7 @@ import { renderWebApp, serveWebUi } from './app.ts'
 import { formatDisplayName, publicContactEmail } from './display-name.ts'
 import { DESIGN_TOKENS_CSS } from './tokens.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
+import { parseMarkup } from './themes/markup.ts'
 
 const owner: Principal = { kind: 'user', id: 'owner-id', username: 'mahmoud', accountId: 'account-id' }
 
@@ -66,7 +67,23 @@ describe('styled status pages', () => {
     expect(signedIn).toContain('data-user-menu')
     expect(signedIn).toContain('mahmoud')
     expect(signedIn).toMatch(/<h1 class="xp-page-title">[^<]+<\/h1>/)
-    expect(signedIn).not.toMatch(/<form\b/)
+    const nodes = parseMarkup(signedIn)
+    const hasAncestor = (index: number, attribute: string): boolean => {
+      for (let parent = nodes[index]!.parent; parent >= 0; parent = nodes[parent]!.parent) {
+        if (nodes[parent]!.attrs.has(attribute)) return true
+      }
+      return false
+    }
+    const forms = nodes.flatMap((node, index) => node.tag === 'form' ? [{ node, index }] : [])
+    expect(forms).toHaveLength(1)
+    for (const { node, index } of forms) {
+      expect(hasAncestor(index, 'data-status-page')).toBe(false)
+      expect(hasAncestor(index, 'data-user-menu')).toBe(true)
+      expect(node.attrs.has('data-ui-theme-form')).toBe(true)
+      expect(node.attrs.has('hidden')).toBe(true)
+      expect(node.attrs.has('action')).toBe(false)
+    }
+    expect(nodes.some((node, index) => hasAncestor(index, 'data-status-page') && (node.tag === 'form' || node.attrs.has('data-account-security') || node.attrs.has('data-auth-setup-form')))).toBe(false)
     expect(signedIn).toContain('data-nav-route="/home"')
     expect(signedIn).toContain('Coming soon')
     expect(signedIn).toContain('data-nav-route="/domains"')
@@ -114,8 +131,25 @@ describe('styled status pages', () => {
     expect(plain).not.toContain('support@xpanel.internal')
   })
 
-  it('keeps qualified sections on a signed-in 404', () => {
+  it('does not turn healthy host probes into accepted sections on a signed-in 404', () => {
     const catalog = qualifyHostTools(tools, {
+      executor: 'linux', probes: { 'control-plane': 'passed', 'host-info': 'passed', audit_log: 'passed' },
+    })
+    expect(catalog.some(tool => tool.status === 'verified')).toBe(false)
+    const html = renderWebApp({
+      surface: 'xwhm', locale: 'en', catalog,
+      visibility: { principal: { kind: 'root', id: 'root-id', username: 'root' } },
+      error: { status: 404, workspaceHref: '/whm', hostname: 'host.example.test' },
+    })
+    expect(html).toContain('data-nav-route="/whm/audit" data-nav-wiring="soon"')
+    expect(html).not.toContain('data-nav-route="/whm/audit" data-nav-wiring="live"')
+    expect(html).toContain('data-status-page="404"')
+  })
+  it('keeps qualified sections on a signed-in 404', () => {
+    // Synthetic already-assessed acceptance for this rendering boundary; host probes only narrow it.
+    const assessed = tools.map(tool => ['audit-log', 'server-information'].includes(tool.id)
+      ? { ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } } : tool)
+    const catalog = qualifyHostTools(assessed, {
       executor: 'linux',
       probes: { 'control-plane': 'passed', 'host-info': 'passed', audit_log: 'passed' },
     })

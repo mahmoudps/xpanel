@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 const CRON_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -95,6 +99,9 @@ function bindAccountCron(askDialog: ((options: Record<string, unknown>) => Promi
     const action = (key: string): HTMLButtonElement => root.querySelector<HTMLButtonElement>('[data-cron-' + key + ']')!
     const scheduleKeys = ['minute', 'hour', 'day', 'month', 'weekday']
     if (!status || !rows || !preset || !unlimited || !enabled || [...scheduleKeys, 'command', 'comment', 'runtime'].some(key => !field(key)) || ['refresh', 'new', 'save', 'reset', 'run', 'observe'].some(key => !action(key))) return
+    const rowSlots = ['name', 'schedule', 'command', 'last-run', 'duration', 'next-run', 'actions'] as const
+    const rowTemplate = clientTemplate(root, 'account-cron-row'), emptyTemplate = clientTemplate(root, 'account-cron-empty'), actionTemplate = clientTemplate(root, 'account-cron-action')
+    cloneClientTemplate(rowTemplate, 'tr', rowSlots); cloneClientTemplate(emptyTemplate, 'tr', ['message']); cloneClientTemplate(actionTemplate, 'button', ['label'])
     let view: AccountCronView | null = null, selectedId: string | null = null, busy = false, confirming = false, review = false
     const observations = new Map<string, AccountCronObservation>()
     const selected = (): AccountCronJob | undefined => view?.jobs.find(job => job.id === selectedId)
@@ -152,21 +159,17 @@ function bindAccountCron(askDialog: ((options: Record<string, unknown>) => Promi
     const paintRows = (): void => {
       rows.textContent = ''
       for (const job of view?.jobs ?? []) {
-        const row = document.createElement('tr')
-        const cell = (text: string, technical = false): void => { const td = document.createElement('td'), content = document.createElement(technical ? 'bdi' : 'span'); if (technical) content.dir = 'ltr'; content.textContent = text; td.append(content); row.append(td) }
-        cell(job.comment || t('Scheduled command')); cell(job.schedule, true); cell(job.command, true)
+        const row = cloneClientTemplate(rowTemplate, 'tr', rowSlots)
         const observed = observations.get(job.id), unknown = t('Not observed')
-        cell(cronLatinDigits(observed?.lastStartedAt ?? observed?.lastTriggerAt ?? unknown), true)
-        cell(observed?.durationMs === null || observed?.durationMs === undefined ? unknown : String(observed.durationMs) + ' ms', true)
-        cell(cronLatinDigits(observed?.nextRunAt ?? unknown), true)
-        const td = document.createElement('td'), actions = document.createElement('div'); actions.className = 'xp-account-cron__actions'
-        const button = (label: string, callback: () => void): void => { const button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.textContent = label; button.setAttribute('aria-label', label + ': ' + (job.comment || job.command)); button.addEventListener('click', () => { if (!button.disabled && eligible()) callback() }); actions.append(button) }
+        for (const [slot, text] of [['name', job.comment || t('Scheduled command')], ['schedule', job.schedule], ['command', job.command], ['last-run', cronLatinDigits(observed?.lastStartedAt ?? observed?.lastTriggerAt ?? unknown)], ['duration', observed?.durationMs === null || observed?.durationMs === undefined ? unknown : String(observed.durationMs) + ' ms'], ['next-run', cronLatinDigits(observed?.nextRunAt ?? unknown)]] as const) clientTemplateSlot(row, slot).textContent = text
+        const actions = clientTemplateSlot(row, 'actions')
+        const button = (label: string, callback: () => void): void => { const button = cloneClientTemplate(actionTemplate, 'button', ['label']) as HTMLButtonElement; clientTemplateSlot(button, 'label').textContent = label; button.setAttribute('aria-label', label + ': ' + (job.comment || job.command)); button.addEventListener('click', () => { if (!button.disabled && eligible()) callback() }); actions.append(button) }
         button(t('Edit'), () => { void refresh(job.id) })
         button(t('View unit'), () => preview(job))
         button(t('Delete'), () => { void mutate('delete', job) })
-        td.append(actions); row.append(td); rows.append(row)
+        rows.append(row)
       }
-      if (!view?.jobs.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 7; td.textContent = t('The saved list contains no cron jobs.'); row.append(td); rows.append(row) }
+      if (!view?.jobs.length) { const row = cloneClientTemplate(emptyTemplate, 'tr', ['message']); clientTemplateSlot(row, 'message', 'td').textContent = t('The saved list contains no cron jobs.'); rows.append(row) }
     }
     const install = (next: AccountCronView, id: string | null): void => {
       view = next; selectedId = next.jobs.some(job => job.id === id) ? id : null; review = false; observations.clear()
@@ -264,4 +267,4 @@ function bindAccountCron(askDialog: ((options: Record<string, unknown>) => Promi
   })
 }
 
-export const ACCOUNT_CRON_CLIENT_BINDING = `(()=>{const CRON_ID=${CRON_ID.toString()};const CRON_UNSAFE=${CRON_UNSAFE.toString()};const cronObject=${cronObject.toString()};const cronText=${cronText.toString()};const cronStable=${cronStable.toString()};const cronDraftOf=${cronDraftOf.toString()};const cronExpandedSchedule=${cronExpandedSchedule.toString()};const readAccountCronView=${readAccountCronView.toString()};const readAccountCronObservation=${readAccountCronObservation.toString()};const cronLatinDigits=${cronLatinDigits.toString()};const accountCronDraft=${accountCronDraft.toString()};const accountCronWriteUncertain=${accountCronWriteUncertain.toString()};return ${bindAccountCron.toString()};})()`
+export const ACCOUNT_CRON_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const CRON_ID=${CRON_ID.toString()};const CRON_UNSAFE=${CRON_UNSAFE.toString()};const cronObject=${cronObject.toString()};const cronText=${cronText.toString()};const cronStable=${cronStable.toString()};const cronDraftOf=${cronDraftOf.toString()};const cronExpandedSchedule=${cronExpandedSchedule.toString()};const readAccountCronView=${readAccountCronView.toString()};const readAccountCronObservation=${readAccountCronObservation.toString()};const cronLatinDigits=${cronLatinDigits.toString()};const accountCronDraft=${accountCronDraft.toString()};const accountCronWriteUncertain=${accountCronWriteUncertain.toString()};return ${bindAccountCron.toString()};})()`

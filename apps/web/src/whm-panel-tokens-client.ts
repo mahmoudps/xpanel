@@ -1,3 +1,5 @@
+import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './whm-client-templates.ts'
+const whmClientNode = canonicalWhmClientNode, clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -67,9 +69,9 @@ function bindWhmPanelTokens(askDialog: ((options: Record<string, unknown>) => Pr
     const note = (target: HTMLElement, state: string, message: string): void => { target.hidden = false; target.dataset.state = state; target.textContent = message; target.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const ltr = (value: string): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = value; return node }
     const cell = (row: HTMLTableRowElement, content: Node | string): void => { const td = document.createElement('td'); td.append(content); row.append(td) }
-    const list = (values: string[]): HTMLElement => { const ul = document.createElement('ul'); ul.className = 'xp-whm-tokens__list'; for (const value of values) { const li = document.createElement('li'); li.append(ltr(value)); ul.append(li) } return ul }
+    const list = (values: string[]): HTMLElement => { const ul = whmClientNode(root, 'whm-token-list', 'ul'); for (const value of values) { const li = document.createElement('li'); li.append(ltr(value)); ul.append(li) } return ul }
     const stateLabel = (state: PanelTokenStateView): string => ({ active: t('Active'), expired: t(msgctxt('whm-panel-tokens-client', 'Expired')), revoked: t('Revoked') })[state]
-    const badge = (state: PanelTokenStateView): HTMLElement => { const node = document.createElement('span'); node.className = 'xp-badge xp-badge--' + (state === 'active' ? 'ok' : state === 'revoked' ? 'critical' : 'suspended'); node.dataset.status = state; node.textContent = stateLabel(state); return node }
+    const badge = (state: PanelTokenStateView): HTMLElement => { const node = whmClientNode(root, 'whm-token-state-' + state, 'span', stateLabel(state)); node.dataset.status = state; return node }
     const failText = (error: unknown, fallback: string): string => {
       const failed = error as { status?: number; details?: { verificationRequired?: boolean; stateChanged?: boolean } }
       return failed?.details?.verificationRequired || failed?.details?.stateChanged ? t('The result could not be verified. Refresh the token list before acting again.')
@@ -79,20 +81,19 @@ function bindWhmPanelTokens(askDialog: ((options: Record<string, unknown>) => Pr
     const paintRows = (): void => {
       rows.textContent = ''
       for (const token of tokens) {
-        const row = document.createElement('tr')
+        const row = cloneClientTemplate(clientTemplate(root, 'whm-token-row'), 'tr', ['name', 'scopes', 'addresses', 'created', 'expires', 'used', 'state', 'actions'])
         row.dataset.tokenState = token.state
-        cell(row, ltr(token.name)); cell(row, list(token.scopes)); cell(row, token.allowedIps.length ? list(token.allowedIps) : t('Any address'))
-        cell(row, ltr(formatDisplayDateTime(token.createdAt))); cell(row, ltr(formatDisplayDateTime(token.expiresAt)))
-        cell(row, token.lastUsedAt ? ltr(formatDisplayDateTime(token.lastUsedAt)) : usageRecorded ? t('Never') : t(msgctxt('whm-panel-tokens-client', 'Not recorded')))
-        cell(row, badge(token.state))
+        const put = (slot: string, value: Node | string): void => clientTemplateSlot(row, slot).replaceChildren(value)
+        put('name', ltr(token.name)); put('scopes', list(token.scopes)); put('addresses', token.allowedIps.length ? list(token.allowedIps) : t('Any address'))
+        put('created', ltr(formatDisplayDateTime(token.createdAt))); put('expires', ltr(formatDisplayDateTime(token.expiresAt)))
+        put('used', token.lastUsedAt ? ltr(formatDisplayDateTime(token.lastUsedAt)) : usageRecorded ? t('Never') : t(msgctxt('whm-panel-tokens-client', 'Not recorded')))
+        put('state', badge(token.state))
         if (token.state === 'active') {
-          const button = document.createElement('button')
-          button.type = 'button'; button.className = 'xp-btn xp-btn--danger'; button.textContent = t(msgctxt('whm-panel-tokens-client', 'Revoke')); button.dataset.whmTokensRevoke = token.id
-          button.setAttribute('aria-label', t('Revoke token {name}', { name: token.name }))
+          const button = whmClientNode(root, 'whm-token-revoke', 'button', t(msgctxt('whm-panel-tokens-client', 'Revoke')))
+          button.dataset.whmTokensRevoke = token.id; button.setAttribute('aria-label', t('Revoke token {name}', { name: token.name }))
           button.disabled = !!revoking || !admitted() || typeof askDialog !== 'function'
-          button.addEventListener('click', () => { void revoke(token) })
-          cell(row, button)
-        } else cell(row, t('No action'))
+          button.addEventListener('click', () => { void revoke(token) }); put('actions', button)
+        } else put('actions', t('No action'))
         rows.append(row)
       }
       if (!tokens.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 8; td.textContent = t('No tokens were returned.'); row.append(td); rows.append(row) }
@@ -189,4 +190,4 @@ function bindWhmPanelTokens(askDialog: ((options: Record<string, unknown>) => Pr
   })
 }
 
-export const WHM_PANEL_TOKENS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readPanelTokenView=${readPanelTokenView.toString()};const readPanelTokenListView=${readPanelTokenListView.toString()};const readPanelTokenCreatedView=${readPanelTokenCreatedView.toString()};return ${bindWhmPanelTokens.toString()};})()`
+export const WHM_PANEL_TOKENS_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readPanelTokenView=${readPanelTokenView.toString()};const readPanelTokenListView=${readPanelTokenListView.toString()};const readPanelTokenCreatedView=${readPanelTokenCreatedView.toString()};return ${bindWhmPanelTokens.toString()};})()`

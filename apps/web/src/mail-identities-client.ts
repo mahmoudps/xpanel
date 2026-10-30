@@ -1,6 +1,10 @@
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
+import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
+const mailTemplate = canonicalMailTemplate
+const mailSlot = canonicalMailSlot
+const mailRequireTemplates = canonicalMailRequireTemplates
 import './i18n.ts'
 const formatMailDateTime = formatDisplayDateTime
 
@@ -96,6 +100,8 @@ function bindMailIdentities(askDialog: ((options: Record<string, unknown>) => Pr
     const saveButton = root.querySelector<HTMLButtonElement>('[data-identities-save]')
     const resetButton = root.querySelector<HTMLButtonElement>('[data-identities-reset]')
     if (!rows || !status || !displayName || !replyTo || !textSignature || !htmlSignature || !isDefault || !saveButton) return
+    try { mailRequireTemplates(root, [['mail-identity-card', 'article', ['name', 'badge', 'facts', 'actions']], ['mail-identity-fact', 'div', ['label', 'value']], ['mail-identity-action', 'button', ['label']], ['mail-identity-empty', 'p', ['message']]]) }
+    catch { root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLTextAreaElement>('input,button,textarea').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = copy('Identity editing is unavailable here. No identities were read or changed.'); return }
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const eligible = (): boolean => root.isConnected && manageable && !root.closest(denied) && identityEmailPattern.test(mailbox)
     let identities: MailIdentity[] = []
@@ -142,38 +148,34 @@ function bindMailIdentities(askDialog: ((options: Record<string, unknown>) => Pr
     const paint = (): void => {
       rows.textContent = ''
       if (!identities.length) {
-        const empty = document.createElement('p'); empty.className = 'xp-help'
-        empty.textContent = copy('No identity with verified mailbox ownership is available. The authenticated mailbox address can still be used. Older metadata may need review.')
+        const empty = mailTemplate(root, 'mail-identity-empty', 'p', ['message'])
+        mailSlot(empty, 'message').textContent = copy('No identity with verified mailbox ownership is available. The authenticated mailbox address can still be used. Older metadata may need review.')
         rows.appendChild(empty)
         return
       }
       for (const identity of identities) {
-        const card = document.createElement('article'); card.className = 'xp-mail-identities__row'; card.dataset.identityId = identity.id
-        const header = document.createElement('header')
-        const title = document.createElement('strong'); title.textContent = identity.displayName
-        const badge = document.createElement('span'); badge.className = 'xp-help'
+        const card = mailTemplate(root, 'mail-identity-card', 'article', ['name', 'badge', 'facts', 'actions']); card.dataset.identityId = identity.id
+        const title = mailSlot(card, 'name'); title.textContent = identity.displayName
+        const badge = mailSlot(card, 'badge')
         badge.textContent = identity.isDefault ? copy('Default identity') : copy('Stored identity')
-        header.append(title, badge); card.appendChild(header)
-        const list = document.createElement('dl')
+        const list = mailSlot(card, 'facts', 'dl')
         const entry = (field: string, label: string, value: string) => {
-          const pair = document.createElement('div'); pair.className = 'xp-mail-identities__datum'; pair.dataset.identityField = field
-          const dt = document.createElement('dt'); dt.textContent = label
-          const dd = document.createElement('dd'), bdi = document.createElement('bdi')
-          bdi.dir = 'ltr'; bdi.textContent = value; bdi.style.overflowWrap = 'anywhere'; bdi.style.maxInlineSize = '100%'; bdi.style.whiteSpace = 'normal'
+          const pair = mailTemplate(root, 'mail-identity-fact', 'div', ['label', 'value']); pair.dataset.identityField = field
+          mailSlot(pair, 'label', 'dt').textContent = label
+          const bdi = mailSlot(pair, 'value', 'bdi')
+          bdi.dir = field === 'signature' ? 'auto' : 'ltr'; bdi.textContent = value
           if (field === 'created') bdi.dataset.identityCreatedAt = ''
-          dd.appendChild(bdi); pair.append(dt, dd); list.appendChild(pair)
+          list.appendChild(pair)
         }
         entry('email', copy(msgctxt('mail-identities-client', 'Email')), identity.email)
         entry('reply-to', copy('Reply-to'), identity.replyTo)
         entry('signature', copy('Plain signature'), identity.textSignature || copy('None'))
         entry('created', copy(msgctxt('mail-identities-client', 'Created')), formatMailDateTime(identity.createdAt))
-        card.appendChild(list)
-        const actions = document.createElement('div'); actions.className = 'xp-mail-identities__actions'
-        const button = (label: string, kind: string, onClick: () => void) => { const node = document.createElement('button'); node.type = 'button'; node.className = 'xp-btn'; node.dataset.identitiesAction = kind; node.textContent = label; node.addEventListener('click', () => { if (!node.disabled && eligible()) onClick() }); actions.appendChild(node); return node }
+        const actions = mailSlot(card, 'actions')
+        const button = (label: string, kind: string, onClick: () => void) => { const node = mailTemplate(root, 'mail-identity-action', 'button', ['label']) as HTMLButtonElement; node.dataset.identitiesAction = kind; mailSlot(node, 'label').textContent = label; node.addEventListener('click', () => { if (!node.disabled && eligible()) onClick() }); actions.appendChild(node); return node }
         button(copy(msgctxt('mail-identities-client', 'Edit')), 'edit', () => beginEdit(identity))
         if (!identity.isDefault) button(copy('Set as default'), 'default', () => { void setDefault(identity) })
         button(copy('Delete'), 'delete', () => { void deleteIdentity(identity) })
-        card.appendChild(actions)
         rows.appendChild(card)
       }
       lock()
@@ -262,4 +264,4 @@ function bindMailIdentities(askDialog: ((options: Record<string, unknown>) => Pr
 /** Reuses the same mailbox-bound validators in the identity editor and compose selector. */
 export const mailIdentitiesClientBinding = (bind: (...args: never[]) => void, withRuntime = false): string => `(function(askDialog){const identityUnsafe=${identityUnsafe.toString()};const identityEmailPattern=${identityEmailPattern.toString()};const identitiesObject=${identitiesObject.toString()};const identityText=${identityText.toString()};const identityEmail=${identityEmail.toString()};const readMailIdentity=${readMailIdentity.toString()};const readMailIdentities=${readMailIdentities.toString()};const identityDraft=${identityDraft.toString()};const identityMatchesDraft=${identityMatchesDraft.toString()};(${bind.toString()})(askDialog${withRuntime ? ',{readMailIdentities,identitiesObject}' : ''});})`
 
-export const MAIL_IDENTITIES_CLIENT_BINDING = `(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};return ${mailIdentitiesClientBinding(bindMailIdentities)};})()`
+export const MAIL_IDENTITIES_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};return ${mailIdentitiesClientBinding(bindMailIdentities)};})()`

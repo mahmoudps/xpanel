@@ -6,27 +6,29 @@ import type { Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { agentCallerHeaders, loadAgentCredentialFile } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
-import { bindMfaRuntimePolicy, canSeeAccount, captureMfaRuntimePolicy, fail, hasAcl, isXpanelError, type AuditEntry, type Domain, type MfaRuntimePolicy, type OsProfile, type WebsiteAnalyticsSnapshot } from '@xpanel/core'
+import { bindMfaRuntimePolicy, canSeeAccount, captureMfaRuntimePolicy, fail, hasAcl, isXpanelError, validateDomainName, type AuditEntry, type Domain, type MfaRuntimePolicy, type OsProfile, type WebsiteAnalyticsSnapshot } from '@xpanel/core'
 import { canOpenRegisteredRoute, canonicalNavigationRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { mapAgentHostInfo, mapAgentServices } from '../../web/src/board-port/xwhm-dashboard.ts'
 import { parseWebsiteAnalyticsSnapshot, type WebsiteAnalyticsWindow } from '../../web/src/charts.ts'
 import { publicContactEmail } from '../../web/src/display-name.ts'
 import { isOfferedLocale, requestLocale } from '../../web/src/i18n.ts'
 import type { WebAppRenderState } from '../../web/src/app.ts'
-import { createDb, getMailboxSession, initializeOperationalMetadata, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, type AuditQuery, type Db } from '@xpanel/db'
+import { assertNoActiveDatabaseTransaction, createDb, getMailboxSession, initializeOperationalMetadata, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, syncAccountContactIndex, type AuditQuery, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { runCli } from './cli.ts'
-import { loadQualifiedCatalog } from './host-catalog.ts'
+import { createQualifiedCatalogProvider, loadQualifiedCatalog, type HostCatalogSource, type QualifiedCatalogProvider, type TrustedAcceptanceOptions } from './host-catalog.ts'
 import { parseAuditFilters } from './audit-filters.ts'
 import { loadMailDocument, messageSizeLimitBytes, messageSizeLimitFromPostconf, type MailDocument } from './mail/document.ts'
-import { auditActorQuery, auditTargetQuery, createLocalMailboxTransport, mailFolderName, mailboxAddressIndex, rewriteMailboxIds } from './mail/inbox.ts'
+import { auditActorQuery, auditTargetQuery, authorizeMailboxSessionBinding, createLocalMailboxTransport, mailFolderName, mailboxAddressIndex, rewriteMailboxIds } from './mail/inbox.ts'
 import { createApiApp, ensureRootPrincipal, listenApiServer } from './server.ts'
 import { authenticateRequest } from './auth.ts'
 import { teamToolIds } from './team-access.ts'
 import { teamFileReader, teamMemberResolver } from './team-session.ts'
 import { createHandoffSessionCheck } from './panel-handoff-authority.ts'
 import { readAdminPreferenceValues } from './admin-preferences.ts'
+import { readUiPreferenceValue, type UiPreferenceAuthority } from './ui-preferences.ts'
+import { captureMailboxMetadataAuthority } from './mail/metadata-authority.ts'
 import { brandingForDocuments, panelBrandingFile, servePanelBrandingAsset } from './panel-branding.ts'
 import { panelSettingsFile } from './panel-settings.ts'
 import { installSavedLanguages } from './panel-languages.ts'
@@ -95,6 +97,8 @@ export const closeApiLifecycleParticipant = async (participant?: ApiLifecyclePar
 }
 
 export interface PanelServerOptions {
+  /** Protected operator startup configuration; never taken from a request. */
+  acceptance?: TrustedAcceptanceOptions
   port?: number
   host?: string
   dbPath?: string
@@ -149,10 +153,12 @@ export const createDefaultWebRenderer = async (deps: {
   /** This listener's own exact public origin. A listener renders no other panel's address. */
   publicOrigin?: string
   /** Connected agent. Implemented tools qualify only when its Linux probes pass. */
-  agent?: { fetch: AgentApp['fetch']; token: string } | null
+  agent?: HostCatalogSource | null
+  catalogProvider?: QualifiedCatalogProvider
 }): Promise<(req: Request) => Promise<Response> | Response> => {
   const mfaRuntimePolicy = bindMfaRuntimePolicy(deps.mfaRuntimePolicy)
-  const { serveWebUi, resolveWebDocumentRoute } = await import('../../web/src/index.ts')
+  const loadCatalog = (source: HostCatalogSource | null) => deps.catalogProvider ? deps.catalogProvider.load(source) : loadQualifiedCatalog(source)
+  const { serveWebUi, resolveWebDocumentRoute, registeredUiThemeIds, resolveUiTheme } = await import('../../web/src/index.ts')
   const publicOrigin = (() => {
     if (!deps.publicOrigin) return undefined
     try { const url = new URL(deps.publicOrigin); return url.protocol === 'https:' && url.origin === deps.publicOrigin ? url.origin : undefined } catch { return undefined }
@@ -222,6 +228,7 @@ export const createDefaultWebRenderer = async (deps: {
     const headers = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }
     // Every authenticated document of a handed-off session carries the identity banner.
     let impersonation: { target: string; issuer: string } | undefined
+    let personalUiTheme: string | undefined
     // Saved branding, default appearance and the live-updates switch reach every rendered document; page state still wins.
     const panelDocumentState = async (): Promise<Partial<WebAppRenderState>> => {
       const [brandingRead, settings] = await Promise.all([panelBrandingFile(deps.store).read().catch(() => null), panelSettingsFile(deps.store).current()])
@@ -230,7 +237,8 @@ export const createDefaultWebRenderer = async (deps: {
         ...(settings.liveUpdates ? {} : { realtimeEnabled: false }) }
     }
     const serve = (request: Request, state?: () => Promise<WebAppRenderState>) =>
-      serveWebUi(request, state && (async () => ({ ...await panelDocumentState(), ...await state(), ...(impersonation ? { impersonation } : {}) })))
+      serveWebUi(request, state && (async () => ({ ...await panelDocumentState(), ...await state(),
+        ...(personalUiTheme ? { uiTheme: personalUiTheme } : {}), ...(impersonation ? { impersonation } : {}) })))
     let resolvedContact: string | undefined | null = null
     const supportEmail = async (): Promise<string | undefined> => {
       if (resolvedContact !== null) return resolvedContact || undefined
@@ -242,10 +250,7 @@ export const createDefaultWebRenderer = async (deps: {
       }
       return resolvedContact || undefined
     }
-    const qualifiedDocumentCatalog = async (): Promise<readonly CatalogTool[] | undefined> => {
-      const loaded = await loadQualifiedCatalog(deps.agent ?? null)
-      return loaded.some(tool => tool.status === 'verified') ? loaded : undefined
-    }
+    const documentCatalog = (): Promise<readonly CatalogTool[]> => loadCatalog(deps.agent ?? null)
     const documentStatus = async (
       status: 400 | 403 | 404,
       model: {
@@ -257,7 +262,7 @@ export const createDefaultWebRenderer = async (deps: {
       },
     ) => {
       const email = await supportEmail()
-      const catalog = model.catalog ?? (model.visibility ? await qualifiedDocumentCatalog() : undefined)
+      const catalog = model.catalog ?? (model.visibility ? await documentCatalog() : undefined)
       let hostname: string | undefined
       if (model.surface === 'xwhm' && model.visibility?.principal.kind === 'root' && deps.agent) {
         try {
@@ -335,6 +340,23 @@ export const createDefaultWebRenderer = async (deps: {
       const mailbox = isMailboxPrincipalUsername(caller.principal.username) && caller.sessionId ? (await getMailboxSession(deps.db, caller.sessionId))?.mailbox : undefined
       impersonation = { target: mailbox ?? caller.principal.username, issuer: caller.impersonator.login }
     }
+    if (sessionReady && caller && (!deps.entryPoint || entryPointAdmitsPrincipal(deps.entryPoint, caller.principalRecord))) {
+      const preferenceSurface = deps.entryPoint ?? (isMailboxPrincipalUsername(caller.principal.username) ? 'xmail' : caller.principal.kind === 'user' ? 'xpanel' : 'xwhm')
+      try {
+        let authority: UiPreferenceAuthority = { caller, surface: preferenceSurface }
+        if (preferenceSurface === 'xmail') {
+          const record = await authorizeMailboxSessionBinding(deps.db, deps.store, caller)
+          const current = await captureMailboxMetadataAuthority(deps.store, record.mailbox)
+          if (current.accountId !== record.accountId || current.serviceUserId !== record.serviceUserId) return fail('FORBIDDEN', 'mailbox lifetime changed; sign in again')
+          authority = { ...authority, mailbox: { ...current, sessionId: record.sessionId } }
+        }
+        personalUiTheme = await readUiPreferenceValue(deps.store.rootDir, authority,
+          { choices: registeredUiThemeIds(), defaultUiTheme: resolveUiTheme().id }) ?? undefined
+      } catch {
+        // A missing or unreadable personal choice uses the registry default; document admission remains below.
+        personalUiTheme = undefined
+      }
+    }
     if (!documentRoute) {
       return documentStatus(404, {
         surface: deps.entryPoint ?? 'xpanel',
@@ -386,7 +408,7 @@ export const createDefaultWebRenderer = async (deps: {
     if (surface === 'xwhm' && documentRoute.activeRoute === '/whm/preferences') {
       if (principal.kind === 'reseller' && (!reseller || reseller.id !== principal.id || reseller.username !== principal.username)) return documentStatus(403, { surface, visibility: { principal } })
       if ([...url.searchParams.keys()].some(key => !['lang', 'theme', 'density'].includes(key))) return documentStatus(400, { surface, visibility: { principal } })
-      const preferenceCatalog = await loadQualifiedCatalog(deps.agent ?? null)
+      const preferenceCatalog = await loadCatalog(deps.agent ?? null)
       return serve(req, async () => ({ surface, ...adminAppearance, mfaRuntimeMode: mfaRuntimePolicy.mode,
         activeRoute: documentRoute.activeRoute, security, visibility: { principal, ...(reseller ? { reseller } : {}) }, catalog: preferenceCatalog,
         whm: { principal, activeReseller: reseller ?? null } }))
@@ -458,8 +480,7 @@ export const createDefaultWebRenderer = async (deps: {
         workspaceHref: ENTRY_POINTS[surface].home,
       })
     }
-    const catalog = await loadQualifiedCatalog(deps.agent ?? null)
-    const qualifiedCatalog = catalog.some(tool => tool.status === 'verified') ? catalog : undefined
+    const catalog = await loadCatalog(deps.agent ?? null)
     const qualifiedRoute = visibleNavigation(scopedVisibility, catalog).some(item => item.surface === surface
       && item.sections.some(section => section.pages.some(page => page.route === canonicalNavigationRoute(documentRoute.activeRoute))))
     if (!qualifiedRoute) {
@@ -473,7 +494,7 @@ export const createDefaultWebRenderer = async (deps: {
         activeRoute: documentRoute.activeRoute,
         security,
         visibility: scopedVisibility,
-        ...(qualifiedCatalog ? { catalog: qualifiedCatalog } : {}),
+        catalog,
         ...(ownAccountId ? { accountId: ownAccountId } : {}),
         ...(email ? { supportEmail: email } : {}),
         workspaceSummary: {
@@ -505,7 +526,7 @@ export const createDefaultWebRenderer = async (deps: {
         mfaRuntimeMode: mfaRuntimePolicy.mode,
         security,
         visibility: scopedVisibility,
-        ...(qualifiedCatalog ? { catalog: qualifiedCatalog } : {}),
+        catalog,
         ...(ownAccountId ? { accountId: ownAccountId } : {}),
         ...(email ? { supportEmail: email } : {}),
         panel: {
@@ -607,18 +628,34 @@ export const createDefaultWebRenderer = async (deps: {
       updatedAt: domainCustomConfig?.updatedAt ?? '',
       updatedBy: domainCustomConfig?.updatedBy ?? 'user',
     } : undefined
-    // The two approved account pages read their existing account-scoped observations here.
+    // Resource and traffic pages read their existing account-scoped observations here.
     // A missing agent, failed read or invalid reply leaves no prop, so the page keeps its
     // explicit unavailable state instead of fabricating a sample.
     const resourcesRoute = surface === 'xpanel' && documentRoute.activeRoute === '/resources'
-    const trafficRoute = surface === 'xpanel' && documentRoute.activeRoute === '/metrics/traffic'
+    const trafficRoute = surface === 'xpanel' && ['/metrics/traffic', '/metrics/web-stats'].includes(documentRoute.activeRoute)
     const requestedWindow = url.searchParams.get('window')
     const trafficWindow: WebsiteAnalyticsWindow = isWebsiteAnalyticsWindow(requestedWindow) ? requestedWindow : '24h'
+    const requestedTrafficDomains = trafficRoute ? url.searchParams.getAll('domain') : []
+    let requestedTrafficDomain: string | undefined
+    if (requestedTrafficDomains.length > 0) {
+      if (requestedTrafficDomains.length !== 1) return documentStatus(400, { surface, visibility, catalog })
+      try { requestedTrafficDomain = validateDomainName(requestedTrafficDomains[0]!) }
+      catch (error) {
+        if (!isXpanelError(error) || error.code !== 'VALIDATION') throw error
+        return documentStatus(400, { surface, visibility, catalog })
+      }
+    }
     const trafficDomain = trafficRoute && account
-      ? accountDomains.find(domain => domain.name === account.primaryDomain)
-        ?? accountDomains.find(domain => domain.kind === 'primary')
-        ?? accountDomains[0]
+      ? requestedTrafficDomain !== undefined
+        ? accountDomains.find(domain => domain.name === requestedTrafficDomain)
+        : accountDomains.find(domain => domain.name === account.primaryDomain)
+          ?? accountDomains.find(domain => domain.kind === 'primary')
+          ?? accountDomains[0]
       : undefined
+    // An explicit selector never falls back to another site or probes another account.
+    if (requestedTrafficDomain !== undefined && !trafficDomain) {
+      return documentStatus(404, { surface, visibility, catalog, ...(account ? { accountId: account.id } : {}) })
+    }
     const [resourceUsage, trafficAnalytics] = await Promise.all([
       resourcesRoute && account ? readAccountUsageObservation(principal.id, account.username) : null,
       trafficDomain ? readWebsiteTraffic(principal.id, trafficDomain, trafficWindow) : null,
@@ -732,7 +769,7 @@ export const createDefaultWebRenderer = async (deps: {
       security,
       ...(url.searchParams.has('accountId') && account ? { accountId: account.id } : {}),
       visibility,
-      ...(qualifiedCatalog ? { catalog: qualifiedCatalog } : {}),
+      catalog,
       ...(active ? { generationId: active.id } : {}),
       ...(surface === 'xwhm' ? { whm: {
         principal,
@@ -784,9 +821,12 @@ export const createDefaultWebRenderer = async (deps: {
         ...(customConfigView ? { customConfig: customConfigView } : {}),
         certificates: accountCertificates,
         ...(resourceUsage ? { usage: resourceUsage } : {}),
-        ...(trafficAnalytics
-          ? { websiteAnalytics: trafficAnalytics, websiteAnalyticsWindow: trafficWindow }
-          : trafficRoute ? { websiteAnalyticsUnavailable: true } : {}),
+        ...(trafficRoute ? {
+          websiteAnalyticsDomainSelectionAvailable: Boolean(account),
+          websiteAnalyticsWindow: trafficWindow,
+          ...(trafficDomain ? { activeDomain: trafficDomain.name } : {}),
+          ...(trafficAnalytics ? { websiteAnalytics: trafficAnalytics } : { websiteAnalyticsUnavailable: true }),
+        } : {}),
         databases: accountDatabases,
         databaseUsers: accountDatabaseUsers,
         serviceUsers: accountServiceUsers,
@@ -950,6 +990,7 @@ export const resolvePanelEntrypoints = (
  */
 export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) => {
   const mfaRuntimePolicy = captureMfaRuntimePolicy()
+  const catalogProvider = createQualifiedCatalogProvider(opts.acceptance)
   const { host, entryPoints } = resolvePanelEntrypoints(opts)
   if (!opts.agentApp && ENTRY_POINT_ORDER.some(name => entryPoints[name].port !== ENTRY_POINT_ENV[name].defaultPort)) {
     fail('PRECONDITION_FAILED', 'production entrypoint listeners must use reserved ports 12083, 12087 and 12096')
@@ -1017,6 +1058,11 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
       return opened
     })
     const store = new StateStore(stateDir)
+    store.registerAccountContactIndexRecovery(account => syncAccountContactIndex(handle.db, account))
+    await withLifecycleWriterAdmission(async () => {
+      assertNoActiveDatabaseTransaction()
+      await store.getWriterLock().waitForUnlocked()
+    })
     // Saved locale policy and uploaded catalogs apply from panel start; invalid saved state keeps the release catalogs.
     const languages = await installSavedLanguages(store.rootDir)
     if (languages.policy === 'invalid' || languages.rejected.length) console.warn(`languages: saved policy ${languages.policy}; catalogs not applied: ${languages.rejected.join(', ') || 'none'}`)
@@ -1034,10 +1080,10 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
       const config = entryPoints[entryPoint]
       const webRenderer = await createDefaultWebRenderer({
         store, db: handle.db, serverSecret, mfaRuntimePolicy, entryPoint, publicOrigin: config.publicOrigin,
-        agent: { fetch: request => agentApp.fetch(request), token: agentToken },
+        agent: { fetch: agentApp.fetch, token: agentToken, identity: agentApp }, catalogProvider,
       })
       const app = createLifecycleBackgroundResources(() => createApiApp({
-        db: handle.db, store, agentApp, agentToken, os, serverSecret, mfaRuntimePolicy, webRenderer,
+        db: handle.db, store, agentApp, agentToken, os, serverSecret, mfaRuntimePolicy, webRenderer, catalogProvider,
         entryPoint, publicOrigin: config.publicOrigin, allowedOrigins: [config.publicOrigin], handoff: HANDOFF_ROUTES[entryPoint](entryPoints),
         ingressSecret, requireSecureCookies: true, requireOriginHeader: true,
         ...(opts.homeBaseDir ? { homeBaseDir: opts.homeBaseDir } : {}),
@@ -1183,12 +1229,16 @@ if (isMainModule()) {
         try {
           await migrate(dbHandle.runner)
           await initializeOperationalMetadata(dbHandle.db)
+          const store = new StateStore(stateDir)
+          store.registerAccountContactIndexRecovery(account => syncAccountContactIndex(dbHandle.db, account))
+          assertNoActiveDatabaseTransaction()
+          await store.getWriterLock().waitForUnlocked()
           const requiresAgent = firstArg === 'reconcile' || firstArg === 'rollback'
           const agentToken = requiresAgent ? await loadAgentCredentialFile(process.env.XPANEL_AGENT_TOKEN_FILE ?? '/etc/xpanel/agent.token') : undefined
           if (agentToken) client = createAgentClient({ socketPath: process.env.XPANEL_AGENT_SOCKET ?? '/run/xpanel/agent.sock', token: agentToken })
           return (await runCli(args, {
             db: dbHandle.db,
-            store: new StateStore(stateDir),
+            store,
             ...(client && agentToken ? { agentApp: client, agentToken } : {}),
             readPassword: readPasswordInput,
             stdout: line => process.stdout.write(`${line}\n`),

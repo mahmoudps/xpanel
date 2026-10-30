@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -55,6 +59,9 @@ function bindAccountDatabaseRemote(_ask: unknown): void {
     const find = <T extends HTMLElement>(name: string): T => root.querySelector<T>('[data-remote-' + name + ']')!
     const rows = find('rows'), status = find('status'), host = find<HTMLInputElement>('host'), comment = find<HTMLInputElement>('comment'), confirmation = find<HTMLInputElement>('confirmation'), selectedPanel = find('selected-panel'), refresh = find<HTMLButtonElement>('refresh'), save = find<HTMLButtonElement>('save'), remove = find<HTMLButtonElement>('remove')
     if (!rows || !status || !host || !comment || !confirmation || !selectedPanel || !refresh || !save || !remove) return
+    const rowSlots = ['host', 'comment', 'created', 'firewall', 'grants', 'manage'] as const
+    const rowTemplate = clientTemplate(root, 'database-remote-row'), emptyTemplate = clientTemplate(root, 'database-remote-empty')
+    cloneClientTemplate(rowTemplate, 'tr', rowSlots); cloneClientTemplate(emptyTemplate, 'tr', ['message'])
     const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const eligible = (): boolean => root.isConnected && root.dataset.remoteManage === 'true' && !root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
     let view: DatabaseRemoteClientView | null = null, selected: string | null = null, busy = false, uncertain = false
@@ -70,20 +77,18 @@ function bindAccountDatabaseRemote(_ask: unknown): void {
       root.setAttribute('aria-busy', String(busy))
     }
     const resetSelection = (): void => { selected = null; selectedPanel.hidden = true; confirmation.value = ''; host.value = ''; comment.value = ''; save.textContent = t('Add host'); lock() }
-    // Hosts, ranges and timestamps are indivisible tokens inside the scrolling table.
-    const technical = (value: string): HTMLElement => { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.className = 'xp-technical-token'; bdi.textContent = value; return bdi }
     const paint = (): void => {
       if (!view) return
       rows.replaceChildren()
       find('scope').textContent = t('{users} database users · {databases} active databases', { users: view.users, databases: view.databases })
       find('count').textContent = String(view.entries.length) + ' / 100'
       for (const item of view.entries) {
-        const row = document.createElement('tr')
-        for (const [text, isolated] of [[item.host, true], [item.comment || '—', false], [formatDisplayDateTime(item.createdAt), true], [item.firewall === 'verified' ? t('TCP/3306 verified') : t(msgctxt('account-database-remote-client', 'Not verified')), false], [item.grants === 'verified' ? t(msgctxt('account-database-remote-client', 'Verified')) : t(msgctxt('account-database-remote-client', 'Not verified')), false]] as const) { const td = document.createElement('td'); if (isolated) td.append(technical(text)); else td.textContent = text; row.append(td) }
-        const td = document.createElement('td'), button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.textContent = t('Manage'); button.setAttribute('aria-label', t('Manage {host}', { host: item.host }))
-        button.addEventListener('click', () => { if (!canWrite()) return; selected = item.host; host.value = item.host; comment.value = item.comment; confirmation.value = ''; find('selected').textContent = item.host; selectedPanel.hidden = false; save.textContent = t('Save host'); confirmation.focus(); lock() }); td.append(button); row.append(td); rows.append(row)
+        const row = cloneClientTemplate(rowTemplate, 'tr', rowSlots)
+        for (const [slot, text] of [['host', item.host], ['comment', item.comment || '—'], ['created', formatDisplayDateTime(item.createdAt)], ['firewall', item.firewall === 'verified' ? t('TCP/3306 verified') : t(msgctxt('account-database-remote-client', 'Not verified'))], ['grants', item.grants === 'verified' ? t(msgctxt('account-database-remote-client', 'Verified')) : t(msgctxt('account-database-remote-client', 'Not verified'))]] as const) clientTemplateSlot(row, slot).textContent = text
+        const button = clientTemplateSlot(row, 'manage', 'button') as HTMLButtonElement; button.setAttribute('aria-label', t('Manage {host}', { host: item.host }))
+        button.addEventListener('click', () => { if (!canWrite()) return; selected = item.host; host.value = item.host; comment.value = item.comment; confirmation.value = ''; find('selected').textContent = item.host; selectedPanel.hidden = false; save.textContent = t('Save host'); confirmation.focus(); lock() }); rows.append(row)
       }
-      if (!view.entries.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 6; td.textContent = t('No remote hosts are saved. Localhost remains available to your database users.'); row.append(td); rows.append(row) }
+      if (!view.entries.length) { const row = cloneClientTemplate(emptyTemplate, 'tr', ['message']); clientTemplateSlot(row, 'message', 'td').textContent = t('No remote hosts are saved. Localhost remains available to your database users.'); rows.append(row) }
       lock()
     }
     const run = async (body?: Record<string, unknown>): Promise<void> => {
@@ -118,4 +123,4 @@ function bindAccountDatabaseRemote(_ask: unknown): void {
     void run()
   })
 }
-export const ACCOUNT_DATABASE_REMOTE_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const remoteObject=${remoteObject.toString()};const remoteExact=${remoteExact.toString()};const remoteHost=${remoteHost.toString()};const remoteInputHost=${remoteInputHost.toString()};const remoteStamp=${remoteStamp.toString()};const readDatabaseRemoteClientView=${readDatabaseRemoteClientView.toString()};return ${bindAccountDatabaseRemote.toString()};})()`
+export const ACCOUNT_DATABASE_REMOTE_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const remoteObject=${remoteObject.toString()};const remoteExact=${remoteExact.toString()};const remoteHost=${remoteHost.toString()};const remoteInputHost=${remoteInputHost.toString()};const remoteStamp=${remoteStamp.toString()};const readDatabaseRemoteClientView=${readDatabaseRemoteClientView.toString()};return ${bindAccountDatabaseRemote.toString()};})()`

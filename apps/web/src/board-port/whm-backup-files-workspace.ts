@@ -1,3 +1,4 @@
+import { backupFilesClientTemplates } from './whm-backup-files-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 /**
  * /whm/backups/files wizard body. Accounts, archives, file trees, reviews and results are filled by
@@ -33,6 +34,7 @@ export function renderWhmBackupFilesWorkspace(input: { locale: Locale; canRead: 
     ${card('result', t('Result'), `<dl class="xp-whm-detail-fields">${fact('count-restored', t('Restored'))}${fact('count-skipped', t('Skipped, already present'))}${fact('count-failed', t(msgctxt('whm-backup-files-workspace', 'Failed')))}${fact('count-pending', t('Not attempted yet'))}</dl>
       ${table(t('File restore results'), 'results', [t('Path in backup'), t('Destination'), t('Result'), t('Reason')], t('No restore has run.'))}
       <div class="xp-whm-detail-actions"><button type="button" class="xp-btn" data-backup-files-continue hidden${off}>${t('Continue restore')}</button></div>`)}
+    ${backupFilesClientTemplates()}
   </div>`
   const rule = (message: string): string => `<li>${t(message)}</li>`
   const aside = card('rules', t('What a file restore does'), `<style>.xp-whm-backup-files__rules{display:flex;flex-direction:column;gap:16px;margin:0;padding-inline-start:16px;line-height:1.7}</style><ul class="xp-whm-backup-files__rules">${[

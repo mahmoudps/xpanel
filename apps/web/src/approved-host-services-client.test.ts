@@ -3,13 +3,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Script } from 'node:vm'
 import { APPROVED_HOST_SERVICES_CLIENT } from './approved-host-services-client.ts'
+import { renderWhmServiceClientTemplates } from './board-port/whm-service-client-templates.ts'
+import { renderV2WhmServiceClientTemplates } from './themes/v2/pages/xwhm/host/service-client-templates.ts'
 type Request = (method: string, path: string, body?: unknown) => Promise<unknown>
 const service = { id: 'apache', label: 'Apache', unit: 'apache2.service', state: 'active' }
 const tick = async () => { await new Promise(resolve => setTimeout(resolve, 0)); await new Promise(resolve => setTimeout(resolve, 0)) }
 const button = () => document.querySelector<HTMLButtonElement>('button[data-service-id]')!
 const status = () => document.querySelector<HTMLElement>('[data-host-service-status]')!
-const boot = (send: Request, confirm = vi.fn().mockResolvedValue(true), attributes = '') => {
-  document.body.innerHTML = '<section data-host-services ' + attributes + '><table><tbody data-host-service-rows></tbody></table><p data-host-service-status></p></section>'
+const boot = (send: Request, confirm = vi.fn().mockResolvedValue(true), attributes = '', templates = renderWhmServiceClientTemplates('host')) => {
+  document.body.innerHTML = '<section data-host-services ' + attributes + '><table><tbody data-host-service-rows></tbody></table><p data-host-service-status></p>' + templates + '</section>'
   ;(window as Window & { xpanelSessionRequest?: Request }).xpanelSessionRequest = send
   new Function('confirm', '(' + APPROVED_HOST_SERVICES_CLIENT + ')(confirm);')(confirm)
   return confirm
@@ -18,7 +20,22 @@ beforeEach(() => { document.documentElement.lang = 'en' })
 afterEach(() => { document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: Request }).xpanelSessionRequest; vi.restoreAllMocks() })
 
 describe('confirmed native service restart', () => {
-  it('emits standalone JavaScript', () => { expect(() => new Script('(' + APPROVED_HOST_SERVICES_CLIENT + ')();')).not.toThrow() })
+  it.each(['classic', 'v2'] as const)('keeps the selected %s action markup through confirmed restart and verified readback', async theme => {
+    const send = vi.fn<Request>().mockResolvedValueOnce({ services: [service] }).mockResolvedValueOnce({ service }).mockResolvedValueOnce({ services: [service] })
+    boot(send, undefined, '', theme === 'classic' ? renderWhmServiceClientTemplates('host') : renderV2WhmServiceClientTemplates('host')); await tick()
+    expect(button().classList.contains(theme === 'classic' ? 'xp-btn' : 'v2-btn')).toBe(true)
+    expect(document.querySelector('[data-host-service-rows] [data-xp-slot="unit"]')?.getAttribute('dir')).toBe('ltr')
+    button().click(); await tick()
+    expect(send.mock.calls.map(call => call[0])).toEqual(['GET', 'POST', 'GET'])
+    expect(status().dataset.state).toBe('active')
+    expect(button().classList.contains(theme === 'classic' ? 'xp-btn' : 'v2-btn')).toBe(true)
+  })
+  it('refuses ambiguous service templates before reading or restarting a service', async () => {
+    const templates = renderWhmServiceClientTemplates('host')
+    const send = vi.fn<Request>(); boot(send, undefined, '', templates + templates); await tick()
+    expect(send).not.toHaveBeenCalled(); expect(status().dataset.state).toBe('unavailable')
+  })
+  it('emits standalone JavaScript', () => { expect(() => new Script('(' + APPROVED_HOST_SERVICES_CLIENT + ')();')).not.toThrow(); expect(APPROVED_HOST_SERVICES_CLIENT).not.toContain('__vite_ssr_import_') })
   it('cancels before POST and restores the control', async () => {
     const send = vi.fn<Request>().mockResolvedValue({ services: [service] }); const confirm = boot(send, vi.fn().mockResolvedValue(null)); await tick()
     button().click(); await tick()

@@ -1,0 +1,6 @@
+/** Classic service records keep presentation outside the shared host controllers. */
+export function renderWhmServiceClientTemplates(kind: 'host' | 'manager'): string {
+  const cell = (slot: string) => `<td><bdi dir="ltr" data-xp-slot="${slot}"></bdi></td>`
+  if (kind === 'host') return `<template data-xp-template="host-service-row"><tr><td data-xp-slot="service"></td>${cell('unit')}<td data-xp-slot="state"></td><td><button type="button" class="xp-btn" data-xp-action="restart" disabled><span data-xp-slot="restart-label"></span></button></td></tr></template><template data-xp-template="host-service-empty"><tr><td colspan="4" data-xp-slot="message"></td></tr></template>`
+  return `<template data-xp-template="service-manager-row"><tr>${['unit', 'load', 'active', 'sub', 'boot'].map(cell).join('')}<td><div class="xp-whm-service-manager__actions"><button type="button" class="xp-btn" data-xp-action="restart" disabled><span data-xp-slot="restart-label"></span></button><button type="button" class="xp-btn" data-xp-action="boot" disabled><span data-xp-slot="boot-label"></span></button><span data-xp-action="protected" data-xp-slot="protected-label"></span></div></td></tr></template><template data-xp-template="service-manager-empty"><tr><td colspan="6" data-xp-slot="message"></td></tr></template>`
+}

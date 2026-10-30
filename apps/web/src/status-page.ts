@@ -4,8 +4,8 @@ import { renderDesignNav } from './design-board.ts'
 import { translator, type Locale } from './i18n.ts'
 import { renderSurfaceShell } from './shell.ts'
 import { escapeHtml } from './tokens.ts'
-
-export type StatusCode = 400 | 403 | 404 | 421 | 500 | 503
+import { statusPageCopy, type StatusCode } from './models/status-page.ts'
+export { statusPageCopy, type StatusCode } from './models/status-page.ts'
 
 export interface StatusPageModel {
   status: StatusCode
@@ -29,25 +29,6 @@ export interface StatusPageModel {
   visibility?: VisibilityContext
   /** Qualified catalog for this host. The sidebar keeps these sections as links. */
   catalog?: readonly CatalogTool[]
-}
-
-interface Copy {
-  title: string
-  explanation: string
-}
-
-const STATUS_COPY: Readonly<Record<StatusCode, Copy>> = {
-  400: { title: msgid('Check the request details'), explanation: msgid('The request contains an invalid value. Correct the filters or date range and try again.') },
-  404: { title: msgid('This page is not here'), explanation: msgid('That address does not match a page on this panel.') },
-  403: { title: msgid('You cannot open this page'), explanation: msgid('This panel is for a different role, or this account cannot view the page.') },
-  421: { title: msgid('Check the panel address'), explanation: msgid('This address does not belong to this panel. Check the address and try again.') },
-  500: { title: msgid('Something went wrong'), explanation: msgid('The panel could not finish loading this page. Try again in a moment.') },
-  503: { title: msgid('The panel is briefly unavailable'), explanation: msgid('Try again in a moment. Nothing was changed.') },
-}
-
-export const statusPageCopy = (status: StatusCode, locale: Locale): Copy => {
-  const t = translator(locale), copy = STATUS_COPY[status]
-  return { title: t(copy.title), explanation: t(copy.explanation) }
 }
 
 const backIcon = `<span class="xp-icon-back"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 6 9 12l6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`

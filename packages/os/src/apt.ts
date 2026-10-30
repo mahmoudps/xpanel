@@ -38,7 +38,8 @@ export const aptProfile = (release: OsRelease): XpanelOsProfile => {
       postgresql: ['postgresql'],
       postfix: ['postfix'],
       dovecot: ['dovecot-core', 'dovecot-imapd', 'dovecot-pop3d', 'dovecot-lmtpd', 'dovecot-sieve', 'dovecot-managesieved'],
-      powerdns: ['pdns-server', 'pdns-backend-pgsql'],
+      // The reconciler publishes BIND zone files; include its candidate validator and observer.
+      powerdns: ['pdns-server', 'pdns-backend-bind', 'bind9-utils', 'dnsutils'],
       redis: ['redis-server'],
       // PureDB virtual users carry the account UID/GID, so FTP logins map onto the account
       ftp: ['pure-ftpd'],

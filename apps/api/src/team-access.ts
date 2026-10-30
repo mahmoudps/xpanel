@@ -23,8 +23,9 @@ export function teamRolesAllowTool(roles: readonly TeamRole[], tool: { id: strin
 /** Catalog tool ids a role set grants, for display and for the signed-in member's navigation. */
 export const teamToolIds = (roles: readonly TeamRole[]): string[] => tools.filter(tool => teamRolesAllowTool(roles, tool)).map(tool => tool.id).sort()
 
-// The only routes without a catalog tool that a team session may call: its own identity, sign-out and the static catalog.
-const TEAM_ROUTES_WITHOUT_TOOL = new Set(['GET /api/auth/me', 'POST /api/auth/logout', 'GET /api/catalog'])
+// These routes act only on the member's own identity/display preference, sign-out or the static catalog.
+const TEAM_ROUTES_WITHOUT_TOOL = new Set(['GET /api/auth/me', 'POST /api/auth/logout', 'GET /api/catalog',
+  'GET /api/auth/ui-preferences', 'PUT /api/auth/ui-preferences'])
 
 /**
  * Checked for every request a team session authenticates. The route's declared policy must be account-scoped and

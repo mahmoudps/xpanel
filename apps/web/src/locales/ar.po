@@ -47714,3 +47714,61 @@ msgstr "ألغى «WHMCS» الإيقاف المؤقت لحساب"
 #: apps/web/src/board-port/xmail-compose.ts
 msgid "· check address"
 msgstr "· راجع العنوان"
+
+#: apps/web/src/ui-theme-client.ts
+msgid "Changing the interface choice is unavailable for this session."
+msgstr "تغيير ثيم الواجهة غير متاح لهذه الجلسة."
+
+#: apps/web/src/ui-theme-client.ts
+msgid "Interface choice saved and read back. Reload this page to apply it."
+msgstr "حُفظ اختيار ثيم الواجهة وتم التحقق منه بقراءة جديدة. أعد تحميل الصفحة لتطبيقه."
+
+#: apps/web/src/ui-theme-client.ts
+msgid "Interface choice saved and read back. Reloading this page…"
+msgstr "حُفظ اختيار ثيم الواجهة وتم التحقق منه بقراءة جديدة. جارٍ إعادة تحميل الصفحة…"
+
+#: apps/web/src/chrome.ts
+msgid "Interface theme"
+msgstr "ثيم الواجهة"
+
+#: apps/web/src/ui-theme-client.ts
+msgid "Reading your interface choice…"
+msgstr "جارٍ قراءة اختيار ثيم الواجهة…"
+
+#: apps/web/src/ui-theme-client.ts
+msgid "Saving your interface choice…"
+msgstr "جارٍ حفظ اختيار ثيم الواجهة…"
+
+#: apps/web/src/ui-theme-client.ts
+msgid "Sign in again to change your interface choice."
+msgstr "سجّل الدخول مجددًا لتغيير اختيار ثيم الواجهة."
+
+#: apps/web/src/ui-theme-client.ts
+msgid "The interface choice changed since it was read. Reload it before saving again."
+msgstr "تغيّر اختيار ثيم الواجهة منذ قراءته. أعد تحميله قبل الحفظ مجددًا."
+
+#: apps/web/src/ui-theme-client.ts
+msgid "The interface choice save could not be verified. Reload the choice before saving again."
+msgstr "تعذّر التحقق من حفظ اختيار ثيم الواجهة. أعد تحميل الاختيار قبل الحفظ مجددًا."
+
+#: apps/web/src/ui-theme-client.ts
+msgid "The interface choices could not be read. Nothing was changed."
+msgstr "تعذّرت قراءة خيارات ثيم الواجهة. لم يتغير شيء."
+
+#: apps/web/src/ui-theme-client.ts
+msgid "The saved interface choice could not be verified. Ask an administrator to review it before changing it."
+msgstr "تعذّر التحقق من اختيار ثيم الواجهة المحفوظ. اطلب من مسؤول مراجعته قبل تغييره."
+
+#: apps/web/src/ui-theme-client.ts
+msgid "Your personal interface choice cannot be changed from a handed-off session."
+msgstr "لا يمكن تغيير اختيارك الشخصي لثيم الواجهة من جلسة مفتوحة نيابةً عن الحساب."
+
+#: apps/web/src/surfaces/account-security.ts apps/web/src/themes/v2/surfaces/slots.ts
+msgctxt "account-security"
+msgid "Two-factor settings cannot be changed from a handed-off session."
+msgstr "لا يمكن تغيير إعدادات التحقق بخطوتين من جلسة مفتوحة نيابةً عن الحساب."
+
+#: apps/web/src/surfaces/account-security.ts apps/web/src/themes/v2/surfaces/slots.ts
+msgctxt "account-security"
+msgid "Password sign-in is active."
+msgstr "تسجيل الدخول بكلمة المرور مفعّل."

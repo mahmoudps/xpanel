@@ -1,3 +1,4 @@
+import { classicSoftwareClientTemplates } from './software-client-templates.ts'
 import { type Locale, type MessageValues, SOURCE_LOCALE, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -29,6 +30,7 @@ export function renderSwContainersWorkspace(input: Input): string {
     <p class="xp-whm-detail-status" role="status">${t('Compose stacks, one-click container apps and new containers are unavailable: no reviewed compose runner or container app catalog is connected. Nothing is created here.')}</p>
     <div class="xp-whm-detail-actions"><button type="button" class="xp-btn xp-btn--primary" disabled>${t('Create container')}</button><button type="button" class="xp-btn" disabled>${t('Deploy compose stack')}</button></div>
   </section>
+${classicSoftwareClientTemplates('containers')}
 </div>`
 }
 
@@ -62,5 +64,6 @@ export function renderSwContainerEngineWorkspace(input: Input): string {
     ${tableHtml(t('Volumes'), [t('Volume'), t('Driver'), t('Engine')], 'volumes', t('No volumes have been read.'))}
     <div class="xp-whm-detail-actions">${disabled(t('Create volume'))}</div>
   </section>
+${classicSoftwareClientTemplates('container-engine')}
 </div>`
 }

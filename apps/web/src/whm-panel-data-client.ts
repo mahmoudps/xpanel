@@ -1,3 +1,5 @@
+import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './whm-client-templates.ts'
+const whmClientNode = canonicalWhmClientNode, clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -32,27 +34,30 @@ function bindWhmPanelData(askDialog: ((options: Record<string, unknown>) => Prom
       read = value
       body.textContent = ''
       for (const generation of value.generations) {
-        const row = document.createElement('tr'); row.dataset.generationRow = String(generation.id)
-        const cell = (content: Node | string, className = ''): void => { const td = document.createElement('td'); if (className) td.className = className; td.append(content); row.append(td) }
+        const row = cloneClientTemplate(clientTemplate(root, 'whm-generation-row'), 'tr', ['generation', 'created', 'summary', 'state', 'actions'])
+        row.dataset.generationRow = String(generation.id)
         const technical = (text: string): HTMLElement => { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = text; return bdi }
-        const strong = document.createElement('strong'); strong.textContent = '#' + String(generation.id)
-        const badge = document.createElement('span'), label = document.createElement('span'), tone = generation.status === 'active' ? 'ok' : 'suspended'
-        badge.className = 'xp-badge xp-badge--' + tone; badge.dataset.status = tone; label.className = 'xp-badge__label'; label.textContent = generation.status; badge.append(label)
-        const button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.dataset.action = 'rollback-generation'; button.dataset.generationId = String(generation.id); button.disabled = true
-        button.textContent = t('Rollback to #{generationId}', { generationId: generation.id })
-        // The generation read has no change summary, so the Summary column states the creation time it does carry.
+        clientTemplateSlot(row, 'generation').replaceChildren(technical('#' + String(generation.id)))
         const created = document.createElement('span'); created.append(t('Created') + ' ', technical(formatDisplayDateTime(generation.createdAt)))
-        cell(strong, 'xp-mono xp-tabular'); cell(created)
-        // Only the checksum is a monospace technical value; the localized file count keeps the page's text font.
-        const checksum = technical('sha256:' + generation.checksum); checksum.className = 'xp-mono xp-tabular'
-        const summary = document.createElement('span'); summary.append(checksum)
+        clientTemplateSlot(row, 'created').replaceChildren(created)
+        const summary = document.createElement('span'); summary.append(technical('sha256:' + generation.checksum))
         if (generation.filesCount !== undefined) summary.append(' · ' + t('{count, plural, one {{count} file} other {{count} files}}', { count: generation.filesCount }))
-        cell(summary)
-        cell(badge); cell(button); body.append(row)
+        clientTemplateSlot(row, 'summary').replaceChildren(summary)
+        const badge = whmClientNode(root, generation.status === 'active' ? 'whm-generation-state-active' : 'whm-generation-state-other', 'span', generation.status)
+        badge.dataset.status = generation.status
+        clientTemplateSlot(row, 'state').replaceChildren(badge)
+        const button = whmClientNode(root, 'whm-generation-rollback', 'button', t('Rollback to #{generationId}', { generationId: generation.id }))
+        button.dataset.action = 'rollback-generation'; button.dataset.generationId = String(generation.id); button.disabled = true
+        clientTemplateSlot(row, 'actions').replaceChildren(button)
+        body.append(row)
       }
-      if (!value.generations.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 5; td.textContent = t('The generation read returned no records.'); row.append(td); body.append(row) }
-      const current = root.querySelector('[data-generations-current] .xp-badge__label')
-      if (current && value.currentGeneration) current.textContent = t('Generation {generationId}', { generationId: value.currentGeneration.id })
+      if (!value.generations.length) body.append(whmClientNode(root, 'whm-generation-empty', 'tr', t('The generation read returned no records.')))
+      const current = root.querySelector('[data-generations-current]')
+      if (current) {
+        const state = value.currentGeneration ? 'active' : 'none'
+        const badge = whmClientNode(root, 'whm-generation-current-' + state, 'span', value.currentGeneration ? t('Generation {generationId}', { generationId: value.currentGeneration.id }) : t('No configuration generation is active'))
+        badge.dataset.state = state; current.replaceChildren(badge)
+      }
     }
     const rollback = async (id: number): Promise<void> => {
       if (busy || review || !admitted() || !restorable()) return
@@ -90,4 +95,4 @@ function bindWhmPanelData(askDialog: ((options: Record<string, unknown>) => Prom
   })
 }
 
-export const WHM_PANEL_DATA_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const whmWebObject=${whmWebObject.toString()};const readWhmWebGeneration=${readWhmWebGeneration.toString()};const readWhmWebGenerations=${readWhmWebGenerations.toString()};const buildWhmWebRollbackRequest=${buildWhmWebRollbackRequest.toString()};const readWhmWebRollbackAck=${readWhmWebRollbackAck.toString()};const panelObject=whmWebObject,panelGenerations=readWhmWebGenerations,panelRollbackRequest=buildWhmWebRollbackRequest,panelRollbackAck=readWhmWebRollbackAck;return ${bindWhmPanelData.toString()};})()`
+export const WHM_PANEL_DATA_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const whmWebObject=${whmWebObject.toString()};const readWhmWebGeneration=${readWhmWebGeneration.toString()};const readWhmWebGenerations=${readWhmWebGenerations.toString()};const buildWhmWebRollbackRequest=${buildWhmWebRollbackRequest.toString()};const readWhmWebRollbackAck=${readWhmWebRollbackAck.toString()};const panelObject=whmWebObject,panelGenerations=readWhmWebGenerations,panelRollbackRequest=buildWhmWebRollbackRequest,panelRollbackAck=readWhmWebRollbackAck;return ${bindWhmPanelData.toString()};})()`

@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -118,6 +122,16 @@ function bindAccountHtaccess(askDialog: unknown): void {
     const admitted = (): boolean => root.isConnected && root.dataset.htaccessManage === 'true' && !root.closest(denied)
     const button = (key: string): HTMLButtonElement => root.querySelector<HTMLButtonElement>('[data-htaccess-' + key + ']')!
     if (!select || !editor || !status || !history || !issues || ['refresh', 'validate', 'save', 'migrate', 'discard', 'insert'].some(key => !button(key))) return
+    const template = (name: string, tag: string, slots: readonly string[]): HTMLElement => cloneClientTemplate(clientTemplate(root, name), tag, slots)
+    try {
+      for (const [name, tag, slots] of [['htaccess-php-row', 'tr', ['directive', 'value', 'compatibility']], ['htaccess-empty-php', 'tr', ['message']], ['htaccess-issue', 'li', ['message']], ['htaccess-version', 'tr', ['time', 'actor', 'size', 'state', 'restore']], ['htaccess-empty-versions', 'tr', ['message']]] as const) template(name, tag, slots)
+      clientTemplateSlot(template('htaccess-version', 'tr', ['restore']), 'restore', 'button')
+      clientTemplateSlot(template('htaccess-version', 'tr', ['time']), 'time', 'time')
+      for (const slot of ['directive', 'value']) clientTemplateSlot(template('htaccess-php-row', 'tr', [slot]), slot, 'bdi')
+    } catch {
+      root.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button,select').forEach(control => { control.disabled = true }); editor.readOnly = true
+      status.dataset.state = 'unavailable'; status.textContent = copy('The protected .htaccess workspace is unavailable here. Nothing was read or changed.'); return
+    }
     const controller = createHtaccessController({ domainId: select.value, accountId: root.dataset.htaccessAccount ?? '', request: (method, path, body) => { if (!transport || !admitted()) return Promise.reject({ stateChanged: false }); return body === undefined ? transport(method, path) : transport(method, path, body) }, admitted,
       confirm: typeof askDialog === 'function' ? askDialog as (options: Record<string, unknown>) => Promise<unknown> : undefined,
       changed: state => {
@@ -151,13 +165,13 @@ function bindAccountHtaccess(askDialog: unknown): void {
         if (compatibility) {
           compatibility.textContent = ''
           for (const item of phpRows) {
-            const row = document.createElement('tr')
-            for (const [text, technical] of [[item.match ? item.match[1] + ' ' + item.match[2] : item.text, true], [item.match?.[3] ?? copy('Needs review'), true], [copy('Requires guarded domain PHP configuration.'), false]] as const) {
-              const cell = document.createElement('td'), value = document.createElement(technical ? 'bdi' : 'span'); if (technical) value.dir = 'ltr'; value.textContent = text; cell.append(value); row.append(cell)
-            }
+            const row = template('htaccess-php-row', 'tr', ['directive', 'value', 'compatibility'])
+            clientTemplateSlot(row, 'directive').textContent = item.match ? item.match[1] + ' ' + item.match[2] : item.text
+            clientTemplateSlot(row, 'value').textContent = item.match?.[3] ?? copy('Needs review')
+            clientTemplateSlot(row, 'compatibility').textContent = copy('Requires guarded domain PHP configuration.')
             compatibility.append(row)
           }
-          if (!phpRows.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 3; cell.textContent = copy('No PHP directives in the current draft.'); row.append(cell); compatibility.append(row) }
+          if (!phpRows.length) { const row = template('htaccess-empty-php', 'tr', ['message']); clientTemplateSlot(row, 'message').textContent = copy('No PHP directives in the current draft.'); compatibility.append(row) }
         }
         button('discard').disabled = state.busy || !admitted() || !state.dirty && !state.review
         button('insert').disabled = blocked || !view?.capabilities.canSave
@@ -169,18 +183,21 @@ function bindAccountHtaccess(askDialog: unknown): void {
         const count = root.querySelector<HTMLElement>('[data-htaccess-lines]'); if (count) count.textContent = String(state.draft.split(/\r\n|\n|\r/).length)
         issues.textContent = ''
         const diagnostics = state.status === 'draft' ? [] : view?.validation?.issues ?? view?.policy.issues ?? []
-        for (const issue of diagnostics) { const item = document.createElement('li'); item.textContent = copy('Line {line}: {message}', { line: issue.line, message: issue.message }); issues.append(item) }
-        if (!diagnostics.length) { const item = document.createElement('li'); item.textContent = state.status === 'draft' ? copy('The current draft has not been validated. Validate it before saving.') : view ? copy('No policy issues were reported for the last checked content. Validate the current draft before saving.') : copy('Diagnostics have not been read.'); issues.append(item) }
+        for (const issue of diagnostics) { const item = template('htaccess-issue', 'li', ['message']); clientTemplateSlot(item, 'message').textContent = copy('Line {line}: {message}', { line: issue.line, message: issue.message }); issues.append(item) }
+        if (!diagnostics.length) { const item = template('htaccess-issue', 'li', ['message']); clientTemplateSlot(item, 'message').textContent = state.status === 'draft' ? copy('The current draft has not been validated. Validate it before saving.') : view ? copy('No policy issues were reported for the last checked content. Validate the current draft before saving.') : copy('Diagnostics have not been read.'); issues.append(item) }
         history.textContent = ''
         for (const version of view?.versions ?? []) {
-          const row = document.createElement('tr')
-          const timeCell = document.createElement('td'), timeValue = document.createElement('bdi'), time = document.createElement('time')
-          timeValue.dir = 'ltr'; time.dateTime = version.at; time.textContent = formatDisplayDateTime(version.at)
-          timeValue.append(time); timeCell.append(timeValue); row.append(timeCell)
-          for (const [text, technical] of [[version.actor, false], [String(version.sizeBytes), true], [version.current ? copy(msgctxt('account-htaccess-client', 'Current')) : version.state === 'failed' ? copy('Check failed; kept') : copy('Kept'), false]] as const) { const cell = document.createElement('td'), value = document.createElement(technical ? 'bdi' : 'span'); if (technical) value.dir = 'ltr'; value.textContent = text; cell.append(value); row.append(cell) }
-          const cell = document.createElement('td'), restore = document.createElement('button'); restore.type = 'button'; restore.className = 'xp-btn'; restore.textContent = copy('Restore'); restore.disabled = blocked || !version.canRestore; restore.addEventListener('click', () => { void controller.restore(version.id) }); cell.append(restore); row.append(cell); history.append(row)
+          const row = template('htaccess-version', 'tr', ['time', 'actor', 'size', 'state', 'restore'])
+          const time = clientTemplateSlot(row, 'time', 'time') as HTMLTimeElement
+          time.dateTime = version.at; time.textContent = formatDisplayDateTime(version.at)
+          clientTemplateSlot(row, 'actor').textContent = version.actor
+          clientTemplateSlot(row, 'size').textContent = String(version.sizeBytes)
+          clientTemplateSlot(row, 'state').textContent = version.current ? copy(msgctxt('account-htaccess-client', 'Current')) : version.state === 'failed' ? copy('Check failed; kept') : copy('Kept')
+          const restore = clientTemplateSlot(row, 'restore', 'button') as HTMLButtonElement
+          restore.textContent = copy('Restore'); restore.disabled = blocked || !version.canRestore
+          restore.addEventListener('click', () => { void controller.restore(version.id) }); history.append(row)
         }
-        if (!view?.versions.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 5; cell.textContent = view ? copy('No kept versions were returned. The first save preserves the current file.') : copy('Kept versions have not been read.'); row.append(cell); history.append(row) }
+        if (!view?.versions.length) { const row = template('htaccess-empty-versions', 'tr', ['message']); clientTemplateSlot(row, 'message').textContent = view ? copy('No kept versions were returned. The first save preserves the current file.') : copy('Kept versions have not been read.'); history.append(row) }
       } })
     if (!transport || !admitted() || !HTACCESS_UUID.test(select.value)) {
       root.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button,select').forEach(control => { control.disabled = true }); editor.readOnly = true
@@ -202,4 +219,4 @@ function bindAccountHtaccess(askDialog: unknown): void {
     void controller.load()
   })
 }
-export const ACCOUNT_HTACCESS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const HTACCESS_UI_BYTES=${HTACCESS_UI_BYTES};const HTACCESS_UUID=${HTACCESS_UUID.toString()};const HTACCESS_REVISION=${HTACCESS_REVISION.toString()};const htaccessObject=${htaccessObject.toString()};const readHtaccessView=${readHtaccessView.toString()};const htaccessUncertain=${htaccessUncertain.toString()};const createHtaccessController=${createHtaccessController.toString()};return ${bindAccountHtaccess.toString()};})()`
+export const ACCOUNT_HTACCESS_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const HTACCESS_UI_BYTES=${HTACCESS_UI_BYTES};const HTACCESS_UUID=${HTACCESS_UUID.toString()};const HTACCESS_REVISION=${HTACCESS_REVISION.toString()};const htaccessObject=${htaccessObject.toString()};const readHtaccessView=${readHtaccessView.toString()};const htaccessUncertain=${htaccessUncertain.toString()};const createHtaccessController=${createHtaccessController.toString()};return ${bindAccountHtaccess.toString()};})()`

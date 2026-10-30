@@ -2,16 +2,17 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { canOpenRegisteredRoute, registeredDocumentAliases, tools } from '@xpanel/catalog'
+import { canOpenRegisteredRoute, registeredDocumentAliases, tools, visibleTools } from '@xpanel/catalog'
 import {
   createApiToken, createResellerPrincipal, createRootPrincipal, createSession, createTestDb, createUserPrincipal, setTotpSecret,
 } from '@xpanel/db'
 import type { TestDbHandle } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
 import type { TestStateStoreHandle } from '@xpanel/state'
-import { SESSION_COOKIE_NAME, sha256Hex } from './auth.ts'
+import { SESSION_COOKIE_NAME, principalRecordToPrincipal, sha256Hex } from './auth.ts'
 import { createDefaultWebRenderer } from './main.ts'
 import { createApiApp, listenApiServer } from './server.ts'
+import type { HostCatalogSource } from './host-catalog.ts'
 
 const hydration = vi.hoisted(() => [] as Record<string, unknown>[])
 vi.mock('../../web/src/index.ts', async (importOriginal) => {
@@ -91,6 +92,12 @@ describe('production web renderer boundary regressions', () => {
     const principal = await createRootPrincipal(db.db, { username: 'root', passwordHash: PUBLIC_VECTOR, forcePasswordChange: opts.forcePasswordChange ?? false })
     if (opts.enrolled !== false) await setTotpSecret(db.db, principal.id, new Uint8Array(32))
     return principal
+  }
+  const expectUnqualifiedCatalog = (value: unknown) => {
+    expect(Array.isArray(value)).toBe(true)
+    if (!Array.isArray(value)) throw new Error('The trusted catalog must remain explicit')
+    expect(value).toHaveLength(tools.length)
+    expect(value.every(tool => tool.status !== 'verified' && tool.delivery.status !== 'verified')).toBe(true)
   }
   const observe = async (id: string, response: Response, expectedStatus: number, expectedLocation?: string) => {
     const html = await response.text()
@@ -305,7 +312,7 @@ describe('production web renderer boundary regressions', () => {
     const workspace = hydration.at(-1)
     expect(workspace).toBeDefined()
     expect((workspace!.visibility as { principal: { kind: string } }).principal.kind).toBe('root')
-    expect(workspace!.catalog).toBeUndefined()
+    expectUnqualifiedCatalog(workspace!.catalog)
     expect(workspace!.workspaceSummary).toEqual({})
     for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(workspace).not.toHaveProperty(key)
     for (const path of ['/whm/accounts', '/whm/accounts/health', ...registeredDocumentAliases.filter(row => row.parentRoute === '/whm/software/site-software').map(row => row.route)]) {
@@ -321,7 +328,7 @@ describe('production web renderer boundary regressions', () => {
         workspaceSummaryKeys: Object.keys(supplied!.workspaceSummary as Record<string, unknown>),
       })
       expect(visibility.principal.kind).toBe('root')
-      expect(supplied!.catalog).toBeUndefined()
+      expectUnqualifiedCatalog(supplied!.catalog)
       expect(supplied!.activeRoute).toBe(path)
       expect(supplied!.workspaceSummary).toEqual({})
       expect(supplied).not.toHaveProperty('error')
@@ -429,7 +436,7 @@ describe('production web renderer boundary regressions', () => {
           account: { id: owner.id, ownerId: owner.ownerId, username: owner.username, primaryDomain: owner.primaryDomain, status: owner.status, planId: owner.planId },
           plan: { id: plan.id, name: plan.name },
         })
-        expect(supplied?.catalog).toBeUndefined()
+        expectUnqualifiedCatalog(supplied?.catalog)
         expect(supplied).not.toHaveProperty('error')
         for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(supplied).not.toHaveProperty(key)
         for (const value of [owner.home, owner.ipv4, owner.contactEmail, other.primaryDomain, PUBLIC_VECTOR, PUBLIC_DB_AUTH,
@@ -446,5 +453,30 @@ describe('production web renderer boundary regressions', () => {
       await observe('scoped-summary-http:anonymous', await fetch(`${origin}/panel`, { redirect: 'manual' }), 303, '/login')
       expect(snapshotReads).toBe(0)
     } finally { await server.close() }
+  })
+  it('preserves one provider snapshot for unqualified documents, status pages, preferences and API reads', async () => {
+    const principal = await root({ enrolled: false })
+    const cookie = await session(principal.id)
+    // A deliberately narrow, unaccepted provider snapshot must never expand to default tools.
+    const snapshot = Object.freeze(tools.slice(0, 1))
+    expect(snapshot.some(tool => tool.status === 'verified')).toBe(false)
+    const load = vi.fn(async (_source: HostCatalogSource | null) => snapshot)
+    const catalogProvider = { acceptanceIdentity: 'synthetic-unaccepted-snapshot', load, reset: () => {} }
+    const render = await createDefaultWebRenderer({ store: state.store, db: db.db, serverSecret: SERVER_SECRET, catalogProvider })
+    for (const [path, status] of [['/whm/accounts', 200], ['/whm/not-a-registered-page', 404], ['/whm/preferences', 200]] as const) {
+      const response = await render(request(path, cookie))
+      expect(response.status).toBe(status)
+      await response.body?.cancel()
+      expect(hydration.at(-1)?.catalog).toBe(snapshot)
+    }
+    const app = createApiApp({ store: state.store, db: db.db, serverSecret: SERVER_SECRET, catalogProvider })
+    const response = await app.fetch(request('/api/catalog', cookie), { remoteAddress: '192.0.2.40' })
+    expect(response.status).toBe(200)
+    const body = await response.json() as { tools: unknown[] }
+    expect(body.tools).toEqual(visibleTools(snapshot, { principal: principalRecordToPrincipal(principal) }))
+    expect(body.tools).toEqual([])
+    expect(load).toHaveBeenCalledTimes(4)
+    expect(load.mock.calls.every(call => call[0] === null)).toBe(true)
+    expect(snapshot).toHaveLength(1)
   })
 })
