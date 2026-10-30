@@ -20,7 +20,7 @@ const assert = (r: ProvisioningReconcileRequest, value: unknown) => assertProvis
 describe('authenticated provisioning reply runtime schema', { tags: ['unit'] }, () => {
   it.each([
     { label: 'array', kind: ['root'] },
-    { label: 'object', kind: { toString: () => 'root' } },
+    { label: 'object', kind: { toString: (): string => 'root' } },
   ])('rejects a $label principal kind even with its matching canonical binding', ({ kind }) => {
     const r = request()
     const authority = { ...r.authority, actor: { ...r.authority.actor, kind } }
