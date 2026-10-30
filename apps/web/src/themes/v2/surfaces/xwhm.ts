@@ -32,14 +32,15 @@ export function renderV2WhmBody(view: WhmSurfaceView): string | undefined {
   const props = view.props, a = view.authority, locale = props.locale ?? 'en', t = v2Messages.translator(locale)
   const root = props.principal.kind === 'root'
   const access = { locale, presentation: a.presentation, canReadFacts: a.canReadFacts, authorizedTools: a.authorizedTools, canRead: a.canRead, canManage: a.canManage }
+  const host = a.presentation === 'read-only' ? { ...props, capabilityUnavailable: true as const } : props
   switch (view.route) {
     case '/whm': return renderV2WhmOverview(t, props)
     case '/whm/accounts': return renderV2WhmAccountList(t, props, a)
     case '/whm/accounts/new': return renderV2WhmAccountCreate(t, props, a)
-    case '/whm/services': return renderV2WhmServices(props)
-    case '/whm/services/more': return renderV2WhmServiceManager(props)
-    case '/whm/security/firewall': return renderV2WhmFirewall(props)
-    case '/whm/software/php': return renderV2WhmPhp(props)
+    case '/whm/services': return renderV2WhmServices(host)
+    case '/whm/services/more': return renderV2WhmServiceManager(host)
+    case '/whm/security/firewall': return renderV2WhmFirewall(host)
+    case '/whm/software/php': return renderV2WhmPhp(host)
     case '/whm/backups':
     case '/whm/backups/restore': return renderV2BackupsPage({ ...access, activeRoute: view.route, ...(props.accounts ? { accounts: props.accounts } : {}) })
     case '/whm/backups/destinations': return renderV2BackupDestinationsPage(access)

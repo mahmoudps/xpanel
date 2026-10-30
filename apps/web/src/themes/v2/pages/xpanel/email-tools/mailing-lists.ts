@@ -32,5 +32,6 @@ export function renderV2PanelMailingLists(props: PanelSurfaceProps, authority?: 
     + field('mailx-lists-moderators', t(msgid('Moderators')), area('mailx-lists-moderators', undefined, ' rows="3" dir="ltr"'))
     + `<p>${esc(t(msgid('Moderation needs a list manager (for example Mailman or mlmmj) that holds posts for approval. None is installed or connected.')))}</p>` + v2MailToolsClientTemplates('lists'),
     { 'data-mailx-tools': true, 'data-mailx-tools-section': 'lists', 'data-mailx-can-manage': String(canManage) })
-  return page(locale, route, header(t, route, title, t(msgctxt('theme:v2', 'Manage saved membership, posting policy and the observed delivery state of your account lists.'))) + saved + delivery)
+  const inert = !authority?.canRead || authority.presentation === 'read-only' || !account
+  return page(locale, route, header(t, route, title, t(msgctxt('theme:v2', 'Manage saved membership, posting policy and the observed delivery state of your account lists.'))) + saved + delivery, inert ? { 'data-readonly': 'true' } : undefined)
 }

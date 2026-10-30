@@ -1,4 +1,4 @@
-import { classicOpsClientTemplates } from '../themes/classic/ops-client-templates.ts'
+import { classicOpsClientTemplates } from './ops-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 
 /** Signed webhook integrations for the developer/integrations workspace. Filled by OPS_INTEGRATIONS_CLIENT_BINDING. */

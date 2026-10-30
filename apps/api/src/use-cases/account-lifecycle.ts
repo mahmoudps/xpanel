@@ -117,6 +117,11 @@ export interface ProvisionAccountResult {
   readonly execution?: AccountExecutionObservation
 }
 
+/** A completed replay can carry a null reconciliation. That is not a host effect performed by this call. */
+export const isFreshProvisioningHostEffect = (
+  result: Pick<ProvisionAccountResult, 'reconciliation' | 'execution'>,
+): boolean => result.reconciliation !== null || result.execution !== undefined
+
 export interface PlanChangePreview {
   readonly accountId: Id
   readonly username: string
@@ -457,6 +462,7 @@ export class AccountLifecycleCoordinator {
           account: acc,
           job: enqueued,
           principalId: principal.id,
+          // Status-only replay. Null reconciliation is not a host effect from this call.
           reconciliation: null,
           resumedFromStep: enqueued.completedSteps.length,
         }
@@ -719,6 +725,7 @@ export class AccountLifecycleCoordinator {
               account: { id: account.id, username: account.username, ownerId: account.ownerId, planId: account.planId,
                 uid: account.uid, gid: account.gid, home: account.home, primaryDomain: account.primaryDomain },
               operation: { id: leased.id, workerId: this.workerId, fencingToken: leased.fencingToken,
+                // Current renewed lease. The agent must not require equality with an earlier leaseExpiresAt.
                 leaseExpiresAt: currentLease.leaseExpiresAt!, requestFingerprint: leased.requestFingerprint },
               desired: { revision: snapshot.revision ?? await this.store.getRevision(), checksum: snapshot.checksum,
                 preparationReference: prepared.reference, preparationIdentity: canonicalProvisioningIdentity(prepared.desiredState) },
@@ -726,12 +733,27 @@ export class AccountLifecycleCoordinator {
             const request: ProvisioningReconcileRequest = { authority, binding: canonicalProvisioningIdentity(authority) }
             const reply = await this.provisioningPort!.reconcile(request, { signal: leaseAuthority.abort.signal, assertAuthority })
             await assertAuthority()
+            if (reply.reconciliation == null) {
+              fail('PRECONDITION_FAILED', 'a null reconciliation is not a verified host effect', {
+                stateChanged: true, verificationRequired: true, freshExecution: false,
+              })
+            }
             observedExecution = assertProvisioningReply(request, reply)
             reconciliation = reply.reconciliation
           } else {
             reconciliation = await this.reconciler!.reconcile({ actor: actorLabel(input.actor), force: true,
               scope: { accountId: account.id, resellerId: account.ownerId } })
             await assertAuthority()
+            if (reconciliation == null) {
+              fail('PRECONDITION_FAILED', 'a null reconciliation is not a verified host effect', {
+                stateChanged: true, verificationRequired: true, freshExecution: false,
+              })
+            }
+          }
+          if (reconciliation == null) {
+            fail('PRECONDITION_FAILED', 'a null reconciliation is not a verified host effect', {
+              stateChanged: true, verificationRequired: true, freshExecution: false,
+            })
           }
           if (reconciliation.status === 'failed') {
             unknownOutcome = reconciliation.stateChanged !== false && reconciliation.rolledBack !== true
@@ -1371,3 +1393,9 @@ export class AccountLifecycleCoordinator {
     }
   }
 }
+
+/** Shared prepared entry for API account creation. `createAccountAs` in the API server is left for its owner. */
+export const provisionPreparedAccountCall = (
+  deps: AccountLifecycleDeps,
+  input: { readonly actor: Principal; readonly idempotencyKey: string; readonly preparationReference: string },
+): Promise<ProvisionAccountResult> => new AccountLifecycleCoordinator(deps).provisionPreparedAccount(input)

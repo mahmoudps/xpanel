@@ -1,7 +1,7 @@
 import { projectReadOnlyMailSurface, projectReadOnlyPanelSurface, projectReadOnlyWhmSurface } from '../../../models/theme-surface.ts'
 import { projectReadOnlyMailSurfaceView } from '../../../models/mail.ts'
 import { v2Messages } from '../messages.ts'
-import { parseMarkup } from '../../markup.ts'
+import { parseMarkup } from '../../../html.ts'
 import { renderV2MailInbox } from '../pages/xmail/inbox.ts'
 import { renderV2MailCompose } from '../pages/xmail/compose.ts'
 import { renderV2MailWorkspace } from '../pages/xmail/workspaces/index.ts'

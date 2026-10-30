@@ -103,7 +103,8 @@ export function renderMailToolsPage(value: MailWorkspaceInput): string {
 
 /** Core inserts its own theme account-security slot; no authentication form is duplicated here. */
 export function renderMailSecurityPage(value: MailWorkspaceInput): string {
-  const { t } = ctx(value)
-  return page(value, t(msgid('Security')), t(msgctxt('theme:v2', 'Mailbox sign-in security uses the current authenticated account-security workspace.')),
-    value.securityHtml ? value.securityHtml : section('v2-mail-security-status', t(msgid('Security')), `<p role="status" data-mail-security-unread>${esc(t(msgctxt('theme:v2', 'The account-security workspace has not been provided. No security setting was changed.')))}</p>`))
+  const { t, readable } = ctx(value)
+  const unread = section('v2-mail-security-status', t(msgid('Security')), `<p role="status" data-mail-security-unread>${esc(t(msgctxt('theme:v2', 'The account-security workspace has not been provided. No security setting was changed.')))}</p>`)
+  const security = value.securityHtml && (readable || value.readOnly === true) ? value.securityHtml : unread
+  return page(value, t(msgid('Security')), t(msgctxt('theme:v2', 'Mailbox sign-in security uses the current authenticated account-security workspace.')), security)
 }

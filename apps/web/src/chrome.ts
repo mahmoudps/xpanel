@@ -68,6 +68,8 @@ export interface UserMenuModel {
   signedIn: boolean
   activityHref?: string
   menuLinks?: readonly { label: string; href: string }[]
+  /** Unqualified documents keep the chooser visible as markup and do not submit it. */
+  themeChooserWritable?: boolean
 }
 
 export const surfaceContextHref = (model: UserMenuModel, patch: Partial<Pick<UserMenuModel, 'locale' | 'theme' | 'density'>> = {}): string => {
@@ -103,9 +105,9 @@ const renderMenuLinks = (model: UserMenuModel): string => {
 }
 
 const renderInterfaceChoice = (model: UserMenuModel): string => !model.signedIn ? '' : `<style>
-.xp-ui-theme{display:grid;gap:24px;padding:24px;border-block:1px solid var(--xp-border)}.xp-ui-theme[hidden],.xp-ui-theme [hidden]{display:none!important}.xp-ui-theme form{display:grid;gap:16px}.xp-ui-theme label{display:grid;gap:8px}.xp-ui-theme label>span{padding-inline-start:var(--xp-control-content-inset)}.xp-ui-theme p{margin:0;overflow-wrap:anywhere}.xp-ui-theme__actions{display:flex;flex-wrap:wrap;gap:16px}@media(max-width:640px){.xp-ui-theme{padding:16px}}
+.xp-ui-theme{display:grid;gap:24px;padding:24px;border-block:1px solid var(--xp-border)}.xp-ui-theme[hidden],.xp-ui-theme [hidden]{display:none!important}.xp-ui-theme :is(form,[data-ui-theme-form]){display:grid;gap:16px}.xp-ui-theme label{display:grid;gap:8px}.xp-ui-theme label>span{padding-inline-start:var(--xp-control-content-inset)}.xp-ui-theme p{margin:0;overflow-wrap:anywhere}.xp-ui-theme__actions{display:flex;flex-wrap:wrap;gap:16px}@media(max-width:640px){.xp-ui-theme{padding:16px}}
 </style><section class="xp-ui-theme" data-ui-theme-preferences data-ui-theme-can-read="true" hidden>
-<form data-ui-theme-form hidden><label for="xp-ui-theme-choice"><span class="xp-label">${escapeHtml(translator(model.locale)('Interface theme'))}</span><select class="xp-select" id="xp-ui-theme-choice" name="uiTheme" data-ui-theme-choice disabled><option value="classic">${escapeHtml(translator(model.locale)('Classic'))}</option><option value="v2">V2</option></select></label><button class="xp-btn" type="submit" data-ui-theme-save disabled>${escapeHtml(translator(model.locale)('Save'))}</button></form>
+${model.themeChooserWritable === false ? '<div' : '<form'} data-ui-theme-form hidden><label for="xp-ui-theme-choice"><span class="xp-label">${escapeHtml(translator(model.locale)('Interface theme'))}</span><select class="xp-select" id="xp-ui-theme-choice" name="uiTheme" data-ui-theme-choice disabled><option value="classic">${escapeHtml(translator(model.locale)('Classic'))}</option><option value="v2">V2</option></select></label><button class="xp-btn" type="${model.themeChooserWritable === false ? 'button' : 'submit'}" data-ui-theme-save disabled>${escapeHtml(translator(model.locale)('Save'))}</button>${model.themeChooserWritable === false ? '</div>' : '</form>'}
 <p class="xp-help" data-ui-theme-status role="status" aria-live="polite" hidden></p><div class="xp-ui-theme__actions"><button class="xp-btn xp-btn--ghost" type="button" data-ui-theme-reload disabled hidden>${escapeHtml(translator(model.locale)('Reload'))}</button></div>
 </section>`
 

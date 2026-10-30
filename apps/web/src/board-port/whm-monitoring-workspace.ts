@@ -1,4 +1,4 @@
-import { classicWhmClientTemplates } from '../themes/classic/whm-client-templates.ts'
+import { classicWhmClientTemplates } from './whm-client-templates.ts'
 import { localeDirection, translator, type Locale } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 import { MONITORING_LOG_DEFAULT_LINES, MONITORING_LOG_MAX_LINES, MONITORING_LOG_UNITS } from '../../../../packages/os/src/monitoring-command.ts'

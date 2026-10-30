@@ -1,4 +1,4 @@
-import { classicOpsClientTemplates } from '../themes/classic/ops-client-templates.ts'
+import { classicOpsClientTemplates } from './ops-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 
 /** Server NFS shares editor for /whm/server/file-sharing. Host data is filled by OPS_FILE_SHARING_CLIENT_BINDING from authorized reads only. */

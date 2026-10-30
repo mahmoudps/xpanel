@@ -1,4 +1,4 @@
-import { classicOpsClientTemplates } from '../themes/classic/ops-client-templates.ts'
+import { classicOpsClientTemplates } from './ops-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 
 /** Managed server nodes for /whm/server/nodes. Host data is filled by OPS_NODES_CLIENT_BINDING from authorized reads only. */

@@ -39,5 +39,6 @@ export function renderV2PanelDeliverability(props: PanelSurfaceProps, authority?
   const routing = section('v2-email-delivery-routing', t(msgctxt('theme:v2', 'Routing and sender identity')),
     facts([{ label: t(msgctxt('theme:v2', 'Mail routing')), valueHtml: notRead }, { label: t(msgctxt('theme:v2', 'Outbound address')), valueHtml: notRead }, { label: 'PTR / rDNS', valueHtml: notRead }, { label: t(msgctxt('theme:v2', 'Last delivery check')), valueHtml: notRead }])
     + `<p>${esc(t(msgctxt('theme:v2', 'These values require an authorized service observation. Stored domain names are shown for selection only.')))}</p>`)
-  return page(locale, route, header(t, route, title, t(msgctxt('theme:v2', 'Review each domain without inferring SPF, DKIM, DMARC or SMTP success from saved configuration.'))) + checks + routing)
+  const inert = !authority?.canRead || authority.presentation === 'read-only' || !account
+  return page(locale, route, header(t, route, title, t(msgctxt('theme:v2', 'Review each domain without inferring SPF, DKIM, DMARC or SMTP success from saved configuration.'))) + checks + routing, inert ? { 'data-readonly': 'true' } : undefined)
 }

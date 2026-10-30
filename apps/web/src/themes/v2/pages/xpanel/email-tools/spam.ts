@@ -31,5 +31,6 @@ export function renderV2PanelSpamFilters(props: PanelSurfaceProps, authority?: P
     + check('mailx-boxtrapper-enabled', t(msgid('Ask unknown senders to verify before delivery')))
     + field('mailx-boxtrapper-allow', t(msgid('Senders delivered without verification')), area('mailx-boxtrapper-allow', undefined, ' rows="3" dir="ltr"'))
     + `<p>${esc(t(msgid('Missing native step: xPanel has no challenge-response provider for Postfix and Dovecot. Challenge mail sent to forged senders creates backscatter, so none is enabled. Use the spam filter and sender lists instead.')))}</p>`)
-  return page(locale, route, header(t, route, title, t(msgctxt('theme:v2', 'Keep saved spam policy separate from the filter state observed on this server.'))) + saved + native + challenge)
+  const inert = !authority?.canRead || authority.presentation === 'read-only' || !account
+  return page(locale, route, header(t, route, title, t(msgctxt('theme:v2', 'Keep saved spam policy separate from the filter state observed on this server.'))) + saved + native + challenge, inert ? { 'data-readonly': 'true' } : undefined)
 }

@@ -1,4 +1,4 @@
-import { classicWhmClientTemplates } from '../themes/classic/whm-client-templates.ts'
+import { classicWhmClientTemplates } from './whm-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 

@@ -1,4 +1,4 @@
-import { classicWhmClientTemplates, classicWhmGenerationCurrent } from '../themes/classic/whm-client-templates.ts'
+import { classicWhmClientTemplates, classicWhmGenerationCurrent } from '../board-port/whm-client-templates.ts'
 import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import type {
   Account,
