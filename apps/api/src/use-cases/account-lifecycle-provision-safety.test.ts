@@ -3,7 +3,10 @@ import type { HostReconciler, ReconcileResult } from '@xpanel/agent'
 import { XpanelError, type Account, type Principal } from '@xpanel/core'
 import type { Db, DurableJobRecord } from '@xpanel/db'
 import type { StateStore } from '@xpanel/state'
-import { AccountLifecycleCoordinator, type ProvisionAccountInput } from './account-lifecycle.ts'
+import { AccountLifecycleCoordinator, isFreshProvisioningHostEffect, type ProvisionAccountInput } from './account-lifecycle.ts'
+import { canonicalProvisioningIdentity } from './account-provisioning-port.ts'
+import { preparedAccountZone, provisioningRequestKey } from './account-provisioning-prepared.ts'
+import { createAuthenticatedProvisioningPort } from './account-provisioning-transport.ts'
 
 const dbPort = vi.hoisted(() => ({
   enqueue: vi.fn(), lease: vi.fn(), complete: vi.fn(), checkpoint: vi.fn(), principal: vi.fn(),
@@ -198,5 +201,167 @@ describe('provisioning identity and uncertain host effects', () => {
     }
     expect(new Set(fingerprints).size).toBe(5)
     expect(fingerprints.every(value => /^[a-f0-9]{64}$/.test(value))).toBe(true)
+  })
+
+  it('does not report a completed replay with null reconciliation as a new host effect', async () => {
+    const h = harness()
+    dbPort.enqueue.mockResolvedValue({ ...job({ status: 'succeeded', checkpointData: checkpoint(), completedSteps: ['reserve_and_create_state', 'ensure_principal_and_zone', 'reconcile_host', 'finalize_index_and_audit'] }), deduplicated: true })
+    const result = await h.coordinator.provisionAccount(input())
+    expect(result.reconciliation).toBeNull()
+    expect(result.execution).toBeUndefined()
+    expect(isFreshProvisioningHostEffect(result)).toBe(false)
+    expect(h.reconcile).not.toHaveBeenCalled()
+    expect(dbPort.lease).not.toHaveBeenCalled()
+  })
+
+  it('rejects a stale fence even when the renewed lease expiration is still valid', async () => {
+    const h = harness()
+    dbPort.lease.mockResolvedValue(job({ leaseOwner: 'worker', fencingToken: 4, leaseExpiresAt: '2020-01-01T00:00:00.000Z' }))
+    dbPort.renew.mockResolvedValue(job({ leaseOwner: 'worker', fencingToken: 9, leaseExpiresAt: '2099-01-01T00:00:00.000Z' }))
+    await expect(h.coordinator.provisionAccount(input())).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect(h.reconcile).not.toHaveBeenCalled()
+    expect(h.store.createAccount).not.toHaveBeenCalled()
+  })
+
+  it('keeps a renewed lease when the fence is unchanged', async () => {
+    const h = harness()
+    dbPort.lease.mockResolvedValue(job({ leaseOwner: 'worker', fencingToken: 4, leaseExpiresAt: '2020-01-01T00:00:00.000Z' }))
+    dbPort.renew.mockResolvedValue(job({ leaseOwner: 'worker', fencingToken: 4, leaseExpiresAt: '2099-01-01T00:00:00.000Z' }))
+    await h.coordinator.provisionAccount(input())
+    expect(h.reconcile).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not checkpoint a null reconciliation as a new host effect', async () => {
+    const h = harness()
+    h.reconcile.mockResolvedValue(null as never)
+    await expect(h.coordinator.provisionAccount(input())).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED', detail: { freshExecution: false, verificationRequired: true },
+    })
+    expect(h.reconcile).toHaveBeenCalledTimes(1)
+    expect(dbPort.checkpoint.mock.calls.map(call => call[1].step)).not.toContain('reconcile_host')
+  })
+})
+
+describe('prepared account provisioning', () => {
+  const storedHash = 'stored-prepared-credential-hash'
+  const nameservers = ['ns1.xpanel.internal', 'ns2.xpanel.internal']
+  const plan = { id: 'plan-id', name: 'basic', ownerId: null, featureListId: 'feature-list', resources: { diskMb: 1 }, caps: {}, dedicatedIp: false, shell: 'jailed' as const, defaultMailboxQuotaMb: 0 }
+  const accountFields = () => ({ username: 'tenant', primaryDomain: 'tenant.example.test', planId: 'plan-id', ownerId: null as null, contactEmail: 'ops@example.test', ipv4: '203.0.113.10', shell: 'jailed' as const, php: input().php })
+  const prepared = () => {
+    const accountInput = accountFields()
+    const desiredState = { account: accountInput, sourceRevision: 2, operationKey: provisioningRequestKey(root, 'retry-key'), planIdentity: canonicalProvisioningIdentity(plan), template: null, nameservers, serial: 2026103001 }
+    return { reference: '55555555-5555-4555-8555-555555555555', requestIdentity: canonicalProvisioningIdentity(accountInput), passwordHash: storedHash, desiredState }
+  }
+  const preparedHarness = () => {
+    const record = prepared()
+    let savedZone: unknown = null
+    const store = {
+      getAccountByUsername: vi.fn(async () => null as ReturnType<typeof account> | null),
+      createAccount: vi.fn(async () => account()),
+      getAccount: vi.fn(async () => account()),
+      getReseller: vi.fn(async () => ({ id: 'reseller-id', acl: ['create-account'] })),
+      getDnsZone: vi.fn(async () => savedZone),
+      saveDnsZone: vi.fn(async (zone: unknown) => { savedZone = zone }),
+      readSnapshot: vi.fn(async () => ({ checksum: 'b'.repeat(64), revision: 8 })),
+      getPlan: vi.fn(async () => plan),
+      getServerSettings: vi.fn(async () => ({ nameservers })),
+      getRevision: vi.fn(async () => 8),
+    }
+    const reconcile = vi.fn(async (request: { authority: { operation: { fencingToken: number; leaseExpiresAt: string } } }) => {
+      void request
+      return { binding: 'unused', outcome: 'known' as const, reconciliation: null }
+    })
+    const coordinator = new AccountLifecycleCoordinator({
+      store: store as unknown as StateStore, db: {} as Db, workerId: 'worker',
+      provisioningPort: { reconcile } as never, authorizeProvisioning: async () => undefined,
+      preparations: { prepare: vi.fn(), load: vi.fn(async () => record) } as never,
+      readAccountTemplates: async () => null,
+    })
+    return { store, reconcile, coordinator, record }
+  }
+
+  it('reuses the prepared credential hash and does not run host effects when the checkpoint is not saved', async () => {
+    const h = preparedHarness()
+    dbPort.checkpoint.mockRejectedValueOnce(new Error('checkpoint lost'))
+    await expect(h.coordinator.provisionPreparedAccount({ actor: root, idempotencyKey: 'retry-key', preparationReference: h.record.reference })).rejects.toThrow('checkpoint lost')
+    expect(h.store.createAccount).toHaveBeenCalledWith(expect.objectContaining({ passwordHash: storedHash }), expect.anything())
+    const recorded = dbPort.enqueue.mock.calls[0] as [unknown, { detail?: unknown }] | undefined
+    expect(JSON.stringify(recorded?.[1]?.detail)).not.toContain(storedHash)
+    expect(dbPort.createPrincipal).not.toHaveBeenCalled()
+    expect(h.reconcile).not.toHaveBeenCalled()
+  })
+
+  it('does not repeat host effects while an intent checkpoint has no acknowledged outcome', async () => {
+    const h = preparedHarness()
+    dbPort.lease.mockResolvedValue(job({
+      checkpointData: { ...checkpoint(), preparationReference: h.record.reference, preparationIdentity: canonicalProvisioningIdentity(h.record.desiredState), hostAttempt: 1, hostNoEffectAttempt: null },
+      completedSteps: ['reserve_and_create_state', 'ensure_principal_and_zone', 'reconcile_host_intent'],
+    }))
+    await expect(h.coordinator.provisionPreparedAccount({ actor: root, idempotencyKey: 'retry-key', preparationReference: h.record.reference })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED', detail: { verificationRequired: true },
+    })
+    expect(h.store.createAccount).not.toHaveBeenCalled()
+    expect(h.reconcile).not.toHaveBeenCalled()
+  })
+
+  it('returns a completed prepared replay with null reconciliation and does not execute the host again', async () => {
+    const h = preparedHarness()
+    dbPort.enqueue.mockResolvedValue({ ...job({ status: 'succeeded', checkpointData: checkpoint(), completedSteps: ['reserve_and_create_state', 'ensure_principal_and_zone', 'reconcile_host', 'finalize_index_and_audit'] }), deduplicated: true })
+    const result = await h.coordinator.provisionPreparedAccount({ actor: root, idempotencyKey: 'retry-key', preparationReference: h.record.reference })
+    expect(result.reconciliation).toBeNull()
+    expect(result.execution).toBeUndefined()
+    expect(isFreshProvisioningHostEffect(result)).toBe(false)
+    expect(h.reconcile).not.toHaveBeenCalled()
+    expect(h.store.createAccount).not.toHaveBeenCalled()
+    expect(dbPort.lease).not.toHaveBeenCalled()
+  })
+
+  it('sends the current renewed lease and does not accept a null reconciliation as a host effect', async () => {
+    const h = preparedHarness()
+    const hosted = { ...account(), id: '22222222-2222-4222-8222-222222222222' }
+    h.store.getAccount.mockResolvedValue(hosted)
+    const zone = preparedAccountZone(h.record, hosted)
+    h.store.getDnsZone.mockResolvedValue(zone)
+    dbPort.principal.mockResolvedValue({ id: '33333333-3333-4333-8333-333333333333', kind: 'user', username: 'tenant', accountId: hosted.id, passwordHash: storedHash })
+    dbPort.lease.mockResolvedValue(job({
+      leaseOwner: 'worker', fencingToken: 4, leaseExpiresAt: '2020-01-01T00:00:00.000Z',
+      checkpointData: {
+        ...checkpoint(), accountId: hosted.id, gid: 20000, home: '/home/tenant', preparationReference: h.record.reference,
+        preparationIdentity: canonicalProvisioningIdentity(h.record.desiredState), desiredZoneIdentity: canonicalProvisioningIdentity(zone),
+      },
+      completedSteps: ['reserve_and_create_state', 'ensure_principal_and_zone'],
+    }))
+    dbPort.renew.mockResolvedValue(job({ leaseOwner: 'worker', fencingToken: 4, leaseExpiresAt: '2099-01-01T00:00:00.000Z' }))
+    dbPort.checkpoint.mockImplementation(async (_db: Db, cp: { step: string; data: Record<string, unknown>; fencingToken: number }) => job({
+      fencingToken: cp.fencingToken, leaseOwner: 'worker', leaseExpiresAt: '2099-01-01T00:00:00.000Z', checkpointData: cp.data, completedSteps: [cp.step],
+    }))
+    await expect(h.coordinator.provisionPreparedAccount({ actor: root, idempotencyKey: 'retry-key', preparationReference: h.record.reference })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED', detail: { freshExecution: false, verificationRequired: true },
+    })
+    expect(h.reconcile).toHaveBeenCalledTimes(1)
+    expect(h.reconcile.mock.calls[0]?.[0].authority.operation).toMatchObject({ fencingToken: 4, leaseExpiresAt: '2099-01-01T00:00:00.000Z' })
+    expect(h.store.createAccount).not.toHaveBeenCalled()
+    expect(dbPort.createPrincipal).not.toHaveBeenCalled()
+    expect(dbPort.checkpoint.mock.calls.map(call => call[1].step)).not.toContain('reconcile_host')
+  })
+
+  it('sends the trusted principal id and refuses to call the agent when that id is omitted', async () => {
+    const token = 'a'.repeat(64)
+    const actorId = '11111111-1111-4111-8111-111111111111'
+    const sent: Request[] = []
+    const port = createAuthenticatedProvisioningPort({
+      token, fetch: async request => { sent.push(request); return new Response(null, { status: 503 }) },
+    })
+    const trusted = { actor: { id: actorId, kind: 'root', username: 'root' }, marker: 'trusted-actor' }
+    await expect(port.reconcile({ authority: trusted as never, binding: canonicalProvisioningIdentity(trusted) }, {
+      signal: AbortSignal.timeout(1_000), assertAuthority: async () => undefined,
+    })).rejects.toThrow()
+    expect(sent[0]?.headers.get('x-xpanel-principal-id')).toBe(actorId)
+    const omitted = { actor: { id: '', kind: 'root', username: 'root' }, marker: 'missing-principal' }
+    const calls = sent.length
+    await expect(port.reconcile({ authority: omitted as never, binding: canonicalProvisioningIdentity(omitted) }, {
+      signal: AbortSignal.timeout(1_000), assertAuthority: async () => { throw new Error('authority refreshed') },
+    })).rejects.toMatchObject({ code: 'UNAUTHENTICATED', detail: { stateChanged: false } })
+    expect(sent).toHaveLength(calls)
   })
 })

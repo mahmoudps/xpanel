@@ -920,7 +920,21 @@ export class HostReconciler {
       if (state && !state.active) {
         return { ok: false, error: `service unit ${unit} is not active after reload` }
       }
+      return { ok: true }
     }
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9_.:@-]|\\x[0-9a-fA-F]{2})*\.service$/.test(unit) || unit.length > 200) {
+      return { ok: false, error: `service unit ${unit} cannot be probed` }
+    }
+    const observed = await this.deps.executor.runCommand([
+      '/usr/bin/systemctl', 'show', '--no-pager',
+      '--property=Id,Names,LoadState,ActiveState,SubState,UnitFileState',
+      '--', unit,
+    ])
+    if (!observed.ok || observed.code !== 0) {
+      return { ok: false, error: observed.stderr.trim() || `service unit ${unit} probe failed` }
+    }
+    const active = observed.stdout.split('\n').find(line => line.startsWith('ActiveState='))?.slice('ActiveState='.length).trim()
+    if (active !== 'active') return { ok: false, error: `service unit ${unit} is ${active || 'unobserved'}` }
     return { ok: true }
   }
 

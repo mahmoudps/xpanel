@@ -72,13 +72,14 @@ export const status = (text: string, hooks?: HookAttributes): string => `<p role
 export const note = (text: string): string => `<p class="v2-muted">${esc(text)}</p>`
 
 export function page(props: PanelSurfaceProps, authority: PanelSettingsAuthority, route: string, title: string, description: string, bodyHtml: string, hooks?: HookAttributes): string {
-  const { locale, t, account, readable } = settingsContext(props, authority)
-  return `<section class="v2-panel-settings" data-v2-settings-route="${esc(route)}"${!readable && route !== '/security/account' ? ' data-readonly="true"' : ''}${account ? ` data-account="${esc(account.id)}" data-uid="${account.uid}"` : ''} lang="${locale}" dir="${localeDirection(locale)}"${hookAttrs(hooks)}>${pageHeader(t, { route, title, description, breadcrumb: [{ label: t(msgid('Home')), href: '/home' }, { label: title }] })}${bodyHtml}</section>`
+  const { locale, t, account, readable, readOnly } = settingsContext(props, authority)
+  const keepSecurityHostOpen = route === '/security/account' && readOnly
+  return `<section class="v2-panel-settings" data-v2-settings-route="${esc(route)}"${!readable && !keepSecurityHostOpen ? ' data-readonly="true"' : ''}${account ? ` data-account="${esc(account.id)}" data-uid="${account.uid}"` : ''} lang="${locale}" dir="${localeDirection(locale)}"${hookAttrs(hooks)}>${pageHeader(t, { route, title, description, breadcrumb: [{ label: t(msgid('Home')), href: '/home' }, { label: title }] })}${bodyHtml}</section>`
 }
 
 export function deniedPage(props: PanelSurfaceProps, authority: PanelSettingsAuthority, route: string, title: string, description: string): string {
   const { t } = settingsContext(props, authority)
-  return page(props, authority, route, title, description, notice(t, { tone: 'warn', lead: t(msgid('Unavailable')), text: t(msgctxt('theme:v2', 'An authorized account has not been read. Nothing was read or changed.')) }))
+  return page(props, authority, route, title, description, section('v2-settings-unavailable', title, notice(t, { tone: 'warn', lead: t(msgid('Unavailable')), text: t(msgctxt('theme:v2', 'An authorized account has not been read. Nothing was read or changed.')) })))
 }
 
 export const PANEL_SETTINGS_CSS = `.v2-panel-settings{display:flex;flex-direction:column;gap:var(--space-4);min-inline-size:0;text-align:start}

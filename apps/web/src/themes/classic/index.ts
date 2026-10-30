@@ -67,6 +67,7 @@ const renderUnavailable = (props: UnavailableProps): string => {
       ...(props.accountId ? { accountId: props.accountId } : {}),
       ...(props.session ? { username: props.session.username, role: props.session.role } : {}),
       signedIn: props.signedIn,
+      themeChooserWritable: false,
     }),
     content: `<section class="xp-workspace-summary" data-surface="${panelSurface}" data-tool-availability="unverified"${disabledRouteAttribute}${securityPage ? ' data-security-page="true"' : ''}>
   ${securityPage ? `<h1 class="xp-page-title">${escapeHtml(pageHeading)}</h1>` : design || `<h1 class="xp-page-title">${escapeHtml(pageHeading)}</h1>`}

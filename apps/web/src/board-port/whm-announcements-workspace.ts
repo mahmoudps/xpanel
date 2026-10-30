@@ -1,4 +1,4 @@
-import { classicWhmClientTemplates } from '../themes/classic/whm-client-templates.ts'
+import { classicWhmClientTemplates } from './whm-client-templates.ts'
 import { LOCALES, languageName, localeDirection, translator, type Locale, type MessageValues } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 import { ACCOUNT_ANNOUNCEMENT_SEVERITY_LABELS, ACCOUNT_ANNOUNCEMENT_STYLES } from './account-announcements-banner.ts'

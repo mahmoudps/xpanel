@@ -180,6 +180,7 @@ function bindDirectoryPrivacy(askDialog: ((options: Record<string, unknown>) => 
         clientTemplateSlot(row, 'path', 'bdi').textContent = rule.path
         clientTemplateSlot(row, 'prompt').textContent = rule.authName
         const list = clientTemplateSlot(row, 'users', 'div')
+        const removeRule = clientTemplateSlot(row, 'remove', 'button') as HTMLButtonElement
         rule.users.forEach((user, userIndex) => {
           const line = clone('directory-privacy-user', 'div', userSlots)
           clientTemplateSlot(line, 'username', 'bdi').textContent = user.username
@@ -200,7 +201,6 @@ function bindDirectoryPrivacy(askDialog: ((options: Record<string, unknown>) => 
         enabled.checked = rule.enabled; enabled.dataset.directoryPrivacyEnabled = rule.path
         enabled.setAttribute('aria-label', copy('Enabled') + ': ' + rule.path)
         enabled.addEventListener('change', event => { rule.enabled = (event.target as HTMLInputElement).checked })
-        const removeRule = clientTemplateSlot(row, 'remove', 'button') as HTMLButtonElement
         removeRule.textContent = copy('Remove folder')
         removeRule.addEventListener('click', event => { event.stopPropagation(); if (removeRule.disabled || busy || uncertain || !eligible()) return; draft.splice(index, 1); paint(); lock() })
         rows.appendChild(row)

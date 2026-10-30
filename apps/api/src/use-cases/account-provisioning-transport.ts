@@ -1,11 +1,10 @@
-import { fail } from '@xpanel/core'
+import { fail, isUuid } from '@xpanel/core'
 import type { AgentApp } from '@xpanel/agent'
 import { assertProvisioningReply, canonicalProvisioningIdentity, type ProvisioningReconcilePort, type ProvisioningReconcileReply } from './account-provisioning-port.ts'
 
 /**
- * Dedicated authenticated admission, not generic /reconcile. The agent owner must implement
- * this route and revalidate actor/revision/operation/fencing/source before native work.
- * Until then its 404 is a closed, unverified operation, never a fallback to generic apply.
+ * Dedicated authenticated admission, not generic /reconcile.
+ * The lifecycle's trusted actor id is sent as x-xpanel-principal-id. The JSON actor is only a claim.
  */
 export function createAuthenticatedProvisioningPort(source: { fetch: AgentApp['fetch']; token: string }): ProvisioningReconcilePort {
   if (!source.token || /[\r\n]/.test(source.token)) fail('SERVICE_UNAVAILABLE', 'account provisioning transport credential is unavailable')
@@ -14,12 +13,18 @@ export function createAuthenticatedProvisioningPort(source: { fetch: AgentApp['f
       if (request.binding !== canonicalProvisioningIdentity(request.authority)) {
         return fail('PRECONDITION_FAILED', 'account provisioning request binding is invalid', { stateChanged: false })
       }
+      const principalId = request.authority.actor?.id
+      if (!isUuid(principalId)) fail('UNAUTHENTICATED', 'an authenticated principal is required', { stateChanged: false })
       await context.assertAuthority()
       const timeout = AbortSignal.timeout(180_000)
       let reply: ProvisioningReconcileReply
       try {
         const response = await source.fetch(new Request('http://agent.local/host/account-provisioning', {
-          method: 'POST', headers: { 'x-xpanel-agent-token': source.token, 'content-type': 'application/json' },
+          method: 'POST', headers: {
+            'x-xpanel-agent-token': source.token,
+            'x-xpanel-principal-id': principalId,
+            'content-type': 'application/json',
+          },
           body: JSON.stringify(request), signal: AbortSignal.any([context.signal, timeout]),
         }))
         if (!response.ok || !response.body) throw new Error('unacknowledged reply')

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { translator } from './i18n.ts'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import { ACCOUNT_HTACCESS_CLIENT_BINDING, type HtaccessClientView } from './account-htaccess-client.ts'
 import { ACCOUNT_WEB_DIRECTIVES_CLIENT_BINDING } from './account-web-directives-client.ts'
@@ -8,8 +9,11 @@ import * as classic from './board-port/account-directive-client-templates.ts'
 import * as v2 from './themes/v2/pages/xpanel/advanced/directive-client-templates.ts'
 
 let environment: EnvironmentReturn
-beforeEach(async () => { environment = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test', runScripts: 'outside-only' } }) })
-afterEach(async () => { await environment.teardown(globalThis); vi.restoreAllMocks() })
+beforeEach(async () => {
+  environment = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test', runScripts: 'outside-only' } })
+  vi.stubGlobal('xpT', translator('en'))
+})
+afterEach(async () => { await environment.teardown(globalThis); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const accountId = '11111111-1111-4111-8111-111111111111', domainId = '22222222-2222-4222-8222-222222222222'
 const input = { locale: 'en' as const, accountId, domains: [{ id: domainId, accountId, name: 'example.test' }], canManage: true }
 const saved: HtaccessClientView = { context: { accountId, domainId, domainName: 'example.test', path: 'public_html/.htaccess', engine: 'apache', phpHandler: 'fpm' }, document: { exists: true, content: 'php_value memory_limit 128M', sizeBytes: 27, mtime: '2026-10-26T12:00:00.000Z', revision: 'a'.repeat(64) }, versions: [{ id: '44444444-4444-4444-8444-444444444444', at: '2026-10-26T12:00:00.000Z', actor: '<literal reviewer>', sizeBytes: 27, revision: 'a'.repeat(64), state: 'kept', current: true, canRestore: false }], capabilities: { canValidate: true, canSave: true, canRestore: false, canMigrate: false, reason: null }, application: { status: 'read', nativeQualified: false, syntaxChecked: false, httpStatus: null }, policy: { valid: true, issues: [], phpLines: [] }, reviewRequired: false }

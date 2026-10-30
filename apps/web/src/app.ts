@@ -35,6 +35,7 @@ import {
 } from './ws-client.ts'
 
 import { findUiThemeAsset, registeredUiThemeIds, resolveUiTheme } from './themes/registry.ts'
+export { findUiThemeAsset, registeredUiThemeIds, resolveUiTheme }
 import type { ThemePackageView, UnavailableProps, WorkspaceSummaryView } from './themes/contract.ts'
 
 export type WebSurfaceKind = 'login' | 'xwhm' | 'xpanel' | 'xmail'

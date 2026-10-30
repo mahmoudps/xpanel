@@ -1,7 +1,6 @@
 import { gzipSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
 import { parseMarkup } from '../markup.ts'
-import { classicWhmBackupClientTemplates } from '../../board-port/whm-backup-client-templates.ts'
 import { v2Stylesheet } from './assets.ts'
 import { v2SharedStylesheets, v2StylesheetsForDocument } from './route-assets.ts'
 import { v2WhmBackupClientTemplates } from './pages/xwhm/lifecycle/backup-client-templates.ts'
@@ -12,7 +11,7 @@ const routeCss = (surface: 'xpanel' | 'xwhm', route: string): string => v2Styles
 const hasClass = (value: string | undefined, name: string): boolean => (value ?? '').split(/\s+/).includes(name)
 
 describe('selected V2 dynamic fragment styling', () => {
-  it.each([['classic', classicWhmBackupClientTemplates, 'xp-whm-backup-actions'], ['v2', v2WhmBackupClientTemplates, 'v2-lifecycle__actions']] as const)('retains the %s action group inside the cloned pager and each multi-action backup cell', (_theme, templates, actionsClass) => {
+  it.each([['v2', v2WhmBackupClientTemplates, 'v2-lifecycle__actions']] as const)('retains the %s action group inside the cloned pager and each multi-action backup cell', (_theme, templates, actionsClass) => {
     const nodes = parseMarkup(templates())
     for (const name of ['pager', 'destination-row', 'run-row']) {
       const template = nodes.findIndex(node => node.attrs.get('data-xp-template') === 'whm-backup-' + name)

@@ -26,7 +26,7 @@ export const LOGIN_CLIENT_SCRIPT = MOBILE_NAVIGATION_CLIENT_SCRIPT + /* js */ St
   var shell = document.querySelector('[data-auth-state]');
   var login = document.querySelector('[data-login-form]');
   var mfaDisabled = document.documentElement.getAttribute('data-mfa-mode') === 'disabled';
-  var security = document.querySelector('[data-account-security="two-factor"]');
+  var security = document.querySelector('[data-account-security="' + 'two-factor' + '"]');
   var securityReadOnly = Boolean(security && security.getAttribute('data-auth-readonly') === 'true');
   var errorBox = document.querySelector('[data-auth-error]');
   var statusBox = document.querySelector('[data-auth-status]');

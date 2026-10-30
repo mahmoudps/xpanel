@@ -18,6 +18,7 @@ export function cloneViewRecord(root: HTMLElement, name: string, tag: string, va
     names.add(key)
     clientTemplateSlot(clone, key).textContent = String(values[key])
   }
+  if (names.size !== Object.keys(values).length) throw new Error('view_record_slot_unavailable')
   return clone
 }
 

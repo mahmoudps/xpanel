@@ -1,4 +1,4 @@
-import { classicWhmClientTemplates } from '../themes/classic/whm-client-templates.ts'
+import { classicWhmClientTemplates } from './whm-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 export type WhmMailServerPage = 'server' | 'routing' | 'outbound'
 /** `canManage` defaults to `canRead`: both pages are root-only, and the API re-checks root on every save. */

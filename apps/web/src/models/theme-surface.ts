@@ -1,4 +1,4 @@
-import { canOpenRegisteredRoute, canonicalNavigationRoute, isToolAuthorized, registeredDocumentAliases, tools as defaultCatalog, visibleNavigation, visibleTools, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
+import { canOpenRegisteredRoute, canonicalNavigationRoute, isToolAuthorized, navigation, registeredDocumentAliases, tools as defaultCatalog, visibleNavigation, visibleTools, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import type { Account, Principal } from '@xpanel/core'
 import type { MailSurfaceProps, PanelSurfaceProps, ThemeViewProps, WhmSurfaceProps } from '../themes/contract.ts'
 import { parseWebsiteAnalyticsSnapshot } from './website-analytics.ts'
@@ -144,7 +144,8 @@ function projectWhmSurfaceMode(props: WhmSurfaceProps & ThemeViewProps, presenta
   const visibility = props.visibility ?? { principal, ...(activeReseller ? { reseller: activeReseller } : {}) }
   const route = props.activeRoute ?? '/whm', catalog = props.catalog ?? defaultCatalog
   const access = surfaceAccess('xwhm', route, visibility, catalog)
-  if (presentation === 'live' ? !access.allowed : !canOpenRegisteredRoute(route, visibility)) return undefined
+  const registeredWhmRoute = navigation.some(surface => surface.surface === 'xwhm' && surface.sections.some(section => section.pages.some(page => page.route === canonicalNavigationRoute(route))))
+  if (presentation === 'live' ? !access.allowed : !registeredWhmRoute) return undefined
   const root = principal.kind === 'root'
   const accounts = (presentation === 'live' ? access.qualifiedTools : access.authorizedTools).has('list-accounts') ? props.accounts?.filter(account => root || account.ownerId === principal.id) : undefined
   const accountIds = new Set(accounts?.map(account => account.id)), assignedPlanIds = new Set(accounts?.map(account => account.planId))
