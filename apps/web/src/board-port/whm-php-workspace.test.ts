@@ -31,8 +31,9 @@ describe('PHP and Composer visual structure regressions', () => {
     expect([...page.querySelectorAll<HTMLElement>('[data-whm-detail-section]')].map(section => section.dataset.whmDetailSection)).toEqual(['php-versions', 'php-install', 'php-handlers', 'php-extensions', 'php-configure', 'php-functions'])
     const handlers = page.querySelector<HTMLTableElement>('[data-whm-detail-section="php-handlers"] table')!
     expect([...handlers.tBodies[0]!.rows].map(row => row.cells[0]!.textContent)).toEqual(['PHP-FPM', 'CGI / suexec', 'suPHP', 'lsphp'])
-    for (const row of handlers.tBodies[0]!.rows) { expect(row.cells).toHaveLength(4); expect(row.cells[3]!.textContent).toBe(locale === 'ar' ? 'غير مقروء' : 'Not read') }
-    expect(page.querySelectorAll('details')).toHaveLength(3)
+    for (const row of handlers.tBodies[0]!.rows) { expect(row.cells).toHaveLength(6); for (const cell of [...row.cells].slice(3)) expect(cell.textContent).toBe(locale === 'ar' ? 'غير مقروء' : 'Not read') }
+    expect(page.querySelectorAll('details')).toHaveLength(2)
+    expect(page.querySelector('[data-presentation-tabs="panels"]')).not.toBeNull()
     for (const details of page.querySelectorAll('details')) { details.open = true; expect(details.querySelector('summary')).not.toBeNull() }
     for (const name of ['php-selected-version', 'php-install-version', 'php-install-request', 'php-extension-version', 'php-version', 'php-ini', 'memory_limit', 'upload_max_filesize', 'post_max_size', 'max_execution_time', 'max_input_vars', 'php-exception-account', 'php-exception-reason']) expect(page.querySelector('[name="' + name + '"]')).not.toBeNull()
     for (const control of page.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input,select,textarea')) expect(control.disabled).toBe(true)
@@ -54,7 +55,7 @@ describe('PHP and Composer visual structure regressions', () => {
     expect(document.querySelector('[data-whm-php-source]')!.textContent).toBe('dpkg')
     expect(document.querySelector('[data-whm-php-usage]')!.textContent).toContain('example.test')
     for (const name of ['php-selected-version', 'php-extension-version', 'php-version']) { const select = document.querySelector<HTMLSelectElement>('[name="' + name + '"]')!; expect(select.value).toBe('8.3'); expect(select.disabled).toBe(false) }
-    for (const button of document.querySelectorAll<HTMLButtonElement>('button:not([data-whm-php-refresh])')) expect(button.disabled).toBe(true)
+    for (const button of document.querySelectorAll<HTMLButtonElement>('button:not([data-whm-php-refresh]):not([data-presentation-tab]):not([data-php-version-pick])')) expect(button.disabled).toBe(true)
     for (const control of document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea')) expect(control.disabled).toBe(true)
     expect(document.querySelector('[data-whm-detail-section="php-extensions"] tbody')!.textContent).toContain('php8.3-curl')
   })

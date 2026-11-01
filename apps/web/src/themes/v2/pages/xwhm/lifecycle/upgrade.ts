@@ -75,7 +75,7 @@ ${actions(button('cancel-pending', msgid('Cancel pending upgrade')))}
     msgid('The control plane services and private IPC are ready'),
   ])}`)
   const process = lifecycleCard(t, 'upgrade-process', msgid('How the upgrade runs'), `<p>${text(t, msgid('Only xPanel’s own services restart. Nginx, Apache, PHP-FPM, MariaDB and mail are reloaded at most.'))}</p><ol>${PHASES.filter(([key]) => key !== 'rollback').map(([, label]) => `<li>${text(t, label)}</li>`).join('')}</ol><p>${text(t, msgid('A healthy host flow stays recorded as retirement pending until the native coordinator settles it. A failed health check switches back to the previous release.'))}</p>`)
-  return `<div class="v2-lifecycle" data-whm-detail-route="/whm/server/upgrade" lang="${props.locale}" dir="${localeDirection(props.locale)}">
+  return `<div class="v2-lifecycle" data-whm-detail-route="/whm/server/upgrade" data-capability-state="${props.canRead === true ? 'authorized' : 'unavailable'}" lang="${props.locale}" dir="${localeDirection(props.locale)}">
 ${lifecycleHeader(t, msgid('Upgrade'), '/whm/server/upgrade', msgctxt('theme:v2', 'Review a verified release, run host preflight and confirm before changing the control plane.'))}
 <div class="v2-lifecycle__column" data-whm-upgrade-workspace data-upgrade-can-manage="${props.canRead && props.canManage}">
 ${status('banner', props.canRead ? msgid('Release state has not been read. Nothing has changed.') : msgctxt('theme:v2', 'Upgrade state is unavailable to this account. Nothing has changed.'))}

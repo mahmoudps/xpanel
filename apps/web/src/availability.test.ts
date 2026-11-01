@@ -1,3 +1,5 @@
+/// <reference lib="dom" />
+// @vitest-environment jsdom
 import { LOGIN_CLIENT_SCRIPT } from './login-client.ts'
 import { Script } from 'node:vm'
 import { describe, expect, it } from 'vitest'
@@ -9,6 +11,148 @@ import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
 import type { Account, Plan, Principal } from '@xpanel/core'
 import { composedRouteSpecs, nativeComposedRoutePaths } from './board-port/composed/all.ts'
 import { renderComposedRoutes } from './board-port/composed/render.ts'
+import { parseMarkup } from './themes/markup.ts'
+import { escapeHtml } from './html.ts'
+
+// Only the admitted session menu may display this supplied mailbox identity.
+// Keep the original whole-document payload exclusion after removing that one menu.
+const expectMailboxOnlyInChrome = (html: string, mailbox: string, marker: string): void => {
+  const document = new DOMParser().parseFromString(html, 'text/html')
+  const menus = document.querySelectorAll('details[data-user-menu]')
+  expect(menus).toHaveLength(1)
+  const menu = menus.item(0)
+  expect(menu?.closest('header')).not.toBeNull()
+  expect(menu?.closest('[data-tool-availability="unverified"]')).toBeNull()
+  expect(menu?.textContent).toContain(mailbox)
+  menu?.remove()
+  expect(document.documentElement.outerHTML).not.toContain(marker)
+}
+const expectDocumentForms = (html: string, mode: 'anonymous' | 'signed-in' | 'writable-home'): void => {
+  const nodes = parseMarkup(html)
+  const forms = nodes.flatMap((node, index) => node.tag === 'form' ? [{ node, index }] : [])
+  const hasAncestor = (index: number, attribute: string): boolean => {
+    for (let parent = nodes[index]!.parent; parent >= 0; parent = nodes[parent]!.parent) {
+      if (nodes[parent]!.attrs.has(attribute)) return true
+    }
+    return false
+  }
+  const within = (index: number, ancestor: number): boolean => {
+    for (let parent = nodes[index]!.parent; parent >= 0; parent = nodes[parent]!.parent) {
+      if (parent === ancestor) return true
+    }
+    return false
+  }
+  const prototypes = forms.filter(({ node }) => node.template >= 0)
+  expect(prototypes).toHaveLength(1)
+  for (const { node, index } of prototypes) {
+    expect(nodes[node.template]!.tag).toBe('template')
+    expect(nodes[node.template]!.attrs.get('data-xp-template')).toBe('prompt-dialog')
+    expect(hasAncestor(index, 'data-xp-prompt')).toBe(true)
+    expect(node.namespace).toBe('html')
+    expect(node.attrs.get('method')).toBe('dialog')
+    expect(node.attrs.get('data-xp-slot')).toBe('form')
+    expect(node.attrs.has('action')).toBe(false)
+  }
+  const expectedMenus = mode === 'writable-home' ? 2 : mode === 'signed-in' ? 1 : 0
+  const liveForms = forms.filter(({ node }) => node.template < 0)
+  // Session-owned preferences are admitted independently from unavailable hosting tools.
+  expect(liveForms).toHaveLength(expectedMenus)
+  const choices = nodes.flatMap((node, index) => node.template < 0 && node.attrs.has('data-ui-theme-form') ? [{ node, index }] : [])
+  expect(choices).toHaveLength(expectedMenus)
+  const menus = nodes.flatMap((node, index) => node.template < 0 && node.attrs.has('data-user-menu') ? [{ node, index }] : [])
+  if (mode !== 'anonymous') {
+    expect(menus).toHaveLength(expectedMenus)
+    for (const { node, index } of menus) {
+      expect(node.namespace).toBe('html')
+      expect(node.tag).toBe('details')
+      expect(choices.filter(choice => within(choice.index, index))).toHaveLength(1)
+    }
+  }
+  const choiceIds = new Set<string>()
+  for (const { node, index } of choices) {
+    expect(node.namespace).toBe('html')
+    expect(node.tag).toBe('form')
+    expect(node.attrs.has('hidden')).toBe(true)
+    expect(node.attrs.has('action')).toBe(false)
+    expect(hasAncestor(index, 'data-user-menu')).toBe(true)
+    expect(hasAncestor(index, 'data-ui-theme-preferences')).toBe(true)
+    for (const attribute of ['data-status-page', 'data-composed-route', 'data-extension-view', 'data-approved-xpanel-workspace', 'data-whm-detail-route']) {
+      expect(hasAncestor(index, attribute)).toBe(false)
+    }
+    const controls = nodes.filter((candidate, at) => ['input', 'select', 'textarea', 'button'].includes(candidate.tag) && within(at, index))
+    expect(controls.map(control => control.tag)).toEqual(['select', 'button'])
+    const choiceId = controls[0]!.attrs.get('id')
+    expect(choiceId).toBeTruthy()
+    expect(choiceIds.has(choiceId!)).toBe(false)
+    choiceIds.add(choiceId!)
+    const labels = nodes.filter((candidate, at) => candidate.tag === 'label' && within(at, index))
+    expect(labels.map(label => label.attrs.get('for'))).toEqual([choiceId])
+    expect(controls[0]!.attrs.get('name')).toBe('uiTheme')
+    expect(controls[0]!.attrs.has('data-ui-theme-choice')).toBe(true)
+    expect(controls[1]!.attrs.get('type')).toBe('submit')
+    expect(controls[1]!.attrs.has('data-ui-theme-save')).toBe(true)
+    for (const control of controls) expect(control.attrs.has('disabled')).toBe(true)
+  }
+}
+
+const expectOwnAccountIdOnlyInLocalLinks = (html: string, accountId: string): void => {
+  // Every raw ID must belong to one validated href, including the owned mobile drawer's dormant navigation.
+  expect(accountId).toMatch(/^[A-Za-z0-9-]+$/)
+  const nodes = parseMarkup(html)
+  const drawers = nodes.filter(node => node.namespace === 'html' && node.tag === 'template' && node.attrs.get('id') === 'xpanel-home-drawer')
+  let contextLinks = 0
+  for (const node of nodes) {
+    for (const [attribute, value] of node.attrs) {
+      if (!value.includes(accountId)) continue
+      expect(node.namespace).toBe('html')
+      if (node.template >= 0) {
+        const template = nodes[node.template]
+        if (!template) throw new Error('Missing account-link drawer template')
+        expect(drawers).toHaveLength(1)
+        expect(template).toBe(drawers[0])
+        expect(template.template).toBe(-1)
+        const parent = nodes[template.parent]
+        expect(parent?.namespace).toBe('html')
+        expect(parent?.tag).toBe('div')
+        expect(parent?.template).toBe(-1)
+        expect(parent?.attrs.get('data-home-phone')).toBe('true')
+        const hosts = nodes.filter(candidate => candidate.parent === template.parent && candidate.namespace === 'html' && candidate.tag === 'div' && candidate.attrs.get('id') === 'xpanel-home-drawer-host')
+        expect(hosts).toHaveLength(1)
+        expect(hosts[0]?.template).toBe(-1)
+        expect(hosts[0]?.attrs.has('hidden')).toBe(true)
+        let navigation = false, dialog = false, ancestorIndex = node.parent
+        while (ancestorIndex >= 0 && ancestorIndex !== node.template) {
+          const ancestor = nodes[ancestorIndex]
+          if (!ancestor) throw new Error('Missing account-link drawer ancestor')
+          if (ancestor.namespace === 'html' && ancestor.tag === 'nav' && ancestor.attrs.has('data-xp-sidebar')) navigation = true
+          if (ancestor.namespace === 'html' && ancestor.tag === 'div' && ancestor.attrs.get('id') === 'm-drawer' && ancestor.attrs.get('role') === 'dialog' && ancestor.attrs.get('aria-modal') === 'true') dialog = true
+          ancestorIndex = ancestor.parent
+        }
+        expect(navigation).toBe(true)
+        expect(dialog).toBe(true)
+      } else {
+        expect(node.template).toBe(-1)
+      }
+      expect(node.tag).toBe('a')
+      expect(attribute).toBe('href')
+      expect(value.startsWith('/') && !value.startsWith('//')).toBe(true)
+      expect(value.split(accountId)).toHaveLength(2)
+      const url = new URL(value, 'https://xpanel.invalid')
+      expect(url.origin).toBe('https://xpanel.invalid')
+      expect(url.searchParams.getAll('accountId')).toEqual([accountId])
+      expect(url.pathname).not.toContain(accountId)
+      expect(url.hash).not.toContain(accountId)
+      for (const [key, parameter] of url.searchParams) {
+        if (parameter.includes(accountId)) {
+          expect(key).toBe('accountId')
+          expect(parameter).toBe(accountId)
+        }
+      }
+      contextLinks++
+    }
+  }
+  expect(html.split(accountId).length - 1).toBe(contextLinks)
+}
 
 const unavailableProviderRead = (): never => { throw new Error('unqualified_provider_read') }
 
@@ -37,7 +181,8 @@ describe('verified production availability', () => {
       expect(html).toContain(`data-composed-route="${spec.route}"`)
       expect(html).toContain('data-read-state="unavailable"')
       expect(html).toContain('data-tool-availability="unverified"')
-      expect(html).not.toMatch(/<form\b|data-read-state="(?:loaded|empty)"/)
+      expectDocumentForms(html, 'signed-in')
+      expect(html).not.toMatch(/data-read-state="(?:loaded|empty)"/)
       const staticOnly = renderComposedRoutes([spec], {
         locale, route: spec.route,
         get account() { return unavailableProviderRead() },
@@ -65,7 +210,8 @@ describe('verified production availability', () => {
     expect(html).toContain('data-installer-state="unavailable"')
     expect(html).toContain('data-tool-availability="unverified"')
     expect(html).toMatch(/<button\b[^>]*disabled[^>]*data-wiring="unavailable"/)
-    expect(html).not.toMatch(/<form\b|data-installer-progress="(?:running|complete)"/)
+    expectDocumentForms(html, 'signed-in')
+    expect(html).not.toMatch(/data-installer-progress="(?:running|complete)"/)
     for (const marker of ['private-store-domain-marker', '/private-home-marker', 'private-contact-marker']) expect(html).not.toContain(marker)
   })
 
@@ -75,7 +221,7 @@ describe('verified production availability', () => {
       ...(kind === 'missing' ? {} : { panel: { account: { ...summaryAccount, ...(kind === 'foreign' ? { id: 'foreign-account' } : { status: 'suspended' as const }) } } }),
     })
     expect(html).not.toContain('data-extension-view')
-    expect(html).not.toMatch(/<form\b/)
+    expectDocumentForms(html, 'signed-in')
   })
 
   it.each(['xwhm', 'xpanel', 'xmail'] as const)('keeps an anonymous %s workspace unavailable without admitting registered navigation', surface => {
@@ -96,7 +242,8 @@ describe('verified production availability', () => {
     if (surface === 'xmail') expect(sidebar).toContain('data-security-link="true"')
     else expect(sidebar).not.toContain('data-security-link="true"')
     expect(sidebar.replace(/<a\b[^>]*data-security-link="true"[^>]*>[\s\S]*?<\/a>/g, '')).not.toMatch(/<a\b/)
-    expect(html).not.toMatch(/<form\b|data-cmdk-item="/)
+    expectDocumentForms(html, 'anonymous')
+    expect(html).not.toMatch(/data-cmdk-item="/)
     expect(html).not.toContain('alice-shop.com')
     expect(html).not.toMatch(/data-generation-chip=|data-service-row=|data-account-row=|data-mail-uid=|data-realtime-enabled="true"/)
     for (const marker of ['owner7.example.test', 'Configured plan7', 'private-mailbox-marker', 'private-account-id', 'private-contact-marker']) expect(html).not.toContain(marker)
@@ -126,17 +273,25 @@ describe('verified production availability', () => {
     expect(html).toContain('data-action="logout"')
     // Unqualified documents omit the qualified-only palette, including an owner's eligible Home link.
     expect(html).not.toMatch(/id="xp-cmdk-modal"|data-cmdk-item="/)
-    expect(html).not.toMatch(/<form\b|data-generation-chip=|data-service-row=|data-account-row=|data-mail-uid=|data-realtime-enabled="true"/)
-    for (const marker of ['owner7.example.test', 'Configured plan7', row.principal.id, 'private-account-id', 'private-contact-marker', 'private-audit-action-marker', 'private-audit-target-marker', 'private-mailbox-marker', 'private-recipient-marker', 'private-subject-marker', 'private-body-marker']) expect(html).not.toContain(marker)
+    expectDocumentForms(html, 'signed-in')
+    expect(html).not.toMatch(/data-generation-chip=|data-service-row=|data-account-row=|data-mail-uid=|data-realtime-enabled="true"/)
+    if (row.surface === 'xmail') expectMailboxOnlyInChrome(html, 'private-mailbox-marker@example.test', 'private-mailbox-marker')
+    else expect(html).not.toContain('private-mailbox-marker')
+    for (const marker of ['owner7.example.test', 'Configured plan7', row.principal.id, 'private-account-id', 'private-contact-marker', 'private-audit-action-marker', 'private-audit-target-marker', 'private-recipient-marker', 'private-subject-marker', 'private-body-marker']) expect(html).not.toContain(marker)
   })
 
   it('does not publish provider payloads just because a principal is authenticated', () => {
     const html = renderWebApp({
       surface: 'xmail', visibility: { principal: { kind: 'user', id: 'u1', username: 'owner', accountId: 'a1' } },
-      mail: { mailbox: 'private-marker@example.test', messages: [] },
+      mail: { mailbox: 'private-marker@example.test', messages: [{
+        uid: 17, folder: 'INBOX', from: 'private-sender-marker@example.test', to: 'private-marker@example.test',
+        subject: 'private-subject-marker', preview: 'private-preview-marker', body: 'private-body-marker',
+        receivedAt: '2026-10-26T00:00:00Z', unread: false,
+      }] },
     })
     expect(html).toContain('data-tool-availability="unverified"')
-    expect(html).not.toContain('private-marker')
+    expectMailboxOnlyInChrome(html, 'private-marker@example.test', 'private-marker')
+    for (const marker of ['private-sender-marker', 'private-subject-marker', 'private-preview-marker', 'private-body-marker']) expect(html).not.toContain(marker)
     expect(html).toContain('data-workspace-identity="true"')
     expect(html).not.toContain('data-workspace-account-overview=')
   })
@@ -149,8 +304,10 @@ describe('verified production availability', () => {
     expect(html).toContain(locale === 'ar' ? 'قيد التفعيل' : 'Coming soon')
     if (locale === 'ar') expect(html).toContain('<bdi dir="ltr">owner7.example.test</bdi>')
     expect(html).not.toContain('data-tool-availability="unverified"')
-    expect(html).not.toMatch(/<form\b|data-generation-chip=|[\u0660-\u0669\u06f0-\u06f9]/)
-    for (const marker of ['private-contact-marker', 'private-account-id', 'private-plan-id', 'private-feature-id', 'private-suspension-marker', '9123457', 'quotaUsed']) expect(html).not.toContain(marker)
+    expectDocumentForms(html, 'writable-home')
+    expect(html).not.toMatch(/data-generation-chip=|[\u0660-\u0669\u06f0-\u06f9]/)
+    expectOwnAccountIdOnlyInLocalLinks(html, summaryAccount.id)
+    for (const marker of ['private-contact-marker', 'private-plan-id', 'private-feature-id', 'private-suspension-marker', '9123457', 'quotaUsed']) expect(html).not.toContain(marker)
   })
 
   it.each([
@@ -277,11 +434,59 @@ describe('verified production availability', () => {
       : { kind: 'user' as const, id: 'synthetic-owner', username: 'synthetic-owner', accountId: 'synthetic-account' }
     const html = renderWebApp({ surface, activeRoute: '/synthetic-unregistered-route', visibility: { principal, disabledFeatures: new Set() } })
     expect(html).toContain('data-tool-availability="unverified"')
-    expect(html).not.toMatch(/<form\b|data-cmdk-item="/)
+    expectDocumentForms(html, 'signed-in')
+    expect(html).not.toMatch(/data-cmdk-item="/)
     expect(html).not.toContain('data-realtime-enabled="true"')
   })
 })
 
+describe('parsed native form admission', () => {
+  it.each(['extra hidden form', 'preference owner loss', 'unknown inert form', 'own account ID text'] as const)('rejects %s in the document boundary', kind => {
+    const home = kind === 'preference owner loss' || kind === 'own account ID text'
+    const html = renderWebApp({
+      surface: 'xpanel', activeRoute: home ? '/home' : '/resources',
+      ...(kind === 'own account ID text' ? { accountId: summaryAccount.id } : {}),
+      visibility: { principal: summaryOwner },
+      ...(home ? { panel: { account: summaryAccount, plan: summaryPlan } } : {}),
+    })
+    expectDocumentForms(html, home ? 'writable-home' : 'signed-in')
+    if (kind === 'own account ID text') {
+      expectOwnAccountIdOnlyInLocalLinks(html, summaryAccount.id)
+      const href = parseMarkup(html).find(node => node.template < 0 && node.tag === 'a' && node.attrs.get('href')?.includes(summaryAccount.id))?.attrs.get('href')
+      expect(href).toBeTruthy()
+      for (const text of [
+        summaryAccount.id,
+        'href="' + escapeHtml(href!) + '"',
+        escapeHtml('href="' + href! + '"'),
+      ]) {
+        const altered = html.replace('</body>', '<p>' + text + '</p></body>')
+        expect(() => expectOwnAccountIdOnlyInLocalLinks(altered, summaryAccount.id)).toThrow()
+      }
+      const drawerStart = '<template id="xpanel-home-drawer">'
+      expect(html).toContain(drawerStart)
+      const drawerText = html.replace(drawerStart, drawerStart + '<p>' + summaryAccount.id + '</p>')
+      expect(() => expectOwnAccountIdOnlyInLocalLinks(drawerText, summaryAccount.id)).toThrow()
+      const detachedDrawerLink = html.replace(drawerStart, drawerStart + '<a href="' + escapeHtml(href!) + '">unexpected link</a>')
+      expect(() => expectOwnAccountIdOnlyInLocalLinks(detachedDrawerLink, summaryAccount.id)).toThrow()
+      const unownedTemplate = html.replace('</body>', '<template id="unexpected-account-links"><a href="' + escapeHtml(href!) + '">unexpected link</a></template></body>')
+      expect(() => expectOwnAccountIdOnlyInLocalLinks(unownedTemplate, summaryAccount.id)).toThrow()
+
+      return
+    }
+    let altered: string
+    if (kind === 'preference owner loss') {
+      const form = /<form data-ui-theme-form hidden>[\s\S]*?<\/form>/.exec(html)?.[0]
+      expect(form).toBeTruthy()
+      altered = html.replace(form!, '').replace('</body>', form! + '</body>')
+    } else {
+      const unexpected = kind === 'extra hidden form'
+        ? '<form hidden><input disabled></form>'
+        : '<template data-unexpected-prototype><form method="dialog"></form></template>'
+      altered = html.replace('</body>', unexpected + '</body>')
+    }
+    expect(() => expectDocumentForms(altered, home ? 'writable-home' : 'signed-in')).toThrow()
+  })
+})
 describe('emitted browser JavaScript syntax', () => {
   it('parses the complete emitted script rather than the TypeScript template source', () => {
     expect(() => new Script(BROWSER_REALTIME_SCRIPT, { filename: 'xpanel-realtime-client.js' })).not.toThrow()

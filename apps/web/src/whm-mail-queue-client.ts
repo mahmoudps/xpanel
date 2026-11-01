@@ -1,4 +1,5 @@
-import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './whm-client-templates.ts'
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates
 const whmClientNode = canonicalWhmClientNode, clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
@@ -61,7 +62,31 @@ function bindWhmMailQueue(askDialog: Ask | undefined): void {
     const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
     if (!status || !refresh || !rows || !banner || !results || !selectAll || !selectedLabel) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.mailQueueCanRead === 'true' && !root.closest(denied) && !!request
+    let templateContractIntact = true
+    const templateContracts = [
+      ['whm-mail-queue-row', 'tr', { 'select': 'td', 'reference': 'td', 'queue': 'td', 'arrived': 'td', 'age': 'td', 'bytes': 'td', 'sender': 'td', 'recipients': 'td', 'reason': 'td', 'actions': 'td' }],
+      ['whm-mail-queue-empty', 'tr', { 'content': 'td' }],
+      ['whm-mail-queue-actions', 'div', { 'content': 'div' }],
+      ['whm-mail-queue-action', 'button', { 'content': 'button' }],
+      ['whm-mail-queue-delete', 'button', { 'content': 'button' }],
+    ] as const
+    const verifyWhmTemplates = (): void => {
+      if (!templateContractIntact) throw new Error('client_template_contract_unavailable')
+      try { assertWhmClientTemplates(root, templateContracts) } catch (error) {
+        templateContractIntact = false
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+        status.dataset.state = 'unavailable'; status.textContent = t('Unavailable')
+        throw error
+      }
+    }
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.mailQueueCanRead === 'true' && !root.closest(denied) && !!request)
+    if (admitted()) { try { verifyWhmTemplates() } catch { return } }
+    const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
+      verifyWhmTemplates()
+      const reply = await request!(...args)
+      verifyWhmTemplates()
+      return reply
+    }
     const manageable = (): boolean => admitted() && root.dataset.mailQueueCanManage === 'true'
     const names: Record<string, string> = { incoming: t('Incoming'), active: t(msgctxt('whm-mail-queue-client', 'Active')), deferred: t(msgctxt('whm-mail-queue-client', 'Deferred')), hold: t('Hold'), maildrop: t('Maildrop') }
     const labels: Record<string, string> = { deliver: t('Retry now'), hold: t(msgctxt('whm-mail-queue-client', 'Hold')), release: t('Release'), delete: t('Delete') }
@@ -134,7 +159,7 @@ function bindWhmMailQueue(askDialog: Ask | undefined): void {
     const send = async (action: string, item: MailQueueMessageView, revision: string): Promise<{ kind: string; after?: MailQueueActionView['after'] }> => {
       const input = { action, queueId: item.queueId, queue: item.queue }
       let value: unknown
-      try { value = await request!('POST', '/api/server/mail-queue/action', { ...input, expectedRevision: revision }) }
+      try { value = await checkedRequest('POST', '/api/server/mail-queue/action', { ...input, expectedRevision: revision }) }
       catch (error) {
         const problem = error && typeof error === 'object' ? error as { status?: number; code?: string; details?: Record<string, unknown> } : {}, details = problem.details && typeof problem.details === 'object' ? problem.details : {}
         if (details.unknownOutcome === true || details.verificationRequired === true) return { kind: 'unknown' }
@@ -153,7 +178,7 @@ function bindWhmMailQueue(askDialog: Ask | undefined): void {
       if (busy || !admitted()) return
       busy = true; controls(); note('reading', t('Reading the Postfix queue…'))
       try {
-        const next = readMailQueueView(await request!('GET', '/api/server/mail-queue'))
+        const next = readMailQueueView(await checkedRequest('GET', '/api/server/mail-queue'))
         if (!admitted()) return
         view = next
         for (const queueId of [...selected]) if (!next.messages.some(item => item.queueId === queueId)) selected.delete(queueId)

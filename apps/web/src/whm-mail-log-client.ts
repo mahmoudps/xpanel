@@ -1,4 +1,5 @@
-import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates
 const whmClientNode = canonicalWhmClientNode
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
@@ -116,7 +117,27 @@ function bindWhmMailLog(): void {
     const delivery = root.dataset.whmMailLog === 'delivery'
     const form = root.querySelector<HTMLFormElement>('[data-mail-log-form]'), status = root.querySelector<HTMLElement>('[data-mail-log-status]'), range = root.querySelector<HTMLSelectElement>('[data-mail-log-range]'), submit = root.querySelector<HTMLButtonElement>('[data-mail-log-submit]')
     if (!form || !status || !range || !submit) return
-    const admitted = (): boolean => root.isConnected && root.dataset.mailLogCanRead === 'true' && !root.closest(denied) && !!send
+    let templateContractIntact = true
+    const templateContracts = [
+      ['whm-mail-timeline-button', 'button', { 'content': 'button' }],
+    ] as const
+    const verifyWhmTemplates = (): void => {
+      if (!templateContractIntact) throw new Error('client_template_contract_unavailable')
+      try { assertWhmClientTemplates(root, templateContracts) } catch (error) {
+        templateContractIntact = false
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+        status.dataset.state = 'unavailable'; status.textContent = t('Unavailable')
+        throw error
+      }
+    }
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.mailLogCanRead === 'true' && !root.closest(denied) && !!send)
+    if (admitted()) { try { verifyWhmTemplates() } catch { return } }
+    const checkedRequest: NonNullable<typeof send> = async (...args: Parameters<NonNullable<typeof send>>) => {
+      verifyWhmTemplates()
+      const reply = await send!(...args)
+      verifyWhmTemplates()
+      return reply
+    }
     const fact = (key: string, value: string): void => { const node = root.querySelector<HTMLElement>('[data-mail-log-fact="' + key + '"]'); if (node) node.textContent = value }
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const controls = form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')
@@ -211,7 +232,7 @@ function bindWhmMailLog(): void {
       const token = ++generation
       busy = true; sync(); note('reading', t('Reading Postfix delivery events from the journal…'))
       try {
-        const raw = await send('GET', '/api/server/mail-log/' + (delivery ? 'delivery' : 'monitor') + '?' + params)
+        const raw = await checkedRequest('GET', '/api/server/mail-log/' + (delivery ? 'delivery' : 'monitor') + '?' + params)
         if (token !== generation || !admitted()) return
         const view = delivery ? readMailDeliveryView(raw) : readMailMonitorView(raw)
         fact('observed', time(view.observedAt)); fact('window', time(view.window.since) + ' – ' + time(view.window.until))

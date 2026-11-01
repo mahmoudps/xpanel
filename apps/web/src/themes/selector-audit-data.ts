@@ -353,10 +353,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/account-mailing-lists-client.ts",
-    "sha256": "9e422d0523281e40f6cb35151c3a12ee75403c682e1c2dabbbc2b3002d674af9",
+    "sha256": "b988d59edf3e0923449396caf0adf5b662c70180fe42428103fe47e4bd8268db",
     "sites": [
       {
-        "line": 107,
+        "line": 108,
         "column": 85,
         "method": "closest",
         "argument": "denied",
@@ -515,7 +515,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/account-sessions-client.ts",
-    "sha256": "bc7dc5ca480fd55d9935a38586719b1658f051537dae8becafb5e3073637c073",
+    "sha256": "d11c5f954f0e8091daecb68a9d330353a24f830dec0bf44539de9d4059ee810f",
     "sites": [
       {
         "line": 74,
@@ -725,7 +725,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/acct-restore-client.ts",
-    "sha256": "60b445cadc91eab40c18c2fe307fa99404f9a7f8220bae249b8eec4664589cf0",
+    "sha256": "ac5a4b14cbf9158047da9e929a618a7c26c0692f89404de92b417d79def2deb7",
     "sites": [
       {
         "line": 84,
@@ -829,21 +829,21 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/approved-host-services-client.ts",
-    "sha256": "73a68285cb80b0c491a5a64433573a7ffa2f2fb479971b46008a21a4a1fe646c",
+    "sha256": "743e7479e44ad720f4055a2eea5e987a999b5b394448e3b2b55dbeca2074f64c",
     "sites": [
       {
-        "line": 12,
-        "column": 71,
-        "method": "closest",
-        "argument": "unavailable",
-        "classification": "literal-ineligibility-ancestor-policy",
+        "line": 15,
+        "column": 50,
+        "method": "querySelectorAll",
+        "argument": "selector",
+        "classification": "finite-helper-or-variant-selector",
         "controllers": [
-          "ancestor-eligibility-policy"
+          "approved-host-services"
         ]
       },
       {
-        "line": 54,
-        "column": 81,
+        "line": 23,
+        "column": 135,
         "method": "closest",
         "argument": "unavailable",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -855,11 +855,61 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/board-port/account-announcements-banner-client.ts",
-    "sha256": "2722857264f1d30e18402465cf7b3ec11043c0f2a2855add9bd3d9d039f50526",
+    "sha256": "eb3d72d50b5d49ac3e88fe77ef77ea388a3c088659fe42e7aa940dce0a6a994c",
     "sites": [
       {
-        "line": 73,
+        "line": 97,
         "column": 51,
+        "method": "closest",
+        "argument": "denied",
+        "classification": "literal-ineligibility-ancestor-policy",
+        "controllers": [
+          "ancestor-eligibility-policy"
+        ]
+      },
+      {
+        "line": 101,
+        "column": 93,
+        "method": "querySelectorAll",
+        "argument": "selector",
+        "classification": "finite-source-classified",
+        "controllers": [
+          "account-announcements-owned-root"
+        ]
+      },
+      {
+        "line": 117,
+        "column": 45,
+        "method": "closest",
+        "argument": "denied",
+        "classification": "literal-ineligibility-ancestor-policy",
+        "controllers": [
+          "ancestor-eligibility-policy"
+        ]
+      },
+      {
+        "line": 130,
+        "column": 134,
+        "method": "closest",
+        "argument": "denied",
+        "classification": "literal-ineligibility-ancestor-policy",
+        "controllers": [
+          "ancestor-eligibility-policy"
+        ]
+      },
+      {
+        "line": 145,
+        "column": 154,
+        "method": "closest",
+        "argument": "denied",
+        "classification": "literal-ineligibility-ancestor-policy",
+        "controllers": [
+          "ancestor-eligibility-policy"
+        ]
+      },
+      {
+        "line": 156,
+        "column": 47,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -1069,10 +1119,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/board-port/xpanel-home.ts",
-    "sha256": "5f45f0d0fbda850c62434f6e018b78a1efd4f2c0298e190a1097b82268d8f204",
+    "sha256": "a843f31e2fd6e0cf12cd8bd42024ee9650453de384ad83b5a28c77553e3dde3e",
     "sites": [
       {
-        "line": 1063,
+        "line": 1084,
         "column": 41,
         "method": "getElementById",
         "argument": "inputId",
@@ -1083,7 +1133,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1064,
+        "line": 1085,
         "column": 49,
         "method": "getElementById",
         "argument": "peerId",
@@ -1094,7 +1144,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1065,
+        "line": 1086,
         "column": 41,
         "method": "getElementById",
         "argument": "countId",
@@ -1105,7 +1155,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1066,
+        "line": 1087,
         "column": 39,
         "method": "querySelector",
         "argument": "rootSel",
@@ -1116,7 +1166,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1179,
+        "line": 1200,
         "column": 64,
         "method": "querySelectorAll",
         "argument": "homeFocusSelector",
@@ -1127,7 +1177,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1297,
+        "line": 1318,
         "column": 43,
         "method": "getElementById",
         "argument": "button.getAttribute('aria-controls') || ''",
@@ -1238,7 +1288,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/directory-privacy-client.ts",
-    "sha256": "02211f83a569ed70731cfe9a8fd88fd3ea17029b5d43d9b091ea82b66b01bb1f",
+    "sha256": "7593a9fefb1bba1185cbf2526afd004dcef5b72d9ef9078e96f0da4a570c4b9c",
     "sites": [
       {
         "line": 147,
@@ -1280,10 +1330,54 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/file-workspace-client.ts",
-    "sha256": "56fd97b385b19e8f069c42c57e8f30a46dca627a75159e1f0ffb6e419e773f82",
+    "sha256": "6e3cdee0053c3e490f92725260dfba5adec065d63bb1fdb2372d2d8a99cc5e0f",
     "sites": [
       {
+        "line": 134,
+        "column": 56,
+        "method": "querySelectorAll",
+        "argument": "selector",
+        "classification": "finite-helper-or-variant-selector",
+        "controllers": [
+          "file-workspace-browse-presentation",
+          "file-workspace-trash-presentation"
+        ]
+      },
+      {
         "line": 166,
+        "column": 71,
+        "method": "querySelector",
+        "argument": "'[data-file-workspace-action=\"'+action+'\"]'",
+        "classification": "finite-source-classified",
+        "controllers": [
+          "file-workspace-browse",
+          "file-workspace-trash"
+        ]
+      },
+      {
+        "line": 182,
+        "column": 77,
+        "method": "querySelector",
+        "argument": "'[data-file-workspace-action=\"'+action+'\"]'",
+        "classification": "finite-source-classified",
+        "controllers": [
+          "file-workspace-browse",
+          "file-workspace-trash"
+        ]
+      },
+      {
+        "line": 183,
+        "column": 74,
+        "method": "querySelector",
+        "argument": "'[data-file-workspace-action=\"'+(browse?'chmod':'purge')+'\"]'",
+        "classification": "finite-source-classified",
+        "controllers": [
+          "file-workspace-browse",
+          "file-workspace-trash"
+        ]
+      },
+      {
+        "line": 252,
         "column": 93,
         "method": "closest",
         "argument": "denied",
@@ -1293,8 +1387,28 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 255,
+        "line": 302,
+        "column": 241,
+        "method": "closest",
+        "argument": "denied",
+        "classification": "literal-ineligibility-ancestor-policy",
+        "controllers": [
+          "ancestor-eligibility-policy"
+        ]
+      },
+      {
+        "line": 345,
         "column": 92,
+        "method": "closest",
+        "argument": "denied",
+        "classification": "literal-ineligibility-ancestor-policy",
+        "controllers": [
+          "ancestor-eligibility-policy"
+        ]
+      },
+      {
+        "line": 357,
+        "column": 264,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -1345,7 +1459,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/mail-attachments-client.ts",
-    "sha256": "8dd63844b1daaf0672aa107d74995b5cbff5050ebf3d92f8cccf19dbc3399896",
+    "sha256": "374c15412ab279c7e4831cd7a27958e0d6d0d912aa5ea820dd22d38b1480330f",
     "sites": [
       {
         "line": 40,
@@ -1361,7 +1475,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/mail-calendar-client.ts",
-    "sha256": "a1ffdde42e1d37e9db7c54136fc84587558604b1ba053ecae30beb00127b699e",
+    "sha256": "50c0f26e4684eaefd531b36bf9b8afe7b1494fbbad1883931e7eaa66376cbf7e",
     "sites": [
       {
         "line": 25,
@@ -1501,7 +1615,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/mail-contacts-tools-client.ts",
-    "sha256": "38cba200a9b81d41d326d979e8e3896b123906a0457bbbb4439901bf2ee37430",
+    "sha256": "f38a83525b54338f55935764a08df64b6e2aac1be326937a2cffc1dd49d61a91",
     "sites": [
       {
         "line": 103,
@@ -1517,7 +1631,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/mail-contacts-workspace-client.ts",
-    "sha256": "3e84be63c69c90ae605d7d9b058a660d1f3e6651f0e09fb4b5a8e38050ea8b04",
+    "sha256": "7778240ed3d44ff666295e04254d5e1971afc73d497deae143e82fc02bd735ff",
     "sites": [
       {
         "line": 91,
@@ -1585,11 +1699,11 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/mail-folder-workspace-client.ts",
-    "sha256": "8d1abbab7ee7d819bba0cc40cb07524c631ed28963158c525e18b744b326a37e",
+    "sha256": "e5b1966ea7b2ca4ccb56db3d301658807fc8baa5244010b528e2426382e1043f",
     "sites": [
       {
         "line": 192,
-        "column": 772,
+        "column": 877,
         "method": "querySelector",
         "argument": "selector",
         "classification": "source-classified",
@@ -1611,7 +1725,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/mail-folders-client.ts",
-    "sha256": "eb10479638e17a559406a3186ed75ff891782b9792d1caa6c655b35dc9ca485a",
+    "sha256": "9b9648644572d5f248f760d00fc14b34706980453603fff135b4981da0fced91",
     "sites": [
       {
         "line": 65,
@@ -1637,7 +1751,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/mail-identities-client.ts",
-    "sha256": "6aac60f09cfdaed0ac3a1e5d9ca5c78bcee374636ea5c57a291e8d379045f2f2",
+    "sha256": "83ff05725ae5f94f806387a6cddc6a651403c7e710c9df26b4da4d78dd3f5155",
     "sites": [
       {
         "line": 106,
@@ -1653,7 +1767,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/mail-mailbox-forwarders-client.ts",
-    "sha256": "b886d442e09ca824dd77c14923fe03f209866b212636794af9cbd62bc43f4994",
+    "sha256": "bf80be43242424d3a83bac9a0b10fc1c57e4a1a3eecefd1e94af033b4dc5a937",
     "sites": [
       {
         "line": 48,
@@ -1695,7 +1809,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/mail-search-client.ts",
-    "sha256": "ede4994d81351b52a8a867b3eac2e5801a0424e68494a7d3b0ec59d6259d8c1e",
+    "sha256": "e592cf24bbaae99112375d5300b5b928506a6d11dbec69e8fb8ac4f0a6eb08a8",
     "sites": [
       {
         "line": 70,
@@ -1773,7 +1887,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/mail-track-delivery-client.ts",
-    "sha256": "c33a346fce2f551aea04a968748e6aba25e4b803bf577c5cd08a6d0c6132be6b",
+    "sha256": "95842254e7ca5098c63066ec7a0309b7e53d94d4d6e67122508118c50c23e315",
     "sites": [
       {
         "line": 67,
@@ -2209,10 +2323,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/sec-security-client.ts",
-    "sha256": "19dfc335dfaa54a38583cf83f4b7591268b58f28907ac658bb43ed2f60d10ae8",
+    "sha256": "694860e75c82e3bbc9c04a975d412d6ce864b13904150d9227289c69748684af",
     "sites": [
       {
-        "line": 43,
+        "line": 45,
         "column": 100,
         "method": "querySelector",
         "argument": "selector",
@@ -2228,7 +2342,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 44,
+        "line": 46,
         "column": 104,
         "method": "querySelectorAll",
         "argument": "selector",
@@ -2244,8 +2358,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 47,
-        "column": 107,
+        "line": 51,
+        "column": 128,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -2455,10 +2569,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-announcements-client.ts",
-    "sha256": "272aa057b9ce5075b6be0f6e25e6dea68a3bf9afd3227c0d0cde1471c29343c5",
+    "sha256": "7fd2240d8a9e3ecf38cf6c903fbf5001f3d16a7b6d806fdc25f08010ae943d28",
     "sites": [
       {
-        "line": 68,
+        "line": 70,
         "column": 90,
         "method": "querySelector",
         "argument": "selector",
@@ -2468,8 +2582,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 80,
-        "column": 121,
+        "line": 82,
+        "column": 128,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -2481,10 +2595,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-backup-destinations-client.ts",
-    "sha256": "e028b7eba7c47ea0d5ca6858c250078fab7786bb3bbb2f98b369a5109e3c4dea",
+    "sha256": "122d461dace0db33cf92f07550347d80fc65e0bc9cd433e46856ea755849c646",
     "sites": [
       {
-        "line": 46,
+        "line": 89,
         "column": 118,
         "method": "querySelector",
         "argument": "'[data-destination-field=\"'+name+'\"]'",
@@ -2543,10 +2657,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-backups-client.ts",
-    "sha256": "9f0514183012e157a633bfd13fb5a4d413fe122b07053df3705e2d063097e05c",
+    "sha256": "0bb65389bff13b6cd845df85eb35d2152fe0507d9cb2aba8916aa2c052eecbf1",
     "sites": [
       {
-        "line": 122,
+        "line": 145,
         "column": 91,
         "method": "querySelector",
         "argument": "'#backup-layout-' + key",
@@ -2556,7 +2670,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 123,
+        "line": 146,
         "column": 94,
         "method": "querySelector",
         "argument": "'#backup-layout-' + key",
@@ -2566,7 +2680,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 124,
+        "line": 147,
         "column": 94,
         "method": "querySelector",
         "argument": "'[data-backup-action=\"' + key + '\"]'",
@@ -2576,7 +2690,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 126,
+        "line": 149,
         "column": 111,
         "method": "closest",
         "argument": "denied",
@@ -2586,7 +2700,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 380,
+        "line": 410,
         "column": 111,
         "method": "closest",
         "argument": "denied",
@@ -2596,7 +2710,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 383,
+        "line": 413,
         "column": 90,
         "method": "querySelector",
         "argument": "selector",
@@ -2606,7 +2720,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 384,
+        "line": 414,
         "column": 104,
         "method": "querySelectorAll",
         "argument": "'[data-backup-action=\"' + key + '\"]'",
@@ -2723,10 +2837,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-developer-client.ts",
-    "sha256": "c0f0a29eb6fbdc8ce71f9162ca93e04f6f2406425fd74d20868eb2a9fb41e5d2",
+    "sha256": "3426a3d1d44c88e1694c045740ee72e12e688405a238b3b34ff8e5bc0a8c0310",
     "sites": [
       {
-        "line": 55,
+        "line": 56,
         "column": 95,
         "method": "querySelector",
         "argument": "s",
@@ -2736,8 +2850,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 60,
-        "column": 115,
+        "line": 74,
+        "column": 142,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -2847,10 +2961,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-firewall-client.ts",
-    "sha256": "ebba2dbf8263971383a50cb2504a22ca8895ec4723da5497dd48f5f8007ab611",
+    "sha256": "56327803ac0f8e8e34741e9f5eb7532b4afd1f8e22ac5381854bfe6aca69583f",
     "sites": [
       {
-        "line": 133,
+        "line": 151,
         "column": 60,
         "method": "querySelector",
         "argument": "'[data-whm-firewall-panel=\"' + kind + '\"] table'",
@@ -2860,7 +2974,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 178,
+        "line": 202,
         "column": 150,
         "method": "querySelector",
         "argument": "'[name=\"' + name + '\"]'",
@@ -2870,7 +2984,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 186,
+        "line": 210,
         "column": 68,
         "method": "querySelector",
         "argument": "'[data-firewall-action=\"' + hookName + '\"]'",
@@ -2880,7 +2994,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 189,
+        "line": 213,
         "column": 206,
         "method": "querySelector",
         "argument": "'[name=\"' + name + '\"]'",
@@ -2893,11 +3007,11 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-ftp-log-client.ts",
-    "sha256": "14c4592cd07f1511ee28bd6627537d49349115825f764ba9f34048f46d802a4c",
+    "sha256": "dfd0f13fa7eda365bb044138f01e88e781a8c998ac404fb25cb4fa33931c1904",
     "sites": [
       {
-        "line": 114,
-        "column": 112,
+        "line": 117,
+        "column": 138,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -2906,7 +3020,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 115,
+        "line": 118,
         "column": 103,
         "method": "querySelector",
         "argument": "'[data-ftp-log-fact=\"' + key + '\"]'",
@@ -2917,6 +3031,16 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
       },
       {
         "line": 137,
+        "column": 64,
+        "method": "querySelectorAll",
+        "argument": "selector",
+        "classification": "finite-helper-or-variant-selector",
+        "controllers": [
+          "whm-ftp-log-workspace-controls"
+        ]
+      },
+      {
+        "line": 157,
         "column": 52,
         "method": "querySelector",
         "argument": "'[data-ftp-log-table=\"' + key + '\"]'",
@@ -2945,10 +3069,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-jobs-client.ts",
-    "sha256": "2208eb5e1379a4cb0618c306106ff9bbf84a788af16eb0d3449e1e8f92eb014e",
+    "sha256": "57ea1089d31a3cd10fac9d080f7b52103f86209d8ebd1da9c1b00ed251d041e3",
     "sites": [
       {
-        "line": 71,
+        "line": 72,
         "column": 90,
         "method": "querySelector",
         "argument": "selector",
@@ -2958,8 +3082,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 82,
-        "column": 110,
+        "line": 106,
+        "column": 137,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -2968,7 +3092,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 115,
+        "line": 146,
         "column": 115,
         "method": "querySelector",
         "argument": "'[data-whm-jobs-field=\"' + key + '\"]'",
@@ -3017,11 +3141,11 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-mail-log-client.ts",
-    "sha256": "a107feedbbf6ace5edaccbf6e0acc3a7d2b9e767b3dea6c5ee597437dcd6d463",
+    "sha256": "b15f678d873bdcf6b27812df93e1ab9b2a7ae52b0f2aec52c702425b1f9f9434",
     "sites": [
       {
-        "line": 119,
-        "column": 113,
+        "line": 133,
+        "column": 140,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -3030,7 +3154,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 120,
+        "line": 141,
         "column": 103,
         "method": "querySelector",
         "argument": "'[data-mail-log-fact=\"' + key + '\"]'",
@@ -3040,7 +3164,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 194,
+        "line": 215,
         "column": 54,
         "method": "querySelector",
         "argument": "'[data-mail-monitor-table=\"' + key + '\"]'",
@@ -3053,11 +3177,11 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-mail-quality-client.ts",
-    "sha256": "8a64dea1b5ae39150a263d4a70b497c035a78e4b9b25d3196bcfaa0ecee298e8",
+    "sha256": "d3bd987f6c920e25f3a9fb73ddfbc6e8c42aa60882c026ad16b216b94985f896",
     "sites": [
       {
-        "line": 83,
-        "column": 117,
+        "line": 97,
+        "column": 144,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -3066,7 +3190,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 111,
+        "line": 132,
         "column": 103,
         "method": "querySelector",
         "argument": "'[data-whm-mail-quality-fact=\"' + key + '\"]'",
@@ -3079,10 +3203,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-mail-queue-client.ts",
-    "sha256": "a3a93a583421717978bd1ae341fe0e7674a2c2c137404649f4d1ac2aa48c78dc",
+    "sha256": "7b99e82cdcb22d73ce688532a96c8363a584a60e14c648c14ad7e34be48f0b9d",
     "sites": [
       {
-        "line": 60,
+        "line": 61,
         "column": 95,
         "method": "querySelector",
         "argument": "'[data-whm-mail-queue-filter=\"' + name + '\"]'",
@@ -3092,8 +3216,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 64,
-        "column": 115,
+        "line": 82,
+        "column": 142,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -3102,7 +3226,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 94,
+        "line": 119,
         "column": 93,
         "method": "querySelector",
         "argument": "'[data-whm-mail-queue-count=\"' + name + '\"]'",
@@ -3115,11 +3239,11 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-mail-server-client.ts",
-    "sha256": "c388cb170d33707d133e07633140fcfa6d1f176f7833bd8286cb2ff5bd05599d",
+    "sha256": "40ae02c79008efab6133f71f15496576d126dc6a4150abac8f6ac5f0a42b4c46",
     "sites": [
       {
-        "line": 99,
-        "column": 116,
+        "line": 113,
+        "column": 143,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -3128,7 +3252,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 109,
+        "line": 130,
         "column": 88,
         "method": "querySelector",
         "argument": "'[data-whm-mail-server-' + name + ']'",
@@ -3138,7 +3262,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 123,
+        "line": 144,
         "column": 105,
         "method": "querySelector",
         "argument": "'[data-whm-mail-server-fact=\"' + key + '\"]'",
@@ -3151,10 +3275,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-mailbox-maintenance-client.ts",
-    "sha256": "a4f6a004c73bcfd553f85d8b9573f818e998c8981239f4e3e320e579e830b9d6",
+    "sha256": "45e42e793943c412b00e3306b94daabdfe637a1e36adafac2e6cbc057572da3c",
     "sites": [
       {
-        "line": 68,
+        "line": 69,
         "column": 102,
         "method": "querySelector",
         "argument": "selector",
@@ -3164,8 +3288,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 74,
-        "column": 124,
+        "line": 88,
+        "column": 151,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -3249,11 +3373,11 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-monitoring-client.ts",
-    "sha256": "d9a302890be5dd1a9cc01f1c2572d0d7c6e0ce7c0b2063d1509cc53e9e5da95f",
+    "sha256": "175c687392f242a773ebc17a9d50ed92ace99f866237b7211d4b3931e5d1a918",
     "sites": [
       {
-        "line": 118,
-        "column": 151,
+        "line": 135,
+        "column": 178,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -3262,7 +3386,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 120,
+        "line": 138,
         "column": 91,
         "method": "querySelector",
         "argument": "'[data-whm-monitoring-' + name + ']'",
@@ -3272,7 +3396,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 342,
+        "line": 366,
         "column": 44,
         "method": "querySelector",
         "argument": "'[data-whm-monitoring-chart=\"' + metric + '\"] figcaption'",
@@ -3311,11 +3435,11 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-panel-data-client.ts",
-    "sha256": "7b75ab467230a68dde610cbad99f8d43a655f1bf8d08866e49015673dde809cf",
+    "sha256": "bcbb03de5399deec66a92f0179b5348123476f611912b0a75f19001e07233414",
     "sites": [
       {
-        "line": 22,
-        "column": 118,
+        "line": 42,
+        "column": 145,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -3327,10 +3451,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-panel-notifications-client.ts",
-    "sha256": "2887344708fb9c8f1072dad260d2980e74286cbdbf72681b0e3c84c25b0fee1e",
+    "sha256": "801793a6e7a80b436da13a24e69e9e1057798e79352ecdb13ad189e0abea2d3e",
     "sites": [
       {
-        "line": 59,
+        "line": 60,
         "column": 90,
         "method": "querySelector",
         "argument": "selector",
@@ -3340,8 +3464,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 69,
-        "column": 121,
+        "line": 83,
+        "column": 148,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -3350,7 +3474,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 73,
+        "line": 94,
         "column": 100,
         "method": "querySelector",
         "argument": "'[data-whm-notifications-field=\"' + key + '\"]'",
@@ -3389,10 +3513,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-panel-tokens-client.ts",
-    "sha256": "d15cb39a44995d31ced2f305fa2d97a208ff6f431ecf119091f0e667de056a25",
+    "sha256": "3052061f24ca6c3cfb7539ca0a13f06ec065cdb3ae64d7c32cab2f3f460e0de2",
     "sites": [
       {
-        "line": 55,
+        "line": 56,
         "column": 90,
         "method": "querySelector",
         "argument": "selector",
@@ -3402,8 +3526,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 66,
-        "column": 114,
+        "line": 85,
+        "column": 141,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -3415,11 +3539,11 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-php-client.ts",
-    "sha256": "b7199fdaddf27c511fdd00604dfc43cf17f49b278891875cc609724dd019bed0",
+    "sha256": "609a5d42027b5212b969ae687255f984212c1537c3c7d691a969d85ecd2cde7a",
     "sites": [
       {
-        "line": 86,
-        "column": 100,
+        "line": 93,
+        "column": 126,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -3428,7 +3552,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 91,
+        "line": 98,
         "column": 102,
         "method": "querySelector",
         "argument": "'[name=\"' + name + '\"]'",
@@ -3438,7 +3562,41 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 141,
+        "line": 111,
+        "column": 64,
+        "method": "querySelectorAll",
+        "argument": "selector",
+        "classification": "finite-helper-or-variant-selector",
+        "controllers": [
+          "whm-php-workspace-controls"
+        ]
+      },
+      {
+        "line": 134,
+        "column": 288,
+        "method": "querySelectorAll",
+        "argument": "'[name=\"' + name + '\"]'",
+        "classification": "finite-source-classified",
+        "controllers": [
+          "whm-php-dynamic-91",
+          "whm-php-dynamic-201",
+          "whm-php-dynamic-248",
+          "whm-php-dynamic-276",
+          "whm-php-workspace-controls"
+        ]
+      },
+      {
+        "line": 135,
+        "column": 228,
+        "method": "querySelectorAll",
+        "argument": "'[data-php-action=\"' + name + '\"]'",
+        "classification": "finite-source-classified",
+        "controllers": [
+          "whm-php-dynamic-141"
+        ]
+      },
+      {
+        "line": 268,
         "column": 100,
         "method": "querySelector",
         "argument": "'[data-php-action=\"' + name + '\"]'",
@@ -3448,7 +3606,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 144,
+        "line": 272,
         "column": 52,
         "method": "querySelector",
         "argument": "'[data-whm-detail-section=\"' + section + '\"]'",
@@ -3458,27 +3616,40 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 201,
-        "column": 91,
+        "line": 331,
+        "column": 186,
         "method": "querySelector",
         "argument": "'[name=\"' + name + '\"]'",
         "classification": "finite-source-classified",
         "controllers": [
-          "whm-php-dynamic-201"
-        ]
-      },
-      {
-        "line": 249,
-        "column": 91,
-        "method": "querySelector",
-        "argument": "'[name=\"' + name + '\"]'",
-        "classification": "finite-source-classified",
-        "controllers": [
+          "whm-php-dynamic-201",
           "whm-php-dynamic-248"
         ]
       },
       {
-        "line": 277,
+        "line": 336,
+        "column": 91,
+        "method": "querySelector",
+        "argument": "'[name=\"' + name + '\"]'",
+        "classification": "finite-source-classified",
+        "controllers": [
+          "whm-php-dynamic-201",
+          "whm-php-dynamic-248"
+        ]
+      },
+      {
+        "line": 430,
+        "column": 91,
+        "method": "querySelector",
+        "argument": "'[name=\"' + name + '\"]'",
+        "classification": "finite-source-classified",
+        "controllers": [
+          "whm-php-dynamic-201",
+          "whm-php-dynamic-248"
+        ]
+      },
+      {
+        "line": 457,
         "column": 176,
         "method": "querySelector",
         "argument": "'[name=\"' + name + '\"]'",
@@ -3488,7 +3659,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 283,
+        "line": 463,
         "column": 95,
         "method": "querySelector",
         "argument": "'[name=\"php-exception-' + fn + '\"]'",
@@ -3553,10 +3724,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-security-tools-client.ts",
-    "sha256": "366b7ea1088bbc8816e9bc4200c61c9f87e1b90a7a533f565397d87062004900",
+    "sha256": "35671e92bc36f4202202749f9a107ee9dabd3e48f628361314b101e55058cca7",
     "sites": [
       {
-        "line": 100,
+        "line": 103,
         "column": 102,
         "method": "querySelector",
         "argument": "selector",
@@ -3568,8 +3739,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 105,
-        "column": 119,
+        "line": 109,
+        "column": 145,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -3653,11 +3824,11 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-service-detail-client.ts",
-    "sha256": "0319ac2e7d69ffeade3f901931c172e5f0221ca76972c073892249110e1d3868",
+    "sha256": "7be967c8d349e1ea4e7bde2e150f28ceece38be3bd46bde1960f43ce39f0b635",
     "sites": [
       {
-        "line": 101,
-        "column": 119,
+        "line": 105,
+        "column": 145,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -3666,7 +3837,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 108,
+        "line": 131,
         "column": 110,
         "method": "querySelector",
         "argument": "'[data-whm-service-detail-fact=\"' + key + '\"]'",
@@ -3679,10 +3850,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-service-manager-client.ts",
-    "sha256": "527a6e349dd77d7592ca1a718c56630a7798a86e4fd35e6819f13ce654f9cf82",
+    "sha256": "146349cbf9277940b805e2db9ded2603fe51c3db354a6ec663e6a673ad8482e1",
     "sites": [
       {
-        "line": 47,
+        "line": 49,
         "column": 88,
         "method": "querySelector",
         "argument": "selector",
@@ -3692,8 +3863,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 53,
-        "column": 141,
+        "line": 55,
+        "column": 157,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -3799,10 +3970,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-support-client.ts",
-    "sha256": "a1eee41886942854eb74cf8ff2d5021eb68e28caf7f381a807d483cbb8315ece",
+    "sha256": "b83cbcba4df2a869b27ce046047adb7d414836ff0947ea15b5bb1aba1ee1b7b9",
     "sites": [
       {
-        "line": 84,
+        "line": 85,
         "column": 90,
         "method": "querySelector",
         "argument": "selector",
@@ -3812,8 +3983,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 90,
-        "column": 113,
+        "line": 104,
+        "column": 140,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -3822,7 +3993,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 95,
+        "line": 116,
         "column": 86,
         "method": "querySelector",
         "argument": "'[data-whm-support-fact=\"' + key + '\"]'",
@@ -3832,7 +4003,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 98,
+        "line": 119,
         "column": 39,
         "method": "querySelector",
         "argument": "'[data-whm-support-' + marker + ']'",
@@ -3842,7 +4013,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 136,
+        "line": 157,
         "column": 28,
         "method": "querySelector",
         "argument": "'[data-whm-support-' + marker + ']'",
@@ -3871,10 +4042,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-transfer-client.ts",
-    "sha256": "7f0732936d76cb361489afa55aaf2f4421fbeef85d5bf0177a096d6b28283984",
+    "sha256": "de5ac68a16d87cb62cd5365c5ba711843d14cf140e214167a43d4885584b2fb0",
     "sites": [
       {
-        "line": 34,
+        "line": 36,
         "column": 90,
         "method": "querySelector",
         "argument": "'[data-transfer-field=\"' + id + '\"]'",
@@ -3884,7 +4055,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 35,
+        "line": 37,
         "column": 95,
         "method": "querySelector",
         "argument": "'[data-transfer-' + name + ']'",
@@ -3894,8 +4065,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 55,
-        "column": 113,
+        "line": 65,
+        "column": 131,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -3904,7 +4075,19 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 140,
+        "line": 100,
+        "column": 64,
+        "method": "querySelectorAll",
+        "argument": "selector",
+        "classification": "finite-helper-or-variant-selector",
+        "controllers": [
+          "whm-transfer-dynamic-28",
+          "whm-transfer-dynamic-29",
+          "whm-transfer-workspace-controls"
+        ]
+      },
+      {
+        "line": 255,
         "column": 65,
         "method": "querySelector",
         "argument": "`[data-transfer-import-${key}]`",
@@ -3914,7 +4097,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 140,
+        "line": 255,
         "column": 125,
         "method": "querySelector",
         "argument": "`[data-transfer-import-part=\"${key}\"] tbody`",
@@ -3924,7 +4107,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 217,
+        "line": 333,
         "column": 41,
         "method": "querySelector",
         "argument": "'[' + hook + ']'",
@@ -4041,10 +4224,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-whmcs-client.ts",
-    "sha256": "ff2abf8ebff6094e9c73c1d23f63541aa30a4e74b6fba3096db4a74fe4ce4002",
+    "sha256": "c5f785e04002080e1fb5a34f6fb94d02c41907cd0d30b5d820d0ca74d3c2282b",
     "sites": [
       {
-        "line": 62,
+        "line": 65,
         "column": 90,
         "method": "querySelector",
         "argument": "selector",
@@ -4054,8 +4237,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 76,
-        "column": 140,
+        "line": 80,
+        "column": 166,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -4067,10 +4250,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/ws-client.ts",
-    "sha256": "bc5e3ecb65f5f2e43317365955c1cb7a4831322940af976aa7ea83bae47d36b6",
+    "sha256": "c4b6789f3a471865e38bdfc712f0e40abd82fd89a1242b333cf1b21a1ea85dba",
     "sites": [
       {
-        "line": 632,
+        "line": 639,
         "column": 41,
         "method": "querySelector",
         "argument": "'[data-stage=\"' + event.data.stage + '\"]'",
@@ -4080,7 +4263,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 825,
+        "line": 832,
         "column": 51,
         "method": "getElementById",
         "argument": "routeOrId.slice(1)",
@@ -4090,7 +4273,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 879,
+        "line": 889,
         "column": 69,
         "method": "querySelectorAll",
         "argument": "'[name=\"' + name + '\"]'",
@@ -4100,7 +4283,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1029,
+        "line": 1060,
         "column": 63,
         "method": "querySelector",
         "argument": "'[name=\"' + name + '\"]'",
@@ -4110,7 +4293,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1252,
+        "line": 1287,
         "column": 77,
         "method": "querySelector",
         "argument": "'[name=\"' + name + '\"]'",
@@ -4120,7 +4303,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1645,
+        "line": 1615,
         "column": 43,
         "method": "querySelector",
         "argument": "selector",
@@ -4131,7 +4314,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1646,
+        "line": 1616,
         "column": 44,
         "method": "querySelector",
         "argument": "'[name=\"' + name + '\"]'",
@@ -4142,7 +4325,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1686,
+        "line": 1656,
         "column": 43,
         "method": "querySelector",
         "argument": "selector",
@@ -4152,7 +4335,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1804,
+        "line": 1774,
         "column": 86,
         "method": "querySelector",
         "argument": "'[name=\"' + key + '\"]'",
@@ -4162,7 +4345,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1808,
+        "line": 1778,
         "column": 72,
         "method": "querySelector",
         "argument": "'[name=\"' + key + '\"]'",
@@ -4172,7 +4355,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1863,
+        "line": 1833,
         "column": 60,
         "method": "querySelector",
         "argument": "'[name=\"' + key + '\"]'",
@@ -4701,10 +4884,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/workspace-view-templates.ts",
-    "sha256": "2683faf4b47d9e231e97b8483cc28e30d91676c7775f0f4c60ed40d8ff930c5b",
+    "sha256": "b255eee649e6f2a7ff7924bdf09471ae5391851dc4454ed628194c3bc78a385e",
     "sites": [
       {
-        "line": 28,
+        "line": 29,
         "column": 37,
         "method": "matches",
         "argument": "selector",
@@ -4742,7 +4925,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 28,
+        "line": 29,
         "column": 101,
         "method": "querySelectorAll",
         "argument": "selector",
@@ -4777,6 +4960,304 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
           "whm-transfer-import-projections",
           "whm-updates-dynamic-58",
           "whm-updates-dynamic-83"
+        ]
+      }
+    ]
+  },
+  {
+    "path": "apps/web/src/account-details-client.ts",
+    "sha256": "9d429fa50a496387be00e9d86d94913e9e8d38fc35be030d56e94b390f2f9f1a",
+    "sites": [
+      {
+        "line": 8,
+        "column": 59,
+        "method": "querySelectorAll",
+        "argument": "rootSelector",
+        "classification": "literal-workspace-root-reference",
+        "controllers": [
+          "whm-account-details"
+        ]
+      },
+      {
+        "line": 12,
+        "column": 91,
+        "method": "querySelectorAll",
+        "argument": "selector",
+        "classification": "finite-owned-control-selector",
+        "controllers": [
+          "whm-account-details"
+        ]
+      },
+      {
+        "line": 12,
+        "column": 130,
+        "method": "closest",
+        "argument": "rootSelector",
+        "classification": "literal-owning-workspace-root-reference",
+        "controllers": [
+          "whm-account-details"
+        ]
+      },
+      {
+        "line": 47,
+        "column": 34,
+        "method": "querySelectorAll",
+        "argument": "rootSelector",
+        "classification": "literal-workspace-root-reference",
+        "controllers": [
+          "whm-account-details"
+        ]
+      },
+      {
+        "line": 50,
+        "column": 29,
+        "method": "closest",
+        "argument": "rootSelector",
+        "classification": "literal-owning-workspace-root-reference",
+        "controllers": [
+          "whm-account-details"
+        ]
+      },
+      {
+        "line": 50,
+        "column": 73,
+        "method": "closest",
+        "argument": "rootSelector",
+        "classification": "literal-owning-workspace-root-reference",
+        "controllers": [
+          "whm-account-details"
+        ]
+      },
+      {
+        "line": 50,
+        "column": 119,
+        "method": "closest",
+        "argument": "rootSelector",
+        "classification": "literal-owning-workspace-root-reference",
+        "controllers": [
+          "whm-account-details"
+        ]
+      }
+    ]
+  },
+  {
+    "path": "apps/web/src/plan-editor.ts",
+    "sha256": "b33f08a252285284310f3b7c9e200277157ed7e0792fde2ffc5287e35483d0f1",
+    "sites": [
+      {
+        "line": 160,
+        "column": 148,
+        "method": "querySelectorAll",
+        "argument": "'[data-plan-review-' + slot + ']'",
+        "classification": "finite-plan-review-cell-selector",
+        "controllers": [
+          "native-plan-review"
+        ]
+      },
+      {
+        "line": 191,
+        "column": 57,
+        "method": "querySelector",
+        "argument": "'[data-plan-review-' + slot + ']'",
+        "classification": "finite-plan-review-cell-selector",
+        "controllers": [
+          "native-plan-review"
+        ]
+      }
+    ]
+  },
+  {
+    "path": "apps/web/src/presentation-tabs-client.ts",
+    "sha256": "f961db74e77f3543c1f57968290656fe65f19cafc98fae6c2c407530b1256a33",
+    "sites": [
+      {
+        "line": 15,
+        "column": 57,
+        "method": "querySelectorAll",
+        "argument": "rootSelector",
+        "classification": "literal-workspace-root-reference",
+        "controllers": [
+          "presentation-tabs"
+        ]
+      },
+      {
+        "line": 17,
+        "column": 93,
+        "method": "querySelectorAll",
+        "argument": "selector",
+        "classification": "finite-owned-control-selector",
+        "controllers": [
+          "presentation-tabs"
+        ]
+      },
+      {
+        "line": 17,
+        "column": 132,
+        "method": "closest",
+        "argument": "rootSelector",
+        "classification": "literal-owning-workspace-root-reference",
+        "controllers": [
+          "presentation-tabs"
+        ]
+      },
+      {
+        "line": 51,
+        "column": 118,
+        "method": "closest",
+        "argument": "rootSelector",
+        "classification": "literal-owning-workspace-root-reference",
+        "controllers": [
+          "presentation-tabs"
+        ]
+      },
+      {
+        "line": 61,
+        "column": 127,
+        "method": "closest",
+        "argument": "rootSelector",
+        "classification": "literal-owning-workspace-root-reference",
+        "controllers": [
+          "presentation-tabs"
+        ]
+      }
+    ]
+  },
+  {
+    "path": "apps/web/src/prompt-client.ts",
+    "sha256": "1e5d4f39366f0080ca2a87a031ca5c3c2b0c82f05cdc04b3a43c46efcf83ad76",
+    "sites": [
+      {
+        "line": 57,
+        "column": 84,
+        "method": "getElementById",
+        "argument": "id",
+        "classification": "cloned-prompt-descendant-identity-guard",
+        "controllers": [
+          "shared-prompt-dialog"
+        ]
+      }
+    ]
+  },
+  {
+    "path": "apps/web/src/whm-security-client.ts",
+    "sha256": "249a040eb4c9c1fdc32f92224975ec1a82b9fea43e332b8a45dd494a3ebebd9f",
+    "sites": [
+      {
+        "line": 25,
+        "column": 64,
+        "method": "querySelectorAll",
+        "argument": "selector",
+        "classification": "finite-owned-typed-control-selector",
+        "controllers": [
+          "whm-security-evidence"
+        ]
+      }
+    ]
+  },
+  {
+    "path": "apps/web/src/whm-ssh-client.ts",
+    "sha256": "38a2dadb598a517875c0c6173450d2a957522ea4f8ea1da65387cc4df42964be",
+    "sites": [
+      {
+        "line": 44,
+        "column": 187,
+        "method": "closest",
+        "argument": "denied",
+        "classification": "literal-ineligibility-ancestor-policy",
+        "controllers": [
+          "ancestor-eligibility-policy"
+        ]
+      },
+      {
+        "line": 44,
+        "column": 213,
+        "method": "closest",
+        "argument": "denied",
+        "classification": "literal-ineligibility-ancestor-policy",
+        "controllers": [
+          "ancestor-eligibility-policy"
+        ]
+      },
+      {
+        "line": 65,
+        "column": 64,
+        "method": "querySelectorAll",
+        "argument": "selector",
+        "classification": "finite-owned-typed-control-selector",
+        "controllers": [
+          "whm-ssh-workspace"
+        ]
+      },
+      {
+        "line": 99,
+        "column": 199,
+        "method": "closest",
+        "argument": "denied",
+        "classification": "literal-ineligibility-ancestor-policy",
+        "controllers": [
+          "ancestor-eligibility-policy"
+        ]
+      }
+    ]
+  },
+  {
+    "path": "apps/web/src/account-password-client.ts",
+    "sha256": "58700d0e9ba4d98a92a593da9832ac2d857283cc565b94c3dddc9ac5e22d9c15",
+    "sites": [
+      {
+        "line": 13,
+        "column": 105,
+        "method": "querySelectorAll",
+        "argument": "selector",
+        "classification": "finite-helper-or-variant-selector",
+        "controllers": [
+          "account-password"
+        ]
+      },
+      {
+        "line": 52,
+        "column": 24,
+        "method": "closest",
+        "argument": "denied",
+        "classification": "literal-ineligibility-ancestor-policy",
+        "controllers": [
+          "ancestor-eligibility-policy"
+        ]
+      }
+    ]
+  },
+  {
+    "path": "apps/web/src/account-api-tokens-client.ts",
+    "sha256": "3955102d59bfd84f56e3867d8632609e09195c11304a614cfc808de287874c7f",
+    "sites": [
+      {
+        "line": 55,
+        "column": 95,
+        "method": "querySelectorAll",
+        "argument": "selector",
+        "classification": "finite-helper-or-variant-selector",
+        "controllers": [
+          "account-api-tokens"
+        ]
+      },
+      {
+        "line": 95,
+        "column": 153,
+        "method": "closest",
+        "argument": "denied",
+        "classification": "literal-ineligibility-ancestor-policy",
+        "controllers": [
+          "ancestor-eligibility-policy"
+        ]
+      },
+      {
+        "line": 105,
+        "column": 128,
+        "method": "closest",
+        "argument": "denied",
+        "classification": "literal-ineligibility-ancestor-policy",
+        "controllers": [
+          "ancestor-eligibility-policy"
         ]
       }
     ]

@@ -1,15 +1,17 @@
-import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './whm-client-templates.ts'
-const whmClientNode = canonicalWhmClientNode, clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
+import { WHM_CLIENT_TEMPLATE_BINDING, assertWhmClientTemplates as canonicalAssertWhmClientTemplates, whmClientNode as canonicalWhmClientNode, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates, whmClientNode = canonicalWhmClientNode, clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
-import { buildAccountAnnouncementNotice, type AccountAnnouncementLabels } from './board-port/account-announcements-banner-client.ts'
+import { ACCOUNT_ANNOUNCEMENT_NOTICE_HELPERS_BINDING, buildAccountAnnouncementNotice, requireAccountAnnouncementTemplates as canonicalRequireAccountAnnouncementTemplates, readAccountAnnouncementLabels as canonicalReadAccountAnnouncementLabels, type AccountAnnouncementLabels } from './board-port/account-announcements-banner-client.ts'
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
-import './i18n.ts'
+import { LOCALES } from './i18n.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
+const announcementPreviewLocales = LOCALES.map(({ tag, dir }) => ({ tag, dir }))
 
 type Text = { en: string; ar: string }
 // Module-local alias: the binding source refers to it by this name, defined again in WHM_ANNOUNCEMENTS_CLIENT_BINDING.
 const buildNotice = buildAccountAnnouncementNotice
+const requireAccountAnnouncementTemplates = canonicalRequireAccountAnnouncementTemplates, readAccountAnnouncementLabels = canonicalReadAccountAnnouncementLabels
 export type WhmAnnouncementAudience = { kind: 'all' } | { kind: 'plan'; planId: string } | { kind: 'reseller'; resellerId: string } | { kind: 'accounts'; usernames: string[] }
 export type WhmAnnouncement = {
   id: string; status: 'active' | 'archived'; severity: 'info' | 'warning' | 'maintenance'; title: Text; body: Text; audience: WhmAnnouncementAudience
@@ -61,7 +63,7 @@ function bindWhmAnnouncements(askDialog: ((options: Record<string, unknown>) => 
   const pageLocale = document.documentElement.lang
   const localized = (text: Text): string => (text as Readonly<Record<string, string>>)[pageLocale] ?? text.en
   // Each preview carries notice labels in its own language (rendered by the server workspace).
-  const previewLabels = (node: HTMLElement): AccountAnnouncementLabels | undefined => { try { return JSON.parse(node.dataset.whmAnnouncementsLabels ?? '') as AccountAnnouncementLabels } catch { return undefined } }
+  const previewLabels = (node: HTMLElement): AccountAnnouncementLabels | undefined => { try { return readAccountAnnouncementLabels(JSON.parse(node.dataset.whmAnnouncementsLabels ?? '')) } catch { return undefined } }
   document.querySelectorAll<HTMLElement>('[data-whm-announcements-workspace]').forEach(root => {
     if (root.dataset.announcementsBound === 'true') return
     root.dataset.announcementsBound = 'true'
@@ -74,11 +76,43 @@ function bindWhmAnnouncements(askDialog: ((options: Record<string, unknown>) => 
     const inputs: Record<string, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement> = {}
     root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('[data-whm-announcements-input]').forEach(control => { inputs[control.dataset.whmAnnouncementsInput!] = control })
     const names = ['title-en', 'body-en', 'title-ar', 'body-ar', 'severity', 'audience', 'plan', 'reseller', 'usernames', 'starts', 'ends']
-    const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const sessionRequest = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     if (!status || !rows || !empty || !refresh || !listStatus || !form || !heading || !save || !cancel || !saveStatus || !previewEmpty || previews.length !== 2 || !names.every(name => inputs[name])) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.announcementsCanManage === 'true' && !root.closest(denied) && form.tagName === 'FORM' && typeof request === 'function'
+    const contextAdmitted = (): boolean => root.isConnected && root.dataset.announcementsCanManage === 'true' && !root.closest(denied) && form.tagName === 'FORM' && typeof sessionRequest === 'function'
     const fields = Object.values(inputs)
+    let contractReady = false
+    const admitted = (): boolean => contextAdmitted() && contractReady
+    const verifyTemplates = (): boolean => {
+      if (!contextAdmitted()) return false
+      try {
+        assertWhmClientTemplates(root, [
+          ['whm-announcement-row', 'tr', { titles: 'td', severity: 'td', audience: 'td', window: 'td', phase: 'td', updated: 'td', actions: 'td' }],
+          ['whm-announcement-cell', 'div', { content: 'div' }], ['whm-announcement-note', 'span', { content: 'span' }],
+          ['whm-announcement-actions', 'div', { content: 'div' }], ['whm-announcement-button', 'button', { content: 'button' }],
+        ])
+        if (whmClientNode(root, 'whm-announcement-button', 'button').type !== 'button') throw new Error('invalid_announcement_button')
+        requireAccountAnnouncementTemplates(root)
+        const languages = previews.map(preview => preview.dataset.whmAnnouncementsPreview)
+        if (new Set(languages).size !== 2 || !languages.includes('en') || !languages.includes('ar') || previews.some(preview => !previewLabels(preview)
+          || preview.lang !== preview.dataset.whmAnnouncementsPreview || preview.dir !== announcementPreviewLocales.find(locale => locale.tag === preview.lang)?.dir)) throw new Error('invalid_announcement_preview')
+        contractReady = true
+        return true
+      } catch {
+        contractReady = false
+        root.dataset.capabilityState = 'unavailable'
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+        status.hidden = false; status.dataset.state = 'unavailable'; status.textContent = t('Unavailable')
+        return false
+      }
+    }
+    if (contextAdmitted() && !verifyTemplates()) return
+    const request = async (method: string, path: string, body?: unknown): Promise<unknown> => {
+      if (!admitted() || !verifyTemplates() || typeof sessionRequest !== 'function') throw new Error('announcement_context_unavailable')
+      const result = body === undefined ? await sessionRequest(method, path) : await sessionRequest(method, path, body)
+      if (!admitted() || !verifyTemplates()) throw Object.assign(new Error('announcement_context_unavailable'), { details: { verificationRequired: true } })
+      return result
+    }
     let view: WhmAnnouncementsView | null = null, editing = '', busy = false
     let editingSource: { revision: string; startsAt: string | null; endsAt: string | null } | null = null
     const element = <K extends keyof HTMLElementTagNameMap>(tag: K, content?: string, ltr = false): HTMLElementTagNameMap[K] => {
@@ -123,12 +157,13 @@ function bindWhmAnnouncements(askDialog: ((options: Record<string, unknown>) => 
     const texts = (): { title: Text; body: Text } => ({ title: { en: inputs['title-en']!.value.trim(), ar: inputs['title-ar']!.value.trim() }, body: { en: inputs['body-en']!.value.trim(), ar: inputs['body-ar']!.value.trim() } })
     const paintPreview = (): void => {
       const { title, body } = texts(), ready = !!(title.en && title.ar && body.en && body.ar)
+      if (ready && !verifyTemplates()) return
       const severity = (['info', 'warning', 'maintenance'].includes(inputs.severity!.value) ? inputs.severity!.value : 'info') as WhmAnnouncement['severity']
       previewEmpty.hidden = ready
       for (const preview of previews) {
         preview.hidden = !ready
         if (!ready) { preview.replaceChildren(); continue }
-        const notice = buildNotice({ id: editing || '00000000-0000-4000-8000-000000000000', severity, title, body, startsAt: null, endsAt: draftStamp('ends') ?? null }, preview.dataset.whmAnnouncementsPreview ?? 'en', true, previewLabels(preview))
+        const notice = buildNotice(root, { id: editing || '00000000-0000-4000-8000-000000000000', severity, title, body, startsAt: null, endsAt: draftStamp('ends') ?? null }, preview.dataset.whmAnnouncementsPreview ?? 'en', true, previewLabels(preview))
         notice.removeAttribute('role')
         notice.querySelectorAll('button').forEach(button => { button.disabled = true })
         preview.replaceChildren(notice)
@@ -286,4 +321,4 @@ function bindWhmAnnouncements(askDialog: ((options: Record<string, unknown>) => 
   })
 }
 
-export const WHM_ANNOUNCEMENTS_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmAnnouncementsView=${readWhmAnnouncementsView.toString()};const buildNotice=${buildAccountAnnouncementNotice.toString()};return ${bindWhmAnnouncements.toString()};})()`
+export const WHM_ANNOUNCEMENTS_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const announcementPreviewLocales=${JSON.stringify(announcementPreviewLocales)};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${ACCOUNT_ANNOUNCEMENT_NOTICE_HELPERS_BINDING}const readWhmAnnouncementsView=${readWhmAnnouncementsView.toString()};const buildNotice=${buildNotice.toString()};return ${bindWhmAnnouncements.toString()};})()`

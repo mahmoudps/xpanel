@@ -3,6 +3,7 @@ import type { WhmSurfaceProps } from '../../../../contract.ts'
 import { card, pageHeader } from '../../../components/index.ts'
 import { escapeHtml, hookAttrs, type HookAttributes } from '../../../html.ts'
 import { v2Messages } from '../../../messages.ts'
+import { V2_ACCOUNT_ANNOUNCEMENT_CSS } from '../../../components/account-announcement-notice-templates.ts'
 
 /** Core supplies independent read and mutation decisions for this exact route. */
 export interface WhmAccountToolAuthority {
@@ -36,7 +37,7 @@ export function page(props: WhmSurfaceProps, route: string, title: string, descr
   return `<section class="v2-account-tools" data-whm-detail-route="${escapeHtml(route)}" lang="${locale}" dir="${localeDirection(locale)}"${hookAttrs(hooks)}>${pageHeader(t, { title, route, description, breadcrumb: [{ label: 'xWHM', href: '/whm' }, { label: title }] })}${bodyHtml}</section>`
 }
 
-export const WHM_ACCOUNT_TOOLS_CSS = `.v2-account-tools{display:flex;flex-direction:column;gap:var(--space-4);min-inline-size:0;text-align:start}
+export const WHM_ACCOUNT_TOOLS_CSS = V2_ACCOUNT_ANNOUNCEMENT_CSS + `.v2-account-tools{display:flex;flex-direction:column;gap:var(--space-4);min-inline-size:0;text-align:start}
 .v2-account-tools :is(h2,h3,p,dl,dd,fieldset,ol,ul){margin:0}
 .v2-account-tools .v2-card__body,.v2-account-tool__groups{display:flex;flex-direction:column;gap:var(--space-3);min-inline-size:0}
 .v2-account-tool__fields,.v2-account-tool__facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2);min-inline-size:0}

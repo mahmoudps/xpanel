@@ -63,7 +63,7 @@ export function bindMailComposeAttachments(_askDialog: unknown): void {
     const status = root.querySelector<HTMLElement>('[data-compose-attachment-status]')
     const summary = root.querySelector<HTMLElement>('[data-compose-attachment-summary]')
     if (!opener || !input || !list || !status || input.type !== 'file' || Object.prototype.hasOwnProperty.call(group, 'xpanelReadComposeAttachments')) return
-    try { mailRequireTemplates(root, [['mail-compose-attachment-row', 'li', ['name', 'size', 'remove']], ['mail-compose-attachment-dismiss', 'button', ['label']]]) }
+    try { mailRequireTemplates(root, [['mail-compose-attachment-row', 'li', ['name', 'size', 'remove'], [['name', 'bdi'], ['size', 'bdi'], ['remove', 'button', { type: 'button' }]]], ['mail-compose-attachment-dismiss', 'button', ['label'], [['label', 'button', { type: 'button' }]]]]) }
     catch { opener.disabled = true; input.disabled = true; status.textContent = t('Attachments are unavailable here.'); return }
     root.dataset.composeAttachmentsBound = 'true'
     const state = { pending: false, error: null as string | null, files: [] as readonly ComposeAttachmentPayload[] }

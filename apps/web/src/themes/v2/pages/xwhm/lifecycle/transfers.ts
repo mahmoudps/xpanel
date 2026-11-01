@@ -38,13 +38,14 @@ ${fields(input('transfer-host', msgid('Source host or HTTPS API URL'), 'text', '
 ${actions(button('create', msgid('Save source review'), true))}
 `, { 'data-whm-detail-section': 'transfer-source' })
 
+  const inventoryTable = lifecycleTable(t, msgctxt('theme:v2', 'Source accounts'), [msgid('Select'), msgid('Account'), msgid('Plan'), msgid('Disk'), msgid('Databases'), msgid('Mailboxes'), msgid('Conflict'), msgid('Resolution')], { 'data-transfer-inventory-rows': true, 'data-transfer-accounts': true }, msgid('No observed records are available for this saved session.'))
+    .replace(`<th scope="col">${text(t, msgid('Select'))}</th>`, `<th scope="col"><label class="v2-lifecycle__choice"><input type="checkbox" data-transfer-select-all aria-label="${text(t, msgid('Select all accounts'))}" disabled><span class="v2-sr">${text(t, msgid('Select'))}</span></label></th>`)
   const selection = lifecycleCard(t, 'transfer-selection', msgctxt('theme:v2', 'Select accounts'), `
 ${scope === 'server' ? `<p>${text(t, msgid('Whole-server migration selects every source account and plan. An account with a conflict can be skipped when you resolve it.'))}</p>` : ''}
-<div class="v2-lifecycle__choices" data-transfer-accounts></div>
 <div class="v2-lifecycle__choices" data-transfer-plans></div>
 ${status(msgid('No authenticated source inventory has been read.'), 'inventory-note')}
 ${status(msgctxt('theme:v2', 'Authenticated source inventory has not been read.'), 'identities-observation')}
-${lifecycleTable(t, msgctxt('theme:v2', 'Source accounts'), [msgid('Account'), msgid('Primary domain'), msgctxt('theme:v2', 'Source UID'), msgid('Conflict')], { 'data-transfer-inventory-rows': true }, msgid('No observed records are available for this saved session.'))}
+${inventoryTable}
 ${actions(button('select', msgid('Save selection'), true))}
 `, { 'data-whm-detail-section': 'transfer-identities' })
 
@@ -89,10 +90,10 @@ ${actions(button('import-discard', msgid('Discard archive')) + button('import-ru
 `, { 'data-whm-detail-section': 'transfer-import' })
 
   const note = lifecycleCard(t, 'transfer-boundary', msgctxt('theme:v2', 'Transfer review'), `<p>${text(t, msgid('Resume a saved review, inspect actual source inventory and resolve conflicts. Connection and execution results are accepted only from the trusted server adapter.'))}</p><p>${text(t, msgctxt('theme:v2', 'No destination account is created until the current review is confirmed. Source identity, resource limits and proposed changes must be checked before running.'))}</p>`)
-  return `<div class="v2-lifecycle" data-whm-detail-route="${route}" lang="${props.locale}" dir="${localeDirection(props.locale)}">
+  return `<div class="v2-lifecycle" data-whm-detail-route="${route}" data-capability-state="${props.canRead ? 'authorized' : 'unavailable'}" lang="${props.locale}" dir="${localeDirection(props.locale)}">
 ${lifecycleHeader(t, scope === 'server' ? msgid('Server migration') : msgid('Transfer tool'), route, msgctxt('theme:v2', 'Move accounts from a verified source or inspect a cPanel archive before importing.'))}
 ${scope === 'server' ? renderV2TransferCredentials(t, props.canRead && props.canManage) : ''}
-<section class="v2-lifecycle__column" data-transfer-workspace data-transfer-manage="${props.canRead && props.canManage}" data-transfer-scope="${scope}"${scope === 'server' ? ' data-transfer-credentials="read"' : ''} aria-label="${text(t, msgid('Saved transfer sessions and archive review'))}">
+<section class="v2-lifecycle__column" data-transfer-workspace data-transfer-inventory-layout="comparison" data-transfer-manage="${props.canRead && props.canManage}" data-transfer-scope="${scope}"${props.canRead ? ' data-transfer-credentials="read"' : ''} aria-label="${text(t, msgid('Saved transfer sessions and archive review'))}">
 <div class="v2-lifecycle__grid"><div class="v2-lifecycle__column">${source}${selection}${mapping}${execution}</div><aside class="v2-lifecycle__column" aria-label="${text(t, msgctxt('theme:v2', 'Transfer review'))}">${note}</aside></div>
 ${scope === 'server' ? `<div hidden>${archive}</div>` : archive}
 <p class="v2-lifecycle__status" role="status" data-transfer-status data-state="unread">${text(t, props.canRead ? msgid('Saved transfer state has not been read.') : msgid('Transfer review is unavailable here. Nothing was read or changed.'))}</p>

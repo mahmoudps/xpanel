@@ -105,6 +105,7 @@ describe('v2 account home', () => {
     const html = renderV2PanelHome(props({ visibility: { principal: { kind: 'user', id: 'user', username: account.username, accountId: account.id }, disabledFeatures: new Set(['filemanager']) } }))
     expect(html).not.toContain('data-tool-capability="file-manager"')
     expect(html).not.toContain('data-tool-capability="aapanel-url-rewrite"')
+    expect(html).toContain('data-tool-capability="domain-htaccess"')
     expect(html).toContain('data-tool-capability="backup"')
   })
 
@@ -205,5 +206,67 @@ describe('v2 account home', () => {
     expect(html).toContain('v2-home-information-title')
     expect(html).toContain('Not read')
     expect(html).not.toContain('data-account=')
+  })
+})
+
+// Synthetic delivery fixtures test admission only. Production remains researched.
+describe('bounded owner rewrite home card', () => {
+  it('renders all 35 approved account cards and keeps the new production rewrite card disabled', () => {
+    const complete = parseMarkup(renderV2PanelHome(props()))
+    expect(complete.filter(node => node.attrs.has('data-tool-capability'))).toHaveLength(35)
+    const production = parseMarkup(renderV2PanelHome(props({ catalog: tools })))
+    const rewrite = production.find(node => node.attrs.get('data-tool-capability') === 'domain-htaccess')!
+    expect(rewrite.tag).toBe('button'); expect(rewrite.attrs.has('disabled')).toBe(true)
+    expect(rewrite.attrs.has('href')).toBe(false)
+    expect(production.some(node => node.attrs.get('data-tool-capability') === 'aapanel-url-rewrite')).toBe(false)
+  })
+  it.each(['domain-htaccess', 'aapanel-url-rewrite'])('retains the saved plan denial for %s', deny => {
+    const html = renderV2PanelHome(props({ visibility: { ...props().visibility!, disabledFeatures: new Set([deny]) } }))
+    expect(html).not.toContain('data-tool-capability="domain-htaccess"')
+  })
+  it('never makes the rewrite card eligible without a feature policy', () => {
+    const html = renderV2PanelHome(props({ visibility: { principal: props().visibility!.principal } }))
+    expect(html).not.toContain('data-tool-capability="domain-htaccess"')
+  })
+})
+
+describe('v2 home registered personal navigation', () => {
+  const personalIds = ['change-language', 'two-factor-auth', 'api-tokens', 'password-security'] as const
+  const unverified = qualified.map(tool => ({ ...tool, status: 'implemented' as const, delivery: { ...tool.delivery, status: 'implemented' as const } }))
+
+  it.each(['en', 'ar'] as const)('keeps authorized personal links available without qualifying native tools in %s', locale => {
+    const html = renderV2PanelHome(props({ locale, catalog: unverified }))
+    const nodes = parseMarkup(html)
+    const currentLanguageHint = '<span class="v2-home-tool__hint v2-num">' + (locale === 'en' ? 'English' : 'العربية') + '</span>'
+    expect(html).toContain(currentLanguageHint)
+    for (const id of personalIds) {
+      const item = nodes.find(node => node.attrs.get('data-tool-capability') === id)!
+      expect(item.tag, id).toBe('a')
+      expect(item.attrs.get('href')).toBe(id === 'change-language' ? (locale === 'en' ? '?lang=ar' : '?lang=en') : '/security/account')
+      expect(item.attrs.has('disabled')).toBe(false)
+    }
+    const native = nodes.find(node => node.attrs.get('data-tool-capability') === 'backup')!
+    expect(native.tag).toBe('button')
+    expect(native.attrs.has('disabled')).toBe(true)
+    expect(native.attrs.has('href')).toBe(false)
+  })
+
+  it.each(['en', 'ar'] as const)('retains team authorization before making a personal link in %s', locale => {
+    const visibility = { ...props().visibility!, allowedToolIds: new Set(['backup']) }
+    const nodes = parseMarkup(renderV2PanelHome(props({ locale, catalog: unverified, visibility })))
+    for (const id of personalIds) expect(nodes.some(node => node.attrs.get('data-tool-capability') === id)).toBe(false)
+    const native = nodes.find(node => node.attrs.get('data-tool-capability') === 'backup')!
+    expect(native.tag).toBe('button')
+    expect(native.attrs.has('disabled')).toBe(true)
+  })
+
+  it('does not infer personal authorization without a visibility context', () => {
+    const nodes = parseMarkup(renderV2PanelHome(props({ catalog: unverified, visibility: undefined })))
+    expect(nodes.some(node => node.attrs.has('data-tool-capability'))).toBe(false)
+  })
+
+  it('does not fabricate catalog definitions when the supplied catalog is empty', () => {
+    const nodes = parseMarkup(renderV2PanelHome(props({ catalog: [] })))
+    expect(nodes.some(node => node.attrs.has('data-tool-capability'))).toBe(false)
   })
 })

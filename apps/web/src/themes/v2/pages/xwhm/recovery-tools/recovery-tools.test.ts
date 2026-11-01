@@ -86,3 +86,35 @@ describe('V2 WHM guarded recovery tools', () => {
     expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
   })
 })
+
+
+describe('backup capability source parity', () => {
+  for (const route of ['/whm/backups/restore-more','/whm/backups/files'] as const) for (const locale of ['en','ar'] as const) {
+    it('binds ' + route + ' capability to existing context in ' + locale, { tags: ['unit'] }, () => {
+      const variants=[
+        {canRead:true,canManage:true,unavailable:false},
+        {canRead:true,canManage:false,unavailable:false},
+        {canRead:false,canManage:true,unavailable:false},
+        {canRead:true,canManage:true,unavailable:true},
+      ];
+      for(const variant of variants){
+        const html=renderV2WhmRecoveryToolsPage({activeRoute:route,locale,capabilityUnavailable:variant.unavailable},{canRead:variant.canRead,canManage:variant.canManage,root:true});
+        if(!html)throw new Error('Missing real recovery page');
+        const nodes=parseMarkup(html),owners=nodes.filter(node=>node.attrs.get('data-whm-detail-route')===route);
+        expect(owners).toHaveLength(1);
+        const owner=owners[0];if(!owner)throw new Error('Missing recovery root');
+        const readable=variant.canRead&&!variant.unavailable;
+        expect(owner.attrs.get('data-capability-state')).toBe(readable?'authorized':'unavailable');
+        const component=route==='/whm/backups/restore-more',hook=component?'data-whm-restore-more-workspace':'data-whm-backup-files-workspace';
+        const workspace=nodes.find(node=>node.attrs.has(hook));
+        if(!workspace)throw new Error('Missing real restore workspace');
+        expect(workspace.attrs.get(component?'data-restore-more-can-read':'data-backup-files-can-read')).toBe(String(readable));
+        expect(workspace.attrs.get(component?'data-restore-more-can-restore':'data-backup-files-can-restore')).toBe(String(readable&&variant.canManage));
+        expect(html).toContain(component?'data-restore-more-ack disabled':'data-backup-files-ack disabled');
+      }
+      const denied=renderV2WhmRecoveryToolsPage({activeRoute:route,locale});
+      if(!denied)throw new Error('Missing default-denied recovery page');
+      expect(denied).toContain('data-capability-state="unavailable"');
+    });
+  }
+});

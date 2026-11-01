@@ -1,7 +1,9 @@
 import { v2WhmBackupClientTemplates } from './backup-client-templates.ts'
+import { renderV2BackupDestinationManager } from './destination-manager.ts'
 import { localeDirection } from '../../../../../i18n.ts'
 import { v2Messages } from '../../../messages.ts'
 import { escapeHtml } from '../../../html.ts'
+import { tabs, tabPanel } from '../../../components/tabs.ts'
 import { lifecycleButton, lifecycleCard, lifecycleField, lifecycleHeader, lifecycleStatus, lifecycleTable, text, type LifecycleAccess } from './shared.ts'
 
 export interface V2BackupsPageProps extends LifecycleAccess {
@@ -46,30 +48,12 @@ ${group(msgid('Retention'), fields(input('daily-copies', msgid('Daily copies'), 
 ${group(msgid('What to include'), `<div class="v2-lifecycle__choices">${choice('include-home', msgid('Home directories'), msgid('Account files with ownership and permissions preserved'))}${choice('include-databases', msgid('Databases'), msgid('A consistent backup for each selected database'))}${choice('include-mail', msgid('Mail'), msgid('Maildirs, forwarders and filters'))}${choice('include-dns', msgid('DNS zones'), msgid('Exported zone records'))}${choice('include-control', msgid('Control database snapshot'), msgid('Desired state and audit recovery data'))}</div>`)}
 ${group(msgid('Accounts'), accounts)}
 ${status('configuration-status', msgid('No configuration has been saved from this view. Selecting individual accounts must not silently include newly created accounts.'))}
-${actions(button('discard-schedule', msgid('Discard changes')) + button('save-schedule', msgid('Save configuration'), true))}
+${actions(button('refresh', msgid('Read saved configuration')) + button('discard-schedule', msgid('Discard changes')) + button('save-schedule', msgid('Save configuration'), true))}
+<section class="v2-lifecycle__group"><h3>${text(t, msgid('Destinations'))}</h3><div class="v2-lifecycle__choices" data-backup-destination-choices></div></section>
+${status('workspace-status', msgid('Saved configuration has not been read.'))}
 `, { 'data-backup-section': 'configuration', 'data-backup-saved-policy': true })
 
-  const destinations = lifecycleCard(t, 'backup-destinations', msgid('Destinations'), `
-<p>${text(t, msgctxt('theme:v2', 'New and changed destinations stay inactive. Verify the transport before activation; a saved destination does not prove a remote copy.'))}</p>
-<div class="v2-lifecycle__choices" data-backup-destination-choices></div>
-${table(msgid('Saved destinations'), [msgid('Name'), msgid('Kind'), msgid('Endpoint'), msgid('State'), msgid('Actions')], 'destination-rows', msgid('Not read'))}
-<fieldset data-backup-destination-editor disabled><legend>${text(t, msgid('Destination configuration'))}</legend>
-${fields(input('destination-name', msgid('Name'))
-    + select('destination-kind', msgid('Kind'), [msgid('Local directory'), msgctxt('theme:v2', 'SFTP'), msgctxt('theme:v2', 'S3'), msgctxt('theme:v2', 'Backblaze'), msgctxt('theme:v2', 'Rsync'), msgctxt('theme:v2', 'FTP')])
-    + input('destination-endpoint', msgid('Service URL or local directory'))
-    + input('destination-prefix', msgid('Directory or object prefix'))
-    + input('destination-bucket', msgid('Bucket (object storage)'))
-    + input('destination-region', msgid('Region (object storage)'))
-    + input('destination-user', msgid('Remote username'))
-    + input('destination-retention', msgid('Retention days'), 'number', ' min="1" max="3650" step="1"'))}
-${choice('destination-enabled', msgid('Destination enabled in saved policy'))}
-</fieldset>
-${actions(button('new-destination', msgid('New destination')) + button('save-destination', msgid('Save destination configuration'), true))}
-${status('sftp-status', msgid('No remote connection or host-key trust has been verified. Store only the server-side key path; the key must never leave the server.'))}
-<a class="v2-btn" href="/whm/backups/destinations?lang=${props.locale}">${text(t, msgctxt('theme:v2', 'Verify and activate destinations'))}</a>
-${status('workspace-status', msgid('Saved configuration has not been read.'))}
-${actions(button('refresh', msgid('Read saved configuration')))}
-`)
+  const destinations = renderV2BackupDestinationManager(props, { stacked: true, inline: true })
 
   const runs = lifecycleCard(t, 'backup-runs', msgid('Runs'), `
 <p>${text(t, msgid('Run history and the saved retention policy have not been read.'))}</p>
@@ -106,6 +90,7 @@ ${actions(button('restore-back', msgid('Back')) + button('restore-continue', msg
   const archive = lifecycleCard(t, 'backup-local', msgctxt('theme:v2', 'Local account archives'), `
 <section class="v2-lifecycle__group" data-local-archives-unavailable>
 <p>${text(t, msgid('The archive is stored in the local backup directory, limited to 2 GiB, and restored only into that account home.'))}</p>
+<p data-local-archive-scope-warning>${text(t, msgid('This local archive workflow copies home files and excludes the standard mail data and mail settings directories. It does not create database dumps or capture DNS zones. Review a component backup for those parts.'))}</p>
 ${lifecycleField(t, 'v2-backup-account', msgid('Account'), `<select id="v2-backup-account" data-backup-account disabled>${(authorizedAccounts ?? []).map(account => `<option value="${escapeHtml(account.username)}">${escapeHtml(account.username)}</option>`).join('')}</select>`)}
 ${table(msgctxt('theme:v2', 'Local account archives'), [msgid('File'), msgid('Size'), msgid('Actions')], 'files', msgctxt('theme:v2', 'No account archive has been read.'))}
 ${status('status', msgctxt('theme:v2', 'No account archive has been read.'))}
@@ -113,12 +98,19 @@ ${status('status', msgctxt('theme:v2', 'No account archive has been read.'))}
 <button type="button" class="v2-btn v2-btn--primary" data-backup-create disabled>${text(t, msgid('Create backup'))}</button>
 </section>`)
 
-  return `<div class="v2-lifecycle" data-whm-detail-route="${route}" lang="${props.locale}" dir="${localeDirection(props.locale)}">
+  const initialTab = route === '/whm/backups/restore' ? 'restore' : 'settings'
+  const navigation = tabs({ label: t(msgctxt('theme:v2', 'Backup sections')), tabs: [
+    ['settings', msgid('Settings')], ['restore', msgid('Restore')], ['runs', msgid('Runs')],
+  ].map(([key, label]) => ({ id: `v2-backup-tab-${key}`, label: t(label!), panelId: `v2-backup-panel-${key}`, selected: key === initialTab, hooks: { 'data-presentation-tab': key! } })) })
+  const panel = (key: string, bodyHtml: string): string => tabPanel({ id: `v2-backup-panel-${key}`, tabId: `v2-backup-tab-${key}`, bodyHtml, hidden: key !== initialTab, sectionSpacing: true })
+  return `<div class="v2-lifecycle" data-presentation-tabs="panels" data-whm-detail-route="${route}" lang="${props.locale}" dir="${localeDirection(props.locale)}">
 ${lifecycleHeader(t, msgid('Server backups'), route, msgctxt('theme:v2', 'Configure copies, review actual run evidence and restore only the selected account and parts.'))}
-<section class="v2-lifecycle__column" data-approved-whm-backups data-backup-manage="${props.canRead && props.canManage}" data-backup-read-state="${props.canRead ? 'unread' : 'denied'}" data-backup-native="unavailable" aria-label="${text(t, msgid('Server backups'))}">
+${navigation}
+<section class="v2-lifecycle__column" data-approved-whm-backups data-backup-destination-editor="manager" data-backup-manage="${props.canRead && props.canManage}" data-backup-read-state="${props.canRead ? 'unread' : 'denied'}" data-backup-native="unavailable" aria-label="${text(t, msgid('Server backups'))}">
 <p id="whm-backup-layout-unavailable" class="v2-lifecycle__status" role="status">${text(t, props.canRead ? msgid('Server-wide run history, restore differences, scheduling and remote destinations have not been loaded. Their controls stay unavailable; no result or saved configuration is assumed.') : msgid('This workspace requires an authorized root account.'))}</p>
-${v2WhmBackupClientTemplates()}${summary}<nav class="v2-lifecycle__tabs" aria-label="${text(t, msgctxt('theme:v2', 'Backup pages'))}"><a href="/whm/backups?lang=${props.locale}"${route === '/whm/backups' ? ' aria-current="page"' : ''}>${text(t, msgid('Settings'))}</a><a href="/whm/backups/restore?lang=${props.locale}"${route === '/whm/backups/restore' ? ' aria-current="page"' : ''}>${text(t, msgid('Restore'))}</a><a href="#v2-lifecycle-backup-runs">${text(t, msgid('Runs'))}</a></nav>
-${route === '/whm/backups/restore' ? `<div class="v2-lifecycle__grid"><div class="v2-lifecycle__column">${restore}</div><aside class="v2-lifecycle__column" aria-label="${text(t, msgid('What a restore does'))}">${rules}</aside></div>` : ''}
-<div class="v2-lifecycle__grid"><div class="v2-lifecycle__column">${schedule}${runs}${route === '/whm/backups/restore' ? '' : restore}</div><aside class="v2-lifecycle__column" aria-label="${text(t, msgctxt('theme:v2', 'Backup destinations and recovery'))}">${destinations}${route === '/whm/backups/restore' ? '' : rules}${archive}</aside></div>
+${v2WhmBackupClientTemplates()}${summary}
+${panel('settings', `<div class="v2-lifecycle__grid"><div class="v2-lifecycle__column">${schedule}</div><aside class="v2-lifecycle__column" aria-label="${text(t, msgctxt('theme:v2', 'Backup destinations and recovery'))}">${destinations}${archive}</aside></div>`)}
+${panel('restore', `<div class="v2-lifecycle__grid"><div class="v2-lifecycle__column">${restore}</div><aside class="v2-lifecycle__column" aria-label="${text(t, msgid('What a restore does'))}">${rules}</aside></div>`)}
+${panel('runs', runs)}
 </section></div>`
 }

@@ -13,6 +13,10 @@ import { SESSION_COOKIE_NAME, principalRecordToPrincipal, sha256Hex } from './au
 import { createDefaultWebRenderer } from './main.ts'
 import { createApiApp, listenApiServer } from './server.ts'
 import type { HostCatalogSource } from './host-catalog.ts'
+import { parseMarkup, type MarkupNode } from '../../web/src/html.ts'
+import { renderUserMenu } from '../../web/src/chrome.ts'
+import { LOGIN_CLIENT_SCRIPT } from '../../web/src/login-client.ts'
+import { renderAccountSecurityCard } from '../../web/src/surfaces/account-security.ts'
 
 const hydration = vi.hoisted(() => [] as Record<string, unknown>[])
 vi.mock('../../web/src/index.ts', async (importOriginal) => {
@@ -35,18 +39,181 @@ const observations: Record<string, unknown>[] = []
 const future = () => new Date(Date.now() + 60_000).toISOString()
 const protectedPaths = ['/', '/whm', '/panel', '/mail', '/home', '/resources', '/files/manager', '/panel/files/manager', '/whm/accounts', '/whm/security/sign-in', '/mail/inbox']
 
-const expectReadOnlyUnqualifiedWorkspace = (html: string): void => {
-  const document = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
-  const start = document.search(/<section\b[^>]*\bdata-tool-availability="unverified"[^>]*>/i)
-  expect(start).toBeGreaterThanOrEqual(0)
-  const workspace = document.slice(start)
-  const controls = [...workspace.matchAll(/<(?:button|input|select|textarea)\b[^>]*>/gi)].map(match => match[0])
-  expect(controls.length).toBeGreaterThan(0)
-  // Enforce the native interaction boundary, regardless of marker names or attribute order.
-  for (const control of controls) expect(control).toMatch(/\sdisabled(?:\s|=|\/?>)/i)
-  expect(workspace).not.toMatch(/<form\b/i)
-  expect(workspace).not.toMatch(/<a\b[^>]*\s(?:data-action|onclick|onsubmit)\s*=/i)
+const accountSecurityControls = (html: string) =>
+  parseMarkup(html).filter(node => node.attrs.get('data-account-security') === 'two-factor')
+
+const expectNoAccountSecurityControls = (html: string): void => {
+  expect(accountSecurityControls(html)).toHaveLength(0)
 }
+
+describe('account-security document boundary assertions', () => {
+  it('ignores bootstrap selector text and example markup inside scripts', () => {
+    const html = '<script>' + LOGIN_CLIENT_SCRIPT + '</script><script>const example = \'<section data-account-security="two-factor"><input type="password"></section>\';</script><p>Access denied</p>'
+    expectNoAccountSecurityControls(html)
+  })
+
+  it.each(['live', 'disabled', 'hidden', 'template'] as const)('rejects a genuine %s enrollment card on a denied page', presentation => {
+    const card = renderAccountSecurityCard({ locale: 'en', totpEnabled: false, principalKind: 'reseller', surface: 'xwhm' })
+    const html = presentation === 'disabled' ? '<fieldset disabled>' + card + '</fieldset>'
+      : presentation === 'hidden' ? '<div hidden>' + card + '</div>'
+        : presentation === 'template' ? '<template>' + card + '</template>' : card
+    expect(accountSecurityControls(html)).toHaveLength(1)
+    expect(() => expectNoAccountSecurityControls(html)).toThrow()
+  })
+})
+
+// An owned account ID is legitimate only as the selected account of a local link.
+// Count raw occurrences as well, so text, scripts and unrelated attributes cannot hide behind that exception.
+const expectOwnedAccountContextLinks = (html: string, accountId: string): void => {
+  const links = parseMarkup(html).filter(node => node.namespace === 'html' && node.tag === 'a' && node.template < 0 && node.attrs.get('href')?.includes(accountId))
+  expect(links.length).toBeGreaterThan(0)
+  expect(html.split(accountId).length - 1).toBe(links.length)
+  for (const link of links) {
+    const href = link.attrs.get('href')
+    if (href === undefined) throw new Error('missing owned context href')
+    expect(href.startsWith('/') && !href.startsWith('//')).toBe(true)
+    const url = new URL(href, 'https://xpanel.invalid')
+    expect(url.origin).toBe('https://xpanel.invalid')
+    expect(url.searchParams.getAll('accountId')).toEqual([accountId])
+    url.searchParams.delete('accountId')
+    expect(url.href).not.toContain(accountId)
+  }
+}
+
+const expectUnselectedAccountContextLinks = (html: string, accountId: string, origin: string): void => {
+  const links = parseMarkup(html).filter(node => node.namespace === 'html' && node.tag === 'a' && node.template < 0 && node.attrs.has('href'))
+  expect(html).not.toContain(accountId)
+  let localLinks = 0
+  for (const link of links) {
+    const href = link.attrs.get('href')
+    if (href === undefined) throw new Error('missing unselected context href')
+    const url = new URL(href, origin)
+    if (url.origin !== new URL(origin).origin) continue
+    localLinks++
+    expect(url.searchParams.getAll('accountId')).toEqual([])
+  }
+  expect(localLinks).toBeGreaterThan(0)
+}
+
+const within = (nodes: readonly MarkupNode[], index: number, ancestor: number): boolean => {
+  for (let at = index; at >= 0;) {
+    if (at === ancestor) return true
+    const node = nodes[at]
+    if (node === undefined) return false
+    at = node.parent
+  }
+  return false
+}
+
+const expectPersonalPreferenceBoundary = (nodes: readonly MarkupNode[], menuCount: number, writable: boolean): void => {
+  const menus = nodes.flatMap((node, index) => node.template < 0 && node.tag === 'details' && node.attrs.has('data-user-menu') ? [index] : [])
+  expect(menus).toHaveLength(menuCount)
+  const preferences = nodes.flatMap((node, index) => node.attrs.has('data-ui-theme-preferences') ? [index] : [])
+  const choosers = nodes.flatMap((node, index) => node.attrs.has('data-ui-theme-form') ? [index] : [])
+  expect(preferences).toHaveLength(menuCount)
+  expect(choosers).toHaveLength(menuCount)
+  const choiceIds = new Set<string>()
+  for (const menu of menus) {
+    const owners = preferences.filter(index => within(nodes, index, menu))
+    expect(owners).toHaveLength(1)
+    const owner = owners[0]
+    if (owner === undefined) throw new Error('missing personal preference owner')
+    expect(nodes[owner]?.template).toBe(-1)
+    expect(nodes[owner]?.attrs.has('hidden')).toBe(true)
+    const ownedChoosers = choosers.filter(index => within(nodes, index, owner))
+    expect(ownedChoosers).toHaveLength(1)
+    const chooser = ownedChoosers[0]
+    if (chooser === undefined) throw new Error('missing personal preference chooser')
+    expect(nodes[chooser]?.tag).toBe(writable ? 'form' : 'div')
+    expect(nodes[chooser]?.template).toBe(-1)
+    expect(nodes[chooser]?.attrs.has('hidden')).toBe(true)
+    const fields = nodes.filter((_node, index) => within(nodes, index, chooser))
+    const choices = fields.filter(node => node.tag === 'select' && node.attrs.get('name') === 'uiTheme' && node.attrs.has('data-ui-theme-choice'))
+    expect(choices).toHaveLength(1)
+    const choice = choices[0]
+    const id = choice?.attrs.get('id')
+    if (choice === undefined || id === undefined || id === '') throw new Error('missing personal preference field identity')
+    expect(choice.attrs.has('disabled')).toBe(true)
+    expect(choiceIds.has(id)).toBe(false)
+    choiceIds.add(id)
+    expect(fields.filter(node => node.tag === 'label' && node.attrs.get('for') === id)).toHaveLength(1)
+    const saves = fields.filter(node => node.tag === 'button' && node.attrs.has('data-ui-theme-save'))
+    expect(saves).toHaveLength(1)
+    expect(saves[0]?.attrs.get('type')).toBe(writable ? 'submit' : 'button')
+    expect(saves[0]?.attrs.has('disabled')).toBe(true)
+  }
+  const forms = nodes.flatMap((node, index) => node.tag === 'form' ? [index] : [])
+  expect(forms.filter(index => nodes[index]?.template === -1)).toHaveLength(writable ? menuCount : 0)
+  expect(forms.filter(index => (nodes[index]?.template ?? -1) >= 0)).toHaveLength(1)
+  for (const index of forms) {
+    const form = nodes[index]
+    if (form === undefined) throw new Error('missing form')
+    if (form.template < 0) {
+      expect(choosers.includes(index)).toBe(true)
+      continue
+    }
+    const template = nodes[form.template]
+    expect(template?.tag).toBe('template')
+    expect(template?.attrs.get('data-xp-template')).toBe('prompt-dialog')
+    expect(form.attrs.get('method')).toBe('dialog')
+    expect(form.attrs.get('data-xp-slot')).toBe('form')
+    expect(form.attrs.has('action')).toBe(false)
+  }
+}
+
+const expectReadOnlyUnqualifiedWorkspace = (html: string, preferenceWritable = true): void => {
+  const nodes = parseMarkup(html)
+  const roots = nodes.flatMap((node, index) => node.template < 0 && node.attrs.get('data-tool-availability') === 'unverified' ? [index] : [])
+  expect(roots).toHaveLength(1)
+  const root = roots[0]
+  if (root === undefined) throw new Error('missing unqualified workspace')
+  const workspace = nodes.filter((_node, index) => within(nodes, index, root))
+  const controls = workspace.filter(node => ['button', 'input', 'select', 'textarea'].includes(node.tag))
+  expect(controls.length).toBeGreaterThan(0)
+  for (const control of controls) expect(control.attrs.has('disabled')).toBe(true)
+  for (const node of workspace) {
+    expect(node.tag).not.toBe('form')
+    expect(node.attrs.get('contenteditable')?.toLowerCase()).not.toBe('true')
+    if (node.tag === 'a') for (const attribute of ['data-action', 'onclick', 'onsubmit']) expect(node.attrs.has(attribute)).toBe(false)
+    expect(node.attrs.has('data-user-menu')).toBe(false)
+    expect(node.attrs.has('data-ui-theme-preferences')).toBe(false)
+  }
+  // Personal preference admission is independent of the unavailable hosting workspace.
+  expectPersonalPreferenceBoundary(nodes, 1, preferenceWritable)
+}
+
+describe('bounded document ownership assertions', () => {
+  const chooser = (writable = false) => renderUserMenu({ locale: 'en', theme: 'dark', density: 'comfortable', path: '/whm/accounts', surface: 'xwhm', username: 'administrator7', role: 'root', signedIn: true, themeChooserWritable: writable })
+  const prompt = '<template data-xp-template="prompt-dialog"><dialog><form method="dialog" data-xp-slot="form"><input id="xp-prompt-input"><button>OK</button></form></dialog></template>'
+  const workspace = '<section data-tool-availability="unverified"><input disabled><button disabled>Unavailable</button></section>'
+
+  it('recognizes both personal chooser modes outside the exact workspace', { tags: ['unit'] }, () => {
+    for (const writable of [false, true]) {
+      expectReadOnlyUnqualifiedWorkspace(chooser(writable) + workspace + prompt + '<script>const sample = "<form><input>"</script>', writable)
+    }
+  })
+
+  const invalidWorkspaces: Array<[string, string]> = [
+    ['enabled workspace field', chooser() + '<section data-tool-availability="unverified"><input hidden><button disabled>Unavailable</button></section>' + prompt],
+    ['native workspace form', chooser() + '<section data-tool-availability="unverified"><form hidden><button disabled>Apply</button></form></section>' + prompt],
+    ['unowned live form', chooser() + workspace + prompt + '<form hidden><button disabled>Apply</button></form>'],
+    ['unrecognized inert form', chooser() + workspace + '<template><form method="dialog" data-xp-slot="form"><input></form></template>'],
+    ['relocated personal owner', '<section data-tool-availability="unverified">' + chooser() + '<button disabled>Unavailable</button></section>' + prompt],
+  ]
+  it.each(invalidWorkspaces)('rejects %s without weakening workspace or form ownership', { tags: ['unit'] }, (_kind, html) => {
+    expect(() => expectReadOnlyUnqualifiedWorkspace(html, false)).toThrow()
+  })
+
+  it('permits an owned account context only in its correct local URL query', { tags: ['unit'] }, () => {
+    const accountId = 'owned-context-7'
+    const link = '<a href="/home?lang=en&amp;accountId=' + accountId + '">Home</a>'
+    expectOwnedAccountContextLinks(link, accountId)
+    for (const html of [link + '<span>' + accountId + '</span>', '<a href="https://foreign.example/home?accountId=' + accountId + '">Home</a>', '<a href="/home?other=' + accountId + '">Home</a>', link + '<script>const account = "' + accountId + '"</script>', link + '<p>href="/home?lang=en&amp;accountId=' + accountId + '"</p>', link + '<p>&lt;a href="/home?lang=en&amp;accountId=' + accountId + '"&gt;Home&lt;/a&gt;</p>', '<svg><a href="/home?accountId=' + accountId + '">Home</a></svg>']) {
+      expect(() => expectOwnedAccountContextLinks(html, accountId)).toThrow()
+    }
+  })
+})
+
 
 afterAll(async () => {
   const path = process.env.XPANEL_WEB_BOUNDARY_EVIDENCE
@@ -193,7 +360,7 @@ describe('production web renderer boundary regressions', () => {
       security: { totpEnabled: listAccounts },
       visibility: { principal: { kind: 'reseller', id: principal.id, username: principal.username } },
     })
-    expect(html).toContain('data-account-security="two-factor"')
+    expect(accountSecurityControls(html)).toHaveLength(1)
     expect(html).toContain(listAccounts ? 'data-mfa-enabled="true"' : 'data-auth-state="optional"')
     expect(html).not.toMatch(/data-mfa-recommendation|data-realtime-enabled="true"|data-workspace-account-overview=|data-account-row=|data-service-row=|data-cmdk-item=/)
     for (const marker of [other.id, 'Multi-factor enrollment is required']) expect(html).not.toContain(marker)
@@ -235,7 +402,7 @@ describe('production web renderer boundary regressions', () => {
     const render = await renderer()
     const expectedStatus = condition === 'missing' || condition === 'mismatched' ? 403 : 303
     const html = await observe(`reseller-self-security-rejected:${condition}`, await render(request('/whm/security/sign-in', condition === 'api-token' ? undefined : cookie, authorization)), expectedStatus, expectedStatus === 303 ? '/login' : undefined)
-    expect(html).not.toContain('data-account-security="two-factor"')
+    expectNoAccountSecurityControls(html)
     if (expectedStatus === 303) expect(hydration).toEqual([])
     else expect(hydration.at(-1)).not.toHaveProperty('security')
     expect(getSettings).not.toHaveBeenCalled()
@@ -299,7 +466,8 @@ describe('production web renderer boundary regressions', () => {
     expect.soft(accounts.includes('data-tool-availability="unverified"')).toBe(true)
     expectReadOnlyUnqualifiedWorkspace(accounts)
     expect(hydration.at(-1)?.workspaceSummary).toEqual({})
-    for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(hydration.at(-1)).not.toHaveProperty(key)
+    expect(hydration.at(-1)?.whm).toEqual({ principal: principalRecordToPrincipal(principal), activeReseller: null })
+    for (const key of ['panel', 'mail', 'generationId']) expect(hydration.at(-1)).not.toHaveProperty(key)
     expect.soft(/alice-shop\.com|srv1\.xpanel\.test/.test(accounts)).toBe(false)
     expect(snapshotReads).toBe(0)
   })
@@ -314,25 +482,31 @@ describe('production web renderer boundary regressions', () => {
     expect((workspace!.visibility as { principal: { kind: string } }).principal.kind).toBe('root')
     expectUnqualifiedCatalog(workspace!.catalog)
     expect(workspace!.workspaceSummary).toEqual({})
-    for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(workspace).not.toHaveProperty(key)
+    expect(workspace?.whm).toEqual({ principal: principalRecordToPrincipal(principal), activeReseller: null })
+    for (const key of ['panel', 'mail', 'generationId']) expect(workspace).not.toHaveProperty(key)
     for (const path of ['/whm/accounts', '/whm/accounts/health', ...registeredDocumentAliases.filter(row => row.parentRoute === '/whm/software/site-software').map(row => row.route)]) {
       const html = await observe(`empty-state:${path}`, await render(request(path, cookie)), 200)
       expect(html).toContain('data-tool-availability="unverified"')
       expectReadOnlyUnqualifiedWorkspace(html)
       const supplied = hydration.at(-1)
       expect(supplied).toBeDefined()
-      const visibility = supplied!.visibility as { principal: { kind: string } }
+      if (!supplied) throw new Error('Missing bounded WHM identity state')
+      const visibility = supplied.visibility as { principal: { kind: string } }
+      const whm = supplied.whm
+      const whmKeys = whm !== null && typeof whm === 'object' && !Array.isArray(whm) ? Object.keys(whm) : []
       observations.push({ id: `hydration:${path}`, visibilityPrincipalKind: visibility.principal.kind,
-        catalogOverridden: supplied!.catalog !== undefined,
-        fullStateSupplied: ['whm', 'panel', 'mail', 'generationId'].some(key => key in supplied!),
-        workspaceSummaryKeys: Object.keys(supplied!.workspaceSummary as Record<string, unknown>),
+        catalogOverridden: supplied.catalog !== undefined,
+        fullStateSupplied: ['panel', 'mail', 'generationId'].some(key => key in supplied)
+          || whmKeys.some(key => !['principal', 'activeReseller'].includes(key)),
+        workspaceSummaryKeys: Object.keys(supplied.workspaceSummary as Record<string, unknown>),
       })
       expect(visibility.principal.kind).toBe('root')
       expectUnqualifiedCatalog(supplied!.catalog)
       expect(supplied!.activeRoute).toBe(path)
       expect(supplied!.workspaceSummary).toEqual({})
       expect(supplied).not.toHaveProperty('error')
-      for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(supplied).not.toHaveProperty(key)
+      expect(supplied.whm).toEqual({ principal: principalRecordToPrincipal(principal), activeReseller: null })
+      for (const key of ['panel', 'mail', 'generationId']) expect(supplied).not.toHaveProperty(key)
     }
     expect(snapshotReads).toBe(0)
   })
@@ -408,7 +582,9 @@ describe('production web renderer boundary regressions', () => {
         expect(html).toContain(locale === 'ar' ? 'الرئيسية' : 'Home')
         expect(html).toContain('data-action="logout"')
         expect(html).not.toContain('data-tool-availability="unverified"')
-        expect(html).not.toMatch(/<form\b|[\u0660-\u0669\u06f0-\u06f9]/)
+        expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+        expectPersonalPreferenceBoundary(parseMarkup(html), 2, true)
+        expectUnselectedAccountContextLinks(html, owner.id, origin)
         const panel = hydration.at(-1)?.panel as { databases: Array<{ id: string; name: string }>; databaseUsers: Array<{ id: string; name: string; grants: unknown[] }> }
         expect(panel.databases.map(database => database.name)).toEqual(databases.map(database => database.name))
         expect(panel.databaseUsers).toEqual(databaseUsers.map(user => ({ id: user.id, name: user.name, grants: user.grants })))
@@ -419,7 +595,7 @@ describe('production web renderer boundary regressions', () => {
           expect(JSON.stringify(panel)).not.toContain(value)
           expect(html).not.toContain(value)
         }
-        for (const value of [owner.id, other.id, principal.id, plan.id, featureList.id, owner.contactEmail, other.primaryDomain, PUBLIC_VECTOR]) expect(html).not.toContain(value)
+        for (const value of [other.id, principal.id, plan.id, featureList.id, owner.contactEmail, other.primaryDomain, PUBLIC_VECTOR]) expect(html).not.toContain(value)
       }
       for (const [path, canonicalRoute] of [
         ['/domains', '/domains'], ['/panel/domains', '/domains'],
@@ -438,7 +614,8 @@ describe('production web renderer boundary regressions', () => {
         })
         expectUnqualifiedCatalog(supplied?.catalog)
         expect(supplied).not.toHaveProperty('error')
-        for (const key of ['whm', 'panel', 'mail', 'generationId']) expect(supplied).not.toHaveProperty(key)
+        expect(supplied?.panel).toEqual({ account: owner, plan })
+        for (const key of ['whm', 'mail', 'generationId']) expect(supplied).not.toHaveProperty(key)
         for (const value of [owner.home, owner.ipv4, owner.contactEmail, other.primaryDomain, PUBLIC_VECTOR, PUBLIC_DB_AUTH,
           otherDatabase.id, otherDatabase.name, otherDatabaseUser.id, otherDatabaseUser.name,
           ...databases.map(database => database.name), ...databaseUsers.map(user => user.name),

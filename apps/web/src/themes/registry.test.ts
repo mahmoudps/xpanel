@@ -1,9 +1,11 @@
 import { readFileSync, readdirSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { dirname, join, relative, resolve } from 'node:path'
 import { expect, it } from 'vitest'
 import { lexJavaScriptSource, sourceLiteral } from '../../../../scripts/i18n-catalog.mjs'
 import { findUiThemeAsset, registeredUiThemeIds, resolveUiTheme } from './registry.ts'
 import { escapeHtml } from '../html.ts'
+import { serveWebUi } from '../app.ts'
 import { escapeHtml as legacyEscapeHtml } from '../tokens.ts'
 
 const unknownPreference = (() => {
@@ -18,7 +20,8 @@ it.each([undefined, null, '', unknownPreference, '../v2', '__proto__', 'construc
 
 it('exposes unique immutable registered packages with classic as the default', () => {
   const ids = registeredUiThemeIds()
-  expect(ids).toContain('classic')
+  expect(ids).toEqual(['classic', 'v2'])
+  expect(resolveUiTheme().id).toBe('classic')
   expect(new Set(ids).size).toBe(ids.length)
   for (const id of ids) {
     expect(resolveUiTheme(id).id).toBe(id)
@@ -31,6 +34,34 @@ it('keeps core runtime paths and traversal outside the theme asset registry', ()
   for (const path of ['/assets/ws-client.js', '/assets/login.js', '/assets/i18n-en.js', '/assets/../tokens.css', '/assets/themes/classic/../../tokens.css'])
     expect(findUiThemeAsset(path)).toBeUndefined()
   expect(findUiThemeAsset('/assets/tokens.css')).toMatchObject({ path: '/assets/tokens.css', contentType: 'text/css; charset=utf-8' })
+})
+
+it('serves installed Classic and V2 styles through the immutable public asset boundary', async () => {
+  const classic = await serveWebUi(new Request('http://localhost/assets/tokens.css'))
+  expect(classic.status).toBe(200)
+  expect(classic.headers.get('content-type')).toBe('text/css; charset=utf-8')
+  expect((await classic.text()).trim()).not.toBe('')
+
+  const response = await serveWebUi(new Request('http://localhost/assets/themes/v2/styles.css'))
+  expect(response.status).toBe(200)
+  expect(response.headers.get('content-type')).toBe('text/css; charset=utf-8')
+  expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+  expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+  const css = await response.text()
+  expect(css.startsWith('[data-ui-theme="v2"]{')).toBe(true)
+  const version = createHash('sha256').update(css).digest('hex').slice(0, 16)
+  expect(findUiThemeAsset('/assets/themes/v2/styles.css')?.href).toBe('/assets/themes/v2/styles.css?v=' + version)
+  const versioned = await serveWebUi(new Request('http://localhost/assets/themes/v2/styles.css?v=' + version))
+  expect(versioned.status).toBe(200)
+  expect(await versioned.text()).toBe(css)
+
+  for (const pathname of ['/assets/themes/unregistered-test-theme/styles.css', '/assets/themes/v2/not-installed.css']) {
+    expect(findUiThemeAsset(pathname)).toBeUndefined()
+    const missing = await serveWebUi(new Request('http://localhost' + pathname))
+    expect(missing.status).toBe(404)
+    expect(missing.headers.get('cache-control')).toBe('no-store')
+    expect(missing.headers.get('x-content-type-options')).toBe('nosniff')
+  }
 })
 
 it('keeps the legacy escaping export identical to the core helper', () => {

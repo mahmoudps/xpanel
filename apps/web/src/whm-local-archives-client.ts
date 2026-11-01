@@ -38,7 +38,7 @@ function bindLocalArchives(): void {
           clientTemplateSlot(row, 'archive').textContent = item.file
           clientTemplateSlot(row, 'bytes').textContent = String(item.bytes)
           const review = clientTemplateSlot(row, 'review', 'a') as HTMLAnchorElement
-          review.href = '/whm/backups/files?lang=' + (document.documentElement.lang === 'ar' ? 'ar' : 'en')
+          review.href = '/whm/backups/files?' + new URLSearchParams({ lang: document.documentElement.lang })
           review.textContent = xpT('Restore files') + ': ' + item.file
           return row
         })

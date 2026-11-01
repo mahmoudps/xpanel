@@ -1,5 +1,6 @@
 import { localeDirection, localizedText, translator, type Locale, type LocalizedText, type MessageValues } from '../i18n.ts'
 import { escapeHtml, formatDisplayDateTime } from '../tokens.ts'
+import { classicAccountAnnouncementNoticeTemplates } from './account-announcement-notice-templates.ts'
 
 /** One live announcement as /api/account/announcements returns it (apps/api/src/announcements-workspace.ts). */
 export type AccountAnnouncementNotice = {
@@ -25,5 +26,5 @@ export function renderAccountAnnouncementNotice(notice: AccountAnnouncementNotic
 
 /** xPanel home banner: live announcements for this account, hidden when there are none. The client binding reads and repaints it. */
 export function renderAccountAnnouncementsBanner(input: { locale: Locale; announcements: readonly AccountAnnouncementNotice[] }): string {
-  return `${ACCOUNT_ANNOUNCEMENT_STYLES}<section class="xp-account-announcements" data-account-announcements data-state="unread" lang="${input.locale}" dir="${localeDirection(input.locale)}" aria-label="${escapeHtml(translator(input.locale)('Announcements'))}"${input.announcements.length ? '' : ' hidden'}><div class="xp-account-announcements__list" data-account-announcements-list>${input.announcements.map(notice => renderAccountAnnouncementNotice(notice, input.locale, true)).join('')}</div><p class="xp-help" data-account-announcements-status role="status" hidden></p></section>`
+  return `${ACCOUNT_ANNOUNCEMENT_STYLES}<section class="xp-account-announcements" data-account-announcements data-state="unread" lang="${input.locale}" dir="${localeDirection(input.locale)}" aria-label="${escapeHtml(translator(input.locale)('Announcements'))}"${input.announcements.length ? '' : ' hidden'}>${classicAccountAnnouncementNoticeTemplates()}<div class="xp-account-announcements__list" data-account-announcements-list>${input.announcements.map(notice => renderAccountAnnouncementNotice(notice, input.locale, true)).join('')}</div><p class="xp-help" data-account-announcements-status role="status" hidden></p></section>`
 }

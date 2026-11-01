@@ -14,6 +14,8 @@ const props = { mailbox: 'owner@example.test', visibility, catalog, locale: 'en'
 describe('v2 complete mailbox surface integration', () => {
   it.each(MAIL_WORKSPACE_ROUTES)('mounts the actual workspace %s inside one mailbox shell', activeRoute => {
     const html = render({ ...props, activeRoute })
+    const shell = parseMarkup(html).find(node => node.attrs.get('class') === 'v2-shell')
+    expect(shell?.attrs.get('data-mailbox')).toBe(props.mailbox)
     expect(html).toContain(`data-mail-workspace-route="${activeRoute}"`)
     expect(html).not.toContain('data-core-unavailable')
     expect(html.match(/id="main-content"/g)).toHaveLength(1)
@@ -56,6 +58,7 @@ describe('v2 complete mailbox surface integration', () => {
       const html = render({ ...props, activeRoute, visibility: { ...visibility, allowedToolIds: new Set() } })
       expect(html).toBe('<section data-core-unavailable>Unavailable</section>')
       expect(html).not.toContain(props.mailbox)
+      expect(html).not.toContain('data-mailbox=')
     }
   })
 

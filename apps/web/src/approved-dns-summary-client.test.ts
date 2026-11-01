@@ -2,6 +2,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
+import { translator } from './i18n.ts'
+import { dnsEditorTemplates } from './board-port/data-client-templates.ts'
 type Request = (method: string, path: string, body?: unknown) => Promise<unknown>
 const tick = async () => { await new Promise(resolve => setTimeout(resolve, 0)); await new Promise(resolve => setTimeout(resolve, 0)) }
 let listeners: [EventTarget, string, EventListenerOrEventListenerObject, boolean | AddEventListenerOptions | undefined][]
@@ -16,6 +18,9 @@ beforeEach(() => {
 afterEach(() => { for (const [target, name, callback, options] of listeners) target.removeEventListener(name, callback, options); document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: Request }).xpanelSessionRequest; vi.restoreAllMocks() })
 const boot = (send: Request, attributes = '') => {
   document.body.innerHTML = '<section data-whm-dns-workspace ' + attributes + '><section data-dns-editor><select data-dns-zone></select><table><tbody data-dns-records></tbody></table><p data-dns-status></p><input data-dns-new-name><select data-dns-account><option value="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa">Alpha account</option></select><button data-dns-refresh>Refresh</button><button data-dns-add-record>Add record</button><button data-dns-add-zone>Add zone</button><button data-dns-save>Save</button><button data-dns-delete>Delete</button></section><table><tbody data-whm-dns-zone-rows><tr><td colspan="5">Not read</td></tr></tbody></table><span data-whm-dns-zone-count>Not read</span><dd data-whm-dns-soa-serial>Not read</dd><p data-provider-health>Not read</p></section>'
+  const editor = document.querySelector<HTMLElement>('[data-dns-editor]')
+  if (!editor) throw new Error('missing_dns_fixture')
+  editor.insertAdjacentHTML('beforeend', dnsEditorTemplates(translator('en'), true))
   ;(window as Window & { xpanelSessionRequest?: Request }).xpanelSessionRequest = send
   new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document)
 }

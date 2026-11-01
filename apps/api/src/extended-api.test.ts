@@ -13,6 +13,7 @@ import { CSRF_HEADER_NAME, hashPasswordArgon2id, parseCookies, SESSION_COOKIE_NA
 import { startPanelServer } from './test-panel-server.ts'
 import { ExtendedFeaturesStore, type InstalledAppRecord } from './extended-routes.ts'
 import * as mailDocuments from './mail/document.ts'
+import { parseMarkup } from '../../web/src/html.ts'
 import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
 
 interface HttpSessionClient {
@@ -61,6 +62,29 @@ const createHttpClient = (baseUrl: string, setCookieHeader: string | null, csrfT
       })
     },
   }
+}
+
+// Inspect actual unqualified status-body elements. Bootstrap strings and inert
+// row templates do not grant authority; hidden/disabled live forms still count.
+const assertUnqualifiedWorkspaceHasNoLiveActions = (html: string): ReturnType<typeof parseMarkup> => {
+  const nodes = parseMarkup(html)
+  const liveWorkspace: ReturnType<typeof parseMarkup> = []
+  const bodies = new Set(nodes.flatMap((node, index) => node.namespace === 'html' && node.template === -1
+    && node.tag === 'section' && node.attrs.get('data-tool-availability') === 'unverified' ? [index] : []))
+  assert.ok(bodies.size > 0, 'the actual unqualified workspace status body must exist')
+  const inside = (index: number): boolean => {
+    for (let current = index; current >= 0; current = nodes[current]?.parent ?? -1) if (bodies.has(current)) return true
+    return false
+  }
+  for (const [index, node] of nodes.entries()) {
+    // Forbidden enrollment cards remain forbidden even when hidden or templated.
+    assert.notEqual(node.attrs.get('data-account-security'), 'two-factor')
+    if (node.namespace !== 'html' || node.template !== -1 || !inside(index)) continue
+    assert.notEqual(node.tag, 'form', 'an unqualified workspace must not contain a live operation form')
+    assert.equal(node.attrs.has('data-cmdk-item'), false, 'an unqualified status body must not expose executable command items')
+    liveWorkspace.push(node)
+  }
+  return liveWorkspace
 }
 
 describe('@xpanel/api extended HTTP contracts with explicit fake host execution', () => {
@@ -149,7 +173,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.match(whmHtml, /data-tool-availability="unverified"/)
     assert.match(whmHtml, /data-mfa-optional-link/)
     assert.match(whmHtml, /data-nav-route=/)
-    assert.doesNotMatch(whmHtml, /<form\b|data-cmdk-item="/)
+    assertUnqualifiedWorkspaceHasNoLiveActions(whmHtml)
     const securityPage = await root.request('/whm/security/sign-in')
     assert.equal(securityPage.status, 200)
     const securityHtml = await securityPage.text()
@@ -218,15 +242,15 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
           assert.ok(html.includes('data-surface="xpanel"'))
           assert.match(html, /data-tool-availability="unverified"/)
           const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
-          const workspaceStart = markup.search(/<section\b[^>]*\bdata-tool-availability="unverified"[^>]*>/i)
-          assert.ok(workspaceStart >= 0, 'The unqualified workspace remains explicit')
-          const workspace = markup.slice(workspaceStart)
-          const controls = [...workspace.matchAll(/<(?:button|input|select|textarea)\b[^>]*>/gi)].map(match => match[0])
-          assert.ok(controls.length > 0, 'The read-only document retains its actual controls')
-          // A marker string is not evidence of disabled interaction; inspect every native control.
-          for (const control of controls) assert.match(control, /\sdisabled(?:\s|=|\/?>)/i)
-          assert.doesNotMatch(workspace, /<form\b/i)
-          assert.doesNotMatch(workspace, /<a\b[^>]*\s(?:data-action|onclick|onsubmit)\s*=/i)
+          const workspace = assertUnqualifiedWorkspaceHasNoLiveActions(html)
+          const controls = workspace.filter(node => ['button', 'input', 'select', 'textarea'].includes(node.tag))
+          assert.ok(controls.length > 0, 'The read-only document retains its actual live controls')
+          // Inspect every live control, including hidden/disabled elements. Inert
+          // finite row/prompt templates and controls outside the body are separate.
+          for (const control of controls) assert.equal(control.attrs.has('disabled'), true)
+          for (const node of workspace.filter(value => value.tag === 'a')) {
+            assert.equal(['data-action', 'onclick', 'onsubmit'].some(attribute => node.attrs.has(attribute)), false)
+          }
           assert.match(html, /<html\b[^>]*data-realtime-enabled="false"/)
           assert.doesNotMatch(html, /data-status-page="404"|data-board-port="xpanel-home"/)
           assert.doesNotMatch(markup, /<(?:div|section|main)\b[^>]*data-mail-layout=/)
@@ -240,7 +264,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     } finally { serverHandle.store.readSnapshot = readSnapshot; mailRead.mockRestore() }
   })
 
-  it('2. Stored extended feature HTTP contracts and generated configuration with fake host execution', async () => {
+  it('2. Stored extended feature HTTP contracts and generated configuration with fake host execution', { tags: ['slow'] }, async () => {
     const root = await loginOverHttp('root', 'RootPassword!2026')
 
     // ---- Step A: First-Run Setup Wizard, Hostname Change & Disk Quota Init ----
@@ -309,17 +333,16 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.equal(planRes.status, 201)
     const planId = ((await planRes.json()) as { plan: { id: string } }).plan.id
 
-    const accRes = await root.request('/api/accounts', {
-      method: 'POST',
-      body: {
-        username: 'nebula',
-        primaryDomain: 'nebula.test',
-        planId,
-        password: 'NebulaPassword!2026',
-      },
+    // Arrange isolated desired-state data for the extended-contract fixture.
+    // This fake host has no private/native prepared-provisioning proof. Account
+    // provisioning HTTP/WHMCS admission is tested by its dedicated strict suites;
+    // this setup must not pretend a native account-create acknowledgement.
+    const accountPasswordHash = await hashPasswordArgon2id('NebulaPassword!2026')
+    const account = await serverHandle.store.createAccount({ username: 'nebula', primaryDomain: 'nebula.test', planId,
+      ownerId: null, contactEmail: 'nebula@nebula.test', passwordHash: accountPasswordHash, shell: 'none',
+      php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 4, startServers: 2, minSpareServers: 1, maxSpareServers: 3, maxRequests: 500, processIdleTimeoutSec: 10 }, ini: {} },
     })
-    assert.equal(accRes.status, 201)
-    const account = ((await accRes.json()) as { account: { id: string; username: string; uid: number } }).account
+    await createUserPrincipal(serverHandle.db, { username: account.username, accountId: account.id, passwordHash: accountPasswordHash, forcePasswordChange: false })
 
     // Register the source domain and mailbox through authorized provisioning contracts.
     const oldDomain = await root.request('/api/domains', {
@@ -862,7 +885,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     const actions = new Set(audits.map((a) => a.action))
     assert.ok(actions.has('setup.wizard.completed'))
     assert.ok(actions.has('server.hostname_change'))
-    assert.ok(actions.has('server.quota_init'))
+    assert.equal(audits.some(entry => entry.action === 'server.quota_init' && entry.outcome === 'ok'), false, 'Unavailable quota initialization must not produce a success audit')
     assert.ok(actions.has('mail.domain_forwarder.created'))
     assert.ok(actions.has('mail.filter.created'))
     assert.ok(actions.has('mail.import_csv'))

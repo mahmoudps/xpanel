@@ -6351,3 +6351,188 @@ msgstr ""
 msgctxt "theme:v2"
 msgid "Zstandard"
 msgstr ""
+
+msgctxt "theme:v2"
+msgid "Account details"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Identity and plan"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Limits and usage"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Close account details"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "How team access works"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Role limit"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "No role"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Sign-out"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Owner only"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Backup sections"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Use the xPanel sign-in page and the username shown in the team list. Sign-in availability follows the state reported above."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Set by the member through a single-use password link. You never see or choose their password."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Up to 7 members can hold a role. Suspended members still count."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Can sign in when team sign-in is enabled, but cannot use account tools."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Suspending or deleting a member, or removing a role, signs that member out."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Only the signed-in account owner can manage the team, and the plan must include it."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Use the account preferences page to refresh or change saved contact details."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Open account preferences"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/plans/editor.ts
+msgctxt "theme:v2"
+msgid "Features"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Saved configuration when this page opened. Reload after changes to refresh this reference."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Runtime not observed"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Edge and reverse proxy"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "The intended edge forwards site requests to the loopback backend. Public listeners and generated configuration have not been observed here."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Saved backend engine"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Saved Apache MPM: {mpm}. The saved choice does not verify the identity of a serving process."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "OpenLiteSpeed is the saved engine. Its listener and per-site execution identity have not been observed."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Saved settings have not been read."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Site application"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Per-site handler"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Account execution boundary"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "The domain handler, PHP pool or application process, account UID and served response require separate runtime evidence."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Request flow"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Request path"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Proxy configuration reference"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Illustrative proxy block using the page-load saved HTTP port. This is not a read of a generated file or a verified listener."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Forwarded client headers are overwritten at the edge. The complete generated configuration includes additional guarded directives."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "A host-specific default baseline has not been supplied. Saved values are not proof of active configuration; draft differences appear in Pending change."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Saved configuration comparison"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Default baseline"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Not reviewed"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Review pending change"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Test gate"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Required change workflow. No step is marked passed by this explanatory reference."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Read the complete saved settings and review the draft difference."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Validate the candidate and test syntax before applying."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Read the actual reconcile result and resulting generation."
+msgstr ""

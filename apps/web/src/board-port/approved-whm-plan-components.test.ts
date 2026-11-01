@@ -4,8 +4,22 @@ import { defaultPlan, type Account, type Reseller, type ResellerAcl } from '@xpa
 import type { WhmSurfaceProps } from '../surfaces/xwhm.ts'
 import { approvedWhmPlanImpact, renderApprovedWhmFeatureListSupplement, renderApprovedWhmPlanSupplement } from './approved-whm-plan-components.ts'
 
+// Positive fixtures name only the capabilities exercised by these renderer cases.
+// This private input does not change the production acceptance catalog or host evidence.
+const qualifiedControlPlaneFixture = (ids: readonly string[]) => {
+  const accepted = new Set(ids)
+  const catalog = qualifyHostTools(tools.map(tool => accepted.has(tool.id)
+    ? { ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } }
+    : tool), { executor: 'linux', probes: { 'control-plane': 'passed' } }, true)
+  for (const id of accepted) {
+    expect(catalog.find(tool => tool.id === id)?.status).toBe('verified')
+    expect(catalog.find(tool => tool.id === id)?.delivery.status).toBe('verified')
+  }
+  return catalog
+}
+
 const root = { kind: 'root' as const, id: 'private-root-key', username: 'administrator7' }
-const catalog = qualifyHostTools(tools, { executor: 'linux', probes: { 'control-plane': 'passed' } })
+const catalog = qualifiedControlPlaneFixture(['add-package', 'edit-package', 'feature-list-crud', 'list-accounts'])
 const owned = defaultPlan({ id: 'private-plan-one', name: 'Configured plan7', ownerId: 'owner-key', featureListId: 'private-list-own' })
 const otherPlan = defaultPlan({ id: 'private-plan-two', name: 'Other plan7', ownerId: 'other-key', featureListId: 'private-list-other' })
 const first: Account = {

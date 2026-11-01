@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
-import { readSecSavedView, secKit } from './sec-security-client.ts'
+import { readSecSavedView, secKit, SEC_CLIENT_TEMPLATE_HELPERS } from './sec-security-client.ts'
 import type { SecSavedView } from './sec-security-client.ts'
 import './i18n.ts'
 const displayDateTime = formatDisplayDateTime
@@ -36,6 +36,7 @@ function bindSecDns(askDialog: Ask | undefined): void {
     const k = kitOf(root, askDialog, displayDateTime), t = k.t
     const refresh = k.q<HTMLButtonElement>('[data-sec-action="refresh"]')
     if (!k.admitted()) { if (refresh) refresh.disabled = true; k.note('unavailable', t('This page is unavailable here. Nothing was read or changed.')); return }
+    if (!k.prepareTemplates()) return
     const editors = k.all<HTMLInputElement | HTMLSelectElement>('[data-sec-input]'), buttons = k.all<HTMLButtonElement>('[data-sec-action]:not([data-sec-action="refresh"])')
     let loaded = false
     k.controls.push(() => { if (refresh) refresh.disabled = k.isBusy(); const editable = loaded && !k.isBusy() && k.manageable(); for (const node of [...editors, ...buttons]) node.disabled = !editable })
@@ -64,6 +65,7 @@ function bindSecDns(askDialog: Ask | undefined): void {
           const raw = await k.send('GET', '/api/account/sec/cloudflare') as { domains?: unknown }
           if (!Array.isArray(raw?.domains) || raw.domains.length > 5000) throw new Error('invalid')
           const domains = raw.domains.map(item => { const row = item as { domain?: unknown; linked?: unknown }; if (typeof row.domain !== 'string' || !/^[a-z0-9.-]{1,253}$/.test(row.domain) || typeof row.linked !== 'boolean') throw new Error('invalid'); return { domain: row.domain, linked: row.linked } })
+          if (!k.prepareTemplates()) return
           loaded = true
           k.rows('domains', domains.map(row => [k.technical(row.domain), row.linked ? t(msgctxt('sec-dns-client', 'Connected')) : t('Not connected'), row.linked ? k.group(k.actionButton(t('Inspect'), t('Inspect {domain}', { domain: row.domain }), () => void inspect('/api/account/sec/cloudflare/zone', row.domain), false), k.actionButton(t('Purge cache'), t('Purge the cache of {domain}', { domain: row.domain }), () => void purge('/api/account/sec/cloudflare/purge', row.domain), !k.manageable())) : '-']), t('You have no domains.'), 3)
           k.note('read', t('Read from this server.'))
@@ -76,6 +78,7 @@ function bindSecDns(askDialog: Ask | undefined): void {
       let view: SecProvidersView | null = null
       const fill = (key: string, items: [string, string][]): void => { const select = k.input<HTMLSelectElement>(key); if (!select) return; const current = select.value, first = select.options[0]; select.textContent = ''; if (first) select.append(first); for (const [v, label] of items) { const option = document.createElement('option'); option.value = v; option.textContent = label; select.append(option) }; select.value = items.some(([v]) => v === current) ? current : '' }
       const paint = (next: SecProvidersView): void => {
+        if (!k.prepareTemplates()) return
         view = next; loaded = true
         const labelOf = (id: string): string => next.accounts.find(account => account.id === id)?.label ?? id
         k.rows('accounts', next.accounts.map(account => [account.label, 'Cloudflare', k.technical(account.tokenId), k.technical(displayDateTime(account.verifiedAt)), k.group(k.actionButton(t('Remove'), t('Remove {name}', { name: account.label }), () => void remove(account.id, account.label), !k.manageable()))]), t('No provider accounts are connected.'), 5)
@@ -114,6 +117,7 @@ function bindSecDns(askDialog: Ask | undefined): void {
     let view: SecSavedView | null = null
     const peersOf = (next: SecSavedView | null): { name: string; address: string }[] => (next?.policy?.peers as { name: string; address: string }[] | undefined) ?? []
     const paint = (next: SecSavedView): void => {
+      if (!k.prepareTemplates()) return
       view = next; loaded = next.state !== 'invalid'
       const o = next.observation as { state?: string; application?: string; settings?: { launch: string | null; primary: boolean | null; includeDir: string | null; allowAxfrIps: string[] } | null; peers?: { name: string; transferAllowed: boolean | null; notified: boolean | null }[] } | null
       const states: Record<string, string> = { single_node: t('Single server. No peers are saved.'), applied: t('Applied: every saved peer can transfer zones and is notified.'), drift: t('Not applied: the running PowerDNS settings differ from the saved peers.'), unavailable: t('PowerDNS settings could not be read.') }
@@ -162,4 +166,4 @@ function bindSecDns(askDialog: Ask | undefined): void {
     refresh?.addEventListener('click', () => void load()); void load()
   })
 }
-export const SEC_DNS_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};const readSaved=${readSecSavedView.toString()};const readSecProvidersView=${readSecProvidersView.toString()};const readSecZoneView=${readSecZoneView.toString()};const kitOf=${secKit.toString()};return ${bindSecDns.toString()};})()`
+export const SEC_DNS_CLIENT_BINDING = `(()=>{${SEC_CLIENT_TEMPLATE_HELPERS}const displayDateTime=${DISPLAY_DATETIME_BINDING};const readSaved=${readSecSavedView.toString()};const readSecProvidersView=${readSecProvidersView.toString()};const readSecZoneView=${readSecZoneView.toString()};const kitOf=${secKit.toString()};return ${bindSecDns.toString()};})()`

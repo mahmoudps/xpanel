@@ -56,9 +56,21 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
     if (!status) return
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     try {
-      const values = { position: '', action: '', protocol: '', port: '', source: '', comment: '', added: '', expires: '', destination: '', name: '', entries: '', file: '', updated: '', address: '', reason: '', since: '' }
-      for (const kind of ['port', 'ip', 'forward', 'prefix', 'ban']) {
-        const row = cloneViewRecord(root, 'firewall-' + kind + '-row', 'tr', values)
+      const records: Readonly<Record<'port' | 'ip' | 'forward' | 'prefix' | 'ban', Readonly<Record<string, string>>>> = {
+        port: { position: '', action: '', protocol: '', port: '', source: '', purpose: '', origin: '', comment: '' },
+        ip: { action: '', source: '', port: '', comment: '', added: '', expires: '' },
+        forward: { protocol: '', port: '', destination: '', source: '', comment: '' },
+        prefix: { name: '', action: '', entries: '', port: '', file: '', updated: '' },
+        ban: { address: '', reason: '', source: '', since: '', expires: '' },
+      }
+      for (const [kind, fields] of Object.entries(records)) {
+        const row = cloneViewRecord(root, 'firewall-' + kind + '-row', 'tr', fields)
+        if (kind === 'port') {
+          const head = card.querySelector<HTMLTableElement>('[data-whm-firewall-panel="port"] table')?.tHead?.rows[0]
+          const purpose = row.querySelector('[data-xp-slot="purpose"]'), origin = row.querySelector('[data-xp-slot="origin"]')
+          if (!head || head.cells.length !== 9 || row.children.length !== 9
+            || purpose?.tagName !== 'TD' || row.children.item(5) !== purpose || origin?.tagName !== 'TD' || row.children.item(6) !== origin) throw new Error('invalid_firewall_port_columns')
+        }
         if (kind !== 'prefix') viewAction(row, 'actions', 'div')
       }
       const empty = cloneViewRecord(root, 'firewall-empty', 'tr', { message: '' }); viewAction(empty, 'cell', 'td')
@@ -85,10 +97,10 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
       paint()
       note('stored', t('Applied as one generation, read back and confirmed from this session.'))
     }
-    const write = async (method: string, path: string, body: Record<string, unknown>): Promise<void> => {
+    const write = async (method: string, path: string, body: Record<string, unknown>, reviewedRevision?: string): Promise<void> => {
       if (busy || !view) return
       busy = true; root.setAttribute('aria-busy', 'true'); note('reading', t('Checking the rules against your session address and applying them…'))
-      try { await confirm(await request(method, path, { ...body, expectedRevision: view.revision })) }
+      try { await confirm(await request(method, path, { ...body, expectedRevision: reviewedRevision ?? view.revision })) }
       catch (error) { note('failed', failure(error)); try { view = readFirewallView(await request('GET', '/api/firewall')); paint() } catch { /* the last read stays on screen */ } }
       finally { busy = false; root.setAttribute('aria-busy', 'false') }
     }
@@ -124,8 +136,14 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
       row.after(tr)
     }
 
-    const values = (rule: FirewallRuleView, index: number): Record<string, string | number> => ({ position: index + 1, action: action(rule), protocol: rule.protocol ?? '', port: rule.port ?? (rule.kind === 'ip' ? t('All ports') : ''),
-      source: rule.source ?? (rule.kind === 'ip' ? '' : t('Any source')), comment: rule.comment, added: '—', expires: '—', destination: rule.forwardTo ?? '' })
+    const values = (rule: FirewallRuleView, index: number): Record<string, string | number> => {
+      switch (rule.kind) {
+        case 'port': return { position: index + 1, action: action(rule), protocol: rule.protocol ?? '', port: rule.port ?? '', source: rule.source ?? t('Any source'), purpose: t('Not read'), origin: t('Not read'), comment: rule.comment }
+        case 'ip': return { action: action(rule), source: rule.source ?? '', port: rule.port ?? t('All ports'), comment: rule.comment, added: '—', expires: '—' }
+        case 'forward': return { protocol: rule.protocol ?? '', port: rule.port ?? '', destination: rule.forwardTo ?? '', source: rule.source ?? t('Any source'), comment: rule.comment }
+        default: throw new Error('invalid_firewall_record_kind')
+      }
+    }
     const paint = (): void => {
       if (!view) return
       const rules = view.rules
@@ -133,6 +151,12 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
         const table = card.querySelector<HTMLTableElement>('[data-whm-firewall-panel="' + kind + '"] table')
         if (!table) continue
         const head = table.tHead?.rows[0]
+        if (kind === 'port') {
+          if (!head || head.cells.length !== 9) throw new Error('invalid_firewall_port_columns')
+          const manage = head.cells.item(8)
+          if (!manage) throw new Error('invalid_firewall_port_columns')
+          manage.dataset.firewallManageHead = ''
+        }
         if (head && !head.querySelector('[data-firewall-manage-head]')) { const th = document.createElement('th'); th.scope = 'col'; th.dataset.firewallManageHead = ''; th.textContent = t('Manage'); head.append(th) }
         const columns = head?.cells.length ?? 1
         const body = table.tBodies[0] ?? table.createTBody()
@@ -232,14 +256,20 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
     })
     importButton?.addEventListener('click', () => {
       if (busy || !view || !json) return
+      const reviewedRevision = view.revision
       let parsed: unknown
       try { parsed = JSON.parse(json.value) } catch { note('failed', t('The file is not valid JSON. Nothing was changed.')); return }
       void (async () => {
         try {
-          const check = await request('POST', '/api/firewall/import', { document: parsed, expectedRevision: view!.revision, dryRun: true }) as { valid?: boolean; errors?: string[]; diff?: { added?: string[]; removed?: string[]; changed?: string[] } }
+          const check = await request('POST', '/api/firewall/import', { document: parsed, expectedRevision: reviewedRevision, dryRun: true }) as { valid?: boolean; errors?: string[]; diff?: { added?: string[]; removed?: string[]; changed?: string[] } }
           if (!check.valid) { note('failed', t('Not imported: {reason}', { reason: String(check.errors?.[0] ?? '') })); return }
           const yes = await ask(t('Import these rules?'), t('{added} added, {removed} removed, {changed} changed. The import passes the same lockout check before anything applies.', { added: String(check.diff?.added?.length ?? 0), removed: String(check.diff?.removed?.length ?? 0), changed: String(check.diff?.changed?.length ?? 0) }), true)
-          if (yes) await write('POST', '/api/firewall/import', { document: parsed })
+          if (yes) {
+            if (!view || view.revision !== reviewedRevision) {
+              note('failed', t("The firewall rules changed after the preview. Preview the import again; this import was not applied.")); return
+            }
+            await write('POST', '/api/firewall/import', { document: parsed }, reviewedRevision)
+          }
         } catch (error) { note('failed', failure(error)) }
       })()
     })

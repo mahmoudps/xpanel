@@ -1,7 +1,10 @@
 import '../../../web/src/i18n.ts'
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto'
-import { fail, isXpanelError, msgid } from '@xpanel/core'
-import type { Principal } from '@xpanel/core'
+import { constants } from 'node:fs'
+import { open } from 'node:fs/promises'
+import { join } from 'node:path'
+import { fail, isUuid, isXpanelError, msgid } from '@xpanel/core'
+import type { Account, Principal, ServiceUser } from '@xpanel/core'
 import {
   createAuthenticatedSession,
   createUserPrincipal,
@@ -9,8 +12,15 @@ import {
   getMailboxSession,
   saveHandoffMailboxSession,
   saveMailboxSession,
+  acquireJobLease,
+  completeJobWithLease,
+  enqueueDurableJob,
+  getDurableJob,
+  revokeAllSessionsForPrincipal,
+  revokeAllApiTokensForPrincipal,
+  saveJobCheckpoint,
 } from '@xpanel/db'
-import type { Db, MailboxSessionRecord, PrincipalRecord, SessionRecord } from '@xpanel/db'
+import type { Db, DurableJobRecord, MailboxSessionRecord, PrincipalRecord, SessionRecord } from '@xpanel/db'
 import type { StateStore } from '@xpanel/state'
 import { hashPasswordArgon2id } from '../auth.ts'
 import type { AuthenticatedCaller } from '../auth.ts'
@@ -402,17 +412,38 @@ export const createLocalMailboxTransport = (
   }
 }
 
-/** The persisted user principal behind a mailbox identity; its random password is never used to sign in. */
-const ensureMailboxPrincipal = async (db: Db, mailbox: string, accountId: string): Promise<PrincipalRecord> => {
+const mailboxRetirementKey = (serviceUserId: string): string => `mailbox.retire:v1:${serviceUserId}`
+
+/** An unverified retirement blocks its original ID and address, including replacement IDs. */
+const assertMailboxIdentityAvailable = async (db: Db, serviceUserId: string, mailbox: string): Promise<void> => {
+  if (!isUuid(serviceUserId)) return fail('UNAUTHENTICATED', 'mailbox identity is unavailable')
+  const rows = await db.query<{ id: string }>(
+    `SELECT j.id FROM jobs j JOIN job_runtime_leases l ON l.job_id = j.id
+     WHERE l.idempotency_key = $1 OR (j.kind = 'mailbox.retire' AND json_extract(j.detail, '$.mailboxRetirement.service.login') = $2) LIMIT 1`,
+    [mailboxRetirementKey(serviceUserId), mailbox],
+  )
+  if (rows.length !== 0) return fail('UNAUTHENTICATED', 'mailbox identity is unavailable')
+}
+
+/** Expensive password derivation must happen outside the admitted database transaction. */
+const prepareMailboxPrincipalCreation = async (db: Db, mailbox: string): Promise<string | null> =>
+  await findPrincipalByUsername(db, mailboxPrincipalUsername(mailbox)) ? null : hashPasswordArgon2id(randomBytes(32).toString('hex'))
+
+/** Called on the admitted transaction; principal creation and session issuance share the retirement gate. */
+const ensureMailboxPrincipal = async (db: Db, mailbox: string, accountId: string, serviceUserId: string, creationHash: string | null): Promise<PrincipalRecord> => {
+  await assertMailboxIdentityAvailable(db, serviceUserId, mailbox)
   const username = mailboxPrincipalUsername(mailbox)
   const existing = await findPrincipalByUsername(db, username)
   if (existing && (existing.kind !== 'user' || existing.accountId !== accountId)) {
     return fail('CONFLICT', 'mailbox identity does not match this account')
   }
-  return existing ?? createUserPrincipal(db, {
+  if (existing?.disabled) return fail('UNAUTHENTICATED', 'mailbox identity is unavailable')
+  if (existing) return existing
+  if (creationHash === null) return fail('UNAUTHENTICATED', 'mailbox identity changed; sign in again')
+  return createUserPrincipal(db, {
     username,
     accountId,
-    passwordHash: await hashPasswordArgon2id(randomBytes(32).toString('hex')),
+    passwordHash: creationHash,
     forcePasswordChange: false,
   })
 }
@@ -433,9 +464,11 @@ export const establishHandoffMailboxSession = async (input: {
   userAgent: string
 }): Promise<EstablishedMailboxSession> => {
   const mailbox = normalizeMailbox(input.mailbox)
-  const principalRecord = await ensureMailboxPrincipal(input.db, mailbox, input.accountId)
+  await assertMailboxIdentityAvailable(input.db, input.serviceUserId, mailbox)
+  const creationHash = await prepareMailboxPrincipalCreation(input.db, mailbox)
   const rawToken = randomBytes(32).toString('hex')
-  const session = await input.db.transaction(async tx => {
+  const issued = await input.db.transaction(async tx => {
+    const principalRecord = await ensureMailboxPrincipal(tx, mailbox, input.accountId, input.serviceUserId, creationHash)
     const created = await createAuthenticatedSession(tx, {
       principalId: principalRecord.id,
       tokenHash: sessionTokenHash(rawToken, input.entryPoint),
@@ -450,8 +483,9 @@ export const establishHandoffMailboxSession = async (input: {
     })
     if (!created) return fail('UNAUTHENTICATED', 'mailbox identity changed; open the mailbox again')
     await saveHandoffMailboxSession(tx, { sessionId: created.id, mailbox, serviceUserId: input.serviceUserId, accountId: input.accountId })
-    return created
+    return { principalRecord, session: created }
   })
+  const { principalRecord, session } = issued
   const principal: Principal = { kind: 'user', id: principalRecord.id, username: principalRecord.username, accountId: input.accountId }
   return { principal, principalRecord, session, rawToken, mailbox }
 }
@@ -482,38 +516,329 @@ export const establishMailboxSession = async (input: {
   if (!serviceUser || !serviceUser.services.email || !account || account.status !== 'active') {
     return fail('UNAUTHENTICATED', 'invalid username or password')
   }
+  await assertMailboxIdentityAvailable(input.db, serviceUser.id, mailbox)
   try {
     await input.transport.verify(mailbox, input.password)
   } catch (err) {
     if (isXpanelError(err) && err.code === 'UNAUTHENTICATED') return fail('UNAUTHENTICATED', 'invalid username or password')
     throw err
   }
-  const principalRecord = await ensureMailboxPrincipal(input.db, mailbox, account.id)
+  const currentService = await input.store.getServiceUser(serviceUser.id)
+  const currentAccount = await input.store.getAccount(account.id)
+  if (!currentService || currentService.accountId !== account.id || currentService.login.toLowerCase() !== mailbox
+    || !currentService.services.email || !currentAccount || currentAccount.status !== 'active') {
+    return fail('UNAUTHENTICATED', 'mailbox identity changed; sign in again')
+  }
+  const creationHash = await prepareMailboxPrincipalCreation(input.db, mailbox)
   const rawToken = randomBytes(32).toString('hex')
-  const session = await createAuthenticatedSession(input.db, {
-    principalId: principalRecord.id,
-    tokenHash: sessionTokenHash(rawToken, input.entryPoint),
-    expiresAt: new Date(Date.now() + 24 * 3600_000).toISOString(),
-    ip: input.ip,
-    userAgent: input.userAgent,
-    mfaVerified: false,
-    expectedPasswordHash: principalRecord.passwordHash,
-    expectedTotpEnabled: principalRecord.totpEnabled,
-    expectedSealedSecret: principalRecord.totpSecretEnc,
+  const issued = await input.db.transaction(async tx => {
+    const principalRecord = await ensureMailboxPrincipal(tx, mailbox, account.id, serviceUser.id, creationHash)
+    const session = await createAuthenticatedSession(tx, {
+      principalId: principalRecord.id,
+      tokenHash: sessionTokenHash(rawToken, input.entryPoint),
+      expiresAt: new Date(Date.now() + 24 * 3600_000).toISOString(),
+      ip: input.ip,
+      userAgent: input.userAgent,
+      mfaVerified: false,
+      expectedPasswordHash: principalRecord.passwordHash,
+      expectedTotpEnabled: principalRecord.totpEnabled,
+      expectedSealedSecret: principalRecord.totpSecretEnc,
+    })
+    if (!session) return fail('UNAUTHENTICATED', 'credentials changed; authenticate again')
+    await saveMailboxSession(tx, {
+      sessionId: session.id,
+      mailbox,
+      serviceUserId: serviceUser.id,
+      accountId: account.id,
+      sealedPassword: sealMailboxPassword(input.password, input.serverSecret),
+    })
+    return { principalRecord, session }
   })
-  if (!session) return fail('UNAUTHENTICATED', 'credentials changed; authenticate again')
-  await saveMailboxSession(input.db, {
-    sessionId: session.id,
-    mailbox,
-    serviceUserId: serviceUser.id,
-    accountId: account.id,
-    sealedPassword: sealMailboxPassword(input.password, input.serverSecret),
-  })
+  const { principalRecord, session } = issued
   const principal: Principal = { kind: 'user', id: principalRecord.id, username: principalRecord.username, accountId: account.id }
   return { principal, principalRecord, session, rawToken, mailbox }
 }
 
-/** Removes the mailbox login, its sessions, and the sealed mailbox secret in one transaction. */
+const retirementDigest = (value: unknown): string => {
+  const sorted = (item: unknown): unknown => Array.isArray(item) ? item.map(sorted)
+    : item && typeof item === 'object' ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, child]) => [key, sorted(child)])) : item
+  return createHash('sha256').update(JSON.stringify(sorted(value))).digest('hex')
+}
+
+interface RetirementIntent {
+  version: 1
+  account: Pick<Account, 'id' | 'username' | 'ownerId'>
+  service: ServiceUser
+  serviceDigest: string
+  initiator: Principal
+  principalIds: string[]
+  identity: string
+}
+const publicRetirementService = (value: ServiceUser): ServiceUser => Object.freeze({ id: value.id, accountId: value.accountId, login: value.login,
+  services: Object.freeze({ email: value.services.email, ftp: value.services.ftp, webdisk: value.services.webdisk }), mailboxQuotaMb: value.mailboxQuotaMb, ftpDir: value.ftpDir })
+export interface MailboxRetirementSource {
+  readonly account: Account
+  readonly service: ServiceUser
+}
+export interface MailboxRetirementClockGuard {
+  /** Synchronous: use the already verified credential's finite validity deadline after the last await. */
+  assertCurrentTime(): void
+}
+export interface MailboxRetirementAttempt {
+  db: Db
+  store: StateStore
+  serviceUserId: string
+  actor: Principal
+  /** Trusted callback: use the admitted runner and the attempt's original HTTP credential. No state locks/RPC. */
+  authorize(tx: Db, source: MailboxRetirementSource): Promise<MailboxRetirementClockGuard>
+  audit(input: { action: 'mailbox.retirement_requested' | 'mailbox.retirement_resumed'; job: DurableJobRecord; source: MailboxRetirementSource }): Promise<void>
+  reconcile(source: MailboxRetirementSource): Promise<unknown>
+}
+
+const readRetirementLeaf = async (path: string): Promise<{ digest: string; record: Record<string, unknown> } | null> => {
+  let handle: Awaited<ReturnType<typeof open>>
+  try { handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK) }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error }
+  try {
+    const before = await handle.stat()
+    if (!before.isFile() || before.nlink !== 1 || before.size > 131_072) return fail('PRECONDITION_FAILED', 'mailbox retirement source is unavailable', { stateChanged: false })
+    const bytes = await handle.readFile()
+    const after = await handle.stat()
+    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== bytes.length || before.size !== after.size
+      || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) return fail('CONFLICT', 'mailbox retirement source changed', { stateChanged: false })
+    const record: unknown = JSON.parse(bytes.toString('utf8'))
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return fail('PRECONDITION_FAILED', 'mailbox retirement source is unavailable', { stateChanged: false })
+    return { digest: createHash('sha256').update(bytes).digest('hex'), record: Object.fromEntries(Object.entries(record)) }
+  } finally { await handle.close() }
+}
+
+function invalidRetirementIntent(): never { return fail('PRECONDITION_FAILED', 'mailbox retirement intent requires review', { stateChanged: false }) }
+const retirementRecord = (value: unknown, keys: string): Record<string, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== keys) return invalidRetirementIntent()
+  return Object.fromEntries(Object.entries(value))
+}
+const retirementIntent = (job: DurableJobRecord): RetirementIntent => {
+  const raw = retirementRecord(job.detail.mailboxRetirement, 'account,identity,initiator,principalIds,service,serviceDigest,version')
+  const account = retirementRecord(raw.account, 'id,ownerId,username')
+  const service = retirementRecord(raw.service, 'accountId,ftpDir,id,login,mailboxQuotaMb,services')
+  const services = retirementRecord(service.services, 'email,ftp,webdisk')
+  const actorValue = raw.initiator
+  if (!actorValue || typeof actorValue !== 'object' || Array.isArray(actorValue)) return invalidRetirementIntent()
+  const actor = Object.fromEntries(Object.entries(actorValue))
+  if (raw.version !== 1 || !isUuid(account.id) || typeof account.username !== 'string' || !/^[a-z][a-z0-9]{0,15}$/.test(account.username)
+    || !(account.ownerId === null || isUuid(account.ownerId)) || !isUuid(service.id) || service.accountId !== account.id
+    || typeof service.login !== 'string' || normalizeMailbox(service.login) !== service.login || typeof services.email !== 'boolean'
+    || typeof services.ftp !== 'boolean' || typeof services.webdisk !== 'boolean' || typeof service.ftpDir !== 'string'
+    || !(service.mailboxQuotaMb === 'unlimited' || typeof service.mailboxQuotaMb === 'number' && Number.isSafeInteger(service.mailboxQuotaMb) && service.mailboxQuotaMb >= 0)
+    || !isUuid(actor.id) || typeof actor.username !== 'string' || actor.username.length < 1 || actor.username.length > 255
+    || !['root','reseller','user'].includes(String(actor.kind)) || typeof raw.serviceDigest !== 'string' || !/^[0-9a-f]{64}$/.test(raw.serviceDigest)
+    || typeof raw.identity !== 'string' || !/^[0-9a-f]{64}$/.test(raw.identity)
+    || !Array.isArray(raw.principalIds) || raw.principalIds.length > 2 || !raw.principalIds.every(isUuid)
+    || new Set(raw.principalIds).size !== raw.principalIds.length) return invalidRetirementIntent()
+  let initiator: Principal
+  if (actor.kind === 'user') {
+    if (Object.keys(actor).sort().join(',') !== 'accountId,id,kind,username' || actor.accountId !== account.id) return invalidRetirementIntent()
+    initiator = { kind: 'user', id: actor.id, username: actor.username, accountId: account.id }
+  } else {
+    if (Object.keys(actor).sort().join(',') !== 'id,kind,username' || actor.kind !== 'root' && actor.kind !== 'reseller') return invalidRetirementIntent()
+    initiator = { kind: actor.kind, id: actor.id, username: actor.username }
+  }
+  const bound: Omit<RetirementIntent, 'identity'> = { version: 1 as const, account: { id: account.id, username: account.username, ownerId: account.ownerId },
+    service: { id: service.id, accountId: account.id, login: service.login, services: { email: services.email, ftp: services.ftp, webdisk: services.webdisk }, mailboxQuotaMb: service.mailboxQuotaMb, ftpDir: service.ftpDir },
+    serviceDigest: raw.serviceDigest, initiator, principalIds: [...raw.principalIds].sort() }
+  if (raw.identity !== retirementDigest(bound) || job.kind !== 'mailbox.retire' || job.accountId !== account.id
+    || job.actor !== initiator.kind + ':' + initiator.username || job.idempotencyKey !== mailboxRetirementKey(service.id)) return invalidRetirementIntent()
+  return { ...bound, identity: raw.identity }
+}
+
+const findRetirement = async (db: Db, id: string): Promise<DurableJobRecord | null> => {
+  const rows = await db.query<{ job_id: string }>('SELECT job_id FROM job_runtime_leases WHERE idempotency_key = $1', [mailboxRetirementKey(id)])
+  return rows[0] ? getDurableJob(db, rows[0].job_id) : null
+}
+
+/**
+ * Forward-only control-plane retirement. Native mailbox absence has no trusted producer yet,
+ * so this never marks the full mailbox-delete job successful or removes the held MFA identity.
+ * Null means an existing non-mail service user should continue through its ordinary route.
+ */
+export const retireMailboxServiceUser = async (input: MailboxRetirementAttempt): Promise<null> => {
+  if (!isUuid(input.serviceUserId)) return fail('VALIDATION', 'invalid service user identity', { stateChanged: false })
+  const previous = await findRetirement(input.db, input.serviceUserId)
+  const saved = previous ? retirementIntent(previous) : null
+  const snapshot = await input.store.readSnapshot()
+  const revision = snapshot.revision
+  if (typeof revision !== 'number' || !Number.isSafeInteger(revision)) return fail('PRECONDITION_FAILED', 'mailbox source revision is unavailable', { stateChanged: false })
+  const storedService = snapshot.serviceUsers.find(user => user.id === input.serviceUserId)
+  const currentService = storedService ? publicRetirementService(storedService) : undefined
+  if (!saved && !currentService) return null
+  if (!saved && currentService && !currentService.services.email) {
+    const identities = await input.db.query<{ id: string }>('SELECT id FROM principals WHERE username = $1 OR username = $2', [mailboxPrincipalUsername(currentService.login), currentService.login])
+    if (identities.length === 0) return null
+  }
+  const selectedService = saved?.service ?? currentService
+  if (!selectedService) return fail('NOT_FOUND', 'mailbox service was not found', { stateChanged: false })
+  const service = publicRetirementService(selectedService)
+  const storedAccount = snapshot.accounts.find(value => value.id === service.accountId)
+  const account = storedAccount ? await input.store.getAccount(storedAccount.id, { username: storedAccount.username }) : null
+  if (!account || !/^[a-z][a-z0-9]{0,15}$/.test(account.username)) return fail('FORBIDDEN', 'mailbox account is unavailable', { stateChanged: false })
+  const scope = { id: account.id, username: account.username, ownerId: account.ownerId }
+  if (saved && retirementDigest(saved.account) !== retirementDigest(scope)) return fail('CONFLICT', 'mailbox retirement account changed', { stateChanged: false })
+  if (snapshot.serviceUsers.some(user => user.login.toLowerCase() === service.login.toLowerCase() && user.id !== service.id)) {
+    return fail('CONFLICT', 'a replacement mailbox requires separate review', { stateChanged: false })
+  }
+  if (currentService && retirementDigest(currentService) !== retirementDigest(service)) return fail('CONFLICT', 'mailbox retirement service changed', { stateChanged: false })
+  const accountPath = join(input.store.rootDir, 'accounts', account.username, 'account.json')
+  const servicePath = join(input.store.rootDir, 'accounts', account.username, 'users', service.id + '.json')
+  const [accountLeaf, serviceLeaf, epoch] = await Promise.all([readRetirementLeaf(accountPath), readRetirementLeaf(servicePath), input.store.getWriterLock().readAuthority()])
+  if (!accountLeaf || epoch.revision !== revision || Boolean(serviceLeaf) !== Boolean(currentService)) return fail('CONFLICT', 'mailbox retirement source changed', { stateChanged: false })
+  if (accountLeaf.record.id !== account.id || accountLeaf.record.username !== account.username || accountLeaf.record.ownerId !== account.ownerId) return fail('CONFLICT', 'mailbox retirement account changed', { stateChanged: false })
+  if (serviceLeaf && (serviceLeaf.record.id !== service.id || serviceLeaf.record.accountId !== account.id || serviceLeaf.record.login !== service.login
+    || saved && serviceLeaf.digest !== saved.serviceDigest)) return fail('CONFLICT', 'mailbox retirement source changed', { stateChanged: false })
+  if (!saved && !serviceLeaf) return fail('CONFLICT', 'mailbox retirement source changed', { stateChanged: false })
+  const observedPrincipals = saved ? [] : await input.db.query<{ id: string }>('SELECT id FROM principals WHERE username = $1 OR username = $2 ORDER BY id', [mailboxPrincipalUsername(service.login), service.login])
+  const intent = saved ?? (() => {
+    const bound = { version: 1 as const, account: scope, service, serviceDigest: serviceLeaf?.digest ?? '', initiator: input.actor,
+      principalIds: observedPrincipals.map(value => value.id).sort() }
+    return { ...bound, identity: retirementDigest(bound) }
+  })()
+  const source: MailboxRetirementSource = Object.freeze({ account: Object.freeze(account), service })
+  const assertOriginalSource = async (fencingToken?: number): Promise<void> => {
+    const [now, freshAccount, freshService] = await Promise.all([input.store.getWriterLock().readAuthority(), readRetirementLeaf(accountPath), readRetirementLeaf(servicePath)])
+    if (now.revision !== revision || fencingToken !== undefined && now.fencingToken !== fencingToken || freshAccount?.digest !== accountLeaf.digest || freshService?.digest !== serviceLeaf?.digest) {
+      return fail('CONFLICT', 'mailbox retirement source changed during admission', { stateChanged: false })
+    }
+  }
+  const assertSource = (): Promise<void> => assertOriginalSource(epoch.fencingToken)
+  const created = await enqueueDurableJob(input.db, {
+    kind: 'mailbox.retire', accountId: account.id, actor: previous?.actor ?? input.actor.kind + ':' + input.actor.username,
+    summary: 'Mailbox retirement requires native verification', detail: previous?.detail ?? { mailboxRetirement: intent },
+    idempotencyKey: mailboxRetirementKey(service.id), ...(previous ? { requestFingerprint: previous.requestFingerprint } : {}),
+  }, async (tx, job) => {
+    await assertSource()
+    const admittedAuthorization = await input.authorize(tx, source)
+    admittedAuthorization.assertCurrentTime()
+    const bound = retirementIntent(job)
+    if (bound.identity !== intent.identity || job.cancelRequested) return fail('CONFLICT', 'mailbox retirement intent changed', { stateChanged: false })
+    if (job.status === 'succeeded' || job.status === 'cancelled') return fail('PRECONDITION_FAILED', 'mailbox retirement intent requires review', { stateChanged: false })
+    const rows = await tx.query<{ id: string; kind: string; account_id: string | null }>('SELECT id,kind,account_id FROM principals WHERE username = $1 OR username = $2', [mailboxPrincipalUsername(service.login), service.login])
+    if (rows.some(row => row.kind !== 'user' || row.account_id !== account.id)) return fail('CONFLICT', 'mailbox identity belongs to another principal', { stateChanged: false })
+    if (retirementDigest(rows.map(row => row.id).sort()) !== retirementDigest(bound.principalIds)) return fail('CONFLICT', 'mailbox principal identity changed during retirement', { stateChanged: false })
+    for (const row of rows) {
+      await tx.query('UPDATE principals SET disabled = 1, updated_at = $1 WHERE id = $2 AND kind = $3 AND account_id = $4', [new Date().toISOString(), row.id, 'user', account.id])
+      await revokeAllSessionsForPrincipal(tx, row.id)
+      await revokeAllApiTokensForPrincipal(tx, row.id)
+    }
+    await tx.query('DELETE FROM mailbox_sessions WHERE account_id = $1 AND (service_user_id = $2 OR mailbox = $3)', [account.id, service.id, service.login])
+    await tx.query('DELETE FROM handoff_mailbox_sessions WHERE account_id = $1 AND (service_user_id = $2 OR mailbox = $3)', [account.id, service.id, service.login])
+    await assertSource()
+    const finalAuthorization = await input.authorize(tx, source)
+    await assertSource()
+    finalAuthorization.assertCurrentTime()
+  })
+  const pending = (job: DurableJobRecord, reason: string): never => fail('PRECONDITION_FAILED', 'Mailbox retirement requires review; reload current state before continuing.', {
+    stateChanged: true, verificationRequired: true, unknownOutcome: true, reason,
+    job: { id: job.id, referenceCode: job.referenceCode, status: job.status }, nativeDeletionVerified: false,
+  })
+  try {
+    await input.audit({ action: previous ? 'mailbox.retirement_resumed' : 'mailbox.retirement_requested', job: created, source })
+    if (created.needsAttention || created.status === 'failed') return pending(created, created.completedSteps.includes('configuration_removed') ? 'mailbox_retirement_native_unverified' : 'mailbox_retirement_state_unconfirmed')
+    const workerId = 'mailbox-retire-' + randomUUID()
+    const leased = await acquireJobLease(input.db, { jobId: created.id, workerId, leaseDurationMs: 30_000 })
+    if (!leased) return pending(created, 'mailbox_retirement_lease_unavailable')
+    const assertAttempt = async (sourceGuard: () => Promise<void>): Promise<MailboxRetirementClockGuard> => {
+      const admitted = await input.db.transaction(async tx => {
+        const assertLease = async (): Promise<() => void> => {
+          const job = await getDurableJob(tx, leased.id)
+          if (!job || job.status !== 'running' || job.cancelRequested || job.needsAttention || job.leaseOwner !== workerId || job.fencingToken !== leased.fencingToken
+            || !job.leaseExpiresAt) return fail('CONFLICT', 'mailbox retirement lease changed', { stateChanged: true, verificationRequired: true })
+          const deadline = Date.parse(job.leaseExpiresAt)
+          const assertCurrentTime = (): void => {
+            if (!Number.isFinite(deadline) || Date.now() >= deadline) return fail('CONFLICT', 'mailbox retirement lease expired', { stateChanged: true, verificationRequired: true })
+          }
+          assertCurrentTime()
+          return assertCurrentTime
+        }
+        await sourceGuard()
+        const initialAuthorization = await input.authorize(tx, source)
+        await assertLease()
+        initialAuthorization.assertCurrentTime()
+        await sourceGuard()
+        const finalAuthorization = await input.authorize(tx, source)
+        const assertLeaseTime = await assertLease()
+        const checked = { assertCurrentTime: (): void => { finalAuthorization.assertCurrentTime(); assertLeaseTime() } }
+        await sourceGuard()
+        checked.assertCurrentTime()
+        return checked
+      })
+      // A queued COMMIT is also an await. No stale validity window crosses it.
+      admitted.assertCurrentTime()
+      return admitted
+    }
+    const checkpoint = async (step: string, extra: Record<string, unknown> = {}): Promise<DurableJobRecord> => saveJobCheckpoint(input.db, {
+      jobId: leased.id, workerId, fencingToken: leased.fencingToken, step,
+      data: { retirementIdentity: intent.identity, serviceUserId: service.id, accountId: account.id, recoveryActor: input.actor, ...extra },
+    })
+    try {
+      await checkpoint('identity_held')
+      await assertAttempt(() => assertOriginalSource())
+      if (currentService && leased.completedSteps.includes('configuration_removed')) return fail('CONFLICT', 'retired mailbox source reappeared and requires review')
+      if (currentService) await input.store.deleteServiceUser(service.id, {
+        expectedRevision: revision,
+        authorize: async (currentAccount, current) => {
+          if (retirementDigest(currentAccount) !== retirementDigest(source.account) || retirementDigest(current) !== retirementDigest(source.service)) {
+            return fail('CONFLICT', 'mailbox retirement identity changed during writer admission', { stateChanged: true, verificationRequired: true })
+          }
+          // This is the writer that will remove the source. Its fence is issued
+          // AFTER queue admission; the earlier observed writer fence is stale.
+          const admitted = await input.store.getWriterLock().readAuthority()
+          const checked = await assertAttempt(() => assertOriginalSource(admitted.fencingToken))
+          checked.assertCurrentTime()
+        },
+      })
+      const remaining = await input.store.getServiceUser(service.id)
+      if (remaining) return fail('CONFLICT', 'mailbox source removal is not confirmed')
+      await checkpoint('configuration_removed')
+    } catch (error) {
+      const remaining = await input.store.getServiceUser(service.id).catch(() => null)
+      const leaf = await readRetirementLeaf(servicePath).catch(() => null)
+      const knownUnchanged = !leased.completedSteps.includes('configuration_removed') && remaining !== null && retirementDigest(remaining) === retirementDigest(service) && leaf?.digest === intent.serviceDigest
+      const failed = await completeJobWithLease(input.db, { jobId: leased.id, workerId, fencingToken: leased.fencingToken,
+        status: 'failed', error: 'mailbox source removal requires recovery', failureClass: knownUnchanged ? 'retryable' : 'unknown_outcome',
+        needsAttention: !knownUnchanged, requeueOnRetryable: knownUnchanged })
+      if (isXpanelError(error) && (error.code === 'UNAUTHENTICATED' || error.code === 'FORBIDDEN')) {
+        return fail(error.code, 'Mailbox retirement remains held; request authorization changed.', {
+          stateChanged: true, verificationRequired: true, unknownOutcome: true, reason: 'mailbox_retirement_authorization_changed',
+          job: { id: failed.id, referenceCode: failed.referenceCode, status: failed.status }, nativeDeletionVerified: false,
+        })
+      }
+      return pending(failed, 'mailbox_retirement_state_unconfirmed')
+    }
+    if (!leased.completedSteps.includes('reconcile_requested')) {
+      const after = await input.store.getWriterLock().readAuthority()
+      const guardRemoved = async (): Promise<void> => {
+        const [now, accountNow, serviceNow] = await Promise.all([input.store.getWriterLock().readAuthority(), readRetirementLeaf(accountPath), readRetirementLeaf(servicePath)])
+        if (now.revision !== after.revision || now.fencingToken !== after.fencingToken || accountNow?.digest !== accountLeaf.digest || serviceNow !== null) return fail('CONFLICT', 'retired mailbox source changed', { stateChanged: true, verificationRequired: true })
+      }
+      await assertAttempt(guardRemoved)
+      await checkpoint('reconcile_requested')
+      const checked = await assertAttempt(guardRemoved)
+      checked.assertCurrentTime()
+      try { await input.reconcile(source); await checkpoint('reconcile_acknowledged') }
+      catch { /* A lost reply is not native absence; never repeat this phase automatically. */ }
+    }
+    const held = await completeJobWithLease(input.db, { jobId: leased.id, workerId, fencingToken: leased.fencingToken,
+      status: 'failed', error: 'native mailbox removal has not been independently verified', failureClass: 'unknown_outcome', needsAttention: true })
+    return pending(held, 'mailbox_retirement_native_unverified')
+  } catch (error) {
+    if (isXpanelError(error) && error.detail.stateChanged === true) throw error
+    return fail(isXpanelError(error) ? error.code : 'PRECONDITION_FAILED', 'Mailbox retirement is held; this attempt was not acknowledged.', {
+      stateChanged: true, verificationRequired: true, unknownOutcome: true, reason: 'mailbox_retirement_attempt_unacknowledged',
+      job: { id: created.id, referenceCode: created.referenceCode }, nativeDeletionVerified: false,
+    })
+  }
+}
+
+/** Legacy entry point retained until the coordinated DELETE hook is installed. */
 export const revokeMailboxIdentity = async (db: Db, mailbox: string, serviceUserId: string): Promise<void> => {
   const address = normalizeMailbox(mailbox)
   const names = [mailboxPrincipalUsername(address), address]
@@ -558,6 +883,7 @@ export const authorizeMailboxSessionBinding = async (
   caller: AuthenticatedCaller,
 ): Promise<MailboxSessionRecord> => {
   const record = await requireMailboxSessionRecord(db, caller.sessionId)
+  await assertMailboxIdentityAvailable(db, record.serviceUserId, record.mailbox)
   if (caller.principal.kind !== 'user' || caller.principal.accountId !== record.accountId
     || ![mailboxPrincipalUsername(record.mailbox), record.mailbox].includes(caller.principal.username.toLowerCase())) {
     return fail('FORBIDDEN', 'mailbox session binding is unavailable')

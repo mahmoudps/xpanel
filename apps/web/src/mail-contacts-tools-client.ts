@@ -97,7 +97,7 @@ function bindContactsTools(askDialog: ((options: Record<string, unknown>) => Pro
     const sharesList = root.querySelector<HTMLElement>('[data-contacts-shares]')
     const shareStatus = root.querySelector<HTMLElement>('[data-contacts-share-status]')
     if (!importText || !importButton || !exportButton || !sharesList) return
-    try { mailRequireTemplates(root, [['mail-contact-share', 'li', ['address', 'permission', 'remove']], ['mail-contact-share-empty', 'li', ['message']]]) }
+    try { mailRequireTemplates(root, [['mail-contact-share', 'li', ['address', 'permission', 'remove'], [['address', 'bdi'], ['remove', 'button', { type: 'button' }]]], ['mail-contact-share-empty', 'li', ['message']]]) }
     catch { root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('input,button,select,textarea').forEach(control => { control.disabled = true }); if (shareStatus) { shareStatus.dataset.state = 'unavailable'; shareStatus.textContent = copy('Unavailable') }; return }
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const eligible = (): boolean => root.isConnected && manageable && !root.closest(denied) && contactToolsEmail.test(mailbox)

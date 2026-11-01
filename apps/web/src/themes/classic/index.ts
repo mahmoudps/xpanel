@@ -12,7 +12,8 @@ import { renderMailSurface, renderUnavailableMailBody } from '../../surfaces/xma
 import { renderPanelSurface } from '../../surfaces/xpanel.ts'
 import { renderWhmSurface } from '../../surfaces/xwhm.ts'
 import { renderUnavailableComposedRoute } from '../../board-port/composed/render.ts'
-import { renderApprovedXpanelWorkspace } from '../../board-port/approved-xpanel-workspaces.ts'
+import { CLASSIC_ACCOUNT_SECURITY_FACTOR_HOST, renderClassicAccountSecurityWorkspace, renderApprovedXpanelWorkspace } from '../../board-port/approved-xpanel-workspaces.ts'
+import { isHtmlElement, parseMarkup } from '../markup.ts'
 import { renderWhmDetailPage } from '../../board-port/approved-xwhm.ts'
 import { renderStoreExtension } from '../../board-port/extensions/store.ts'
 import { renderCommandPaletteEntries } from '../../command-palette.ts'
@@ -21,7 +22,9 @@ import { DESIGN_TOKENS_CSS, renderAsyncActionState, renderStatusBadge } from '..
 import { escapeHtml } from '../../html.ts'
 import { renderReconcileBanner, type LiveEventState } from '../../ws-client.ts'
 import { loadThemeMessages } from '../../theme-messages.ts'
+import { URL as FileURL } from 'node:url'
 import type { DocumentProps, UiTheme, UnavailableProps, WorkspaceSummaryView, ThemeSurface } from '../contract.ts'
+import { CLASSIC_PROMPT_CSS, CLASSIC_PROMPT_TEMPLATE } from './prompt.ts'
 
 const renderWorkspaceSummary = (view: WorkspaceSummaryView | undefined, surface: ThemeSurface): string => {
   if (!view) return ''
@@ -58,6 +61,8 @@ const renderUnavailable = (props: UnavailableProps): string => {
   const design = securityPage ? '' : (detailed || composed || renderDesignMain(path, locale)
     || (canonicalPath !== path ? renderDesignMain(canonicalPath, locale) : '')
     || renderDisabledScreen(pageHeading, locale))
+  const personalSecurity = props.admitted && panelSurface === 'xpanel' && path === '/security/account'
+    ? renderClassicAccountSecurityWorkspace({ route: path, locale, readOnly: true, authPersonal: props.authPersonal }) : undefined
   return renderSurfaceShell({
     surface: panelSurface,
     locale,
@@ -67,16 +72,15 @@ const renderUnavailable = (props: UnavailableProps): string => {
       ...(props.accountId ? { accountId: props.accountId } : {}),
       ...(props.session ? { username: props.session.username, role: props.session.role } : {}),
       signedIn: props.signedIn,
-      themeChooserWritable: false,
     }),
-    content: `<section class="xp-workspace-summary" data-surface="${panelSurface}" data-tool-availability="unverified"${disabledRouteAttribute}${securityPage ? ' data-security-page="true"' : ''}>
+    content: personalSecurity === undefined ? `<section class="xp-workspace-summary" data-surface="${panelSurface}" data-tool-availability="unverified"${disabledRouteAttribute}${securityPage ? ' data-security-page="true"' : ''}>
   ${securityPage ? `<h1 class="xp-page-title">${escapeHtml(pageHeading)}</h1>` : design || `<h1 class="xp-page-title">${escapeHtml(pageHeading)}</h1>`}
   ${props.actionState ? renderAsyncActionState({ ...props.actionState, locale }) : ''}
   ${securityPage ? '' : renderWorkspaceSummary(props.summary, panelSurface)}
   ${securityPage ? '' : renderSupportNotice(locale, props.supportEmail)}
   <div role="alert" data-auth-error hidden></div>
   <p role="status" data-auth-status></p>
-</section>`,
+</section>` : `${personalSecurity}${props.actionState ? renderAsyncActionState({ ...props.actionState, locale }) : ''}`,
   })
 }
 
@@ -109,7 +113,7 @@ const renderDocument = (props: DocumentProps): string => `<!doctype html>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <style id="xpanel-design-tokens">${DESIGN_TOKENS_CSS}</style>${brandingHeadStyle(props.branding)}
+  <style id="xpanel-design-tokens">${DESIGN_TOKENS_CSS}</style><style id="xpanel-prompt-styles">${CLASSIC_PROMPT_CSS}</style>${brandingHeadStyle(props.branding)}
   ${props.headHtml}
 </head>
 <body>${props.bodyHtml}</body>
@@ -117,7 +121,7 @@ const renderDocument = (props: DocumentProps): string => `<!doctype html>
 
 export const classicTheme: UiTheme = Object.freeze<UiTheme>({
   id: 'classic',
-  messages: loadThemeMessages('classic', new URL('./locales/', import.meta.url)),
+  messages: loadThemeMessages('classic', new FileURL('./locales/', import.meta.url)),
   assets: Object.freeze([Object.freeze({
     path: '/assets/tokens.css' as const,
     href: `/assets/tokens.css?v=${createHash('sha256').update(DESIGN_TOKENS_CSS).digest('hex').slice(0, 16)}`,
@@ -137,6 +141,33 @@ export const classicTheme: UiTheme = Object.freeze<UiTheme>({
     reconcileBanner: ({ live, locale }) => `<div class="xp-global-reconcile-wrap" style="padding: 12px var(--xp-space-card) 0;">${renderReconcileBanner(live, locale)}</div>`,
     accountSecurity: ({ bodyHtml, security }) => {
       const card = renderAccountSecurityCard(security)
+      const nodes = parseMarkup(bodyHtml)
+      const roots = nodes.flatMap((node, index) => node.attrs.has('data-auth-personal-security') ? [index] : [])
+      const hosts = nodes.flatMap((node, index) => node.attrs.has('data-classic-account-security-factor-host') ? [index] : [])
+      if (roots.length || hosts.length) {
+        const root = roots[0], host = hosts[0]
+        const owner = root === undefined ? undefined : nodes[root]
+        const target = host === undefined ? undefined : nodes[host]
+        let parent = host, inside = false, denied = false
+        while (parent !== undefined && parent >= 0) {
+          const node = nodes[parent]!
+          if (parent === root) inside = true
+          if (node.template >= 0 || node.attrs.has('hidden') || node.attrs.has('inert')
+            || node.attrs.get('aria-hidden') === 'true' || node.attrs.get('aria-disabled') === 'true'
+            || node.attrs.get('data-tool-availability') === 'unverified' || node.attrs.get('data-workspace-mode') === 'read-only'
+            || isHtmlElement(node, 'fieldset') && node.attrs.has('disabled')) denied = true
+          parent = node.parent
+        }
+        if (roots.length !== 1 || hosts.length !== 1 || !owner || !target
+          || !isHtmlElement(owner, 'section') || owner.template >= 0
+          || owner.attrs.get('data-approved-xpanel-workspace') !== '/security/account' || owner.attrs.get('data-surface') !== 'xpanel'
+          || !isHtmlElement(target, 'div') || target.template >= 0 || !inside || denied
+          || nodes.some(node => node.parent === host) || bodyHtml.split(CLASSIC_ACCOUNT_SECURITY_FACTOR_HOST).length !== 2
+          || nodes.some(node => node.attrs.get('data-account-security') === 'two-factor')) throw new Error('classic_security_factor_host')
+        const filled = bodyHtml.replace(CLASSIC_ACCOUNT_SECURITY_FACTOR_HOST, card)
+        if (parseMarkup(filled).some(node => node.attrs.has('data-classic-account-security-factor-host'))) throw new Error('classic_security_factor_host')
+        return filled
+      }
       const afterTitle = bodyHtml.replace(/(<h1\b[^>]*\bclass="[^"]*\bxp-page-title\b[^"]*"[^>]*>[\s\S]*?<\/h1>)/, `$1\n${card}`)
       return afterTitle === bodyHtml ? bodyHtml.replace(/(<main\b[^>]*\bid="main-content"[^>]*>)/, `$1${card}`) : afterTitle
     },
@@ -149,6 +180,7 @@ export const classicTheme: UiTheme = Object.freeze<UiTheme>({
   ${props.surfaceHtml}${renderBrandingFooter(props.branding, props.locale)}
   ${props.paletteHtml}
   ${props.activityHtml}
+  ${CLASSIC_PROMPT_TEMPLATE}
 ${props.clientScriptsHtml}`
     },
   }),

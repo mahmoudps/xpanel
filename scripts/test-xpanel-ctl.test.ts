@@ -134,4 +134,24 @@ describe('lifecycle command boundary: source contracts, not native qualification
       expect(text).not.toMatch(/rm -|source |\beval\b|systemctl|curl |wget /)
     }
   })
+
+  it('describes prepared-install finalization without claiming host provisioning or native qualification', () => {
+    expect(HELP).toContain('finalize an already prepared install')
+    expect(HELP).toContain('does not provision a host or start services')
+    expect(HELP).toContain('adopt                      Plan adoption (native apply unavailable)')
+    expect(parseLifecycleArgs(['install', '--apply', '--yes', ...artifact])).toMatchObject({ command: 'install', mode: 'apply', assumeYes: true })
+    reject(['install', '--apply', '--yes'], 'ARTIFACT_PROOF_REQUIRED')
+  })
+
+  it('keeps installation ownership distinct from readiness and retains only the real bounded job reference', () => {
+    const clean = publicLifecycleResult({ exitCode: 0, code: 'INSTALL_OWNERSHIP_ACTIVE', outcome: 'committed',
+      details: { status: 'installed', version: '0.1.0', installationActive: true, installReady: false, nativeQualified: false,
+        qualified: false, bootstrapPending: false, changed: true, officialReference: 'XP-JOB-2026-000001',
+        bootstrap: '/var/lib/xpanel-lifecycle/bootstrap.json', rawProbe: 'private-observation' } }, 'apply')
+    expect(clean).toEqual({ exitCode: 0, code: 'INSTALL_OWNERSHIP_ACTIVE', outcome: 'committed', message: 'Lifecycle command completed.',
+      details: { status: 'installed', version: '0.1.0', installationActive: true, installReady: false, nativeQualified: false,
+        qualified: false, bootstrapPending: false, changed: true, officialReference: 'XP-JOB-2026-000001' } })
+    expect(JSON.stringify(clean)).not.toMatch(/var\/lib|rawProbe|private-observation/)
+    expect(publicLifecycleResult({ exitCode: 6, code: 'INSTALL_FINALIZATION_ATTENTION', outcome: 'attention', details: {} }, 'apply')).not.toHaveProperty('details')
+  })
 })

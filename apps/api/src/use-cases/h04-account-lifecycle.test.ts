@@ -512,7 +512,7 @@ describe('H04 Account Lifecycle Coordinator (Plans, Resellers, Provisioning, Sus
     }
   })
 
-  it('enforces reseller capacity caps, multi-tenant visibility boundaries (A07), and root-only ownership transfer', async () => {
+  it('enforces reseller capacity caps, multi-tenant visibility boundaries (A07), and root-only ownership transfer', { tags: ['slow', 'journey'] }, async () => {
     const h = await createTestHarness()
     try {
       const resellerA = await h.store.createReseller({
@@ -878,7 +878,7 @@ describe('H04 Account Lifecycle Coordinator (Plans, Resellers, Provisioning, Sus
     }
   })
 
-  it('terminates an account completely across all surfaces without UID reuse or neighbor collateral (A22, A35)', async () => {
+  it('terminates an account completely across all surfaces without UID reuse or neighbor collateral (A22)', async () => {
     const h = await createTestHarness()
     try {
       // Provision neighbor account (keepme) and target account (killme)

@@ -151,3 +151,35 @@ describe('read-only documents keep collection permission and tenant boundaries',
     for (const value of [panel, whm, mail]) expect(value.authority).toMatchObject({ presentation: 'read-only', canRead: false, canReadAccounts: false, canManage: false, canUseTerminal: false, canChangeOwner: false })
   })
 })
+
+describe('account-service read-only layouts preserve missing-fact authority', () => {
+  for (const route of ['/domains/zone-editor', '/security/ssl', '/advanced/cron']) {
+    it(route + ' retains its complete layout without promoting orphan rich facts into an account', { tags: ['feature'] }, () => {
+      const document = documents.find(value => value.route === route)
+      if (!document) throw new Error('Missing registered account-service document')
+      const { account: omitted, ...orphanFacts } = panelFacts(true, ownerVisibility)
+      expect(omitted).toEqual(account)
+      const view = projectReadOnlyPanelSurface({ ...orphanFacts, activeRoute: route })
+      if (!view) throw new Error('Missing role-admitted read-only projection')
+      expect(view.props.account).toBeUndefined()
+      expect(view.props.plan).toBeUndefined()
+      expect(view.props.domains).toBeUndefined()
+      expect(view.props.serviceUsers).toBeUndefined()
+      expect(view.props.certificates).toBeUndefined()
+      expect(view.props.dnsRecords).toBeUndefined()
+      expect(view.authority).toMatchObject({ presentation: 'read-only', canRead: false, canReadFacts: false, canManage: false })
+      const value: UnavailableProps = { ...descriptor(document, false), readOnlyFacts: { surface: 'xpanel', panel: orphanFacts } }
+      const html = renderV2ReadOnlyPage(value)
+      if (html === undefined) throw new Error('Missing complete account-service layout')
+      for (const fact of [account.id, account.home, domain.name, plan.name, mailbox, database.name]) expect(html).not.toContain(fact)
+      assertFullReadOnlyDocument(document, html)
+    })
+    it(route + ' rejects a supplied foreign account before choosing its read-only layout', { tags: ['feature'] }, () => {
+      const document = documents.find(value => value.route === route)
+      if (!document) throw new Error('Missing registered account-service document')
+      const value: UnavailableProps = { ...descriptor(document, true),
+        readOnlyFacts: { surface: 'xpanel', panel: { ...panelFacts(true, ownerVisibility), account: { ...account, id: 'foreign-service-account' } } } }
+      expect(() => renderV2ReadOnlyPage(value)).toThrow('v2_readonly_authority_unavailable:xpanel')
+    })
+  }
+})

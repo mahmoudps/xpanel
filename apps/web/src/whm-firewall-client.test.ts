@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFirewallView, WHM_FIREWALL_CLIENT_BINDING } from './whm-firewall-client.ts'
 import { renderWhmFirewallClientTemplates } from './board-port/whm-firewall-client-templates.ts'
 import { renderV2WhmFirewall } from './themes/v2/pages/xwhm/host/firewall.ts'
-import { tools } from '@xpanel/catalog'
+import { tools, type CatalogTool } from '@xpanel/catalog'
+import type { FirewallRule } from '@xpanel/core'
+import type { WhmSurfaceProps } from './themes/contract.ts'
+import { translator } from './i18n.ts'
+import { renderApprovedWhmOperationsSupplement } from './board-port/approved-whm-operations-components.ts'
 
 // Use the actual catalog parser with Node URLs in the DOM test realm.
 vi.mock('./themes/v2/messages.ts', async () => {
@@ -18,7 +22,7 @@ const tick = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve
 const rule = (id: string, over: Record<string, unknown> = {}) => ({ id, kind: 'port', action: 'accept', protocol: 'tcp', port: '443', source: null, forwardTo: null, list: null, comment: id, enabled: true, ...over })
 const view = (over: Record<string, unknown> = {}) => ({ rules: [rule('default-https'), rule('default-backend-drop', { action: 'drop', port: '8080' }), rule('office', { port: '3306', source: '203.0.113.0/28' })], prefixLists: [{ name: 'office_v4', entries: ['203.0.113.0/28', '203.0.113.16/28'] }], revision: 'd'.repeat(64), session: { ip: '203.0.113.7' }, pending: null, confirmWindowSeconds: 120, ...over })
 const markup = `<div data-approved-whm-operations="/whm/security/firewall" data-operation-state="qualified"><section data-whm-ops-section="firewall-rule-categories"><h2>Rules</h2><p data-firewall-manage-status role="status"></p>
-  <section data-whm-firewall-panel="port"><table><thead><tr><th>Position</th><th>Action</th><th>Protocol</th><th>Port</th><th>Source</th><th>Note</th></tr></thead><tbody></tbody></table><div class="xp-whm-ops-actions" data-firewall-static-management><button disabled>Edit</button></div><p class="xp-whm-ops-status" data-firewall-static-management>not connected</p></section>
+  <section data-whm-firewall-panel="port"><table><thead><tr><th>Position</th><th>Action</th><th>Protocol</th><th>Port</th><th>Source</th><th>Purpose</th><th>Origin</th><th>Note</th><th>Manage</th></tr></thead><tbody></tbody></table><div class="xp-whm-ops-actions" data-firewall-static-management><button disabled>Edit</button></div><p class="xp-whm-ops-status" data-firewall-static-management>not connected</p></section>
   <section data-whm-firewall-panel="prefix-list"><table><thead><tr><th>Name</th><th>Action</th><th>Entries</th><th>Ports</th><th>File</th><th>Updated</th></tr></thead><tbody></tbody></table><input name="firewall-prefix-name" disabled><input type="file" name="firewall-prefix-file" disabled><input name="firewall-prefix-ports" disabled><select name="firewall-prefix-action" disabled><option value="">Choose</option><option value="drop">Drop</option></select><button data-firewall-action="upload-list" disabled>Upload prefix list</button><button data-firewall-action="replace-list" disabled>Replace file</button></section>
   <section data-whm-firewall-panel="banned"><table><thead><tr><th>Address</th><th>Reason</th><th>Source</th><th>Banned at</th><th>Expires</th></tr></thead><tbody></tbody></table><input name="firewall-unban-address" disabled><button data-firewall-action="unban" disabled>Unban</button></section></section>
   <section data-whm-ops-section="firewall-import-export"><input type="file" name="firewall-import-file" disabled><textarea name="firewall-import-json" disabled></textarea><button data-firewall-action="import" disabled>Import JSON</button><button data-firewall-action="export" disabled>Export JSON</button></section>${renderWhmFirewallClientTemplates()}</div>`
@@ -32,6 +36,7 @@ const rows = () => [...document.querySelectorAll<HTMLTableRowElement>('[data-fir
 const buttons = (id: string) => [...document.querySelector(`[data-firewall-rule-id="${id}"]`)!.querySelectorAll('button')].map(node => node.textContent)
 
 beforeEach(() => { document.body.innerHTML = markup })
+afterEach(() => { document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr'; delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
 
 describe('WHM firewall management', () => {
   it('serializes a closed browser helper graph without SSR import bindings', () => { expect(WHM_FIREWALL_CLIENT_BINDING).not.toContain('__vite_ssr_import_') })
@@ -40,10 +45,12 @@ describe('WHM firewall management', () => {
     const send = vi.fn(async (_method: string, path: string, _body?: unknown) => path === '/api/firewall/bans' ? { state: 'read', bans: [] } : view())
     boot(send); await tick()
     const row = document.querySelector<HTMLElement>('[data-firewall-rule-id="office"]')!
-    expect(row.children).toHaveLength(7); expect(row.querySelector('[class*="xp-"]')).toBeNull()
+    expect(row.children).toHaveLength(9); expect(row.querySelector('[class*="xp-"]')).toBeNull()
+    expect(row.children[5]?.textContent).toBe('Not read'); expect(row.children[6]?.textContent).toBe('Not read'); expect(row.children[7]?.textContent).toBe('office')
     ;[...row.querySelectorAll('button')].find(button => button.textContent === 'Edit')!.click()
     const form = document.querySelector<HTMLFormElement>('[data-firewall-editor="office"] form')!
     expect(form.querySelector('[class*="xp-"]')).toBeNull()
+    expect(form.closest('td')?.colSpan).toBe(9)
     const source = form.elements.namedItem('source') as HTMLInputElement
     expect(source.dir).toBe('ltr'); expect(source.id).toBe(form.querySelector<HTMLLabelElement>(`label[for="${source.id}"]`)!.htmlFor)
     source.value = '203.0.113.16/28'
@@ -52,6 +59,7 @@ describe('WHM firewall management', () => {
     ;[...form.querySelectorAll('button')].find(button => button.textContent === 'Check and save')!.click(); await tick()
     expect(send).toHaveBeenCalledWith('PATCH', '/api/firewall/rules/office', { action: 'accept', protocol: 'tcp', port: '3306', source: '203.0.113.16/28', comment: 'office', expectedRevision: 'd'.repeat(64) })
     expect(document.querySelector('[data-firewall-rule-id="office"] [class*="xp-"]')).toBeNull()
+    expect(document.querySelector('[data-whm-firewall-panel="port"] thead tr')?.children).toHaveLength(9)
   })
   it('refuses ambiguous firewall templates before reading or applying rules', async () => {
     const root = document.querySelector('[data-approved-whm-operations]')!, template = root.querySelector('template[data-xp-template="firewall-port-row"]')!
@@ -135,5 +143,105 @@ describe('WHM firewall management', () => {
     expect(() => readFirewallView({ ...view(), revision: 'nope' })).toThrow()
     expect(() => readFirewallView(view({ rules: [rule('x', { kind: 'shell' })] }))).toThrow()
     expect(WHM_FIREWALL_CLIENT_BINDING).not.toContain('innerHTML')
+  })
+})
+
+type FirewallTheme = 'classic' | 'v2'
+const qualifiedCatalog = tools.map((tool): CatalogTool => ({ ...tool, status: 'verified', delivery: { ...tool.delivery, status: 'verified' } }))
+const firewallMarkup = (theme: FirewallTheme, locale: 'en' | 'ar', rules?: FirewallRule[]): string => {
+  const props: WhmSurfaceProps = { locale, activeRoute: '/whm/security/firewall', principal: { kind: 'root', id: 'operator', username: 'operator' }, catalog: qualifiedCatalog, firewallRules: rules }
+  return theme === 'classic' ? renderApprovedWhmOperationsSupplement(props) : renderV2WhmFirewall(props)
+}
+const portTable = (): HTMLTableElement => {
+  const table = document.querySelector<HTMLTableElement>('[data-whm-firewall-panel="port"] table')
+  if (!table) throw new Error('missing_test_port_table')
+  return table
+}
+const typedPortRule = (): FirewallRule => ({ id: 'default-office', kind: 'port', action: 'accept', protocol: 'tcp', port: '443', source: '2001:db8::/64', forwardTo: null, list: null, comment: 'Keep <note> separate', enabled: true })
+
+describe('approved firewall port columns', () => {
+  it.each(['classic', 'v2'] as const)('paints every %s rule family through the strict record helper', async theme => {
+    document.body.innerHTML = firewallMarkup(theme, 'en')
+    const current = view({ rules: [
+      rule('web', { comment: 'port note' }),
+      rule('office-range', { kind: 'ip', protocol: null, port: null, source: '203.0.113.0/28', comment: 'address note' }),
+      rule('forward-web', { kind: 'forward', port: '8443', forwardTo: '192.0.2.40:443', comment: 'forward note' }),
+      rule('feed', { kind: 'prefix-list', protocol: null, list: 'office_v4', comment: 'list note' }),
+    ] })
+    const send = vi.fn(async (_method: string, path: string, _body?: unknown) => path === '/api/firewall/bans'
+      ? { state: 'read', bans: [{ address: '198.51.100.9', expiresSec: 1200 }] } : current)
+    boot(send)
+    await vi.waitFor(() => expect(document.querySelectorAll('[data-firewall-rule-id]')).toHaveLength(3))
+    for (const [id, columns, note] of [['web', 9, 'port note'], ['office-range', 7, 'address note'], ['forward-web', 6, 'forward note']] as const) {
+      const row = document.querySelector<HTMLTableRowElement>('[data-firewall-rule-id="' + id + '"]')
+      if (!row) throw new Error('missing_test_live_rule')
+      expect(row.cells).toHaveLength(columns); expect(row.querySelector('[data-xp-slot="comment"]')?.textContent).toBe(note)
+    }
+    expect(document.querySelector('[data-firewall-rule-id="office-range"] [data-xp-slot="port"]')?.textContent).toBe('All ports')
+    expect(document.querySelector('[data-firewall-rule-id="forward-web"] [data-xp-slot="destination"]')?.textContent).toBe('192.0.2.40:443')
+    expect(document.querySelector('[data-whm-firewall-panel="prefix-list"] [data-xp-slot="name"]')?.textContent).toBe('office_v4')
+    expect(document.querySelector('[data-whm-firewall-panel="banned"] [data-xp-slot="address"]')?.textContent).toBe('198.51.100.9')
+    expect(document.querySelector<HTMLElement>('[data-firewall-manage-status]')?.dataset.state).toBe('read')
+    expect(send.mock.calls.every(call => call[0] === 'GET')).toBe(true)
+  })
+
+  for (const theme of ['classic', 'v2'] as const) for (const locale of ['en', 'ar'] as const) {
+    it('preserves actual ' + theme + ' ' + locale + ' SSR and readback columns without inventing purpose or origin', async () => {
+      document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'
+      const saved = Object.assign(typedPortRule(), { purpose: 'not an authoritative purpose', origin: 'not an authoritative origin' }), before = JSON.stringify(saved)
+      document.body.innerHTML = firewallMarkup(theme, locale, [saved])
+      const table = portTable(), header = table.tHead?.rows[0], row = table.tBodies[0]?.rows[0], t = translator(locale), unread = t('Not read')
+      if (!header || !row) throw new Error('missing_test_port_rows')
+      expect(header.cells).toHaveLength(9); expect(row.cells).toHaveLength(9)
+      expect(header.cells[5]?.textContent).toBe(locale === 'en' ? 'Purpose' : 'الغرض')
+      expect(header.cells[6]?.textContent).toBe(t('Origin')); expect(header.cells[7]?.textContent).toBe(t('Note')); expect(header.cells[8]?.textContent).toBe(t('Manage'))
+      expect(row.cells[5]?.textContent).toBe(unread); expect(row.cells[6]?.textContent).toBe(unread); expect(row.cells[7]?.textContent).toBe(saved.comment)
+      expect(row.querySelector('img')).toBeNull()
+      const manage = row.cells[8]?.querySelector('button')
+      if (!manage) throw new Error('missing_test_manage_placeholder')
+      expect(manage.type).toBe('button'); expect(manage.disabled).toBe(true)
+      const send = vi.fn(async (_method: string, path: string, _body?: unknown) => path === '/api/firewall/bans' ? { state: 'read', bans: [] } : view({ rules: [saved] }))
+      ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
+      manage.click(); expect(send).not.toHaveBeenCalled()
+      boot(send)
+      await vi.waitFor(() => expect(table.querySelectorAll('[data-firewall-rule-id]')).toHaveLength(1))
+      const observed = table.tBodies[0]?.rows[0]
+      if (!observed) throw new Error('missing_test_observed_port')
+      expect(header.cells).toHaveLength(9); expect(header.querySelectorAll('[data-firewall-manage-head]')).toHaveLength(1); expect(observed.cells).toHaveLength(9)
+      for (const slot of ['purpose', 'origin']) {
+        const value = observed.querySelector('[data-xp-slot="' + slot + '"]')
+        expect(value?.tagName).toBe('TD'); expect(value?.textContent).toBe(unread); expect(value?.querySelector('bdi')).toBeNull()
+      }
+      expect(observed.cells[7]?.textContent).toBe(saved.comment); expect(observed.querySelector('img')).toBeNull()
+      expect(observed.textContent).not.toContain(saved.purpose); expect(observed.textContent).not.toContain(saved.origin)
+      expect(observed.cells[8]?.querySelectorAll('button').length).toBeGreaterThan(0)
+      expect(send.mock.calls.every(call => call[0] === 'GET')).toBe(true); expect(JSON.stringify(saved)).toBe(before)
+    })
+  }
+
+  it.each(['classic', 'v2'] as const)('keeps the %s unread, empty and post-read port rows at exactly 9 columns', async theme => {
+    document.body.innerHTML = firewallMarkup(theme, 'en')
+    expect(portTable().tHead?.rows[0]?.cells).toHaveLength(9); expect(portTable().tBodies[0]?.rows[0]?.cells[0]?.colSpan).toBe(9)
+    document.body.innerHTML = firewallMarkup(theme, 'en', [])
+    const table = portTable()
+    expect(table.tBodies[0]?.rows[0]?.cells[0]?.colSpan).toBe(9)
+    boot(vi.fn(async (_method: string, path: string, _body?: unknown) => path === '/api/firewall/bans' ? { state: 'read', bans: [] } : view({ rules: [] })))
+    await vi.waitFor(() => expect(table.tHead?.rows[0]?.querySelectorAll('[data-firewall-manage-head]')).toHaveLength(1))
+    expect(table.tHead?.rows[0]?.cells).toHaveLength(9); expect(table.tBodies[0]?.rows[0]?.cells[0]?.colSpan).toBe(9)
+  })
+
+  it.each(['old header', 'missing purpose', 'non-text origin'] as const)('refuses a %s port contract before any request', async defect => {
+    const table = portTable()
+    const template = document.querySelector<HTMLTemplateElement>('template[data-xp-template="firewall-port-row"]')
+    if (!template) throw new Error('missing_test_port_prototype')
+    if (defect === 'old header') { const header = table.tHead?.rows[0]; if (!header) throw new Error('missing_test_port_header'); header.deleteCell(8); header.deleteCell(6); header.deleteCell(5) }
+    else {
+      const field = template.content.querySelector('[data-xp-slot="' + (defect === 'missing purpose' ? 'purpose' : 'origin') + '"]')
+      if (!field) throw new Error('missing_test_port_slot')
+      if (defect === 'missing purpose') field.remove()
+      else { const technical = document.createElement('bdi'); technical.dir = 'ltr'; technical.dataset.xpSlot = 'origin'; field.removeAttribute('data-xp-slot'); field.append(technical) }
+    }
+    const send = vi.fn(); boot(send)
+    expect(send).not.toHaveBeenCalled(); expect(document.querySelector<HTMLElement>('[data-firewall-manage-status]')?.dataset.state).toBe('unavailable')
   })
 })

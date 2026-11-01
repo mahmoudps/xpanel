@@ -9,6 +9,21 @@ import { WHM_SSL_CLIENT_BINDING } from '../whm-ssl-client.ts'
 import { WHM_SSH_CLIENT_BINDING } from '../whm-ssh-client.ts'
 
 const root = { kind: 'root' as const, id: 'synthetic-root', username: 'synthetic-root' }
+
+// Positive renderer fixtures model only the named accepted control-plane operations.
+// Production acceptance and host evidence are never changed by these local inputs.
+const qualifiedControlPlaneFixture = (ids: readonly string[]) => {
+  const accepted = new Set(ids)
+  const catalog = qualifyHostTools(tools.map(tool => accepted.has(tool.id)
+    ? { ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } }
+    : tool), { executor: 'linux', probes: { 'control-plane': 'passed' } }, true)
+  for (const id of accepted) {
+    assert.equal(catalog.find(tool => tool.id === id)?.status, 'verified', id)
+    assert.equal(catalog.find(tool => tool.id === id)?.delivery.status, 'verified', id)
+  }
+  return catalog
+}
+
 const readyCatalog = tools.map(tool => ['feature-list-crud', 'server-settings-edit'].includes(tool.id) ? { ...tool, status: 'verified' as const } : tool)
 const settings: ServerSettings = {
   hostname: 'synthetic.example.test', nameservers: ['ns1.example.test', 'ns2.example.test'], adminEmail: 'owner@example.test',
@@ -21,25 +36,93 @@ const settings: ServerSettings = {
 const rows = [{ id: 'synthetic-private-audit-key', at: '2026-10-25T09:30:00.123Z', actor: 'synthetic-root', action: 'auth.login', target: 'synthetic-root', detail: { apiToken: 'must-never-be-exported' }, outcome: 'ok' as const }]
 
 describe('detailed administrator workspaces', () => {
+
+
+  it.each(['en', 'ar'] as const)('restores the complete Web Server architecture and saved configuration reference in %s', locale => {
+    const current = { ...settings, backendPort: 18181, backendTlsPort: 19443 }
+    const host = document.createElement('div')
+    host.innerHTML = renderWhmDetailPage({ activeRoute: '/whm/services/web', locale, principal: root, serverSettings: current, catalog: readyCatalog })!
+    assert.equal(host.querySelectorAll('[data-whm-web-hop]').length, 3)
+    for (const key of ['web-flow', 'web-proxy', 'web-comparison', 'web-test-gate']) assert.ok(host.querySelector(`[data-whm-detail-section="${key}"]`), key)
+    assert.equal(host.querySelectorAll('[data-whm-web-snapshot="page-load"]').length, 3)
+    assert.equal(host.querySelectorAll('[data-whm-web-snapshot-setting]').length, 15)
+    const proxy = host.querySelector('[data-whm-web-proxy-reference]')!
+    assert.equal(proxy.getAttribute('data-state'), 'saved')
+    assert.match(proxy.textContent!, /proxy_pass http:\/\/127\.0\.0\.1:18181;/)
+    assert.match(proxy.textContent!, /proxy_set_header X-Forwarded-For \$remote_addr;/)
+    assert.doesNotMatch(proxy.textContent!, /\$proxy_add_x_forwarded_for/)
+    assert.equal(host.querySelector('[data-whm-web-snapshot-setting="backendTlsPort"]')!.textContent, '19443')
+    assert.equal(host.querySelectorAll('[data-whm-detail-section="web-comparison"] th[scope="col"]').length, 5)
+    assert.equal(host.querySelectorAll('[data-server-settings-form]').length, 1)
+    assert.equal(host.querySelectorAll('[data-whm-web-readback]').length, 1)
+    assert.equal(host.querySelectorAll('[data-whm-web-generation]').length, 1)
+    assert.equal(host.querySelectorAll('[data-whm-web-rollback]').length, 1)
+    assert.equal(host.querySelectorAll('[href="#whm-detail-web-pending"]').length, 1)
+    const ids = [...host.querySelectorAll('[id]')].map(item => item.id)
+    assert.equal(new Set(ids).size, ids.length)
+    assert.doesNotMatch(host.textContent!, /alice-shop|20014|1\.24\.0|2\.4\.58|[\u0660-\u0669\u06f0-\u06f9]/)
+    assert.ok([...host.querySelectorAll('[data-whm-web-snapshot-setting] bdi')].every(item => item.getAttribute('dir') === 'ltr'))
+  })
+
+  it('uses the saved Web Server engine and MPM without claiming the flow is running', () => {
+    for (const [engine, apacheMpm, expected] of [
+      ['apache', 'itk', 'Saved Apache MPM: itk.'],
+      ['apache', 'prefork', 'Saved Apache MPM: prefork.'],
+      ['openlitespeed', 'itk', 'OpenLiteSpeed is the saved engine.'],
+    ] as const) {
+      const host = document.createElement('div')
+      host.innerHTML = renderWhmDetailPage({ activeRoute: '/whm/services/web', principal: root, serverSettings: { ...settings, engine, apacheMpm }, catalog: readyCatalog })!
+      const flow = host.querySelector('[data-whm-web-flow]')!
+      assert.ok(flow.textContent!.includes(expected))
+      assert.ok(flow.textContent!.includes('Runtime not observed'))
+      assert.doesNotMatch(flow.textContent!, /\bRunning\b/)
+    }
+  })
+
+  it('keeps defaults, proposed values and runtime unknown when the page snapshot is unread or denied', () => {
+    for (const props of [{ catalog: readyCatalog }, { catalog: readyCatalog, capabilityUnavailable: true, serverSettings: { ...settings, backendPort: 18181, backendTlsPort: 19443 } }]) {
+      const host = document.createElement('div')
+      host.innerHTML = renderWhmDetailPage({ activeRoute: '/whm/services/web', principal: root, ...props })!
+      assert.equal(host.querySelector('[data-whm-web-proxy-reference]')!.getAttribute('data-state'), 'unread')
+      assert.equal(host.querySelectorAll('[data-whm-web-snapshot-setting]').length, 15)
+      assert.ok([...host.querySelectorAll('[data-whm-web-snapshot-setting]')].every(item => item.textContent === 'Not read'))
+      assert.doesNotMatch(host.innerHTML, /18181|19443|proxy_pass http:\/\/127\.0\.0\.1:/)
+      if (props.capabilityUnavailable) {
+        assert.equal(host.querySelectorAll('form').length, 0)
+        assert.ok([...host.querySelectorAll('input,select,textarea,button')].every(item => (item as HTMLInputElement).disabled))
+      }
+    }
+    const host = document.createElement('div')
+    host.innerHTML = renderWhmDetailPage({ activeRoute: '/whm/services/web', principal: root, serverSettings: settings, catalog: readyCatalog })!
+    const comparison = host.querySelector('[data-whm-detail-section="web-comparison"]')!
+    assert.ok(comparison.textContent!.includes('A host-specific default baseline has not been supplied.'))
+    assert.ok(comparison.textContent!.includes('Not reviewed'))
+    assert.doesNotMatch(comparison.textContent!, /Default for 4 cores \/ 8 GB/)
+  })
+
   it.each(whmDetailRoutes)('retains %s structure without invented observations or mutations in unavailable mode', activeRoute => {
     for (const locale of ['en', 'ar'] as const) {
       const html = renderWhmDetailPage({ activeRoute, locale, capabilityUnavailable: true, principal: root, serverSettings: settings, featureLists: [{ id: 'private-list', name: 'DO-NOT-RENDER', disabled: [] }] })!
       assert.match(html, new RegExp(`data-whm-detail-route="${activeRoute}"`))
       assert.match(html, /data-capability-state="unavailable"/)
-      assert.doesNotMatch(html, /<form\b|synthetic\.example\.test|DO-NOT-RENDER|must-never-be-exported/)
-      for (const input of html.matchAll(/<(?:input|select|textarea)\b[^>]*>/g)) assert.match(input[0], /\bdisabled\b/)
+      const doc = new DOMParser().parseFromString(html, 'text/html')
+      assert.equal(doc.querySelectorAll('form').length, 0, 'unavailable documents contain no live native form')
+      assert.doesNotMatch(html, /synthetic\.example\.test|DO-NOT-RENDER|must-never-be-exported/)
+      for (const control of doc.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input,select,textarea')) assert.equal(control.disabled, true, control.outerHTML)
       assert.doesNotMatch(html, /[\u0660-\u0669\u06f0-\u06f9]/)
     }
   })
 
   it('integrates backup and reseller native controls exactly once without duplicating page headings', () => {
-    const catalog = qualifyHostTools(tools, { executor: 'linux', probes: { 'control-plane': 'passed' } })
+    const catalog = qualifiedControlPlaneFixture(['reseller-center'])
     const backups = renderWhmSurface({ principal: root, activeRoute: '/whm/backups', catalog, accounts: [] })
-    assert.equal([...backups.matchAll(/data-account-backups="true"/g)].length, 1)
-    assert.equal([...backups.matchAll(/<h1\b/g)].length, 1)
+    const backupDoc = new DOMParser().parseFromString(backups, 'text/html')
+    assert.equal(backupDoc.querySelectorAll('[data-account-backups="true"]').length, 1)
+    assert.equal(backupDoc.querySelectorAll('h1').length, 1)
     const resellers = renderWhmSurface({ principal: root, activeRoute: '/whm/resellers', catalog, resellers: [], accounts: [] })
-    assert.equal([...resellers.matchAll(/data-reseller-create-form="true"/g)].length, 1)
-    assert.equal([...resellers.matchAll(/<h1\b/g)].length, 1)
+    const resellerDoc = new DOMParser().parseFromString(resellers, 'text/html')
+    assert.equal(resellerDoc.querySelectorAll('form[data-reseller-create-form="true"]').length, 1)
+    assert.equal(resellerDoc.querySelectorAll('h1').length, 1)
   })
 
   it.each(['/whm/backups', '/whm/backups/restore', '/whm/resellers', '/whm/resellers/privileges'])('does not pass DTOs or native forms to the %s availability fallback', activeRoute => {
@@ -121,8 +204,35 @@ describe('detailed administrator workspaces', () => {
     assert.equal([...html.matchAll(/<h1\b/g)].length, 1)
     for (const section of sections) assert.ok(html.includes(`data-whm-detail-section="${section}"`), section)
     for (const label of labels) assert.ok(html.includes(label), label)
-    // The root inventory read is an observation, not one of the unsupported operations.
-    for (const element of html.matchAll(/<(?:input|select|textarea|button)\b[^>]*>/g)) if (!/\sdata-whm-php-refresh\b/.test(element[0])) assert.match(element[0], /\bdisabled\b/)
+    // Presentation tabs change only the local editor view; all other native operations remain fenced.
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const workspace = doc.querySelector<HTMLElement>('[data-whm-detail-route="' + activeRoute + '"]')!
+    assert.ok(workspace)
+    const phpTabs = new Set<Element>()
+    let inventoryRead: HTMLButtonElement | null = null
+    if (activeRoute === '/whm/software/php') {
+      const modes = workspace.querySelector('[data-php-editor-modes][data-presentation-tabs="panels"]')!
+      assert.ok(modes)
+      assert.equal(modes.querySelectorAll('[data-presentation-tab]').length, 2)
+      for (const [id, key, panelId] of [['whm-php-common-tab', 'common', 'whm-php-common-panel'], ['whm-php-file-tab', 'file', 'whm-php-file-panel']] as const) {
+        const tab = modes.querySelector<HTMLButtonElement>('#' + id)!
+        const panel = modes.querySelector<HTMLElement>('#' + panelId)!
+        assert.ok(tab); assert.ok(panel)
+        assert.equal(tab.tagName, 'BUTTON'); assert.equal(tab.type, 'button'); assert.equal(tab.getAttribute('role'), 'tab')
+        assert.equal(tab.getAttribute('data-presentation-tab'), key); assert.equal(tab.getAttribute('aria-controls'), panelId)
+        assert.equal(panel.getAttribute('role'), 'tabpanel'); assert.equal(panel.getAttribute('aria-labelledby'), id)
+        assert.equal(tab.disabled, false)
+        assert.equal(tab.matches('[data-php-action],[data-php-version-command],[data-php-install-pick],[data-php-exception-revoke],[data-action],[data-xp-action],[api-url],[data-api-url]'), false)
+        phpTabs.add(tab)
+      }
+      assert.equal(workspace.querySelectorAll('[data-whm-php-refresh]').length, 1)
+      inventoryRead = workspace.querySelector<HTMLButtonElement>('[data-whm-php-workspace] [data-whm-php-refresh]')!
+      assert.ok(inventoryRead); assert.equal(inventoryRead.tagName, 'BUTTON'); assert.equal(inventoryRead.type, 'button')
+    }
+    for (const control of doc.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button')) {
+      if (control === inventoryRead || phpTabs.has(control)) continue
+      assert.equal(control.disabled, true, control.outerHTML)
+    }
     assert.doesNotMatch(html, /<form\b|value="(?:8\.1|8\.3|1\.5\.0|srv0\.xpanel\.test)"/)
     const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map(match => match[1]!)
     assert.equal(new Set(ids).size, ids.length)
@@ -172,8 +282,10 @@ describe('detailed administrator workspaces', () => {
   it.each(['/whm/accounts', '/whm/accounts/new', '/whm/plans', '/whm/security/firewall', '/whm/services'] as const)('keeps complete %s unavailable layout without private records or forms', activeRoute => {
     const html = renderWhmDetailPage({ activeRoute, capabilityUnavailable: true, principal: root, accounts: [{ username: 'PRIVATE-ACCOUNT' } as never], plans: [{ name: 'PRIVATE-PLAN' } as never], services: [{ name: 'PRIVATE-SERVICE' } as never] })!
     assert.equal([...html.matchAll(/<h1\b/g)].length, 1)
-    assert.doesNotMatch(html, /<form\b|PRIVATE-ACCOUNT|PRIVATE-PLAN|PRIVATE-SERVICE/)
-    for (const element of html.matchAll(/<(?:input|select|textarea|button)\b[^>]*>/g)) assert.match(element[0], /\bdisabled\b/)
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    assert.equal(doc.querySelectorAll('form').length, 0, 'unavailable documents contain no live native form')
+    assert.doesNotMatch(html, /PRIVATE-ACCOUNT|PRIVATE-PLAN|PRIVATE-SERVICE/)
+    for (const control of doc.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button')) assert.equal(control.disabled, true, control.outerHTML)
     if (activeRoute === '/whm/plans') for (const label of ['Read operations per second', 'Addon domains', 'Default mailbox quota', 'Impact', 'Unsaved changes']) assert.ok(html.includes(label), label)
     if (activeRoute === '/whm/accounts/new') for (const label of ['Username', 'Primary domain', 'Contact email', 'Password', 'IPv4 assignment', 'Owner', 'Shell', 'What will be created']) assert.ok(html.includes(label), label)
   })
@@ -181,7 +293,7 @@ describe('detailed administrator workspaces', () => {
   it('integrates account and plan components without nested forms, duplicate IDs or dropped native controls', () => {
     const plan = defaultPlan({ featureListId: '40000000-0000-4000-8000-000000000001', ownerId: null })
     const account: Account = { id: '20000000-0000-4000-8000-000000000001', username: 'synthetic7', uid: 1007, gid: 1007, home: '/home/synthetic7', primaryDomain: 'synthetic7.example.test', planId: plan.id, ownerId: null, status: 'active', suspendReason: null, contactEmail: 'synthetic7@example.test', ipv4: '192.0.2.7', shell: 'none', createdAt: '2026-10-25T00:00:00.000Z' }
-    const catalog = qualifyHostTools(tools, { executor: 'linux', probes: { 'control-plane': 'passed' } })
+    const catalog = qualifiedControlPlaneFixture(['list-accounts', 'modify-account'])
     for (const activeRoute of ['/whm/accounts', '/whm/accounts/new', '/whm/plans']) {
       const html = renderWhmSurface({ principal: root, catalog, activeRoute, accounts: [account], plans: [plan], resellers: [], featureLists: [{ id: plan.featureListId, name: 'Synthetic list', disabled: [] }] })
       assert.equal([...html.matchAll(/<h1\b/g)].length, 1)
@@ -193,7 +305,11 @@ describe('detailed administrator workspaces', () => {
       assert.equal(depth, 0)
       const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map(match => match[1]!)
       assert.equal(new Set(ids).size, ids.length, activeRoute)
-      if (activeRoute === '/whm/accounts') for (const marker of ['data-account-row="synthetic7"', 'data-account-plan-form', 'data-account-table-value="disk"', 'data-account-table-value="bandwidth"', 'data-account-bulk-control']) assert.ok(html.includes(marker), marker)
+      if (activeRoute === '/whm/accounts') {
+        for (const marker of ['data-account-row="synthetic7"', 'data-account-plan-form', 'data-account-table-value="disk"', 'data-account-table-value="bandwidth"', 'data-account-bulk-control']) assert.ok(html.includes(marker), marker)
+        const doc = new DOMParser().parseFromString(html, 'text/html')
+        assert.equal(doc.querySelectorAll('form[data-account-plan-form="true"][data-account-username="synthetic7"]').length, 1)
+      }
       if (activeRoute === '/whm/accounts/new') for (const marker of ['data-create-account-form', 'data-approved-account-create-fields', 'data-account-generate-password', 'data-account-toggle-password', 'data-approved-account-create-status']) assert.equal([...html.matchAll(new RegExp(`<[a-z][^>]*\\s${marker}(?:[\\s=>])`, 'g'))].length, 1, marker)
       if (activeRoute === '/whm/plans') for (const label of ['Impact', 'Unsaved changes', 'How saving applies']) assert.ok(html.includes(label), label)
     }

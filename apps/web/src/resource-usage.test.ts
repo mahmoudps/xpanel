@@ -6,6 +6,20 @@ import { renderWhmSurface } from './surfaces/xwhm.ts'
 import { renderMailSurface } from './surfaces/xmail.ts'
 import { SYNTHETIC_WHM_IO_SNAPSHOT } from '../../../tests/fixtures/analytics-snapshots.ts'
 
+// Positive fixtures name only the capabilities exercised by these renderer cases.
+// This private input does not change the production acceptance catalog or host evidence.
+const qualifiedControlPlaneFixture = (ids: readonly string[]) => {
+  const accepted = new Set(ids)
+  const catalog = qualifyHostTools(tools.map(tool => accepted.has(tool.id)
+    ? { ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } }
+    : tool), { executor: 'linux', probes: { 'control-plane': 'passed' } }, true)
+  for (const id of accepted) {
+    expect(catalog.find(tool => tool.id === id)?.status).toBe('verified')
+    expect(catalog.find(tool => tool.id === id)?.delivery.status).toBe('verified')
+  }
+  return catalog
+}
+
 const options = { locale: 'en' as const, unit: 'MiB', label: 'Memory' }
 const plainText = (html: string): string => html.replace(/<[^>]+>/g, '')
 
@@ -109,7 +123,7 @@ describe('truthful resource usage rendering', () => {
 
   it('uses real configured reseller caps without inventing usage from row order or incomplete account lists', () => {
     const resellers = [1, 2].map(id => ({ id: `reseller-${id}`, username: `reseller${id}`, acl: [], maxAccounts: 5, totalDiskMb: 10240, totalBandwidthMb: 102400, oversell: false, nameservers: [], delegatedIps: [] }))
-    const catalog = qualifyHostTools(tools, { executor: 'linux', probes: { 'control-plane': 'passed' } })
+    const catalog = qualifiedControlPlaneFixture(['reseller-center', 'list-accounts'])
     const render = (rows: typeof resellers) => renderWhmSurface({ principal: { kind: 'root', id: 'root', username: 'root' }, activeRoute: '/whm/resellers', catalog, resellers: rows })
     const forward = render(resellers), reversed = render([...resellers].reverse())
     const row = (html: string, username: string) => html.match(new RegExp(`<tr data-reseller-row="${username}">[\\s\\S]*?<\\/tr>`))![0]

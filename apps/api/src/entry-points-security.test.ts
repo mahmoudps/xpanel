@@ -6,10 +6,10 @@ import { afterEach, beforeEach, describe, it } from 'vitest'
 import WebSocket from 'ws'
 import { createApiToken, createResellerPrincipal, createRootPrincipal, createSession, createTestDb, createUserPrincipal, revokeSession } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
-import { fail } from '@xpanel/core'
+import { ACCOUNT_SELF_PASSWORD_MIN_LENGTH, fail } from '@xpanel/core'
 import { computeTotpCode, deriveCsrfToken, sha256Hex, verifyPasswordArgon2id } from './auth.ts'
 import type { MailboxTransport } from './mail/inbox.ts'
-import { ENTRY_POINTS, sessionCookieName, sessionTokenHash, type EntryPoint } from './entry-points.ts'
+import { ENTRY_POINTS, entryPointAllowsApiRoute, sessionCookieName, sessionTokenHash, type EntryPoint } from './entry-points.ts'
 import { createApiApp, listenApiServer, type ApiServerDeps } from './server.ts'
 import { ExtendedFeaturesStore } from './extended-routes.ts'
 
@@ -136,6 +136,90 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
     assert.equal(reseller.response.status, 200)
     assert.equal(reseller.data.mfaEnrollmentRequired, false)
     assert.notEqual(reseller.response.headers.get('set-cookie'), null)
+  })
+
+  it('manages only the owner sessions on the real xPanel listener with CSRF and Origin protection', { tags: ['feature'] }, async () => {
+    const panel = await f.login('xpanel')
+    assert.equal(panel.response.status, 200)
+    assert.ok(typeof panel.data.csrfToken === 'string')
+    const csrf = panel.data.csrfToken
+    const addOwned = () => createSession(f.database.db, { principalId: f.user.id,
+      tokenHash: sessionTokenHash(randomUUID(), 'xpanel'), expiresAt: new Date(Date.now() + 60_000).toISOString() })
+    const other = await addOwned()
+    const foreignPrincipal = await createRootPrincipal(f.database.db, { username: 'foreign-self-session', passwordHash: HASH, forcePasswordChange: false })
+    const foreign = await createSession(f.database.db, { principalId: foreignPrincipal.id,
+      tokenHash: sessionTokenHash(randomUUID(), 'xpanel'), expiresAt: new Date(Date.now() + 60_000).toISOString() })
+    const read = async () => {
+      const response = await f.request('xpanel', '/api/auth/sessions', { cookie: panel.cookie })
+      assert.equal(response.status, 200)
+      return await response.json() as { sessions: { id: string; current: boolean; tokenHash?: unknown; principalId?: unknown }[]; currentSessionId: string }
+    }
+    const before = await read()
+    assert.equal(before.sessions.length, 2)
+    assert.ok(before.sessions.some(row => row.id === other.id && !row.current))
+    assert.ok(before.sessions.some(row => row.id === before.currentSessionId && row.current))
+    assert.ok(before.sessions.every(row => row.tokenHash === undefined && row.principalId === undefined && row.id !== foreign.id))
+    assert.equal((await f.request('xpanel', '/api/auth/sessions/' + foreign.id, { method: 'DELETE', cookie: panel.cookie, csrf })).status, 404)
+    assert.equal((await f.request('xpanel', '/api/auth/sessions/' + other.id, { method: 'DELETE', cookie: panel.cookie })).status, 403)
+    assert.equal((await f.request('xpanel', '/api/auth/sessions/' + other.id, { method: 'DELETE', cookie: panel.cookie, csrf, headers: { origin: origin('xmail') } })).status, 403)
+    assert.equal((await f.request('xpanel', '/api/auth/sessions/revoke-others', { method: 'POST', cookie: panel.cookie, csrf, headers: { origin: '' } })).status, 403)
+    assert.equal((await read()).sessions.length, 2)
+    const bearer = 'xp_nonoperational_self_sessions_fixture'
+    await createApiToken(f.database.db, { principalId: f.user.id, name: 'self-sessions-fixture', tokenHash: sha256Hex(bearer),
+      scopes: ['*'], expiresAt: new Date(Date.now() + 60_000).toISOString() })
+    assert.equal((await f.request('xpanel', '/api/auth/sessions', { cookie: panel.cookie, headers: { authorization: 'Bearer ' + bearer } })).status, 401)
+    const ended = await f.request('xpanel', '/api/auth/sessions/' + other.id, { method: 'DELETE', cookie: panel.cookie, csrf })
+    assert.equal(ended.status, 200)
+    assert.deepEqual(await ended.json(), { ok: true, currentSessionRevoked: false })
+    assert.ok(!(await read()).sessions.some(row => row.id === other.id))
+    const extra = await addOwned()
+    const remaining = await f.request('xpanel', '/api/auth/sessions/revoke-others', { method: 'POST', cookie: panel.cookie, csrf })
+    assert.equal(remaining.status, 200)
+    assert.deepEqual(await remaining.json(), { ok: true, revokedCount: 1 })
+    const after = await read()
+    assert.equal(after.sessions.length, 1)
+    assert.ok(after.sessions.every(row => row.current && row.id !== extra.id))
+    assert.equal((await f.request('xpanel', '/api/auth/me', { cookie: panel.cookie })).status, 200)
+    const current = await f.request('xpanel', '/api/auth/sessions/' + after.currentSessionId, { method: 'DELETE', cookie: panel.cookie, csrf })
+    assert.equal(current.status, 200)
+    assert.deepEqual(await current.json(), { ok: true, currentSessionRevoked: true })
+    assert.match(current.headers.get('set-cookie') ?? '', /^__Host-xpanel_session=;/)
+    assert.equal((await f.request('xpanel', '/api/auth/me', { cookie: panel.cookie })).status, 401)
+  })
+
+  it('keeps the existing self-password boundary at seven rejected and eight accepted on the xPanel listener', { tags: ['feature'] }, async () => {
+    const panel = await f.login('xpanel')
+    assert.equal(panel.response.status, 200)
+    assert.ok(typeof panel.data.csrfToken === 'string')
+    const csrf = panel.data.csrfToken
+    assert.equal(ACCOUNT_SELF_PASSWORD_MIN_LENGTH, 8)
+    const protectedAuthState = async (): Promise<string> => {
+      const principals = await f.database.db.query('SELECT id, password_hash, password_changed_at, force_password_change, disabled FROM principals WHERE id=$1', [f.user.id])
+      const sessions = await f.database.db.query('SELECT id, token_hash, revoked_at FROM sessions WHERE principal_id=$1 ORDER BY id', [f.user.id])
+      assert.equal(principals.length, 1)
+      assert.ok(sessions.length > 0)
+      // Normal authentication may touch lastSeen; compare only protected fields and never print credential material.
+      return sha256Hex(JSON.stringify({ principals, sessions }))
+    }
+    const authBefore = await protectedAuthState()
+    const short = 'a'.repeat(ACCOUNT_SELF_PASSWORD_MIN_LENGTH - 1)
+    const accepted = 'a'.repeat(ACCOUNT_SELF_PASSWORD_MIN_LENGTH)
+    const refused = await f.request('xpanel', '/api/auth/change-password', { method: 'POST', cookie: panel.cookie, csrf,
+      body: { currentPassword: PASSWORD, newPassword: short } })
+    assert.equal(refused.status, 422)
+    const problem: unknown = await refused.json()
+    assert.ok(problem !== null && typeof problem === 'object' && !Array.isArray(problem) && 'code' in problem && 'status' in problem)
+    assert.equal(problem.code, 'VALIDATION')
+    assert.equal(problem.status, 422)
+    assert.equal(await protectedAuthState(), authBefore)
+    assert.equal((await f.request('xpanel', '/api/auth/me', { cookie: panel.cookie })).status, 200)
+    const changed = await f.request('xpanel', '/api/auth/change-password', { method: 'POST', cookie: panel.cookie, csrf,
+      body: { currentPassword: PASSWORD, newPassword: accepted } })
+    assert.equal(changed.status, 200)
+    assert.deepEqual(await changed.json(), { ok: true, reauthenticationRequired: true })
+    assert.equal((await f.request('xpanel', '/api/auth/me', { cookie: panel.cookie })).status, 401)
+    assert.equal((await f.request('xpanel', '/api/auth/login', { method: 'POST', body: { username: 'alice', password: accepted } })).status, 200)
+    assert.equal((await f.request('xpanel', '/api/auth/login', { method: 'POST', body: { username: 'alice', password: PASSWORD } })).status, 401)
   })
 
   it('confines APIs before routing and refuses query/header audience overrides', async () => {
@@ -320,5 +404,29 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
     assert.deepEqual(await ext.readOrDefault('mail/filters.json', []), seeded)
     const allowed = await request('/api/mail/filters', 'POST', { accountId: f.account.id, scope: 'global', name: 'Owned account-wide rule', conditions: [], actions: [{ type: 'keep' }] })
     assert.equal(allowed.status, 201)
+  })
+})
+
+describe('finite owner personal-auth listener admission', () => {
+  it('admits only exact owner methods and rejects aliases, malformed IDs and other listeners', { tags: ['feature'] }, () => {
+    const id = '11111111-1111-4111-8111-111111111111'
+    const routes: readonly (readonly [string, string])[] = [
+      ['GET', '/api/auth/sessions'], ['POST', '/api/auth/sessions/revoke-others'], ['DELETE', '/api/auth/sessions/' + id],
+      ['GET', '/api/auth/api-tokens'], ['POST', '/api/auth/api-tokens'], ['PATCH', '/api/auth/api-tokens/' + id],
+      ['POST', '/api/auth/api-tokens/' + id + '/revoke'], ['POST', '/api/auth/api-tokens/revoke'],
+    ]
+    for (const profile of profiles) for (const [method, path] of routes) {
+      assert.equal(entryPointAllowsApiRoute(profile, path, method), profile === 'xpanel', profile + ':' + method + ':' + path)
+    }
+    const deniedRoutes: readonly (readonly [string, string])[] = [
+      ['POST', '/api/auth/sessions'], ['GET', '/api/auth/sessions/revoke-others'], ['PUT', '/api/auth/sessions/' + id],
+      ['GET', '/api/auth/sessions/' + id], ['DELETE', '/api/auth/sessions/' + '1'.repeat(36)],
+      ['DELETE', '/api/auth/sessions/' + id + '/extra'], ['GET', '/api/auth/sessions/'],
+      ['DELETE', '/api/auth/api-tokens/' + id], ['GET', '/api/auth/api-tokens/revoke'],
+      ['PATCH', '/api/auth/api-tokens/' + id.toUpperCase().replace('1', 'A')],
+      ['POST', '/api/auth/api-tokens/' + id + '/revoke/extra'], ['POST', '/api/auth/api-tokens/'],
+      ['GET', '/api/auth/api-tokens/other'], ['GET', '/api/auth/other/sessions'],
+    ]
+    for (const [method, path] of deniedRoutes) for (const profile of profiles) assert.equal(entryPointAllowsApiRoute(profile, path, method), false, profile + ':' + method + ':' + path)
   })
 })

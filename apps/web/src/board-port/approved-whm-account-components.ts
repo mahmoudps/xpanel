@@ -1,6 +1,7 @@
 import type { WhmSurfaceProps } from '../surfaces/xwhm.ts'
 import { escapeHtml, renderLtrValue } from '../tokens.ts'
 import { formatDisplayName } from '../display-name.ts'
+import { formatAsciiBytes } from '../display-format.ts'
 import { SOURCE_LOCALE, translator } from '../i18n.ts'
 type Copy = string
 const copy = (props: WhmSurfaceProps, text: Copy): string => escapeHtml(translator(props.locale)(text))
@@ -84,7 +85,7 @@ export const renderApprovedWhmAccountActions = (props: WhmSurfaceProps, username
 }
 
 
-/** Four cells for the native table. Configured limits are distinct from unavailable usage observations. */
+/** Five cells for the native table. Configured limits are distinct from unavailable usage observations. */
 export const renderApprovedWhmAccountTableCells = (props: WhmSurfaceProps, username: string): string => {
   const account = accountFor(props, username)
   const principal = principalOf(props)
@@ -94,8 +95,12 @@ export const renderApprovedWhmAccountTableCells = (props: WhmSurfaceProps, usern
   const limit = (cap: number | 'unlimited' | undefined): string => cap === undefined ? missing : cap === 'unlimited' ? copy(props, msgid('Unlimited')) : renderLtrValue(String(cap) + ' MiB')
   const cell = (key: string, label: Copy, body: string): string => `<td data-account-table-value="${key}"><span class="xp-accounts__mobile-label" aria-hidden="true">${copy(props, label)}</span>${body}</td>`
   const quota = (cap: number | 'unlimited' | undefined): string => `<div class="xp-whm-account-field"><span>${missing} / ${limit(cap)}</span><small class="xp-help">${copy(props, msgid('Usage / configured plan limit. Usage has not been read.'))}</small></div>`
+  const ioWrite = plan?.resources.ioWriteBps
+  const ioWriteCap = ioWrite === 'unlimited' ? copy(props, msgid('Unlimited'))
+    : typeof ioWrite === 'number' && Number.isFinite(ioWrite) && ioWrite >= 0 ? renderLtrValue(`${formatAsciiBytes(ioWrite)}/s`) : missing
   return cell('owner', msgid('Owner'), ownerName === undefined ? missing : renderLtrValue(ownerName))
     + cell('ip', msgid('IP address'), account ? `<div class="xp-whm-account-field">${renderLtrValue(account.ipv4)}${account.ipv6 ? renderLtrValue(account.ipv6) : ''}</div>` : missing)
     + cell('disk', msgid('Disk'), quota(plan?.resources.diskMb))
     + cell('bandwidth', msgid('Bandwidth per month'), quota(plan?.resources.bandwidthMbMonth))
+    + cell('io-write', msgid('IO write cap'), ioWriteCap)
 }

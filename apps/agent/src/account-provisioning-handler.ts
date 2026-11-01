@@ -2,6 +2,7 @@ import { assertAcl, fail, isUuid, isXpanelError, type Account, type ErrorCode, t
 import {
   assertProvisioningReply,
   canonicalProvisioningIdentity,
+  parseProvisioningCheckpointObservation,
   parseProvisioningReconcileRequest,
   type ProvisioningReconcileReply,
   type ProvisioningReconcileRequest,
@@ -108,8 +109,9 @@ const json = (body: unknown): Response => new Response(JSON.stringify(body), {
   status: 200,
   headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
 })
-const closed = (code: ErrorCode, message: string, detail: Record<string, unknown> = {}): never =>
-  fail(code, message, { stateChanged: false, ...detail })
+function closed(code: ErrorCode, message: string, detail: Record<string, unknown> = {}): never {
+  return fail(code, message, { stateChanged: false, ...detail })
+}
 const whole = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value)
 
 const readBody = async (request: Request): Promise<unknown> => {
@@ -220,7 +222,7 @@ export async function handleAccountProvisioning(input: AccountProvisioningHandle
 }
 
 interface BoundProvisioning {
-  readonly principal: ProvisioningPrincipalView
+  readonly principal: ProvisioningPrincipalView & { readonly kind: 'root' | 'reseller' }
   readonly account: Account
   readonly job: ProvisioningJobView
   readonly checkpoint: HostCheckpoint
@@ -237,6 +239,7 @@ const bind = async (ports: AccountProvisioningReadPorts, principalId: string, re
   }
   if (principal.kind === 'user') closed('FORBIDDEN', 'user principals cannot provision accounts')
   if (principal.kind !== 'root' && principal.kind !== 'reseller') closed('FORBIDDEN', 'account provisioning requires a privileged actor')
+  const privilegedPrincipal = { id: principal.id, kind: principal.kind, username: principal.username, disabled: principal.disabled }
   const claimed = request.authority.account
   const account = await ports.getAccount(claimed.id)
   if (!account) closed('NOT_FOUND', 'provisioning account was not found')
@@ -280,10 +283,27 @@ const bind = async (ports: AccountProvisioningReadPorts, principalId: string, re
     || checkpoint.preparationReference !== desired.preparationReference || checkpoint.preparationIdentity !== desired.preparationIdentity) {
     closed('CONFLICT', 'the saved account checkpoint does not match the current account')
   }
-  if (!job.completedSteps.includes('reconcile_host_intent') || checkpoint.hostAttempt !== job.attempt) {
+  const completedHost = job.completedSteps.includes('reconcile_host')
+  if (!job.completedSteps.includes('reconcile_host_intent') || (!completedHost && checkpoint.hostAttempt !== job.attempt)
+    || completedHost && checkpoint.hostAttempt > job.attempt) {
     closed('PRECONDITION_FAILED', 'account provisioning host effects require the current intent checkpoint')
   }
-  if (job.completedSteps.includes('reconcile_host') || checkpoint.hostNoEffectAttempt !== null) {
+  if (completedHost) {
+    let validHistoricalProof = false
+    try {
+      const saved = parseProvisioningCheckpointObservation(job.checkpointData.observedContext)
+      const previous = saved.request.authority
+      validHistoricalProof = whole(job.checkpointData.generationId) && job.checkpointData.generationId > 0
+        && saved.execution.generationId === job.checkpointData.generationId
+        && canonicalProvisioningIdentity(previous.actor) === canonicalProvisioningIdentity(request.authority.actor)
+        && canonicalProvisioningIdentity(previous.account) === canonicalProvisioningIdentity(request.authority.account)
+        && canonicalProvisioningIdentity(previous.desired) === canonicalProvisioningIdentity(request.authority.desired)
+        && previous.operation.id === job.id && previous.operation.requestFingerprint === job.requestFingerprint
+    } catch { /* Missing, legacy-redacted or corrupt proof cannot authorize reobservation. */ }
+    if (!validHistoricalProof) {
+      fail('PRECONDITION_FAILED', 'completed account provisioning requires saved proof and read-only reobservation', { stateChanged: false, freshExecution: false })
+    }
+  } else if (checkpoint.hostNoEffectAttempt !== null) {
     fail('PRECONDITION_FAILED', 'completed account provisioning is not a fresh host execution', { stateChanged: false, freshExecution: false })
   }
   const zone = await ports.getDnsZone(account.primaryDomain)
@@ -293,7 +313,7 @@ const bind = async (ports: AccountProvisioningReadPorts, principalId: string, re
     || canonicalProvisioningIdentity(zone) !== checkpoint.desiredZoneIdentity) {
     closed('CONFLICT', 'the account zone does not match the saved DNS intent')
   }
-  return { principal, account, job, checkpoint, snapshotRevision: desired.revision, snapshotChecksum: desired.checksum }
+  return { principal: privilegedPrincipal, account, job, checkpoint, snapshotRevision: desired.revision, snapshotChecksum: desired.checksum }
 }
 
 const bindPreparation = async (

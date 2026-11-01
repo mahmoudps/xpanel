@@ -783,7 +783,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         if (!trustedPrincipalId || trustedPrincipalId !== caller.principalId) {
           return fail('UNAUTHENTICATED', 'an authenticated principal is required', { stateChanged: false })
         }
-        return handleAccountProvisioning({
+        return await handleAccountProvisioning({
           principalId: trustedPrincipalId,
           request: req,
           runtime: deps.accountProvisioning,
@@ -1669,7 +1669,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
               await assertAccountCaller({ principalId: principal.id, actor: principal.username, role: principal.kind,
                 accountId: principal.accountId, resellerId: principal.kind === 'reseller' ? principal.id : null }, fresh, 'htaccess')
               const plan = await deps.store.getPlan(fresh.planId), features = plan ? await deps.store.getFeatureList(plan.featureListId) : null
-              if (!plan || !features || features.disabled.includes('aapanel-url-rewrite')) return fail('FORBIDDEN', 'the .htaccess tool is unavailable in the current plan', { stateChanged: false })
+              if (!plan || !features || ['domain-htaccess', 'aapanel-url-rewrite'].some(id => features.disabled.includes(id))) return fail('FORBIDDEN', 'the .htaccess tool is unavailable in the current plan', { stateChanged: false })
               const domain = await deps.store.getDomain(domainId)
               if (!domain || domain.accountId !== fresh.id) return fail('NOT_FOUND', 'domain not found', { stateChanged: false })
               const serving = domain.kind === 'alias' && domain.parentId ? await deps.store.getDomain(domain.parentId) : undefined

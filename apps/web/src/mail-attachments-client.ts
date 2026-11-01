@@ -33,7 +33,7 @@ function bindMailAttachments(_askDialog: unknown): void {
     root.dataset.attachmentsBound = 'true'
     const status = root.querySelector<HTMLElement>('[data-attachment-status]'), list = root.querySelector<HTMLElement>('[data-attachment-list]'), refresh = root.querySelector<HTMLButtonElement>('[data-attachment-refresh]')
     if (!status || !list || !refresh) return
-    try { mailRequireTemplates(root, [['mail-attachment-row', 'li', ['link', 'badge', 'name', 'size']]]) }
+    try { mailRequireTemplates(root, [['mail-attachment-row', 'li', ['link', 'badge', 'name', 'size'], [['link', 'a'], ['name', 'bdi'], ['size', 'bdi']]]]) }
     catch { refresh.disabled = true; status.dataset.state = 'unavailable'; status.textContent = t('Attachment reading is unavailable here.'); return }
     const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'

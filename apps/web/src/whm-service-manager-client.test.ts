@@ -64,11 +64,12 @@ describe('service manager client actions', () => {
     expect(send).not.toHaveBeenCalled(); expect(q<HTMLElement>('[data-sm-status]').dataset.state).toBe('unavailable')
     expect([...document.querySelectorAll<HTMLButtonElement>('button')].every(button => button.disabled)).toBe(true)
   })
-  it('keeps all controls inert with no transport, authority or qualification', async () => {
+  it('keeps native controls inert while local area navigation remains harmless without transport or authority', async () => {
     boot(); expect(q<HTMLElement>('[data-sm-status]').dataset.state).toBe('unavailable')
     for (const extra of [{ canRead: false }, { capability: 'unavailable' }]) {
       mount(extra); const send = vi.fn(); boot(send, async () => true); await tick(); expect(send).not.toHaveBeenCalled()
-      for (const control of document.querySelectorAll<HTMLInputElement>('input,select,button')) expect(control.disabled).toBe(true)
+      for (const control of document.querySelectorAll<HTMLInputElement>('input,select,[data-sm-refresh],[data-sm-reboot],[data-sm-action]')) expect(control.disabled).toBe(true)
+      const area = q<HTMLButtonElement>('[data-sm-area="web"]'); expect(area.disabled).toBe(false); area.click(); await tick(); expect(send).not.toHaveBeenCalled()
     }
     expect(WHM_SERVICE_MANAGER_CLIENT_BINDING).not.toContain('innerHTML')
     expect(WHM_SERVICE_MANAGER_CLIENT_BINDING).not.toContain('fetch(')

@@ -87,6 +87,32 @@ describe('v2 remaining account workspaces', () => {
     expect(html).not.toContain('in order')
   })
 
+  it('declares the seven approved security views around one unblocked core slot without turning tabs into native actions', () => {
+    const html = render('/security/account', readonly)
+    expect(nodes(html, '[data-presentation-tabs]')[0]!.attrs.get('data-presentation-tabs')).toBe('sections')
+    const tabs = nodes(html, '[data-presentation-tab]')
+    expect(tabs.map(node => node.attrs.get('data-presentation-tab'))).toEqual(['overview', 'signin', 'twofactor', 'sessions', 'tokens', 'ssh', 'site'])
+    expect(tabs.every(node => node.tag === 'button' && node.attrs.get('type') === 'button' && !node.attrs.has('data-action'))).toBe(true)
+    expect(nodes(html, '[role="tabpanel"]')[0]!.attrs.get('aria-labelledby')).toBe('v2-security-tab-overview')
+    expect(html.split(V2_SECURITY_SLOT)).toHaveLength(2)
+    expect(html).toContain(`data-presentation-tab-visible="overview twofactor">${V2_SECURITY_SLOT}`)
+    expect(nodes(html, '[data-presentation-tab-link]')).toHaveLength(6)
+    expect(nodes(html, '[data-sessions-revoke-others]')[0]!.attrs.has('disabled')).toBe(true)
+  })
+
+  it('pairs the real team editor with the complete help sidebar while retaining unread sign-in and private-link controls', () => {
+    const html = render('/preferences/team', readonly)
+    expect(html).toContain('How team access works')
+    expect(html).toContain('Up to 7 members can hold a role. Suspended members still count.')
+    expect(html).toContain('Sign-in availability follows the state reported above.')
+    expect(html).toContain('Only the signed-in account owner can manage the team, and the plan must include it.')
+    expect(nodes(html, '[data-acct-team-form]')).toHaveLength(1)
+    expect(nodes(html, '[data-acct-team-save]')[0]!.attrs.has('disabled')).toBe(true)
+    expect(nodes(html, '[data-acct-team-signin-state]')[0]!.attrs.get('data-state-chip')).toBe('unread')
+    expect(nodes(html, '[data-acct-team-link-url]')).toHaveLength(1)
+    expect(html).toContain('<aside class="v2-panel-settings__groups"><section class="v2-card" id="v2-team-help"')
+  })
+
   it('keeps ACME names account-owned and disables unsupported sources without dropping the wizard', () => {
     const html = render('/security/ssl/issue', allowed, { domains: [domain, { ...domain, id: 'foreign-domain', accountId: 'foreign', name: 'foreign.example.test' }] })
     expect(html).not.toContain('foreign.example.test')

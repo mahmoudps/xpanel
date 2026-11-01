@@ -77,7 +77,10 @@ export const renderConnectedPanelSsl = (p: ApprovedXpanelWorkspaceProps): string
 };
 
 export const renderConnectedPanelSessions = (p: ApprovedXpanelWorkspaceProps): string | undefined => {
-    if (p.route !== '/security/account' || p.readOnly)
+    if (p.route !== '/security/account')
         return undefined;
-    return `<section class="xp-panel-detail__card" data-account-sessions data-workspace-section="sessions">${accountSessionClientTemplates()}<style>.xp-sessions-rows{display:grid;gap:16px;margin:0;min-inline-size:0}.xp-sessions-rows:not(:has(>*)){display:none}</style><h2>${text(p, msgid('Active sessions'))}</h2><p class="xp-help">${text(p, msgid('Sessions signed in to this account. Ending a session makes its next request require signing in again; the current session can also be ended.'))}</p><div class="xp-sessions-rows" data-sessions-rows></div><div class="xp-panel-detail__actions"><button type="button" class="xp-btn" data-sessions-revoke-others>${text(p, msgid('Sign out other sessions'))}</button></div><p class="xp-help" data-sessions-status role="status">${text(p, msgid('Reading active sessions…'))}</p></section>`;
+    const state = p.authPersonal?.state === 'ready' ? 'ready' : p.authPersonal?.state === 'denied' ? 'denied' : 'unavailable';
+    const canRead = state === 'ready' && p.authPersonal?.canReadSessions === true;
+    const canRevoke = state === 'ready' && p.authPersonal?.canRevokeSessions === true;
+    return `<section class="xp-panel-detail__card" data-account-sessions data-auth-personal-state="${state}" data-sessions-can-read="${canRead}" data-sessions-can-revoke="${canRevoke}" data-workspace-section="sessions">${accountSessionClientTemplates()}<style>.xp-sessions-rows{display:grid;gap:16px;margin:0;min-inline-size:0}.xp-sessions-rows:not(:has(>*)){display:none}</style><h2>${text(p, msgid('Active sessions'))}</h2><p class="xp-help">${text(p, msgid('Sessions signed in to this account. Ending a session makes its next request require signing in again; the current session can also be ended.'))}</p><div class="xp-sessions-rows" data-sessions-rows></div><div class="xp-panel-detail__actions"><button type="button" class="xp-btn" data-sessions-revoke-others disabled>${text(p, msgid('Sign out other sessions'))}</button></div><p class="xp-help" data-sessions-status role="status" aria-live="polite">${text(p, canRead ? msgid('Not read') : msgid('Unavailable'))}</p></section>`;
 };

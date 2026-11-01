@@ -9,6 +9,7 @@ const PATHS = {
   branch: 'M6 4v10a4 4 0 0 0 4 4h8M15 15l3 3-3 3',
   calendar: 'M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM3 10h18M8 3v4M16 3v4',
   check: 'M5 12l5 5L20 7',
+  clock: 'M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0M12 7v5l3 2',
   chevDown: 'M6 9l6 6 6-6',
   chevLeft: 'M15 6l-6 6 6 6',
   chevRight: 'M9 6l6 6-6 6',

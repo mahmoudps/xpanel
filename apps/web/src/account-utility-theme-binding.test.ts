@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import type { Account, Domain } from '@xpanel/core'
 import { translator } from './i18n.ts'
+import type { AuthPersonalView } from './themes/contract.ts'
 import { ACCOUNT_SSH_CLIENT_BINDING } from './account-ssh-client.ts'
 import { ACCOUNT_SESSIONS_CLIENT_BINDING } from './account-sessions-client.ts'
 import { ACCOUNT_VIRUS_SCAN_CLIENT_BINDING } from './account-virus-scan-client.ts'
@@ -10,7 +11,7 @@ import { ACCOUNT_GIT_CLIENT_BINDING } from './account-git-client.ts'
 import { renderAccountSshWorkspace } from './board-port/account-ssh-workspace.ts'
 import { renderAccountVirusScanWorkspace } from './board-port/account-virus-scan-workspace.ts'
 import { renderAccountGitWorkspace } from './board-port/account-git-workspace.ts'
-import { renderConnectedPanelSessions } from './board-port/approved-xpanel-bindings.ts'
+import { renderApprovedXpanelWorkspace } from './board-port/approved-xpanel-workspaces.ts'
 import { renderV2AccountSshPage, renderV2VirusScannerPage } from './themes/v2/pages/xpanel/security/tools.ts'
 import { renderV2AccountSecurityPage } from './themes/v2/pages/xpanel/security/account.ts'
 import { renderV2AccountGitPage } from './themes/v2/pages/xpanel/operations/git.ts'
@@ -72,16 +73,34 @@ describe('account utility theme-owned dynamic markup', () => {
   })
 
   it.each(['classic', 'v2'])('keeps session facts under their named labels in %s and never uses a raw ID in confirmation', async theme => {
-    const html = theme === 'classic' ? renderConnectedPanelSessions({ route: '/security/account', locale: 'en', readOnly: false } as never)! : renderV2AccountSecurityPage(props, allowed)
+    const authPersonal: AuthPersonalView = {
+      state: 'ready', canChangePassword: false, canReadSessions: true, canRevokeSessions: true,
+      canReadApiTokens: false, canManageApiTokens: false,
+    }
+    const html = theme === 'classic'
+      ? renderApprovedXpanelWorkspace({ route: '/security/account', locale: 'en', readOnly: true, authPersonal })
+      : renderV2AccountSecurityPage({ ...props, authPersonal })
+    if (html === undefined) throw new Error('Missing actual Security workspace')
     const record = { id: currentId, current: true, ip: null, userAgent: null, mfaVerified: false, createdAt: instant, lastSeenAt: instant, expiresAt: '2026-10-30T00:00:00Z' }
     const request = vi.fn(async () => ({ sessions: [record, { ...record, id: otherId, current: false }], currentSessionId: currentId }))
     const confirmation = vi.fn(async () => false)
     install(html, ACCOUNT_SESSIONS_CLIENT_BINDING, request, confirmation); await tick()
     const rows = $('[data-sessions-rows]')
-    expect(rows.querySelectorAll('article')).toHaveLength(2)
+    const rowTag = theme === 'v2' ? 'tr' : 'article'
+    const sessionRows = [...rows.querySelectorAll(rowTag)]
+    expect(sessionRows).toHaveLength(2)
+    const slots = ['title', 'verification', 'network-label', 'network', 'client-label', 'client', 'last-active-label', 'last-active', 'expires-label', 'expires', 'actions', ...(theme === 'v2' ? ['created-label', 'created'] : [])]
+    for (const row of sessionRows) {
+      for (const slot of slots) expect(row.querySelectorAll('[data-xp-slot="' + slot + '"]')).toHaveLength(1)
+      if (theme === 'v2') {
+        expect(row.children).toHaveLength(6)
+        expect([...row.children].every(cell => cell.tagName === 'TD')).toBe(true)
+        expect(row.querySelector('[data-xp-slot="created"]')?.getAttribute('datetime')).toBe(instant)
+      }
+    }
     expect(rows.querySelector('[data-xp-slot="network-label"]')?.textContent).toBe('Network')
     expect(rows.querySelector('[data-xp-slot="last-active"]')?.getAttribute('datetime')).toBe(instant)
-    expect(rows.querySelectorAll('article:first-child button')).toHaveLength(0)
+    expect(rows.querySelectorAll(rowTag + ':first-child button')).toHaveLength(0)
     $<HTMLButtonElement>('[data-sessions-rows] button').click(); await tick()
     expect(confirmation).toHaveBeenCalledWith(expect.objectContaining({ body: 'Unknown client' }))
     expect(JSON.stringify(confirmation.mock.calls)).not.toContain(otherId)

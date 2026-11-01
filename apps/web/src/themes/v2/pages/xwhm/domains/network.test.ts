@@ -21,6 +21,7 @@ describe('independent v2 WHM domains, DNS and certificate pages', () => {
   it('dispatches exactly the 7 implemented routes without replacing other pages', () => {
     for (const route of ['/whm/domains', '/whm/dns', '/whm/dns/more', '/whm/dns/providers', '/whm/dns/cluster', '/whm/ssl', '/whm/ssl/install']) {
       expect(renderV2WhmNetworkPage({ activeRoute: route }, authority)).toContain(`data-whm-detail-route="${route}"`)
+      expect(renderV2WhmNetworkPage({ activeRoute: route }, authority)).toContain('data-capability-state="authorized"')
     }
     expect(renderV2WhmNetworkPage({ activeRoute: '/whm/ssl/install/other' }, authority)).toBeUndefined()
     expect(renderV2WhmNetworkPage({ activeRoute: '/whm/accounts' }, authority)).toBeUndefined()
@@ -29,6 +30,7 @@ describe('independent v2 WHM domains, DNS and certificate pages', () => {
   it('does not infer authority from supplied accounts or domain observations', () => {
     const html = renderV2WhmDomainsPage({ accounts: [account], domains: [domain] })
     expect(html).toContain('data-readonly="true"')
+    expect(html).toContain('data-capability-state="unavailable"')
     expect(html).toContain('data-whm-domains-manage="false"')
     expect(html).not.toContain(domain.name)
     expect(html).not.toContain(account.home)
@@ -88,10 +90,25 @@ describe('independent v2 WHM domains, DNS and certificate pages', () => {
 
   it('keeps DNS checks read-only independently from revision-bound TTL changes', () => {
     const html = renderV2WhmDnsToolsPage({}, { canRead: true, canManage: false })
+    expect(html).toContain('data-capability-state="authorized"')
     expect(html).toContain('data-dns-tools-can-read="true" data-dns-tools-can-manage="false"')
     expect(html).toContain('Up to 32 zones per change.')
     expect(html).not.toContain('Every zone ran')
     expect(live(html).find(node => node.attrs.get('data-whm-dns-tools-run') === 'apply')?.attrs.has('disabled')).toBe(true)
+  })
+
+  it.each(['en', 'ar'] as const)('keeps unavailable presentation and capability overrides authoritative in %s', { tags: ['unit'] }, locale => {
+    for (const route of ['/whm/domains', '/whm/dns', '/whm/dns/more', '/whm/dns/providers', '/whm/dns/cluster', '/whm/ssl', '/whm/ssl/install']) {
+      for (const html of [
+        renderV2WhmNetworkPage({ activeRoute: route, locale }, { ...authority, presentation: 'read-only' }),
+        renderV2WhmNetworkPage({ activeRoute: route, locale, capabilityUnavailable: true }, authority),
+      ]) {
+        if (html === undefined) throw new Error('Missing implemented network route')
+        const root = live(html).find(node => node.attrs.get('data-whm-detail-route') === route)
+        expect(root?.attrs.get('data-capability-state'), route).toBe('unavailable')
+        expect(root?.attrs.get('data-readonly'), route).toBe('true')
+      }
+    }
   })
 
   it('never presets or echoes a Cloudflare secret and preserves provider isolation hooks', () => {

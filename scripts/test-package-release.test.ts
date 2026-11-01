@@ -788,3 +788,77 @@ describe('authenticated source staging diagnostics (no native-root qualification
   })
 
 })
+
+
+describe('fresh-install package source closure', () => {
+  const installFiles = [
+    'scripts/install-bootstrap.mjs', 'scripts/install-bootstrap.d.mts',
+    'scripts/install-finalization.mjs', 'scripts/install-finalization.d.mts',
+    'scripts/install-finalization-native.mjs', 'scripts/install-finalization-native.d.mts',
+    'scripts/install-finalization-readiness.mjs', 'scripts/install-finalization-readiness.d.mts',
+    'scripts/install-startup.mjs', 'scripts/install-startup.d.mts',
+  ]
+
+  // Model the fixed import graph without executing any native participant or host port.
+  const makeInstallSource = (): string => {
+    const root = makeSourceFixture()
+    for (const path of installFiles) writeSourceFile(root, path, 'export {}\n')
+    writeSourceFile(root, 'scripts/install-bootstrap.mjs', [
+      "export const inspect = () => import('./install-finalization.mjs')",
+      "export const finalize = () => import('./install-finalization-native.mjs')",
+    ].join('\n'))
+    writeSourceFile(root, 'scripts/install-finalization-native.mjs', [
+      "import './install-finalization.mjs'",
+      "import './install-startup.mjs'",
+      "import './install-finalization-readiness.mjs'",
+    ].join('\n'))
+    return root
+  }
+
+  it('ships the fixed install source graph in a verified unsigned archive without private or diagnostic inputs', { tags: ['feature'] }, async () => {
+    const sourceRoot = makeInstallSource()
+    const excluded = [
+      '.workspace-private/context.json',
+      'apps/web/src/.workspace-private/runtime.ts',
+      'scripts/install-unreviewed.mjs',
+      'scripts/test-install-finalization.test.ts',
+      '.env',
+    ]
+    for (const path of excluded) writeSourceFile(sourceRoot, path, 'synthetic excluded input\n')
+    const built = await buildReleaseArtifact({ sourceRoot, outputDir: makeTempDir(), version: '0.1.0' })
+    if (!built.archivePath || !built.archiveSha256) throw new Error('Missing diagnostic archive')
+    const verified = await verifyReleaseArtifact({
+      artifactDir: built.stagingDir,
+      archivePath: built.archivePath,
+      expectedArchiveSha256: built.archiveSha256,
+      pinnedNodeVersion: '26.12.1',
+      requireSignature: false,
+    })
+    expect(verified.ok).toBe(true)
+    expect(built.manifest.signature).toBeNull()
+    expect(built.publisherManifest).toBeNull()
+    const paths = new Set(built.manifest.files.map(file => file.path))
+    for (const path of installFiles) {
+      expect(paths.has(path), path).toBe(true)
+      expect(readFileSync(join(built.stagingDir, path))).toEqual(readFileSync(join(sourceRoot, path)))
+    }
+    for (const path of excluded) expect(paths.has(path), path).toBe(false)
+  })
+
+  it('refuses a missing startup dependency before creating any destination content', { tags: ['feature'] }, async () => {
+    const sourceRoot = makeInstallSource(), outputDir = makeTempDir()
+    unlinkSync(join(sourceRoot, 'scripts/install-startup.mjs'))
+    const error = await expectReleaseError(() => buildReleaseArtifact({ sourceRoot, outputDir }), 'RELEASE_DEPENDENCY_MISSING')
+    expect(error.detail).toMatchObject({ path: 'scripts/install-finalization-native.mjs', dependency: './install-startup.mjs', target: 'scripts/install-startup.mjs' })
+    expect(readdirSync(outputDir)).toEqual([])
+  })
+
+  it('keeps a present nonallowlisted script outside the runtime graph and refuses its import before writes', { tags: ['feature'] }, async () => {
+    const sourceRoot = makeInstallSource(), outputDir = makeTempDir()
+    writeSourceFile(sourceRoot, 'scripts/install-unreviewed.mjs', 'export {}\n')
+    writeSourceFile(sourceRoot, 'scripts/install-startup.mjs', "import './install-unreviewed.mjs'\n")
+    const error = await expectReleaseError(() => buildReleaseArtifact({ sourceRoot, outputDir }), 'RELEASE_DEPENDENCY_MISSING')
+    expect(error.detail).toMatchObject({ path: 'scripts/install-startup.mjs', dependency: './install-unreviewed.mjs', target: 'scripts/install-unreviewed.mjs' })
+    expect(readdirSync(outputDir)).toEqual([])
+  })
+})

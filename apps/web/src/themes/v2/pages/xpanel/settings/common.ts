@@ -1,5 +1,5 @@
 import { navigation, canonicalNavigationRoute, canOpenRegisteredRoute, isToolAuthorized } from '@xpanel/catalog'
-import type { PanelSurfaceProps } from '../../../../contract.ts'
+import type { PanelSurfaceProps, ThemeViewProps } from '../../../../contract.ts'
 import { localeDirection } from '../../../../../i18n.ts'
 import { normalizeAsciiDigits } from '../../../../../display-format.ts'
 import { card, notice, pageHeader } from '../../../components/index.ts'
@@ -71,9 +71,9 @@ export const table = (id: string, title: string, heads: readonly string[], bodyH
 export const status = (text: string, hooks?: HookAttributes): string => `<p role="status" data-state="unread"${hookAttrs(hooks)}>${esc(text)}</p>`
 export const note = (text: string): string => `<p class="v2-muted">${esc(text)}</p>`
 
-export function page(props: PanelSurfaceProps, authority: PanelSettingsAuthority, route: string, title: string, description: string, bodyHtml: string, hooks?: HookAttributes): string {
+export function page(props: PanelSurfaceProps & ThemeViewProps, authority: PanelSettingsAuthority, route: string, title: string, description: string, bodyHtml: string, hooks?: HookAttributes): string {
   const { locale, t, account, readable, readOnly } = settingsContext(props, authority)
-  const keepSecurityHostOpen = route === '/security/account' && readOnly
+  const keepSecurityHostOpen = route === '/security/account' && (readOnly || props.authPersonal?.state === 'ready')
   return `<section class="v2-panel-settings" data-v2-settings-route="${esc(route)}"${!readable && !keepSecurityHostOpen ? ' data-readonly="true"' : ''}${account ? ` data-account="${esc(account.id)}" data-uid="${account.uid}"` : ''} lang="${locale}" dir="${localeDirection(locale)}"${hookAttrs(hooks)}>${pageHeader(t, { route, title, description, breadcrumb: [{ label: t(msgid('Home')), href: '/home' }, { label: title }] })}${bodyHtml}</section>`
 }
 

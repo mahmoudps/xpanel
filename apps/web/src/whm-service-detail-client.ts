@@ -1,4 +1,7 @@
 /// <reference lib="dom" />
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates
+const whmClientNode = canonicalWhmClientNode
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
@@ -98,11 +101,31 @@ function bindWhmServiceDetail(askDialog: Ask | undefined): void {
     const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
     if (!['dns', 'ftp', 'certificates'].includes(kind) || !status || !refresh || !rows || !banner) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.serviceDetailCanRead === 'true' && !root.closest(denied) && !!request
+    let templateContractIntact = true
+    const admitted = (): boolean => templateContractIntact && root.isConnected && root.dataset.serviceDetailCanRead === 'true' && !root.closest(denied) && !!request
     const manageable = (): boolean => admitted() && root.dataset.serviceDetailCanRestart === 'true' && !!restartButton
     let view: ServiceDetailView | null = null, busy = false
     const notRead = t('Not read'), none = t('Not applicable')
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
+    const verifyWhmTemplates = (): void => {
+      if (kind !== 'dns') return
+      if (!templateContractIntact) throw new Error('client_template_contract_unavailable')
+      try {
+        assertWhmClientTemplates(root, [['whm-service-check-zone', 'button', { content: 'button' }]])
+        const prototype = whmClientNode(root, 'whm-service-check-zone', 'button')
+        if (prototype.type !== 'button' || !prototype.disabled) throw new Error('client_template_contract_unavailable')
+      } catch (error) {
+        templateContractIntact = false
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+        note('unavailable', t('Unavailable'))
+        throw error
+      }
+    }
+    if (admitted()) { try { verifyWhmTemplates() } catch { return } }
+    const checkedRequest: Transport = async (...args: Parameters<Transport>) => {
+      verifyWhmTemplates()
+      try { return await request!(...args) } finally { verifyWhmTemplates() }
+    }
     const show = (target: HTMLElement, kindOf: string, message: string): void => { target.hidden = false; target.dataset.outcome = kindOf; target.textContent = message; target.setAttribute('role', ['unknown', 'failed'].includes(kindOf) ? 'alert' : 'status') }
     const technical = (value: string): HTMLElement => { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = value; return bdi }
     const fact = (key: string, value: string | null): void => { const cell = root.querySelector<HTMLElement>('[data-whm-service-detail-fact="' + key + '"]'); if (cell) cell.textContent = value ?? notRead }
@@ -132,6 +155,7 @@ function bindWhmServiceDetail(askDialog: Ask | undefined): void {
       root.setAttribute('aria-busy', String(busy))
     }
     const paint = (): void => {
+      try { verifyWhmTemplates() } catch { controls(); return }
       rows.textContent = ''
       const current = view
       fact('observed-at', current ? formatDisplayDateTime(current.observedAt) : null)
@@ -150,8 +174,8 @@ function bindWhmServiceDetail(askDialog: Ask | undefined): void {
         for (const zone of shown) {
           const action: (string | Node)[] = []
           if (zone.desired === true) {
-            const button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.dataset.whmServiceDetailCheckZone = zone.zone
-            button.textContent = t('Check zone'); button.setAttribute('aria-label', t('Check zone {zone}', { zone: zone.zone })); action.push(button)
+            const button = whmClientNode(root, 'whm-service-check-zone', 'button', t('Check zone')); button.dataset.whmServiceDetailCheckZone = zone.zone
+            button.setAttribute('aria-label', t('Check zone {zone}', { zone: zone.zone })); action.push(button)
           } else action.push(t('Not rendered by xPanel'))
           row([[technical(zone.zone)], [zone.desired === null ? t('Saved state not read') : zone.desired ? t(msgctxt('whm-service-detail-client', 'Rendered by xPanel')) : t('Not in saved state')],
             [fileStates[zone.file]!], [zone.stateSerial === null ? none : technical(String(zone.stateSerial))], [zone.fileSerial === null ? none : technical(String(zone.fileSerial))], [zone.sizeBytes === null ? none : technical(size(zone.sizeBytes))], action])
@@ -188,7 +212,7 @@ function bindWhmServiceDetail(askDialog: Ask | undefined): void {
       busy = true; controls(); note('reading', t('Reading from the host…'))
       let fresh = false
       try {
-        const next = readServiceDetailView(kind, await request!('GET', '/api/server/services/' + kind))
+        const next = readServiceDetailView(kind, await checkedRequest('GET', '/api/server/services/' + kind))
         if (admitted()) { view = next; fresh = true; note('read', t('Read from the host. Nothing was changed.')) }
       } catch { if (admitted()) note('failed', t('The service could not be read. Values shown are from the last successful read.')) }
       finally { busy = false; paint() }
@@ -204,17 +228,19 @@ function bindWhmServiceDetail(askDialog: Ask | undefined): void {
     const restart = async (): Promise<void> => {
       const id = restartButton?.dataset.whmServiceDetailRestart ?? ''
       if (busy || !manageable() || !view || view.kind === 'certificates' || !view.service?.unit || !['pdns', 'pure-ftpd'].includes(id)) return
+      try { verifyWhmTemplates() } catch { controls(); return }
       if (!askDialog) { show(banner, 'refused', t('Restart confirmation is unavailable. No restart was sent.')); return }
       const impact = id === 'pdns' ? t('DNS answers stop until it is back; resolvers retry and may serve cached records.') : t('Open FTP sessions disconnect; transfers in progress must restart.')
       busy = true; controls()
       let confirmed = false
       try { confirmed = await askDialog({ title: t('Restart service'), body: view.service.unit + '\n' + impact, confirm: t('Restart'), danger: true }) === true } catch { confirmed = false }
       finally { busy = false; controls() }
+      try { verifyWhmTemplates() } catch { controls(); return }
       if (!confirmed || !manageable()) { show(banner, 'cancelled', t('Restart cancelled. No restart request was sent.')); return }
       busy = true; controls(); show(banner, 'pending', t('Restarting the service…'))
       let outcome = 'unknown'
       try {
-        const result = await request!('POST', '/api/server/services/' + id + '/restart', {}) as { service?: { id?: unknown; state?: unknown } } | null
+        const result = await checkedRequest('POST', '/api/server/services/' + id + '/restart', {}) as { service?: { id?: unknown; state?: unknown } } | null
         outcome = result && typeof result === 'object' && result.service && result.service.id === id && result.service.state === 'active' ? 'accepted' : 'unknown'
       } catch (error) { outcome = definiteRefusal(error) ? 'refused' : 'unknown' }
       busy = false
@@ -228,7 +254,7 @@ function bindWhmServiceDetail(askDialog: Ask | undefined): void {
       busy = true; controls(); messages.hidden = true; messages.textContent = ''
       show(check, 'reading', t('Checking {zone}…', { zone }))
       try {
-        const result = readZoneCheckView(await request!('GET', '/api/server/services/dns/zone-check?zone=' + encodeURIComponent(zone)), zone)
+        const result = readZoneCheckView(await checkedRequest('GET', '/api/server/services/dns/zone-check?zone=' + encodeURIComponent(zone)), zone)
         const counts = { zone, records: String(result.records), errors: String(result.errors), warnings: String(result.warnings) }
         show(check, result.state === 'passed' ? 'passed' : result.state === 'failed' ? 'failed' : 'unknown', result.state === 'passed' ? t('{zone} passed pdnsutil check-zone: {records} records, {errors} errors, {warnings} warnings.', counts)
           : result.state === 'failed' ? t('{zone} failed pdnsutil check-zone: {records} records, {errors} errors, {warnings} warnings.', counts) : t('{zone}: pdnsutil did not return a readable result. Nothing was changed.', { zone }))
@@ -254,4 +280,4 @@ function bindWhmServiceDetail(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_SERVICE_DETAIL_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readServiceDetailView=${readServiceDetailView.toString()};const readZoneCheckView=${readZoneCheckView.toString()};return ${bindWhmServiceDetail.toString()};})()`
+export const WHM_SERVICE_DETAIL_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readServiceDetailView=${readServiceDetailView.toString()};const readZoneCheckView=${readZoneCheckView.toString()};return ${bindWhmServiceDetail.toString()};})()`

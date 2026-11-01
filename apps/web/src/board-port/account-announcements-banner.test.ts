@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { renderAccountAnnouncementNotice, renderAccountAnnouncementsBanner } from './account-announcements-banner.ts'
 import type { AccountAnnouncementNotice } from './account-announcements-banner.ts'
+import { parseMarkup } from '../html.ts'
+
+const liveNodes = (html: string) => parseMarkup(html).filter(node => node.template < 0)
 
 const notice = (overrides: Partial<AccountAnnouncementNotice> = {}): AccountAnnouncementNotice => ({
   id: '77777777-7777-4777-8777-000000000001', severity: 'maintenance', title: { en: 'Planned maintenance', ar: 'صيانة مجدولة' },
@@ -11,14 +14,15 @@ describe('account announcements banner renderer', () => {
   it('renders a hidden, empty region when there is nothing to show', () => {
     const html = renderAccountAnnouncementsBanner({ locale: 'en', announcements: [] })
     expect(html).toMatch(/<section class="xp-account-announcements" data-account-announcements data-state="unread" lang="en" dir="ltr" aria-label="Announcements" hidden>/)
-    expect(html).not.toContain('data-account-announcement=')
+    expect(liveNodes(html).filter(node => node.attrs.has('data-account-announcement'))).toHaveLength(0)
+    expect(html.match(/data-xp-template="account-announcement-notice-/g)).toHaveLength(3)
     expect(html).not.toContain(' id=')
   })
 
   it('renders English notices with severity, end time and a labelled dismiss control', () => {
     const html = renderAccountAnnouncementsBanner({ locale: 'en', announcements: [notice(), notice({ id: '77777777-7777-4777-8777-000000000002', severity: 'warning', endsAt: null })] })
     expect(html).not.toMatch(/aria-label="Announcements" hidden/)
-    expect(html.match(/role="status"/g)).toHaveLength(3)
+    expect(liveNodes(html).filter(node => node.attrs.get('role') === 'status')).toHaveLength(3)
     expect(html).toContain('<span class="xp-account-announcement__severity">Maintenance</span><span>Planned maintenance</span>')
     expect(html).toContain('<p class="xp-help">Until <bdi dir="ltr">2026-10-30 18:00 UTC</bdi></p>')
     expect(html).toContain('aria-label="Dismiss announcement: Planned maintenance">Dismiss</button>')

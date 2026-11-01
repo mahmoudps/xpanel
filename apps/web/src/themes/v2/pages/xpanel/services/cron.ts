@@ -7,9 +7,10 @@ import { missingServiceAccount, serviceButton, serviceFacts, serviceField, servi
 
 export function renderV2CronPage(props: PanelSurfaceProps, authority: PanelServiceAuthority = { canManage: false }): string {
   const t = v2Messages.translator(props.locale ?? 'en')
-  const missing = missingServiceAccount(t, props)
-  const principal = props.visibility?.principal
   const readOnly = authority.presentation === 'read-only'
+  const missing = readOnly ? undefined : missingServiceAccount(t, props)
+  if (missing) return missing
+  const principal = props.visibility?.principal
   const account = !readOnly || authority.canReadFacts === true && principal?.kind === 'user' && props.account?.id === principal.accountId ? props.account : undefined
   const field = (key: string, label: string, options: { value?: string; maxLength?: number; type?: 'text' | 'number'; auto?: boolean } = {}): string => {
     const id = `v2-cron-${key}`

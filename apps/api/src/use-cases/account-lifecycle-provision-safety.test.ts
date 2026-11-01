@@ -274,6 +274,8 @@ describe('prepared account provisioning', () => {
     const coordinator = new AccountLifecycleCoordinator({
       store: store as unknown as StateStore, db: {} as Db, workerId: 'worker',
       provisioningPort: { reconcile } as never, authorizeProvisioning: async () => undefined,
+      // These cases stop before activation; its admitted-DB authority is exercised separately.
+      authorizeProvisioningInTransaction: async () => undefined,
       preparations: { prepare: vi.fn(), load: vi.fn(async () => record) } as never,
       readAccountTemplates: async () => null,
     })
@@ -304,13 +306,12 @@ describe('prepared account provisioning', () => {
     expect(h.reconcile).not.toHaveBeenCalled()
   })
 
-  it('returns a completed prepared replay with null reconciliation and does not execute the host again', async () => {
+  it('refuses a legacy completed prepared replay without a bound observation instead of fabricating success', async () => {
     const h = preparedHarness()
     dbPort.enqueue.mockResolvedValue({ ...job({ status: 'succeeded', checkpointData: checkpoint(), completedSteps: ['reserve_and_create_state', 'ensure_principal_and_zone', 'reconcile_host', 'finalize_index_and_audit'] }), deduplicated: true })
-    const result = await h.coordinator.provisionPreparedAccount({ actor: root, idempotencyKey: 'retry-key', preparationReference: h.record.reference })
-    expect(result.reconciliation).toBeNull()
-    expect(result.execution).toBeUndefined()
-    expect(isFreshProvisioningHostEffect(result)).toBe(false)
+    await expect(h.coordinator.provisionPreparedAccount({ actor: root, idempotencyKey: 'retry-key', preparationReference: h.record.reference })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED', detail: { verificationRequired: true },
+    })
     expect(h.reconcile).not.toHaveBeenCalled()
     expect(h.store.createAccount).not.toHaveBeenCalled()
     expect(dbPort.lease).not.toHaveBeenCalled()

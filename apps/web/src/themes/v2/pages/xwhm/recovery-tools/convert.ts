@@ -4,7 +4,7 @@ import { actions, button, context, esc, field, fields, page, status, table, tool
 
 /** The controller must receive and revalidate a real review before it can unlock conversion. */
 export function renderV2WhmConvertAddonPage(props: WhmSurfaceProps, authority: WhmAccountToolAuthority): string {
-  const { t, editable } = context(props, authority)
+  const { t, readable, editable } = context(props, authority)
   const title = t(msgid('Convert addon domain'))
   const container = editable ? 'form' : 'div'
   // Core unlocks these only after reading real candidates and native preview capabilities.
@@ -34,5 +34,5 @@ export function renderV2WhmConvertAddonPage(props: WhmSurfaceProps, authority: W
   const intro = status(t(msgid('Addon domains have not been read.')), { 'data-acct-convert-status': true })
     + `<div data-acct-convert-loading aria-busy="true" aria-label="${esc(t(msgid('Loading addon domains')))}" hidden></div><div data-acct-convert-empty hidden><h3>${esc(t(msgid('No addon domains')))}</h3><p>${esc(t(msgid('Only an addon domain of an existing account can become its own account.')))}</p></div>`
   return page(props, '/whm/transfers/convert-addon', title, t(msgid('Review what moves when an addon domain becomes its own account.')),
-    `<div class="v2-recovery-tools v2-recovery__column" data-acct-convert-addon data-can-manage="${editable}">${steps}${intro}<div class="v2-recovery__grid"><div class="v2-recovery__column">${choice}${reviewed}${apply}</div><aside class="v2-recovery__column">${aside}</aside></div>${v2AccountLifecycleTemplates('convert')}</div>`)
+    `<div class="v2-recovery-tools v2-recovery__column" data-acct-convert-addon data-can-manage="${editable}">${steps}${intro}<div class="v2-recovery__grid"><div class="v2-recovery__column">${choice}${reviewed}${apply}</div><aside class="v2-recovery__column">${aside}</aside></div>${v2AccountLifecycleTemplates('convert')}</div>`, { 'data-capability-state': readable ? 'authorized' : 'unavailable' })
 }

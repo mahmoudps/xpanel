@@ -38,3 +38,21 @@ export function prepareNewInstallation(inputs: Omit<NewInstallInputs, 'phase'> &
 export function establishInstallAdmission(): Promise<Readonly<{ status: 'admission_ready'; version: string; releaseRoot: string; installationReceipt: 'pending' }>>
 export function captureInstallOwnership(): Promise<Readonly<{ status: 'bootstrap_pending'; version: string; releaseRoot: string; installationReceipt: 'captured'; active: false }>>
 export function runBootstrapCli(argv: readonly string[], streams?: { stdout: { write(value: string): unknown }; stderr: { write(value: string): unknown } }): Promise<number>
+
+export interface PreparedInstallBootstrap {
+  readonly schemaVersion: 1
+  readonly status: 'bootstrap_pending' | 'active'
+  readonly createdAt: string
+  readonly version: string
+  readonly releaseRoot: string
+  readonly archiveSha256: string
+  readonly manifestSha256: string
+  readonly controlDbSchemaVersion: number
+  readonly dependencyReceiptSha256: string
+  readonly runtime: Readonly<{ nodePath: string; nodeSha256: string }>
+  readonly finalization?: import('./install-finalization.mjs').InstallFinalizationIntent
+}
+/** A protected source observation only; it does not confer the native finalization capability. */
+export function observePreparedInstallFinalization(): Promise<Readonly<{ bootstrap: PreparedInstallBootstrap; runtime: Readonly<{ nodePath: string; nodeSha256: string }> }>>
+/** The fixed native factory validates the unknown request independently before admitting effects. */
+export function finalizePreparedInstallation(request: unknown): ReturnType<typeof import('./install-finalization.mjs').runPreparedInstallFinalization>

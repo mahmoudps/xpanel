@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { URL as FileURL } from 'node:url'
 import { LOCALES, SOURCE_LOCALE, catalogFromEntries, catalogKey, createTranslator, isLocale, messageArguments, parsePo, type Catalog, type Locale, type MessageValues, type PoCatalog, type Translate } from '@xpanel/core'
 import { translator } from './i18n.ts'
 
@@ -83,12 +84,17 @@ export function createThemeMessages(themeId: string, sourcePo: string, translati
 /** Installed package paths are supplied by trusted theme modules, never by a request preference. */
 export function loadThemeMessages(themeId: string, directory: URL): ThemeMessages {
   if (directory.protocol !== 'file:') throw new Error('theme_message_directory')
-  const source = readFileSync(new URL(SOURCE_LOCALE + '.po', directory), 'utf8')
+  const source = readFileSync(new FileURL(SOURCE_LOCALE + '.po', directory.href), 'utf8')
   const translations: Partial<Record<Locale, string>> = {}
   for (const { tag } of LOCALES) {
     if (tag === SOURCE_LOCALE) continue
-    try { translations[tag] = readFileSync(new URL(tag + '.po', directory), 'utf8') }
+    try { translations[tag] = readFileSync(new FileURL(tag + '.po', directory.href), 'utf8') }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
   }
   return createThemeMessages(themeId, source, translations)
+}
+
+/** Resolve the trusted installing module through Node's URL implementation before the existing file/scope guards. */
+export function loadThemeMessagesFromModule(themeId: string, moduleUrl: string): ThemeMessages {
+  return loadThemeMessages(themeId, new FileURL('./locales/', moduleUrl))
 }

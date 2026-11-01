@@ -12,6 +12,7 @@
   "dependencies": {
     "@xpanel/catalog": "workspace:*",
     "@xpanel/core": "workspace:*",
+    "@xpanel/render": "workspace:*",
     "@xterm/addon-fit": "0.10.0",
     "@xterm/xterm": "5.5.0"
   },

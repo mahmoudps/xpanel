@@ -3,6 +3,7 @@ import { createHash, generateKeyPairSync, webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmSshEffective, renderWhmSshFailures, renderWhmSshKeys } from './board-port/whm-security-components.ts'
 import { WHM_SSH_CLIENT_BINDING } from './whm-ssh-client.ts'
+import { renderV2WhmSsh } from './themes/v2/pages/xwhm/security/ssh.ts'
 
 // Synthetic session/host transport only. No browser-native authentication or SSH operation occurs.
 const generatedKey = () => {
@@ -138,5 +139,150 @@ describe('root SSH observation and key controller', () => {
     const f = model(); f.current().opaqueEntries = 1; f.boot(); await ready()
     const note = document.querySelector<HTMLElement>('[data-whm-ssh-opaque]')!
     expect(note.hidden).toBe(false); expect(note.textContent).toContain('1'); expect(note.textContent).toContain('preserved and protected')
+  })
+})
+
+type SshTheme = 'classic' | 'v2'
+const mountSsh = (theme: SshTheme, locale: 'en' | 'ar' = 'en', canManage = true): HTMLElement => {
+  document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'
+  document.body.innerHTML = theme === 'classic'
+    ? '<section data-whm-detail-route="/whm/security/ssh">' + renderWhmSshKeys({ locale, canManage }) + renderWhmSshEffective({ locale }) + renderWhmSshFailures({ locale }) + '</section>'
+    : renderV2WhmSsh({ locale, observationAuthority: { canRead: true, canManage } })
+  return document.querySelector<HTMLElement>('[data-whm-detail-route="/whm/security/ssh"]')!
+}
+const sshTemplate = (root: HTMLElement, name: string) => root.querySelector<HTMLTemplateElement>('template[data-xp-template="' + name + '"]')!
+const sshTemplateNames = ['whm-ssh-remove', 'whm-ssh-fact-technical', 'whm-ssh-fact-text'] as const
+const sshCorruptions: readonly (readonly [string, (template: HTMLTemplateElement, root: HTMLElement) => void])[] = [
+  ['missing', template => template.remove()],
+  ['duplicate', (template, root) => root.append(template.cloneNode(true))],
+  ['wrong root', template => template.content.replaceChildren(document.createElement('section'))],
+  ['missing label', template => template.content.querySelector('[data-xp-slot="label"]')!.remove()],
+  ['wrong label tag', template => { const label = document.createElement('code'); label.dataset.xpSlot = 'label'; template.content.querySelector('[data-xp-slot="label"]')!.replaceWith(label) }],
+  ['duplicate label', template => { const label = template.content.querySelector('[data-xp-slot="label"]')!; label.parentElement!.append(label.cloneNode(true)) }],
+  ['unexpected slot', template => { const extra = document.createElement('span'); extra.dataset.xpSlot = 'unexpected'; template.content.firstElementChild!.append(extra) }],
+  ['event handler', template => template.content.firstElementChild!.setAttribute('onclick', 'window.unexpected=true')],
+  ['native action metadata', template => template.content.firstElementChild!.setAttribute('data-api-url', '/api/security/ssh/keys')],
+  ['interactive child', template => template.content.firstElementChild!.append(document.createElement('input'))],
+  ['borrowed nested owner', (template, root) => { const nested = document.createElement('section'); nested.dataset.whmDetailRoute = '/whm/security/ssh'; nested.append(template); root.append(nested) }],
+]
+
+describe('selected-theme SSH factories', () => {
+  it.each(['classic', 'v2'] as const)('uses actual %s markup for facts and managed removal while retaining native payloads', async theme => {
+    for (const locale of ['en', 'ar'] as const) {
+      const root = mountSsh(theme, locale), f = model(), key = generatedKey(); f.boot(); await ready()
+      const policy = root.querySelector('[data-whm-ssh-effective]')!
+      expect(policy.querySelectorAll('bdi').length).toBeGreaterThan(0)
+      for (const value of policy.querySelectorAll('bdi')) { expect(value.dir).toBe('ltr'); expect(value.classList.contains(theme === 'classic' ? 'xp-mono' : 'v2-mono')).toBe(true) }
+      expect([...policy.children].every(node => theme === 'classic' ? node.classList.contains('xp-security-observation__fact') : !node.className.includes('xp-'))).toBe(true)
+      expect(root.querySelector<HTMLButtonElement>('[data-whm-ssh-remove]')!.disabled).toBe(true)
+      fill(key); add().click(); await vi.waitFor(() => expect(status().dataset.state).toBe('saved'))
+      expect(f.writes()[0]).toEqual(['POST', '/api/security/ssh/keys', { publicKey: key, expectedRevision: 'a'.repeat(64) }])
+      const remove = [...root.querySelectorAll<HTMLButtonElement>('[data-whm-ssh-remove]')].find(button => button.dataset.whmSshRemove === fingerprint(key))!
+      expect(remove.classList.contains(theme === 'classic' ? 'xp-btn' : 'v2-btn')).toBe(true)
+      if (theme === 'v2') expect(remove.className).not.toContain('xp-')
+      expect(remove.type).toBe('button'); expect(remove.disabled).toBe(false); expect(remove.querySelector('[data-xp-slot="label"]')?.tagName).toBe('SPAN')
+      remove.click(); await vi.waitFor(() => expect(f.writes()).toHaveLength(2)); await vi.waitFor(() => expect(root.querySelectorAll('[data-whm-ssh-remove]')).toHaveLength(1))
+      expect(f.writes()[1]).toEqual(['DELETE', '/api/security/ssh/keys', { fingerprint: fingerprint(key), expectedRevision: 'b'.repeat(64) }])
+      expect(f.ask).toHaveBeenCalledTimes(2); expect(draft().value).toBe('')
+      expect(root.textContent).not.toContain(key.split(' ')[1]!); expect(root.querySelector('img')).toBeNull()
+    }
+    expect(WHM_SSH_CLIENT_BINDING).not.toContain('xp-btn')
+    expect(WHM_SSH_CLIENT_BINDING).not.toContain('xp-security-observation__fact')
+    expect(WHM_SSH_CLIENT_BINDING).not.toContain('innerHTML'); expect(WHM_SSH_CLIENT_BINDING).not.toContain('fetch(')
+  })
+
+  it.each(['classic', 'v2'] as const)('keeps unobserved %s policy as ordinary text and read-only authority unchanged', async theme => {
+    for (const locale of ['en', 'ar'] as const) {
+      const root = mountSsh(theme, locale, false)
+      const send = vi.fn(async () => ({ ssh: { keys: initial(), policy: { state: 'unavailable', values: {} }, service: { state: 'unavailable' }, failedLogins: { state: 'unavailable', items: [], window: '24h', limit: 500, truncated: false } }, keyActions: { add: true, remove: true } }))
+      const ask = vi.fn(async () => true); (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
+      new Function('return ' + WHM_SSH_CLIENT_BINDING)()(ask); await ready()
+      const policy = root.querySelector('[data-whm-ssh-effective]')!, value = policy.querySelector('[data-xp-slot="value"]')!
+      expect(value.tagName).toBe('SPAN'); expect(value.hasAttribute('dir')).toBe(false); expect(policy.querySelectorAll('bdi')).toHaveLength(0)
+      expect(add().disabled).toBe(true); fill(generatedKey()); add().disabled = false; add().click()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(send.mock.calls).toEqual([['GET', '/api/security/ssh']]); expect(ask).not.toHaveBeenCalled(); expect(draft().readOnly).toBe(true)
+    }
+  })
+
+  it.each(['classic', 'v2'] as const)('sends zero transport calls for malformed complete %s factory contracts', theme => {
+    for (const name of sshTemplateNames) for (const [reason, corrupt] of sshCorruptions) {
+      const root = mountSsh(theme); corrupt(sshTemplate(root, name), root)
+      const f = model(); f.boot()
+      expect(f.send, name + ': ' + reason).not.toHaveBeenCalled(); expect(f.ask).not.toHaveBeenCalled()
+      expect(status().dataset.state).toBe('unavailable'); expect(add().disabled).toBe(true); expect(draft().disabled).toBe(true)
+    }
+    for (const name of ['whm-ssh-fact-technical', 'whm-ssh-fact-text'] as const) {
+      const root = mountSsh(theme), value = sshTemplate(root, name).content.querySelector<HTMLElement>('[data-xp-slot="value"]')!
+      value.dir = name === 'whm-ssh-fact-technical' ? 'rtl' : 'ltr'
+      const f = model(); f.boot(); expect(f.send).not.toHaveBeenCalled(); expect(status().dataset.state).toBe('unavailable')
+    }
+    const root = mountSsh(theme); (sshTemplate(root, 'whm-ssh-remove').content.firstElementChild as HTMLButtonElement).disabled = false
+    const f = model(); f.boot(); expect(f.send).not.toHaveBeenCalled(); expect(status().dataset.state).toBe('unavailable')
+  })
+
+  it.each(['classic', 'v2'] as const)('rejects %s controls or route identity changed during the initial read without painting its reply', async theme => {
+    for (const change of ['rows', 'route'] as const) {
+      const root = mountSsh(theme), f = model(), original = f.send.getMockImplementation()!
+      let release!: () => void
+      const gate = new Promise<void>(resolve => { release = resolve })
+      f.send.mockImplementation(async (method, path, body) => { await gate; return original(method, path, body) })
+      f.boot(); expect(f.send).toHaveBeenCalledTimes(1)
+      const replacement = document.createElement('tbody'); replacement.dataset.whmSshKeyRows = ''
+      if (change === 'rows') root.querySelector('[data-whm-ssh-key-rows]')!.replaceWith(replacement)
+      else root.dataset.whmDetailRoute = '/whm/security'
+      release(); await vi.waitFor(() => expect(status().dataset.state).toBe('unavailable'))
+      expect(replacement.children).toHaveLength(0); expect(root.querySelectorAll('[data-whm-ssh-remove]')).toHaveLength(0)
+      expect(f.writes()).toHaveLength(0); expect(f.ask).not.toHaveBeenCalled(); expect(add().disabled).toBe(true)
+    }
+  })
+
+  it.each(['classic', 'v2'] as const)('rejects a late %s template change during confirmation without sending or discarding the key', async theme => {
+    const root = mountSsh(theme), f = model(), key = generatedKey()
+    let accept!: (accepted: boolean) => void
+    f.ask.mockImplementation(() => new Promise<boolean>(resolve => { accept = resolve }))
+    f.boot(); await ready(); fill(key); add().click(); await vi.waitFor(() => expect(f.ask).toHaveBeenCalledTimes(1))
+    sshTemplate(root, 'whm-ssh-remove').remove(); accept(true)
+    await vi.waitFor(() => expect(status().dataset.state).toBe('unavailable'))
+    expect(f.send.mock.calls).toHaveLength(1); expect(f.writes()).toHaveLength(0); expect(draft().value).toBe(key); expect(add().disabled).toBe(true)
+  })
+
+  it.each(['classic', 'v2'] as const)('rejects a late %s template change in the pre-write read and retains the draft', async theme => {
+    const root = mountSsh(theme), f = model(), key = generatedKey(), original = f.send.getMockImplementation()!
+    let release!: () => void, reads = 0
+    const gate = new Promise<void>(resolve => { release = resolve })
+    f.send.mockImplementation(async (method, path, body) => { if (method === 'GET' && ++reads === 2) await gate; return original(method, path, body) })
+    f.boot(); await ready(); fill(key); add().click(); await vi.waitFor(() => expect(reads).toBe(2))
+    sshTemplate(root, 'whm-ssh-fact-text').remove(); release()
+    await vi.waitFor(() => expect(status().dataset.state).toBe('unavailable'))
+    expect(f.writes()).toHaveLength(0); expect(f.send.mock.calls).toHaveLength(2); expect(draft().value).toBe(key)
+  })
+
+  it.each(['classic', 'v2'] as const)('keeps the %s result uncertain when factories change after a key write or during readback', async theme => {
+    for (const phase of ['write', 'readback'] as const) {
+      const root = mountSsh(theme), f = model(), key = generatedKey(), original = f.send.getMockImplementation()!
+      let release!: () => void, reads = 0, pending = false
+      const gate = new Promise<void>(resolve => { release = resolve })
+      f.send.mockImplementation(async (method, path, body) => {
+        if (method === 'GET') reads++
+        const value = await original(method, path, body)
+        if (phase === 'write' && method === 'POST' || phase === 'readback' && method === 'GET' && reads === 3) { pending = true; await gate }
+        return value
+      })
+      f.boot(); await ready(); fill(key); add().click(); await vi.waitFor(() => expect(pending).toBe(true))
+      sshTemplate(root, 'whm-ssh-fact-technical').remove(); release()
+      await vi.waitFor(() => expect(status().dataset.state).toBe('uncertain'))
+      expect(f.writes()).toHaveLength(1); expect(draft().value).toBe(key); expect(add().disabled).toBe(true)
+      add().disabled = false; add().click(); await new Promise(resolve => setTimeout(resolve, 0)); expect(f.writes()).toHaveLength(1)
+      expect(root.textContent).not.toContain(key.split(' ')[1]!)
+    }
+  })
+
+  it.each(['classic', 'v2'] as const)('rechecks %s managed-removal factories at the action boundary', async theme => {
+    const root = mountSsh(theme), f = model(), key = generatedKey(); f.boot(); await ready(); fill(key); add().click()
+    await vi.waitFor(() => expect(status().dataset.state).toBe('saved'))
+    const remove = [...root.querySelectorAll<HTMLButtonElement>('[data-whm-ssh-remove]')].find(button => button.dataset.whmSshRemove === fingerprint(key))!
+    sshTemplate(root, 'whm-ssh-remove').content.querySelector('[data-xp-slot="label"]')!.remove(); remove.click()
+    expect(status().dataset.state).toBe('unavailable'); expect(f.writes()).toHaveLength(1); expect(f.ask).toHaveBeenCalledTimes(1); expect(f.current().items).toHaveLength(2)
   })
 })

@@ -2,12 +2,13 @@ import type { Translate } from '../../../../../i18n.ts'
 import { escapeHtml } from '../../../html.ts'
 import { lifecycleCard, lifecycleField, lifecycleTable, text } from './shared.ts'
 
-/** V2 owns its four-column inventory and all dynamic transfer presentation. */
+/** V2 owns its eight-column comparison and all dynamic transfer presentation. */
 export function v2TransferClientTemplates(t: Translate): string {
   const row = (name: string, fields: readonly string[]) => `<template data-xp-template="${name}-row"><tr>${fields.map(key => `<td><bdi dir="auto" data-xp-slot="${key}"></bdi></td>`).join('')}</tr></template><template data-xp-template="${name}-empty"><tr><td colspan="${fields.length}" data-xp-slot="message"></td></tr></template>`
   const grid = (name: string, headers: readonly string[]) => `<template data-xp-template="${name}-table"><div class="v2-lifecycle__scroll" role="region" tabindex="0" aria-label="${text(t, msgctxt('theme:v2', 'Transfer review'))}"><table class="v2-lifecycle__table"><thead><tr>${headers.map(label => `<th scope="col">${text(t, label)}</th>`).join('')}</tr></thead><tbody data-xp-slot="rows"></tbody></table></div></template>`
+  const inventory = `<template data-xp-template="transfer-inventory-row"><tr><td><label class="v2-lifecycle__choice"><input type="checkbox" data-xp-action="select" disabled></label></td><td><div class="v2-lifecycle__field"><strong><bdi class="v2-mono" dir="ltr" data-xp-slot="username"></bdi></strong><bdi class="v2-muted v2-mono" dir="ltr" data-xp-slot="domain"></bdi><p class="v2-muted">${text(t, msgctxt('theme:v2', 'Source UID'))}: <bdi class="v2-mono" dir="ltr" data-xp-slot="uid"></bdi></p></div></td><td><bdi dir="auto" data-xp-slot="plan"></bdi></td><td><bdi class="v2-mono" dir="ltr" data-xp-slot="disk"></bdi></td><td><bdi class="v2-mono" dir="ltr" data-xp-slot="databases"></bdi></td><td><bdi class="v2-mono" dir="ltr" data-xp-slot="mailboxes"></bdi></td><td><span data-xp-slot="conflict"></span></td><td><button type="button" class="v2-btn" data-xp-action="resolve" disabled><span data-xp-slot="resolution"></span></button></td></tr></template><template data-xp-template="transfer-inventory-empty"><tr><td colspan="8" data-xp-slot="message"></td></tr></template>`
   return `<template data-xp-template="transfer-choice"><label class="v2-lifecycle__choice"><input type="checkbox" data-xp-action="select" disabled><bdi dir="ltr" data-xp-slot="name"></bdi></label></template>`
-    + row('transfer-inventory', ['username', 'domain', 'uid', 'conflict'])
+    + inventory
     + row('transfer-progress', ['account', 'home', 'databases', 'mail', 'dns', 'state'])
     + row('transfer-plans', ['source', 'target', 'owner', 'conflict'])
     + row('transfer-import-part', ['item', 'source', 'target', 'state'])

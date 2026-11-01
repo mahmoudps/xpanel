@@ -249,7 +249,13 @@ const isIncludedRuntimeSource = (relPath) => {
   if (REQUIRED_ROOT_FILES.includes(relPath)) return true
   if (REQUIRED_LIFECYCLE_CONTROL_FILES.includes(relPath)) return true
   // Fresh-install tooling is shipped when present, without changing legacy upgrade/recovery admission.
-  if (['scripts/install-bootstrap.mjs', 'scripts/install-bootstrap.d.mts'].includes(relPath)) return true
+  if ([
+    'scripts/install-bootstrap.mjs', 'scripts/install-bootstrap.d.mts',
+    'scripts/install-finalization.mjs', 'scripts/install-finalization.d.mts',
+    'scripts/install-finalization-native.mjs', 'scripts/install-finalization-native.d.mts',
+    'scripts/install-finalization-readiness.mjs', 'scripts/install-finalization-readiness.d.mts',
+    'scripts/install-startup.mjs', 'scripts/install-startup.d.mts',
+  ].includes(relPath)) return true
   if (REQUIRED_SYSTEMD_UNITS.includes(relPath)) return true
   if (/^(?:apps|packages)\/[^/]+\/package\.json$/.test(relPath)) return true
   if (/^packages\/db\/src\/migrations\/\d{4}_[a-z0-9_]+\.sql$/.test(relPath)) return true

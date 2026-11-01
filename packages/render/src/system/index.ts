@@ -14,3 +14,4 @@ export {
   assertUsername,
   toSystemdIoDevice,
 } from './validate.ts'
+export * from './account-probe.ts'

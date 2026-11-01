@@ -1,3 +1,4 @@
+import { canOpenRegisteredRoute } from '@xpanel/catalog'
 import { alternateLocales } from '../../../i18n.ts'
 import { projectActionState } from '../../../models/action-state.ts'
 import type { PanelSurfaceView, ReadOnlyPanelSurfaceView } from '../../../models/theme-surface.ts'
@@ -64,6 +65,14 @@ export function createV2PanelSurface(project: V2PanelProjector, unavailable: UiT
       return view.route + '?' + values.toString()
     }
     const feedback = props.actionState ? actionState(projectActionState({ ...props.actionState, locale })) : ''
+    const descriptor = props.unavailableView, session = descriptor?.session
+    const principal = view.visibility.principal, sessionPrincipal = descriptor?.visibility?.principal
+    // The localized role is core-owned and must describe this exact authenticated owner.
+    const coreSession = descriptor?.surface === 'xpanel' && descriptor.signedIn && descriptor.locale === locale
+      && principal.kind === 'user' && sessionPrincipal?.kind === 'user'
+      && sessionPrincipal.id === principal.id && sessionPrincipal.username === principal.username
+      && sessionPrincipal.accountId === account.id && session?.username === principal.username
+      && session.accountId === account.id ? session : undefined
     const status = account.status === 'active' ? t('Active') : account.status === 'suspended' ? t('Suspended') : t('Terminating')
     return renderV2Shell(t, {
       surface: 'xpanel', activeRoute: view.route, homeHref: '/home', visibility: view.visibility, catalog: view.catalog,
@@ -75,8 +84,9 @@ export function createV2PanelSurface(project: V2PanelProjector, unavailable: UiT
       languages: alternateLocales(locale).map(info => ({ tag: info.tag, href: query({ lang: info.tag }) })),
       scheme: { current: scheme, toggleHref: query({ theme: scheme === 'dark' ? 'light' : 'dark' }) },
       account: { signedIn: true, username: view.visibility.principal.username,
-        ...(view.authority.relatedRoutes.has('/security/account') ? { securityHref: '/security/account' } : {}) },
-      hooks: { 'data-account-username': account.username, 'data-account-id': account.id },
+        ...(coreSession ? { roleLabel: coreSession.role } : {}),
+        ...(canOpenRegisteredRoute('/security/account', view.visibility) ? { securityHref: '/security/account' } : {}) },
+      hooks: { 'data-account-username': account.username, 'data-account-id': account.id, 'data-account': account.id, 'data-uid': account.uid },
       contentHtml: feedback + content,
     })
   }

@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { parseMarkup } from '../../../../markup.ts'
 import { renderV2WhmServiceToolPage, V2_WHM_SERVICE_TOOL_ROUTES, WHM_SERVICE_TOOLS_CSS } from './index.ts'
 import type { WhmDataPageInput } from '../software/common.ts'
+import { WHM_WEB_SERVER_CSS } from './web.ts'
+import { v2StylesheetsForDocument } from '../../../route-assets.ts'
 
 const saved: ServerSettings = { hostname: 'host.example.test', nameservers: ['ns1.example.test'], adminEmail: 'admin@example.test', engine: 'apache', apacheMpm: 'itk', panelPort: 2087, sshPort: 22, backendPort: 8080, backendTlsPort: 8443,
   nginx: { workerProcesses: 'auto', workerConnections: 4096, workerRlimitNofile: 16384, multiAccept: true, keepaliveTimeoutSec: 65 },
@@ -15,6 +17,84 @@ const node = (html: string, name: string, value?: string) => {
 }
 
 describe('V2 WHM service-tool documents', () => {
+
+
+  it.each(['en', 'ar'] as const)('restores the Web Server flow, proxy and saved comparison in %s without inventing runtime evidence', locale => {
+    const current = { ...saved, backendPort: 18181, backendTlsPort: 19443 }
+    const html = render('/whm/services/web', { locale, serverSettings: current })
+    const nodes = parseMarkup(html)
+    expect(nodes.filter(item => item.attrs.has('data-whm-web-hop'))).toHaveLength(3)
+    expect(nodes.filter(item => item.attrs.has('data-whm-web-snapshot-setting'))).toHaveLength(15)
+    for (const key of ['web-flow', 'web-proxy', 'web-comparison', 'web-test-gate']) expect(node(html, 'data-whm-detail-section', key).tag).toBe('section')
+    expect(nodes.filter(item => item.attrs.get('data-whm-web-snapshot') === 'page-load')).toHaveLength(3)
+    expect(html).toContain('proxy_pass http://127.0.0.1:18181;')
+    expect(html).toContain('proxy_set_header X-Forwarded-For $remote_addr;')
+    expect(html).not.toContain('$proxy_add_x_forwarded_for')
+    expect(html).not.toMatch(/alice-shop|20014|1\.24\.0|2\.4\.58|xpanel-&lt;uid&gt;/)
+    expect(nodes.filter(item => item.attrs.has('data-server-settings-form'))).toHaveLength(1)
+    expect(nodes.filter(item => item.attrs.has('data-whm-web-readback'))).toHaveLength(1)
+    expect(nodes.filter(item => item.attrs.has('data-whm-web-generation'))).toHaveLength(1)
+    expect(nodes.filter(item => item.attrs.has('data-whm-web-rollback'))).toHaveLength(1)
+    const ids = nodes.flatMap(item => item.attrs.has('id') ? [item.attrs.get('id')!] : [])
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+  })
+
+  it('binds the explanatory backend to the saved engine and MPM rather than the Apache demo', () => {
+    for (const [engine, apacheMpm, expected] of [
+      ['apache', 'itk', 'Saved Apache MPM: itk.'],
+      ['apache', 'prefork', 'Saved Apache MPM: prefork.'],
+      ['openlitespeed', 'itk', 'OpenLiteSpeed is the saved engine.'],
+    ] as const) {
+      const html = render('/whm/services/web', { serverSettings: { ...saved, engine, apacheMpm } })
+      expect(html).toContain(expected)
+      expect(html).toContain('Runtime not observed')
+      expect(html).not.toContain('Running</span>')
+    }
+  })
+
+  it('keeps comparison defaults and proposed changes unreviewed until authoritative data is available', () => {
+    const html = render('/whm/services/web', { serverSettings: saved })
+    const nodes = parseMarkup(html)
+    const sectionIndex = nodes.findIndex(item => item.attrs.get('data-whm-detail-section') === 'web-comparison')
+    const belongs = (index: number): boolean => {
+      for (let parent = nodes[index]!.parent; parent >= 0; parent = nodes[parent]!.parent) if (parent === sectionIndex) return true
+      return false
+    }
+    const headers = nodes.filter((item, index) => belongs(index) && item.tag === 'th' && item.attrs.get('scope') === 'col')
+    expect(headers).toHaveLength(5)
+    expect(html).toContain('A host-specific default baseline has not been supplied.')
+    expect(html).toContain('Not reviewed')
+    expect(html).not.toContain('Default for 4 cores / 8 GB')
+    expect(nodes.filter(item => item.attrs.get('href') === '#v2-whm-data-web-pending')).toHaveLength(1)
+    expect(nodes.filter(item => item.attrs.has('data-whm-web-test-gate'))).toHaveLength(1)
+  })
+
+  it('retains unknown architecture when settings are unread and never exposes denied saved ports', () => {
+    const unread = render('/whm/services/web')
+    expect(node(unread, 'data-whm-web-proxy-reference').attrs.get('data-state')).toBe('unread')
+    expect(unread).not.toContain('proxy_pass http://127.0.0.1:')
+    for (const extra of [{ dataAuthority: undefined }, { capabilityUnavailable: true }]) {
+      const html = render('/whm/services/web', { serverSettings: { ...saved, backendPort: 18181, backendTlsPort: 19443 }, ...extra })
+      expect(node(html, 'data-whm-web-proxy-reference').attrs.get('data-state')).toBe('unread')
+      expect(html).not.toMatch(/18181|19443|proxy_pass http:\/\/127\.0\.0\.1:/)
+      expect(parseMarkup(html).filter(item => ['input', 'select', 'textarea', 'button'].includes(item.tag)).every(item => item.attrs.has('disabled'))).toBe(true)
+    }
+  })
+
+  it('loads the Web Server supplement only for that authorized document selection', () => {
+    const selected = v2StylesheetsForDocument({ surface: 'xwhm', route: '/whm/services/web', viewKind: 'workspace' })
+    const supplement = selected.find(item => item.path === '/assets/themes/v2/whm-web-server.css')
+    expect(supplement?.body).toBe(WHM_WEB_SERVER_CSS.trim() + '\n')
+    for (const route of ['/whm/services/dns', '/whm/services', '/whm/software/php', '/whm/plans']) {
+      expect(v2StylesheetsForDocument({ surface: 'xwhm', route, viewKind: 'workspace' }).some(item => item.path === supplement!.path)).toBe(false)
+    }
+    for (const viewKind of ['status', 'login'] as const) expect(v2StylesheetsForDocument({ surface: 'xwhm', route: '/whm/services/web', viewKind }).some(item => item.path === supplement!.path)).toBe(false)
+    expect(v2StylesheetsForDocument({ surface: 'xpanel', route: '/whm/services/web', viewKind: 'workspace' }).some(item => item.path === supplement!.path)).toBe(false)
+    expect(WHM_WEB_SERVER_CSS).toContain('[data-whm-detail-route="/whm/services/web"]')
+    expect(WHM_WEB_SERVER_CSS).not.toMatch(/text-align:(?:left|right)|margin-(?:left|right)/)
+  })
+
   it('maps exactly seven service-tool documents without claiming the existing service manager', () => {
     expect(new Set(V2_WHM_SERVICE_TOOL_ROUTES).size).toBe(7)
     for (const route of V2_WHM_SERVICE_TOOL_ROUTES) {

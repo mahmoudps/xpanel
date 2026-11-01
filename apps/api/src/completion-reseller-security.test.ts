@@ -10,6 +10,7 @@ import { createRootPrincipal, createTestDb, createUserPrincipal, findPrincipalBy
 import { profileFor } from '@xpanel/os'
 import { createTestStateStore } from '@xpanel/state'
 import { createApiApp, listenApiServer } from './server.ts'
+import { preparedAccountFixture } from './testing/provisioning-preparation-fixture.ts'
 import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
 
 /**
@@ -135,8 +136,9 @@ const fixture = async () => {
 
   const os = profileFor(OS_RELEASE)
   const executor = new FakeHostExecutor()
+  const reconciler = new HostReconciler({ store: state.store, db: database.db, executor, os })
   const agentApp = createAgentApp({
-    reconciler: new HostReconciler({ store: state.store, db: database.db, executor, os }),
+    reconciler,
     store: state.store, db: database.db, executor,
     os: { id: os.id, versionId: os.versionId, family: os.family },
     agentToken: TEST_AGENT_TOKEN,
@@ -144,7 +146,7 @@ const fixture = async () => {
   })
   const app = createApiApp({
     db: database.db, store: state.store, serverSecret: TEST_SERVER_SECRET,
-    agentApp, agentToken: TEST_AGENT_TOKEN, os,
+    ...preparedAccountFixture({ store: state.store, reconciler, executor, agentApp, agentToken: TEST_AGENT_TOKEN }), agentToken: TEST_AGENT_TOKEN, os,
   })
   const listener = await listenApiServer(app, { host: '127.0.0.1', port: 0 })
   cleanup.push(async () => { listener.server.closeAllConnections(); await listener.close() })
@@ -507,9 +509,10 @@ describe('real HTTP reseller-owned account scope', () => {
     expect(response.status, text).toBe(201)
     const ack = JSON.parse(text) as AccountAck
     expect(ack.account).toMatchObject({ username: 'spawna1', ownerId: reseller.id })
-    // The real agent contract acknowledged a global configuration apply; this is not native proof.
+    // The explicit prepared H agent fixture supplies this synthetic account receipt, not native proof.
     expect(ack.reconcile?.status).toBe('applied')
-    expect(ack.execution).toMatchObject({ status: 'configuration_applied', scope: 'global_configuration' })
+    // Synthetic H protocol acceptance only; no independent native worker is observed.
+    expect(ack.execution).toMatchObject({ status: 'account_verified', scope: 'account', targetVerified: true, verificationRequired: false })
     const persisted = await f.state.store.getAccountByUsername('spawna1')
     expect(persisted?.ownerId).toBe(reseller.id)
     expect(await findPrincipalByUsername(f.database.db, 'spawna1')).toMatchObject({ kind: 'user', accountId: persisted!.id })

@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
 import { classicTheme } from './classic/index.ts'
+import { v2Theme } from './v2/theme.ts'
 import type { ThemeAsset, UiTheme, UiThemeId } from './contract.ts'
 
 const DEFAULT_UI_THEME = 'classic' as const
-const registered = Object.freeze([classicTheme])
+const registered = Object.freeze([classicTheme, v2Theme])
 const themes = new Map<UiThemeId, UiTheme>()
 const assets = new Map<string, ThemeAsset>()
 

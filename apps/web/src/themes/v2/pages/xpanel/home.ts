@@ -1,12 +1,13 @@
-import { isToolAuthorized, tools as defaultCatalog, visibleNavigation, visibleTools } from '@xpanel/catalog'
+import { canOpenRegisteredRoute, isToolAuthorized, tools as defaultCatalog, visibleNavigation, visibleTools } from '@xpanel/catalog'
 import { resolveResourceUsage, type Domain, type Limit, type Plan } from '@xpanel/core'
-import { alternateLocales, type Translate } from '../../../../i18n.ts'
+import { alternateLocales, localeInfo, type Translate } from '../../../../i18n.ts'
 import { auditActionLabel, auditActorLabel, auditTargetLabel } from '../../../../audit-labels.ts'
 import { parseWebsiteAnalyticsSnapshot } from '../../../../models/website-analytics.ts'
 import type { PanelSurfaceProps, ThemeViewProps } from '../../../contract.ts'
 import { card, dataTable, emptyState, errorState, kpiCard, meter, notice, pageHeader, rowMenu, statusPill, type MeterProps } from '../../components/index.ts'
 import { escapeHtml, type Tone } from '../../html.ts'
 import { icon, type IconName } from '../../icons.ts'
+import { renderV2AccountAnnouncementsBanner, V2_HOME_ANNOUNCEMENTS_CSS } from '../../components/account-announcements.ts'
 import { v2Messages } from '../../messages.ts'
 
 import type { SurfaceAuthority } from '../../../../models/theme-surface.ts'
@@ -193,7 +194,7 @@ export const PANEL_HOME_TOOL_GROUPS: readonly HomeToolGroup[] = [
   { label: msgid('Software'), icon: 'code', tools: [
     homeTool(msgid('PHP version & handler'), '/software/php', 'code', 'domain-php-settings', 'php fpm cgi workers version', 'php'),
     homeTool(msgid('PHP settings'), '/software/php', 'sliders', 'domain-php-settings', 'php ini memory_limit extensions'),
-    homeTool(msgctxt('xpanel-home', '.htaccess editor'), '/software/htaccess', 'files', 'aapanel-url-rewrite', 'htaccess rewrite apache'),
+    homeTool(msgctxt('xpanel-home', '.htaccess editor'), '/software/htaccess', 'files', 'domain-htaccess', 'htaccess rewrite apache'),
     homeTool(msgid('Node.js & Python apps'), '/software/apps', 'code', 'nodejs-apps', 'node python app proxy'),
   ] },
   { label: msgid('Advanced'), icon: 'calendar', tools: [
@@ -243,8 +244,13 @@ function tools(props: PanelPageProps, t: Translate, visitors: number | undefined
     const rest = t('{count, plural, one {# tool} other {# tools}}', { count: group.tools.length })
     return `<details class="v2-home-tool-group" open data-home-accordion data-home-collapse-below="600" data-tool-group data-group-label="${escapeHtml(label)}" data-size="${group.tools.length}" aria-labelledby="v2-home-tools-${index}"><summary class="v2-home-tool-heading"><h3 id="v2-home-tools-${index}"><span class="v2-home-group-tile v2-tile v2-tile--${group.tone ?? 'info'}" aria-hidden="true">${icon(group.icon, 16)}</span><span class="v2-home-group-label">${escapeHtml(label)}</span><span class="v2-muted v2-num" data-group-count data-rest="${escapeHtml(rest)}">${escapeHtml(rest)}</span>${icon('chevDown', 16)}</h3></summary><div class="v2-home-tool-grid" data-tool-panel>${group.tools.map(item => {
       const name = t(item.label)
-      const enabled = qualified.has(item.capability) && (routes.has(item.route) || item.capability === 'change-language')
-      const hint = enabled ? (item.hint ? hints[item.hint] : undefined) ?? t(msgctxt('resources-board', 'Not read')) : t('Unavailable')
+      // Personal documents use registered session admission; host-native cards retain qualification.
+      const personal = (item.capability === 'change-language' || item.route === '/security/account')
+        && canOpenRegisteredRoute(item.route, context)
+      const enabled = personal || (qualified.has(item.capability) && routes.has(item.route))
+      const hint = !enabled ? t('Unavailable')
+        : item.capability === 'change-language' ? localeInfo(t.locale).nativeName
+        : (item.hint ? hints[item.hint] : undefined) ?? t(msgctxt('resources-board', 'Not read'))
       const href = item.capability === 'change-language' ? `?lang=${alternateLocales(t.locale)[0]!.tag}` : item.route
       const technicalHint = enabled && item.hint !== undefined && hints[item.hint] !== undefined
       const content = `<span class="v2-home-tool__tile v2-tile v2-tile--${enabled ? group.tone ?? 'info' : 'neutral'}" aria-hidden="true">${icon(item.icon, 16)}</span><span class="v2-home-tool__label">${escapeHtml(name)}</span><span class="v2-home-tool__hint v2-num">${technicalHint ? `<bdi dir="ltr" class="v2-mono">${escapeHtml(hint)}</bdi>` : escapeHtml(hint)}</span>`
@@ -289,6 +295,9 @@ export function renderV2PanelHome(props: PanelPageProps, authority?: SurfaceAuth
   const t = v2Messages.translator(props.locale ?? 'en')
   props = scopePrimaryPanelFacts(props, authority)
   const account = props.account
+  const principal = props.visibility?.principal
+  const canReadAnnouncements = !!account && principal?.kind === 'user' && principal.accountId === account.id
+    && authority?.presentation === 'live' && authority.canRead
   const domain = account ? props.domains?.find(item => item.accountId === account.id && item.name === props.activeDomain)?.name ?? account.primaryDomain : t('Not read')
   const routes = new Set(visibleNavigation(props.visibility, props.catalog).find(surface => surface.surface === 'xpanel')?.sections.flatMap(section => section.pages.map(page => page.route)))
   const domainsDefinition = (props.catalog ?? defaultCatalog).find(tool => tool.id === 'domains')
@@ -319,12 +328,12 @@ export function renderV2PanelHome(props: PanelPageProps, authority?: SurfaceAuth
 ${pageHeader(t, { breadcrumb: [{ label: t('Home') }], route: '/home', title: t(msgctxt('theme:v2', 'Welcome back, {username}'), { username: account?.username ?? t('Not read') }),
     description: t(msgctxt('theme:v2', 'Your sites, tools and account resources.')),
     actionsHtml: `<div class="v2-home-page-actions"><p class="v2-home-selected-domain"><span>${escapeHtml(t('Selected domain'))}</span><bdi dir="ltr" class="v2-mono">${escapeHtml(domain)}</bdi></p>${routes.has('/domains') ? `<a class="v2-btn v2-btn--primary" href="/domains">${icon('plus', 18)}${escapeHtml(t(msgid('Add domain')))}</a>` : domainsAuthorized ? `<button type="button" class="v2-btn" disabled>${icon('plus', 18)}${escapeHtml(t(msgid('Add domain')))}</button>` : ''}</div>` })}
-${bandwidthNotice}<section class="v2-kpi-row" aria-label="${escapeHtml(t('Account summary'))}">${summary.map(item => kpiCard({ headingLevel: 2, ...item })).join('')}</section>
+${renderV2AccountAnnouncementsBanner(t, canReadAnnouncements)}${bandwidthNotice}<section class="v2-kpi-row" aria-label="${escapeHtml(t('Account summary'))}">${summary.map(item => kpiCard({ headingLevel: 2, ...item })).join('')}</section>
 ${sites(props, t, routes)}<div class="v2-home-columns">${tools(props, t, traffic?.totals.uniqueVisitors)}<aside class="v2-stack" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Account information')))}">${resourceCard}${information(props, t)}${recentChanges(props, t)}</aside></div>
 </div>`
 }
 
-export const V2_PANEL_HOME_CSS = `.v2-panel-home .v2-home-columns{display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:flex-start}
+export const V2_PANEL_HOME_CSS = V2_HOME_ANNOUNCEMENTS_CSS + '\n' + `.v2-panel-home .v2-home-columns{display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:flex-start}
 .v2-panel-home .v2-home-page-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
 .v2-panel-home .v2-home-columns>.v2-home-tools{flex:1.75 1 560px;min-inline-size:0}
 .v2-panel-home .v2-home-columns>aside{flex:1 1 300px;min-inline-size:0;gap:var(--space-3)}
@@ -377,7 +386,8 @@ export const V2_PANEL_HOME_CSS = `.v2-panel-home .v2-home-columns{display:flex;f
 .v2-home-changes>li{display:flex;align-items:flex-start;gap:12px}.v2-home-changes>li>.v2-icon{margin-block-start:2px;color:var(--muted)}
 .v2-home-changes>li>div{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0;overflow-wrap:anywhere}
 .v2-home-changes p{font-size:12px}.v2-home-filter-empty{display:flex;flex-direction:column;gap:var(--space-1);padding:var(--v2-panel-padding);border:1px dashed var(--line-strong);border-radius:var(--radius-card)}
-@media(max-width:600px){.v2-home-sites-desktop{display:none}.v2-home-sites-mobile{display:block}.v2-panel-home [data-home-sites]{padding:0;background:transparent;border:0;box-shadow:none}
+@media(max-width:600px){.v2-panel-home>.v2-kpi-row{grid-template-columns:repeat(2,minmax(0,1fr))}
+.v2-home-sites-desktop{display:none}.v2-home-sites-mobile{display:block}.v2-panel-home [data-home-sites]{padding:0;background:transparent;border:0;box-shadow:none}
 .v2-panel-home [data-home-sites]>.v2-card__head{padding:0;margin-block-end:var(--space-2)}
 .v2-card[aria-labelledby=v2-home-resources-title]>.v2-card__body{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
 .v2-panel-home .v2-home-tool-list{grid-template-columns:minmax(0,1fr);gap:var(--space-2)}.v2-panel-home .v2-home-tool-group{overflow:hidden}

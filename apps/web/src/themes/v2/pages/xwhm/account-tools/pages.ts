@@ -1,5 +1,6 @@
 import { v2AccountLifecycleTemplates } from './lifecycle-client-templates.ts'
 import { v2WhmClientTemplates } from '../../../whm-client-templates.ts'
+import { v2AccountAnnouncementNoticeTemplates } from '../../../components/account-announcement-notice-templates.ts'
 import { languageName, localeDirection } from '../../../../../i18n.ts'
 import type { WhmSurfaceProps } from '../../../../contract.ts'
 import { v2Messages } from '../../../messages.ts'
@@ -30,7 +31,7 @@ export function renderV2WhmAccountHealthPage(props: WhmSurfaceProps, authority: 
     + actions(`<label class="v2-account-tool__choice"><input type="checkbox" data-whm-health-select-all${off}><span>${esc(t(msgid('Select all shown')))}</span></label>${button(t(msgid('Recheck selected')), { 'data-whm-health-recheck': true })}<span data-whm-health-selection role="status">${esc(t(msgid('No accounts selected.')))}</span>`)
     + `<div class="v2-account-tool__groups" data-whm-health-list aria-live="polite"><p data-whm-health-empty>${esc(t(msgid('No accounts have been checked.')))}</p></div>`)
   return page(props, '/whm/accounts/health', title, t(msgid('Read-only checks of each account against its saved plan and this server, with links to the pages that fix each problem.')), v2WhmDiagnosticTemplates() + summary + accounts,
-    { 'data-whm-health-workspace': true, 'data-health-can-read': String(readable), 'data-health-root': String(authority.root === true) })
+    { 'data-whm-health-workspace': true, 'data-health-can-read': String(readable), 'data-capability-state': readable ? 'authorized' : 'unavailable', 'data-health-root': String(authority.root === true) })
 }
 
 export function renderV2WhmAccountBandwidthPage(props: WhmSurfaceProps, authority: WhmAccountToolAuthority): string {
@@ -45,7 +46,7 @@ export function renderV2WhmAccountBandwidthPage(props: WhmSurfaceProps, authorit
     ].map(([key, label]) => ({ label: t(label!), hooks: { 'data-whm-metering-fact': key! } })), t(msgid('Not read')))
     + table(t(msgid('Bandwidth per account')), [msgid('Account'), msgid('Domain'), msgid('Status'), msgid('Web'), msgid('Mail'), 'FTP', msgid('Total'), msgid('Plan limit')].map(label => t(label)), { 'data-whm-metering-rows': 'bandwidth' }, t(msgid('No bandwidth has been read.'))))
   return page(props, '/whm/accounts/bandwidth', title, t(msgid('Monthly traffic per account: web from the saved site access logs, plus mail and FTP from their service logs.')), body,
-    { 'data-whm-metering': 'bandwidth', 'data-metering-can-read': String(readable) })
+    { 'data-whm-metering': 'bandwidth', 'data-metering-can-read': String(readable), 'data-capability-state': readable ? 'authorized' : 'unavailable' })
 }
 
 export function renderV2WhmAccountAnnouncementsPage(props: WhmSurfaceProps, authority: WhmAccountToolAuthority): string {
@@ -76,7 +77,7 @@ export function renderV2WhmAccountAnnouncementsPage(props: WhmSurfaceProps, auth
   }).join('')
   const container = editable ? 'form' : 'div'
   const editor = toolCard('announcements-editor', t(msgid('Create announcement')), `<${container} class="v2-account-tool__groups" data-whm-announcements-form aria-labelledby="v2-announcements-editor-heading"${editable ? ' novalidate' : ''}><h3 id="v2-announcements-editor-heading" data-whm-announcements-editor-heading>${esc(t(msgid('Create announcement')))}</h3>${content}<p class="v2-muted" id="v2-announcements-text-help">${esc(t(msgid('Plain text only: HTML is refused and links are not made clickable. Titles up to 140 characters, messages up to 2000. Both languages are required.')))}</p>${choices}${dates}<section class="v2-account-tool__groups" aria-labelledby="v2-announcements-preview-heading"><h3 id="v2-announcements-preview-heading">${esc(t(msgid('Preview')))}</h3><p data-whm-announcements-preview-empty>${esc(t(msgid('Fill in both titles and messages to see how account owners will see the notice.')))}</p><div class="v2-account-tool__previews">${previews}</div></section>${actions(`<button type="${editable ? 'submit' : 'button'}" class="v2-btn v2-btn--primary" data-whm-announcements-save${off}>${esc(t(msgid('Create announcement')))}</button><button type="button" class="v2-btn" data-whm-announcements-cancel hidden${off}>${esc(t(msgid('Cancel editing')))}</button>`)}${status('', { 'data-whm-announcements-save-status': true }, 'unread', true)}</${container}>`)
-  return page(props, '/whm/accounts/announcements', title, t(msgid("Notices shown on account owners' xPanel home page while they are live, in English and Arabic. Owners can dismiss a notice for their own account. Nothing is emailed.")), v2WhmClientTemplates('announcements') + list + editor,
+  return page(props, '/whm/accounts/announcements', title, t(msgid("Notices shown on account owners' xPanel home page while they are live, in English and Arabic. Owners can dismiss a notice for their own account. Nothing is emailed.")), v2WhmClientTemplates('announcements') + v2AccountAnnouncementNoticeTemplates() + list + editor,
     { 'data-whm-announcements-workspace': true, 'data-announcements-can-manage': String(editable), 'data-capability-state': editable ? 'authorized' : 'unavailable' })
 }
 
@@ -103,5 +104,5 @@ export function renderV2WhmAccountTemplatesPage(props: WhmSurfaceProps, authorit
   const preview = toolCard('template-preview', t(msgid('Zone preview')), `<p data-acct-templates-preview-note>${esc(t(msgid('Choose Edit on a saved template to see its full zone for example.com with documentation addresses 192.0.2.10 and 2001:db8::10. Unsaved changes are checked when you save.')))}</p>`
     + table(t(msgid('Zone preview')), [t(msgid('Name')), 'TTL', t(msgid('Type')), t(msgid('Priority')), t(msgid('Content'))], { 'data-acct-templates-preview': true }, t(msgid('No template selected'))))
   return page(props, '/whm/accounts/templates', title, t(msgid('Zone records and page text for new accounts on a plan. New accounts get the template zone records; the page text is saved only.')), application + list + editor + preview + v2AccountLifecycleTemplates('templates'),
-    { 'data-acct-templates-workspace': true, 'data-templates-can-manage': String(editable) })
+    { 'data-acct-templates-workspace': true, 'data-templates-can-manage': String(editable), 'data-capability-state': editable ? 'authorized' : 'unavailable' })
 }

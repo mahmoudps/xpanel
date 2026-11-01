@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmFtpLog } from './board-port/whm-ftp-log-workspace.ts'
 import { readFtpLogView, WHM_FTP_LOG_CLIENT_BINDING } from './whm-ftp-log-client.ts'
+import { renderV2WhmFtpLog } from './themes/v2/pages/xwhm/service-tools/ftp-log.ts'
 
 const tick = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const at = (minute: number) => `2026-10-27T10:${String(minute).padStart(2, '0')}:00.000Z`
@@ -136,5 +137,116 @@ describe('WHM FTP log full timestamp display', () => {
     expect(JSON.stringify(payload)).toBe(canonicalPayload)
     expect(send.mock.calls.map(([method]) => method)).toEqual(['GET'])
     expect(document.body.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+  })
+})
+
+type FtpTheme = 'classic' | 'v2'
+const ftpMarkup = (theme: FtpTheme, locale: 'en' | 'ar' = 'en') => theme === 'classic' ? renderWhmFtpLog({ locale, canRead: true }) : renderV2WhmFtpLog({ locale, dataAuthority: { canRead: true, canManage: false } })
+const ftpTemplate = (root: HTMLElement) => root.querySelector<HTMLTemplateElement>('template[data-xp-template="whm-ftp-log-pick"]')!
+const corruptFtpTemplates: readonly (readonly [string, (template: HTMLTemplateElement, root: HTMLElement) => void])[] = [
+  ['missing', template => template.remove()],
+  ['duplicate', (template, root) => root.append(template.cloneNode(true))],
+  ['wrong root', template => template.content.replaceChildren(document.createElement('div'))],
+  ['missing label', template => template.content.querySelector('[data-xp-slot="content"]')!.remove()],
+  ['wrong label tag', template => { const node = document.createElement('bdi'); node.dataset.xpSlot = 'content'; template.content.querySelector('[data-xp-slot="content"]')!.replaceWith(node) }],
+  ['duplicate label', template => { const node = template.content.querySelector('[data-xp-slot="content"]')!; node.parentElement!.append(node.cloneNode(true)) }],
+  ['unexpected slot', template => { const node = document.createElement('span'); node.dataset.xpSlot = 'unexpected'; template.content.firstElementChild!.append(node) }],
+  ['submit button', template => { template.content.querySelector('button')!.type = 'submit' }],
+  ['enabled prototype', template => { template.content.querySelector('button')!.disabled = false }],
+  ['event handler', template => template.content.firstElementChild!.setAttribute('onclick', 'window.unexpected=true')],
+  ['native action metadata', template => template.content.firstElementChild!.setAttribute('data-action', 'delete')],
+  ['interactive label', template => template.content.querySelector('[data-xp-slot="content"]')!.append(document.createElement('input'))],
+  ['borrowed from nested workspace', (template, root) => { const nested = document.createElement('div'); nested.dataset.whmFtpLog = ''; nested.dataset.ftpLogBound = 'true'; nested.append(template); root.append(nested) }],
+]
+
+describe('FTP drill-down from the selected theme', () => {
+  it.each(['classic', 'v2'] as const)('uses the real %s renderer and serialized binding for user/client drill-down in both locales', async theme => {
+    for (const locale of ['en', 'ar'] as const) {
+      const send = vi.fn(async (_method: string, path: string) => path.includes('user=') ? bobView() : view())
+      boot(ftpMarkup(theme, locale), send, locale === 'ar'); await tick()
+      const root = document.querySelector<HTMLElement>('[data-whm-ftp-log]')!, pick = root.querySelector<HTMLButtonElement>('[data-ftp-log-table="users"] [data-ftp-log-pick]')!
+      expect($('[data-ftp-log-status]').dataset.state).toBe('read')
+      expect(pick.classList.contains(theme === 'classic' ? 'xp-btn' : 'v2-btn')).toBe(true)
+      expect(pick.querySelector('[data-xp-slot="content"]')?.tagName).toBe('SPAN')
+      expect(pick.disabled).toBe(false)
+      expect(ftpTemplate(root).content.querySelector('button')!.disabled).toBe(true)
+      pick.click(); pick.click(); await tick()
+      expect(send).toHaveBeenCalledTimes(2)
+      expect(new URLSearchParams(send.mock.calls[1]![1].split('?')[1]).get('user')).toBe('bob@example.com')
+      expect($('[data-ftp-log-detail-body]').hidden).toBe(false)
+      expect($('[data-ftp-log-detail-facts]').textContent).toContain('acme')
+      root.querySelector<HTMLButtonElement>('[data-ftp-log-table="clients"] [data-ftp-log-pick]')!.click(); await tick()
+      const params = new URLSearchParams(send.mock.calls[2]![1].split('?')[1])
+      expect(params.get('client')).toBe('203.0.113.5'); expect(params.has('user')).toBe(false)
+      expect(send.mock.calls.every(([method]) => method === 'GET')).toBe(true)
+      expect($('[data-ftp-log-detail-body]').hidden).toBe(true)
+      expect(root.querySelector('img')).toBeNull()
+      expect(root.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+    }
+    expect(WHM_FTP_LOG_CLIENT_BINDING).not.toContain('xp-btn')
+    expect(WHM_FTP_LOG_CLIENT_BINDING).not.toContain('innerHTML')
+    expect(WHM_FTP_LOG_CLIENT_BINDING).not.toContain('fetch(')
+  })
+
+  it.each(['classic', 'v2'] as const)('performs zero transport for missing, ambiguous or malformed %s prototypes', theme => {
+    for (const [reason, corrupt] of corruptFtpTemplates) {
+      const holder = document.createElement('div'); holder.innerHTML = ftpMarkup(theme)
+      const root = holder.querySelector<HTMLElement>('[data-whm-ftp-log]')!; corrupt(ftpTemplate(root), root)
+      const send = vi.fn(); boot(holder.innerHTML, send)
+      expect(send, reason).not.toHaveBeenCalled()
+      expect($('[data-ftp-log-status]').dataset.state, reason).toBe('unavailable')
+      expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('[data-whm-ftp-log] input,[data-whm-ftp-log] select,[data-whm-ftp-log] button')].every(node => node.disabled)).toBe(true)
+    }
+  })
+
+  it.each(['classic', 'v2'] as const)('rejects ambiguous live %s controls before startup', theme => {
+    for (const selector of ['[data-ftp-log-form]', '[data-ftp-log-status]', '[data-ftp-log-range]', '[data-ftp-log-submit]']) {
+      const holder = document.createElement('div'); holder.innerHTML = ftpMarkup(theme)
+      const node = holder.querySelector(selector)!; node.parentElement!.append(node.cloneNode(true))
+      const send = vi.fn(); boot(holder.innerHTML, send)
+      expect(send, selector).not.toHaveBeenCalled()
+    }
+  })
+
+  it.each(['classic', 'v2'] as const)('does not reset %s drafts or request a drill-down after a late broken prototype', async theme => {
+    const send = vi.fn(async () => view()); boot(ftpMarkup(theme), send); await tick()
+    const root = document.querySelector<HTMLElement>('[data-whm-ftp-log]')!, form = root.querySelector<HTMLFormElement>('[data-ftp-log-form]')!
+    const user = form.elements.namedItem('user') as HTMLInputElement; user.value = 'keep this draft'
+    const pick = root.querySelector<HTMLButtonElement>('[data-ftp-log-table="users"] [data-ftp-log-pick]')!, template = ftpTemplate(root), repair = template.cloneNode(true)
+    template.remove(); pick.click()
+    expect(send).toHaveBeenCalledTimes(1); expect(user.value).toBe('keep this draft')
+    expect($('[data-ftp-log-status]').dataset.state).toBe('unavailable'); expect(pick.disabled).toBe(true)
+    root.append(repair)
+    root.querySelector<HTMLButtonElement>('[data-ftp-log-clear]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    form.dispatchEvent(new Event('submit', { cancelable: true }))
+    expect(send).toHaveBeenCalledTimes(1); expect(user.value).toBe('keep this draft'); expect(user.disabled).toBe(true)
+  })
+
+  it.each(['classic', 'v2'] as const)('does not paint %s observations after a fulfilled or rejected await loses its finite contract', async theme => {
+    for (const rejected of [false, true]) {
+      let finish!: (value: unknown) => void, fail!: (reason: unknown) => void
+      const send = vi.fn(() => new Promise<unknown>((resolve, reject) => { finish = resolve; fail = reject })); boot(ftpMarkup(theme), send)
+      const root = document.querySelector<HTMLElement>('[data-whm-ftp-log]')!, before = root.querySelector('[data-ftp-log-rows]')!.outerHTML
+      expect(send).toHaveBeenCalledTimes(1)
+      ftpTemplate(root).content.querySelector('[data-xp-slot="content"]')!.remove()
+      if (rejected) fail(new Error('unavailable')); else finish(view())
+      await tick()
+      expect($('[data-ftp-log-status]').dataset.state).toBe('unavailable')
+      expect($('[data-ftp-log-status]').textContent).toBe('Unavailable')
+      expect(root.querySelector('[data-ftp-log-rows]')!.outerHTML).toBe(before)
+      expect(root.querySelectorAll('[data-ftp-log-pick]')).toHaveLength(0)
+      expect([...root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,select,button')].every(node => node.disabled)).toBe(true)
+      expect(send).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it.each(['classic', 'v2'] as const)('keeps %s controls closed when admission is revoked during its GET', async theme => {
+    let finish!: (value: unknown) => void
+    const send = vi.fn(() => new Promise<unknown>(resolve => { finish = resolve })); boot(ftpMarkup(theme), send)
+    const root = document.querySelector<HTMLElement>('[data-whm-ftp-log]')!; root.dataset.readonly = 'true'; finish(view()); await tick()
+    expect($('[data-ftp-log-status]').dataset.state).toBe('unavailable')
+    expect(root.querySelectorAll('[data-ftp-log-pick]')).toHaveLength(0)
+    expect([...root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,select,button')].every(node => node.disabled)).toBe(true)
+    expect(send).toHaveBeenCalledTimes(1)
   })
 })

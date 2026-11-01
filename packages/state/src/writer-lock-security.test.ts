@@ -5,6 +5,7 @@ import { link, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile }
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WriterLock, type WriterLease } from './writer-lock.ts'
+import { setStateOwnershipDepsForTests } from './ownership.ts'
 
 const ioFault = vi.hoisted(() => ({ failRenameTo: '', failIntentClear: false, partialCleanup: '', failDirectoryAfterRenameTo: '', lastRenamedTo: '', directoryFailures: 0 }))
 vi.mock('node:fs/promises', async importOriginal => {
@@ -393,20 +394,40 @@ describe('mutex inode and metadata publication', () => {
     const holder = JSON.parse(await readFile(writer.ownerFilePath, 'utf8'))
     expect(holder.protocol).toBe('sqlite-v1')
     expect(holder.mutexIdentity).toMatch(/^[0-9]+:[0-9]+$/)
-    expect((await lstat(writer.mutexFilePath)).nlink).toBe(1)
+    const initialMutex = await lstat(writer.mutexFilePath)
+    expect(initialMutex.nlink).toBe(1)
     if (process.platform !== 'win32') {
       const parent = await lstat(root)
-      expect((await lstat(writer.mutexFilePath)).mode & 0o777).toBe(0o660)
+      expect(initialMutex.mode & 0o777).toBe(0o660)
+      expect(initialMutex.gid).toBe(parent.gid)
       expect((await lstat(writer.lockDirPath)).mode & 0o7777).toBe(0o2770)
       for (const path of [writer.ownerFilePath, writer.intentFilePath]) { expect((await lstat(path)).mode & 0o777).toBe(0o640); expect((await lstat(path)).gid).toBe(parent.gid) }
     }
     await lease.commitAuthority()
+    await lease.release()
+    const nextLease = await acquire(writer), reopenedMutex = await lstat(writer.mutexFilePath)
+    expect([reopenedMutex.dev, reopenedMutex.ino]).toEqual([initialMutex.dev, initialMutex.ino])
+    expect(reopenedMutex.nlink).toBe(1)
+    if (process.platform !== 'win32') {
+      expect(reopenedMutex.mode & 0o777).toBe(0o660)
+      expect(reopenedMutex.gid).toBe((await lstat(root)).gid)
+    }
+    await nextLease.release()
   })
   it('refuses a multiply-linked mutex without opening a second inode lock', async () => {
     const writer = lock()
     await writer.readAuthorityAtBarrier()
     await link(writer.mutexFilePath, join(base, 'unexpected-hardlink.sqlite'))
-    await expect(writer.acquire()).rejects.toMatchObject({ code: 'VALIDATION' })
+    const initialMutex = await lstat(writer.mutexFilePath), initialParent = await lstat(root)
+    const ownershipChanges = vi.fn(async () => undefined)
+    setStateOwnershipDepsForTests({ euid: () => 0, lookup: () => ({ uid: initialParent.uid + 1, gid: initialParent.gid + 1 }), chown: ownershipChanges })
+    try {
+      await expect(writer.acquire()).rejects.toMatchObject({ code: 'VALIDATION' })
+      expect(ownershipChanges).not.toHaveBeenCalled()
+      const rejectedMutex = await lstat(writer.mutexFilePath), rejectedParent = await lstat(root)
+      expect([rejectedMutex.dev, rejectedMutex.ino, rejectedMutex.mode, rejectedMutex.gid, rejectedMutex.nlink]).toEqual([initialMutex.dev, initialMutex.ino, initialMutex.mode, initialMutex.gid, initialMutex.nlink])
+      expect([rejectedParent.uid, rejectedParent.gid]).toEqual([initialParent.uid, initialParent.gid])
+    } finally { setStateOwnershipDepsForTests(null) }
   })
   it('refuses orphan recovery after the closed mutex inode was replaced', async () => {
     const writer = lock(), lease = await acquire(writer)

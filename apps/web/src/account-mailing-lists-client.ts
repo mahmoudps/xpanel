@@ -96,7 +96,8 @@ function bindMailingLists(askDialog: ((options: Record<string, unknown>) => Prom
     let templates: { row: HTMLTemplateElement; empty: HTMLTemplateElement }
     try {
       templates = { row: clientTemplate(root, 'account-mailing-list-row'), empty: clientTemplate(root, 'account-mailing-list-empty') }
-      cloneClientTemplate(templates.row, 'tr', ['address', 'members', 'moderation', 'archive', 'remove'])
+      const row = cloneClientTemplate(templates.row, 'tr', ['address', 'members', 'moderation', 'archive', 'remove'])
+      if (clientTemplateSlot(row, 'remove', 'button').getAttribute('type') !== 'button') throw new Error('client_template_slot_unavailable')
       cloneClientTemplate(templates.empty, 'tr', ['message'])
     } catch {
       root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('button,input,select,textarea').forEach(control => { control.disabled = true })

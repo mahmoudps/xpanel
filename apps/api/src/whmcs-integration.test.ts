@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fail } from '@xpanel/core'
 import type { AuthenticatedCaller } from './auth.ts'
 import { handleWhmcsRoute, parseWhmcsProvision, parseWhmcsUpdate, readSavedWhmcs, readWhmcsActivity, whmcsRevision, WHMCS_ACTIVITY_KEEP } from './whmcs-integration.ts'
-import type { WhmcsActivityEntry, WhmcsRouteHelpers, WhmcsView } from './whmcs-integration.ts'
+import type { WhmcsActivityEntry, WhmcsProvisionPorts, WhmcsRouteHelpers, WhmcsView } from './whmcs-integration.ts'
+import { canonicalProvisioningIdentity } from './use-cases/account-provisioning-port.ts'
 
 const ROOT = { principal: { id: '11111111-1111-4111-8111-111111111111', kind: 'root', username: 'root' }, sessionId: 'one', apiTokenId: null } as AuthenticatedCaller
 const RESELLER = { principal: { id: '22222222-2222-4222-8222-222222222222', kind: 'reseller', username: 'reseller1' }, sessionId: 'two', apiTokenId: null } as AuthenticatedCaller
@@ -20,7 +21,7 @@ const configFile = () => join(root, 'extended', 'integrations', 'whmcs.json')
 
 function harness(caller = ROOT, overrides: Partial<WhmcsRouteHelpers> = {}) {
   const lease = { assertFencingToken: vi.fn(async () => undefined), release: vi.fn(async () => undefined) }
-  const ports = { createAccount: vi.fn(async () => undefined), suspendAccount: vi.fn(async () => undefined), unsuspendAccount: vi.fn(async () => undefined),
+  const ports = { createAccount: vi.fn<WhmcsProvisionPorts['createAccount']>(async () => undefined), suspendAccount: vi.fn(async () => undefined), unsuspendAccount: vi.fn(async () => undefined),
     terminateAccount: vi.fn(async () => undefined), changePlan: vi.fn(async () => undefined) }
   let ip: string | null = '203.0.113.10'
   const helpers = {
@@ -172,7 +173,8 @@ describe('WHMCS provisioning endpoint', () => {
     await ok({ action: 'change_package', username: 'alice', package: 'Business Pro' })
     await ok({ action: 'terminate', username: 'bob' })
     const actor = ROOT.principal.id
-    expect(h.ports.createAccount).toHaveBeenCalledWith({ actor, username: 'dave', primaryDomain: 'dave.example', planId: 'plan-basic', password: 'S3cret-pass', contactEmail: 'dave@example.test' })
+    expect(h.ports.createAccount).toHaveBeenCalledWith({ actor, username: 'dave', primaryDomain: 'dave.example', planId: 'plan-basic', password: 'S3cret-pass', contactEmail: 'dave@example.test' },
+      expect.objectContaining({ reference: expect.objectContaining({ kind: 'whmcs', principalId: actor, planId: 'plan-basic', package: 'Starter' }), assertCurrent: expect.any(Function) }))
     expect(h.ports.suspendAccount).toHaveBeenCalledWith({ actor, username: 'alice', reason: 'Overdue invoice' })
     expect(h.ports.unsuspendAccount).toHaveBeenCalledWith({ actor, username: 'alice' })
     expect(h.ports.changePlan).toHaveBeenCalledWith({ actor, username: 'alice', planId: 'plan-pro' })
@@ -193,6 +195,27 @@ describe('WHMCS provisioning endpoint', () => {
     expect(Object.values(h.ports).every(port => port.mock.calls.length === 0)).toBe(true)
     expect((await readWhmcsActivity(root)).map(entry => entry.reason)).toEqual(['invalid_request', 'account_not_found', 'package_not_mapped', 'create_disabled'])
   })
+  it('binds only the authenticated saved token/configuration and can recheck its authority without exposing a secret', async () => {
+    const h = harness(), auth = await h.configure()
+    const response = await h.call({ action: 'create', username: 'dave', domain: 'dave.example', package: 'Starter', password: 'S3cret-pass' }, auth)
+    const context = h.ports.createAccount.mock.calls[0]![1]
+    expect(Object.isFrozen(context.reference)).toBe(true)
+    expect(context.reference.recordIdentity).toBe(canonicalProvisioningIdentity(readSavedWhmcs(JSON.parse(await readFile(configFile(), 'utf8')))))
+    expect(JSON.stringify(context.reference)).not.toContain(auth.secret)
+    expect(await response!.text()).not.toContain(auth.secret)
+    await expect(context.assertCurrent()).resolves.toBeUndefined()
+    await h.rotate()
+    await expect(context.assertCurrent()).rejects.toMatchObject({ code: 'FORBIDDEN', detail: { reason: 'provisioning_authority_changed' } })
+  })
+
+  it('does not acknowledge a create when its token changes before the port returns', async () => {
+    const h = harness(), auth = await h.configure()
+    h.ports.createAccount.mockImplementationOnce(async () => { await h.rotate() })
+    await expect(h.call({ action: 'create', username: 'dave', domain: 'dave.example', package: 'Starter', password: 'S3cret-pass' }, auth)).rejects.toMatchObject({
+      code: 'FORBIDDEN', detail: { stateChanged: true, verificationRequired: true, reason: 'provisioning_authority_changed' },
+    })
+  })
+
   it('logs a port failure with its reason and passes the error on', async () => {
     const h = harness(), auth = await h.configure()
     h.ports.suspendAccount.mockRejectedValueOnce(Object.assign(new Error('x'), {}))

@@ -1,6 +1,6 @@
 import { teamClientTemplates } from '../../../client-templates/team-logs.ts'
 import type { PanelSurfaceProps } from '../../../../contract.ts'
-import { actions, button, deniedPage, esc, facts, field, fields, input, note, page, section, settingsContext, status, table, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from './common.ts'
+import { actions, button, deniedPage, esc, facts, field, fields, input, note, page, section, settingsContext, split, status, table, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from './common.ts'
 
 const ROLES = [
   ['administrator', msgid('Administrator'), msgid('Every account tool except calendars and contacts, service users, the owner preferences and sign-in security, API tokens and this team page.')],
@@ -26,5 +26,13 @@ export function renderV2AccountTeamPage(props: PanelSurfaceProps, authority: Pan
       + f('expires', t(msgid('Expires (UTC)')), input('v2-team-expires', '', 'datetime-local', ' dir="ltr" data-acct-team-input="expiresAt"', !c.editable), t(msgid('Empty never expires.')))
       + f('reason', t(msgid('Expiry reason')), input('v2-team-reason', '', 'text', ' maxlength="100" autocomplete="off" dir="auto" data-acct-team-input="expiryReason"', !c.editable)))}
     ${actions(`<button type="submit" class="v2-btn v2-btn--primary" data-acct-team-save${!c.editable ? ' disabled' : ''}>${esc(t(msgid('Add team member')))}</button><button type="button" class="v2-btn" data-acct-team-cancel hidden${!c.editable ? ' disabled' : ''}>${esc(t(msgid('Cancel editing')))}</button>`)}<p role="status" data-acct-team-save-status hidden></p></form></div></section>`
-  return page(props, authority, '/preferences/team', title, description, signin + list + editor + teamClientTemplates(), { 'data-acct-team-workspace': true, 'data-team-can-manage': String(c.editable), 'data-capability-state': c.editable ? 'authorized' : 'unavailable' })
+  const help = section('v2-team-help', t(msgctxt('theme:v2', 'How team access works')), facts([
+    { label: t(msgid('Sign-in')), valueHtml: esc(t(msgctxt('theme:v2', 'Use the xPanel sign-in page and the username shown in the team list. Sign-in availability follows the state reported above.'))) },
+    { label: t(msgid('Password')), valueHtml: esc(t(msgctxt('theme:v2', 'Set by the member through a single-use password link. You never see or choose their password.'))) },
+    { label: t(msgctxt('theme:v2', 'Role limit')), valueHtml: esc(t(msgctxt('theme:v2', 'Up to 7 members can hold a role. Suspended members still count.'))) },
+    { label: t(msgctxt('theme:v2', 'No role')), valueHtml: esc(t(msgctxt('theme:v2', 'Can sign in when team sign-in is enabled, but cannot use account tools.'))) },
+    { label: t(msgctxt('theme:v2', 'Sign-out')), valueHtml: esc(t(msgctxt('theme:v2', 'Suspending or deleting a member, or removing a role, signs that member out.'))) },
+    { label: t(msgctxt('theme:v2', 'Owner only')), valueHtml: esc(t(msgctxt('theme:v2', 'Only the signed-in account owner can manage the team, and the plan must include it.'))) },
+  ]))
+  return page(props, authority, '/preferences/team', title, description, signin + list + split(editor, help) + teamClientTemplates(), { 'data-acct-team-workspace': true, 'data-team-can-manage': String(c.editable), 'data-capability-state': c.editable ? 'authorized' : 'unavailable' })
 }

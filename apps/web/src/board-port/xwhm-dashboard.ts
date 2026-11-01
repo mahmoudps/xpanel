@@ -399,8 +399,8 @@ export interface MappedHostService {
   unit: string
   version: string
   active: boolean
-  enabled: boolean
-  rssMb: number
+  enabled: boolean | null
+  rssMb: number | null
   role: string
   installed: boolean
   checked: boolean
@@ -421,8 +421,9 @@ export const mapAgentServices = (payload: unknown): MappedHostService[] | null =
       unit: typeof service.unit === 'string' ? service.unit : '',
       version: '',
       active: state === 'active',
-      enabled: state === 'active',
-      rssMb: 0,
+      // The host service DTO contains neither boot enablement nor RSS.
+      enabled: null,
+      rssMb: null,
       role: '',
       installed,
       checked,

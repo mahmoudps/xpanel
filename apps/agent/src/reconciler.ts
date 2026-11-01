@@ -33,6 +33,7 @@ import type { StateSnapshot, StateStore } from '@xpanel/state'
 import { assertGenerationRollbackPreconditions, generationSourceIsLinked, isStateDirectoryDurabilityError, parseGenerationRollbackRequest, withGenerationReconciliationLease } from '@xpanel/state'
 import type { GenerationRollbackRequest } from '@xpanel/state'
 import type { AgentExecutor } from './executor.ts'
+import { assertHostEffectAuthority, withHostEffectAuthority, type HostEffectAuthority } from './host-effect-authority.ts'
 import { applyPostfixLocalDelivery, localMailNeedsUpdate, retirePostfixLocalDelivery } from './services/local-mail.ts'
 import { ensureOpenDkimSigning, mailAuthZoneAdditions, type OpenDkimSigning } from './services/opendkim-live.ts'
 import { removedMaildirPaths } from './services/mail.ts'
@@ -177,6 +178,12 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     }
   }
 
+  const probeAccounts = snapshot.accounts.filter(account => account.status !== 'terminating'
+    && snapshot.domains.some(domain => domain.accountId === account.id && domain.siteType === 'php' && domain.php.handler === 'fpm'))
+  if (snapshot.server && probeAccounts.length) {
+    preActions.push(...system.accountProbeDirectories(probeAccounts))
+    files.push(system.renderAccountProbeAsset())
+  }
   const plansById = new Map(snapshot.plans.map((p) => [p.id, p]))
   const certs = snapshot.certificates
 
@@ -745,6 +752,9 @@ export interface ReconcileOptions {
   force?: boolean
   scope?: LiveEventScope
   actor?: string
+  /** Trusted account operation only; HTTP reconcile bodies cannot supply authority. */
+  effectAuthority?: HostEffectAuthority
+  expectedState?: { revision: number; checksum: string }
   mailAuth?: OpenDkimSigning | null
   /** Trusted rollback source; never populated from an HTTP reconcile body. */
   expectedRestoredState?: { revision: number; checksum: string }
@@ -1413,7 +1423,11 @@ export class HostReconciler {
    * atomically and updates the SQLite index.
    */
   async reconcile(opts: ReconcileOptions = {}): Promise<ReconcileResult> {
-    return withLifecycleWriterAdmission(() => withGenerationReconciliationLease(this.deps.store.rootDir, () => this.reconcileAdmitted(opts)))
+    const run = () => withLifecycleWriterAdmission(() => withGenerationReconciliationLease(this.deps.store.rootDir, async () => {
+      await assertHostEffectAuthority(this.deps.executor)
+      return this.reconcileAdmitted(opts)
+    }))
+    return opts.effectAuthority ? withHostEffectAuthority(this.deps.executor, opts.effectAuthority, run) : run()
   }
 
   private async reconcileAdmitted(opts: ReconcileOptions = {}): Promise<ReconcileResult> {
@@ -1425,6 +1439,9 @@ export class HostReconciler {
     await this.journal.assertNoUnresolvedPreparation()
     const existingJournal = await this.journal.readActiveJournal()
     if (existingJournal) {
+      if (opts.effectAuthority) return fail('PRECONDITION_FAILED', 'an interrupted reconciliation requires separate operator recovery before account provisioning', {
+        stateChanged: false, verificationRequired: true, generationId: existingJournal.generationId,
+      })
       if (existingJournal.phase === 'needs_attention') {
         fail('PRECONDITION_FAILED', 'previous reconciliation rollback failed and requires operator attention', {
           generationId: existingJournal.generationId,
@@ -1441,6 +1458,10 @@ export class HostReconciler {
     }
 
     const snapshot = await this.deps.store.readSnapshot()
+    if (opts.expectedState && (snapshot.revision !== opts.expectedState.revision || snapshot.checksum !== opts.expectedState.checksum)) {
+      return fail('CONFLICT', 'the saved account source changed before reconciliation', { stateChanged: false })
+    }
+    await assertHostEffectAuthority(this.deps.executor)
     const mailForwarding = await readMailForwardingConfiguration(this.deps.store.rootDir, snapshot)
     // mailfx: Sieve inputs come from saved files; the milter needs systemd answers, read after preflight.
     let mailFx = await readMailfxRenderInput(this.deps.store.rootDir, snapshot, this.deps.os.family, null)
@@ -1526,6 +1547,9 @@ export class HostReconciler {
     // Preflight MUST run before any executor read/write/action or DB/snapshot creation.
     let mailAuth = opts.mailAuth ?? null
     let compiled = compileMail(mailAuth)
+    if (opts.effectAuthority && compiled.terminatingAccounts.length) {
+      return fail('PRECONDITION_FAILED', 'pending account retirements require a separate reconciliation before provisioning', { stateChanged: false })
+    }
     let filesChecksum = computeFilesChecksum(compiled.files)
     await this.deps.executor.preflight(preflightOf(compiled, filesChecksum))
     const removedPathsFor = (files: readonly RenderedFile[]): string[] => {
@@ -1597,6 +1621,7 @@ export class HostReconciler {
       repairedDriftCount = drift.items.length + (mailDrift ? 1 : 0)
     }
 
+    await assertHostEffectAuthority(this.deps.executor)
     const pendingGen = await createGeneration(this.deps.db, {
       checksum: filesChecksum,
       actor,
@@ -1619,10 +1644,12 @@ export class HostReconciler {
       await assertMailForwardingUnchanged()
       // Persist exactly the state that produced these files. The store rejects
       // a revision advanced during preflight before any live host activation.
+      await assertHostEffectAuthority(this.deps.executor)
       await this.deps.store.saveGenerationSnapshot(pendingGen.id, snapshot)
       if (JSON.stringify(savedRuntimes(await readRuntimeRegistries(this.deps.store.rootDir, snapshot.accounts))) !== runtimeText) {
         fail('CONFLICT', 'Saved runtime services changed during reconciliation; retry the current configuration')
       }
+      await assertHostEffectAuthority(this.deps.executor)
       await saveRuntimeGeneration(this.deps.store.rootDir, pendingGen.id, runtime)
     } catch (err) {
       const errorMsg = (err instanceof Error ? err.message : String(err)).slice(0, 2000)
@@ -1670,7 +1697,9 @@ export class HostReconciler {
     }
 
     try {
+      await assertHostEffectAuthority(this.deps.executor)
       await this.journal.saveJournal(journalRecord)
+      await assertHostEffectAuthority(this.deps.executor)
       await this.journal.stageCandidateFiles(pendingGen.id, compiled.files, candidateManifest)
       this.emitStage(pendingGen.id, 'render', 'passed', scope)
       await this.invokePhaseHook('stage', journalRecord)
@@ -1924,6 +1953,10 @@ export class HostReconciler {
         await removeRuntimeRegistry(this.deps.store.rootDir, term.id)
       }
 
+      await assertHostEffectAuthority(this.deps.executor)
+      // Once admitted, complete the existing activation/manifest/projection
+      // protocol before acknowledging authority again. A loss cannot be called
+      // an undone commit; the outer scope reports it as requiring verification.
       const appliedGen = await activate(this.deps.db, pendingGen.id)
       await this.journal.writeManifest(candidateManifest)
 

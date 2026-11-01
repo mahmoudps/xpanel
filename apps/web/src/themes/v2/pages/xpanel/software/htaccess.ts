@@ -1,9 +1,14 @@
+import { isToolAuthorized, tools as defaultCatalog } from '@xpanel/catalog'
 import { htaccessClientTemplates } from '../advanced/directive-client-templates.ts'
 import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { actions, area, button, deniedPage, esc, facts, field, fields, link, note, page, section, select, settingsContext, split, status, table, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from '../settings/common.ts'
 
 export function renderV2PanelHtaccessPage(props: PanelSurfaceProps, authority: PanelSettingsAuthority = NO_SETTINGS_AUTHORITY): string {
   const c = settingsContext(props, authority), { t } = c, title = t(msgid('.htaccess editor')), description = t(msgid('Edit site rules and validate before replacing the saved file.'))
+  const canManage = c.editable && props.visibility?.principal.kind === 'user' && props.visibility.principal.accountId === c.account?.id
+    && (props.catalog ?? defaultCatalog).some(tool => tool.id === 'domain-htaccess' && tool.status === 'verified' && tool.delivery.status === 'verified' && isToolAuthorized(tool, props.visibility!))
+  // The existing controller reads row capabilities before enabling validation/save/restore.
+  // No PHP update port is supplied by this bounded contract; migration remains unavailable.
   const context = section('v2-htaccess-context', t(msgid('Domain and file')), field('v2-htaccess-domain', t(msgid('Domain')), select('v2-htaccess-domain', '', (c.domains ?? []).map(domain => [domain.id, domain.name]), ' data-htaccess-domain', true, c.selected?.id))
     + facts([{ label: t(msgid('Account-relative file')), valueHtml: `<bdi dir="ltr" data-htaccess-path>${esc(t(msgid('Not read')))}</bdi>` }, { label: t(msgid('Local site check')), valueHtml: `<bdi dir="ltr" data-htaccess-http>${esc(t(msgid('Not checked')))}</bdi>` }]))
   const editor = section('v2-htaccess-editor', t(msgid('File editor')), field('v2-htaccess-preset', t(msgid('Rewrite template')), select('v2-htaccess-preset', '', [['wordpress', 'WordPress'], ['https', t(msgid('Force HTTPS behind the proxy'))], ['private', t(msgid('Keep configuration files private'))]], ' data-htaccess-preset', true))
@@ -27,8 +32,8 @@ export function renderV2PanelHtaccessPage(props: PanelSurfaceProps, authority: P
   const versions = section('v2-htaccess-versions', t(msgid('Kept versions')), note(t(msgid('The protected service keeps the latest 30 versions.')))
     + table('v2-htaccess-version-table', t(msgid('Kept versions')), [t(msgid('Saved at (UTC)')), t(msgid('Actor')), t(msgid('Bytes')), t(msgid('State')), t(msgid('Action'))], unreadRow(5, t(msgid('Kept versions have not been read.'))), { 'data-htaccess-versions': true }))
   const save = section('v2-htaccess-save', t(msgid('What a save does')), `<ol>${[msgid('Checks the current domain, authorization and file revision.'), msgid('Keeps the current file before any replacement.'), msgid('Validates the candidate with the protected Apache parser.'), msgid('Writes the actual file and checks the authoritative site through loopback.'), msgid('Restores the kept content after a failed check only while the written candidate still matches. An unsafe or uncertain outcome stops further writes.')].map(copy => `<li>${esc(t(copy))}</li>`).join('')}</ol>`
-    + note(t(msgctxt('theme:v2', 'This route is not qualified for file changes. The editor and workflow remain visible, but no file operation is started.'))))
-  return page(props, authority, '/software/htaccess', title, description, context + split(editor + test + changes, php + versions + save) + htaccessClientTemplates(), { 'data-htaccess-workspace': true, 'data-htaccess-account': (c.account?.id ?? ''), 'data-htaccess-manage': 'false', 'data-wiring': 'soon' })
+    + (canManage ? '' : note(t(msgctxt('theme:v2', 'This route is not qualified for file changes. The editor and workflow remain visible, but no file operation is started.')))))
+  return page(props, authority, '/software/htaccess', title, description, context + split(editor + test + changes, php + versions + save) + htaccessClientTemplates(), { 'data-htaccess-workspace': true, 'data-htaccess-account': (c.account?.id ?? ''), 'data-htaccess-manage': String(canManage), 'data-wiring': canManage ? 'connected' : 'soon' })
 }
 
 export const PANEL_HTACCESS_CSS = `.v2-panel-settings .v2-settings-code-editor{display:grid;grid-template-columns:48px minmax(0,1fr);border:1px solid var(--line);border-radius:var(--radius-control);overflow:hidden;direction:ltr}.v2-panel-settings .v2-settings-code-editor>pre{padding:12px 4px;text-align:end;user-select:none;background:var(--sunken);color:var(--muted);font-family:var(--font-mono);white-space:pre;block-size:420px}.v2-panel-settings .v2-settings-code-editor>textarea{border:0;border-radius:0;padding:12px;white-space:pre;overflow:auto;block-size:420px}`

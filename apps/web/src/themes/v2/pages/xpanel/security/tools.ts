@@ -1,3 +1,4 @@
+import { v2SecClientTemplates } from '../../../components/sec-client-templates.ts'
 import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { kpiCard } from '../../../components/kpi-card.ts'
 import type { IconName } from '../../../icons.ts'
@@ -39,5 +40,5 @@ export function renderV2AccountWafPage(props: PanelSurfaceProps, authority: Pane
     + note(t(msgid('These limits are set by the server administrator and apply to every site on this server.'))), actions(button(t(msgid('Refresh')), { 'data-sec-action': 'refresh' }, !c.readable)))
   const domains = section('v2-waf-domains', t(msgid('ModSecurity per domain')), table('v2-waf-table', t(msgid('ModSecurity per domain')), [t(msgid('Domain')), t(msgid('ModSecurity')), t(msgid('Actions'))], unreadRow(3, t(msgid('No domains have been read.'))), { 'data-sec-rows': 'domains' })
     + note(t(msgid('Turning ModSecurity off for a domain stops rule checks for its sites. The server deny lists and limits still apply.'))) + '<p data-sec-result role="status" hidden></p>')
-  return page(props, authority, '/security/waf', title, description, read + domains, { 'data-sec-workspace': true, 'data-sec-page': 'account-waf', 'data-sec-can-read': String(c.readable), 'data-sec-can-manage': String(c.editable) })
+  return page(props, authority, '/security/waf', title, description, v2SecClientTemplates('account-waf') + read + domains, { 'data-sec-workspace': true, 'data-sec-page': 'account-waf', 'data-sec-can-read': String(c.readable), 'data-sec-can-manage': String(c.editable) })
 }

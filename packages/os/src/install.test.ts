@@ -686,6 +686,19 @@ describe('H02 unified preflight, opt-in services & durable install phase journal
     expect(preforkErr.message).toContain('shared-identity prefork fallback is refused')
   })
 
+  it('admits canonical xpanel data ownership at current and legacy installed modes', () => {
+    const base = cleanProbe()
+    for (const mode of [0o2750, 0o2770]) {
+      const report = verifyInstallPreflight(cleanProbe({
+        statPath: (path) => path === '/var/lib/xpanel'
+          ? { exists: true, isSymbolicLink: false, isDirectory: true, isFile: false,
+              uid: 991, gid: 991, owner: 'xpanel', group: 'xpanel', mode }
+          : base.statPath(path),
+      }))
+      expect(report.ok).toBe(true)
+    }
+  })
+
   it('rejects active xpanel services, missing cgroup v2 controllers, missing quota tools, port conflicts, and writable parent paths', () => {
     // Active xpanel-api / xpanel-agent services -> CONFLICT directing to upgrade
     const activeErr = error(() => verifyInstallPreflight(cleanProbe({ activeUnits: ['xpanel-api.service'] })))
@@ -863,6 +876,10 @@ describe('H02 unified preflight, opt-in services & durable install phase journal
 
     expect(secondRun.journal.lastFailedPhase).toBeNull()
     expect(secondRun.journal.completedPhases).toEqual([...INSTALL_PHASES])
+
+    // Normal installed paths must satisfy retained-directory ownership and mode checks.
+    expect(dirs.get('/var/lib/xpanel')).toEqual({ mode: 0o2750, owner: 'xpanel', group: 'xpanel' })
+    expect(dirs.get('/var/lib/xpanel/state')).toEqual({ mode: 0o2750, owner: 'xpanel', group: 'xpanel' })
 
     // Verify existing valid 0640 root:xpanel secrets were preserved, NOT rotated or clobbered
     expect(files.get('/etc/xpanel/agent.token')?.content).toBe(firstAgentToken)

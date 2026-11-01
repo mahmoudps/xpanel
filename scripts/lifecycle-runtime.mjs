@@ -59,6 +59,10 @@ export async function runLifecycleRuntime(input) {
     if (process.version !== 'v26.12.1' || process.env.NODE_OPTIONS || process.env.NODE_PATH) fail('LIFECYCLE_PINNED_RUNTIME_REQUIRED')
     // A real pending barrier must be recovered, never bypassed by a new apply request.
     if (await readLifecycleBarrier() && request.command !== 'recover') fail('LIFECYCLE_RETAINED_ATTENTION')
+    if (request.command === 'install' && request.mode === 'apply') {
+      const bootstrap = await import('./install-bootstrap.mjs')
+      return await bootstrap.finalizePreparedInstallation(request)
+    }
     const native = await import('./lifecycle-root-safety.mjs')
     return await native.executeNativeLifecycleCommand(request)
   } catch (error) {

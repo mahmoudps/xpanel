@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmServiceDetailWorkspace } from './board-port/whm-service-detail-workspace.ts'
+import { renderV2WhmServiceDetail } from './themes/v2/pages/xwhm/service-tools/details.ts'
+import { translator } from './i18n.ts'
 import type { WhmServiceDetailKind } from './board-port/whm-service-detail-workspace.ts'
 import { readServiceDetailView, readZoneCheckView, WHM_SERVICE_DETAIL_CLIENT_BINDING } from './whm-service-detail-client.ts'
 
@@ -183,5 +185,116 @@ describe('service detail full timestamp display', () => {
     expect(JSON.stringify(payload)).toBe(canonicalPayload)
     expect(send.mock.calls.map(([method]) => method)).toEqual(['GET'])
     expect(document.body.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+  })
+})
+
+
+type ServiceTheme = 'classic' | 'v2'
+const mountServiceTheme = (theme: ServiceTheme, kind: WhmServiceDetailKind = 'dns', locale: 'en' | 'ar' = 'en', canRead = true, canRestart = true): void => {
+  if (theme === 'classic') { mount(kind, locale, canRead, canRestart); return }
+  document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'
+  document.body.innerHTML = renderV2WhmServiceDetail({ locale, principal: { kind: 'root', id: 'fixture-root', username: 'operator' }, dataAuthority: { canRead, canManage: canRestart } }, kind)
+}
+const dnsPrototype = (): HTMLTemplateElement => document.querySelector<HTMLTemplateElement>('template[data-xp-template="whm-service-check-zone"]')!
+const servicePrototypeFaults = ['missing', 'duplicate', 'wrong-root', 'missing-slot', 'duplicate-slot', 'unknown-slot', 'wrong-slot-tag', 'enabled', 'submit'] as const
+const damageDnsPrototype = (fault: typeof servicePrototypeFaults[number]): void => {
+  const template = dnsPrototype(); expect(template).not.toBeNull()
+  const button = template.content.firstElementChild as HTMLButtonElement
+  if (fault === 'missing') { template.remove(); return }
+  if (fault === 'duplicate') { template.after(template.cloneNode(true)); return }
+  if (fault === 'wrong-root') { const span = document.createElement('span'); span.dataset.xpSlot = 'content'; button.replaceWith(span); return }
+  if (fault === 'missing-slot') button.removeAttribute('data-xp-slot')
+  if (fault === 'duplicate-slot') { const span = document.createElement('span'); span.dataset.xpSlot = 'content'; button.append(span) }
+  if (fault === 'unknown-slot') button.dataset.xpSlot = 'unreviewed'
+  if (fault === 'wrong-slot-tag') { button.removeAttribute('data-xp-slot'); const span = document.createElement('span'); span.dataset.xpSlot = 'content'; button.append(span) }
+  if (fault === 'enabled') button.disabled = false
+  if (fault === 'submit') button.type = 'submit'
+}
+
+describe.each(['classic', 'v2'] as const)('%s DNS finite button contract', theme => {
+  it.each(['en', 'ar'] as const)('clones the selected %s theme button and preserves the read-only check payload', async locale => {
+    mountServiceTheme(theme, 'dns', locale)
+    const prototype = dnsPrototype().content.firstElementChild as HTMLButtonElement
+    expect(prototype.type).toBe('button'); expect(prototype.disabled).toBe(true)
+    expect(prototype.classList.contains(theme === 'classic' ? 'xp-btn' : 'v2-btn')).toBe(true)
+    expect(document.querySelector('[data-whm-service-detail-check-zone]')).toBeNull()
+    const send = vi.fn(async (_method: string, path: string) => path.includes('zone-check') ? { zone: 'example.com', observedAt: at, state: 'passed', records: 3, errors: 0, warnings: 0, messages: [] } : dns())
+    boot(send); await tick()
+    const button = document.querySelector<HTMLButtonElement>('[data-whm-service-detail-check-zone="example.com"]')!
+    expect(button.className).toBe(prototype.className)
+    expect(button.textContent).toBe(translator(locale)('Check zone'))
+    expect(button.getAttribute('aria-label')).toBe(translator(locale)('Check zone {zone}', { zone: 'example.com' }))
+    expect(button.type).toBe('button'); expect(button.disabled).toBe(false); expect(prototype.disabled).toBe(true)
+    if (theme === 'v2') expect(button.classList.contains('xp-btn')).toBe(false)
+    button.click(); await tick()
+    expect(send.mock.calls).toEqual([['GET', '/api/server/services/dns'], ['GET', '/api/server/services/dns/zone-check?zone=example.com']])
+    expect(document.querySelector<HTMLElement>('[data-whm-service-detail-check]')!.dataset.outcome).toBe('passed')
+    expect(document.body.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+  })
+  it.each(servicePrototypeFaults)('blocks the initial GET for a %s prototype', async fault => {
+    mountServiceTheme(theme); damageDnsPrototype(fault)
+    const send = vi.fn(), ask = vi.fn(async () => true)
+    boot(send, ask); await tick()
+    expect(send).not.toHaveBeenCalled(); expect(ask).not.toHaveBeenCalled()
+    expect(status().dataset.state).toBe('unavailable')
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')].every(control => control.disabled)).toBe(true)
+    expect(fact('state')).toBe('Not read')
+  })
+  it('retains independent read authority without restart authority', async () => {
+    mountServiceTheme(theme, 'dns', 'en', true, false)
+    const send = vi.fn(async (_method: string, _path: string) => dns()), ask = vi.fn(async () => true)
+    boot(send, ask); await tick()
+    const restart = document.querySelector<HTMLButtonElement>('[data-whm-service-detail-restart]')!
+    expect(restart.disabled).toBe(true)
+    expect(document.querySelector<HTMLButtonElement>('[data-whm-service-detail-check-zone]')!.disabled).toBe(false)
+    restart.disabled = false; restart.click(); await tick()
+    expect(ask).not.toHaveBeenCalled(); expect(send.mock.calls).toEqual([['GET', '/api/server/services/dns']])
+  })
+  it.each(['resolved', 'rejected'] as const)('locks a prototype lost during a %s initial read', async settlement => {
+    mountServiceTheme(theme)
+    let resolve!: (value: unknown) => void, reject!: (error: Error) => void
+    const send = vi.fn((_method: string, _path: string) => new Promise<unknown>((yes, no) => { resolve = yes; reject = no }))
+    boot(send); await tick(); expect(send).toHaveBeenCalledOnce()
+    dnsPrototype().remove()
+    if (settlement === 'resolved') resolve(dns()); else reject(new Error('unavailable'))
+    await tick()
+    expect(status().dataset.state).toBe('unavailable'); expect(fact('state')).toBe('Not read')
+    expect(document.querySelector('[data-whm-service-detail-check-zone]')).toBeNull()
+    const refresh = document.querySelector<HTMLButtonElement>('[data-whm-service-detail-refresh]')!
+    expect(refresh.disabled).toBe(true); refresh.disabled = false; refresh.click(); await tick()
+    expect(send).toHaveBeenCalledOnce()
+  })
+  it('refuses a late zone result and further checks after prototype loss', async () => {
+    mountServiceTheme(theme)
+    let resolve!: (value: unknown) => void
+    const send = vi.fn(async (_method: string, path: string) => path.includes('zone-check') ? new Promise<unknown>(yes => { resolve = yes }) : dns())
+    boot(send); await tick()
+    const button = document.querySelector<HTMLButtonElement>('[data-whm-service-detail-check-zone="example.com"]')!
+    button.click(); await tick(); expect(send).toHaveBeenCalledTimes(2)
+    dnsPrototype().remove(); resolve({ zone: 'example.com', observedAt: at, state: 'passed', records: 3, errors: 0, warnings: 0, messages: [] }); await tick()
+    expect(status().dataset.state).toBe('unavailable')
+    expect(document.querySelector<HTMLElement>('[data-whm-service-detail-check]')!.dataset.outcome).not.toBe('passed')
+    expect(button.disabled).toBe(true)
+    button.disabled = false; button.click(); await tick(); expect(send).toHaveBeenCalledTimes(2)
+  })
+  it('sends no restart or readback after prototype loss while confirmation is pending', async () => {
+    mountServiceTheme(theme)
+    let confirm!: (value: boolean) => void
+    const ask = vi.fn(() => new Promise<boolean>(yes => { confirm = yes }))
+    const send = vi.fn(async (_method: string, _path: string) => dns())
+    boot(send, ask); await tick()
+    document.querySelector<HTMLButtonElement>('[data-whm-service-detail-restart]')!.click(); await tick()
+    expect(ask).toHaveBeenCalledOnce(); dnsPrototype().remove(); confirm(true); await tick()
+    expect(send.mock.calls).toEqual([['GET', '/api/server/services/dns']])
+    expect(status().dataset.state).toBe('unavailable')
+    expect(document.querySelector<HTMLButtonElement>('[data-whm-service-detail-restart]')!.disabled).toBe(true)
+  })
+  it.each(['ftp', 'certificates'] as const)('keeps %s independent of the DNS-only prototype', async kind => {
+    mountServiceTheme(theme, kind); expect(dnsPrototype()).toBeNull()
+    document.querySelector('[data-whm-service-detail-workspace]')!.insertAdjacentHTML('beforeend', '<template data-xp-template="whm-service-check-zone"><div>unrelated malformed prototype</div></template>')
+    const send = vi.fn(async (_method: string, _path: string) => views[kind]())
+    boot(send); await tick()
+    expect(status().dataset.state).toBe('read'); expect(send.mock.calls).toEqual([['GET', '/api/server/services/' + kind]])
+    expect(document.querySelector('[data-whm-service-detail-check-zone]')).toBeNull()
   })
 })

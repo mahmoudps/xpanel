@@ -1,8 +1,10 @@
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
 import './i18n.ts'
 const displayDateTime = formatDisplayDateTime
+const clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
 type Transport = (method: string, path: string, body?: unknown) => Promise<unknown>
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
 export type SecSavedKind = 'waf' | 'flood' | 'panel-access' | 'dns-cluster'
@@ -43,11 +45,13 @@ export function secKit(root: HTMLElement, askDialog: Ask | undefined, displayDat
   const q = <T extends Element = HTMLElement>(selector: string): T | null => root.querySelector<T>(selector)
   const all = <T extends Element = HTMLElement>(selector: string): T[] => [...root.querySelectorAll<T>(selector)]
   const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
+  let dynamicTemplatesRequired = false, templatesInvalid = false
+  let actionTemplate: HTMLTemplateElement | null = null, groupTemplate: HTMLTemplateElement | null = null
   const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-  const admitted = (): boolean => root.isConnected && root.dataset.secCanRead === 'true' && !root.closest(denied) && typeof request === 'function'
+  const admitted = (): boolean => root.isConnected && !templatesInvalid && root.dataset.secCanRead === 'true' && !root.closest(denied) && typeof request === 'function'
   const manageable = (): boolean => admitted() && root.dataset.secCanManage === 'true'
   const status = q('[data-sec-status]'), banner = q('[data-sec-result]')
-  const note = (state: string, message: string): void => { if (!status) return; status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
+  const note = (state: string, message: string): void => { if (!status || templatesInvalid && state !== 'unavailable') return; status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
   const show = (kind: string, message: string): void => { if (!banner) return; banner.hidden = false; banner.dataset.outcome = kind; banner.textContent = message; banner.setAttribute('role', ['unknown', 'denied', 'failed'].includes(kind) ? 'alert' : 'status') }
   const technical = (value: string): HTMLElement => { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = value; return bdi }
   const field = (key: string, value: string | null, tone?: string): void => { const node = q('[data-sec-field="' + key + '"]'); if (!node) return; node.textContent = value ?? t('Not read'); if (tone) node.dataset.tone = tone }
@@ -61,8 +65,38 @@ export function secKit(root: HTMLElement, askDialog: Ask | undefined, displayDat
     for (const cells of data) { const row = document.createElement('tr'); for (const content of cells) { const td = document.createElement('td'); td.append(content); row.append(td) } body.append(row) }
     if (!data.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = columns; td.textContent = empty; row.append(td); body.append(row) }
   }
-  const actionButton = (label: string, accessible: string, onClick: () => void, disabled: boolean): HTMLButtonElement => { const b = document.createElement('button'); b.type = 'button'; b.className = 'xp-btn'; b.textContent = label; b.setAttribute('aria-label', accessible); b.disabled = disabled; b.addEventListener('click', onClick); return b }
-  const group = (...items: Node[]): HTMLElement => { const div = document.createElement('div'); div.className = 'xp-sec__actions'; div.append(...items); return div }
+  const prepareTemplates = (): boolean => {
+    dynamicTemplatesRequired = true
+    if (templatesInvalid) return false
+    try {
+      const nextAction = clientTemplate(root, 'sec-action'), nextGroup = clientTemplate(root, 'sec-action-group')
+      const button = cloneClientTemplate(nextAction, 'button', ['label'])
+      clientTemplateSlot(button, 'label', 'span')
+      if (button.getAttribute('type') !== 'button') throw new Error('client_template_slot_unavailable')
+      clientTemplateSlot(cloneClientTemplate(nextGroup, 'div', ['items']), 'items', 'div')
+      actionTemplate = nextAction; groupTemplate = nextGroup
+      return true
+    } catch {
+      templatesInvalid = true
+      for (const control of all<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>('input,textarea,select,button')) control.disabled = true
+      note('unavailable', t('Unavailable'))
+      return false
+    }
+  }
+  const actionButton = (label: string, accessible: string, onClick: () => void, disabled: boolean): HTMLButtonElement => {
+    if (!actionTemplate) throw new Error('client_template_unavailable')
+    const button = cloneClientTemplate(actionTemplate, 'button', ['label']) as HTMLButtonElement
+    if (button.getAttribute('type') !== 'button') throw new Error('client_template_slot_unavailable')
+    clientTemplateSlot(button, 'label', 'span').textContent = label
+    button.setAttribute('aria-label', accessible); button.disabled = disabled; button.addEventListener('click', onClick)
+    return button
+  }
+  const group = (...items: Node[]): HTMLElement => {
+    if (!groupTemplate) throw new Error('client_template_unavailable')
+    const clone = cloneClientTemplate(groupTemplate, 'div', ['items'])
+    clientTemplateSlot(clone, 'items', 'div').append(...items)
+    return clone
+  }
   const outcome = (error: unknown): string => {
     const problem = error && typeof error === 'object' ? error as { status?: number; code?: string; details?: Record<string, unknown> } : {}, details = problem.details && typeof problem.details === 'object' ? problem.details : {}
     if (details.rolledBack === true) return 'rolled_back'
@@ -85,16 +119,21 @@ export function secKit(root: HTMLElement, askDialog: Ask | undefined, displayDat
     : value === 'failed' ? t('Saved, but the server reported that applying it failed. The previous generation stays active.')
     : value === 'unknown' ? t('Saved, but the apply outcome is unknown. Refresh before trying again.') : t('Saved.')
   const confirm = async (options: Record<string, unknown>): Promise<boolean> => {
+    if (dynamicTemplatesRequired && !prepareTemplates()) return false
     if (!askDialog) { show('refused', t('Confirmation is unavailable; nothing was changed.')); return false }
     try { return await askDialog(options) === true } catch { return false }
   }
-  let busy = false
+  let busy = false, mutationAttempted = false
   const controls: (() => void)[] = []
-  const lock = (): void => { root.setAttribute('aria-busy', String(busy)); for (const control of controls) control() }
-  const guarded = async (work: () => Promise<void>): Promise<void> => { if (busy || !admitted()) return; busy = true; lock(); try { await work() } finally { busy = false; lock() } }
+  const lock = (): void => { root.setAttribute('aria-busy', String(busy)); for (const control of controls) control(); if (templatesInvalid) for (const control of all<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>('input,textarea,select,button')) control.disabled = true }
+  const guarded = async (work: () => Promise<void>): Promise<void> => { if (busy || !admitted() || dynamicTemplatesRequired && !prepareTemplates()) return; mutationAttempted = false; busy = true; lock(); try { await work() } finally { busy = false; lock() } }
   const isBusy = (): boolean => busy
-  const send = (method: string, path: string, body?: unknown): Promise<unknown> => request!(method, path, body)
-  return { t, q, all, admitted, manageable, note, show, technical, field, when, input, yesNo, rows, actionButton, group, outcome, failure, reconcileText, confirm, guarded, controls, lock, isBusy, send }
+  const send = (method: string, path: string, body?: unknown): Promise<unknown> => {
+    if (dynamicTemplatesRequired && !prepareTemplates()) return Promise.reject(Object.assign(new Error('client_template_unavailable'), { details: { stateChanged: mutationAttempted } }))
+    if (method !== 'GET' && method !== 'HEAD') mutationAttempted = true
+    return request!(method, path, body)
+  }
+  return { t, q, all, admitted, manageable, note, show, technical, field, when, input, yesNo, rows, prepareTemplates, actionButton, group, outcome, failure, reconcileText, confirm, guarded, controls, lock, isBusy, send }
 }
 
 function bindSecSecurity(askDialog: Ask | undefined): void {
@@ -105,6 +144,7 @@ function bindSecSecurity(askDialog: Ask | undefined): void {
     const k = secKit(root, askDialog, displayDateTime), t = k.t
     const refresh = k.q<HTMLButtonElement>('[data-sec-action="refresh"]'), save = k.q<HTMLButtonElement>('[data-sec-action="save"]')
     if (!k.admitted()) { if (refresh) refresh.disabled = true; k.note('unavailable', t('This page is unavailable here. Nothing was read or changed.')); return }
+    if (page === 'account-waf' && !k.prepareTemplates()) return
     const editors = k.all<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('[data-sec-input]')
     let loaded = false
     k.controls.push(() => { if (refresh) refresh.disabled = k.isBusy(); const editable = loaded && !k.isBusy() && k.manageable(); for (const editor of editors) editor.disabled = !editable; if (save) save.disabled = !editable })
@@ -115,6 +155,7 @@ function bindSecSecurity(askDialog: Ask | undefined): void {
     if (page === 'account-waf') {
       let view: SecAccountWafView | null = null
       const paint = (next: SecAccountWafView): void => {
+        if (!k.prepareTemplates()) return
         view = next; loaded = true
         const s = next.server, live = next.live
         k.field('modsec', !live ? t('Not read') : live.active.modsecurity ? t('Active') : live.connector ? t('Installed, not active') : t(msgctxt('sec-security-client', 'Not installed')), live?.active.modsecurity ? 'good' : 'neutral')
@@ -226,4 +267,5 @@ function bindSecSecurity(askDialog: Ask | undefined): void {
     void load()
   })
 }
-export const SEC_SECURITY_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};const readSecSavedView=${readSecSavedView.toString()};const readSecAccountWafView=${readSecAccountWafView.toString()};const secKit=${secKit.toString()};return ${bindSecSecurity.toString()};})()`
+export const SEC_CLIENT_TEMPLATE_HELPERS = `${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};`
+export const SEC_SECURITY_CLIENT_BINDING = `(()=>{${SEC_CLIENT_TEMPLATE_HELPERS}const displayDateTime=${DISPLAY_DATETIME_BINDING};const readSecSavedView=${readSecSavedView.toString()};const readSecAccountWafView=${readSecAccountWafView.toString()};const secKit=${secKit.toString()};return ${bindSecSecurity.toString()};})()`

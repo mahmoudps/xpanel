@@ -358,6 +358,9 @@ export interface EnqueueDurableJobInput {
   maxAttempts?: number
 }
 
+/** Trusted in-process admission only. Use tx, never the outer runner or an external effect. */
+export type DurableJobEnqueueAdmission = (tx: Db, job: DurableJobRecord) => Promise<void>
+
 /**
  * Enqueues a durable background job with idempotency deduplication, redacted detail,
  * and a server-allocated reference code (`XP-JOB-XXXXXX`).
@@ -368,6 +371,7 @@ export interface EnqueueDurableJobInput {
 export const enqueueDurableJob = (
   db: Db,
   input: EnqueueDurableJobInput,
+  admit?: DurableJobEnqueueAdmission,
 ): Promise<DurableJobRecord & { deduplicated: boolean }> =>
   withSqliteErrors(async () => {
     assertRegisteredDatabaseRunner(db)
@@ -424,6 +428,7 @@ export const enqueueDurableJob = (
               existingJobId: existingJob.id,
             })
           }
+          if (admit) await admit(tx, existingJob)
           return { ...existingJob, deduplicated: true }
         }
       }
@@ -444,6 +449,7 @@ export const enqueueDurableJob = (
         [id, idempotencyKey, requestFingerprint, targetRevision, maxAttempts, refCode, now],
       )
       const created = mustExist(await queryDurableJobTx(tx, id), 'job', id)
+      if (admit) await admit(tx, created)
       return { ...created, deduplicated: false }
     })
   })
@@ -840,9 +846,12 @@ export interface CompleteJobWithLeaseInput {
  * Settles a running job under CAS verification of `(workerId, fencingToken)` and active lease.
  * Rejects stale workers whose lease expired and was superseded by a higher fencing token.
  */
+/** Trusted in-process validation under the admitted completion transaction; no external effects or nested transaction. */
+export type CompleteJobLeaseAdmission = (tx: Db, current: Readonly<DurableJobRecord>, phase: 'before' | 'after') => Promise<void>
 export const completeJobWithLease = (
   db: Db,
   input: CompleteJobWithLeaseInput,
+  admit?: CompleteJobLeaseAdmission,
 ): Promise<DurableJobRecord> =>
   withSqliteErrors(async () => {
     await requireOperationalIdentity(db)
@@ -854,8 +863,20 @@ export const completeJobWithLease = (
       input.failureClass == null ? null : oneOf(input.failureClass, FAILURE_CLASSES, 'failureClass')
 
     return db.transaction(async (tx) => {
-      const now = admittedLeaseClock(input.now).now
+      let now = admittedLeaseClock(input.now).now
       const current = await assertActiveLeaseOwnerTx(tx, jobId, workerId, fencingToken, now)
+      const verifyAdmission = async (phase: 'before' | 'after'): Promise<void> => {
+        if (!admit) return
+        await admit(tx, current, phase)
+        const sampled = admittedLeaseClock(undefined).now
+        if (phase === 'before') await assertActiveLeaseOwnerTx(tx, jobId, workerId, fencingToken, sampled)
+        const finalClock = admittedLeaseClock(undefined).now
+        if (current.leaseExpiresAt === null || current.leaseExpiresAt <= finalClock) {
+          fail('CONFLICT', 'job lease expired during completion admission')
+        }
+        now = finalClock
+      }
+      if (admit) await verifyAdmission('before')
       const error = input.error ?? null
       if (status === 'failed' && (typeof error !== 'string' || error.length === 0)) {
         fail('VALIDATION', 'failed job needs an error message')
@@ -893,7 +914,9 @@ export const completeJobWithLease = (
            WHERE job_id = $2 AND fencing_token = $3`,
           [now, jobId, fencingToken],
         )
-        return mustExist(await queryDurableJobTx(tx, jobId), 'job', jobId)
+        const completed = mustExist(await queryDurableJobTx(tx, jobId), 'job', jobId)
+        if (admit) await verifyAdmission('after')
+        return completed
       }
 
       const progress = status === 'succeeded' ? 100 : current.progress
@@ -923,7 +946,9 @@ export const completeJobWithLease = (
         [failureClass, needsAttention, now, jobId, fencingToken],
       )
 
-      return mustExist(await queryDurableJobTx(tx, jobId), 'job', jobId)
+      const completed = mustExist(await queryDurableJobTx(tx, jobId), 'job', jobId)
+      if (admit) await verifyAdmission('after')
+      return completed
     })
   })
 

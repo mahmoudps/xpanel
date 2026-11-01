@@ -174,8 +174,8 @@ function bindRestoreMore(): void {
     const renderComponents = (view: RestoreMoreInventory | null): void => {
       const row = (name: string, contents: string, action: Node | string): HTMLTableRowElement => themedRow('components', { name, contents, action })
       const link = cloneClientTemplate(templates.get('link')!, 'a', shapes.link) as HTMLAnchorElement
-      const locale = document.documentElement.lang === 'ar' ? 'ar' : 'en'
-      clientTemplateSlot(link, 'label').textContent = t('Restore files'); link.href = '/whm/backups/files?lang=' + locale
+      const locale = document.documentElement.lang
+      clientTemplateSlot(link, 'label').textContent = t('Restore files'); link.href = '/whm/backups/files?' + new URLSearchParams({ lang: locale })
       const part = (name: string, state: RestoreMorePartState, entries: readonly RestoreMoreDatabase[]): HTMLTableRowElement => {
         const contents = state === 'not-in-archive' ? t('Not in this backup') : entries.map(entry => entry.name).join(', ')
         if (state !== 'available') return row(name, contents, state === 'not-in-archive' ? t('Nothing to restore') : t('Unavailable'))

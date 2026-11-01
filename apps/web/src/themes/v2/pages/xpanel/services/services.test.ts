@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Account, Certificate, Domain } from '@xpanel/core'
 import { renderV2CronPage, renderV2DnsPage, renderV2PanelServicePage, renderV2TlsPage } from './index.ts'
 import { technical } from './common.ts'
+import { parseMarkup } from '../../../../markup.ts'
 
 const account: Account = {
   id: '10000000-0000-4000-8000-000000000001', username: 'alice', uid: 20014, gid: 20014,
@@ -27,10 +28,33 @@ describe('v2 xPanel service pages', () => {
 
   it('requires an authorized account before emitting workspace controls or supplied collections', () => {
     for (const render of [renderV2DnsPage, renderV2TlsPage, renderV2CronPage]) {
-      const html = render({ domains: [domain], certificates: [certificate] }, { canManage: true })
-      expect(html).toContain('role="alert"')
-      expect(html).not.toContain(account.primaryDomain)
-      expect(html).not.toContain('data-v2-panel-service')
+      for (const authority of [{ canManage: true }, { canManage: false, presentation: 'read-only' as const, canReadFacts: true, authorizedTools: new Set(['domains', 'ssl-tls-status']) }]) {
+        const html = render({ domains: [domain], certificates: [certificate] }, authority)
+        const parsed = parseMarkup(html)
+        const nodes = parsed.filter(node => node.namespace === 'html' && node.template === -1)
+        if (authority.presentation === 'read-only') {
+          expect(nodes.filter(node => node.attrs.has('data-v2-panel-service') && node.attrs.get('data-readonly') === 'true')).toHaveLength(1)
+          const controls = nodes.filter(node => ['button', 'input', 'select', 'textarea'].includes(node.tag))
+          expect(controls.length).toBeGreaterThan(0)
+          for (const control of controls) {
+            let closed = control.attrs.has('disabled'), throughLegend = false
+            for (let at = control.parent; !closed && at >= 0;) {
+              const parent = parsed[at]
+              if (parent === undefined) throw new Error('Missing control ancestor')
+              if (parent.tag === 'legend') throughLegend = true
+              if (parent.tag === 'fieldset' && parent.attrs.has('disabled') && !throughLegend) closed = true
+              at = parent.parent
+            }
+            expect(closed, control.tag).toBe(true)
+          }
+        } else {
+          expect(nodes.filter(node => node.attrs.get('role') === 'alert')).toHaveLength(1)
+          expect(nodes.filter(node => ['form', 'button', 'input', 'select', 'textarea'].includes(node.tag))).toEqual([])
+          expect(html).not.toContain('data-v2-panel-service')
+        }
+        expect(html).not.toContain(account.primaryDomain)
+        expect(html).not.toContain(certificate.id)
+      }
     }
   })
 

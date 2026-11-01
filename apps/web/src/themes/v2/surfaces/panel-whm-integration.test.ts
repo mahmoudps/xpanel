@@ -25,6 +25,10 @@ const documents = (surface: 'xpanel' | 'xwhm'): string[] => {
 describe('complete v2 account surface dispatch', () => {
   it.each(documents('xpanel'))('renders the actual body for %s inside exactly one surface shell', activeRoute => {
     const html = renderPanel({ ...panel, activeRoute })
+    const shell = parseMarkup(html).find(node => node.attrs.get('class') === 'v2-shell')
+    expect(shell?.attrs.get('data-account')).toBe(account.id)
+    expect(shell?.attrs.get('data-account-id')).toBe(account.id)
+    expect(shell?.attrs.get('data-uid')).toBe(String(account.uid))
     expect(html).not.toContain('data-core-panel-denied')
     expect(html.match(/id="main-content"/g)).toHaveLength(1)
     expect(html.match(/id="xp-sidebar"/g)).toHaveLength(1)
@@ -34,7 +38,7 @@ describe('complete v2 account surface dispatch', () => {
   })
 
   it.each(['/domains/site-settings', '/software/htaccess'])('preserves core denial for %s without a bounded owner tool', activeRoute => {
-    expect(renderPanel({ ...panel, activeRoute })).toBe('<section data-core-panel-denied></section>')
+    expect(renderPanel({ ...panel, catalog: catalog.filter(tool => tool.id !== 'domain-htaccess'), activeRoute })).toBe('<section data-core-panel-denied></section>')
   })
 
   it('forwards real denied inputs to core without leaking account facts', () => {
@@ -44,6 +48,8 @@ describe('complete v2 account surface dispatch', () => {
     expect(observed).toBe(input)
     expect(html).toBe('<section>Unavailable</section>')
     expect(html).not.toContain(account.username)
+    expect(html).not.toContain('data-account=')
+    expect(html).not.toContain('data-uid=')
   })
 
   it('keeps domain forwarders available without optional mailbox suggestions', () => {

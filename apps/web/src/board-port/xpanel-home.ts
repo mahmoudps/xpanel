@@ -1,3 +1,4 @@
+import { renderUserMenu, type UserMenuModel } from '../chrome.ts'
 import { LOCALES, SOURCE_LOCALE, alternateLocales, localeDirection, localeInfo, translator, type Locale } from '../i18n.ts'
 import { ARABIC_TYPE_CSS } from '../arabic-type.ts'
 import { isolateLtrRuns, metaPieces } from '../bidi-runs.ts'
@@ -107,6 +108,14 @@ const PORT_CSS = `.xp-board-port{line-height:normal;font-size:16px;font-kerning:
 [data-home-desktop] label[for="tool-filter"]{box-sizing:border-box;padding-inline-start:41px}
 [data-home-desktop] #tool-filter{text-align:match-parent!important}
 [data-home-desktop][dir="rtl"] #tool-filter{padding-right:40px!important;padding-left:12px!important;text-align:right!important}
+
+[data-home-desktop] .xp-user-menu,[data-home-phone] .xp-user-menu{flex:none;margin:0}
+[data-home-desktop] .xp-user-menu__summary,[data-home-phone] .xp-user-menu__summary,[data-home-desktop] .xp-home-avatar,[data-home-phone] .xp-home-avatar{box-sizing:border-box;display:flex;align-items:center;justify-content:center;inline-size:44px;block-size:44px;min-block-size:44px;padding:0;border:1px solid light-dark(#C7D7F8,var(--xp-accent-border,#C7D7F8));border-radius:50%;background:light-dark(#E8EFFD,var(--xp-accent-soft,#E8EFFD));color:light-dark(#1D5BD6,var(--xp-accent,#1D5BD6));font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600;list-style:none}
+[data-home-desktop] .xp-user-menu__summary,[data-home-phone] .xp-user-menu__summary{cursor:pointer}
+[data-home-desktop] .xp-user-menu__summary::-webkit-details-marker,[data-home-phone] .xp-user-menu__summary::-webkit-details-marker{display:none}
+[data-home-desktop] .xp-user-menu__avatar,[data-home-phone] .xp-user-menu__avatar{inline-size:auto;block-size:auto;border:0;border-radius:0;background:transparent;color:inherit;font:inherit}
+[data-home-desktop] .xp-user-menu__identity,[data-home-phone] .xp-user-menu__identity{position:absolute;inline-size:1px;block-size:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+[data-home-desktop] .xp-user-menu__panel,[data-home-phone] .xp-user-menu__panel{box-sizing:border-box;min-inline-size:0;inline-size:min(320px,calc(100vw - 32px));max-inline-size:calc(100vw - 32px);max-block-size:min(640px,calc(100dvh - 96px));overflow:auto;overscroll-behavior:contain}
 ${ARABIC_TYPE_CSS}`
 
 export interface Hint {
@@ -330,6 +339,8 @@ export interface HomeDesktopModel {
   metricsUnavailable: boolean
   actionHtml: string
   signOutLabel?: string
+  /** Supplied by the authenticated surface; labels never imply authentication. */
+  userMenu?: UserMenuModel
 }
 
 export interface HomePhoneModel {
@@ -349,6 +360,8 @@ export interface HomePhoneModel {
   metricsUnavailable: boolean
   actionHtml: string
   signOutLabel?: string
+  /** Supplied by the authenticated surface; labels never imply authentication. */
+  userMenu?: UserMenuModel
 }
 
 const ALWAYS_LIVE_HREFS = new Set(['/security/account'])
@@ -754,6 +767,8 @@ export interface XpanelHomeProps {
   /** Routes this account may open. Omit it for the board specimen, which links every tool. */
   qualifiedRoutes?: ReadonlySet<string>
   signOutLabel?: string
+  /** Supplied by the authenticated surface; labels never imply authentication. */
+  userMenu?: UserMenuModel
   lastSignInAt?: string
   recentChanges?: HomeChange[]
   /** A host sample. Absent means the meters stay unknown. */
@@ -832,9 +847,15 @@ export const xpanelHomeFromProps = (props: XpanelHomeProps): { desktop: HomeDesk
   const desktop = desktopFromFacts(facts, actionHtml, props.qualifiedRoutes, props.signOutLabel)
   const phone = phoneFromFacts(facts, actionHtml, 'div', props.qualifiedRoutes, props.signOutLabel)
   return {
-    desktop: { ...desktop, theme, realtimeEnabled: props.realtimeEnabled === true },
-    phone: { ...phone, theme, realtimeEnabled: props.realtimeEnabled === true },
+    desktop: { ...desktop, theme, realtimeEnabled: props.realtimeEnabled === true, ...(props.userMenu ? { userMenu: props.userMenu } : {}) },
+    phone: { ...phone, theme, realtimeEnabled: props.realtimeEnabled === true, ...(props.userMenu ? { userMenu: props.userMenu } : {}) },
   }
+}
+
+const homeUserMenu = (model: { locale: Locale; username: string; userMenu?: UserMenuModel }, instanceId: 'xp-home-desktop' | 'xp-home-phone'): string => {
+  const userMenu = model.userMenu
+  if (userMenu) return renderUserMenu({ ...userMenu, instanceId })
+  return '<span class="xp-home-avatar" role="img" aria-label="' + escapeHtml(translator(model.locale)('Account')) + '">' + escapeHtml(model.username.slice(0, 1).toLowerCase()) + '</span>'
 }
 
 const homeControls = (model: { locale: Locale; theme?: 'dark' | 'light'; realtimeEnabled?: boolean }): string => {
@@ -923,7 +944,7 @@ export const renderDesktop = (model: HomeDesktopModel): string => {
       ${homeControls(model)}
       ${langLinks(locale, false)}
       ${model.signOutLabel ? `<button type="button" data-action="logout" style="min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-border-strong,#D0D5DD)); background: light-dark(#FFFFFF,var(--xp-bg-surface,#FFFFFF)); color: light-dark(#344054,var(--xp-text-secondary,#344054)); font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer">${escapeHtml(model.signOutLabel)}</button>` : ''}
-      <button type="button" aria-label="${t('User menu, {username}', { username: escapeHtml(model.username) })}" style="width: 44px; height: 44px; border-radius: 50%; border: 1px solid light-dark(#C7D7F8,var(--xp-accent-border,#C7D7F8)); background: light-dark(#E8EFFD,var(--xp-accent-soft,#E8EFFD)); color: light-dark(#1D5BD6,var(--xp-accent,#1D5BD6)); font-family: ${MONO}; font-size: 15px; font-weight: 600">${escapeHtml(model.username.slice(0, 1).toLowerCase())}</button>
+      ${homeUserMenu(model, 'xp-home-desktop')}
     </header>
     <div style="width: 100%; max-width: 1180px; margin: 0 auto; padding: 24px clamp(16px, 3vw, 32px) 52px; display: flex; flex-direction: column; gap: 26px">
       ${model.actionHtml}
@@ -1027,7 +1048,7 @@ export const renderPhone = (model: HomePhoneModel): string => {
     <a href="/home" style="display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 4px; text-decoration: none">${`<span aria-hidden="true" style="width: 28px; height: 28px; border-radius: 7px; background: #101828; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 15px; font-weight: 600">x</span>`}${brand}</a>
     <span style="flex: 1 1 auto"></span>
     ${model.signOutLabel ? `<button type="button" data-action="logout" style="flex: none; min-height: 44px; padding: 0 10px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-border-strong,#D0D5DD)); background: light-dark(#FFFFFF,var(--xp-bg-surface,#FFFFFF)); color: light-dark(#344054,var(--xp-text-secondary,#344054)); font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer">${escapeHtml(model.signOutLabel)}</button>` : ''}
-    <button type="button" aria-label="${t('User menu, {username}', { username: escapeHtml(model.username) })}" style="flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid light-dark(#C7D7F8,var(--xp-accent-border,#C7D7F8)); background: light-dark(#E8EFFD,var(--xp-accent-soft,#E8EFFD)); color: light-dark(#1D5BD6,var(--xp-accent,#1D5BD6)); font-family: ${MONO}; font-size: 15px; font-weight: 600">${escapeHtml(model.username.slice(0, 1).toLowerCase())}</button>
+    ${homeUserMenu(model, 'xp-home-phone')}
   </header>
   <main tabindex="-1" data-home-main="phone" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px 16px 32px; display: flex; flex-direction: column; gap: 16px">
     ${model.actionHtml}

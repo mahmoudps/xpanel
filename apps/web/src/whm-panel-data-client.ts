@@ -1,4 +1,5 @@
-import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './whm-client-templates.ts'
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates
 const whmClientNode = canonicalWhmClientNode, clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
@@ -19,7 +20,33 @@ function bindWhmPanelData(askDialog: ((options: Record<string, unknown>) => Prom
     const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     if (!status || !body) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.generationsEditable === 'true' && !root.closest(denied) && typeof request === 'function'
+    let templateContractIntact = true
+    const templateContracts = [
+      ['whm-generation-current-active', 'span', { 'content': 'span' }],
+      ['whm-generation-current-none', 'span', { 'content': 'span' }],
+      ['whm-generation-row', 'tr', { 'generation': 'td', 'created': 'td', 'summary': 'td', 'state': 'td', 'actions': 'td' }],
+      ['whm-generation-empty', 'tr', { 'content': 'td' }],
+      ['whm-generation-state-active', 'span', { 'content': 'span' }],
+      ['whm-generation-state-other', 'span', { 'content': 'span' }],
+      ['whm-generation-rollback', 'button', { 'content': 'button' }],
+    ] as const
+    const verifyWhmTemplates = (): void => {
+      if (!templateContractIntact) throw new Error('client_template_contract_unavailable')
+      try { assertWhmClientTemplates(root, templateContracts) } catch (error) {
+        templateContractIntact = false
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+        status.dataset.state = 'unavailable'; status.textContent = t('Unavailable')
+        throw error
+      }
+    }
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.generationsEditable === 'true' && !root.closest(denied) && typeof request === 'function')
+    if (admitted()) { try { verifyWhmTemplates() } catch { return } }
+    const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
+      verifyWhmTemplates()
+      const reply = await request!(...args)
+      verifyWhmTemplates()
+      return reply
+    }
     let busy = false, review = false, read: WhmWebGenerationRead | null = null
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'stale', 'uncertain'].includes(state) ? 'alert' : 'status') }
     const restorable = (): boolean => !!read && read.canRollback && !!read.currentGeneration && read.desiredState?.pending === false
@@ -70,14 +97,14 @@ function bindWhmPanelData(askDialog: ((options: Record<string, unknown>) => Prom
         if (confirmation === null || confirmation === false || confirmation === undefined) return
         const payload = panelRollbackRequest(current, target, desiredState, confirmation)
         if (!admitted()) throw { status: 403, details: { stateChanged: false } }
-        const fresh = panelGenerations(await request!('GET', '/api/generations')), freshTarget = fresh.generations.find(item => item.id === id)
+        const fresh = panelGenerations(await checkedRequest('GET', '/api/generations')), freshTarget = fresh.generations.find(item => item.id === id)
         if (!fresh.canRollback || !fresh.rollbackEligibleGenerationIds.includes(id) || !fresh.desiredState || fresh.desiredState.pending || fresh.desiredState.revision !== desiredState.revision || fresh.desiredState.checksum !== desiredState.checksum
           || fresh.currentGeneration?.id !== current.id || fresh.currentGeneration.checksum !== current.checksum || !freshTarget || freshTarget.checksum !== target.checksum || freshTarget.status !== 'superseded') {
           review = true; paint(fresh); note('stale', t('Current state, admission or the target changed. Saved changes are preserved; read and review before restoring.')); return
         }
         wrote = true
-        const acknowledged = panelRollbackAck(await request!('POST', '/api/generations/' + String(id) + '/rollback', payload), target)
-        const observed = panelGenerations(await request!('GET', '/api/generations'))
+        const acknowledged = panelRollbackAck(await checkedRequest('POST', '/api/generations/' + String(id) + '/rollback', payload), target)
+        const observed = panelGenerations(await checkedRequest('GET', '/api/generations'))
         if (observed.currentGeneration?.id !== acknowledged.id || observed.currentGeneration.checksum !== acknowledged.checksum || !observed.desiredState || observed.desiredState.pending || observed.desiredState.revision < desiredState.revision) throw new Error('rollback_readback_mismatch')
         paint(observed)
         note('restored', t('The requested snapshot restore was acknowledged and its resulting active generation was read back. Application health is not verified here.'))
@@ -91,7 +118,7 @@ function bindWhmPanelData(askDialog: ((options: Record<string, unknown>) => Prom
     body.addEventListener('click', event => { const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('[data-action="rollback-generation"]') : null; if (button && !button.disabled) void rollback(Number(button.dataset.generationId)) })
     if (!admitted()) { sync(); note('unavailable', t('Generation history and rollback require root authorization. Nothing was read or changed.')); return }
     busy = true; sync(); note('reading', t('Reading…'))
-    void request!('GET', '/api/generations').then(panelGenerations).then(value => { paint(value); busy = false; sync(); explain() }, () => { busy = false; sync(); note('failed', t('Generation history could not be read. Rollback stays unavailable.')) })
+    void checkedRequest('GET', '/api/generations').then(panelGenerations).then(value => { paint(value); busy = false; sync(); explain() }, () => { busy = false; sync(); note('failed', t('Generation history could not be read. Rollback stays unavailable.')) })
   })
 }
 

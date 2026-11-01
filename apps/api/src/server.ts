@@ -32,6 +32,8 @@ import { handleAccountHealthWorkspaceRoute } from './account-health-workspace.ts
 import { handleBackupFileRestoreWorkspaceRoute } from './backup-file-restore-workspace.ts'
 import { handleJobsWorkspaceRoute } from './jobs-workspace.ts'
 import { handlePanelTokensWorkspaceRoute } from './panel-tokens-workspace.ts'
+import { handleOwnerApiTokensWorkspaceRoute } from './owner-api-tokens-workspace.ts'
+import { assertAuthPersonalOwner } from './auth-personal.ts'
 import { handlePanelNotificationsRoute } from './panel-notifications.ts'
 import { handleAnnouncementsRoute } from './announcements-workspace.ts'
 import { handleTransferCredentialsRoute, readTransferCredentialToken } from './acct-transfer-credentials.ts'
@@ -44,11 +46,14 @@ import { createTransferExecution } from './lifecycle-transfer-execution.ts'
 import { handleConvertAddonRoute } from './acct-convert-addon.ts'
 import { handleComponentRestoreWorkspaceRoute } from './acct-restore-workspace.ts'
 import { handleStagingWorkspaceRoute } from './acct-staging-workspace.ts'
-import { handleTeamRoute } from './acct-team-workspace.ts'
+import { handleTeamRoute, readSavedTeam, teamMemberPhase } from './acct-team-workspace.ts'
 import { handleTeamPasswordRoute, signInTeamMember, teamFileReader, teamMemberResolver, TEAM_PASSWORD_ROUTE } from './team-session.ts'
-import { revokeTeamSession } from './team-store.ts'
-import { accountTemplateZoneRecords, handleAccountTemplatesRoute, templateForNewAccount } from './acct-templates-workspace.ts'
-import type { AccountTemplate } from './acct-templates-workspace.ts'
+import { findActiveTeamSession, revokeTeamSession } from './team-store.ts'
+import { handleAccountTemplatesRoute } from './acct-templates-workspace.ts'
+import { AccountLifecycleCoordinator, isFreshProvisioningHostEffect } from './use-cases/account-lifecycle.ts'
+import { createAuthenticatedProvisioningPort } from './use-cases/account-provisioning-transport.ts'
+import { createProvisioningPreparationAuthority, prepareAccountProvisioning, type PreparedAccountState, type ProvisioningAuthorizationReference } from './use-cases/account-provisioning-prepared.ts'
+import type { ProvisioningPreparationStore } from './use-cases/provisioning-preparation.ts'
 import { handleAccountEnhancementsRoute } from './acct-enhancements-workspace.ts'
 import { handleSoftwareCenterWorkspaceRoute } from './software-center-workspace.ts'
 import { handleWhmDatabasesWorkspaceRoute } from './whm-databases-workspace.ts'
@@ -68,7 +73,7 @@ import { handlePanelBrandingRoute, panelBrandingFile } from './panel-branding.ts
 import { handlePanelLanguagesRoute } from './panel-languages.ts'
 import { handlePanelSettingsRoute, panelOfflineAdmits, panelSettingsFile } from './panel-settings.ts'
 import { handleReverseProxyRoute } from './reverse-proxy-workspace.ts'
-import { handleWhmcsRoute } from './whmcs-integration.ts'
+import { handleWhmcsRoute, readSavedWhmcs } from './whmcs-integration.ts'
 import type { WhmcsProvisionPorts, WhmcsRouteHelpers } from './whmcs-integration.ts'
 import { WHMCS_PROVISION_PATH } from './whmcs-module.ts'
 import { handleServiceManagerWorkspaceRoute } from './service-manager-workspace.ts'
@@ -126,10 +131,14 @@ import type { AgentApp } from '@xpanel/agent'
 import { groups, visibleTools, visibleNavigation } from '@xpanel/catalog'
 import {
   bindMfaRuntimePolicy,
+  SESSION_ABSOLUTE_TIMEOUT_MS,
+  SESSION_IDLE_TIMEOUT_MS,
   fail,
   isXpanelError,
   isUuid,
   assertAcl,
+  assertProvisioningAuthorization,
+  assertPrivilegedSessionAuthorization,
   parseIp,
   canonicalIp,
   validateDomainCustomConfig,
@@ -179,6 +188,8 @@ import {
   deletePrincipal,
   listMetricsHistory,
   findPrincipalByUsername,
+  findActiveApiTokenByHash,
+  findActiveSessionByTokenHash,
   getPrincipal,
   latestActive,
   listAudit,
@@ -229,6 +240,7 @@ import {
   sha256Hex,
   unsealTotpSecret,
   verifyPasswordArgon2id,
+  assertPasswordHashArgon2id,
   verifyTotpStep,
   passwordHashFromInput,
   principalRecordToPrincipal,
@@ -273,7 +285,7 @@ import { ENTRY_POINTS, entryPointAdmitsPrincipal, entryPointAllowsApiRoute, isMa
 import type { EntryPoint } from './entry-points.ts'
 import { loadQualifiedCatalog, type HostCatalogSource, type QualifiedCatalogProvider } from './host-catalog.ts'
 import { renderTotpQrSvg } from './totp-qr.ts'
-import { authorizeMailboxSessionBinding, createLocalMailboxTransport, establishMailboxSession, mailFolderName, mailboxAddressIndex, mailboxSessionPassword, openAuthorizedMailboxSession, parseMailboxSend, revokeMailboxIdentity, rewriteMailboxIds } from './mail/inbox.ts'
+import { authorizeMailboxSessionBinding, createLocalMailboxTransport, establishMailboxSession, mailFolderName, mailboxAddressIndex, mailboxSessionPassword, openAuthorizedMailboxSession, parseMailboxSend, retireMailboxServiceUser, rewriteMailboxIds } from './mail/inbox.ts'
 import { listMailboxFolder, readMailboxFolder, moveMailboxFolder, mailboxFolderUid, mailboxUidValidity } from './mail/folder-workspace.ts'
 import type { FolderWorkspaceAuthorization } from './mail/folder-workspace.ts'
 import { imapDialPlan, mailboxLiveEvent, watchMailboxIdle } from './mail/idle.ts'
@@ -400,6 +412,8 @@ export interface ApiServerDeps {
   store: StateStore
   agentApp?: AgentApp
   agentToken?: string
+  /** Trusted startup/test authority only; no request may select a preparation store or directory. */
+  provisioningPreparations?: ProvisioningPreparationStore
   serverSecret: string
   /** Frozen trusted process policy shared with the document renderer. */
   mfaRuntimePolicy?: MfaRuntimePolicy
@@ -1159,23 +1173,6 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
 
   const accountExecution = () => ({ status: 'configuration_applied', scope: 'global_configuration', targetVerified: false, verificationRequired: true } as const)
 
-  const observeAccountExecution = async (caller: AuthenticatedCaller, ipv4: string) => {
-    const pending = accountExecution()
-    try {
-      const response = await callAgent('/host/addresses', { caller })
-      if (!response.ok) {
-        await response.body?.cancel().catch(() => undefined)
-        return pending
-      }
-      const body = await response.json() as { addresses?: unknown }
-      const seen = Array.isArray(body.addresses) && body.addresses.includes(ipv4)
-      if (!seen) return pending
-      return { status: 'configuration_applied' as const, scope: 'global_configuration' as const, targetVerified: true, verificationRequired: false, hostBinding: 'observed' as const, observedAddress: ipv4 }
-    } catch {
-      return pending
-    }
-  }
-
   const publicDomainRevision = (revision: string): string => createHmac('sha256', serverSecret)
     .update('xpanel-domain-view:v1\0').update(revision).digest('hex')
 
@@ -1576,52 +1573,116 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   })
 
   // Account lifecycle operations shared by the HTTP routes and the WHMCS provisioning ports.
-  type CreateAccountBody = Partial<NewAccount> & { username: string; primaryDomain: string; planId: Id; password?: string }
-  const createAccountAs = async (caller: AuthenticatedCaller, body: CreateAccountBody) => {
+  type CreateAccountBody = Partial<NewAccount> & { username: string; primaryDomain: string; planId: Id; password?: string; idempotencyKey?: string }
+  const provisioningPreparations = deps.provisioningPreparations ?? createProvisioningPreparationAuthority({ store: deps.store,
+    directory: opsJoin(deps.store.rootDir, 'private', 'account-provisioning') })
+  const provisioningPort = deps.agentApp && deps.agentToken ? createAuthenticatedProvisioningPort({
+    fetch: request => deps.agentApp!.fetch(request), token: deps.agentToken,
+  }) : undefined
+  const readAccountTemplates = () => new ExtendedFeaturesStore(deps.store.rootDir).readOrDefault<unknown>('accounts/templates.json', null)
+  const createAccountAs = async (caller: AuthenticatedCaller, body: CreateAccountBody, authority: {
+    reference: ProvisioningAuthorizationReference; reauthenticate: () => Promise<AuthenticatedCaller>; idempotencyKey?: unknown
+  }) => {
     requireAccountHostAgent()
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => ![
+      'username', 'primaryDomain', 'planId', 'password', 'passwordHash', 'ownerId', 'contactEmail', 'ipv4', 'ipAssignment',
+      'ipv6', 'extraIps', 'shell', 'php', 'homeBase', 'forcePasswordChange', 'idempotencyKey',
+    ].includes(key))) return fail('VALIDATION', 'unsupported account creation fields', { stateChanged: false })
+    if (caller.principal.kind !== 'root' && caller.principal.kind !== 'reseller') return fail('FORBIDDEN', 'a privileged actor is required')
     const username = validateUsername(body.username)
-    const passwordHash = await passwordHashFromInput(body)
-    let ownerId: Id | null
-    let expectedRevision: number
-    let template: AccountTemplate | null = null, nameservers: string[] = []
-    const lease = await deps.store.getWriterLock().acquire()
-    try {
-      const reseller = caller.principal.kind === 'reseller' ? await resolveResellerForCaller(caller) : null
-      if (caller.principal.kind === 'reseller') {
-        if (!reseller) return fail('FORBIDDEN', 'reseller authorization is unavailable')
-        assertAcl(caller.principal, reseller, 'create-account')
-      }
-      ownerId = caller.principal.kind === 'reseller' ? reseller!.id : body.ownerId ?? null
-      if (await findPrincipalByUsername(deps.db, username) || await deps.store.getAccountByUsername(username)) return fail('CONFLICT', 'the account username is already reserved')
-      // The plan template is read and proven against this domain before any state changes; an unreadable file refuses.
-      nameservers = (await deps.store.getServerSettings())?.nameservers ?? []
-      template = templateForNewAccount(await new ExtendedFeaturesStore(deps.store.rootDir).readOrDefault<unknown>('accounts/templates.json', null), body.planId, validateDomainName(body.primaryDomain), nameservers)
-      if (template && await deps.store.getDnsZone(body.primaryDomain)) return fail('CONFLICT', 'a DNS zone for this domain already exists, so the plan template cannot add its records', { stateChanged: false })
-      expectedRevision = (await lease.assertFencingToken()).revision
-    } finally { await lease.release() }
-    const account = await deps.store.createAccount({ username, passwordHash, primaryDomain: body.primaryDomain, planId: body.planId,
-      ownerId, contactEmail: body.contactEmail ?? username + '@' + body.primaryDomain,
+    const primaryDomain = validateDomainName(body.primaryDomain)
+    if (!isUuid(body.planId) || (caller.principal.kind === 'root' && body.ownerId !== undefined && body.ownerId !== null && !isUuid(body.ownerId))) {
+      return fail('VALIDATION', 'valid account plan and owner identities are required', { stateChanged: false })
+    }
+    // Reject invalid credential input before reserving an immutable preparation. Hash only on its first admitted write.
+    if (body.password !== undefined && body.passwordHash !== undefined) return fail('VALIDATION', 'supply a password or passwordHash, not both', { stateChanged: false })
+    const credentialIntent = body.passwordHash !== undefined ? assertPasswordHashArgon2id(body.passwordHash) : body.password
+    if (typeof credentialIntent !== 'string' || (body.passwordHash === undefined && (credentialIntent.length < 8
+      || Buffer.byteLength(credentialIntent, 'utf8') > 1024 || /[\r\n\0]/.test(credentialIntent)))) {
+      return fail('VALIDATION', 'a single-line password of 8..1024 UTF-8 bytes is required', { stateChanged: false })
+    }
+    const explicitKey = authority.idempotencyKey ?? body.idempotencyKey
+    if (authority.idempotencyKey !== undefined && body.idempotencyKey !== undefined && authority.idempotencyKey !== body.idempotencyKey) {
+      return fail('VALIDATION', 'the account request keys do not match', { stateChanged: false })
+    }
+    // Legacy clients reuse one deterministic identity per actor/username. Changed inputs or credentials conflict;
+    // a retry never receives a random key or adopts an existing account. Explicit keys use the same durable namespace.
+    const idempotencyKey = explicitKey === undefined ? `username:${username}` : typeof explicitKey === 'string' ? explicitKey
+      : fail('VALIDATION', 'the account request key must be a bounded string', { stateChanged: false })
+    const reseller = caller.principal.kind === 'reseller' ? await resolveResellerForCaller(caller) : null
+    if (caller.principal.kind === 'reseller') assertAcl(caller.principal, reseller, 'create-account')
+    const ownerId = caller.principal.kind === 'reseller' ? reseller!.id : body.ownerId ?? null
+    const requestedPlan = await deps.store.getPlan(body.planId) ?? fail('NOT_FOUND', 'the account plan is unavailable', { stateChanged: false })
+    const accountInput: PreparedAccountState['account'] = { username, primaryDomain, planId: body.planId,
+      ownerId, contactEmail: body.contactEmail ?? `${username}@${primaryDomain}`,
       ...(body.ipv4 !== undefined && { ipv4: body.ipv4 }), ...(body.ipAssignment !== undefined && { ipAssignment: body.ipAssignment }),
       ...(body.ipv6 !== undefined && { ipv6: body.ipv6 }), ...(body.extraIps !== undefined && { extraIps: body.extraIps }),
-      shell: body.shell ?? 'jailed', php: body.php ?? await serverDefaultPhp(), ...(body.homeBase !== undefined && { homeBase: body.homeBase }),
-    }, { expectedRevision })
-    if (template) {
-      try { await deps.store.saveDnsZone({ id: randomUUID(), name: account.primaryDomain, accountId: account.id, serial: 2026102201, records: accountTemplateZoneRecords(template, account, nameservers).map(record => ({ id: randomUUID(), ...record })) }, { expectedRevision: expectedRevision + 1 }) }
-      catch { return accountMutationFailure(caller, account, 'create', 'failed', 'template_zone_unverified', 'PRECONDITION_FAILED') }
+      shell: body.shell ?? requestedPlan.shell, php: body.php ?? await serverDefaultPhp(), ...(body.homeBase !== undefined && { homeBase: body.homeBase }),
+      forcePasswordChange: body.forcePasswordChange ?? false,
     }
-    const reconcile = await applyAccountConfiguration(caller, account, 'create', expectedRevision + (template ? 2 : 1))
-    try {
-      const existing = await findPrincipalByUsername(deps.db, account.username)
-      if (existing && (existing.kind !== 'user' || existing.accountId !== account.id)) {
-        return accountMutationFailure(caller, account, 'create', 'unknown', 'identity_binding_conflict', 'CONFLICT')
+    if (authority.reference.principalId !== caller.principal.id) return fail('FORBIDDEN', 'account provisioning credential identity changed', { stateChanged: false })
+    const authorizeFresh = async (input: { actor: AuthenticatedCaller['principal']; accountId: Id | null; ownerId: Id | null }): Promise<void> => {
+      const fresh = await authority.reauthenticate()
+      if (fresh.principal.id !== caller.principal.id || fresh.principal.kind !== caller.principal.kind
+        || fresh.principal.username !== caller.principal.username || fresh.sessionId !== caller.sessionId || fresh.apiTokenId !== caller.apiTokenId
+        || fresh.principal.id !== input.actor.id || fresh.principal.kind !== input.actor.kind || input.ownerId !== ownerId) {
+        return fail('FORBIDDEN', 'account provisioning authorization changed', { stateChanged: false })
       }
-      if (!existing) await createUserPrincipal(deps.db, { username: account.username, passwordHash, accountId: account.id })
-    } catch { return accountMutationFailure(caller, account, 'create', 'unknown', 'identity_establishment_unverified') }
-    await emitAudit({ actor: caller.principal.username, action: 'account.desired.created', target: 'account:' + account.username,
-      detail: { accountId: account.id, primaryDomain: account.primaryDomain, planId: account.planId, templateId: template?.id ?? null, execution: accountExecution() }, outcome: 'ok', principalId: caller.principal.id,
-    }, { accountId: account.id, resellerId: account.ownerId })
-    const primaryDomains = await deps.store.listDomains({ accountId: account.id })
-    return { account, primaryDomain: primaryDomains[0] ?? null, reconcile, execution: await observeAccountExecution(caller, account.ipv4) }
+      if (fresh.principal.kind === 'reseller') {
+        const current = await resolveResellerForCaller(fresh)
+        assertAcl(fresh.principal, current, 'create-account')
+        if (!current || current.id !== ownerId) return fail('FORBIDDEN', 'account owner authority changed', { stateChanged: false })
+      }
+      if (input.accountId) {
+        const account = await deps.store.getAccount(input.accountId)
+        if (!account || account.ownerId !== ownerId || account.username !== username) return fail('FORBIDDEN', 'account provisioning identity changed', { stateChanged: false })
+      }
+    }
+    const prepared = await prepareAccountProvisioning({ store: deps.store, preparations: provisioningPreparations, authorizeFresh, readTemplates: readAccountTemplates,
+      assertIdentityAvailable: async account => { if (await findPrincipalByUsername(deps.db, account.username)) return fail('CONFLICT', 'the account username is already reserved', { stateChanged: false }) },
+    }, {
+      actor: caller.principal, idempotencyKey, account: accountInput, credentialIntent, authorizationRef: authority.reference,
+      preparePasswordHash: () => passwordHashFromInput(body), verifyCredentialIntent: body.passwordHash === undefined
+        ? (intent, hash) => verifyPasswordArgon2id(intent, hash)
+        : async (intent, hash) => { const left = Buffer.from(intent), right = Buffer.from(hash); return left.length === right.length && timingSafeEqual(left, right) },
+    })
+    const lifecycle = new AccountLifecycleCoordinator({ store: deps.store, db: deps.db, preparations: provisioningPreparations,
+      ...(provisioningPort ? { provisioningPort } : {}), authorizeProvisioning: authorizeFresh, readAccountTemplates,
+      authorizeProvisioningInTransaction: (tx, input) => assertProvisioningAuthorization({ ...input, policy: mfaRuntimePolicy,
+        ports: { principal: id => getPrincipal(tx, id), session: tokenHash => findActiveSessionByTokenHash(tx, tokenHash),
+          apiToken: tokenHash => findActiveApiTokenByHash(tx, tokenHash),
+          whmcs: async () => readSavedWhmcs(await new ExtendedFeaturesStore(deps.store.rootDir).readOrDefault<unknown>('integrations/whmcs.json', null)) },
+      }),
+    })
+    const result = await lifecycle.provisionPreparedAccount({ actor: caller.principal, idempotencyKey, preparationReference: prepared.preparationReference }).catch(error => {
+      // Agent diagnostics and internal operation IDs are not a public failure contract. A lost
+      // acknowledgment never becomes a rollback claim or permission to repeat privileged work.
+      return fail(isXpanelError(error) ? error.code : 'SERVICE_UNAVAILABLE', 'account provisioning did not acknowledge a verified outcome', {
+        stateChanged: isXpanelError(error) ? error.detail.stateChanged === true : true,
+        verificationRequired: true, reason: 'account_provisioning_unverified',
+      })
+    })
+    const account = result.account
+    const freshExecution = isFreshProvisioningHostEffect(result)
+    const currentObservation = result.execution ?? result.reobservedExecution
+    const execution = currentObservation ? { status: 'account_verified', scope: 'account', targetVerified: true, verificationRequired: false, observation: currentObservation }
+      : { status: 'already_completed', scope: 'account', targetVerified: false, verificationRequired: true, replay: true,
+        ...(result.lastVerifiedExecution && { lastVerifiedObservation: result.lastVerifiedExecution }) }
+    let primaryDomains: Domain[]
+    try {
+      if (!result.completedReplay) await emitAudit({ actor: caller.principal.username, action: 'account.desired.created', target: 'account:' + account.username,
+        detail: { accountId: account.id, primaryDomain: account.primaryDomain, planId: account.planId, execution }, outcome: 'ok', principalId: caller.principal.id,
+      }, { accountId: account.id, resellerId: account.ownerId })
+      primaryDomains = await deps.store.listDomains({ accountId: account.id })
+    } catch (error) {
+      return fail(isXpanelError(error) ? error.code : 'SERVICE_UNAVAILABLE', 'account provisioning completed but its acknowledgment requires verification', {
+        stateChanged: true, verificationRequired: true, reason: 'account_provisioning_acknowledgment_unverified',
+      })
+    }
+    try { await authorizeFresh({ actor: caller.principal, accountId: account.id, ownerId }) }
+    catch { return fail('FORBIDDEN', 'account provisioning authorization changed before acknowledgment', { stateChanged: true, verificationRequired: true }) }
+    return { account, primaryDomain: primaryDomains[0] ?? null, reconcile: result.reconciliation, execution,
+      operation: { status: result.job.status, reference: result.job.referenceCode, resumedFromStep: result.resumedFromStep, freshExecution, completedReplay: result.completedReplay === true } }
   }
   const setAccountSuspensionAs = async (caller: AuthenticatedCaller, target: Account, verb: 'suspend' | 'unsuspend', reason?: string) => {
     requireAccountHostAgent()
@@ -1680,7 +1741,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   /** WHMCS acts as the root administrator who issued its current token; a disabled or demoted issuer stops every call. */
   const whmcsCaller = async (actor: string): Promise<AuthenticatedCaller> => {
     const record = await getPrincipal(deps.db, actor)
-    if (!record || record.kind !== 'root' || record.disabled) {
+    if (!record || record.kind !== 'root' || record.disabled || record.forcePasswordChange) {
       return fail('FORBIDDEN', 'the root administrator who issued the WHMCS token is no longer active; create a new token', { stateChanged: false, reason: 'token_issuer_inactive' })
     }
     return { principal: principalRecordToPrincipal(record), principalRecord: record, sessionId: null, sessionToken: null, apiTokenId: null, scopes: [], csrfValid: true, mfaVerified: true }
@@ -1688,8 +1749,15 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   const whmcsAccount = async (username: string): Promise<Account> =>
     await deps.store.getAccountByUsername(username) ?? fail('NOT_FOUND', `account "${username}" not found`, { stateChanged: false, reason: 'account_not_found' })
   const whmcsPorts: WhmcsProvisionPorts = {
-    createAccount: async input => { await createAccountAs(await whmcsCaller(input.actor), { username: input.username, primaryDomain: input.primaryDomain, planId: input.planId,
-      password: input.password, ...(input.contactEmail ? { contactEmail: input.contactEmail } : {}) }) },
+    createAccount: async (input, authority) => {
+      const caller = await whmcsCaller(input.actor)
+      if (authority.reference.principalId !== caller.principal.id || authority.reference.planId !== input.planId) return fail('FORBIDDEN', 'WHMCS account authority does not match its request', { stateChanged: false })
+      await createAccountAs(caller, { username: input.username, primaryDomain: input.primaryDomain, planId: input.planId,
+        password: input.password, ...(input.contactEmail ? { contactEmail: input.contactEmail } : {}) }, {
+        reference: authority.reference, idempotencyKey: `whmcs:${validateUsername(input.username)}`,
+        reauthenticate: async () => { await authority.assertCurrent(); return whmcsCaller(input.actor) },
+      })
+    },
     suspendAccount: async input => { await setAccountSuspensionAs(await whmcsCaller(input.actor), await whmcsAccount(input.username), 'suspend', input.reason) },
     unsuspendAccount: async input => { await setAccountSuspensionAs(await whmcsCaller(input.actor), await whmcsAccount(input.username), 'unsuspend') },
     terminateAccount: async input => { const account = await whmcsAccount(input.username); await terminateAccountAs(await whmcsCaller(input.actor), account, account.username) },
@@ -3045,8 +3113,41 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           readServerLog: (caller, query) => readNativeWorkspace(caller, '/host/mail/log?' + query) })
         if (response) return response
       }
+      if (pathname === '/api/auth/api-tokens' || pathname.startsWith('/api/auth/api-tokens/')) {
+        const response = await handleOwnerApiTokensWorkspaceRoute(req, url, method, {
+          db: deps.db, store: deps.store, entryPoint, requireCaller, emitAudit,
+          authorizeSession: async (tx, request) => {
+            // Only this admitted runner reads the original session and principal after any DB queue.
+            // Team/handoff resolvers are deliberately absent: neither may become an original owner.
+            const current = await authenticateRequest(tx, request, { serverSecret, clientIp: extractClientIp(request), entryPoint,
+              touchSession: false, mfaRuntimePolicy })
+            if (!current) return fail('FORBIDDEN', 'the original owner session is no longer authenticated', { stateChanged: false })
+            assertAuthPersonalOwner(current, entryPoint)
+            if (request.method !== 'GET' && !current.csrfValid) return fail('FORBIDDEN', 'the original owner CSRF proof changed', { stateChanged: false })
+            await assertRequestAuthorized(deps.store, current, request)
+            if (!panelOfflineAdmits(new URL(request.url).pathname, current.principal.kind) && (await panelSettingsFile(deps.store).current()).offlineMode) {
+              return fail('SERVICE_UNAVAILABLE', 'the panel is offline for maintenance', { reason: 'panel_offline', stateChanged: false })
+            }
+            return current
+          },
+        })
+        if (response) return response
+      }
       if (pathname === '/api/server/panel/api-tokens' || pathname.startsWith('/api/server/panel/api-tokens/')) {
-        const response = await handlePanelTokensWorkspaceRoute(req, url, method, { db: deps.db, requireCaller, assertRoot, emitAudit })
+        const response = await handlePanelTokensWorkspaceRoute(req, url, method, { db: deps.db, requireCaller, assertRoot, emitAudit,
+          authorizeIssuance: async (tx, caller) => {
+            if (caller.principal.kind !== 'root' || caller.apiTokenId !== null || !caller.sessionId || !caller.sessionToken
+              || caller.team || caller.impersonator || (entryPoint !== undefined && entryPoint !== 'xwhm')) {
+              return fail('FORBIDDEN', 'token issuance requires the original interactive root session', { stateChanged: false })
+            }
+            await assertPrivilegedSessionAuthorization({
+              reference: { kind: 'session', principalId: caller.principal.id, sessionId: caller.sessionId,
+                tokenHash: sessionTokenHash(caller.sessionToken, entryPoint), entryPoint: entryPoint ?? null },
+              actor: caller.principal, policy: mfaRuntimePolicy,
+              ports: { principal: id => getPrincipal(tx, id), session: tokenHash => findActiveSessionByTokenHash(tx, tokenHash) },
+            })
+          },
+        })
         if (response) return response
       }
       if (/^\/api\/(?:server|account)\/announcements(?:\/|$)/.test(pathname)) {
@@ -3078,7 +3179,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const extended = new ExtendedFeaturesStore(deps.store.rootDir)
         const response = pathname.startsWith('/api/server/account-templates')
           ? await handleAccountTemplatesRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, emitAudit,
-              readSaved: () => extended.readOrDefault<unknown>('accounts/templates.json', null), writeSaved: value => extended.write('accounts/templates.json', value) })
+              readSaved: () => extended.readOrDefault<unknown>('accounts/templates.json', null), writeSaved: (value, writer) => extended.write('accounts/templates.json', value, { templateWriter: writer }) })
           : await handleAccountEnhancementsRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, emitAudit,
               readSaved: () => extended.readOrDefault<unknown>('plans/enhancements.json', null), writeSaved: value => extended.write('plans/enhancements.json', value) })
         if (response) return response
@@ -3362,7 +3463,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const account = domain ? await deps.store.getAccount(domain.accountId) : null
         if (!domain || !account) return fail('NOT_FOUND', 'domain not found', { stateChanged: false })
         await assertCanAccessAccount(caller, account, 'domain.htaccess')
-        await assertAccountFeatures(deps.store, caller, account, ['aapanel-url-rewrite'])
+        await assertAccountFeatures(deps.store, caller, account, ['domain-htaccess'])
         const request = parseHtaccessHttpRequest(method, htaccessMatch[2], method === 'GET' ? undefined : await readJsonBody(req))
         return await executeHtaccessWorkspaceRequest({ accountId: account.id, domainId: domain.id }, request, () => callAgent('/accounts/' + account.username + '/htaccess/' + domain.id, { caller, method: 'POST', body: request }))
       }
@@ -3416,7 +3517,19 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const caller = await requireCaller(req)
         if (caller.principal.kind === 'user') return fail('FORBIDDEN', 'user accounts cannot create hosting accounts')
         const body = await readJsonBody<CreateAccountBody>(req)
-        return jsonResponse(await createAccountAs(caller, body), 201)
+        let reference: ProvisioningAuthorizationReference
+        if (caller.apiTokenId) {
+          const bearer = /^Bearer\s+(\S+)$/i.exec(req.headers.get('authorization')?.trim() ?? '')
+          if (!bearer) return fail('UNAUTHENTICATED', 'the account creation credential is unavailable', { stateChanged: false })
+          reference = { kind: 'api-token', principalId: caller.principal.id, tokenId: caller.apiTokenId,
+            tokenHash: sha256Hex(bearer[1]!), clientIp: extractClientIp(req), scope: 'accounts:write' }
+        } else if (caller.sessionId && caller.sessionToken && !caller.impersonator && (entryPoint === undefined || entryPoint === 'xwhm')) {
+          reference = { kind: 'session', principalId: caller.principal.id, sessionId: caller.sessionId,
+            tokenHash: sessionTokenHash(caller.sessionToken, entryPoint), entryPoint: entryPoint ?? null }
+        } else return fail('FORBIDDEN', 'a direct privileged account creation credential is required', { stateChanged: false })
+        const requestKey = req.headers.get('idempotency-key')
+        return jsonResponse(await createAccountAs(caller, body, { reference: Object.freeze(reference), reauthenticate: () => requireCaller(req),
+          ...(requestKey !== null && { idempotencyKey: requestKey }) }), 201)
       }
 
       const accountSuspendMatch = /^\/api\/accounts\/([^/]+)\/(suspend|unsuspend)$/.exec(pathname)
@@ -4082,6 +4195,107 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (serviceUserIdMatch) {
         const caller = await requireCaller(req)
         const suId = serviceUserIdMatch[1]!.toLowerCase()
+        // Insert after suId, before the existing state lookup/404. This permits an
+        // explicitly authenticated retry of the SAME durable retirement intent.
+        if (method === 'DELETE') {
+          const credentialRequest = new Request(req.url, { method: req.method, headers: new Headers(req.headers) })
+          const clientIp = extractClientIp(req)
+          try {
+            await retireMailboxServiceUser({
+              db: deps.db, store: deps.store, serviceUserId: suId, actor: caller.principal,
+              authorize: async (tx, source) => {
+                const current = await authenticateRequest(tx, credentialRequest, {
+                  serverSecret, clientIp, entryPoint, mfaRuntimePolicy, touchSession: false, teamMember,
+                  handoffAuthority: createHandoffSessionCheck({ db: tx, store: deps.store, teamMember }),
+                })
+                if (!current || !current.mfaVerified || current.principalRecord.forcePasswordChange
+                  || current.principal.id !== caller.principal.id || current.principal.kind !== caller.principal.kind
+                  || current.principal.username !== caller.principal.username
+                  || current.principal.kind === 'user' && (caller.principal.kind !== 'user' || current.principal.accountId !== caller.principal.accountId)
+                  || current.sessionId !== caller.sessionId || current.apiTokenId !== caller.apiTokenId
+                  || JSON.stringify([...current.scopes].sort()) !== JSON.stringify([...caller.scopes].sort())
+                  || JSON.stringify(current.team ?? null) !== JSON.stringify(caller.team ?? null)
+                  || JSON.stringify(current.impersonator ?? null) !== JSON.stringify(caller.impersonator ?? null)) {
+                  return fail('UNAUTHENTICATED', 'the original retirement credential is no longer current', { stateChanged: false })
+                }
+                if (current.sessionId !== null && current.apiTokenId === null && !current.csrfValid) {
+                  return fail('FORBIDDEN', 'invalid or missing CSRF token (x-csrf-token)', { stateChanged: false })
+                }
+                // Existing permission policy, including API scopes, user/team rights,
+                // reseller ACL and source features. These routes use leaf reads only.
+                await assertRequestAuthorized(deps.store, current, credentialRequest)
+                await assertCanAccessAccount(current, source.account, 'service_user.modify')
+                // The verifier's database/state reads may cross an expiry boundary.
+                // Preserve the existing credential time policy in a synchronous guard
+                // which the coordinator invokes after its LAST awaited admission read.
+                const sessionDeadline = (session: { expiresAt: string; createdAt: string; lastSeenAt: string }): number => {
+                  const expiresAt = Date.parse(session.expiresAt), createdAt = Date.parse(session.createdAt), lastSeenAt = Date.parse(session.lastSeenAt)
+                  if (![expiresAt, createdAt, lastSeenAt].every(Number.isFinite)) return fail('UNAUTHENTICATED', 'the retirement credential time is unavailable', { stateChanged: false })
+                  return Math.min(expiresAt, createdAt + SESSION_ABSOLUTE_TIMEOUT_MS, lastSeenAt + SESSION_IDLE_TIMEOUT_MS)
+                }
+                let deadline: number
+                if (current.apiTokenId !== null) {
+                  const bearer = /^Bearer\s+(\S+)$/i.exec(credentialRequest.headers.get('authorization')?.trim() ?? '')?.[1]
+                  if (bearer === undefined) return fail('UNAUTHENTICATED', 'the original retirement credential is unavailable', { stateChanged: false })
+                  const token = await findActiveApiTokenByHash(tx, sha256Hex(bearer))
+                  if (!token || token.id !== current.apiTokenId || token.principalId !== current.principal.id) return fail('UNAUTHENTICATED', 'the original retirement credential changed', { stateChanged: false })
+                  // API token expiry is required by its current persisted contract.
+                  // Missing/invalid expiry must never become an unlimited credential.
+                  deadline = Date.parse(token.expiresAt)
+                } else {
+                  if (current.sessionToken === null || current.sessionId === null) return fail('UNAUTHENTICATED', 'the original retirement session is unavailable', { stateChanged: false })
+                  const tokenHash = sessionTokenHash(current.sessionToken, entryPoint)
+                  if (current.team) {
+                    const member = readSavedTeam(await readTeamFile(current.team.accountId))?.find(value => value.id === current.team?.id)
+                    if (!member || teamMemberPhase(member, Date.now()) !== 'active' || member.username !== current.team.username
+                      || JSON.stringify([...member.roles].sort()) !== JSON.stringify([...current.team.roles].sort())) {
+                      return fail('UNAUTHENTICATED', 'the retirement team authority changed', { stateChanged: false })
+                    }
+                    const session = await findActiveTeamSession(tx, tokenHash, new Date())
+                    if (!session || session.id !== current.sessionId || session.ownerPrincipalId !== current.principal.id
+                      || session.memberId !== current.team.id || session.accountId !== current.team.accountId || session.login !== current.team.login) {
+                      return fail('UNAUTHENTICATED', 'the original retirement team session changed', { stateChanged: false })
+                    }
+                    deadline = sessionDeadline(session)
+                    if (member.expiresAt !== null) deadline = Math.min(deadline, Date.parse(member.expiresAt))
+                  } else {
+                    const session = await findActiveSessionByTokenHash(tx, tokenHash)
+                    if (!session || session.id !== current.sessionId || session.principalId !== current.principal.id) return fail('UNAUTHENTICATED', 'the original retirement session changed', { stateChanged: false })
+                    deadline = sessionDeadline(session)
+                  }
+                }
+                if (!Number.isFinite(deadline)) return fail('UNAUTHENTICATED', 'the retirement credential time is unavailable', { stateChanged: false })
+                const clock = Object.freeze({ assertCurrentTime(): void {
+                  const now = Date.now()
+                  if (!Number.isFinite(now) || now >= deadline) return fail('UNAUTHENTICATED', 'the retirement credential expired during admission', { stateChanged: false })
+                } })
+                clock.assertCurrentTime()
+                return clock
+              },
+              audit: async event => {
+                await emitAudit({ actor: caller.principal.username, principalId: caller.principal.id,
+                  action: event.action, target: 'mailbox:' + event.source.service.login, outcome: 'ok',
+                  detail: { jobId: event.job.id, initiator: event.job.actor, recoveryActorId: caller.principal.id,
+                    scope: 'control_plane', nativeDeletionVerified: false } },
+                  { accountId: event.source.account.id, resellerId: event.source.account.ownerId })
+              },
+              reconcile: source => triggerReconcile(caller, { scope: { accountId: source.account.id, resellerId: source.account.ownerId } }),
+            })
+          } catch (error) {
+            if (isXpanelError(error) && (error.code === 'UNAUTHENTICATED' || error.code === 'FORBIDDEN')) {
+              // Rejection rolls back the admitted transaction. Preserve the normal
+              // authenticator's session/team revocation outside that transaction.
+              try { await authenticateRequest(deps.db, credentialRequest, { serverSecret, clientIp, entryPoint,
+                mfaRuntimePolicy, touchSession: false, teamMember, handoffAuthority }) }
+              catch { return fail('SERVICE_UNAVAILABLE', 'retirement credential rejection requires review', {
+                stateChanged: true, verificationRequired: true, unknownOutcome: true,
+              }) }
+            }
+            throw error
+          }
+          // A mailbox retirement cannot return success without native proof.
+          // Null is only the unchanged non-mail service-user route below.
+        }
         const existing = await deps.store.getServiceUser(suId)
         if (!existing) return fail('NOT_FOUND', `service user "${suId}" not found`)
         const account = await deps.store.getAccount(existing.accountId)
@@ -4102,22 +4316,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           const reconcile = await triggerReconcile(caller, {
             scope: { accountId: account.id, resellerId: account.ownerId },
           })
-          return jsonResponse({ serviceUser, reconcile: reconcile?.body ?? null })
+          return jsonResponse({ serviceUser: publicServiceUser(serviceUser), reconcile: reconcile?.body ?? null })
         }
         if (method === 'DELETE') {
-          if (existing.services.email && existing.login.includes('@')) {
-            await emitAudit(
-              {
-                actor: caller.principal.username,
-                action: 'mailbox.deleted',
-                target: `mailbox:${existing.login}`,
-                outcome: 'ok',
-                principalId: caller.principal.id,
-              },
-              { accountId: account.id, resellerId: account.ownerId },
-            )
-          }
-          await revokeMailboxIdentity(deps.db, existing.login, suId)
           await deps.store.deleteServiceUser(suId)
           const reconcile = await triggerReconcile(caller, {
             scope: { accountId: account.id, resellerId: account.ownerId },

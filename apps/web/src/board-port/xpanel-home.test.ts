@@ -1,3 +1,5 @@
+import { resolveWebDocumentRoute } from '../document-routes.ts'
+import { parseMarkup } from '../themes/markup.ts'
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import { defaultPlan } from '@xpanel/core'
@@ -171,4 +173,127 @@ describe('xPanel home board port', () => {
     const importers = walk(src).filter(file => /from '[^']*\.fixture\.ts'/.test(readFileSync(decodeURIComponent(file).replace(/^\/([A-Za-z]:)/, '$1'), 'utf8')))
     assert.deepEqual(importers, [])
   })
+})
+
+
+describe('authenticated Home account menu', () => {
+  it.each(['en', 'ar'] as const)('renders two native menu owners with unique controls and the trusted document context in %s', { tags: ['feature'] }, locale => {
+    for (const route of ['/home', '/panel']) {
+      const documentRoute = resolveWebDocumentRoute(route)
+      assert.ok(documentRoute && documentRoute.surface === 'xpanel')
+      const html = renderWebApp({
+        surface: 'xpanel', activeRoute: documentRoute.activeRoute, locale, theme: 'light', density: 'compact', accountId: account.id,
+        visibility: { principal: { kind: 'user', id: 'home-menu-owner', username: account.username, accountId: account.id } },
+        panel: { account },
+      })
+      const nodes = parseMarkup(html), live = nodes.filter(node => node.namespace === 'html' && node.template === -1)
+      const menus = live.filter(node => node.tag === 'details' && node.attrs.has('data-user-menu'))
+      assert.equal(menus.length, 2, route)
+      const choices = live.filter(node => node.tag === 'select' && node.attrs.has('data-ui-theme-choice'))
+      assert.deepEqual(choices.map(node => node.attrs.get('id')).sort(), ['xp-home-desktop-ui-theme-choice', 'xp-home-phone-ui-theme-choice'])
+      const ids = live.flatMap(node => node.attrs.has('id') ? [node.attrs.get('id')] : [])
+      assert.equal(new Set(ids).size, ids.length)
+      for (const menu of menus) {
+        const menuIndex = nodes.indexOf(menu)
+        const descendants = live.filter(node => {
+          let parent = node.parent
+          while (parent >= 0) {
+            if (parent === menuIndex) return true
+            const ancestor = nodes[parent]
+            if (!ancestor) break
+            parent = ancestor.parent
+          }
+          return false
+        })
+        const summary = descendants.find(node => node.tag === 'summary' && node.parent === menuIndex)
+        assert.ok(summary)
+        assert.ok(summary.attrs.get('aria-label')?.includes(account.username))
+        assert.equal(summary.attrs.get('role'), undefined)
+        assert.equal(descendants.filter(node => node.attrs.has('data-ui-theme-choice')).length, 1)
+        assert.equal(descendants.filter(node => node.attrs.get('data-action') === 'logout').length, 1)
+        const choice = descendants.find(node => node.attrs.has('data-ui-theme-choice'))
+        assert.ok(choice)
+        assert.equal(live.filter(node => node.tag === 'label' && node.attrs.get('for') === choice.attrs.get('id')).length, 1)
+        const security = descendants.find(node => node.tag === 'a' && node.attrs.has('data-security-link'))
+        assert.ok(security)
+        const href = security.attrs.get('href')
+        assert.ok(href)
+        const url = new URL(href.replaceAll('&amp;', '&'), 'https://panel.example.test')
+        assert.equal(url.pathname, '/security/account')
+        assert.equal(url.searchParams.get('lang'), locale)
+        assert.equal(url.searchParams.get('theme'), 'light')
+        assert.equal(url.searchParams.get('density'), 'compact')
+        assert.equal(url.searchParams.get('accountId'), account.id)
+      }
+    }
+  })
+
+  it('keeps an absent authenticated menu model noninteractive instead of inferring sign-in from account labels', { tags: ['feature'] }, () => {
+    const nodes = parseMarkup(renderXpanelHome(xpanelHomeFromProps({ account })))
+    assert.equal(nodes.filter(node => node.attrs.has('data-user-menu')).length, 0)
+    assert.equal(nodes.filter(node => node.tag === 'span' && node.attrs.get('class') === 'xp-home-avatar' && node.attrs.get('role') === 'img').length, 2)
+    assert.equal(nodes.filter(node => node.attrs.has('data-ui-theme-preferences') || node.attrs.get('data-action') === 'logout').length, 0)
+  })
+
+  it('uses the shared sign-in menu for an explicit signed-out model without personal preference or logout controls', { tags: ['feature'] }, () => {
+    const nodes = parseMarkup(renderXpanelHome(xpanelHomeFromProps({
+      account, userMenu: { locale: 'en', theme: 'light', density: 'comfortable', path: '/home', surface: 'xpanel', signedIn: false },
+    })))
+    assert.equal(nodes.filter(node => node.tag === 'details' && node.attrs.has('data-user-menu')).length, 2)
+    assert.equal(nodes.filter(node => node.attrs.has('data-ui-theme-preferences') || node.attrs.get('data-action') === 'logout').length, 0)
+    assert.equal(nodes.filter(node => node.tag === 'a' && node.attrs.get('href')?.startsWith('/login?')).length, 2)
+  })
+})
+
+
+describe('Home account query context ownership', () => {
+  for (const selected of [false, true]) {
+    it.each(['en', 'ar'] satisfies readonly ('en' | 'ar')[])('uses only selected account query context (selected=' + selected + ') in %s', { tags: ['feature'] }, locale => {
+      for (const route of ['/home', '/panel', '/panel/home']) {
+        const documentRoute = resolveWebDocumentRoute(route)
+        assert.ok(documentRoute && documentRoute.surface === 'xpanel')
+        assert.equal(documentRoute.activeRoute, '/home')
+        const html = renderWebApp({
+          surface: 'xpanel', uiTheme: 'classic', activeRoute: documentRoute.activeRoute, locale,
+          theme: 'light', density: 'compact', ...(selected ? { accountId: account.id } : {}),
+          visibility: { principal: { kind: 'user', id: 'home-query-owner', username: account.username, accountId: account.id } },
+          panel: { account },
+        })
+        const live = parseMarkup(html).filter(node => node.namespace === 'html' && node.template < 0)
+        assert.equal(live.filter(node => node.tag === 'details' && node.attrs.has('data-user-menu')).length, 2, route)
+        assert.equal(live.filter(node => node.attrs.has('data-ui-theme-choice')).length, 2, route)
+        const logoutButtons = live.filter(node => node.attrs.get('data-action') === 'logout')
+        assert.equal(logoutButtons.length, 4, route)
+        assert.equal(logoutButtons.filter(node => (node.attrs.get('class') ?? '').split(/\s+/).includes('xp-menu-signout')).length, 2, route)
+        for (const button of logoutButtons) {
+          assert.equal(button.tag, 'button')
+          assert.equal(button.attrs.get('type'), 'button')
+          assert.equal(button.attrs.has('disabled'), false)
+        }
+        let contextualControls = 0
+        for (const anchor of live.filter(node => node.tag === 'a' && node.attrs.has('href'))) {
+          const href = anchor.attrs.get('href')
+          if (href === undefined) throw new Error('Missing live Home link')
+          const url = new URL(href, 'https://panel.example.test/home')
+          if (url.origin !== 'https://panel.example.test') continue
+          if (!selected) assert.equal(url.searchParams.has('accountId'), false, route + ' ' + url.pathname)
+          if (anchor.attrs.has('data-security-link') || anchor.attrs.has('data-lang-switch')
+            || anchor.attrs.has('data-theme-toggle') || anchor.attrs.has('data-density-option') || url.pathname === '/resources') {
+            contextualControls++
+            assert.equal(url.searchParams.get('accountId'), selected ? account.id : null, route + ' ' + url.pathname)
+            if (anchor.attrs.has('data-theme-toggle')) {
+              assert.equal(anchor.attrs.get('data-theme-toggle'), 'dark')
+              assert.equal(url.searchParams.get('theme'), 'dark')
+            } else assert.equal(url.searchParams.get('theme'), 'light')
+            if (anchor.attrs.has('data-density-option')) {
+              const targetDensity = anchor.attrs.get('data-density-option')
+              assert.ok(targetDensity === 'comfortable' || targetDensity === 'compact')
+              assert.equal(url.searchParams.get('density'), targetDensity)
+            } else assert.equal(url.searchParams.get('density'), 'compact')
+          }
+        }
+        assert.ok(contextualControls >= 6, route)
+      }
+    })
+  }
 })

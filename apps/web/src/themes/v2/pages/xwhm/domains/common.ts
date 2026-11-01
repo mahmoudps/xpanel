@@ -50,7 +50,7 @@ export const netFacts = (rows: readonly { label: string; valueHtml: string; hook
   `<dl class="v2-whm-network__facts">${rows.map(row => `<div><dt>${escapeHtml(row.label)}</dt><dd${hookAttrs(row.hooks)}>${row.valueHtml}</dd></div>`).join('')}</dl>`
 
 export function networkPage(t: Translate, route: string, title: string, description: string, bodyHtml: string, canRead: boolean, hooks?: HookAttributes): string {
-  return `<section class="v2-whm-network" data-whm-detail-route="${escapeHtml(route)}"${canRead ? '' : ' data-readonly="true"'}${hookAttrs(hooks)}>${pageHeader(t, { route, title, description, breadcrumb: [{ label: t(msgid('Home')), href: '/whm' }, { label: title }] })}${!canRead ? `<p role="status">${escapeHtml(t(msgctxt('theme:v2', 'Authorized data has not been read. Controls remain unavailable.')))}</p>` : ''}${bodyHtml}</section>`
+  return `<section class="v2-whm-network" data-whm-detail-route="${escapeHtml(route)}" data-capability-state="${canRead ? 'authorized' : 'unavailable'}"${canRead ? '' : ' data-readonly="true"'}${hookAttrs(hooks)}>${pageHeader(t, { route, title, description, breadcrumb: [{ label: t(msgid('Home')), href: '/whm' }, { label: title }] })}${!canRead ? `<p role="status">${escapeHtml(t(msgctxt('theme:v2', 'Authorized data has not been read. Controls remain unavailable.')))}</p>` : ''}${bodyHtml}</section>`
 }
 
 export const WHM_NETWORK_CSS = `.v2-whm-network,.v2-whm-network__stack{display:flex;flex-direction:column;gap:var(--space-4);min-inline-size:0}

@@ -29,7 +29,7 @@ function bindMailMailingLists(askDialog: ((options: Record<string, unknown>) => 
     const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest, mailbox = root.dataset.listsMailbox ?? ''
     const status = root.querySelector<HTMLElement>('[data-lists-status]')!, rows = root.querySelector<HTMLTableSectionElement>('[data-lists-rows]')!, refresh = root.querySelector<HTMLButtonElement>('[data-lists-refresh]')!
     if (!status || !rows || !refresh) return
-    try { mailRequireTemplates(root, [['mail-membership-row', 'tr', ['address', 'name', 'observed', 'subscription', 'posting', 'membership', 'action']], ['mail-membership-empty', 'tr', ['message']]]) }
+    try { mailRequireTemplates(root, [['mail-membership-row', 'tr', ['address', 'name', 'observed', 'subscription', 'posting', 'membership', 'action'], [['action', 'button', { type: 'button' }]]], ['mail-membership-empty', 'tr', ['message']]]) }
     catch { refresh.disabled = true; status.dataset.state = 'unavailable'; status.textContent = t('Mailing lists are unavailable for this mailbox session. Nothing was read.'); return }
     const admitted = (): boolean => root.isConnected && root.dataset.listsManage === 'true' && root.dataset.listsMailbox === mailbox && !!mailbox && !!send && !root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
     let snapshot: MailListsSnapshot | null = null, busy = false, locked = false

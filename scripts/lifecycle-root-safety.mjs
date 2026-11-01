@@ -20,6 +20,7 @@ const COORDINATORS = new Set(['xpanel-upgrade.service', 'xpanel-lifecycle.servic
 const SHA = /^[a-f0-9]{64}$/
 const scopeStorage = new AsyncLocalStorage()
 const capabilities = new WeakMap()
+const retiredObservationScopes = new WeakSet()
 const factories = new WeakMap()
 const fail = (code, cause) => { throw Object.assign(new Error(code, cause ? { cause } : undefined), { code }) }
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -169,6 +170,24 @@ export async function assertCurrentLifecycleEffect(effect) {
   await assertLifecycleRootSafetyHeld(scope.capability, { effect })
 }
 
+/** Read-only facade of THIS actual native scope. Data, a caller callback or a receipt cannot mint it. */
+export async function captureCurrentLifecycleObservationScope() {
+  const scope = scopeStorage.getStore()
+  await assertLifecycleRootSafetyHeld(scope?.capability, { effect: 'service.observe' })
+  if (!scope || scopeStorage.getStore() !== scope || scope.phase !== 'held' || retiredObservationScopes.has(scope)) fail('LIFECYCLE_NATIVE_SCOPE_REQUIRED')
+  const controller = new AbortController()
+  scope.observations.add(controller)
+  let released = false
+  const assertAuthority = async () => {
+    if (released || controller.signal.aborted || scopeStorage.getStore() !== scope || scope.phase !== 'held' || retiredObservationScopes.has(scope)) fail('LIFECYCLE_OBSERVATION_SCOPE_EXPIRED')
+    await assertLifecycleRootSafetyHeld(scope.capability, { effect: 'service.observe' })
+    if (released || controller.signal.aborted || scopeStorage.getStore() !== scope || scope.phase !== 'held' || retiredObservationScopes.has(scope)) fail('LIFECYCLE_OBSERVATION_SCOPE_EXPIRED')
+  }
+  return Object.freeze({ operationId: scope.job.id, kind: scope.operation, readOnly: true, signal: controller.signal, assertAuthority,
+    release() { if (!released) { released = true; scope.observations.delete(controller); controller.abort() } },
+  })
+}
+
 export async function verifyCurrentLifecycleWriterReadiness() {
   const scope = scopeStorage.getStore()
   await assertScope(scope)
@@ -288,7 +307,7 @@ export async function createNativeUpgradeSafety(options) {
         const job = await createJob(db, { id, kind: intentBinding.action, actor: principal.username, detail: { lifecycleIntent: intentBinding } })
         const authority = await createRootOperationAuditAuthority(db)
         const intentReceipt = await authority.appendLifecycleIntent(intentBinding)
-        const scope = { ...configured, phase: 'held', guard, job, intentBinding, intentReceipt, pins: [parent.verify, tool.verify, node.verify], previousHead: head, capability: Object.freeze({}), capture: null, staged: null, dependencies: null, backup: null }
+        const scope = { ...configured, phase: 'held', guard, job, intentBinding, intentReceipt, pins: [parent.verify, tool.verify, node.verify], previousHead: head, capability: Object.freeze({}), observations: new Set(), capture: null, staged: null, dependencies: null, backup: null }
         capabilities.set(scope.capability, scope); activeScope = scope
         return scopeStorage.run(scope, async () => {
           try {
@@ -302,6 +321,9 @@ export async function createNativeUpgradeSafety(options) {
               return await settleNative(scope, result)
             })
           } finally {
+            retiredObservationScopes.add(scope)
+            for (const controller of scope.observations) controller.abort()
+            scope.observations.clear()
             try { await awaitOwnedServiceChildren(scope.capability) } finally { scope.phase = 'closed'; activeScope = null }
           }
         })

@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
+import type { Account } from '@xpanel/core'
+import { renderPanelSurface } from './surfaces/xpanel.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderUserMenu } from './chrome.ts'
+import { renderWebApp } from './app.ts'
 import { translator } from './i18n.ts'
 import { renderV2Shell } from './themes/v2/shell/shell.ts'
 import { readUiThemePreferencesView, UI_THEME_CLIENT_BINDING, type UiThemePreferencesView } from './ui-theme-client.ts'
@@ -58,6 +61,38 @@ describe('personal UI theme response', () => {
 })
 
 describe('personal UI theme chooser', () => {
+  it.each([
+    ['xpanel', '/resources', { kind: 'user', id: 'u1', username: 'alice', accountId: 'a1' }],
+    ['xwhm', '/whm/accounts', { kind: 'root', id: 'root1', username: 'administrator' }],
+    ['xmail', '/mail/compose', { kind: 'user', id: 'u1', username: 'alice', accountId: 'a1' }],
+  ] as const)('keeps personal choices independent from unqualified %s operations', async (surface, route, principal) => {
+    document.documentElement.lang = 'en'
+    document.documentElement.dir = 'ltr'
+    document.body.innerHTML = renderWebApp({ surface, activeRoute: route, locale: 'en', catalog: [], visibility: { principal } })
+    const workspace = $('[data-tool-availability="unverified"]')
+    const form = $<HTMLFormElement>('form[data-ui-theme-form]')
+    expect(workspace).not.toBeNull()
+    expect(form).not.toBeNull()
+    expect(workspace.contains(form)).toBe(false)
+    expect($<HTMLSelectElement>('[data-ui-theme-choice]').disabled).toBe(true)
+    let reads = 0
+    const request = vi.fn<Requester>(async method => method === 'PUT' || reads++ > 0 ? saved() : initial())
+    ;(window as Window & { xpanelSessionRequest?: Requester }).xpanelSessionRequest = request
+    const reload = vi.fn()
+    controller()(reload)
+    await settle()
+    expect($<HTMLSelectElement>('[data-ui-theme-choice]').disabled).toBe(false)
+    selectTheme(); submit(); await settle()
+    expect(request.mock.calls).toEqual([
+      ['GET', '/api/auth/ui-preferences'],
+      ['PUT', '/api/auth/ui-preferences', { uiTheme: 'v2', expectedRevision: REVISION }],
+      ['GET', '/api/auth/ui-preferences'],
+    ])
+    expect($('[data-ui-theme-status]').dataset.state).toBe('verified')
+    expect(reload).toHaveBeenCalledOnce()
+  })
+
+
   it.each<Theme>(['classic', 'v2'])('keeps the %s chooser hidden when only classic is actually registered', async theme => {
     const request = vi.fn<Requester>(async () => initial({ choices: ['classic'] }))
     const reload = mount(request, theme)
@@ -215,5 +250,87 @@ describe('personal UI theme chooser', () => {
     expect(UI_THEME_CLIENT_BINDING).not.toMatch(/localStorage|document\.cookie|fetch\(|\.className|\.style\./)
     expect(document.querySelector('[data-theme-toggle="light"]')).not.toBeNull()
     expect($<HTMLSelectElement>('[data-ui-theme-choice]').name).toBe('uiTheme')
+  })
+})
+
+
+describe('responsive Home personal interface owners', () => {
+  beforeEach(() => { document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr' })
+  const homeAccount: Account = {
+    id: 'home-interface-account', username: 'browserowner', uid: 20014, gid: 20014, home: '/home/browserowner',
+    primaryDomain: 'home.example.test', planId: 'home-plan', ownerId: null, status: 'active', suspendReason: null,
+    contactEmail: 'owner@home.example.test', ipv4: '192.0.2.10', ipv6: null, shell: 'none', createdAt: '2026-10-31T05:00:00.000Z',
+  }
+  const home = (): string => renderPanelSurface({
+    account: homeAccount, activeRoute: '/home', locale: 'en', theme: 'dark', density: 'compact',
+    visibility: { principal: { kind: 'user', id: 'home-interface-owner', username: homeAccount.username, accountId: homeAccount.id } },
+  })
+  const ownerControls = (instanceId: 'xp-home-desktop' | 'xp-home-phone') => {
+    const select = document.getElementById(instanceId + '-ui-theme-choice')
+    if (!(select instanceof HTMLSelectElement)) throw new Error('Missing owned Home interface choice')
+    const owner = select.closest<HTMLElement>('[data-ui-theme-preferences]')
+    if (!owner) throw new Error('Missing Home interface owner')
+    const form = owner.querySelector<HTMLFormElement>('form[data-ui-theme-form]')
+    const status = owner.querySelector<HTMLElement>('[data-ui-theme-status]')
+    if (!form || !status) throw new Error('Missing owned Home interface controls')
+    return { select, owner, form, status }
+  }
+
+  it.each(['xp-home-desktop', 'xp-home-phone'] as const)('binds %s once and submits only that owner with CAS and independent readback', { tags: ['feature'] }, async instanceId => {
+    document.body.innerHTML = home()
+    let reads = 0
+    const request = vi.fn<Requester>(async method => method === 'PUT' || reads++ >= 2 ? saved() : initial())
+    ;(window as Window & { xpanelSessionRequest?: Requester }).xpanelSessionRequest = request
+    const reload = vi.fn(), bind = controller()
+    bind(reload); await settle()
+    expect(request.mock.calls).toEqual([['GET', '/api/auth/ui-preferences'], ['GET', '/api/auth/ui-preferences']])
+    bind(reload); await settle()
+    expect(request.mock.calls).toHaveLength(2)
+    const selected = ownerControls(instanceId)
+    const other = ownerControls(instanceId === 'xp-home-desktop' ? 'xp-home-phone' : 'xp-home-desktop')
+    expect(selected.select.disabled).toBe(false)
+    expect(other.select.disabled).toBe(false)
+    selected.select.value = 'v2'
+    selected.select.dispatchEvent(new Event('change'))
+    selected.form.dispatchEvent(new Event('submit', { cancelable: true }))
+    await settle()
+    expect(request.mock.calls).toEqual([
+      ['GET', '/api/auth/ui-preferences'], ['GET', '/api/auth/ui-preferences'],
+      ['PUT', '/api/auth/ui-preferences', { uiTheme: 'v2', expectedRevision: REVISION }],
+      ['GET', '/api/auth/ui-preferences'],
+    ])
+    expect(selected.status.dataset.state).toBe('verified')
+    expect(other.select.value).toBe('classic')
+    expect(other.status.dataset.state).not.toBe('verified')
+    expect(reload).toHaveBeenCalledOnce()
+  })
+
+  it('keeps both handed-off Home preference owners read-only without a PUT', { tags: ['feature'] }, async () => {
+    document.body.innerHTML = '<aside data-impersonation>Handed-off session</aside>' + home()
+    const request = vi.fn<Requester>(async () => initial())
+    ;(window as Window & { xpanelSessionRequest?: Requester }).xpanelSessionRequest = request
+    const reload = vi.fn()
+    controller()(reload); await settle()
+    for (const instanceId of ['xp-home-desktop', 'xp-home-phone'] as const) {
+      const controls = ownerControls(instanceId)
+      expect(controls.select.disabled).toBe(true)
+      controls.select.value = 'v2'
+      controls.select.dispatchEvent(new Event('change'))
+      controls.form.dispatchEvent(new Event('submit', { cancelable: true }))
+      expect(controls.status.dataset.state).toBe('readonly')
+    }
+    await settle()
+    expect(request.mock.calls).toEqual([['GET', '/api/auth/ui-preferences'], ['GET', '/api/auth/ui-preferences']])
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('keeps both owners disabled when the normal session transport is absent', { tags: ['feature'] }, () => {
+    document.body.innerHTML = home()
+    controller()(vi.fn())
+    for (const instanceId of ['xp-home-desktop', 'xp-home-phone'] as const) {
+      const controls = ownerControls(instanceId)
+      expect(controls.select.disabled).toBe(true)
+      expect(controls.owner.hidden).toBe(true)
+    }
   })
 })

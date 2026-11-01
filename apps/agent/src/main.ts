@@ -1,9 +1,11 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { createNativeAccountProvisioningHttp } from './account-provisioning-http.ts'
+import { createReadonlyAccountProvisioningObserver } from './account-provisioning-observer.ts'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { timingSafeEqual } from 'node:crypto'
 import { chmod, chown, mkdir, readdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { fail } from '@xpanel/core'
+import { captureMfaRuntimePolicy, fail } from '@xpanel/core'
 import type { OsProfile } from '@xpanel/core'
 import { appendAudit, createDb, initializeOperationalMetadata, migrate, pruneMetricsHistory, recordHostMetricsSample } from '@xpanel/db'
 import { detectOs, XPANEL_FPM_SOCKET_DIR } from '@xpanel/os'
@@ -17,6 +19,10 @@ import { ensureInstalledMail } from './services/local-mail.ts'
 import { enableMailWebsocketProxy } from './services/mail-websocket.ts'
 import { readOpenDkimPublished, writeOpenDkimPublished } from './services/opendkim-live.ts'
 import { HostReconciler } from './reconciler.ts'
+import { loadNativePeerIdentityAddon, resolveProvisionedPeerUids } from './peer-identity.ts'
+import { AccountProvisioningPreparationReader } from './account-provisioning-preparation.ts'
+import { provisioningAuthorizationPorts } from './account-provisioning-authorization.ts'
+import { createAccountProvisioningRuntime } from './account-provisioning-runtime.ts'
 import { HostJobRunner } from './host-jobs.ts'
 import { DATABASE_REMOTE_ACCESS_JOURNAL_DIR, pendingDatabaseRemoteAccessJournals, qualifyDatabaseRemoteAccessNative, recoverPendingDatabaseRemoteAccess } from './db-remote-provider.ts'
 import { createHostJobRun } from './host-job-exec.ts'
@@ -267,6 +273,9 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         const terminalHelperPath = opts.terminalPtyBinaryPath ?? process.env.XPANEL_TERMINAL_PTY_BINARY ?? DEFAULT_TERMINAL_PTY_HELPER
         if (await verifyTerminalPtyHelper(terminalHelperPath)) terminals = new TerminalSessionManager(createSystemdPtySpawner(terminalHelperPath))
 
+        const dnsPublication = createNativeDnsReconcileProvider({ executor, family: os.family,
+          readOwnedPaths: async () => new Set((await reconciler.ownedChecksums()).keys()),
+        })
         const reconciler: HostReconciler = new HostReconciler({
           store,
           db: dbHandle.db,
@@ -274,9 +283,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           os,
           quotaFilesystem,
           ioDevices,
-          dnsPublication: createNativeDnsReconcileProvider({ executor, family: os.family,
-            readOwnedPaths: async () => new Set((await reconciler.ownedChecksums()).keys()),
-          }),
+          dnsPublication,
         })
         await syncRuntimePublicOrigin(executor).catch((error: unknown) => {
           process.stderr.write(`xpanel-agent public origin: ${error instanceof Error ? error.message : String(error)}\n`)
@@ -332,8 +339,25 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         if (resourcesFenced) await ioResourcePipeline.pause()
         await createLifecycleBackgroundResources(() => ioResourcePipeline!.start())
 
+        const provisioningPeerUids = await resolveProvisionedPeerUids({ gid: socketGid, allowRootPeer: false })
+        const provisioningOwnerUid = [...provisioningPeerUids][0]
+        if (provisioningPeerUids.size !== 1 || provisioningOwnerUid === undefined) {
+          return fail('PRECONDITION_FAILED', 'account preparation requires the unique provisioned API service identity')
+        }
+        const provisioningOwner = { uid: provisioningOwnerUid, gid: socketGid }
+        const nativeAccountHttp = createNativeAccountProvisioningHttp({ db: dbHandle.db, store, reconciler, executor, os,
+          addon: await loadNativePeerIdentityAddon(),
+        })
+        const accountProvisioning = createAccountProvisioningRuntime({
+          db: dbHandle.db, executor, reconciler,
+          preparations: new AccountProvisioningPreparationReader(stateDir, provisioningOwner),
+          authorization: provisioningAuthorizationPorts({ db: dbHandle.db, stateRoot: stateDir, owner: provisioningOwner }),
+          policy: captureMfaRuntimePolicy(),
+          observer: createReadonlyAccountProvisioningObserver({ executor, store, dns: dnsPublication, ...nativeAccountHttp }),
+        })
         const app = createAgentApp({
           reconciler,
+          accountProvisioning,
           store,
           db: dbHandle.db,
           executor,
@@ -420,7 +444,9 @@ export const attachAgentProcessLifecycle = (daemon: { close: () => Promise<void>
 
 const isMainModule = (): boolean => {
   try {
-    return process.argv[1] === fileURLToPath(import.meta.url)
+    const entry = fileURLToPath(import.meta.url)
+    const argv = process.argv[1]
+    return argv === entry || (typeof argv === 'string' && argv.length > 0 && realpathSync(argv) === realpathSync(entry))
   } catch {
     return false
   }

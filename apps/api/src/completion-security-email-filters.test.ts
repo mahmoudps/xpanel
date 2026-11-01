@@ -74,6 +74,49 @@ const fixture = async () => {
   return { database, state, features, owner, other, inbox, sibling, foreignMailbox, principal, token, request, credential, mailboxToken, siblingToken, path, bytes, record }
 }
 
+
+// Block only the ACTUAL mutation acquisition, after HTTP recovery/initial auth.
+// Both blocker and contender are genuine OS writer acquisitions, never fake leases.
+const queueNextMutationWriter = (store: Awaited<ReturnType<typeof fixture>>['state']['store']) => {
+  const lock = store.getWriterLock(), acquire = lock.acquire.bind(lock)
+  type Lease = Awaited<ReturnType<typeof acquire>>
+  type Arrival = { lease?: Lease; error?: unknown }
+  let notify: () => void = () => undefined, resume: () => void = () => undefined
+  const reached = new Promise<void>(resolve => { notify = resolve }), gate = new Promise<void>(resolve => { resume = resolve })
+  let blocker: Lease | undefined, phase = '', contenderAcquired = false
+  const spy = vi.spyOn(lock, 'acquire').mockImplementationOnce(async (...args) => {
+    phase = new Error('actual mail mutation writer admission').stack ?? ''
+    const held = await acquire(...args); blocker = held
+    const waiting = acquire(...args).then<Arrival, Arrival>(lease => { contenderAcquired = true; return { lease } }, error => ({ error }))
+    notify()
+    let releaseFailed = false, releaseFailure: unknown
+    try { await gate } finally { try { await held.release() } catch (error) { releaseFailed = true; releaseFailure = error } }
+    const arrival = await waiting
+    if (releaseFailed) { await arrival.lease?.release(); throw releaseFailure }
+    if (!arrival.lease) throw arrival.error
+    return arrival.lease
+  })
+  return {
+    release: () => resume(), restore: () => spy.mockRestore(),
+    wait: async (pending: Promise<unknown>) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([reached,
+          pending.then(() => { throw new Error('mail request completed before the intended mutation writer queue') }),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('mail request did not reach its mutation writer queue')), 5000) }),
+        ])
+        // The call frame must be a mail handler, not global recovery/snapshot work.
+        if (!phase.includes('extended-routes.ts') && !phase.includes('/mail/')) throw new Error('mail mutation queue phase is unqualified')
+        if (/recoverAccountContactProjection|readSnapshot|readAuthorityAtBarrier|waitForUnlocked/.test(phase)) throw new Error('queue was placed before initial mail authorization')
+        const held = blocker
+        if (!held) throw new Error('real queue blocker is missing')
+        await held.assertFencingToken()
+        if (contenderAcquired) throw new Error('the mutation writer did not queue behind its blocker')
+      } finally { if (timer) clearTimeout(timer) }
+    },
+  }
+}
+
 describe('mail-filter configuration HTTP security acceptance with disposable state', () => {
   let f: Awaited<ReturnType<typeof fixture>>
   beforeEach(async () => { f = await fixture() })
@@ -458,32 +501,17 @@ describe('mail-filter configuration HTTP security acceptance with disposable sta
   })
 
   it.each(['token', 'principal'] as const)('revalidates queued %s credentials after acquiring the writer lease', async kind => {
-    const before = await f.bytes()
-    const lock = f.state.store.getWriterLock()
-    const held = await lock.acquire()
-    const acquire = lock.acquire.bind(lock)
-    let queued!: () => void
-    const reached = new Promise<void>(resolve => { queued = resolve })
-    // This hook observes the real router's acquisition after its initial authentication.
-    const spy = vi.spyOn(lock, 'acquire').mockImplementation((...args) => { queued(); return acquire(...args) })
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let released = false
+    const before = await f.bytes(), queue = queueNextMutationWriter(f.state.store)
     const pending = f.request(route, 'POST', draft())
     try {
-      await Promise.race([reached, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Filter request did not reach the queued writer checkpoint')), 5000) })])
+      await queue.wait(pending)
       if (kind === 'token') await dbApi.revokeAllApiTokensForPrincipal(f.database.db, f.principal.id)
       else await dbApi.setPrincipalDisabled(f.database.db, f.principal.id, true)
-      await held.release(); released = true
-      const response = await pending
-      expect(response.status).toBe(401)
+      queue.release()
+      expect((await pending).status).toBe(401)
       expect(await f.bytes()).toBe(before)
       expect((await dbApi.listAudit(f.database.db, { limit: 50 })).some(item => item.action === 'mail.filter.created' && item.outcome === 'ok')).toBe(false)
-    } finally {
-      if (timer) clearTimeout(timer)
-      if (!released) await held.release()
-      spy.mockRestore()
-      await pending.catch(() => undefined)
-    }
+    } finally { queue.release(); await pending.catch(() => undefined); queue.restore() }
   })
 
   it('reports persisted configuration as uncertain when the later audit raises a known conflict', async () => {

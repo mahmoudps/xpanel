@@ -1,4 +1,9 @@
 import { WHM_DNS_CLIENT_BINDING } from './whm-dns-client.ts'
+import { clientTemplate, clientTemplateSlot, cloneClientTemplate } from './client-templates.ts'
+import { PROMPT_CLIENT_BINDING } from './prompt-client.ts'
+import { PRESENTATION_TABS_CLIENT_BINDING } from './presentation-tabs-client.ts'
+import { ACCOUNT_DETAILS_CLIENT_BINDING } from './account-details-client.ts'
+import { ACCOUNT_CREATE_OPERATION_BINDING, ACCOUNT_CREATION_ACKNOWLEDGEMENT_BINDING } from './account-create-operation.ts'
 import { WHM_LOCAL_ARCHIVES_CLIENT_BINDING } from './whm-local-archives-client.ts'
 // Real-time RFC 6455 WebSocket state store, 5-stage reconcile pipeline banner renderer,
 // and embedded browser script for live updates and keyboard navigation shortcuts.
@@ -22,6 +27,8 @@ import { ACCOUNT_FILTERS_CLIENT_BINDING } from './account-filters-client.ts'
 import { ACCOUNT_MAILING_LISTS_CLIENT_BINDING } from './account-mailing-lists-client.ts'
 import { ACCOUNT_SPAM_CLIENT_BINDING } from './account-spam-client.ts'
 import { ACCOUNT_SESSIONS_CLIENT_BINDING } from './account-sessions-client.ts'
+import { ACCOUNT_API_TOKENS_CLIENT_BINDING } from './account-api-tokens-client.ts'
+import { ACCOUNT_PASSWORD_CLIENT_BINDING } from './account-password-client.ts'
 import { ACCOUNT_SSL_CLIENT_BINDING } from './account-ssl-client.ts'
 import { ACCOUNT_CONTACT_CLIENT_BINDING } from './account-contact-client.ts'
 import { DOMAIN_WORKSPACE_CLIENT_BINDING } from './domain-workspace-client.ts'
@@ -855,6 +862,9 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     var createAnother = creationWorkspace && creationWorkspace.querySelector('[data-approved-account-create-status] [data-account-create-another]') || form.querySelector('[data-account-create-another]');
     if (!button || !feedback || !password || !plan || !assignment || !ipFeedback || !ipAddress || !ipRefresh) return;
     var busy = false, accepted = false, dirty = false, reviewRequired = false;
+    var operationCache = null;
+    var createOperationCache = (${ACCOUNT_CREATE_OPERATION_BINDING});
+    var creationAcknowledgement = (${ACCOUNT_CREATION_ACKNOWLEDGEMENT_BINDING});
     var canCreate = !button.disabled, wantedAssignment = 'shared', availability = null;
     var previewController = null, previewTimer = null, previewSequence = 0, previewPlan = null, previewOwner;
     var localActions = Array.prototype.map.call(form.querySelectorAll('[data-account-generate-password],[data-account-toggle-password],button[type="reset"]'), function (element) { return { element: element, disabled: element.disabled }; });
@@ -862,12 +872,12 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       return { element: control, disabled: control.disabled, readOnly: Boolean(control.readOnly) };
     });
     function copy(message, values) { return xpT(message, values); }
-    function status(message, state) {
+    function status(message, state, hostVerified) {
       feedback.textContent = message; feedback.hidden = false;
       feedback.setAttribute('data-state', state);
       feedback.setAttribute('role', state === 'failed' ? 'alert' : 'status');
       var observation = creationWorkspace && creationWorkspace.querySelector('[data-account-creation-observation]');
-      if (observation) observation.textContent = message + ' ' + copy('Individual host task completion has not been observed.');
+      if (observation) observation.textContent = hostVerified ? message : message + ' ' + copy('Individual host task completion has not been observed.');
     }
     function ipStatus(message, state) {
       ipFeedback.textContent = message;
@@ -1000,6 +1010,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     });
     form.addEventListener('reset', function (event) {
       if (busy || accepted || reviewRequired) { event.preventDefault(); return; }
+      try { if (operationCache) operationCache.discard(); }
+      catch (_storageError) { event.preventDefault(); status(copy('Your browser could not retain this request. No changes were sent.'), 'failed'); return; }
       cancelPreview();
       setTimeout(function () { if (!form.isConnected || busy || accepted || reviewRequired) return; dirty = false; wantedAssignment = 'shared'; refreshIpAvailability(); }, 0);
     });
@@ -1010,6 +1022,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         var destination = new URL(createAnother.getAttribute('data-create-route') || '', window.location.origin);
         var choices = { lang: ['en', 'ar'], theme: ['light', 'dark'], density: ['compact', 'comfortable'] };
         if (destination.origin !== window.location.origin || destination.pathname !== '/whm/accounts/new' || destination.hash || Array.from(destination.searchParams.keys()).some(function (key) { return !choices[key] || destination.searchParams.getAll(key).length !== 1 || !choices[key].includes(destination.searchParams.get(key)); })) return;
+        if (!operationCache) return;
+        operationCache.discard();
         window.location.assign(destination.pathname + destination.search);
       } catch (_error) { return; }
     });
@@ -1019,10 +1033,27 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       if (!dirty || accepted) return;
       event.preventDefault(); event.returnValue = '';
     });
+    if (canCreate) {
+      try {
+        operationCache = createOperationCache(window.sessionStorage, form.getAttribute('data-account-create-actor') || '');
+        var retainedOperation = operationCache.read();
+        if (retainedOperation && retainedOperation.phase !== 'no-effects') {
+          accepted = retainedOperation.phase === 'complete'; reviewRequired = !accepted;
+          button.disabled = true; ipRefresh.disabled = true;
+          controls.forEach(function (state) { state.element.disabled = true; });
+          localActions.forEach(function (state) { state.element.disabled = true; });
+          if (createAnother) createAnother.disabled = !accepted;
+          status(accepted ? copy('The previous account request is retained in this tab. Review accounts before starting another request.') : copy('The request could not be verified. Review accounts before retrying.'), accepted ? 'pending' : 'failed');
+        }
+      } catch (_storageError) {
+        canCreate = false; button.disabled = true;
+        status(copy('Your browser could not retain this request. No changes were sent.'), 'failed');
+      }
+    }
     refreshIpAvailability();
     form.addEventListener('submit', function (event) {
       event.preventDefault();
-      if (busy || accepted || reviewRequired || button.disabled || form.closest('[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled') || !updateIpSelection() || !form.reportValidity()) return;
+      if (!canCreate || busy || accepted || reviewRequired || button.disabled || form.closest('[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled') || !updateIpSelection() || !form.reportValidity()) return;
       if (typeof window.xpanelSessionRequest !== 'function') {
         status(copy('Account creation is unavailable. No changes were made.'), 'failed'); return;
       }
@@ -1040,6 +1071,10 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       if (contactEmail) body.contactEmail = contactEmail;
       var ipv6 = value('ipv6');
       if (ipv6) body.ipv6 = ipv6;
+      try {
+        if (!operationCache) throw new Error('account_request_unavailable');
+        body.idempotencyKey = operationCache.begin(body.username);
+      } catch (_storageError) { status(copy('Your browser could not retain this request. No changes were sent.'), 'failed'); return; }
       var submittedValues = controls.map(function (state) {
         return state.element.name === 'password' ? '' : state.element.value;
       });
@@ -1053,21 +1088,19 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       status(copy('Submitting…'), 'loading');
       var refreshAfterRefusal = false;
       Promise.resolve().then(function () { return window.xpanelSessionRequest('POST', '/api/accounts', body); }).then(function (result) {
-        var execution = result && result.execution;
-        var pendingHost = execution && execution.targetVerified === false && execution.verificationRequired === true;
-        var observedHost = execution && execution.targetVerified === true && execution.verificationRequired === false && execution.hostBinding === 'observed' && execution.observedAddress === result.account.ipv4;
-        if (!result || !result.account || result.account.username !== body.username || (Object.hasOwn(body, 'ownerId') && result.account.ownerId !== body.ownerId) || (Object.hasOwn(body, 'shell') && result.account.shell !== body.shell) || !ipv4(result.account.ipv4) || !result.reconcile || result.reconcile.status !== 'applied' || !execution || execution.status !== 'configuration_applied' || execution.scope !== 'global_configuration' || (!pendingHost && !observedHost)) {
+        var acknowledgement = creationAcknowledgement(result, body);
+        if (!acknowledgement) {
           reviewRequired = true;
           status(copy('The result could not be verified. Review accounts before retrying.'), 'failed'); return;
         }
         accepted = true; dirty = false;
+        try { operationCache.mark('complete'); } catch (_storageError) { /* Keep the original key; a reload conservatively requires review. */ }
         ipAddress.textContent = result.account.ipv4; ipAddress.parentElement.hidden = false;
-        if (observedHost) {
-          ipStatus(copy('This address is on the server.'), 'ready');
-          status(copy('Account created.'), 'pending');
+        ipStatus(copy('This address is reserved in configuration. The server has not confirmed it is listening on the host.'), 'ready');
+        if (acknowledgement === 'verified') {
+          status(copy('Account created.'), 'pending', true);
         } else {
-          ipStatus(copy('This address is reserved in configuration. The server has not confirmed it is listening on the host.'), 'ready');
-          status(copy('Account configuration created. Hosting verification is still required.'), 'pending');
+          status(copy('This request already completed. Current hosting verification is still required.'), 'pending');
         }
       }).catch(function (error) {
         var details = error && error.details || {};
@@ -1079,6 +1112,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
           ? copy('The request could not be verified. Review accounts before retrying.')
           : copy('Account creation is unavailable. No changes were made.');
         if (!reviewRequired) {
+          try { operationCache.mark('no-effects'); }
+          catch (_storageError) { reviewRequired = true; message = copy('The request could not be verified. Review accounts before retrying.'); }
           if (error && error.status === 401) message = copy('Your session expired. Sign in again.');
           else if (error && error.status === 403) message = copy('You do not have permission to create accounts.');
           else if (details.reason === 'shared_ipv4_unavailable' || details.reason === 'account_ipv4_unavailable') {
@@ -1477,81 +1512,14 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     });
   }
 
-  function ensurePromptDialog() {
-    var dialog = document.querySelector('[data-xp-prompt]');
-    if (dialog) return dialog;
-    dialog = document.createElement('dialog');
-    dialog.className = 'xp-dialog';
-    dialog.setAttribute('data-xp-prompt', '');
-    var form = document.createElement('form');
-    form.method = 'dialog';
-    form.className = 'xp-form-group';
-    form.innerHTML = '<div class="xp-dialog__header"><h2 data-xp-prompt-title></h2><p data-xp-prompt-body></p></div>' +
-      '<div class="xp-field" data-xp-prompt-field><label class="xp-label" for="xp-prompt-input" data-xp-prompt-label style="padding-inline-start: var(--xp-control-content-inset)"></label>' +
-      '<input id="xp-prompt-input" class="xp-input" data-xp-prompt-input autocomplete="off"></div>' +
-      '<div class="xp-dialog__footer">' +
-      '<button type="button" class="xp-btn" value="cancel" data-xp-prompt-cancel></button>' +
-      '<button type="submit" class="xp-btn xp-btn--primary" value="confirm" data-xp-prompt-confirm></button>' +
-      '</div>';
-    dialog.appendChild(form);
-    document.body.appendChild(dialog);
-    dialog.addEventListener('click', function (event) {
-      if (event.target === dialog) dialog.close('cancel');
-    });
-    dialog.querySelector('[data-xp-prompt-cancel]').addEventListener('click', function () {
-      dialog.close('cancel');
-    });
-    dialog.querySelector('form').addEventListener('submit', function (event) {
-      event.preventDefault();
-      var field = dialog.querySelector('[data-xp-prompt-field]');
-      var input = dialog.querySelector('[data-xp-prompt-input]');
-      var entered = input && typeof input.value === 'string' ? input.value : '';
-      if (!dialog._xpPreserveWhitespace) entered = entered.trim();
-      if (field && !field.hidden && !entered) {
-        input.focus();
-        return;
-      }
-      dialog._xpValue = !field || field.hidden ? true : entered;
-      dialog.close('confirm');
-    });
-    dialog.addEventListener('close', function () {
-      var pending = dialog._xpResolve;
-      dialog._xpResolve = null;
-      if (pending) pending(dialog.returnValue === 'confirm' ? dialog._xpValue : null);
-    });
-    return dialog;
-  }
-
-  function askDialog(options) {
-    var dialog = ensurePromptDialog();
-    dialog.querySelector('[data-xp-prompt-title]').textContent = options.title || '';
-    dialog.querySelector('[data-xp-prompt-body]').textContent = options.body || '';
-    var field = dialog.querySelector('[data-xp-prompt-field]');
-    var input = dialog.querySelector('[data-xp-prompt-input]');
-    var label = dialog.querySelector('[data-xp-prompt-label]');
-    field.hidden = !options.input;
-    label.textContent = options.label || '';
-    input.value = options.value || '';
-    dialog._xpPreserveWhitespace = options.preserveWhitespace === true;
-    input.type = options.secret ? 'password' : 'text';
-    input.required = false;
-    dialog.querySelector('[data-xp-prompt-cancel]').textContent = options.cancel || (xpT('Cancel'));
-    var confirm = dialog.querySelector('[data-xp-prompt-confirm]');
-    confirm.textContent = options.confirm || (xpT('Confirm'));
-    confirm.className = options.danger ? 'xp-btn xp-btn--danger' : 'xp-btn xp-btn--primary';
-    dialog._xpValue = null;
-    return new Promise(function (resolve) {
-      dialog._xpResolve = function (value) {
-        resolve(options.input ? (typeof value === 'string' && value ? value : null) : Boolean(value));
-      };
-      try { dialog.showModal(); }
-      catch (_err) { dialog.setAttribute('open', ''); }
-      var focusTarget = options.input ? input : confirm;
-      if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
-    });
-  }
+  ${clientTemplate.toString()}
+  ${clientTemplateSlot.toString()}
+  ${cloneClientTemplate.toString()}
+  var askDialog = (${PROMPT_CLIENT_BINDING})();
 
   function bindPhaseOneTools() {
+    (${PRESENTATION_TABS_CLIENT_BINDING})();
+    ${ACCOUNT_DETAILS_CLIENT_BINDING};
     ${PASSWORD_GENERATOR_CLIENT_BINDING}
     (${APPROVED_WHM_OPERATIONS_TABS_CLIENT})();
     (${APPROVED_WHM_TABLE_FILTERS_CLIENT})();
@@ -1563,6 +1531,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${ACCOUNT_MAILING_LISTS_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_SPAM_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_SESSIONS_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_PASSWORD_CLIENT_BINDING})();
+    (${ACCOUNT_API_TOKENS_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_SSL_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_CONTACT_CLIENT_BINDING})(askDialog, rtl);
     (${ACCOUNT_BACKUP_CLIENT_BINDING})(askDialog);
@@ -1786,7 +1756,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         window.xpanelSessionRequest('PATCH', '/api/accounts/' + form.getAttribute('data-account-id'), { contactEmail: form.querySelector('[name="contactEmail"]').value.trim() }).then(reload).catch(function (error) { note(status, failText(error)); });
       });
     });
-    document.querySelectorAll('[data-account-password-form]').forEach(function (form) {
+    document.querySelectorAll('form[data-account-password-form][data-account-id]').forEach(function (form) {
       form.addEventListener('submit', function (event) {
         event.preventDefault();
         var status = form.querySelector('[data-account-password-status]');

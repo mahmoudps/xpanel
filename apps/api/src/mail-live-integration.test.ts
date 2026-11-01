@@ -92,7 +92,7 @@ const connected = async () => {
 }
 
 describe('mail live API integration on disposable loopback listeners', () => {
-  it('uses one watch through reauthorization, immutable startup configuration and reconnect', async () => {
+  it('uses one watch through reauthorization, immutable startup configuration and reconnect', { tags: ['slow', 'journey'] }, async () => {
     const f = await connected()
     await until(() => f.events.some(event => event.kind === 'mail.changed'))
     const count = f.events.length

@@ -1,4 +1,5 @@
-import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './whm-client-templates.ts'
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates
 const whmClientNode = canonicalWhmClientNode, clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
@@ -79,7 +80,37 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
     const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     if (!status || !rows || !form || !statusFilter || !kindFilter || !refresh || !clear || !apply || !detailStatus || !steps || !outcome || !failure || !errorText || !verification || !verificationDetail || !logView || !logStatus || !logMore || !cancel || !cancelStatus) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.jobsCanRead === 'true' && !root.closest(denied) && typeof request === 'function'
+    let templateContractIntact = true
+    const templateContracts = [
+      ['whm-jobs-row', 'tr', { 'reference': 'td', 'kind': 'td', 'summary': 'td', 'state': 'td', 'progress': 'td', 'created': 'td', 'started': 'td', 'finished': 'td', 'actor': 'td' }],
+      ['whm-jobs-step', 'tr', { 'order': 'td', 'title': 'td', 'state': 'td', 'exit': 'td' }],
+      ['whm-jobs-select', 'button', { 'content': 'button' }],
+      ['whm-jobs-state-queued', 'span', { 'content': 'span' }],
+      ['whm-jobs-state-running', 'span', { 'content': 'span' }],
+      ['whm-jobs-state-succeeded', 'span', { 'content': 'span' }],
+      ['whm-jobs-state-failed', 'span', { 'content': 'span' }],
+      ['whm-jobs-state-cancelled', 'span', { 'content': 'span' }],
+      ['whm-jobs-progress-other', 'div', { 'track': 'div', 'fill': 'span', 'content': 'bdi' }],
+      ['whm-jobs-progress-failed', 'div', { 'track': 'div', 'fill': 'span', 'content': 'bdi' }],
+      ['whm-jobs-progress-succeeded', 'div', { 'track': 'div', 'fill': 'span', 'content': 'bdi' }],
+    ] as const
+    const verifyWhmTemplates = (): void => {
+      if (!templateContractIntact) throw new Error('client_template_contract_unavailable')
+      try { assertWhmClientTemplates(root, templateContracts) } catch (error) {
+        templateContractIntact = false
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+        status.dataset.state = 'unavailable'; status.textContent = t('Unavailable')
+        throw error
+      }
+    }
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.jobsCanRead === 'true' && !root.closest(denied) && typeof request === 'function')
+    if (admitted()) { try { verifyWhmTemplates() } catch { return } }
+    const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
+      verifyWhmTemplates()
+      const reply = await request!(...args)
+      verifyWhmTemplates()
+      return reply
+    }
     const manageable = (): boolean => admitted() && root.dataset.jobsCanManage === 'true'
     const POLL_MS = 5000, LOG_PAGE = 65536, LOG_DISPLAY_MAX = 1048576, MAX_FAILURES = 3
     let jobs: JobView[] = [], selected: JobView | null = null, wanted: string | null = null, filters = { status: '', kindPrefix: '' }
@@ -182,7 +213,7 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
       if (log.text.length >= LOG_DISPLAY_MAX) { paintLog(); return }
       logBusy = true; paintLog()
       try {
-        const page = readJobLogView(await request('GET', '/api/jobs/' + id + '/log?offset=' + log.nextOffset + '&limit=' + LOG_PAGE))
+        const page = readJobLogView(await checkedRequest('GET', '/api/jobs/' + id + '/log?offset=' + log.nextOffset + '&limit=' + LOG_PAGE))
         if (selected?.id === id && log.id === id && page.id === id && page.offset === log.nextOffset) log = { id, text: (log.text + page.text).slice(0, LOG_DISPLAY_MAX), nextOffset: page.nextOffset, total: page.total, available: page.available, truncated: page.truncated }
       } catch (error) { if (selected?.id === id) logStatus.textContent = failText(error, t(msgctxt('whm-jobs-client', 'The log could not be read. Nothing was changed.'))); logBusy = false; logMore.disabled = !admitted(); return }
       logBusy = false; paintLog()
@@ -190,7 +221,7 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
     const loadDetail = async (id: string, reset: boolean): Promise<void> => {
       if (!admitted() || !request) return
       try {
-        const body = await request('GET', '/api/jobs/' + id) as { job?: unknown }
+        const body = await checkedRequest('GET', '/api/jobs/' + id) as { job?: unknown }
         const job = readJobView(body?.job)
         if (job.id !== id) throw new Error('invalid_job')
         if (wanted !== id) return
@@ -213,7 +244,7 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
       if (!background) note(status, 'reading', t('Reading host job history…'))
       const search = new URLSearchParams(); if (filters.status) search.set('status', filters.status); if (filters.kindPrefix) search.set('kindPrefix', filters.kindPrefix); search.set('limit', '50')
       try {
-        const listed = readJobListView(await request('GET', '/api/jobs?' + search.toString()))
+        const listed = readJobListView(await checkedRequest('GET', '/api/jobs?' + search.toString()))
         if (!admitted()) return
         jobs = listed; failures = 0
         paintRows()
@@ -258,7 +289,7 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
       if (!confirmed || selected?.id !== job.id || !manageable()) { cancelling = false; lockCancel(); return }
       note(cancelStatus, 'reading', t('Recording the cancellation…'))
       try {
-        const updated = readJobView((await request('POST', '/api/jobs/' + job.id + '/cancel') as { job?: unknown })?.job)
+        const updated = readJobView((await checkedRequest('POST', '/api/jobs/' + job.id + '/cancel') as { job?: unknown })?.job)
         if (updated.id === job.id) { selected = updated; jobs = jobs.map(item => item.id === updated.id ? updated : item); paintRows(); paintDetail() }
         note(cancelStatus, 'read', updated.status === 'cancelled' ? t('The job was cancelled before it started.') : t('Cancellation recorded. The job stops before its next step.'))
       } catch (error) {

@@ -1,3 +1,4 @@
+import { v2SecClientTemplates } from '../../../components/sec-client-templates.ts'
 import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { escapeHtml } from '../../../html.ts'
 import { domainButton, domainCard, domainContext, domainFacts, domainHeader, domainTable, missingDomainAccount, NO_DOMAIN_AUTHORITY, type DomainPageAuthority } from './common.ts'
@@ -11,5 +12,5 @@ export function renderV2CloudflarePage(props: PanelSurfaceProps, authority: Doma
     { label: t(msgid('Domain')), key: 'zone-domain' }, { label: t(msgid('Zone status')), key: 'zone-status' },
     { label: t(msgid('SSL/TLS mode')), key: 'zone-ssl' }, { label: t(msgid('Cloudflare nameservers')), key: 'zone-ns' }, { label: t(msgid('Observed at (UTC)')), key: 'zone-at' },
   ].map(item => ({ label: item.label, valueHtml: `<bdi dir="ltr" data-sec-field="${item.key}">${escapeHtml(unread)}</bdi>` })))}<p data-sec-zone-truncated hidden>${escapeHtml(t(msgid('Only the first 500 Cloudflare records were compared.')))}</p>${domainTable(t(msgid('Records compared with this server')), [t(msgid('Name')), t(msgid('Type')), t(msgid('This server')), t(msgid('Cloudflare')), t(msgid('Proxied')), t(msgid('State'))], `<tr><td colspan="6">${escapeHtml(t(msgid('Select Inspect for a linked domain.')))}</td></tr>`, { 'data-sec-rows': 'records' })}`)
-  return `<section class="v2-domain-page"${authority.presentation === 'read-only' || !account ? ' data-readonly="true"' : ''} data-sec-workspace data-sec-page="account-cloudflare" data-sec-can-read="${authority.canRead && authority.presentation !== 'read-only'}" data-sec-can-manage="${canManage}">${domainHeader(t, '/domains/cloudflare', t(msgid('Cloudflare')), t(msgid('Inspect the Cloudflare zone of your connected domains and purge their cache.')))}${domains}${zone}</section>`
+  return `<section class="v2-domain-page"${authority.presentation === 'read-only' || !account ? ' data-readonly="true"' : ''} data-sec-workspace data-sec-page="account-cloudflare" data-sec-can-read="${authority.canRead && authority.presentation !== 'read-only'}" data-sec-can-manage="${canManage}">${v2SecClientTemplates('account-cloudflare')}${domainHeader(t, '/domains/cloudflare', t(msgid('Cloudflare')), t(msgid('Inspect the Cloudflare zone of your connected domains and purge their cache.')))}${domains}${zone}</section>`
 }

@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmSecurityToolsWorkspace } from './board-port/whm-security-tools-workspace.ts'
+import { renderV2WhmSecurityTool } from './themes/v2/pages/xwhm/security/tools.ts'
+import { translator } from './i18n.ts'
 import type { WhmSecurityToolsPage } from './board-port/whm-security-tools-workspace.ts'
 import { readAntivirusView, readIntrusionView, readIsolationView, readJobAck, readUnbanResult, WHM_SECURITY_TOOLS_CLIENT_BINDING } from './whm-security-tools-client.ts'
 
@@ -183,5 +185,122 @@ describe('security tools client binding', () => {
     expect($('[data-whm-security-tools-drift]').hidden).toBe(false)
     expect($('[data-whm-security-tools-fact="uid"]').textContent).toBe('1001')
     expect(document.body.textContent).not.toMatch(/[٠-٩۰-۹]/)
+  })
+})
+
+
+type SecurityTheme = 'classic' | 'v2'
+const mountSecurityTheme = (theme: SecurityTheme, page: WhmSecurityToolsPage = 'intrusion', canRead = true, canManage = true, locale: 'en' | 'ar' = 'en'): void => {
+  if (theme === 'classic') { mount(page, canRead, canManage, locale); return }
+  document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'
+  document.body.innerHTML = renderV2WhmSecurityTool({ locale, principal: { kind: 'root', id: 'fixture-root', username: 'operator' }, observationAuthority: { canRead, canManage } }, page)
+}
+const unbanPrototype = (): HTMLTemplateElement => document.querySelector<HTMLTemplateElement>('template[data-xp-template="whm-security-unban"]')!
+const securityPrototypeFaults = ['missing', 'duplicate', 'wrong-root', 'missing-slot', 'duplicate-slot', 'unknown-slot', 'wrong-slot-tag', 'enabled', 'submit'] as const
+const damageUnbanPrototype = (fault: typeof securityPrototypeFaults[number]): void => {
+  const template = unbanPrototype(); expect(template).not.toBeNull()
+  const button = template.content.firstElementChild as HTMLButtonElement
+  if (fault === 'missing') { template.remove(); return }
+  if (fault === 'duplicate') { template.after(template.cloneNode(true)); return }
+  if (fault === 'wrong-root') { const span = document.createElement('span'); span.dataset.xpSlot = 'content'; button.replaceWith(span); return }
+  if (fault === 'missing-slot') button.removeAttribute('data-xp-slot')
+  if (fault === 'duplicate-slot') { const span = document.createElement('span'); span.dataset.xpSlot = 'content'; button.append(span) }
+  if (fault === 'unknown-slot') button.dataset.xpSlot = 'unreviewed'
+  if (fault === 'wrong-slot-tag') { button.removeAttribute('data-xp-slot'); const span = document.createElement('span'); span.dataset.xpSlot = 'content'; button.append(span) }
+  if (fault === 'enabled') button.disabled = false
+  if (fault === 'submit') button.type = 'submit'
+}
+
+describe.each(['classic', 'v2'] as const)('%s intrusion finite button contract', theme => {
+  it.each(['en', 'ar'] as const)('clones the selected %s theme button and preserves confirmed unban plus readback', async locale => {
+    mountSecurityTheme(theme, 'intrusion', true, true, locale)
+    const prototype = unbanPrototype().content.firstElementChild as HTMLButtonElement
+    expect(prototype.type).toBe('button'); expect(prototype.disabled).toBe(true)
+    expect(prototype.classList.contains(theme === 'classic' ? 'xp-btn' : 'v2-btn')).toBe(true)
+    expect(document.querySelector('[data-whm-security-tools-unban]')).toBeNull()
+    let unbanned = false
+    const send = vi.fn(async (method: string, _path: string, body?: unknown) => {
+      if (method === 'GET') return intrusion(unbanned ? ['198.51.100.0/24'] : undefined)
+      unbanned = true; return { ...(body as object), outcome: 'confirmed', verificationRequired: false, after: { banned: false }, observedAt }
+    })
+    const ask = vi.fn(async () => true)
+    boot(send, ask); await tick()
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>('[data-whm-security-tools-unban]')]
+    expect(buttons[0]!.className).toBe(prototype.className)
+    expect(buttons[0]!.textContent).toBe(translator(locale)('Unban'))
+    expect(buttons[0]!.getAttribute('aria-label')).toBe(translator(locale)('Unban {address} · {jail}', { address: '192.0.2.1', jail: 'sshd' }))
+    expect(buttons[0]!.type).toBe('button'); expect(buttons[0]!.disabled).toBe(false); expect(buttons[1]!.disabled).toBe(true); expect(prototype.disabled).toBe(true)
+    if (theme === 'v2') expect(buttons[0]!.classList.contains('xp-btn')).toBe(false)
+    buttons[0]!.click(); await tick()
+    expect(ask).toHaveBeenCalledOnce()
+    expect(send.mock.calls).toEqual([['GET', '/api/server/security-tools/intrusion'], ['POST', '/api/server/security-tools/intrusion/unban', { jail: 'sshd', address: '192.0.2.1' }], ['GET', '/api/server/security-tools/intrusion']])
+    expect($('[data-whm-security-tools-result]').dataset.outcome).toBe('confirmed'); expect(rows('banned')).toHaveLength(1)
+    expect(document.body.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+  })
+  it.each(securityPrototypeFaults)('blocks the initial GET for a %s prototype', async fault => {
+    mountSecurityTheme(theme); damageUnbanPrototype(fault)
+    const send = vi.fn(), ask = vi.fn(async () => true)
+    boot(send, ask); await tick()
+    expect(send).not.toHaveBeenCalled(); expect(ask).not.toHaveBeenCalled()
+    expect($('[data-whm-security-tools-status]').dataset.state).toBe('unavailable')
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')].every(control => control.disabled)).toBe(true)
+    expect($('[data-whm-security-tools-fact="service"]').textContent).toBe('Not read')
+  })
+  it('retains read authority while denying every unban without mutation authority', async () => {
+    mountSecurityTheme(theme, 'intrusion', true, false)
+    const send = vi.fn(async (_method: string, _path: string) => intrusion()), ask = vi.fn(async () => true)
+    boot(send, ask); await tick()
+    const button = document.querySelector<HTMLButtonElement>('[data-whm-security-tools-unban]')!
+    expect(button.disabled).toBe(true); button.disabled = false; button.click(); await tick()
+    expect(ask).not.toHaveBeenCalled(); expect(send.mock.calls).toEqual([['GET', '/api/server/security-tools/intrusion']])
+  })
+  it.each(['resolved', 'rejected'] as const)('locks a prototype lost during a %s initial read', async settlement => {
+    mountSecurityTheme(theme)
+    let resolve!: (value: unknown) => void, reject!: (error: Error) => void
+    const send = vi.fn((_method: string, _path: string) => new Promise<unknown>((yes, no) => { resolve = yes; reject = no }))
+    boot(send); await tick(); expect(send).toHaveBeenCalledOnce(); unbanPrototype().remove()
+    if (settlement === 'resolved') resolve(intrusion()); else reject(new Error('unavailable'))
+    await tick()
+    expect($('[data-whm-security-tools-status]').dataset.state).toBe('unavailable')
+    expect($('[data-whm-security-tools-fact="service"]').textContent).toBe('Not read')
+    expect(document.querySelector('[data-whm-security-tools-unban]')).toBeNull()
+    const refresh = $<HTMLButtonElement>('[data-whm-security-tools-refresh]')
+    expect(refresh.disabled).toBe(true); refresh.disabled = false; refresh.click(); await tick(); expect(send).toHaveBeenCalledOnce()
+  })
+  it('sends no unban or readback after prototype loss during confirmation', async () => {
+    mountSecurityTheme(theme)
+    let confirm!: (value: boolean) => void
+    const ask = vi.fn(() => new Promise<boolean>(yes => { confirm = yes }))
+    const send = vi.fn(async (_method: string, _path: string) => intrusion())
+    boot(send, ask); await tick()
+    document.querySelector<HTMLButtonElement>('[data-whm-security-tools-unban]')!.click(); await tick()
+    expect(ask).toHaveBeenCalledOnce(); unbanPrototype().remove(); confirm(true); await tick()
+    expect(send.mock.calls).toEqual([['GET', '/api/server/security-tools/intrusion']])
+    expect($('[data-whm-security-tools-status]').dataset.state).toBe('unavailable')
+    expect(document.querySelector<HTMLButtonElement>('[data-whm-security-tools-unban]')!.disabled).toBe(true)
+  })
+  it.each(['resolved', 'rejected'] as const)('keeps a %s unban unverified and blocks readback after prototype loss', async settlement => {
+    mountSecurityTheme(theme)
+    let resolve!: (value: unknown) => void, reject!: (error: Error) => void
+    const send = vi.fn((method: string, _path: string, _body?: unknown) => method === 'GET' ? Promise.resolve(intrusion()) : new Promise<unknown>((yes, no) => { resolve = yes; reject = no }))
+    boot(send, async () => true); await tick()
+    const button = document.querySelector<HTMLButtonElement>('[data-whm-security-tools-unban]')!
+    button.click(); await tick(); expect(send).toHaveBeenCalledTimes(2); unbanPrototype().remove()
+    if (settlement === 'resolved') resolve({ jail: 'sshd', address: '192.0.2.1', outcome: 'confirmed', after: { banned: false } }); else reject(new Error('transport failed'))
+    await tick()
+    expect($('[data-whm-security-tools-result]').dataset.outcome).toBe('unknown')
+    expect($('[data-whm-security-tools-status]').dataset.state).toBe('unavailable')
+    expect(document.querySelector('[data-whm-security-tools-workspace]')!.getAttribute('aria-busy')).toBe('false')
+    expect(button.disabled).toBe(true); button.disabled = false; button.click(); await tick()
+    expect(send.mock.calls.map(([method]) => method)).toEqual(['GET', 'POST'])
+  })
+  it.each(['antivirus', 'isolation'] as const)('keeps %s independent of the intrusion-only prototype', async page => {
+    mountSecurityTheme(theme, page); expect(unbanPrototype()).toBeNull()
+    document.querySelector('[data-whm-security-tools-workspace]')!.insertAdjacentHTML('beforeend', '<template data-xp-template="whm-security-unban"><div>unrelated malformed prototype</div></template>')
+    const send = vi.fn(async (_method: string, _path: string) => page === 'antivirus' ? antivirus() : { accounts: [], report: null })
+    boot(send); await tick()
+    expect($('[data-whm-security-tools-status]').dataset.state).toBe('read')
+    expect(send.mock.calls).toEqual([['GET', '/api/server/security-tools/' + page]])
+    expect(document.querySelector('[data-whm-security-tools-unban]')).toBeNull()
   })
 })

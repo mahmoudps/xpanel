@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { tools } from '@xpanel/catalog'
 import type { Account, Plan, Reseller } from '@xpanel/core'
-import type { WhmSurfaceProps } from '../surfaces/xwhm.ts'
+import { renderWhmSurface, type WhmSurfaceProps } from '../surfaces/xwhm.ts'
+import { translator } from '../i18n.ts'
 import { renderApprovedWhmAccountActions, renderApprovedWhmAccountBulkControls, renderApprovedWhmAccountCreateFields, renderApprovedWhmAccountCreateStatus, renderApprovedWhmAccountSelection, renderApprovedWhmAccountTableCells } from './approved-whm-account-components.ts'
 
 const reseller: Reseller = { id: '10000000-0000-4000-8000-000000000001', username: 'provider7', acl: ['list-accounts', 'create-account', 'edit-account', 'change-plan'], maxAccounts: 5, totalDiskMb: 4096, totalBandwidthMb: 16384, oversell: false, nameservers: [], delegatedIps: [] }
@@ -73,6 +74,53 @@ describe('approved account creation components', () => {
 })
 
 describe('approved account list components', () => {
+
+  it.each(['en', 'ar'] as const)('renders the %s configured IO write cap with ASCII units and localized unlimited/unknown states', locale => {
+    const translate = translator(locale)
+    const ioCell = (html: string): string => {
+      const cells = [...html.matchAll(/<td data-account-table-value="io-write">([\s\S]*?)<\/td>/g)]
+      expect(cells).toHaveLength(1)
+      return cells[0]![1]!
+    }
+    for (const [cap, expected] of [[2_000_000, '2.00 MB/s'], [0, '0 B/s'], ['unlimited', translate('Unlimited')]] as const) {
+      const html = renderApprovedWhmAccountTableCells({ ...base(), locale, plans: [{ ...plan, resources: { ...plan.resources, ioWriteBps: cap } }] }, account.username)
+      const cell = ioCell(html)
+      expect(text(cell)).toContain(expected)
+      expect(cell).toContain(translate('IO write cap'))
+      if (typeof cap === 'number') expect(cell).toMatch(/<bdi\b[^>]*dir="ltr"/)
+      expect(cell).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]|role="meter"|aria-valuenow/)
+    }
+    for (const plans of [undefined, [otherPlan], [{ ...plan, resources: { ...plan.resources, ioWriteBps: Number.NaN } }], [{ ...plan, resources: { ...plan.resources, ioWriteBps: -1 } }]]) {
+      const cell = ioCell(renderApprovedWhmAccountTableCells({ ...base(), locale, plans }, account.username))
+      expect(text(cell)).toContain(translate('Not read'))
+      expect(cell).not.toContain(' B/s')
+    }
+  })
+
+  it('reads IO caps only from the matching root-shared or caller-owned plan', () => {
+    const scoped: WhmSurfaceProps = { ...base(), principal: { kind: 'reseller', id: reseller.id, username: reseller.username }, activeReseller: reseller }
+    const cell = (props: WhmSurfaceProps, username = account.username) => renderApprovedWhmAccountTableCells(props, username).match(/<td data-account-table-value="io-write">([\s\S]*?)<\/td>/)?.[1] ?? ''
+    for (const ownerId of [null, reseller.id]) {
+      expect(text(cell({ ...scoped, plans: [{ ...plan, ownerId, resources: { ...plan.resources, ioWriteBps: 2_000_000 } }] }))).toBe('IO write cap2.00 MB/s')
+    }
+    const foreignPlan = { ...plan, ownerId: foreign.id, resources: { ...plan.resources, ioWriteBps: 9_000_000 } }
+    expect(text(cell({ ...scoped, plans: [foreignPlan] }))).toBe('IO write capNot read')
+    expect(cell({ ...scoped, accounts: [{ ...account, ownerId: foreign.id }], plans: [foreignPlan] })).not.toContain('MB/s')
+  })
+
+  it.each(['en', 'ar'] as const)('aligns the %s IO cap header, cells and empty account-table span', locale => {
+    const html = renderWhmSurface({ ...base(), activeRoute: '/whm/accounts', locale })
+    const table = html.match(/<table class="xp-table xp-accounts__table">([\s\S]*?)<\/table>/)?.[1] ?? ''
+    const headers = [...table.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)]
+    const firstRow = table.match(/<tbody>\s*<tr\b[^>]*>([\s\S]*?)<\/tr>/)?.[1] ?? ''
+    const cells = [...firstRow.matchAll(/<td\b[^>]*>[\s\S]*?<\/td>/g)]
+    expect(headers).toHaveLength(11)
+    expect(cells).toHaveLength(headers.length)
+    expect(headers[8]![1]).toBe(translator(locale)('IO write cap'))
+    expect(cells[8]![0]).toContain('data-account-table-value="io-write"')
+    const empty = renderWhmSurface({ ...base(), activeRoute: '/whm/accounts', locale, accounts: [] })
+    expect(empty).toContain('<td colspan="11">')
+  })
   it('preserves the bulk bar and row selection with honest disabled action semantics', () => {
     const html = renderApprovedWhmAccountBulkControls(base())
     for (const label of ['Selected accounts', 'Select loaded accounts', '0 selected', 'Suspend', 'Unsuspend', 'Change plan', 'Change owner', 'Clear selection']) expect(html).toContain(label)
@@ -115,7 +163,7 @@ describe('approved account list components', () => {
 
   it('adds real owner and IP cells while separating unread usage from saved limits', () => {
     const html = renderApprovedWhmAccountTableCells(base(), account.username)
-    expect(html.match(/<td\b/g)).toHaveLength(4)
+    expect(html.match(/<td\b/g)).toHaveLength(5)
     expect(html).toContain('data-account-table-value="owner"')
     expect(html).toContain('provider7')
     expect(html).toContain('192.0.2.7')

@@ -1,5 +1,5 @@
 import { createServer as createHttpServer, request as httpRequest } from 'node:http'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readFile, readdir } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -11,7 +11,10 @@ import { StateStore, createTestStateStore } from '@xpanel/state'
 import { WRITER_MUTEX_FILE } from '../../../packages/state/src/writer-mutex.ts'
 import * as dbApi from '@xpanel/db'
 import type { AgentApp } from '@xpanel/agent'
-import { XpanelError } from '@xpanel/core'
+import { XpanelError, fail } from '@xpanel/core'
+import { parseProvisioningReconcileRequest } from './use-cases/account-provisioning-port.ts'
+import { parseProvisioningCheckpointObservation } from '../../../packages/core/src/account-provisioning-contract.ts'
+import type { PrepareProvisioningInput, PreparedProvisioning, ProvisioningPreparationStore } from './use-cases/provisioning-preparation.ts'
 import * as lifecycleAdmission from '../../../scripts/lifecycle-admission.mjs'
 import { deriveCsrfToken } from './auth.ts'
 import { sessionCookieName, sessionTokenHash } from './entry-points.ts'
@@ -26,6 +29,40 @@ const outcomes = ['http422', 'failed', 'malformed', 'noop', 'transport', 'unknow
 type Outcome = typeof outcomes[number] | 'applied' | 'invalid-applied' | 'oversized'
 type Action = 'create' | 'suspend' | 'unsuspend' | 'update' | 'delete'
 const cleanup: (() => Promise<unknown>)[] = []
+
+/** H-layer fixture only: exercises real HTTP/DB/lifecycle, not POSIX/HMAC or native host qualification. */
+const memoryPreparations = (store: StateStore): ProvisioningPreparationStore => {
+  const records = new Map<string, { actor: string; value: PreparedProvisioning<unknown> }>()
+  const requests = new Map<string, string>()
+  const locked = async <T>(work: () => Promise<T>): Promise<T> => {
+    const lease = await store.getWriterLock().acquire()
+    try { await lease.assertFencingToken(); const result = await work(); await lease.assertFencingToken(); return result } finally { await lease.release() }
+  }
+  return {
+    async prepare<T>(input: PrepareProvisioningInput<T>): Promise<PreparedProvisioning<T>> {
+      return locked(async () => {
+        const key = JSON.stringify([input.actorKey, input.idempotencyKey]), existing = requests.get(key)
+        if (existing) {
+          const saved = records.get(existing)!.value
+          if (saved.requestIdentity !== input.requestIdentity || !await input.verifyCredentialIntent(input.credentialIntent, saved.passwordHash)) fail('CONFLICT', 'the fixture request changed', { stateChanged: false })
+          return saved as PreparedProvisioning<T>
+        }
+        const desiredState = await input.prepareDesiredState(), passwordHash = await input.preparePasswordHash()
+        if (!await input.verifyCredentialIntent(input.credentialIntent, passwordHash)) fail('CONFLICT', 'the fixture credential changed', { stateChanged: false })
+        const value = { reference: randomUUID(), requestIdentity: input.requestIdentity, desiredState: structuredClone(desiredState), passwordHash }
+        records.set(value.reference, { actor: input.actorKey, value }); requests.set(key, value.reference)
+        return value
+      })
+    },
+    async load<T>(reference: string, actor: string): Promise<PreparedProvisioning<T>> {
+      return locked(async () => {
+        const saved = records.get(reference)
+        if (!saved || saved.actor !== actor) return fail('FORBIDDEN', 'the fixture preparation is unavailable')
+        return saved.value as PreparedProvisioning<T>
+      })
+    },
+  }
+}
 afterEach(async () => { vi.restoreAllMocks(); for (const close of cleanup.splice(0).reverse()) await close() })
 
 const fixture = async () => {
@@ -64,6 +101,7 @@ const fixture = async () => {
   let mode: Outcome = 'applied'
   let purgeMode: 'missing' | 'ready' = 'missing'
   let calls = 0
+  const hostPaths: string[] = []
   let pause: { enter: () => void; gate: Promise<void> } | undefined
   const holdNextApply = () => {
     let release!: () => void
@@ -83,9 +121,16 @@ const fixture = async () => {
       response.end(JSON.stringify({ purged: true }))
       return
     }
-    if (request.url !== '/state/apply') { response.writeHead(404); response.end(); return }
+    const provisioning = request.url === '/host/account-provisioning'
+    if (request.url !== '/state/apply' && !provisioning) { response.writeHead(404); response.end(); return }
     calls++
-    request.resume()
+    hostPaths.push(request.url!)
+    const chunks: Buffer[] = []
+    for await (const chunk of request) chunks.push(Buffer.from(chunk))
+    const rpc = provisioning ? parseProvisioningReconcileRequest(JSON.parse(Buffer.concat(chunks).toString('utf8'))) : null
+    if (rpc && (request.headers['x-xpanel-principal-id'] !== rpc.authority.actor.id || request.headers['x-xpanel-agent-token'] !== 'a'.repeat(64))) {
+      response.writeHead(403); response.end(); return
+    }
     const held = pause
     pause = undefined
     if (held) { held.enter(); await held.gate }
@@ -98,6 +143,33 @@ const fixture = async () => {
     if (mode === 'unknown') { response.end(JSON.stringify({ ok: true, note: RAW_HOST_MARKER })); return }
     if (mode === 'invalid-applied') { response.end(JSON.stringify({ status: 'applied', generation: { id: 1, status: 'active', checksum: 'invalid' }, filesCount: 2, durationMs: 1, error: RAW_HOST_MARKER })); return }
     if (mode === 'oversized') { response.end(JSON.stringify({ status: 'applied', generation: { id: 1, status: 'active', checksum: 'a'.repeat(64) }, filesCount: 2, durationMs: 1, padding: RAW_HOST_MARKER + 'x'.repeat(70000) })); return }
+    if (rpc) {
+      // Synthetic receipt matching the real service contract. This test does not observe a Linux/PHP workload.
+      const a = rpc.authority.account, d = rpc.authority.desired, cgroup = `user-${a.uid}.slice`
+      const zone = await state.store.getDnsZone(a.primaryDomain)
+      const operation = await dbApi.getDurableJob(database.db, rpc.authority.operation.id)
+      const observing = operation!.completedSteps.includes('reconcile_host')
+      let generation = await dbApi.latestActive(database.db)
+      if (observing) {
+        const saved = parseProvisioningCheckpointObservation(operation!.checkpointData.observedContext)
+        expect(saved.request.authority.account).toEqual(a)
+        expect(saved.request.authority.desired).toEqual(d)
+        expect(saved.execution.generationId).toBe(generation!.id)
+        expect(saved.execution.generationChecksum).toBe(generation!.checksum)
+      }
+      if (!observing) {
+        const created = await dbApi.createGeneration(database.db, { checksum: 'a'.repeat(64), actor: 'synthetic-host-fixture' })
+        await dbApi.markTested(database.db, created.id)
+        generation = await dbApi.activate(database.db, created.id)
+      }
+      response.end(JSON.stringify({ binding: rpc.binding, outcome: 'known',
+        reconciliation: observing ? { status: 'noop', generation, stateChecksum: d.checksum } : { status: 'applied', generation, filesCount: 2, durationMs: 1 },
+        execution: { accountId: a.id, uid: a.uid, gid: a.gid, home: a.home, revision: d.revision, generationId: generation!.id,
+          generationChecksum: generation!.checksum, sourceChecksum: d.checksum, cgroup, services: ['fixture-httpd.service'],
+          quota: { enforced: true, filesystem: '/fixture-filesystem' }, dns: { zone: a.primaryDomain, serial: zone!.serial, authoritative: true },
+          php: { status: 200, uid: a.uid, cgroup } } }))
+      return
+    }
     response.end(JSON.stringify({ status: 'applied', generation: { id: 1, createdAt: '2026-10-23T00:00:00Z', status: 'active', checksum: 'a'.repeat(64), error: null, actor: 'root', testedAt: '2026-10-23T00:00:00Z', activatedAt: '2026-10-23T00:00:00Z' }, filesCount: 2, durationMs: 1 }))
   })
   await new Promise<void>(resolve => host.listen(0, '127.0.0.1', resolve))
@@ -112,8 +184,10 @@ const fixture = async () => {
     },
   }
   const servers: Awaited<ReturnType<typeof listenApiServer>>[] = []
+  const provisioningPreparations = memoryPreparations(state.store)
   const open = async (agent: 'connected' | 'missing' | 'missing-token' = 'connected') => {
     const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: 'xwhm', publicOrigin: ORIGIN, allowedOrigins: [ORIGIN], ingressSecret: INGRESS, requireSecureCookies: true, requireOriginHeader: true,
+      provisioningPreparations,
       ...(agent !== 'missing' ? { agentApp } : {}), ...(agent === 'connected' ? { agentToken: 'a'.repeat(64) } : {}),
     })
     const server = await listenApiServer(app, { host: '127.0.0.1', port: 0 })
@@ -122,10 +196,10 @@ const fixture = async () => {
     return server.port
   }
   const port = await open()
-  const request = (method: string, path: string, body?: unknown, options: { port?: number; session?: typeof rootSession; csrf?: string; origin?: string } = {}): Promise<Response> => new Promise((resolve, reject) => {
+  const request = (method: string, path: string, body?: unknown, options: { port?: number; session?: typeof rootSession; csrf?: string; origin?: string; headers?: Record<string, string> } = {}): Promise<Response> => new Promise((resolve, reject) => {
     const auth = options.session ?? rootSession
     const payload = body === undefined ? undefined : JSON.stringify(body)
-    const outgoing = httpRequest({ hostname: '127.0.0.1', port: options.port ?? port, path, method, headers: { host: new URL(ORIGIN).host, origin: options.origin ?? ORIGIN, 'content-type': 'application/json', ...(payload !== undefined ? { 'content-length': Buffer.byteLength(payload) } : {}), cookie: auth.cookie, 'x-csrf-token': options.csrf ?? auth.csrf, [INGRESS_SECRET_HEADER]: INGRESS, 'x-forwarded-proto': 'https', 'x-forwarded-for': '192.0.2.20' } }, incoming => {
+    const outgoing = httpRequest({ hostname: '127.0.0.1', port: options.port ?? port, path, method, headers: { host: new URL(ORIGIN).host, origin: options.origin ?? ORIGIN, 'content-type': 'application/json', ...(payload !== undefined ? { 'content-length': Buffer.byteLength(payload) } : {}), cookie: auth.cookie, 'x-csrf-token': options.csrf ?? auth.csrf, [INGRESS_SECRET_HEADER]: INGRESS, 'x-forwarded-proto': 'https', 'x-forwarded-for': '192.0.2.20', ...options.headers } }, incoming => {
       const chunks: Buffer[] = []
       incoming.on('data', chunk => chunks.push(Buffer.from(chunk)))
       incoming.once('error', reject)
@@ -161,17 +235,24 @@ const fixture = async () => {
     if (action === 'update') return request('PATCH', '/api/accounts/' + account.id, { shell: 'jailed' }, options)
     return request('DELETE', '/api/accounts/' + account.id, { confirmUsername: account.username }, options)
   }
-  return { database, state, plan, account, other, root, reseller, owner, alias, neighbor, rootSession, resellerSession, request, open, fingerprints, identities, accountSuccess, perform, holdNextApply, setMode: (value: Outcome) => { mode = value }, setPurge: (value: 'missing' | 'ready') => { purgeMode = value }, calls: () => calls }
+  return { database, state, plan, accountInput, account, other, root, reseller, owner, alias, neighbor, rootSession, resellerSession, request, open, fingerprints, identities, accountSuccess, perform, holdNextApply, hostPaths, setMode: (value: Outcome) => { mode = value }, setPurge: (value: 'missing' | 'ready') => { purgeMode = value }, calls: () => calls }
 }
 
 describe('real HTTP account mutation security', () => {
   let f: Awaited<ReturnType<typeof fixture>>
   beforeEach(async () => { f = await fixture() })
 
-  it('reports an unknown result when the final read fails after account creation was committed', async () => {
+  it('reports committed account state requiring verification when the final read fails', async () => {
+    let completed = false
+    const completeJob = dbApi.completeJobWithLease
+    vi.spyOn(dbApi, 'completeJobWithLease').mockImplementation(async (db, input) => {
+      const result = await completeJob(db, input)
+      if (input.status === 'succeeded') completed = true
+      return result
+    })
     const original = f.state.store.listDomains.bind(f.state.store)
     vi.spyOn(f.state.store, 'listDomains').mockImplementation(async filter => {
-      if (filter?.accountId) {
+      if (completed && filter?.accountId) {
         const account = await f.state.store.getAccount(filter.accountId)
         if (account?.username === 'newowner7') throw new Error(RAW_HOST_MARKER)
       }
@@ -180,14 +261,50 @@ describe('real HTTP account mutation security', () => {
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
     const response = await f.perform('create')
     const text = await response.text()
-    expect(response.status).toBe(500)
-    expect(JSON.parse(text)).toMatchObject({ code: 'INTERNAL_ERROR', details: { unknownOutcome: true, verificationRequired: true } })
-    expect(JSON.parse(text).details).not.toHaveProperty('stateChanged')
+    expect(response.status).toBe(503)
+    expect(JSON.parse(text)).toMatchObject({ code: 'SERVICE_UNAVAILABLE', details: { stateChanged: true, verificationRequired: true,
+      reason: 'account_provisioning_acknowledgment_unverified' } })
     expect(text).not.toContain(RAW_HOST_MARKER)
     expect(await f.state.store.getAccountByUsername('newowner7')).toMatchObject({ primaryDomain: 'newowner7.example.test' })
     expect(await findPrincipalByUsername(f.database.db, 'newowner7')).toMatchObject({ kind: 'user' })
     expect(f.calls()).toBe(1)
-    expect(errorLog).toHaveBeenCalled()
+    expect(errorLog).not.toHaveBeenCalled()
+  })
+
+  it('reports the committed account when its final success audit fails without leaking diagnostics or applying twice', async () => {
+    const append = dbApi.appendAudit
+    vi.spyOn(dbApi, 'appendAudit').mockImplementation(async (db, entry, options) => {
+      if (entry.action === 'account.desired.created') throw new Error(RAW_HOST_MARKER)
+      return append(db, entry, options)
+    })
+    const response = await f.perform('create'), text = await response.text()
+    expect(response.status).toBe(503)
+    expect(JSON.parse(text)).toMatchObject({ code: 'SERVICE_UNAVAILABLE', details: { stateChanged: true, verificationRequired: true,
+      reason: 'account_provisioning_acknowledgment_unverified' } })
+    expect(text).not.toContain(RAW_HOST_MARKER)
+    const account = (await f.state.store.getAccountByUsername('newowner7'))!
+    expect(await findPrincipalByUsername(f.database.db, 'newowner7')).toMatchObject({ accountId: account.id, disabled: false })
+    const jobs = await f.database.db.query<{ id: string }>('SELECT id FROM jobs WHERE kind = $1', ['account.provision'])
+    expect(jobs).toHaveLength(1)
+    expect(await dbApi.getDurableJob(f.database.db, jobs[0]!.id)).toMatchObject({ status: 'succeeded', needsAttention: false })
+    expect((await f.accountSuccess()).filter(entry => entry.action === 'account.desired.created')).toHaveLength(0)
+    const replay = await f.perform('create')
+    expect(replay.status).toBe(201)
+    expect(await replay.json()).toMatchObject({ operation: { completedReplay: true, freshExecution: false }, execution: { status: 'already_completed', verificationRequired: true } })
+    expect(f.calls()).toBe(1)
+  })
+
+  it('returns public service-user fields after PATCH without disclosing the persisted password hash', async () => {
+    const passwordHash = '{ARGON2ID}' + HASH
+    const serviceUser = await f.state.store.createServiceUser({ accountId: f.account.id, login: 'patch@' + f.account.primaryDomain,
+      passwordHash, services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
+    const response = await f.request('PATCH', '/api/service-users/' + serviceUser.id, { mailboxQuotaMb: 200 })
+    expect(response.status).toBe(200)
+    const body = await response.json() as { serviceUser: { id: string; login: string; mailboxQuotaMb: number } }
+    expect(body.serviceUser).toMatchObject({ id: serviceUser.id, login: serviceUser.login, mailboxQuotaMb: 200 })
+    expect(Object.keys(body.serviceUser)).not.toContain('passwordHash')
+    expect(Object.keys(body.serviceUser)).not.toContain('password')
+    expect(await f.state.store.getServiceUserHash(serviceUser.id) === passwordHash).toBe(true)
   })
 
   it.each(['missing-body', 'missing', 'empty', 'other-row', 'case-change', 'whitespace', 'wrong-type'])('refuses DELETE %s confirmation with zero lifecycle effects', async condition => {
@@ -284,10 +401,161 @@ describe('account mutation outcomes and race boundaries', () => {
   let f: Awaited<ReturnType<typeof fixture>>
   beforeEach(async () => { f = await fixture() })
 
-  it.each(['create', 'suspend', 'unsuspend', 'update'] as const)('reports %s only as a global configuration apply requiring target verification', async action => {
+  it('creates through the dedicated bound protocol and enables sign-in only after its strict account receipt', async () => {
+    const held = f.holdNextApply(), pending = f.perform('create')
+    await held.entered
+    const beforeReply = await findPrincipalByUsername(f.database.db, 'newowner7')
+    expect(beforeReply).toMatchObject({ kind: 'user', disabled: true })
+    held.release()
+    const response = await pending
+    expect(response.status, await response.clone().text()).toBe(201)
+    const body = await response.json() as { account: { id: string; uid: number }; execution: object; operation: { status: string; freshExecution: boolean }; reconcile: { status: string }; jobId?: unknown }
+    expect(body.execution).toMatchObject({ status: 'account_verified', scope: 'account', targetVerified: true, verificationRequired: false,
+      observation: { accountId: body.account.id, uid: body.account.uid, php: { uid: body.account.uid, status: 200 } } })
+    expect(body.reconcile.status).toBe('applied')
+    expect(Object.keys(body.operation).sort()).toEqual(['completedReplay', 'freshExecution', 'reference', 'resumedFromStep', 'status'])
+    expect(body.operation).toMatchObject({ status: 'succeeded', resumedFromStep: 0, freshExecution: true, completedReplay: false })
+    expect(Object.keys(body.execution).sort()).toEqual(['observation', 'scope', 'status', 'targetVerified', 'verificationRequired'])
+    expect(body.jobId).toBeUndefined()
+    expect(await findPrincipalByUsername(f.database.db, 'newowner7')).toMatchObject({ id: beforeReply!.id, accountId: body.account.id, disabled: false })
+    expect(f.hostPaths).toEqual(['/host/account-provisioning'])
+    const audit = await f.accountSuccess()
+    expect(audit.filter(entry => entry.action === 'account.desired.created')).toHaveLength(1)
+    expect(audit.filter(entry => entry.action === 'account.provisioned')).toHaveLength(1)
+  })
+
+  it('replays the saved completed operation without a new host effect, credential, principal or false fresh observation', async () => {
+    const first = await f.perform('create')
+    expect(first.status).toBe(201)
+    const initial = await first.json() as { account: { id: string; uid: number }; execution: { observation: unknown } }
+    const principal = await findPrincipalByUsername(f.database.db, 'newowner7')
+    const beforeAudit = await f.accountSuccess()
+    const port = await f.open()
+    const replay = await f.perform('create', { port })
+    expect(replay.status, await replay.clone().text()).toBe(201)
+    const body = await replay.json()
+    expect(body).toMatchObject({ account: { id: initial.account.id, uid: initial.account.uid }, reconcile: null,
+      operation: { status: 'succeeded', resumedFromStep: 4, freshExecution: false, completedReplay: true },
+      execution: { status: 'already_completed', scope: 'account', targetVerified: false, verificationRequired: true, replay: true, lastVerifiedObservation: initial.execution.observation } })
+    expect(Object.keys(body.operation).sort()).toEqual(['completedReplay', 'freshExecution', 'reference', 'resumedFromStep', 'status'])
+    expect(Object.keys(body.execution).sort()).toEqual(['lastVerifiedObservation', 'replay', 'scope', 'status', 'targetVerified', 'verificationRequired'])
+    expect((await findPrincipalByUsername(f.database.db, 'newowner7'))!.id).toBe(principal!.id)
+    expect(await f.accountSuccess()).toEqual(beforeAudit)
+    expect(f.calls()).toBe(1)
+  })
+
+  it('reobserves an interrupted pre-enable finalization without applying the host again', async () => {
+    const save = dbApi.saveJobCheckpoint
+    let interrupted = false
+    vi.spyOn(dbApi, 'saveJobCheckpoint').mockImplementation(async (db, input) => {
+      if (input.step === 'principal_activation_intent' && !interrupted) { interrupted = true; throw new Error(RAW_HOST_MARKER) }
+      return save(db, input)
+    })
+    const failed = await f.perform('create')
+    expect(failed.status).toBe(503)
+    expect(await findPrincipalByUsername(f.database.db, 'newowner7')).toMatchObject({ disabled: true })
+    const port = await f.open()
+    const resumed = await f.perform('create', { port })
+    expect(resumed.status, await resumed.clone().text()).toBe(201)
+    const body = await resumed.json()
+    expect(body).toMatchObject({ reconcile: null, operation: { status: 'succeeded', resumedFromStep: 3, freshExecution: false, completedReplay: false },
+      execution: { status: 'account_verified', scope: 'account', targetVerified: true, verificationRequired: false } })
+    expect(Object.keys(body.operation).sort()).toEqual(['completedReplay', 'freshExecution', 'reference', 'resumedFromStep', 'status'])
+    expect(Object.keys(body.execution).sort()).toEqual(['observation', 'scope', 'status', 'targetVerified', 'verificationRequired'])
+    expect(await findPrincipalByUsername(f.database.db, 'newowner7')).toMatchObject({ disabled: false })
+    expect(await f.database.db.query('SELECT id FROM config_generations')).toHaveLength(1)
+    expect(f.calls()).toBe(2) // One application and one independently observed, persisted-host path.
+  })
+
+  it('keeps a lost post-enable checkpoint in attention and refuses automatic replay instead of issuing a false completion', async () => {
+    const save = dbApi.saveJobCheckpoint
+    vi.spyOn(dbApi, 'saveJobCheckpoint').mockImplementation(async (db, input) => {
+      if (input.step === 'principal_activated') throw new Error(RAW_HOST_MARKER)
+      return save(db, input)
+    })
+    const failed = await f.perform('create')
+    const failure = await failed.json() as { code?: string; details?: { stateChanged?: boolean; verificationRequired?: boolean } }
+    expect(failure).toMatchObject({ code: 'PRECONDITION_FAILED', details: { stateChanged: true, verificationRequired: true } })
+    // Enabling had a strict, current host proof and committed atomically; its missing job acknowledgment
+    // is retained rather than rolling back identity or clearing recovery attention.
+    const principal = await findPrincipalByUsername(f.database.db, 'newowner7')
+    expect(principal).toMatchObject({ disabled: false })
+    const jobs = await f.database.db.query<{ id: string }>('SELECT id FROM jobs WHERE kind = $1', ['account.provision'])
+    expect(jobs).toHaveLength(1)
+    const job = (await dbApi.getDurableJob(f.database.db, jobs[0]!.id))!
+    expect(job).toMatchObject({ status: 'failed', needsAttention: true, failureClass: 'unknown_outcome' })
+    expect(job.completedSteps).toContain('principal_activation_intent')
+    expect(job.completedSteps).not.toContain('principal_activated')
+    expect(job.checkpointData.principalActivated).not.toBe(true)
+    expect(parseProvisioningCheckpointObservation(job.checkpointData.observedContext).execution.accountId).toBe(principal!.accountId)
+    // The lifecycle requires review for an uncertain, unacknowledged finalization.
+    expect(failed.status, JSON.stringify({ code: failure.code, details: failure.details, principalDisabled: principal!.disabled,
+      jobStatus: job.status, failureClass: job.failureClass, needsAttention: job.needsAttention, completedSteps: job.completedSteps })).toBe(412)
+    const retry = await f.perform('create')
+    expect(retry.status).toBe(412)
+    expect(f.calls()).toBe(1)
+    expect(await f.accountSuccess()).toEqual([])
+  })
+
+  it.each(['credential', 'owner', 'contact'] as const)('rejects changed %s intent under the same durable request without touching the host', async kind => {
+    expect((await f.perform('create')).status).toBe(201)
+    const original = await f.state.store.getAccountByUsername('newowner7')
+    const body = { ...f.accountInput, username: 'newowner7', primaryDomain: 'newowner7.example.test', ownerId: null as string | null }
+    if (kind === 'credential') body.passwordHash = HASH.replace('Yfw', 'Zfw')
+    if (kind === 'owner') body.ownerId = f.reseller.id
+    if (kind === 'contact') body.contactEmail = 'changed@example.test'
+    const response = await f.request('POST', '/api/accounts', body)
+    expect(response.status).toBe(409)
+    expect(await f.state.store.getAccountByUsername('newowner7')).toEqual(original)
+    expect(f.calls()).toBe(1)
+  })
+
+  it('does not enable prepared sign-in or acknowledge success after the original session is revoked during host work', async () => {
+    const held = f.holdNextApply(), pending = f.perform('create')
+    await held.entered
+    await f.database.db.query('UPDATE sessions SET revoked_at = $1 WHERE principal_id = $2', [new Date().toISOString(), f.root.id])
+    held.release()
+    const response = await pending
+    expect(response.status).toBe(401)
+    expect(await response.json()).toMatchObject({ details: { stateChanged: true, verificationRequired: true } })
+    expect(await findPrincipalByUsername(f.database.db, 'newowner7')).toMatchObject({ disabled: true })
+    expect(await f.accountSuccess()).toEqual([])
+    const jobs = await f.database.db.query<{ id: string }>('SELECT id FROM jobs WHERE kind = $1', ['account.provision'])
+    expect(jobs).toHaveLength(1)
+    expect(await dbApi.getDurableJob(f.database.db, jobs[0]!.id)).toMatchObject({ status: 'failed', failureClass: 'unknown_outcome', needsAttention: true })
+  })
+
+  it.each(['actor', 'authorizationRef', 'preparationReference', 'faultInjection'])('refuses a body-supplied %s authority before preparation or effects', async field => {
+    const before = await f.fingerprints()
+    const response = await f.request('POST', '/api/accounts', { ...f.accountInput, username: 'newowner7', primaryDomain: 'newowner7.example.test', [field]: { kind: 'root' } })
+    expect(response.status).toBe(422)
+    expect(await f.fingerprints()).toEqual(before)
+    expect(await f.state.store.getAccountByUsername('newowner7')).toBeNull()
+    expect(f.calls()).toBe(0)
+  })
+
+  it('uses the same prepared lifecycle for an authenticated WHMCS creation', async () => {
+    const view = await (await f.request('GET', '/api/server/panel/whmcs')).json() as { revision: string }
+    const token = await (await f.request('POST', '/api/server/panel/whmcs/token', { expectedRevision: view.revision })).json() as { revision: string; secret: string; apiIdentifier: string }
+    expect((await f.request('PUT', '/api/server/panel/whmcs', { expectedRevision: token.revision, enabled: true, autoCreate: true,
+      whmcsUrl: 'https://billing.example.test', allowedAddresses: ['192.0.2.20'], ssoTarget: 'xpanel', planMap: [{ package: 'Fixture', planId: f.plan.id }] })).status).toBe(200)
+    // Promote the existing authoritative inventory entry; a second ID for the same address is a conflict.
+    const primary = (await f.state.store.listServerIps()).find(entry => entry.address === '192.0.2.42')
+    expect(primary).toMatchObject({ role: 'shared', ownerKind: 'root', ownerId: null })
+    await f.state.store.saveServerIp({ ...primary!, isPrimary: true })
+    const result = await f.request('POST', '/api/integrations/whmcs/provision', {
+      action: 'create', username: 'billing7', domain: 'billing7.example.test', package: 'Fixture', password: 'SyntheticBilling!2026',
+    }, { headers: { authorization: 'Bearer ' + token.secret, 'x-xpanel-whmcs-id': token.apiIdentifier } })
+    expect(result.status, await result.clone().text()).toBe(200)
+    expect(await result.json()).toEqual({ ok: true, action: 'create', username: 'billing7' })
+    expect(await findPrincipalByUsername(f.database.db, 'billing7')).toMatchObject({ disabled: false })
+    expect(f.hostPaths).toEqual(['/host/account-provisioning'])
+  })
+
+  it.each(['suspend', 'unsuspend', 'update'] as const)('reports %s only as a global configuration apply requiring target verification', async action => {
     if (action === 'unsuspend') await f.state.store.suspendAccount(f.account.id, 'Fixture initial state')
     const response = await f.perform(action)
-    expect(response.status).toBe(action === 'create' ? 201 : 200)
+    expect(response.status).toBe(200)
     const data = await response.json() as { account: { username: string }; execution: object; reconcile: { status: string }; operation?: unknown; jobId?: unknown }
     expect(data.execution).toEqual({ status: 'configuration_applied', scope: 'global_configuration', targetVerified: false, verificationRequired: true })
     expect(data.reconcile.status).toBe('applied')
@@ -298,17 +566,13 @@ describe('account mutation outcomes and race boundaries', () => {
     expect(audit[0]!.action).toMatch(/^account\.desired\./)
     expect(audit[0]!.detail.execution).toEqual(data.execution)
     expect(f.calls()).toBe(1)
-    if (action === 'create') {
-      const principal = await findPrincipalByUsername(f.database.db, 'newowner7')
-      expect(principal?.accountId).toBe((await f.state.store.getAccountByUsername('newowner7'))!.id)
-    }
   })
 
-  it('does not establish a new login principal before unknown host apply completes', async () => {
+  it('keeps the prepared login disabled when the host result is unacknowledged', async () => {
     f.setMode('http422')
     const response = await f.perform('create')
-    expect(response.status).toBe(422)
-    expect(await findPrincipalByUsername(f.database.db, 'newowner7')).toBeNull()
+    expect(response.status).toBe(412)
+    expect(await findPrincipalByUsername(f.database.db, 'newowner7')).toMatchObject({ disabled: true })
     expect(await f.state.store.getAccountByUsername('newowner7')).not.toBeNull()
     expect(await f.accountSuccess()).toEqual([])
   })
@@ -505,7 +769,7 @@ describe('account mutation outcomes and race boundaries', () => {
     const body = await created.json() as { account: { id: string; username: string }; reconcile: { status: string }; execution: { status: string; scope: string } }
     expect(body.account.username).toBe('loginowner')
     expect(body.reconcile.status).toBe('applied')
-    expect(body.execution).toMatchObject({ status: 'configuration_applied', scope: 'global_configuration' })
+    expect(body.execution).toMatchObject({ status: 'account_verified', scope: 'account' })
     const principal = await findPrincipalByUsername(f.database.db, 'loginowner')
     expect(principal?.accountId).toBe(body.account.id)
     await deletePrincipal(f.database.db, principal!.id)
@@ -525,7 +789,7 @@ describe('account mutation outcomes and race boundaries', () => {
     expect(await login.json()).toMatchObject({ principal: { username: 'loginowner', kind: 'user' } })
   })
 
-  it('reports identity-establishment failure after host apply without claiming rollback or issuing login', async () => {
+  it('reports identity-establishment failure before contacting the host without claiming rollback or issuing login', async () => {
     vi.spyOn(dbApi, 'createUserPrincipal').mockRejectedValueOnce(new Error(RAW_HOST_MARKER))
     const response = await f.perform('create')
     const text = await response.text()
@@ -533,11 +797,11 @@ describe('account mutation outcomes and race boundaries', () => {
     expect(response.headers.get('set-cookie')).toBeNull()
     expect(response.headers.get('content-type')).toContain('application/problem+json')
     expect(text).not.toContain(RAW_HOST_MARKER)
-    expect(JSON.parse(text), text).toMatchObject({ code: 'SERVICE_UNAVAILABLE', details: { verificationRequired: true, stateChanged: true, reason: 'identity_establishment_unverified' } })
+    expect(JSON.parse(text), text).toMatchObject({ code: 'SERVICE_UNAVAILABLE', details: { verificationRequired: true, stateChanged: true, reason: 'account_provisioning_unverified' } })
     expect(await findPrincipalByUsername(f.database.db, 'newowner7')).toBeNull()
     expect(await f.state.store.getAccountByUsername('newowner7')).not.toBeNull()
     expect(await f.accountSuccess()).toEqual([])
-    expect(f.calls()).toBe(1)
+    expect(f.calls()).toBe(0)
   })
 
   it.each(['typed', 'unknown'] as const)('keeps %s admission retirement failure fail-closed after the request callback', async kind => {

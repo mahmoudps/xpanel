@@ -106,6 +106,7 @@ import type {
   FirewallState,
   MailRoutingState,
   MutationOptions,
+  ServiceUserDeletionOptions,
   ServerSettingsMutationOptions,
   RestoreGenerationMutationOptions,
   NewAccount,
@@ -2202,13 +2203,14 @@ export class StateStore {
     })
   }
 
-  deleteServiceUser(id: Id, opts?: MutationOptions): Promise<boolean> {
+  deleteServiceUser(id: Id, opts?: ServiceUserDeletionOptions): Promise<boolean> {
     return this.withMutationLock(opts, async (lease) => {
       if (!isUuid(id)) return false
       const uid = id.toLowerCase()
       const current = (await this.readAllServiceUsersUnlocked()).find((u) => u.id === uid)
       if (!current) return false
       const account = mustExist(await this.findStoredAccountById(current.accountId), 'account', current.accountId)
+      await opts?.authorize?.(toPublicAccount(account), toPublicServiceUser(current))
       return this.removeStatePath(lease, join(this.accountDir(account.username), 'users', `${current.id}.json`))
     })
   }

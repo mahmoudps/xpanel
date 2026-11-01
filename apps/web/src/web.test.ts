@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import { defaultPlan, type Account } from '@xpanel/core'
 import { planEditorRequest } from './plan-editor.ts'
+import { parseMarkup } from './html.ts'
 import {
   BROWSER_REALTIME_SCRIPT,
   createLiveEventStore,
@@ -42,14 +43,17 @@ const panelFixture: PanelSurfaceProps = {
   domains: [{ id: 'fixture-domain', accountId: fixtureAccount.id, name: fixtureAccount.primaryDomain, kind: 'primary', parentId: null, docRoot: '/home/alice/public_html', siteType: 'php', upstream: null, redirect: null,
     php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 4, startServers: 1, minSpareServers: 1, maxSpareServers: 2, maxRequests: 500, processIdleTimeoutSec: 10 }, ini: {} }, wildcard: false, certificateId: null, suspended: false, expiresAt: null, pathQuotaMb: 'unlimited', ipv4: fixtureAccount.ipv4, ipv6: fixtureAccount.ipv6 }],
   customConfig: { domainId: '11111111-1111-4111-8111-111111111111', accountId: fixtureAccount.id, domainName: fixtureAccount.primaryDomain, nginxInclude: '# synthetic include', apacheInclude: '# synthetic include', userIni: { memory_limit: '256M' }, customHeaders: {}, cacheBypassPaths: [], updatedAt: fixtureAt, updatedBy: 'user' },
-  websiteAnalytics: SYNTHETIC_WEBSITE_ANALYTICS,
+  websiteAnalytics: { ...SYNTHETIC_WEBSITE_ANALYTICS, accountId: fixtureAccount.id, domain: fixtureAccount.primaryDomain },
   files: [{ name: 'fixture.txt', path: '/home/alice/public_html/fixture.txt', kind: 'file', sizeBytes: 128, modeOctal: '0640', modifiedAt: fixtureAt }, { name: 'trashed-fixture.txt', path: '/home/alice/.trash/trashed-fixture.txt', kind: 'file', sizeBytes: 64, modeOctal: '0640', modifiedAt: fixtureAt, trashed: true }],
   databases: [{ id: 'fixture-db', accountId: fixtureAccount.id, engine: 'mariadb', name: 'alice_fixture', trashedAt: null }],
   serviceUsers: [{ id: 'fixture-user', accountId: fixtureAccount.id, login: 'info@alice-shop.com', services: { email: true, ftp: true, webdisk: false }, mailboxQuotaMb: 1024, ftpDir: 'public_html' }],
   dnsRecords: [{ id: 'fixture-dns', zone: fixtureAccount.primaryDomain, name: '@', type: 'A', ttl: 3600, content: fixtureAccount.ipv4, priority: null }],
 }
 const whmFixture: WhmSurfaceProps = {
-  catalog: qualifyHostTools(tools, { executor: 'linux', probes: { 'control-plane': 'passed' } }),
+  // This positive renderer fixture explicitly accepts only reseller-center.
+  catalog: qualifyHostTools(tools.map(tool => tool.id === 'reseller-center'
+    ? { ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } }
+    : tool), { executor: 'linux', probes: { 'control-plane': 'passed' } }, true),
   principal: { kind: 'root', id: 'fixture-root', username: 'synthetic-root' }, hostname: 'srv1.xpanel.test', adminSessionIp: '203.0.113.7',
   accounts: [fixtureAccount, { ...fixtureAccount, id: 'fixture-other', username: 'omar', uid: 20016, gid: 20016 }], plans: [fixturePlan],
   featureLists: [fixtureFeatureList],
@@ -71,17 +75,18 @@ const mailAt = (activeRoute: string, props: MailSurfaceProps = {}): string => re
 const documentFor = (html: string): Document => new DOMParser().parseFromString(html, 'text/html')
 
 /**
- * Verifies that every `.xp-badge` element in a rendered HTML document contains both an inline
+ * Verifies that each live renderStatusBadge component (data-status and role="status") contains both an inline
  * `<svg` icon and a non-empty `<span class="xp-badge__label">` text label (WCAG 2.2 AA 1.4.1).
  */
 const assertAllBadgesHaveSvgAndLabel = (html: string): void => {
-  const badgePattern = /<span class="xp-badge\b[^>]*>([\s\S]*?)<\/span><\/span>/g
-  const matches = [...html.matchAll(badgePattern)]
-  assert.ok(matches.length > 0, 'Expected at least one .xp-badge in rendered HTML')
-  for (const match of matches) {
-    const fullBadge = match[0]
-    assert.match(fullBadge, /<svg\b[^>]*class="xp-status-icon[^"]*"[\s\S]*?<\/svg>/)
-    assert.match(fullBadge, /<span class="xp-badge__label">[^<]+<\/span>/)
+  const badges = documentFor(html).querySelectorAll('.xp-badge[data-status][role="status"]')
+  assert.ok(badges.length > 0, 'Expected at least one .xp-badge in rendered HTML')
+  for (const badge of badges) {
+    assert.equal(badge.tagName, 'SPAN', 'Expected a span badge')
+    assert.equal(badge.querySelectorAll(':scope > svg.xp-status-icon').length, 1, 'Expected one inline status icon')
+    const labels = badge.querySelectorAll(':scope > span.xp-badge__label')
+    assert.equal(labels.length, 1, 'Expected one badge text label')
+    assert.ok(labels[0]!.textContent?.trim(), 'Expected a non-empty badge text label')
   }
 }
 
@@ -233,6 +238,11 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     assert.match(html, /data-action="start-transfer"/)
     assert.doesNotMatch(html, /cpmove-ziad\.tar\.gz/)
     assertAllBadgesHaveSvgAndLabel(html)
+    const countBadge = documentFor(whmAt('/whm/server/ips')).querySelector('[data-ip-pool-count] > .xp-badge')!
+    assert.ok(countBadge)
+    assert.equal(countBadge.querySelector('[data-ip-pool-count-label]')?.textContent, '1 address')
+    assertAllBadgesHaveSvgAndLabel(countBadge.outerHTML)
+
   })
 
   it('renders one current native plan editor with real metadata and explicit create/edit/unavailable selection', () => {
@@ -306,15 +316,38 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     assert.match(html, /data-userdata-status/)
     assert.doesNotMatch(html, /action="\/api\/xpanel\/domains\/custom-config"/)
     assert.match(html, /AssignUserId/)
-    // Website Analytics chart
+    // A matching account/domain observation is required for the native chart.
     assert.match(html, /data-surface-widget="website-analytics"/)
+    assert.ok(documentFor(panelAt('/metrics/traffic')).querySelector('[data-surface-widget="website-analytics"][data-chart-state="loaded"]'))
+    for (const websiteAnalytics of [
+      { ...panelFixture.websiteAnalytics!, accountId: 'foreign-synthetic-account' },
+      { ...panelFixture.websiteAnalytics!, domain: 'foreign-synthetic.example' },
+    ]) {
+      const foreign = panelAt('/metrics/traffic', { websiteAnalytics })
+      assert.equal(documentFor(foreign).querySelector('[data-surface-widget="website-analytics"][data-chart-state="loaded"]'), null)
+      assert.ok(!foreign.includes(websiteAnalytics.topPaths[0]!.key), 'foreign observation rows must not leak')
+    }
     // Jailed File Manager (0640/0750 rules, 0777 blocked, .trash)
     assert.match(html, /data-file-manager-table="true"/)
     assert.doesNotMatch(html, /O_NOFOLLOW Symlink-Safe|Safe Edit/)
     assert.match(html, /0640/)
     assert.match(html, /0750/)
     assert.match(html, /0777/)
-    assert.match(html, /data-action="restore-file"[^>]*>Restore<\/button>/)
+    const browseFiles = documentFor(panelAt('/files/manager')).querySelector('[data-file-manager="browse"]')!
+    const trashFiles = documentFor(panelAt('/files/trash')).querySelector('[data-file-manager="trash"]')!
+    assert.ok(browseFiles)
+    assert.ok(trashFiles)
+    assert.equal(browseFiles.querySelectorAll('[data-action="restore-file"]').length, 0)
+    assert.equal(browseFiles.querySelectorAll('tbody [data-file-path]').length, 1)
+    assert.equal(browseFiles.querySelector('tbody [data-file-path]')?.getAttribute('data-file-path'), panelFixture.files![0]!.path)
+    const restoreButtons = trashFiles.querySelectorAll<HTMLButtonElement>('button[data-action="restore-file"]')
+    assert.equal(restoreButtons.length, 1)
+    assert.equal(restoreButtons[0]!.type, 'button')
+    assert.equal(restoreButtons[0]!.textContent?.trim(), 'Restore')
+    assert.equal(restoreButtons[0]!.getAttribute('data-path'), panelFixture.files![1]!.path)
+    assert.equal(restoreButtons[0]!.closest('tr')?.getAttribute('data-file-path'), panelFixture.files![1]!.path)
+    assert.equal(trashFiles.querySelectorAll('tbody [data-file-path]').length, 1)
+    assert.equal(trashFiles.querySelectorAll('[data-action="chmod-file"]').length, 0)
     // Jailed Shell Terminal
     // The fixture has no signed-in owner, so the workspace renders but cannot open a shell.
     assert.match(html, /data-terminal-workspace data-terminal-kind="account" data-terminal-can-use="false"/)
@@ -395,8 +428,21 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     }
     for (const render of [whmAt, panelAt, mailAt]) {
       const html = render('/unimplemented-synthetic-route')
-      assert.match(html, /data-screen="unavailable"/)
-      assert.doesNotMatch(html, /<form\b|data-terminal-workspace/)
+      const nodes = parseMarkup(html)
+      const unavailable = new Set(nodes.flatMap((node, index) => node.namespace === 'html' && node.template === -1
+        && node.attrs.get('data-screen') === 'unavailable' ? [index] : []))
+      assert.ok(unavailable.size > 0, 'the actual unavailable body must exist')
+      const inside = (index: number): boolean => {
+        for (let parent = index; parent >= 0; parent = nodes[parent]!.parent) if (unavailable.has(parent)) return true
+        return false
+      }
+      // Signed-in preference forms belong to independent chrome. Every active
+      // operation form inside the unavailable body remains forbidden, including
+      // hidden/disabled forms; genuine terminal workspaces remain forbidden anywhere.
+      for (const [index, node] of nodes.entries()) {
+        assert.equal(node.attrs.has('data-terminal-workspace'), false)
+        if (node.namespace === 'html' && node.template === -1 && inside(index)) assert.notEqual(node.tag, 'form')
+      }
     }
     for (const [html, title] of [[panelAt('/home'), 'Home'], [panelAt('/domains'), 'Domains'], [whmAt('/whm/accounts/new'), 'Create account']]) {
       const headings = [...html!.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/g)].map(match => match[1]!.replace(/<[^>]*>/g, '').trim())
@@ -564,13 +610,22 @@ describe('readable initial file metadata', () => {
   it.each([
     { locale: 'en', route: '/files/manager' }, { locale: 'ar', route: '/files/manager' },
     { locale: 'en', route: '/files/trash' }, { locale: 'ar', route: '/files/trash' },
-  ] as const)('renders readable UTC file metadata in the retained SSR table ($locale, $route)', ({ locale, route }) => {
+  ] as const)('keeps modified UTC metadata and unknown deletion dates truthful in the SSR table ($locale, $route)', ({ locale, route }) => {
     const rawTime = '2026-10-27T09:01:02.123Z'
     const file: NonNullable<PanelSurfaceProps['files']>[number] = { name: 'time-review.txt', path: '/home/alice/public_html/time-review.txt', kind: 'file', sizeBytes: 12345, modeOctal: '0640', modifiedAt: rawTime, trashed: route === '/files/trash' }
     const original = JSON.stringify(file), root = documentFor(panelAt(route, { locale, files: [file] }))
-    const time = root.querySelector<HTMLTimeElement>('[data-file-manager-table] tbody time')
-    assert.ok(time); assert.equal(time.textContent, '2026-10-27 09:01 UTC'); assert.equal(time.getAttribute('datetime'), rawTime)
-    assert.equal(root.querySelector('[data-file-manager-table] tbody tr')!.getAttribute('data-file-path'), file.path)
+    const row = root.querySelector<HTMLTableRowElement>('[data-file-manager-table] tbody tr')!
+    assert.ok(row)
+    const time = row.querySelector<HTMLTimeElement>('time')
+    if (route === '/files/trash') {
+      // modifiedAt is not a deletion timestamp; none was supplied by this DTO.
+      assert.equal(time, null)
+      assert.equal(row.cells[3]!.textContent?.trim(), translator(locale)('Not recorded'))
+      assert.equal(root.querySelectorAll('[data-file-manager-table] tbody time').length, 0)
+    } else {
+      assert.ok(time); assert.equal(time.textContent, '2026-10-27 09:01 UTC'); assert.equal(time.getAttribute('datetime'), rawTime)
+    }
+    assert.equal(row.getAttribute('data-file-path'), file.path)
     assert.equal(JSON.stringify(file), original)
   })
 })

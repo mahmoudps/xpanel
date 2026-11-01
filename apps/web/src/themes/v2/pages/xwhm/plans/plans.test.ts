@@ -8,6 +8,8 @@ import { renderV2WhmFeatures } from './features.ts'
 import { renderV2WhmEnhancements } from './enhancements.ts'
 import { renderV2PlanEditor } from './editor.ts'
 import type { WhmPlanAuthority } from './common.ts'
+import { parseMarkup } from '../../../../markup.ts'
+import { v2Messages } from '../../../messages.ts'
 
 const root = { kind: 'root' as const, id: '10000000-0000-4000-8000-000000000001', username: 'operator' }
 const reseller: Reseller = { id: '10000000-0000-4000-8000-000000000002', username: 'provider', acl: ['manage-plans', 'manage-feature-lists'], maxAccounts: 10, totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] }
@@ -133,5 +135,41 @@ describe('v2 stored plan facts remain separate from native reads', () => {
     const html = renderV2WhmEnhancements(t, props({ capabilityUnavailable: true }), stored)
     expect(html).toContain('data-enh-can-manage="false"')
     expect(html).not.toContain('<form')
+  })
+})
+
+
+describe('approved plan editor tabs and review structure', () => {
+  it.each(['en', 'ar'] as const)('retains the %s Resources, Services and Features tabs around one complete native form', locale => {
+    const translate = v2Messages.translator(locale)
+    const html = renderV2PlanEditor(translate, props({ locale }), authority, plan, true), nodes = parseMarkup(html)
+    const controls = nodes.filter(node => ['input', 'select'].includes(node.tag) && node.attrs.has('name'))
+    const names = controls.map(node => node.attrs.get('name')!)
+    expect(new Set(names).size).toBe(names.length)
+    expect(nodes.filter(node => node.tag === 'form')).toHaveLength(1)
+    expect(nodes.filter(node => node.tag === 'button' && node.attrs.get('type') === 'submit')).toHaveLength(1)
+    expect(nodes.filter(node => node.attrs.has('data-presentation-tab')).map(node => node.attrs.get('data-presentation-tab'))).toEqual(['resources', 'services', 'features'])
+    expect(nodes.filter(node => node.attrs.get('role') === 'tabpanel')).toHaveLength(3)
+    expect(nodes.filter(node => node.attrs.has('data-plan-review-key'))).toHaveLength(24)
+    expect(nodes.filter(node => node.attrs.has('data-plan-review-from'))).toHaveLength(24)
+    expect(nodes.filter(node => node.attrs.has('data-plan-review-to'))).toHaveLength(24)
+    const ids = nodes.filter(node => node.attrs.has('id')).map(node => node.attrs.get('id'))
+    expect(new Set(ids).size).toBe(ids.length)
+    for (const key of [...Object.keys(plan.resources), ...Object.keys(plan.caps), 'defaultMailboxQuotaMb']) {
+      expect(names.filter(name => name === key)).toHaveLength(1); expect(names.filter(name => name === 'unlimited.' + key)).toHaveLength(1)
+    }
+    expect(html).toContain('data-native-plan-review'); expect(html).toContain('data-plan-review-readable="true"')
+    expect(html).not.toContain('nextGen'); expect(html).not.toContain('systemctl set-property')
+  })
+  it('retains every control and current-read boundary when the editor is read only', () => {
+    const html = renderV2PlanEditor(t, props(), { ...authority, canManage: false }, plan, false), nodes = parseMarkup(html)
+    expect(html).toContain('data-plan-editable="false"')
+    for (const node of nodes.filter(node => node.tag === 'input' || node.tag === 'select')) expect(node.attrs.has('disabled')).toBe(true)
+    expect(nodes.filter(node => node.attrs.has('data-plan-review-key'))).toHaveLength(24)
+  })
+  it('does not copy denied saved records into the review metadata or control values', () => {
+    const html = renderV2PlanEditor(t, props(), { ...authority, canRead: false }, { ...plan, name: 'PRIVATE-PLAN' }, true)
+    expect(html).toContain('data-plan-review-readable="false"'); expect(html).toContain('data-plan-review-saved="false"')
+    expect(html).not.toContain('PRIVATE-PLAN'); expect(html).not.toContain(plan.id)
   })
 })

@@ -7,9 +7,10 @@ import { missingServiceAccount, serviceButton, serviceFacts, serviceField, servi
 
 export function renderV2TlsPage(props: PanelSurfaceProps, authority: PanelServiceAuthority = { canManage: false }): string {
   const t = v2Messages.translator(props.locale ?? 'en')
-  const missing = missingServiceAccount(t, props)
-  const principal = props.visibility?.principal
   const readOnly = authority.presentation === 'read-only'
+  const missing = readOnly ? undefined : missingServiceAccount(t, props)
+  if (missing) return missing
+  const principal = props.visibility?.principal
   const account = !readOnly || authority.canReadFacts === true && principal?.kind === 'user' && props.account?.id === principal.accountId ? props.account : undefined
   const domains = (account && (!readOnly || authority.authorizedTools?.has('domains')) ? props.domains ?? [] : []).filter(domain => domain.accountId === (account?.id ?? ''))
   const certificates = (account && (!readOnly || authority.authorizedTools?.has('ssl-tls-status')) ? props.certificates ?? [] : []).filter(certificate => certificate.accountId === (account?.id ?? ''))

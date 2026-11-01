@@ -130,6 +130,14 @@ export function formatAsciiBytes(bytes: number): string {
   return `${ normalizeAsciiDigits(val.toFixed(decimals)) } ${units[unitIdx]}`
 }
 
+/** Transfer and other finite clients use the same formatter, without copying its unit rules. */
+export const ASCII_BYTES_BINDING = `(()=>{
+const EASTERN_ARABIC_ZERO=${EASTERN_ARABIC_ZERO};
+const EXTENDED_ARABIC_ZERO=${EXTENDED_ARABIC_ZERO};
+const normalizeAsciiDigits=${normalizeAsciiDigits.toString()};
+return ${formatAsciiBytes.toString()};
+})()`
+
 export function formatBytes(bytes: number): string {
   return formatAsciiBytes(bytes)
 }

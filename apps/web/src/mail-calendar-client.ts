@@ -33,7 +33,7 @@ function bindMailCalendar(askDialog: ((options: Record<string, unknown>) => Prom
     const metadata = ['name', 'color', 'timezone'] as const
     const eventFields = ['summary', 'description', 'location', 'start', 'end', 'timezone'] as const
     if (metadata.some(key => !input(key)) || eventFields.some(key => !input('event-' + key)) || !input('share-principal')) return
-    try { mailRequireTemplates(root, [['mail-calendar-share', 'li', ['address', 'permission', 'remove']], ['mail-calendar-share-empty', 'li', ['message']]]) } catch { root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('input,button,select,textarea').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return }
+    try { mailRequireTemplates(root, [['mail-calendar-share', 'li', ['address', 'permission', 'remove'], [['address', 'bdi'], ['remove', 'button', { type: 'button' }]]], ['mail-calendar-share-empty', 'li', ['message']]]) } catch { root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('input,button,select,textarea').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return }
     let workspace: CalendarWorkspaceView | null = null, selected: CalendarView | null = null, selectedEvent: CalendarEventView | null = null
     let busy = false, review = false, downloadSource = ''
     const request = (method: string, path: string, body?: unknown): Promise<unknown> => {

@@ -1,3 +1,4 @@
+import { roleLabel, type UserMenuModel } from '../chrome.ts'
 import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { renderAccountAnnouncementsBanner } from '../board-port/account-announcements-banner.ts'
 import type {
@@ -34,7 +35,7 @@ import { renderComposedXpanel } from '../board-port/composed/render.ts'
 import { renderAccountTerminalPage } from '../board-port/ops-terminal-workspace.ts'
 import { composedRouteSpecs } from '../board-port/composed/all.ts'
 import { copyOf } from '../board-port/composed/types.ts'
-import { classicFileTemplates } from '../board-port/classic-file-templates.ts'
+import { classicFileTemplates, renderClassicFilePresentation } from '../board-port/classic-file-templates.ts'
 import { renderEmailAccountsExtension, emailAccountsRouteSpec } from '../board-port/extensions/email-accounts.ts'
 import { renderAccountPagesExtension, accountPageRouteSpecs } from '../board-port/extensions/account-pages.ts'
 import { renderStoreExtension, storeRouteSpecs } from '../board-port/extensions/store.ts'
@@ -199,11 +200,17 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
     : ''
 
   if (section === 'overview') {
+    const menuModel: UserMenuModel | undefined = composedPrincipal ? {
+      surface: 'xpanel', locale, theme, density: props.density ?? 'comfortable',
+      path: activeRoute, username: composedPrincipal.username,
+      role: roleLabel(composedPrincipal.kind, locale), signedIn: true,
+    } : undefined
     const homePlan = plan && plan.id === account.planId ? plan : undefined
     return ensureAccessibleSurfaceHtml(renderXpanelHome(xpanelHomeFromProps({
       locale,
       theme,
       realtimeEnabled: props.realtimeEnabled === true,
+      ...(menuModel ? { userMenu: menuModel } : {}),
       account,
       ...(homePlan ? { plan: homePlan } : {}),
       domains,
@@ -426,33 +433,34 @@ ${section === 'resources' ? `<div style="display:grid;gap:32px;min-inline-size:0
             <button type="button" class="xp-btn" data-action="empty-trash">${translator(locale)('Empty trash')}</button>
           </div>
         </div>
-        ${activeRoute === '/files/trash' ? `<p class="xp-help" data-file-status role="status" aria-live="polite" hidden style="margin-block: 0 var(--xp-space-group);"></p>` : ''}
+        <p class="xp-help" data-file-status role="status" aria-live="polite" hidden></p>${renderClassicFilePresentation(locale, 'controls')}
 
         <div class="xp-table-wrap" data-file-table-wrap role="region" tabindex="0" aria-label="${translator(locale)('Account files')}">
           <table class="xp-table" data-file-manager-table="true">
             <thead>
               <tr>
-                <th>${translator(locale)('Name / Path')}</th>
-                <th>${translator(locale)('Type')}</th>
+                <th><label><input type="checkbox" data-file-select-all disabled aria-label="${translator(locale)('Select all')}"></label></th>
+                <th>${translator(locale)('Name')}</th>
                 <th>${translator(locale)('Size')}</th>
-                <th>${translator(locale)('Permissions')}</th>
                 <th>${activeRoute === '/files/trash' ? (translator(locale)(msgctxt('xpanel', 'Deleted (UTC)'))) : (translator(locale)(msgctxt('xpanel', 'Modified (UTC)')))}</th>
+                <th>${translator(locale)('Permissions')}</th><th>${translator(locale)('Owner')}</th>
                 <th>${translator(locale)('Action')}</th>
               </tr>
             </thead>
             <tbody>
-              ${files
+              ${files.filter(file => activeRoute === '/files/trash' ? file.trashed === true : !file.trashed)
                 .map(
                   (f) => `
                 <tr data-file-path="${escapeHtml(f.path)}">
-                  <td>
+                  <td><label><input type="checkbox" disabled aria-label="${escapeHtml(f.name)}"></label></td><td>
                     <strong class="xp-mono"><bdi dir="ltr">${escapeHtml(f.name)}</bdi></strong>
                     <div class="xp-mono" style="font-size: 0.78rem; color: var(--xp-text-muted);"><bdi dir="ltr">${escapeHtml(f.path)}</bdi></div>
+                                    <span>${renderStatusBadge(f.trashed ? 'warn' : 'ok', f.trashed ? '.trash' : translator(locale)(f.kind === 'folder' ? msgctxt('files', 'Folder') : msgctxt('files', 'File')))}</span>
                   </td>
-                  <td>${renderStatusBadge(f.trashed ? 'warn' : 'ok', f.trashed ? '.trash' : translator(locale)(f.kind === 'folder' ? msgctxt('files', 'Folder') : msgctxt('files', 'File')))}</td>
                   <td class="xp-mono xp-tabular" data-numeric="true">${escapeHtml(formatBytes(f.sizeBytes))}</td>
+                  <td class="xp-mono xp-tabular">${f.trashed ? translator(locale)('Not recorded') : `<time datetime="${escapeHtml(f.modifiedAt)}">${escapeHtml(formatDisplayDateTime(f.modifiedAt))}</time>`}</td>
                   <td class="xp-mono xp-tabular"><code>${escapeHtml(f.modeOctal)}</code></td>
-                  <td class="xp-mono xp-tabular"><time datetime="${escapeHtml(f.modifiedAt)}">${escapeHtml(formatDisplayDateTime(f.modifiedAt))}</time></td>
+                  <td>${translator(locale)('Not read')}</td>
                   <td>
                     ${
                       f.trashed
@@ -463,7 +471,7 @@ ${section === 'resources' ? `<div style="display:grid;gap:32px;min-inline-size:0
                 </tr>
               `,
                 )
-                .join('')}
+                .join('') || `<tr><td colspan="7">${translator(locale)(props.files === undefined ? 'Directory contents have not been read.' : activeRoute === '/files/trash' ? 'The trash is empty' : 'This directory is empty.')}</td></tr>`}
             </tbody>
           </table>
         </div>
@@ -476,7 +484,7 @@ ${section === 'resources' ? `<div style="display:grid;gap:32px;min-inline-size:0
 
         <!-- In-Browser Code Editor (<= 1 MiB) + Chmod Isolation Policy Card (browse page only) -->
         ${activeRoute === '/files/manager' ? `<div class="xp-golden-grid" style="margin-block-start: var(--xp-space-card);">
-          <div class="xp-card" data-in-browser-editor="true">
+          <div>${renderClassicFilePresentation(locale, 'closed')}<div data-file-editor-panel hidden><div class="xp-card" data-in-browser-editor="true">
             <div class="xp-card__header">
               <h2>${escapeHtml(translator(locale)('Code & Config Editor'))} — <code class="xp-mono"><bdi dir="ltr">${escapeHtml(account.home)}</bdi></code></h2>
             </div>
@@ -488,13 +496,13 @@ ${section === 'resources' ? `<div style="display:grid;gap:32px;min-inline-size:0
               </div>
               <div style="display:flex;flex-wrap:wrap;gap:var(--xp-space-field)">
                 <button type="button" class="xp-btn xp-btn--primary" data-action="save-file" disabled>${translator(locale)('Save text')}</button>
-                <button type="button" class="xp-btn" data-action="reload-file" disabled>${translator(locale)('Reload file')}</button>
+                <button type="button" class="xp-btn" data-action="reload-file" disabled>${translator(locale)('Reload file')}</button><button type="button" class="xp-btn" data-file-editor-close>${translator(locale)('Close editor')}</button>
               </div>
-              <p class="xp-help" data-file-status role="status" aria-live="polite" hidden></p>
+
             </div>
           </div>
 
-          <div class="xp-card xp-form-group" data-chmod-policy-modal="true">
+          </div></div><div class="xp-file-view-side">${renderClassicFilePresentation(locale, 'details')}<div class="xp-card xp-form-group" data-chmod-policy-modal="true">
             <div class="xp-card__header">
               <h2>${escapeHtml(translator(locale)('Permissions (chmod)'))} (0640 / 0750)</h2>
             </div>
@@ -506,7 +514,7 @@ ${section === 'resources' ? `<div style="display:grid;gap:32px;min-inline-size:0
               <input id="chmod-octal-input" type="text" class="xp-input xp-mono" dir="ltr" value="0640" pattern="0[67][045]0" />
             </div>
           </div>
-        </div>` : ''}
+        </div></div>${renderClassicFilePresentation(locale, 'uploads')}` : renderClassicFilePresentation(locale, 'details')}
         ${classicFileTemplates}
       </section>
 

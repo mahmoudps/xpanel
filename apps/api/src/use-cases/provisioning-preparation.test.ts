@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile, chmod, symlink, unlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile, chmod, symlink, unlink, rename, lstat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -48,6 +48,80 @@ describe('private provisioning authority portability and input admission', { tag
     await expect(store.prepare(input)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { reason: 'private_filesystem_not_supported' } })
     expect(input.preparePasswordHash).not.toHaveBeenCalled()
     expect(input.prepareDesiredState).not.toHaveBeenCalled()
+  })
+})
+
+describe('trusted state ancestor configuration', { tags: ['unit'] }, () => {
+  it.each(['relative', 'outside', 'same-directory', 'uid', 'gid'])('rejects malformed %s startup trust without filesystem access', kind => {
+    const root = join(homedir(), '.unused-preparation-root'), directory = join(root, 'private', 'provisioning')
+    const trusted = { directory: root, uid: 0, gid: 0 }
+    if (kind === 'relative') trusted.directory = 'relative/root'
+    if (kind === 'outside') trusted.directory = join(homedir(), '.other-preparation-root')
+    if (kind === 'same-directory') trusted.directory = directory
+    if (kind === 'uid') trusted.uid = -1
+    if (kind === 'gid') trusted.gid = 0.5
+    expect(() => new FileProvisioningPreparationStore({ directory, trustedStateRoot: trusted, withLock: locked })).toThrow('canonical trusted state ancestor')
+  })
+})
+
+describe.skipIf(!posix)('exact API service state ancestor trust', { tags: ['feature'] }, () => {
+  const shared = async () => {
+    const h = await harness(), stateRoot = join(h.root, 'state'), directory = join(stateRoot, 'private', 'account-provisioning')
+    await mkdir(stateRoot, { mode: 0o700 })
+    await chmod(stateRoot, 0o2770)
+    const trustedStateRoot = { directory: stateRoot, uid: process.getuid!(), gid: process.getgid!() }
+    const store = new FileProvisioningPreparationStore({ directory, trustedStateRoot, withLock: locked })
+    return { ...h, stateRoot, directory, trustedStateRoot, store }
+  }
+
+  it('admits only the exact configured service root and creates private children without inherited SGID', async () => {
+    const h = await shared(), input = request(), saved = await h.store.prepare(input)
+    expect((await lstat(h.stateRoot)).mode & 0o7777).toBe(0o2770)
+    expect((await lstat(join(h.stateRoot, 'private'))).mode & 0o7777).toBe(0o700)
+    expect((await lstat(h.directory)).mode & 0o7777).toBe(0o700)
+    expect(await h.store.load(saved.reference, input.actorKey)).toEqual(saved)
+  })
+
+  it('keeps the default constructor closed to that group-writable root', async () => {
+    const h = await shared(), input = request()
+    const strict = new FileProvisioningPreparationStore({ directory: h.directory, withLock: locked })
+    await expect(strict.prepare(input)).rejects.toMatchObject({ detail: { reason: 'private_directory_untrusted' } })
+    expect(input.preparePasswordHash).not.toHaveBeenCalled()
+  })
+
+  it.each(['path', 'uid', 'gid', 'mode', 'symlink'])('rejects a %s mismatch instead of broadening ancestor trust', async kind => {
+    const h = await shared(), input = request(), trusted = { ...h.trustedStateRoot }
+    if (kind === 'path') trusted.directory = h.root
+    if (kind === 'uid') trusted.uid++
+    if (kind === 'gid') trusted.gid++
+    if (kind === 'mode') await chmod(h.stateRoot, 0o0770)
+    if (kind === 'symlink') {
+      const original = `${h.stateRoot}-original`
+      await rename(h.stateRoot, original)
+      await symlink(original, h.stateRoot, 'dir')
+    }
+    const store = new FileProvisioningPreparationStore({ directory: h.directory, trustedStateRoot: trusted, withLock: locked })
+    await expect(store.prepare(input)).rejects.toMatchObject({ detail: { reason: 'private_directory_untrusted' } })
+    expect(input.preparePasswordHash).not.toHaveBeenCalled()
+  })
+
+  it.each(['private-leaf', 'state-parent'])('detects replacement of the %s before issuing any credential', async kind => {
+    const h = await shared(), input = request()
+    input.prepareDesiredState.mockImplementationOnce(async () => {
+      if (kind === 'private-leaf') {
+        await rename(h.directory, `${h.directory}-preserved`)
+        await mkdir(h.directory, { mode: 0o700 })
+      } else {
+        const old = `${h.stateRoot}-preserved`
+        await rename(h.stateRoot, old)
+        await mkdir(h.stateRoot, { mode: 0o700 })
+        await chmod(h.stateRoot, 0o2770)
+        await rename(join(old, 'private'), join(h.stateRoot, 'private'))
+      }
+      return { planId: 'plan', templateId: 'template', revision: 7, records: [{ name: 'www', content: '192.0.2.4' }] }
+    })
+    await expect(h.store.prepare(input)).rejects.toMatchObject({ detail: { reason: 'private_directory_changed' } })
+    expect(input.preparePasswordHash).not.toHaveBeenCalled()
   })
 })
 

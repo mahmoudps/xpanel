@@ -25,9 +25,8 @@ import { renderWhmDetailPage, renderWhmAuditExports, renderWhmAuditSupplement, r
 import { renderApprovedWhmBackups } from '../board-port/approved-whm-backups.ts'
 import { renderWhmDnsWorkspace } from '../board-port/whm-dns-workspace.ts'
 import { renderWhmIpClientTemplates } from '../board-port/whm-ip-client-templates.ts'
-import { renderWhmServiceClientTemplates } from '../board-port/whm-service-client-templates.ts'
 import { renderApprovedWhmResellers, resellerDetailAnchor } from '../board-port/approved-whm-resellers.ts'
-import { renderApprovedWhmOperationsSupplement } from '../board-port/approved-whm-operations-components.ts'
+import { renderApprovedWhmOperationsSupplement, renderApprovedWhmServicesContent } from '../board-port/approved-whm-operations-components.ts'
 import { renderApprovedWhmPlanSupplement } from '../board-port/approved-whm-plan-components.ts'
 import { renderApprovedWhmAccountCreateFields, renderApprovedWhmAccountCreateStatus, renderApprovedWhmAccountBulkControls, renderApprovedWhmAccountSelection, renderApprovedWhmAccountActions, renderApprovedWhmAccountTableCells } from '../board-port/approved-whm-account-components.ts'
 import { localeDirection, translator, type Locale } from '../i18n.ts'
@@ -59,8 +58,8 @@ export interface WhmServiceHealthRow {
   unit: string
   version: string
   active: boolean
-  enabled: boolean
-  rssMb: number
+  enabled: boolean | null
+  rssMb: number | null
   role: string
   installed?: boolean
   /** False when the unit was not probed. Omitted means the row carries a probe result. */
@@ -271,60 +270,13 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
         </section>
       </section>
 ` : ''}
-      ${section === 'services' ? `      <!-- Service Health Table (nginx, apache/ols, php-fpm, mariadb, dovecot, postfix, pdns, nftables) -->
-      <section class="xp-card" id="whm-services" data-section="service-health" aria-labelledby="whm-services-heading" style="display:flex;flex-direction:column;gap:var(--xp-space-group,24px)">
-        <div class="xp-card__header" style="margin-block-end:0">
-          <div>
-            <h1 id="whm-services-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1>
-            <p class="xp-prose">${translator(locale)('Service versions, memory use and running status.')}</p>
-          </div>
-          ${services.length > 0 ? renderStatusBadge('ok', `${services.filter((s) => s.active).length}/${services.length} Healthy`) : ''}
-        </div>
-        ${services.length > 0 ? `<div class="xp-table-wrap">
-          <table class="xp-table">
-            <thead>
-              <tr>
-                <th>${translator(locale)('Service')}</th>
-                <th>${translator(locale)('systemd Unit')}</th>
-                <th>${translator(locale)('Version')}</th>
-                <th>${translator(locale)('Role')}</th>
-                <th>${translator(locale)('Memory (RSS)')}</th>
-                <th>${translator(locale)('Status')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${services
-                .map(
-                  (svc) => `
-                <tr data-service-row="${escapeHtml(svc.name)}">
-                  <td><strong class="xp-mono"><bdi dir="ltr">${escapeHtml(svc.name)}</bdi></strong></td>
-                  <td><code class="xp-mono"><bdi dir="ltr">${escapeHtml(svc.unit)}</bdi></code></td>
-                  <td class="xp-mono"><bdi dir="ltr">${escapeHtml(svc.version)}</bdi></td>
-                  <td>${escapeHtml(svc.role)}</td>
-                  <td class="xp-tabular xp-mono" data-numeric="true">${svc.rssMb} MB</td>
-                  <td>${renderStatusBadge(svc.active ? 'ok' : 'critical', svc.active ? translator(locale)('Active') : 'Stopped')}</td>
-                </tr>
-              `,
-                )
-                .join('')}
-            </tbody>
-          </table>
-        </div>` : ''}
-        <div class="xp-table-wrap" data-host-services="true">
-          <table class="xp-table">
-            <thead><tr><th>${translator(locale)('Service')}</th><th>${translator(locale)('Unit')}</th><th>${translator(locale)('Status')}</th><th>${translator(locale)(msgctxt('xwhm', 'Action'))}</th></tr></thead>
-            <tbody data-host-service-rows="true"><tr><td colspan="4">${translator(locale)('Reading service status.')}</td></tr></tbody>
-          </table>
-          <p class="xp-help" data-host-service-status role="status"></p>
-          ${renderWhmServiceClientTemplates('host')}
-        </div>
-      </section>
+      ${section === 'services' ? renderApprovedWhmServicesContent({ ...props, locale }) : ''}
 
-` : ''}
       ${section === 'dns' ? renderWhmDnsWorkspace({ locale, accounts, principal, title: pageTitle }) : ''}
       ${section === 'backups' ? `<section class="xp-card" data-account-backups="true" data-backup-manage="${isRoot}" aria-labelledby="whm-backup-heading">
         <div class="xp-card__header"><h1 id="whm-backup-heading" class="xp-page-title">${escapeHtml(pageTitle)}</h1></div>
         <p class="xp-prose">${translator(locale)('The archive is stored in the local backup directory, limited to 2 GiB, and restored only into that account home.')}</p>
+<p class="xp-help" data-local-archive-scope-warning>${escapeHtml(translator(locale)(msgid('This local archive workflow copies home files and excludes the standard mail data and mail settings directories. It does not create database dumps or capture DNS zones. Review a component backup for those parts.')))}</p>
         <div class="xp-field"><label class="xp-label" for="backup-account">${translator(locale)('Account')}</label><select id="backup-account" class="xp-select" data-backup-account="true">${accounts.map(account => `<option value="${escapeHtml(account.username)}">${escapeHtml(account.username)}</option>`).join('')}</select></div>
         <div class="xp-table-wrap"><table class="xp-table"><thead><tr><th>${translator(locale)('File')}</th><th>${translator(locale)('Size')}</th><th></th></tr></thead><tbody data-backup-files="true"></tbody></table></div>
         <template data-xp-template="whm-local-archive-row"><tr><td><bdi dir="ltr" data-xp-slot="archive"></bdi></td><td><bdi dir="ltr" data-xp-slot="bytes"></bdi></td><td><a class="xp-btn" href="/whm/backups/files" data-xp-slot="review"></a></td></tr></template>
@@ -365,6 +317,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           <th scope="col">IP</th>
           <th scope="col">${translator(locale)('Disk')}</th>
           <th scope="col">${translator(locale)(msgctxt('xwhm', 'Bandwidth'))}</th>
+          <th scope="col">${translator(locale)('IO write cap')}</th>
           <th scope="col">${translator(locale)('Status')}</th>
           <th scope="col">${translator(locale)('Actions')}</th>
         </tr>
@@ -466,7 +419,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           </td>
           </tr>`
         }).join('') || `<tr>
-          <td colspan="10">
+          <td colspan="11">
           <p class="xp-accounts__empty">${list.state === 'forbidden' ? (translator(locale)('Account listing is not permitted.')) : list.state === 'unavailable' ? (translator(locale)('The account list is unavailable.')) : (translator(locale)('No accounts.'))}</p>
           </td>
           </tr>`}</tbody>
@@ -513,7 +466,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           </div>
           </form>
         </dialog>` : ''}
-        ${section === 'create-account' ? `<form class="xp-form-group" id="whm-create-account-drawer" action="/api/accounts" method="post" data-create-account-form="true">
+        ${section === 'create-account' ? `<form class="xp-form-group" id="whm-create-account-drawer" action="/api/accounts" method="post" data-create-account-form="true" data-account-create-actor="${escapeHtml(principal.kind + ':' + principal.username)}">
           <div class="xp-accounts__field">
           <label class="xp-label" for="new-acc-username">${translator(locale)('Username')}</label>
           <input id="new-acc-username" name="username" type="text" class="xp-input xp-mono" dir="ltr" required pattern="[a-z][a-z0-9]{0,15}" placeholder="salma" />
@@ -554,7 +507,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           ${renderApprovedWhmAccountCreateFields({ ...props, locale })}
           ${renderAccountPlanPreview(accountPlanPreviewModel({ principal, activeReseller: props.activeReseller, accounts: props.accounts, plans: props.plans, resellers: props.resellers }), locale)}
           <p class="xp-help" data-account-create-status role="status" aria-live="polite" tabindex="-1" hidden></p>
-          <button type="submit" class="xp-btn xp-btn--primary" ${plans.length && (isRoot || heldAcls.has('create-account')) ? '' : 'disabled'}>${escapeHtml(translator(locale)('Create Account'))}</button>
+          <div style="display:flex;flex-wrap:wrap;gap:16px"><button type="reset" class="xp-btn" ${plans.length && (isRoot || heldAcls.has('create-account')) ? '' : 'disabled'}>${escapeHtml(translator(locale)('Discard'))}</button><button type="submit" class="xp-btn xp-btn--primary" ${plans.length && (isRoot || heldAcls.has('create-account')) ? '' : 'disabled'}>${escapeHtml(translator(locale)('Create Account'))}</button></div>
         </form>${renderApprovedWhmAccountCreateStatus({ ...props, locale })}` : ''}
       </section>
 

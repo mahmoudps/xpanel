@@ -6351,3 +6351,188 @@ msgstr "المناطق في الحالة المحفوظة"
 msgctxt "theme:v2"
 msgid "Zstandard"
 msgstr "Zstandard"
+
+msgctxt "theme:v2"
+msgid "Account details"
+msgstr "تفاصيل الحساب"
+
+msgctxt "theme:v2"
+msgid "Identity and plan"
+msgstr "الهوية والخطة"
+
+msgctxt "theme:v2"
+msgid "Limits and usage"
+msgstr "الحدود والاستخدام"
+
+msgctxt "theme:v2"
+msgid "Close account details"
+msgstr "إغلاق تفاصيل الحساب"
+
+msgctxt "theme:v2"
+msgid "How team access works"
+msgstr "كيف يعمل وصول الفريق"
+
+msgctxt "theme:v2"
+msgid "Role limit"
+msgstr "حد الأدوار"
+
+msgctxt "theme:v2"
+msgid "No role"
+msgstr "بدون دور"
+
+msgctxt "theme:v2"
+msgid "Sign-out"
+msgstr "تسجيل الخروج"
+
+msgctxt "theme:v2"
+msgid "Owner only"
+msgstr "المالك فقط"
+
+msgctxt "theme:v2"
+msgid "Backup sections"
+msgstr "أقسام النسخ الاحتياطي"
+
+msgctxt "theme:v2"
+msgid "Use the xPanel sign-in page and the username shown in the team list. Sign-in availability follows the state reported above."
+msgstr "استخدم صفحة تسجيل الدخول إلى xPanel واسم المستخدم الظاهر في قائمة الفريق. تعتمد إمكانية تسجيل الدخول على الحالة الموضحة أعلاه."
+
+msgctxt "theme:v2"
+msgid "Set by the member through a single-use password link. You never see or choose their password."
+msgstr "يحددها العضو من خلال رابط كلمة مرور يستخدم مرة واحدة. لا يمكنك رؤية كلمة مروره أو اختيارها."
+
+msgctxt "theme:v2"
+msgid "Up to 7 members can hold a role. Suspended members still count."
+msgstr "يمكن إسناد دور إلى 7 أعضاء كحد أقصى. ويحتسب الأعضاء الموقوفون ضمن هذا الحد."
+
+msgctxt "theme:v2"
+msgid "Can sign in when team sign-in is enabled, but cannot use account tools."
+msgstr "يمكنه تسجيل الدخول عند تفعيل دخول الفريق، لكنه لا يستطيع استخدام أدوات الحساب."
+
+msgctxt "theme:v2"
+msgid "Suspending or deleting a member, or removing a role, signs that member out."
+msgstr "يؤدي إيقاف العضو أو حذفه أو إزالة أحد أدواره إلى تسجيل خروجه."
+
+msgctxt "theme:v2"
+msgid "Only the signed-in account owner can manage the team, and the plan must include it."
+msgstr "يمكن لمالك الحساب المسجل دخوله فقط إدارة الفريق، ويجب أن تتضمن الباقة هذه الميزة."
+
+msgctxt "theme:v2"
+msgid "Use the account preferences page to refresh or change saved contact details."
+msgstr "استخدم صفحة تفضيلات الحساب لتحديث بيانات الاتصال المحفوظة أو تغييرها."
+
+msgctxt "theme:v2"
+msgid "Open account preferences"
+msgstr "فتح تفضيلات الحساب"
+
+#: apps/web/src/themes/v2/pages/xwhm/plans/editor.ts
+msgctxt "theme:v2"
+msgid "Features"
+msgstr "الميزات"
+
+msgctxt "theme:v2"
+msgid "Saved configuration when this page opened. Reload after changes to refresh this reference."
+msgstr "الإعداد المحفوظ عند فتح هذه الصفحة. أعد تحميل الصفحة بعد التغييرات لتحديث هذا المرجع."
+
+msgctxt "theme:v2"
+msgid "Runtime not observed"
+msgstr "لم تُرصد حالة التشغيل"
+
+msgctxt "theme:v2"
+msgid "Edge and reverse proxy"
+msgstr "واجهة الاتصال والوكيل العكسي"
+
+msgctxt "theme:v2"
+msgid "The intended edge forwards site requests to the loopback backend. Public listeners and generated configuration have not been observed here."
+msgstr "توجّه واجهة الاتصال طلبات المواقع إلى الخدمة الخلفية على عنوان الحلقة المحلية وفق البنية المقصودة. لم تُرصد هنا المنافذ العامة المستمعة أو الإعدادات المولَّدة."
+
+msgctxt "theme:v2"
+msgid "Saved backend engine"
+msgstr "محرك الخدمة الخلفية المحفوظ"
+
+msgctxt "theme:v2"
+msgid "Saved Apache MPM: {mpm}. The saved choice does not verify the identity of a serving process."
+msgstr "وحدة Apache MPM المحفوظة: {mpm}. لا يثبت الاختيار المحفوظ هوية العملية التي تخدم الطلبات."
+
+msgctxt "theme:v2"
+msgid "OpenLiteSpeed is the saved engine. Its listener and per-site execution identity have not been observed."
+msgstr "المحرك المحفوظ هو OpenLiteSpeed. لم تُرصد منافذه المستمعة أو هوية تنفيذ كل موقع."
+
+msgctxt "theme:v2"
+msgid "Saved settings have not been read."
+msgstr "لم تُقرأ الإعدادات المحفوظة."
+
+msgctxt "theme:v2"
+msgid "Site application"
+msgstr "تطبيق الموقع"
+
+msgctxt "theme:v2"
+msgid "Per-site handler"
+msgstr "معالج كل موقع"
+
+msgctxt "theme:v2"
+msgid "Account execution boundary"
+msgstr "حدود تنفيذ الحساب"
+
+msgctxt "theme:v2"
+msgid "The domain handler, PHP pool or application process, account UID and served response require separate runtime evidence."
+msgstr "يلزم دليل منفصل من التشغيل الفعلي للتحقق من معالج النطاق، أو مجموعة عمليات PHP أو عملية التطبيق، ومعرّف مستخدم الحساب UID، والاستجابة المقدَّمة."
+
+msgctxt "theme:v2"
+msgid "Request flow"
+msgstr "مسار الطلب"
+
+msgctxt "theme:v2"
+msgid "Request path"
+msgstr "مسار الطلب"
+
+msgctxt "theme:v2"
+msgid "Proxy configuration reference"
+msgstr "مرجع إعداد الوكيل"
+
+msgctxt "theme:v2"
+msgid "Illustrative proxy block using the page-load saved HTTP port. This is not a read of a generated file or a verified listener."
+msgstr "كتلة توضيحية للوكيل تستخدم منفذ HTTP المحفوظ عند فتح الصفحة. هذا ليس محتوى ملف مولَّد تمت قراءته ولا دليلًا على وجود منفذ مستمع."
+
+msgctxt "theme:v2"
+msgid "Forwarded client headers are overwritten at the edge. The complete generated configuration includes additional guarded directives."
+msgstr "تُستبدل ترويسات العميل المُمرَّرة عند واجهة الاتصال. تتضمن الإعدادات المولَّدة الكاملة توجيهات حماية إضافية."
+
+msgctxt "theme:v2"
+msgid "A host-specific default baseline has not been supplied. Saved values are not proof of active configuration; draft differences appear in Pending change."
+msgstr "لم تُوفَّر قيم افتراضية مرجعية خاصة بهذا الخادم. لا تثبت القيم المحفوظة أنها الإعدادات النشطة؛ وتظهر اختلافات المسودة في قسم «التغيير المعلَّق»."
+
+msgctxt "theme:v2"
+msgid "Saved configuration comparison"
+msgstr "مقارنة الإعدادات المحفوظة"
+
+msgctxt "theme:v2"
+msgid "Default baseline"
+msgstr "القيم الافتراضية المرجعية"
+
+msgctxt "theme:v2"
+msgid "Not reviewed"
+msgstr "لم يُراجع"
+
+msgctxt "theme:v2"
+msgid "Review pending change"
+msgstr "مراجعة التغيير المعلَّق"
+
+msgctxt "theme:v2"
+msgid "Test gate"
+msgstr "التحقق قبل التطبيق"
+
+msgctxt "theme:v2"
+msgid "Required change workflow. No step is marked passed by this explanatory reference."
+msgstr "مسار العمل المطلوب لإجراء التغيير. لا يُعلن هذا المرجع التوضيحي نجاح أي خطوة."
+
+msgctxt "theme:v2"
+msgid "Read the complete saved settings and review the draft difference."
+msgstr "اقرأ الإعدادات المحفوظة كاملة وراجع اختلافات المسودة."
+
+msgctxt "theme:v2"
+msgid "Validate the candidate and test syntax before applying."
+msgstr "تحقّق من الإعدادات المقترحة واختبر صياغتها قبل التطبيق."
+
+msgctxt "theme:v2"
+msgid "Read the actual reconcile result and resulting generation."
+msgstr "اقرأ النتيجة الفعلية لتطبيق الإعدادات والجيل الناتج."

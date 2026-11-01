@@ -1,5 +1,5 @@
 import { execFile, spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { Socket } from 'node:net'
@@ -16,6 +16,7 @@ import type { WebAppRenderState } from '../../web/src/app.ts'
 import { assertNoActiveDatabaseTransaction, createDb, getMailboxSession, initializeOperationalMetadata, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, syncAccountContactIndex, type AuditQuery, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
+import { protectInstalledStateParent } from '../../../packages/state/src/ownership.ts'
 import { runCli } from './cli.ts'
 import { createQualifiedCatalogProvider, loadQualifiedCatalog, type HostCatalogSource, type QualifiedCatalogProvider, type TrustedAcceptanceOptions } from './host-catalog.ts'
 import { parseAuditFilters } from './audit-filters.ts'
@@ -23,6 +24,8 @@ import { loadMailDocument, messageSizeLimitBytes, messageSizeLimitFromPostconf, 
 import { auditActorQuery, auditTargetQuery, authorizeMailboxSessionBinding, createLocalMailboxTransport, mailFolderName, mailboxAddressIndex, rewriteMailboxIds } from './mail/inbox.ts'
 import { createApiApp, ensureRootPrincipal, listenApiServer } from './server.ts'
 import { authenticateRequest } from './auth.ts'
+import { assertAuthPersonalOwner } from './auth-personal.ts'
+import { assertOwnerApiTokenFeatureAccess } from './owner-api-tokens-workspace.ts'
 import { teamToolIds } from './team-access.ts'
 import { teamFileReader, teamMemberResolver } from './team-session.ts'
 import { createHandoffSessionCheck } from './panel-handoff-authority.ts'
@@ -229,6 +232,8 @@ export const createDefaultWebRenderer = async (deps: {
     // Every authenticated document of a handed-off session carries the identity banner.
     let impersonation: { target: string; issuer: string } | undefined
     let personalUiTheme: string | undefined
+    // Assigned only after the existing current session/service/account lifetime checks.
+    let documentMailbox: UiPreferenceAuthority['mailbox']
     // Saved branding, default appearance and the live-updates switch reach every rendered document; page state still wins.
     const panelDocumentState = async (): Promise<Partial<WebAppRenderState>> => {
       const [brandingRead, settings] = await Promise.all([panelBrandingFile(deps.store).read().catch(() => null), panelSettingsFile(deps.store).current()])
@@ -348,7 +353,8 @@ export const createDefaultWebRenderer = async (deps: {
           const record = await authorizeMailboxSessionBinding(deps.db, deps.store, caller)
           const current = await captureMailboxMetadataAuthority(deps.store, record.mailbox)
           if (current.accountId !== record.accountId || current.serviceUserId !== record.serviceUserId) return fail('FORBIDDEN', 'mailbox lifetime changed; sign in again')
-          authority = { ...authority, mailbox: { ...current, sessionId: record.sessionId } }
+          documentMailbox = { ...current, sessionId: record.sessionId }
+          authority = { ...authority, mailbox: documentMailbox }
         }
         personalUiTheme = await readUiPreferenceValue(deps.store.rootDir, authority,
           { choices: registeredUiThemeIds(), defaultUiTheme: resolveUiTheme().id }) ?? undefined
@@ -383,7 +389,7 @@ export const createDefaultWebRenderer = async (deps: {
     const savedAppearance = await readAdminPreferenceValues(deps.store.rootDir, principal)
     // A saved language the administrator no longer offers falls back to normal negotiation.
     const adminAppearance = savedAppearance ? { ...(isOfferedLocale(savedAppearance.language) ? { locale: savedAppearance.language } : {}), theme: savedAppearance.theme, density: savedAppearance.density } : {}
-    const security = { totpEnabled: caller.principalRecord.totpEnabled }
+    let security: NonNullable<WebAppRenderState['security']> = { totpEnabled: caller.principalRecord.totpEnabled }
     // Mailbox identities belong to xMail alone, and only they may open it.
     const mailboxIdentity = principal.kind === 'user' && isMailboxPrincipalUsername(principal.username)
     const wrongRole = (deps.entryPoint && !entryPointAdmitsPrincipal(deps.entryPoint, caller.principalRecord))
@@ -480,10 +486,43 @@ export const createDefaultWebRenderer = async (deps: {
         workspaceHref: ENTRY_POINTS[surface].home,
       })
     }
+    // Self-auth decisions use the existing authenticated actor and desired account/feature
+    // leaves, not native catalog qualification. Every API effect repeats fresh admission.
+    if (surface === 'xpanel' && documentRoute.activeRoute === '/security/account' && principal.kind === 'user') {
+      let originalOwner = false
+      try {
+        assertAuthPersonalOwner(caller, deps.entryPoint)
+        const ownerAccount = scoped?.account
+        originalOwner = ownerAccount !== undefined && ownerAccount !== null
+          && ownerAccount.id === principal.accountId && ownerAccount.status === 'active'
+      } catch { /* Missing or denied original-owner evidence keeps all self controls closed. */ }
+      let tokensAllowed = false
+      if (originalOwner) {
+        try {
+          const tokenAccount = await assertOwnerApiTokenFeatureAccess(deps.store, caller)
+          tokensAllowed = tokenAccount.id === principal.accountId
+        } catch { /* Feature/source failures do not become a token permission. */ }
+      }
+      security = { ...security, authPersonal: {
+        schemaVersion: 1, provenance: 'interactive-owner', surface: 'xpanel', route: '/security/account',
+        principalId: principal.id, accountId: principal.accountId, username: principal.username,
+        state: originalOwner ? 'ready' : 'denied', canChangePassword: originalOwner,
+        canReadSessions: originalOwner, canRevokeSessions: originalOwner,
+        canReadApiTokens: originalOwner && tokensAllowed, canManageApiTokens: originalOwner && tokensAllowed,
+      } }
+    }
     const catalog = await loadCatalog(deps.agent ?? null)
     const qualifiedRoute = visibleNavigation(scopedVisibility, catalog).some(item => item.surface === surface
       && item.sections.some(section => section.pages.some(page => page.route === canonicalNavigationRoute(documentRoute.activeRoute))))
     if (!qualifiedRoute) {
+      if (surface === 'xwhm' && principal.kind === 'reseller'
+        && (!reseller || reseller.id !== principal.id || reseller.username !== principal.username)) {
+        return documentStatus(403, { surface, visibility: scopedVisibility, catalog })
+      }
+      // Factor-only recovery keeps its existing admission; other mailbox documents need a current binding.
+      if (surface === 'xmail' && !documentMailbox && documentRoute.activeRoute !== '/mail/settings/security') {
+        return documentStatus(403, { surface, visibility: scopedVisibility, catalog })
+      }
       const email = await supportEmail()
       const summaryAccount = principal.kind === 'user' && surface === 'xpanel' ? scoped?.account : null
       const summaryPlan = summaryAccount ? scoped?.plan : null
@@ -502,6 +541,14 @@ export const createDefaultWebRenderer = async (deps: {
             primaryDomain: summaryAccount.primaryDomain, status: summaryAccount.status, planId: summaryAccount.planId } } : {}),
           ...(summaryPlan ? { plan: { id: summaryPlan.id, name: summaryPlan.name } } : {}),
         },
+        // Registered owner documents may display already-scoped stored facts; this grants no usage/provider read.
+        ...(surface === 'xpanel' && principal.kind === 'user'
+          && summaryAccount && summaryAccount.id === principal.accountId && summaryAccount.status === 'active'
+          && summaryPlan && summaryPlan.id === summaryAccount.planId
+          ? { panel: { account: summaryAccount, plan: summaryPlan } } : {}),
+        ...(surface === 'xwhm' && principal.kind !== 'user'
+          ? { whm: { principal, activeReseller: reseller ?? null } } : {}),
+        ...(surface === 'xmail' && documentMailbox ? { mail: { mailbox: documentMailbox.mailbox } } : {}),
       }))
     }
     const homeAccount = scoped?.account
@@ -1047,6 +1094,7 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
     if (Buffer.byteLength(ingressSecret, 'utf8') < 32) fail('PRECONDITION_FAILED', 'a protected ingress credential of at least 32 bytes is required')
     const os = opts.os ?? await detectHostOsProfile()
     const handle = await withLifecycleWriterAdmission(async () => {
+      if (!opts.agentApp) await protectInstalledStateParent({ dbPath, stateDir })
       if (dbPath !== ':memory:') await mkdir(dirname(dbPath), { recursive: true })
       await mkdir(stateDir, { recursive: true })
       await assertStateWritable(stateDir)
@@ -1139,7 +1187,9 @@ const readPasswordInput = async (): Promise<string> => {
 
 const isMainModule = (): boolean => {
   try {
-    return process.argv[1] === fileURLToPath(import.meta.url)
+    const entry = fileURLToPath(import.meta.url)
+    const argv = process.argv[1]
+    return argv === entry || (typeof argv === 'string' && argv.length > 0 && realpathSync(argv) === realpathSync(entry))
   } catch {
     return false
   }
@@ -1224,6 +1274,7 @@ if (isMainModule()) {
       const lifecycle = await cliLifecycleQuarantined()
       if (firstArg === 'status' && lifecycle.quarantined) return printQuarantinedCliStatus()
       return withLifecycleWriterAdmission(async () => {
+        await protectInstalledStateParent({ dbPath, stateDir })
         const dbHandle = createDb(dbPath, lifecycle.managed ? { durability: 'strict' } : {})
         let client: ReturnType<typeof createAgentClient> | undefined
         try {

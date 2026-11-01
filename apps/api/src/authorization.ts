@@ -181,7 +181,7 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   }
   if (/^\/api\/ips(?:\/|$)/.test(pathname)) return { resource: 'ips', rootOnly: !read, acl: 'list-accounts' }
   if (pathname === '/api/mail/ips') return { resource: 'mail', rootOnly: true }
-  if (/^\/api\/domains\/[^/]+\/htaccess(?:\/|$)/.test(pathname)) return { resource: 'files', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['aapanel-url-rewrite'], ...(method === 'POST' && /\/htaccess$/.test(pathname) ? { scopeAccess: 'read' as const } : {}) }
+  if (/^\/api\/domains\/[^/]+\/htaccess(?:\/|$)/.test(pathname)) return { resource: 'files', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['domain-htaccess'], ...(method === 'POST' && /\/htaccess$/.test(pathname) ? { scopeAccess: 'read' as const } : {}) }
   if (/^\/api\/domains\/[^/]+\/web-directives\/(?:error-pages|indexes|mime-types|hotlink|ip-blocker|redirects)$/.test(pathname)) return { resource: 'files', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['aapanel-url-rewrite', pathname.endsWith('/hotlink') ? 'hotlink-protection' : pathname.split('/').at(-1)!] }
   if (/^\/api\/domains(?:\/|$)/.test(pathname)) return { resource: 'domains', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['domains'] }
   if (/^\/api\/databases(?:\/|$)/.test(pathname)) return { resource: 'databases', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['mysql-databases'] }

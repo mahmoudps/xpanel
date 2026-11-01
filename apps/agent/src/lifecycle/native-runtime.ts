@@ -6,13 +6,15 @@ import { basename, dirname, posix } from 'node:path'
 import type { HostAction, Principal } from '@xpanel/core'
 import { createDb, getDurableJob, getGeneration, getPrincipal, getStrictOperationDatabaseOrigin, latestActive, loadMigrations } from '@xpanel/db'
 import { recoverUpgrade, runUpgrade } from '@xpanel/lifecycle'
-import type { FsPort, HostPort, ReleaseInfo, UpgradePorts } from '@xpanel/lifecycle'
+import type { FsPort, HostPort, ReleaseInfo, UpgradePorts, UpgradeSafetyPort } from '@xpanel/lifecycle'
 import { detectOs, parseOsRelease } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { createProductionHostTargetMatcher, LinuxHostExecutor } from '../executor.ts'
 import type { AgentExecutor } from '../executor.ts'
 import { observeHostLimits } from '../limit-gaps.ts'
 import { HostReconciler } from '../reconciler.ts'
+import { loadNativePeerIdentityAddon } from '../peer-identity.ts'
+import { createNativeLifecycleCanary } from './native-canary.ts'
 import { createProductionUpgradePorts, verifySignedManifestForRelease } from './upgrade-runner.ts'
 import type { ReleaseVerificationKey } from './upgrade-runner.ts'
 import { signedReleaseManifestDigest } from './upgrade-runner.ts'
@@ -143,13 +145,14 @@ const guardedExecutor = (executor: LinuxHostExecutor): AgentExecutor => {
   return { preflight: plan => effect(() => executor.preflight(plan), 'service.observe'), writeFile: file => effect(() => executor.writeFile(file)), readFile: path => effect(() => executor.readFile(path), 'service.observe'), removePath: path => effect(() => executor.removePath(path)), runTest: test => effect(() => executor.runTest(test)), runAction: action => effect(async () => { if (action.kind === 'systemd') { const result = await executor.runCommand(['/usr/bin/systemctl', action.verb, action.unit]); if (result.code !== 0) return deny('LIFECYCLE_SERVICE_COMMAND_FAILED'); return } await executor.runAction(action) }), runCommand: argv => effect(() => executor.runCommand(argv)), readSliceMetrics: uid => effect(() => executor.readSliceMetrics(uid), 'service.observe') }
 }
 
-const composition = async (db: ReturnType<typeof createDb>['db'], actor: Principal, owner: Owner): Promise<{ ports: UpgradePorts; store: StateStore; os: Awaited<ReturnType<typeof detectOs>>; releaseKeys: readonly ReleaseVerificationKey[] }> => {
+const composition = async (db: ReturnType<typeof createDb>['db'], actor: Principal, owner: Owner): Promise<{ ports: UpgradePorts; store: StateStore; os: Awaited<ReturnType<typeof detectOs>>; releaseKeys: readonly ReleaseVerificationKey[]; canaries: ReturnType<typeof createNativeLifecycleCanary> }> => {
   const os = detectOs(path => readFileSync(path, 'utf8'))
   const store = new StateStore(STATE)
   await store.getAuthorityMetadata()
   const executor = guardedExecutor(new LinuxHostExecutor({ trustedHostTargetMatcher: createProductionHostTargetMatcher(), trustedHostTargets: [{ path: BACKUPS, operations: ['ensure-directory'] }] }))
   const resolvedOs = await os
   const reconciler = new HostReconciler({ store, db, executor, os: resolvedOs, quotaFilesystem: '/home', healthProbe: async unit => { const result = await executor.runCommand(['/usr/bin/systemctl', 'is-active', '--quiet', unit]); return { ok: result.code === 0, ...(result.code !== 0 ? { error: 'Native service was not active' } : {}) } } })
+  const canaries = createNativeLifecycleCanary({ db, store, executor, reconciler, os: resolvedOs, addon: await loadNativePeerIdentityAddon() })
   const host: HostPort = { async apply(action: HostAction) {
     const kind = action.kind === 'systemd' && action.verb === 'stop' ? 'service.stop' : action.kind === 'systemd' ? 'service.start' : 'filesystem.write'
     await assertCurrentLifecycleEffect(kind)
@@ -174,7 +177,7 @@ const composition = async (db: ReturnType<typeof createDb>['db'], actor: Princip
     probeActiveTransfers: async () => { await assertCurrentLifecycleEffect('service.observe'); if (!await verifyCurrentLifecycleWriterReadiness()) return deny('LIFECYCLE_WRITER_READINESS_UNAVAILABLE'); const rows = await db.query<{ count: number }>("SELECT COUNT(*) AS count FROM jobs WHERE status IN ('queued','running') AND kind NOT LIKE 'lifecycle.%'"); const count = rows[0]?.count; if (!Number.isSafeInteger(count) || count! < 0) return deny('LIFECYCLE_TRANSFER_OBSERVATION_UNAVAILABLE'); return count! },
     // Private IPC proves the current fenced control-plane processes, not an MFA user login.
     probeQualifiedControlPlane: verifyCurrentLifecycleWriterReadiness,
-    probeCanaryHttp: async () => deny('LIFECYCLE_HOSTED_UID_PROBE_UNAVAILABLE'),
+    probeCanaryHttp: target => canaries.observe(target),
     reconciler: {
       currentGeneration: async () => { const active = await latestActive(db); if (!active) return deny('LIFECYCLE_ACTIVE_GENERATION_REQUIRED'); return active.id },
       reconcile: async () => { await assertCurrentLifecycleEffect('filesystem.write'); const result = await reconciler.reconcile({ force: true, actor: actor.username }); if (result.status === 'failed' || !result.generation) return deny('LIFECYCLE_RECONCILE_FAILED'); return { generationId: result.generation.id, units: [] } },
@@ -190,10 +193,10 @@ const composition = async (db: ReturnType<typeof createDb>['db'], actor: Princip
         return { generationId: result.generation.id, units: [] }
       },
       status: async () => { const [drift, active, snapshot] = await Promise.all([reconciler.checkDrift(), latestActive(db), store.readSnapshot()]); const manifest = active ? await reconciler.journal.readManifest(active.id) : null; const problems = drift.items.map(item => item.path); if (!manifest || manifest.stateChecksum !== snapshot.checksum) problems.push('current desired state is not the active generation'); if (drift.manifestMissing) problems.push('active generation manifest is unavailable'); return { converged: !drift.hasDrift && problems.length === 0, drift: problems } },
-      identities: async () => { const snapshot = await store.readSnapshot(); if (snapshot.accounts.length && (await observeHostLimits(executor, snapshot.accounts, snapshot.plans, '/home')).status !== 'verified') return deny('LIFECYCLE_ASSIGNED_LIMITS_UNVERIFIED'); return Promise.all(snapshot.accounts.map(async account => { const [uid, gid] = await Promise.all([executor.runCommand(['/usr/bin/id', '-u', '--', account.username]), executor.runCommand(['/usr/bin/id', '-g', '--', account.username])]); if (!uid.ok || !gid.ok || uid.stdout.trim() !== String(account.uid) || gid.stdout.trim() !== String(account.gid)) return deny('LIFECYCLE_ACCOUNT_IDENTITY_CHANGED'); const plan = snapshot.plans.find(plan => plan.id === account.planId); if (!plan) return deny('LIFECYCLE_ASSIGNED_PLAN_UNAVAILABLE'); return { username: account.username, uid: account.uid, gid: account.gid, slice: `xpanel-${account.uid}.slice`, quotas: { ...plan.resources } } })) },
+      identities: async () => { await assertCurrentLifecycleEffect('service.observe'); const snapshot = await store.readSnapshot(); if (snapshot.accounts.length && (await observeHostLimits(executor, snapshot.accounts, snapshot.plans, '/home')).status !== 'verified') return deny('LIFECYCLE_ASSIGNED_LIMITS_UNVERIFIED'); const identities = await Promise.all(snapshot.accounts.map(async account => { const [uid, gid] = await Promise.all([executor.runCommand(['/usr/bin/id', '-u', '--', account.username]), executor.runCommand(['/usr/bin/id', '-g', '--', account.username])]); if (!uid.ok || !gid.ok || uid.stdout.trim() !== String(account.uid) || gid.stdout.trim() !== String(account.gid)) return deny('LIFECYCLE_ACCOUNT_IDENTITY_CHANGED'); const plan = snapshot.plans.find(plan => plan.id === account.planId); if (!plan) return deny('LIFECYCLE_ASSIGNED_PLAN_UNAVAILABLE'); return { username: account.username, uid: account.uid, gid: account.gid, slice: `xpanel-${account.uid}.slice`, quotas: { ...plan.resources } } })); return canaries.bindIdentities(identities) },
     },
   })
-  return { ports, store, os: resolvedOs, releaseKeys }
+  return { ports, store, os: resolvedOs, releaseKeys, canaries }
 }
 
 /** Real composition only. No request, environment or callback supplies a principal or readiness. */
@@ -219,12 +222,15 @@ export const runNativeLifecycleCommand = async (input: unknown, processBinding?:
     const actor: Principal = { kind: 'root', id: root.id, username: root.username }
     const handoff = binding ? readUpgradeIntentJob(await getDurableJob(handle.db, binding.jobId), binding) : null
     if (handoff && (handoff.job.checkpointStep !== 'native-consumed' || handoff.intent.principalId !== actor.id || handoff.intent.actor !== actor.username)) return deny('LIFECYCLE_HANDOFF_ACTOR_MISMATCH')
-    const { ports, store, os, releaseKeys } = await composition(handle.db, actor, await panelOwner())
-    // No real hosted-request UID producer exists yet. Refuse before any service/FS effects.
-    if ((await store.readSnapshot()).accounts.length !== 0) return deny('LIFECYCLE_HOSTED_UID_PROBE_UNAVAILABLE')
+    const { ports, os, releaseKeys, canaries } = await composition(handle.db, actor, await panelOwner())
+    // A stored target is metadata until the actual native safety scope admits that exact account lifetime.
+    const canary = await canaries.select()
+    const withCanary = (safety: UpgradeSafetyPort): UpgradeSafetyPort => ({ ...safety,
+      withExclusive: work => safety.withExclusive(async () => { await canaries.assertSelectionCurrent(canary); return work() }),
+    })
     if (request.command === 'recover') {
       const safety = await createNativeUpgradeSafety({ db: handle.db, actorId: actor.id, operation: 'recover' })
-      await recoverUpgrade({ ...ports, safety }, { actor, os, note: 'Native command observed current authority; physical retirement remains separately verified', canary: null })
+      await recoverUpgrade({ ...ports, safety: withCanary(safety) }, { actor, os, note: 'Native command observed current authority; physical retirement remains separately verified', canary: canary.username })
       return { exitCode: 6, code: 'LIFECYCLE_RETIREMENT_PENDING', outcome: 'attention', details: { phase: 'retirement_pending', qualified: false } }
     }
     const artifact = request.artifact!
@@ -247,7 +253,7 @@ export const runNativeLifecycleCommand = async (input: unknown, processBinding?:
     if (!VERSION.test(currentVersion) || dirname(currentTarget) !== '/opt/xpanel/releases') return deny('LIFECYCLE_CURRENT_RELEASE_INVALID')
     if (request.command === 'update' && currentVersion.split('.')[0] !== release.version.split('.')[0]) return deny('LIFECYCLE_MAJOR_UPGRADE_REQUIRED')
     const safety = await createNativeUpgradeSafety({ db: handle.db, actorId: actor.id, operation: 'upgrade', release })
-    const result = await runUpgrade({ ...ports, safety }, { actor, os, release, canary: null })
+    const result = await runUpgrade({ ...ports, safety: withCanary(safety) }, { actor, os, release, canary: canary.username })
     return result.outcome === 'succeeded'
       ? { exitCode: 0, code: 'LIFECYCLE_NATIVE_COMMITTED', outcome: 'committed', details: { currentVersion: release.version, changed: true, upgradeId: result.recordId } }
       : { exitCode: result.outcome === 'refused' ? 3 : 6, code: result.outcome === 'refused' ? 'LIFECYCLE_UPGRADE_REFUSED' : 'LIFECYCLE_RETIREMENT_PENDING', outcome: result.outcome === 'refused' ? 'blocked' : 'attention', details: { phase: 'retirement_pending', qualified: false } }

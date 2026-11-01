@@ -1,7 +1,7 @@
-import type { SurfaceAuthority } from '../../../../models/theme-surface.ts'
+import { projectConfiguredAccountSlice, type SurfaceAuthority } from '../../../../models/theme-surface.ts'
 import type { Limit } from '@xpanel/core'
 import type { Translate } from '../../../../i18n.ts'
-import { card, emptyState, kpiCard, notice, pageHeader, statusPill } from '../../components/index.ts'
+import { card, kpiCard, notice, pageHeader, statusPill } from '../../components/index.ts'
 import { escapeHtml } from '../../html.ts'
 import { v2Messages } from '../../messages.ts'
 import { panelBytes, panelCount, panelFact, panelHomeMeters, panelLimit, selectedPanelPlan, scopePrimaryPanelFacts, type PanelPageProps } from './home.ts'
@@ -66,8 +66,15 @@ function limitsTable(rows: readonly LimitRow[], t: Translate): string {
   return `<div class="v2-table-scroll" role="region" aria-labelledby="v2-resource-limits-caption" tabindex="0"><table id="v2-resource-limits" class="v2-table v2-resource-limits"><caption class="v2-sr" id="v2-resource-limits-caption">${escapeHtml(t(msgctxt('theme:v2', 'Plan, applied limit and usage')))}</caption><thead><tr>${headings.map(label => `<th scope="col">${escapeHtml(label)}</th>`).join('')}</tr></thead>${groups.map(group => `<tbody><tr class="v2-resource-limit-group"><th scope="rowgroup" colspan="5">${escapeHtml(group.label)}</th></tr>${rows.filter(row => row.group === group.key).map(rowHtml).join('')}</tbody>`).join('')}</table></div>`
 }
 
-const unavailablePanel = (title: string, titleId: string, text: string): string =>
-  card({ title, titleId, bodyHtml: `<p class="v2-muted" role="status">${escapeHtml(text)}</p>` })
+const resourceFacts = (items: readonly (readonly [string, string, boolean?])[]): string => `<dl class="v2-resource-stats">${items.map(([label, value, technical]) => panelFact(label, value, technical === true)).join('')}</dl>`
+function unreadTable(titleId: string, headings: readonly string[], message: string): string {
+  return `<div class="v2-table-scroll" role="region" tabindex="0" aria-labelledby="${titleId}"><table class="v2-table v2-resource-observation-table"><thead><tr>${headings.map(label => `<th scope="col">${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody><tr data-resource-observation="unread"><td colspan="${headings.length}"><p role="status">${escapeHtml(message)}</p></td></tr></tbody></table></div>`
+}
+function historyPanel(t: Translate, title: string, titleId: string, message: string, current: string, configured: string): string {
+  const unread = t(msgctxt('resources-board', 'Not read'))
+  return card({ title, titleId, bodyHtml: `<div class="v2-resource-ranges" role="group" aria-label="${escapeHtml(t(msgctxt('resources-board', 'Time range')))}">${['1h', '24h', '7d'].map((range, index) => `<button type="button" class="v2-btn" aria-pressed="${index === 0}" disabled><bdi dir="ltr">${range}</bdi></button>`).join('')}</div><div class="v2-resource-plot" data-resource-observation="unread"><p role="status">${escapeHtml(message)}</p></div>`
+    + resourceFacts([[t(msgctxt('resources-board', 'Average')), unread], [t(msgctxt('resources-board', 'Peak')), unread], [t('Current reading'), current, /^[0-9]/.test(current)], [t('Stored plan limit'), configured, /^[0-9]/.test(configured)]]) })
+}
 
 function observations(props: PanelPageProps, t: Translate): string {
   const verification = t(props.usage?.ioEnforced === true ? msgid('Verified for this sample')
@@ -83,6 +90,7 @@ export function renderV2PanelResources(props: PanelPageProps, authority?: Surfac
   const t = v2Messages.translator(props.locale ?? 'en')
   props = scopePrimaryPanelFacts(props, authority)
   const account = props.account
+  const configuredSlice = projectConfiguredAccountSlice(account)
   const plan = selectedPanelPlan(props)
   const meters = panelHomeMeters(props, t)
   const unavailable = t('Unavailable')
@@ -100,6 +108,14 @@ export function renderV2PanelResources(props: PanelPageProps, authority?: Surfac
   })
   const missingHistory = t(msgctxt('theme:v2', 'No account history was supplied. No samples or peak values are inferred from a current reading.'))
   const missingProcesses = t(msgctxt('theme:v2', 'An account process list was not supplied. The task count does not identify processes or grant a process action.'))
+  const unread = t(msgctxt('resources-board', 'Not read'))
+  const slice = card({ title: t(msgctxt('resources-board', 'Account isolation slice')), titleId: 'v2-resource-slice-title', bodyHtml: `<p class="v2-muted">${escapeHtml(t(msgctxt('resources-board', 'Stored configuration is not a running-unit or applied-limit observation.')))}</p><dl class="v2-panel-facts">${panelFact(t(msgctxt('resources-board', 'Configured isolation slice')), configuredSlice ?? unread, !!account)}${panelFact(t(msgctxt('resources-board', 'Observed unit state')), unread)}</dl><details class="v2-resource-unit"><summary>${escapeHtml(t(msgctxt('resources-board', 'Service unit details')))}</summary><pre class="v2-resource-code-unread">${escapeHtml(t(msgctxt('resources-board', 'Unit file has not been read.')))}</pre><button type="button" class="v2-btn" disabled>${escapeHtml(t(msgctxt('resources-board', 'Copy unit file')))}</button></details>` })
+  const history = `<div class="v2-resource-charts">${historyPanel(t, t(msgctxt('theme:v2', 'CPU usage')), 'v2-resource-cpu-title', missingHistory, unread, panelLimit(plan?.resources.cpuPercent, t, '%'))}${historyPanel(t, t(msgctxt('theme:v2', 'Memory usage')), 'v2-resource-memory-title', missingHistory, panelCount(props.usage?.memoryBytes) === undefined ? unread : panelBytes(props.usage!.memoryBytes!), panelLimit(plan?.resources.memoryMb, t, 'MiB'))}</div>`
+  const io = card({ title: t(msgctxt('theme:v2', 'Disk IO history')), titleId: 'v2-resource-io-title', bodyHtml: `<div class="v2-resource-ranges" role="group" aria-label="${escapeHtml(t(msgctxt('resources-board', 'IO direction')))}"><button type="button" class="v2-btn" aria-pressed="false" disabled>${escapeHtml(t('Read'))}</button><button type="button" class="v2-btn" aria-pressed="true" disabled>${escapeHtml(t('Write'))}</button></div><div class="v2-resource-plot" data-resource-observation="unread"><p role="status">${escapeHtml(missingHistory)}</p></div>` + resourceFacts([[t(msgctxt('resources-board', 'Average')), unread], [t(msgctxt('resources-board', 'Peak')), unread], [t(msgctxt('resources-board', 'Configured read cap')), panelLimit(plan?.resources.ioReadBps, t, 'B/s'), typeof plan?.resources.ioReadBps === 'number'], [t(msgctxt('resources-board', 'Configured write cap')), panelLimit(plan?.resources.ioWriteBps, t, 'B/s'), typeof plan?.resources.ioWriteBps === 'number']]) })
+  const events = card({ title: t(msgctxt('theme:v2', 'Limit events')), titleId: 'v2-resource-events-title', bodyHtml: `<p class="v2-muted">${escapeHtml(t(msgctxt('resources-board', 'Event counters and their observation times have not been read.')))}</p><ol class="v2-resource-list" data-resource-observation="unread">${[msgctxt('resources-board', 'Memory events'), msgctxt('resources-board', 'Process limit events'), msgctxt('resources-board', 'IO throttling'), msgctxt('resources-board', 'Bandwidth limit events')].map(label => `<li><strong>${escapeHtml(t(label))}</strong>${resourceFacts([[t('State'), unread], [t(msgctxt('resources-board', 'Last observed')), unread]])}</li>`).join('')}</ol>` })
+  const service = card({ title: t(msgctxt('theme:v2', 'Site service configuration')), titleId: 'v2-resource-service-title', bodyHtml: `<dl class="v2-panel-facts">${panelFact(t('Primary domain'), account?.primaryDomain ?? t('Not read'), true)}${panelFact(t(msgctxt('resources-board', 'Configured isolation slice')), configuredSlice ?? t('Not read'), true)}${panelFact(t('Default PHP'), props.usage?.phpVersion ?? t('Not reported by the agent'), true)}${panelFact(t('State'), unavailable)}</dl><p class="v2-muted">${escapeHtml(t(msgctxt('theme:v2', 'A service-unit readback was not supplied. The saved configuration does not establish a running worker or its unit file.')))}</p><ol class="v2-resource-list" aria-label="${escapeHtml(t(msgctxt('resources-board', 'Request path')))}" data-resource-observation="unread">${[msgctxt('resources-board', 'Web proxy'), msgctxt('resources-board', 'Account web worker'), msgctxt('resources-board', 'PHP worker')].map(label => `<li><strong>${escapeHtml(t(label))}</strong><span>${escapeHtml(unread)}</span></li>`).join('')}</ol><h3>${escapeHtml(t(msgctxt('resources-board', 'Virtual host')))}</h3><pre class="v2-resource-code-unread">${escapeHtml(t(msgctxt('resources-board', 'Virtual-host configuration has not been read.')))}</pre>` + resourceFacts([[t(msgctxt('resources-board', 'Runtime identity')), unread], [t(msgctxt('resources-board', 'Home permissions')), unread], [t(msgctxt('resources-board', 'Private temporary directory')), unread], [t(msgctxt('resources-board', 'Database access')), unread]]) })
+  const processes = card({ title: t(msgctxt('theme:v2', 'Processes in your slice')), titleId: 'v2-resource-processes-title', bodyHtml: `<p class="v2-muted">${escapeHtml(missingProcesses)}</p>` + unreadTable('v2-resource-processes-title', [t(msgctxt('resources-board', 'Command and unit')), 'PID', t('User'), t('CPU'), t('Memory'), t('Started (UTC)')], unread) })
+  const folders = card({ title: t(msgctxt('theme:v2', 'Disk usage by folder')), titleId: 'v2-resource-folders-title', actionsHtml: `<button type="button" class="v2-btn" disabled aria-describedby="v2-resource-folder-navigation-note">${escapeHtml(t('File manager'))}</button>`, bodyHtml: `<p class="v2-muted" id="v2-resource-folder-navigation-note">${escapeHtml(t(msgctxt('resources-board', 'Use the authorized workspace navigation to open the file manager.')))}</p>` + unreadTable('v2-resource-folders-title', [t('Path'), t('Size'), t('Share')], t(msgctxt('theme:v2', 'No directory-size observation was supplied. A file listing is not a recursive quota measurement.'))) })
   return `<div class="v2-layout v2-panel-resources" ${account ? `data-account="${escapeHtml(account.id)}" data-uid="${account.uid}"` : ''} data-resource-reading="${props.usage === undefined ? 'unread' : 'read'}">
 ${pageHeader(t, { breadcrumb: [{ label: t('Home'), href: '/home' }, { label: t('Resources & quotas') }], route: '/resources', title: t('Resources & quotas'),
     description: t('What this plan allows, what this host applies to the slice, and what is in use right now.'),
@@ -108,18 +124,29 @@ ${notice(t, { tone: 'info', text: t(msgctxt('theme:v2', 'This is the supplied ac
 ${props.usage?.bandwidthMonth?.limited === true ? notice(t, { tone: 'warn', lead: t('Limit page served'), text: t(msgctxt('theme:v2', 'The account is over its enforced monthly bandwidth limit.')) }) : ''}
 <p class="v2-sr" id="v2-resource-refresh-note">${escapeHtml(t(msgctxt('theme:v2', 'An on-demand account resource reader is unavailable.')))}</p>
 <section class="v2-kpi-row" aria-label="${escapeHtml(t('Resource usage'))}">${kpis.map(kpi => kpiCard({ headingLevel: 2, ...kpi })).join('')}</section>
-${observations(props, t)}
-<div class="v2-resource-charts">${unavailablePanel(t(msgctxt('theme:v2', 'CPU usage')), 'v2-resource-cpu-title', missingHistory)}${unavailablePanel(t(msgctxt('theme:v2', 'Memory usage')), 'v2-resource-memory-title', missingHistory)}</div>
-${limitTable}
-<div class="v2-resource-charts">${unavailablePanel(t(msgctxt('theme:v2', 'Disk IO history')), 'v2-resource-io-title', missingHistory)}${unavailablePanel(t(msgctxt('theme:v2', 'Limit events')), 'v2-resource-events-title', t(msgctxt('theme:v2', 'No account limit-event counters or history were supplied.')))}</div>
-${card({ title: t(msgctxt('theme:v2', 'Site service configuration')), titleId: 'v2-resource-service-title', bodyHtml: `<dl class="v2-panel-facts">${panelFact(t('Primary domain'), account?.primaryDomain ?? t('Not read'), true)}${panelFact(t('Isolation slice'), account ? `xpanel-${account.uid}.slice` : t('Not read'), true)}${panelFact(t('Default PHP'), props.usage?.phpVersion ?? t('Not reported by the agent'), true)}${panelFact(t('State'), unavailable)}</dl><p class="v2-muted">${escapeHtml(t(msgctxt('theme:v2', 'A service-unit readback was not supplied. The saved configuration does not establish a running worker or its unit file.')))}</p>` })}
-${unavailablePanel(t(msgctxt('theme:v2', 'Processes in your slice')), 'v2-resource-processes-title', missingProcesses)}
-${unavailablePanel(t(msgctxt('theme:v2', 'Disk usage by folder')), 'v2-resource-folders-title', t(msgctxt('theme:v2', 'No directory-size observation was supplied. A file listing is not a recursive quota measurement.')))}
+${observations(props, t)}${slice}
+<div class="v2-resource-workspace"><div class="v2-resource-main">${history}${limitTable}<div class="v2-resource-charts">${io}${events}</div></div><aside class="v2-resource-service">${service}</aside></div>
+${processes}${folders}
 </div>`
 }
 
 export const V2_PANEL_RESOURCES_CSS = `.v2-resource-charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-3);align-items:stretch}
 .v2-resource-charts>.v2-card{min-block-size:180px}
+.v2-panel-resources .v2-resource-workspace{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:var(--space-3);align-items:start;min-inline-size:0}
+.v2-panel-resources .v2-resource-main{display:flex;flex-direction:column;gap:var(--space-4);min-inline-size:0}
+.v2-panel-resources .v2-resource-service{min-inline-size:0}
+.v2-panel-resources .v2-resource-ranges{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1)}
+.v2-panel-resources .v2-resource-plot{display:grid;align-content:center;gap:var(--space-2);min-block-size:180px;padding:var(--space-3);border:1px dashed var(--line-strong);border-radius:var(--radius-control);background:var(--subtle);text-align:center}
+.v2-panel-resources .v2-resource-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2);margin:0}
+.v2-panel-resources .v2-resource-stats>div{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0;text-align:start;overflow-wrap:anywhere}
+.v2-panel-resources .v2-resource-stats dt{font-size:12px;color:var(--muted)}.v2-panel-resources .v2-resource-stats dd{margin:0;text-align:start;overflow-wrap:anywhere}
+.v2-panel-resources .v2-resource-list{display:grid;gap:var(--space-2);list-style:none;margin:0;padding:0}
+.v2-panel-resources .v2-resource-list>li{display:grid;gap:var(--space-1);padding-block:var(--space-2);border-block-start:1px solid var(--line)}
+.v2-panel-resources .v2-resource-unit{display:flex;flex-direction:column;gap:var(--space-2);min-inline-size:0}
+.v2-panel-resources .v2-resource-unit>summary{min-block-size:var(--target);align-content:center;cursor:pointer;font-weight:600}
+.v2-panel-resources .v2-resource-code-unread{margin:0;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--subtle);font:inherit;white-space:pre-wrap;overflow-wrap:anywhere}
+.v2-panel-resources .v2-resource-observation-table{min-inline-size:640px}
+@media(max-width:1100px){.v2-panel-resources .v2-resource-workspace{grid-template-columns:minmax(0,1fr)}}
 .v2-panel-resources .v2-table td{overflow-wrap:anywhere}.v2-panel-resources .v2-table bdi{display:inline;unicode-bidi:isolate}
 .v2-resource-limits{min-inline-size:980px}.v2-resource-limits tbody th[scope=row]{padding:14px 16px;padding-inline-start:var(--v2-panel-padding);border-block-start:1px solid var(--line);background:transparent;color:var(--text);font-size:14px;font-weight:600;white-space:normal}
 .v2-resource-limits .v2-resource-limit-group th{padding:12px var(--v2-panel-padding);border-block-start:1px solid var(--line);background:var(--subtle);color:var(--text-2)}

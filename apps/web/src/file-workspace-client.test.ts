@@ -1,3 +1,4 @@
+import { renderPanelSurface } from './surfaces/xpanel.ts'
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { createFileWorkspace, FILE_WORKSPACE_CLIENT_BINDING, workspaceBinary, workspaceEntry, workspaceLeaf, workspaceListing, workspaceMode, workspacePath, workspaceText, workspaceTextBytes, workspaceTrash, workspaceTrashList, workspaceWriteUncertain, type WorkspaceText } from './file-workspace-client.ts'
@@ -101,5 +102,33 @@ describe('file workspace trash and permission wire',()=>{
     expect(FILE_WORKSPACE_CLIENT_BINDING).toContain('data-file-manager=')
     expect(FILE_WORKSPACE_CLIENT_BINDING).toContain('trash')
     expect(FILE_WORKSPACE_CLIENT_BINDING).not.toContain('/api/xpanel/');expect(FILE_WORKSPACE_CLIENT_BINDING).not.toContain('fetch(')
+  })
+})
+
+
+describe('classic account file render contracts', () => {
+  const account = { id: 'file-account', username: 'alice', uid: 20001, gid: 20001, home: '/home/alice', primaryDomain: 'alice.example.test', planId: 'file-plan', ownerId: null, status: 'active' as const, suspendReason: null, contactEmail: 'alice@example.test', ipv4: '192.0.2.10', shell: 'none' as const, createdAt: '2026-10-29T00:00:00Z' }
+  const files = [{ name: 'live.txt', path: 'live.txt', kind: 'file' as const, sizeBytes: 2, modeOctal: '0640', modifiedAt: timestamp }, { name: 'gone.txt', path: 'gone.txt', kind: 'file' as const, sizeBytes: 2, modeOctal: '0640', modifiedAt: timestamp, trashed: true }]
+  it.each(['en', 'ar'] as const)('aligns %s seven-column SSR rows and keeps browse/trash snapshots separate', locale => {
+    for (const route of ['/files/manager', '/files/trash']) {
+      const html = renderPanelSurface({ account, files, activeRoute: route, locale })
+      const table = html.match(/<table class="xp-table" data-file-manager-table="true">([\s\S]*?)<\/table>/)![1]!
+      expect([...table.matchAll(/<th\b/g)]).toHaveLength(7)
+      const row = table.match(/<tbody>\s*<tr\b[^>]*>([\s\S]*?)<\/tr>/)![1]!
+      expect([...row.matchAll(/<td\b/g)]).toHaveLength(7)
+      expect(table).toContain(route === '/files/manager' ? 'live.txt' : 'gone.txt')
+      expect(table).not.toContain(route === '/files/manager' ? 'gone.txt' : 'live.txt')
+      expect(html).toContain('data-file-detail="owner"')
+      expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+    }
+  })
+  it('keeps unread and verified empty SSR directories distinct while the editor remains mounted and closed', () => {
+    const unread = renderPanelSurface({ account, activeRoute: '/files/manager' })
+    const empty = renderPanelSurface({ account, files: [], activeRoute: '/files/manager' })
+    expect(unread).toContain('Directory contents have not been read.')
+    expect(empty).toContain('This directory is empty.')
+    expect(empty).toContain('colspan="7"')
+    expect(unread).toContain('data-file-editor-panel hidden')
+    expect(unread).toContain('id="jailed-code-editor"')
   })
 })

@@ -43,7 +43,7 @@ function bindMailForwarders(askDialog: (options: Record<string, unknown>) => Pro
     const status = root.querySelector<HTMLElement>('[data-forwarders-status]'), rows = root.querySelector<HTMLElement>('[data-forwarders-rows]'), count = root.querySelector<HTMLElement>('[data-forwarders-count]')
     const input = root.querySelector<HTMLInputElement>('input[name="destination"]'), add = root.querySelector<HTMLButtonElement>('[data-forwarders-add]'), refresh = root.querySelector<HTMLButtonElement>('[data-forwarders-refresh]')
     if (!status || !rows || !count || !input || !add || !refresh) return
-    try { mailRequireTemplates(root, [['mail-forwarder-row', 'tr', ['address', 'remove']], ['mail-forwarder-empty', 'tr', ['message']]]) }
+    try { mailRequireTemplates(root, [['mail-forwarder-row', 'tr', ['address', 'remove'], [['address', 'bdi'], ['remove', 'button', { type: 'button' }]]], ['mail-forwarder-empty', 'tr', ['message']]]) }
     catch { input.disabled = true; add.disabled = true; refresh.disabled = true; status.dataset.state = 'unavailable'; status.textContent = t('Forwarders are unavailable for this mailbox session. Nothing was read.'); return }
     const admitted = (): boolean => root.isConnected && root.dataset.forwardersCanManage === 'true' && root.dataset.forwardersMailbox === mailbox && !!mailbox && !root.closest(denied) && !!send
     let snapshot: MailboxForwardersSnapshot | null = null, busy = false, lock = ''

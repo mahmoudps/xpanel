@@ -100,7 +100,7 @@ function bindMailIdentities(askDialog: ((options: Record<string, unknown>) => Pr
     const saveButton = root.querySelector<HTMLButtonElement>('[data-identities-save]')
     const resetButton = root.querySelector<HTMLButtonElement>('[data-identities-reset]')
     if (!rows || !status || !displayName || !replyTo || !textSignature || !htmlSignature || !isDefault || !saveButton) return
-    try { mailRequireTemplates(root, [['mail-identity-card', 'article', ['name', 'badge', 'facts', 'actions']], ['mail-identity-fact', 'div', ['label', 'value']], ['mail-identity-action', 'button', ['label']], ['mail-identity-empty', 'p', ['message']]]) }
+    try { mailRequireTemplates(root, [['mail-identity-card', 'article', ['name', 'badge', 'facts', 'actions'], [['facts', 'dl']]], ['mail-identity-fact', 'div', ['label', 'value'], [['label', 'dt'], ['value', 'bdi']]], ['mail-identity-action', 'button', ['label'], [['label', 'button', { type: 'button' }]]], ['mail-identity-empty', 'p', ['message']]]) }
     catch { root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLTextAreaElement>('input,button,textarea').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = copy('Identity editing is unavailable here. No identities were read or changed.'); return }
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const eligible = (): boolean => root.isConnected && manageable && !root.closest(denied) && identityEmailPattern.test(mailbox)

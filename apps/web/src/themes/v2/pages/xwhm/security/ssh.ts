@@ -1,5 +1,7 @@
 import { actions, area, button, check, context, esc, field, fields, help, inputControl, markerFacts, page, section, select, status, table, type WhmObservationInput } from '../monitoring/common.ts'
 
+const SSH_TEMPLATES = '<template data-xp-template="whm-ssh-remove"><button type="button" class="v2-btn" style="color:var(--bad)" data-whm-ssh-remove data-protected="true" disabled><span data-xp-slot="label"></span></button></template><template data-xp-template="whm-ssh-fact-technical"><div><dt data-xp-slot="label"></dt><dd><bdi dir="ltr" class="v2-mono" data-xp-slot="value"></bdi></dd></div></template><template data-xp-template="whm-ssh-fact-text"><div><dt data-xp-slot="label"></dt><dd><span data-xp-slot="value"></span></dd></div></template>'
+
 export function renderV2WhmSsh(input: WhmObservationInput): string {
   const { t, canRead, canManage } = context(input)
   const portKnown = canRead && Number.isInteger(input.serverSettings?.sshPort)
@@ -22,5 +24,5 @@ export function renderV2WhmSsh(input: WhmObservationInput): string {
       + field(t, 'v2-ssh-minutes', msgid('Within, minutes'), inputControl('v2-ssh-minutes', {}, false, ' min="1" step="1" dir="ltr"', 'number')))
       + table(t, msgid('Banned by SSH'), [msgid('Address'), msgid('Since (UTC)'), msgid('Until (UTC)'), msgid('Reason'), msgid('Action')], { 'data-v2-ssh-banned': true })
       + help(t, msgctxt('theme:v2', 'Automatic ban settings and manual unban are not connected on this page. No ban state has been read.')))
-  return page(input, '/whm/security/ssh', 'SSH', msgid('SSH access, effective policy and account recovery remain separate decisions.'), body)
+  return page(input, '/whm/security/ssh', 'SSH', msgid('SSH access, effective policy and account recovery remain separate decisions.'), body + SSH_TEMPLATES)
 }

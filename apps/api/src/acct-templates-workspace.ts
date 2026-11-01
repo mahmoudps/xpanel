@@ -5,6 +5,7 @@ import { services } from '@xpanel/render'
 import { sha256Hex } from './auth.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 import type { ExtendedRouteHelpers } from './extended-routes.ts'
+import type { AccountTemplateWriteFence } from './extended-routes.ts'
 
 /** Placeholders a zone template line may use, substituted per new account. Unknown %names% are refused. */
 export const TEMPLATE_PLACEHOLDERS = ['%domain%', '%ipv4%', '%ipv6%', '%mailhost%'] as const
@@ -18,7 +19,7 @@ export interface TemplatesHelpers extends Pick<ExtendedRouteHelpers, 'store' | '
   /** ext.readOrDefault('accounts/templates.json', null) */
   readSaved: () => Promise<unknown>
   /** ext.write('accounts/templates.json', value) */
-  writeSaved: (value: unknown) => Promise<unknown>
+  writeSaved: (value: unknown, writer: AccountTemplateWriteFence) => Promise<unknown>
   now?: () => Date
 }
 
@@ -164,7 +165,7 @@ const readJson = async (request: Request): Promise<unknown> => {
 }
 const sameAuthority = (a: AuthenticatedCaller, b: AuthenticatedCaller): boolean => a.principal.id === b.principal.id && a.sessionId === b.sessionId && a.apiTokenId === b.apiTokenId
 
-// shortcut: in-process serialization only; one API process owns these extended state files.
+// Bound in-process work; the StateStore writer below is the authoritative cross-process fence.
 let queue: Promise<unknown> = Promise.resolve()
 const serial = <T>(task: () => Promise<T>): Promise<T> => { const run = queue.then(task, task); queue = run.catch(() => undefined); return run }
 
@@ -188,41 +189,56 @@ export async function handleAccountTemplatesRoute(request: Request, url: URL, me
     if (!object(body) || keys(body) !== 'expectedRevision' || typeof body.expectedRevision !== 'string' || !/^[0-9a-f]{64}$/.test(body.expectedRevision)) return invalid('only the observed templates revision is accepted')
     expectedRevision = body.expectedRevision
   } else { input = parseTemplateInput(body); expectedRevision = input.expectedRevision }
-  return serial(async () => {
-    const raw = await helpers.readSaved()
-    if (revisionOf(raw) !== expectedRevision) return fail('CONFLICT', 'templates changed since they were read; reload before saving', { stateChanged: false })
-    const list = readSavedTemplates(raw)
-    if (!list) return fail('PRECONDITION_FAILED', 'the saved templates file requires review before it can be changed', { stateChanged: false })
-    const index = id === undefined ? -1 : list.findIndex(template => template.id === id)
-    if (id !== undefined && index < 0) return fail('NOT_FOUND', 'template not found', { stateChanged: false })
-    const known = await plans()
-    if (input) {
-      const missing = input.planIds.filter(planId => !known.some(plan => plan.id === planId))
-      if (missing.length) return invalid('these plans do not exist', { missing: missing.slice(0, 10) })
-      const others = list.filter((_, at) => at !== index)
-      if (others.some(template => template.name.toLowerCase() === input!.name.toLowerCase())) return fail('CONFLICT', 'a template with this name already exists', { stateChanged: false })
-      const taken = input.planIds.filter(planId => others.some(template => template.planIds.includes(planId)))
-      if (taken.length) return fail('CONFLICT', 'a plan can use only one template; remove it from the other template first', { stateChanged: false, plans: taken.slice(0, 10) })
-      if (operation === 'create' && list.length >= TEMPLATE_LIMITS.templates) return fail('LIMIT_EXCEEDED', `at most ${TEMPLATE_LIMITS.templates} templates can be saved`, { stateChanged: false })
-    }
-    const actor = await helpers.requireCaller(request)
-    await helpers.assertRoot(actor, 'account-templates.' + operation)
-    if (!sameAuthority(actor, caller)) return fail('FORBIDDEN', 'template authority changed', { stateChanged: false })
-    const stamp = (helpers.now?.() ?? new Date()).toISOString(), by = actor.principal.username
-    const next = [...list]
-    let target: AccountTemplate
-    if (operation === 'delete') { target = list[index]!; next.splice(index, 1) }
-    else {
-      const { expectedRevision: _revision, ...fields } = input!
-      target = { id: operation === 'create' ? randomUUID() : id!, ...fields, updatedAt: stamp, updatedBy: by }
-      if (operation === 'create') next.push(target); else next[index] = target
-    }
-    try { await helpers.writeSaved(next) }
-    catch { return fail('SERVICE_UNAVAILABLE', 'the template write requires review', { stateChanged: true, verificationRequired: true, unknownOutcome: true }) }
-    const saved = await helpers.readSaved()
-    if (revisionOf(saved) !== revisionOf(next) || !readSavedTemplates(saved)) return fail('SERVICE_UNAVAILABLE', 'the saved templates could not be verified', { stateChanged: true, verificationRequired: true })
-    try { await helpers.emitAudit({ actor: by, principalId: actor.principal.id, action: `server.account-template.${operation === 'create' ? 'created' : operation === 'update' ? 'updated' : 'deleted'}`, target: 'account-template:' + target.id, detail: { records: target.records.length, plans: target.planIds.length }, outcome: 'ok' }) }
-    catch { return fail('SERVICE_UNAVAILABLE', 'the template is saved but its audit record requires review', { stateChanged: true, verificationRequired: true }) }
-    return json(operation === 'create' ? 201 : 200, { ...view(saved, known), changed: target.id })
+  const committed = await serial(async () => {
+    const writer = await helpers.store.getWriterLock().acquire()
+    try {
+      await writer.assertFencingToken()
+      const raw = await helpers.readSaved()
+      if (revisionOf(raw) !== expectedRevision) return fail('CONFLICT', 'templates changed since they were read; reload before saving', { stateChanged: false })
+      const list = readSavedTemplates(raw)
+      if (!list) return fail('PRECONDITION_FAILED', 'the saved templates file requires review before it can be changed', { stateChanged: false })
+      const index = id === undefined ? -1 : list.findIndex(template => template.id === id)
+      if (id !== undefined && index < 0) return fail('NOT_FOUND', 'template not found', { stateChanged: false })
+      const known = await plans()
+      if (input) {
+        const missing = input.planIds.filter(planId => !known.some(plan => plan.id === planId))
+        if (missing.length) return invalid('these plans do not exist', { missing: missing.slice(0, 10) })
+        const others = list.filter((_, at) => at !== index)
+        if (others.some(template => template.name.toLowerCase() === input!.name.toLowerCase())) return fail('CONFLICT', 'a template with this name already exists', { stateChanged: false })
+        const taken = input.planIds.filter(planId => others.some(template => template.planIds.includes(planId)))
+        if (taken.length) return fail('CONFLICT', 'a plan can use only one template; remove it from the other template first', { stateChanged: false, plans: taken.slice(0, 10) })
+        if (operation === 'create' && list.length >= TEMPLATE_LIMITS.templates) return fail('LIMIT_EXCEEDED', `at most ${TEMPLATE_LIMITS.templates} templates can be saved`, { stateChanged: false })
+      }
+      const actor = await helpers.requireCaller(request)
+      await helpers.assertRoot(actor, 'account-templates.' + operation)
+      if (!sameAuthority(actor, caller)) return fail('FORBIDDEN', 'template authority changed', { stateChanged: false })
+      const stamp = (helpers.now?.() ?? new Date()).toISOString(), by = actor.principal.username
+      const next = [...list]
+      let target: AccountTemplate
+      if (operation === 'delete') { target = list[index]!; next.splice(index, 1) }
+      else {
+        const { expectedRevision: _revision, ...fields } = input!
+        target = { id: operation === 'create' ? randomUUID() : id!, ...fields, updatedAt: stamp, updatedBy: by }
+        if (operation === 'create') next.push(target); else next[index] = target
+      }
+      await writer.assertFencingToken()
+      try { await helpers.writeSaved(next, writer) }
+      catch { return fail('SERVICE_UNAVAILABLE', 'the template write requires review', { stateChanged: true, verificationRequired: true, unknownOutcome: true }) }
+      const saved = await helpers.readSaved()
+      await writer.assertFencingToken()
+      if (revisionOf(saved) !== revisionOf(next) || !readSavedTemplates(saved)) return fail('SERVICE_UNAVAILABLE', 'the saved templates could not be verified', { stateChanged: true, verificationRequired: true })
+      const audit: Parameters<TemplatesHelpers['emitAudit']>[0] = {
+        actor: by, principalId: actor.principal.id,
+        action: `server.account-template.${operation === 'create' ? 'created' : operation === 'update' ? 'updated' : 'deleted'}`, target: 'account-template:' + target.id,
+        detail: { records: target.records.length, plans: target.planIds.length, revision: revisionOf(saved) }, outcome: 'ok',
+      }
+      await writer.assertFencingToken()
+      return { response: json(operation === 'create' ? 201 : 200, { ...view(saved, known), changed: target.id }), audit }
+    } finally { await writer.release() }
   })
+  // Audit may read an authoritative snapshot. The verified save and its metadata are captured
+  // above; never invoke that public barrier while holding this raw StateStore writer.
+  try { await helpers.emitAudit(committed.audit) }
+  catch { return fail('SERVICE_UNAVAILABLE', 'the template is saved but its audit record requires review', { stateChanged: true, verificationRequired: true }) }
+  return committed.response
 }

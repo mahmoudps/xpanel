@@ -27,6 +27,19 @@ export interface AccountExecutionObservation {
 }
 
 export interface ProvisioningReconcileRequest { readonly authority: ProvisioningAuthority; readonly binding: string }
+/** Nonsecret historical receipt; neutral field names survive the durable journal's secret redaction. */
+export interface ProvisioningCheckpointObservation {
+  readonly version: 1
+  readonly context: {
+    readonly actor: ProvisioningAuthority['actor']
+    readonly account: ProvisioningAuthority['account']
+    readonly operation: Omit<ProvisioningAuthority['operation'], 'fencingToken'> & { readonly fence: number }
+    readonly desired: ProvisioningAuthority['desired']
+  }
+  readonly execution: AccountExecutionObservation
+  readonly binding: string
+  readonly identity: string
+}
 export interface ProvisioningGenerationResult { readonly status: string; readonly generation?: { readonly id: number; readonly checksum: string } | null }
 export interface ProvisioningReconcileReply<T extends ProvisioningGenerationResult = ProvisioningGenerationResult> {
   readonly binding: string
@@ -140,4 +153,40 @@ export function assertProvisioningReply<T extends ProvisioningGenerationResult>(
     || dns.authoritative !== true || !positiveId(dns.serial) || dns.serial > 4294967295
     || php.status !== 200 || !integer(php.uid, 1) || php.uid !== a.uid || !observedText(php.cgroup, 4096) || php.cgroup !== e.cgroup) return unverifiedReply()
   return value.execution as AccountExecutionObservation
+}
+
+/** Store only the already-verified metadata/receipt, never a credential or an authentication reference. */
+export function createProvisioningCheckpointObservation(request: ProvisioningReconcileRequest, execution: AccountExecutionObservation): ProvisioningCheckpointObservation {
+  const { authority, binding } = parseProvisioningReconcileRequest(request)
+  const { fencingToken, ...operation } = authority.operation
+  const data = { version: 1 as const,
+    context: { actor: authority.actor, account: authority.account, operation: { ...operation, fence: fencingToken }, desired: authority.desired },
+    execution, binding }
+  const checkpoint = { ...data, identity: canonicalProvisioningIdentity(data) }
+  parseProvisioningCheckpointObservation(checkpoint)
+  return checkpoint
+}
+
+/**
+ * Decode a digest-bound historical receipt. Validation does not make it fresh evidence:
+ * interrupted finalization still requires an independent read-only observation under the current lease.
+ * Legacy/redacted records are deliberately not reconstructed from current account or job fields.
+ */
+export function parseProvisioningCheckpointObservation(value: unknown): { request: ProvisioningReconcileRequest; execution: AccountExecutionObservation } {
+  const checkpoint = replyRecord(value, ['version', 'context', 'execution', 'binding', 'identity'])
+  if (checkpoint.version !== 1 || !hex(checkpoint.binding) || !hex(checkpoint.identity)) return unverifiedReply()
+  const context = replyRecord(checkpoint.context, ['actor', 'account', 'operation', 'desired'])
+  const actor = replyRecord(context.actor, ['id', 'kind', 'username'])
+  const account = replyRecord(context.account, ['id', 'username', 'ownerId', 'planId', 'uid', 'gid', 'home', 'primaryDomain'])
+  const operation = replyRecord(context.operation, ['id', 'workerId', 'fence', 'leaseExpiresAt', 'requestFingerprint'])
+  const desired = replyRecord(context.desired, ['revision', 'checksum', 'preparationReference', 'preparationIdentity'])
+  const request = parseProvisioningReconcileRequest({ authority: { actor, account,
+    operation: { id: operation.id, workerId: operation.workerId, fencingToken: operation.fence,
+      leaseExpiresAt: operation.leaseExpiresAt, requestFingerprint: operation.requestFingerprint }, desired }, binding: checkpoint.binding })
+  const execution = replyRecord(checkpoint.execution, ['accountId', 'uid', 'gid', 'home', 'revision', 'generationId', 'generationChecksum', 'sourceChecksum', 'cgroup', 'services', 'quota', 'dns', 'php']) as unknown as AccountExecutionObservation
+  // A noop frame checks the saved receipt's schema/bindings only. It never executes or observes a host.
+  assertProvisioningReply(request, { binding: request.binding, outcome: 'known',
+    reconciliation: { status: 'noop', generation: { id: execution.generationId, checksum: execution.generationChecksum, status: 'active' }, stateChecksum: execution.sourceChecksum }, execution })
+  if (canonicalProvisioningIdentity({ version: checkpoint.version, context, execution, binding: checkpoint.binding }) !== checkpoint.identity) return unverifiedReply()
+  return { request, execution }
 }

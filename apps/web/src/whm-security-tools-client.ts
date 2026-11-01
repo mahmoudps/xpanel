@@ -1,4 +1,7 @@
 /// <reference lib="dom" />
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates
+const whmClientNode = canonicalWhmClientNode
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
@@ -102,7 +105,8 @@ function bindWhmSecurityTools(askDialog: Ask | undefined): void {
     const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
     if (!status || !refresh || !['intrusion', 'antivirus', 'isolation'].includes(page)) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.securityToolsCanRead === 'true' && !root.closest(denied) && !!request
+    let templateContractIntact = true
+    const admitted = (): boolean => templateContractIntact && root.isConnected && root.dataset.securityToolsCanRead === 'true' && !root.closest(denied) && !!request
     const manageable = (): boolean => admitted() && root.dataset.securityToolsCanManage === 'true'
     let busy = false
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
@@ -150,9 +154,28 @@ function bindWhmSecurityTools(askDialog: Ask | undefined): void {
     let controls = (): void => { refresh.disabled = busy || !admitted() }
 
     if (page === 'intrusion') {
+      const verifyWhmTemplates = (): void => {
+        if (!templateContractIntact) throw new Error('client_template_contract_unavailable')
+        try {
+          assertWhmClientTemplates(root, [['whm-security-unban', 'button', { content: 'button' }]])
+          const prototype = whmClientNode(root, 'whm-security-unban', 'button')
+          if (prototype.type !== 'button' || !prototype.disabled) throw new Error('client_template_contract_unavailable')
+        } catch (error) {
+          templateContractIntact = false
+          root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+          note('unavailable', t('Unavailable'))
+          throw error
+        }
+      }
+      if (admitted()) { try { verifyWhmTemplates() } catch { return } }
+      const checkedRequest: Transport = async (...args: Parameters<Transport>) => {
+        verifyWhmTemplates()
+        try { return await request!(...args) } finally { verifyWhmTemplates() }
+      }
       let view: IntrusionView | null = null
       const jailFilter = q<HTMLSelectElement>('[data-whm-security-tools-filter="jail"]'), textFilter = q<HTMLInputElement>('[data-whm-security-tools-filter="text"]')
       const paint = (): void => {
+        try { verifyWhmTemplates() } catch { controls(); return }
         const current = view
         fact('service', !current ? null : current.state === 'not_installed' ? t(msgctxt('whm-security-tools-client', 'Not installed')) : current.state === 'unavailable' ? t('Not answering') : t('Answering'))
         fact('jails', current?.state === 'read' ? String(current.jails.length) : null)
@@ -173,7 +196,7 @@ function bindWhmSecurityTools(askDialog: Ask | undefined): void {
         const jailName = jailFilter?.value ?? '', needle = (textFilter?.value ?? '').trim().toLowerCase()
         const pairs = (current?.jails ?? []).flatMap(jail => jail.banned.map(address => ({ jail: jail.name, address }))).filter(pair => (!jailName || pair.jail === jailName) && (!needle || pair.address.toLowerCase().includes(needle)))
         fill('banned', pairs.map(pair => {
-          const button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.textContent = t('Unban')
+          const button = whmClientNode(root, 'whm-security-unban', 'button', t('Unban'))
           button.dataset.whmSecurityToolsUnban = 'true'; button.dataset.jail = pair.jail; button.dataset.address = pair.address; button.setAttribute('aria-label', t('Unban {address} · {jail}', { address: pair.address, jail: pair.jail }))
           return [technical(pair.address), technical(pair.jail), button]
         }), !current ? t('No banned addresses have been read.') : t('No banned addresses match.'), 3)
@@ -189,7 +212,7 @@ function bindWhmSecurityTools(askDialog: Ask | undefined): void {
       const load = (): Promise<void> => guarded(async () => {
         note('reading', t('Reading fail2ban…'))
         try {
-          const next = readIntrusionView(await read('/api/server/security-tools/intrusion'))
+          const next = readIntrusionView(await checkedRequest('GET', '/api/server/security-tools/intrusion'))
           if (!admitted()) return
           view = next
           note(next.state === 'read' ? 'read' : 'unavailable', next.state === 'read' ? t('Fail2ban status read from the server.') : next.state === 'not_installed' ? t('Fail2ban is not installed. Nothing was changed.')
@@ -199,11 +222,15 @@ function bindWhmSecurityTools(askDialog: Ask | undefined): void {
       })
       const unban = async (jail: string, address: string): Promise<void> => {
         if (busy || !manageable()) return
-        if (!await confirm({ title: t('Unban address?'), body: address + ' · ' + jail + '\n' + t('Fail2ban bans it again if the failures continue.'), confirm: t('Unban') }) || !manageable()) return
+        try { verifyWhmTemplates() } catch { controls(); return }
+        const confirmed = await confirm({ title: t('Unban address?'), body: address + ' · ' + jail + '\n' + t('Fail2ban bans it again if the failures continue.'), confirm: t('Unban') })
+        try { verifyWhmTemplates() } catch { controls(); return }
+        if (!confirmed || !manageable()) return
         busy = true; controls()
         let kind: string
-        try { kind = readUnbanResult(await request!('POST', '/api/server/security-tools/intrusion/unban', { jail, address }), { jail, address }).outcome } catch (error) { kind = error instanceof Error && error.message === 'invalid_unban_result' ? 'unknown' : outcome(error) }
+        try { kind = readUnbanResult(await checkedRequest('POST', '/api/server/security-tools/intrusion/unban', { jail, address }), { jail, address }).outcome } catch (error) { kind = error instanceof Error && error.message === 'invalid_unban_result' ? 'unknown' : outcome(error) }
         busy = false
+        if (!templateContractIntact) controls()
         show(kind, kind === 'confirmed' ? t('Unbanned: a fresh read no longer lists the address in this jail.') : kind === 'conflict' ? t('The address is no longer banned in this jail. Nothing was changed.') : failure(kind))
         await load()
       }
@@ -322,4 +349,4 @@ function bindWhmSecurityTools(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_SECURITY_TOOLS_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};const readIntrusionView=${readIntrusionView.toString()};const readAntivirusView=${readAntivirusView.toString()};const readIsolationView=${readIsolationView.toString()};const readUnbanResult=${readUnbanResult.toString()};const readJobAck=${readJobAck.toString()};return ${bindWhmSecurityTools.toString()};})()`
+export const WHM_SECURITY_TOOLS_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const displayDateTime=${DISPLAY_DATETIME_BINDING};const readIntrusionView=${readIntrusionView.toString()};const readAntivirusView=${readAntivirusView.toString()};const readIsolationView=${readIsolationView.toString()};const readUnbanResult=${readUnbanResult.toString()};const readJobAck=${readJobAck.toString()};return ${bindWhmSecurityTools.toString()};})()`

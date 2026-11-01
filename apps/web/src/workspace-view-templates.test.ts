@@ -16,12 +16,14 @@ describe('selected-theme view records', () => {
   it('lets each theme choose semantic columns while filling untrusted values as text', () => {
     for (const [theme, fields] of [['classic', ['name', 'plan']], ['v2', ['name']]] as const) {
       const host = root(`<template data-xp-template="row"><tr class="${theme}-row">${fields.map(key => `<td><bdi dir="ltr" data-xp-slot="${key}"></bdi></td>`).join('')}</tr></template>`)
-      const row = cloneViewRecord(host, 'row', 'tr', { name: '<img src=x>', plan: 'Gold', unused: 'never rendered' })
+      const values = Object.fromEntries(fields.map(key => [key, key === 'name' ? '<img src=x>' : 'Gold']))
+      const row = cloneViewRecord(host, 'row', 'tr', values)
       expect(row.className).toBe(`${theme}-row`)
       expect(row.querySelectorAll('td')).toHaveLength(fields.length)
       expect(row.querySelector('img')).toBeNull()
       expect(row.textContent).toContain('<img src=x>')
       expect(row.textContent).not.toContain('never rendered')
+      expect(() => cloneViewRecord(host, 'row', 'tr', { ...values, unused: 'never rendered' })).toThrow('view_record_slot_unavailable')
     }
   })
   it('rejects missing, duplicate and unknown slots without a fallback renderer', () => {

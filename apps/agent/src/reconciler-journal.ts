@@ -1,3 +1,4 @@
+import { ACCOUNT_PROBE_ASSET } from '../../../packages/render/src/system/account-probe.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -282,6 +283,13 @@ export const buildGenerationManifest = (input: {
     }
   }
 
+  // A replaced bind source is visible to FPM only after its mount namespace is recreated.
+  const probe = entries.find(entry => entry.path === ACCOUNT_PROBE_ASSET)
+  if (probe) {
+    probe.service = 'php-fpm'
+    probe.logicalOwner = 'server:account-probe'
+    probe.dependentUnits = [...managedUnits].filter(unit => /^xpanel-php-fpm-[a-z][a-z0-9]{0,15}-[0-9]+[.][0-9]+[.]service$/.test(unit)).sort()
+  }
   return {
     schemaVersion: 1,
     generationId: input.generationId,

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { canOpenRegisteredRoute, canonicalNavigationRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
-import { canSeeAccount, type Account, type MfaRuntimeMode, type Plan } from '@xpanel/core'
-import { panelLabel, roleLabel } from './chrome.ts'
+import { canSeeAccount, normalizeMailboxMetadataAddress, type Account, type MfaRuntimeMode, type Plan } from '@xpanel/core'
+import { accountSecurityRoute, panelLabel, roleLabel } from './chrome.ts'
 import { HANDOFF_CLIENT_BINDING } from './panel-handoff-client.ts'
 import { formatDisplayName } from './display-name.ts'
 import { brandingFaviconHref, brandingProductName, type WebBranding } from './branding.ts'
@@ -14,6 +14,7 @@ import { type MailSurfaceProps } from './surfaces/xmail.ts'
 import { type PanelSurfaceProps } from './surfaces/xpanel.ts'
 import { type WhmSurfaceProps } from './surfaces/xwhm.ts'
 import { LOGIN_CLIENT_SCRIPT } from './login-client.ts'
+import { projectAuthPersonal } from './models/theme-surface.ts'
 import { TEAM_PASSWORD_CLIENT_BINDING } from './team-password.ts'
 import { contextualizeDocumentLinks, resolveWebDocumentRoute } from './document-routes.ts'
 import { composedRouteSpecs, nativeComposedRoutePaths } from './board-port/composed/all.ts'
@@ -36,7 +37,7 @@ import {
 
 import { findUiThemeAsset, registeredUiThemeIds, resolveUiTheme } from './themes/registry.ts'
 export { findUiThemeAsset, registeredUiThemeIds, resolveUiTheme }
-import type { ThemePackageView, UnavailableProps, WorkspaceSummaryView } from './themes/contract.ts'
+import type { AuthPersonalSource, ThemePackageView, UnavailableProps, WorkspaceSummaryView } from './themes/contract.ts'
 
 export type WebSurfaceKind = 'login' | 'xwhm' | 'xpanel' | 'xmail'
 export type ThemeMode = 'dark' | 'light'
@@ -68,7 +69,7 @@ export interface WebAppRenderState {
   actionState?: AsyncActionBannerProps
   login?: LoginSurfaceProps
   /** Present for an authenticated document. Enrollment stays optional when this is false. */
-  security?: { totpEnabled: boolean }
+  security?: { totpEnabled: boolean; authPersonal?: AuthPersonalSource }
   whm?: WhmSurfaceProps
   panel?: PanelSurfaceProps
   mail?: MailSurfaceProps
@@ -149,17 +150,38 @@ export const unavailableView = (
 ): UnavailableProps => {
   const surface = state.surface === 'xwhm' || state.surface === 'xmail' ? state.surface : 'xpanel'
   const principal = state.visibility?.principal
+  // Session identity is authenticated; an optional selected URL context stays separate.
+  const sessionAccountId = state.accountId
+    ?? (state.surface === 'xpanel' && principal?.kind === 'user' ? principal.accountId : undefined)
   const storeAccount = state.workspaceSummary ? state.workspaceSummary.account : state.panel?.account
   const admitted = canOpenRegisteredRoute(activeRoute, state.visibility)
   const securityPage = ACCOUNT_SECURITY_ROUTES.has(activeRoute)
+  const authPersonal = projectAuthPersonal(state.security?.authPersonal, { surface: state.surface, route: activeRoute,
+    visibility: state.visibility, hasTrustedFactors: typeof state.security?.totpEnabled === 'boolean', workspace: !state.error && state.surface !== 'login' })
   const summary = !securityPage ? workspaceSummaryView(state, locale) : undefined
   // The theme receives only the active account identity used by the read-only store.
   const storeTarget = admitted && !securityPage && principal?.kind === 'user'
     && storeAccount?.id === principal.accountId && storeAccount.status === 'active' ? storeAccount : undefined
-  // The descriptor has no back-reference. Its facts come only from the matching server surface.
-  const readOnlyFacts = admitted ? surface === 'xpanel' && state.panel ? { surface: 'xpanel' as const, panel: state.panel }
-    : surface === 'xwhm' && state.whm ? { surface: 'xwhm' as const, whm: state.whm }
-      : surface === 'xmail' && state.mail ? { surface: 'xmail' as const, mail: state.mail } : undefined : undefined
+  // Trusted session-factor settings do not require unrelated native hosting records.
+  // Empty realm props explicitly describe absent native facts, never an invented entity or grant.
+  const factorOnly = admitted && principal !== undefined && state.surface === surface
+    && activeRoute === accountSecurityRoute(surface) && typeof state.security?.totpEnabled === 'boolean'
+  const panelFacts = state.panel === undefined && factorOnly ? {} : state.panel
+  const whmFacts = state.whm === undefined && factorOnly ? {} : state.whm
+  const mailFacts = state.mail === undefined && factorOnly ? {} : state.mail
+  const readOnlyFacts: UnavailableProps['readOnlyFacts'] = admitted
+    ? surface === 'xpanel' && panelFacts ? { surface: 'xpanel', panel: authPersonal ? { ...panelFacts, authPersonal } : panelFacts }
+      : surface === 'xwhm' && whmFacts ? { surface: 'xwhm', whm: whmFacts }
+        : surface === 'xmail' && mailFacts ? { surface: 'xmail', mail: mailFacts } : undefined
+    : undefined
+  // Mail chrome displays supplied, validated mailbox facts; the authenticated principal stays unchanged.
+  const mailboxMenuName = state.surface === 'xmail' && principal?.kind === 'user' && admitted
+    ? normalizeMailboxMetadataAddress(state.mail?.mailbox) : null
+  const menuSession = principal
+    ? surface === 'xmail'
+      ? mailboxMenuName ? { username: mailboxMenuName, role: '', ...(sessionAccountId ? { accountId: sessionAccountId } : {}) } : undefined
+      : { username: principal.username, role: roleLabel(principal.kind, locale), ...(sessionAccountId ? { accountId: sessionAccountId } : {}) }
+    : undefined
   return {
     surface, locale, theme, density, route: activeRoute,
     branding: state.branding,
@@ -167,12 +189,13 @@ export const unavailableView = (
     heading: workspacePageHeading(state.surface, locale, activeRoute),
     admitted,
     securityPage,
+    ...(authPersonal ? { authPersonal } : {}),
     qualifiedRoutes: new Set((state.visibility ? visibleNavigation(state.visibility, state.catalog) : [])
       .filter(item => item.surface === surface).flatMap(item => item.sections.flatMap(section => section.pages.map(page => page.route)))),
     ...(state.catalog ? { catalog: state.catalog } : {}),
     ...(state.visibility ? { visibility: state.visibility } : {}),
     ...(state.accountId ? { accountId: state.accountId } : {}),
-    ...(principal ? { session: { username: principal.username, role: roleLabel(principal.kind, locale), ...(state.accountId ? { accountId: state.accountId } : {}) } } : {}),
+    ...(menuSession ? { session: menuSession } : {}),
     signedIn: state.visibility !== undefined && principal !== undefined,
     ...(state.actionState ? { actionState: state.actionState } : {}),
     ...(summary ? { summary } : {}),
@@ -314,6 +337,7 @@ export function renderWebApp(state: WebAppRenderState): string {
         branding: state.branding,
         themePackages,
         unavailableView: unavailableDescriptor,
+        ...(unavailableDescriptor.authPersonal ? { authPersonal: unavailableDescriptor.authPersonal } : {}),
       })
       break
     case 'xmail':

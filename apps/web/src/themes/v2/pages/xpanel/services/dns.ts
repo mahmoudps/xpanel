@@ -8,9 +8,10 @@ import { missingServiceAccount, serviceButton, serviceFacts, serviceField, servi
 /** Desired-state editor. Public DNS answers and mail delivery are separate observations. */
 export function renderV2DnsPage(props: PanelSurfaceProps, authority: PanelServiceAuthority = { canManage: false }): string {
   const t = v2Messages.translator(props.locale ?? 'en')
-  const missing = missingServiceAccount(t, props)
-  const principal = props.visibility?.principal
   const readOnly = authority.presentation === 'read-only'
+  const missing = readOnly ? undefined : missingServiceAccount(t, props)
+  if (missing) return missing
+  const principal = props.visibility?.principal
   const account = !readOnly || authority.canReadFacts === true && principal?.kind === 'user' && props.account?.id === principal.accountId ? props.account : undefined
   const domains = (account && (!readOnly || authority.authorizedTools?.has('domains')) ? props.domains ?? [] : []).filter(domain => domain.accountId === (account?.id ?? ''))
   const selected = domains.find(domain => domain.name === props.activeDomain)

@@ -1,13 +1,15 @@
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
-import { constants } from 'node:fs'
+import { constants, type Stats } from 'node:fs'
 import { lstat, mkdir, open, readdir, rename } from 'node:fs/promises'
-import { dirname, isAbsolute, join, parse, resolve } from 'node:path'
+import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path'
 import { assertArgon2Hash, fail, isXpanelError } from '@xpanel/core'
 
 /** Must use the existing authority's cross-process writer lease, not an in-memory mutex. */
 export interface ProvisioningPreparationOptions {
   readonly directory: string
   readonly withLock: <T>(work: () => Promise<T>) => Promise<T>
+  /** Exact startup StateStore root, owned by the API service; never a request-selected exception. */
+  readonly trustedStateRoot?: { readonly directory: string; readonly uid: number; readonly gid: number }
 }
 
 export interface PreparedProvisioning<T> {
@@ -81,6 +83,8 @@ const jsonBytes = (value: unknown): string => {
 export class FileProvisioningPreparationStore implements ProvisioningPreparationStore {
   private readonly directory: string
   private readonly withLock: ProvisioningPreparationOptions['withLock']
+  private readonly trustedStateRoot: ProvisioningPreparationOptions['trustedStateRoot']
+  private directoryIdentities: Map<string, { dev: number; ino: number; uid: number; gid: number; mode: number }> | null = null
 
   constructor(options: ProvisioningPreparationOptions) {
     if (!isAbsolute(options.directory) || resolve(options.directory) !== options.directory) {
@@ -88,6 +92,14 @@ export class FileProvisioningPreparationStore implements ProvisioningPreparation
     }
     this.directory = options.directory
     this.withLock = options.withLock
+    const trusted = options.trustedStateRoot
+    if (trusted && (!isAbsolute(trusted.directory) || resolve(trusted.directory) !== trusted.directory
+      || !Number.isSafeInteger(trusted.uid) || trusted.uid < 0 || !Number.isSafeInteger(trusted.gid) || trusted.gid < 0
+      || relative(trusted.directory, options.directory).startsWith('..') || relative(trusted.directory, options.directory) === ''
+      || isAbsolute(relative(trusted.directory, options.directory)))) {
+      fail('VALIDATION', 'a canonical trusted state ancestor and exact service identity are required', { stateChanged: false })
+    }
+    this.trustedStateRoot = trusted ? Object.freeze({ ...trusted }) : undefined
   }
 
   private requirePosix(): number {
@@ -102,36 +114,74 @@ export class FileProvisioningPreparationStore implements ProvisioningPreparation
 
   private async protectedAncestors(): Promise<void> {
     const uid = this.requirePosix()
+    const observed = new Map<string, { dev: number; ino: number; uid: number; gid: number; mode: number }>()
     let path = this.directory
     for (;;) {
       const info = await lstat(path)
-      if (!info.isDirectory() || info.isSymbolicLink() || (info.uid !== uid && info.uid !== 0) || (info.mode & 0o022)) {
+      if (!this.allowedDirectory(path, info, uid)) {
         return refused('private_directory_untrusted')
       }
-      if (path === this.directory && (info.uid !== uid || (info.mode & 0o777) !== 0o700)) return refused('private_directory_untrusted')
-      if (path === parse(path).root) return
+      if (path === this.directory && (info.uid !== uid || (info.mode & 0o7777) !== 0o700)) return refused('private_directory_untrusted')
+      const identity = { dev: info.dev, ino: info.ino, uid: info.uid, gid: info.gid, mode: info.mode }
+      const original = this.directoryIdentities?.get(path)
+      if (original && Object.keys(identity).some(key => identity[key as keyof typeof identity] !== original[key as keyof typeof original])) {
+        return refused('private_directory_changed')
+      }
+      observed.set(path, identity)
+      if (path === parse(path).root) break
       path = dirname(path)
     }
+    this.directoryIdentities ??= observed
+  }
+
+  private allowedDirectory(path: string, info: Stats, uid: number): boolean {
+    if (!info.isDirectory() || info.isSymbolicLink()) return false
+    const trusted = this.trustedStateRoot
+    // /var/lib/xpanel is deliberately setgid for its existing API/Agent service group. Only
+    // that startup-pinned root may have 02770; its private child and every other ancestor stay strict.
+    if (trusted && path === trusted.directory && trusted.uid === uid && info.uid === trusted.uid
+      && info.gid === trusted.gid && (info.mode & 0o7777) === 0o2770) return true
+    return (info.uid === uid || info.uid === 0) && (info.mode & 0o022) === 0
   }
 
   private async initialize(): Promise<void> {
     const uid = this.requirePosix()
+    if (this.directoryIdentities) await this.protectedAncestors()
+    const before = new Map<string, { dev: number; ino: number }>()
     const create = async (path: string): Promise<void> => {
       let info
       try { info = await lstat(path) } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
         await create(dirname(path))
         await mkdir(path, { mode: 0o700 })
+        // A new child inherits SGID from the supported state root. Strip it only on this
+        // just-created, service-owned inode; never chmod an existing state/private path.
+        const created = await lstat(path)
+        const handle = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+        try {
+          const opened = await handle.stat()
+          if (!created.isDirectory() || created.isSymbolicLink() || created.uid !== uid
+            || opened.dev !== created.dev || opened.ino !== created.ino || opened.uid !== uid) return refused('private_directory_changed')
+          await handle.chmod(0o700)
+          await handle.sync()
+          const after = await lstat(path)
+          if (after.dev !== opened.dev || after.ino !== opened.ino || after.uid !== uid || (after.mode & 0o7777) !== 0o700) return refused('private_directory_changed')
+        } finally { await handle.close() }
         await this.syncDirectory(dirname(path))
         await this.syncDirectory(path)
         info = await lstat(path)
       }
-      if (!info.isDirectory() || info.isSymbolicLink() || (info.uid !== uid && info.uid !== 0) || (info.mode & 0o022)) {
+      if (!this.allowedDirectory(path, info, uid)) {
         return refused('private_directory_untrusted')
       }
+      before.set(path, { dev: info.dev, ino: info.ino })
     }
     await create(this.directory)
     await this.protectedAncestors()
+    for (const [path, original] of before) {
+      const after = await lstat(path)
+      if (after.dev !== original.dev || after.ino !== original.ino) return refused('private_directory_changed')
+    }
     // Re-acknowledge existing links as well: a previous mkdir may have lost its fsync acknowledgment.
     let path = this.directory
     while (path !== parse(path).root) { await this.syncDirectory(dirname(path)); path = dirname(path) }
@@ -139,17 +189,24 @@ export class FileProvisioningPreparationStore implements ProvisioningPreparation
 
   private async readPrivate(path: string): Promise<Buffer> {
     const uid = this.requirePosix()
+    await this.protectedAncestors()
     const before = await lstat(path)
     if (!before.isFile() || before.isSymbolicLink() || before.uid !== uid || (before.mode & 0o777) !== 0o600
       || before.nlink !== 1 || before.size > MAX_BYTES) return refused('private_record_untrusted')
     const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
     try {
       const admitted = await handle.stat()
-      if (admitted.dev !== before.dev || admitted.ino !== before.ino || admitted.size !== before.size) return refused('private_record_changed')
+      if (admitted.dev !== before.dev || admitted.ino !== before.ino || admitted.size !== before.size
+        || admitted.uid !== before.uid || admitted.gid !== before.gid || admitted.mode !== before.mode || admitted.nlink !== before.nlink
+        || admitted.mtimeMs !== before.mtimeMs || admitted.ctimeMs !== before.ctimeMs) return refused('private_record_changed')
       const bytes = await handle.readFile()
       const after = await handle.stat(), pathAfter = await lstat(path)
       if (after.dev !== admitted.dev || after.ino !== admitted.ino || after.size !== admitted.size || after.mtimeMs !== admitted.mtimeMs
-        || after.ctimeMs !== admitted.ctimeMs || pathAfter.dev !== after.dev || pathAfter.ino !== after.ino) return refused('private_record_changed')
+        || after.ctimeMs !== admitted.ctimeMs || after.uid !== admitted.uid || after.gid !== admitted.gid || after.mode !== admitted.mode || after.nlink !== admitted.nlink
+        || pathAfter.dev !== after.dev || pathAfter.ino !== after.ino || pathAfter.size !== after.size
+        || pathAfter.uid !== after.uid || pathAfter.gid !== after.gid || pathAfter.mode !== after.mode || pathAfter.nlink !== after.nlink
+        || pathAfter.mtimeMs !== after.mtimeMs || pathAfter.ctimeMs !== after.ctimeMs) return refused('private_record_changed')
+      await this.protectedAncestors()
       return bytes
     } finally { await handle.close() }
   }
@@ -167,9 +224,11 @@ export class FileProvisioningPreparationStore implements ProvisioningPreparation
   }
 
   private async writeExclusive(path: string, bytes: Uint8Array | string): Promise<void> {
+    await this.protectedAncestors()
     const handle = await open(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
     try { await handle.writeFile(bytes); await handle.sync() } finally { await handle.close() }
     await this.syncDirectory(dirname(path))
+    await this.protectedAncestors()
   }
 
   private async key(create: boolean): Promise<Buffer> {

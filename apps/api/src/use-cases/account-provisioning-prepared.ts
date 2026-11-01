@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto'
-import { fail, type Account, type DnsRecord, type Plan, type Principal } from '@xpanel/core'
+import { fail, type Account, type DnsRecord, type Plan, type Principal, type ProvisioningAuthorizationReference } from '@xpanel/core'
 import { validateDnsZoneFile, type DnsZoneState, type NewAccount, type StateStore } from '@xpanel/state'
 import { services } from '@xpanel/render'
 import { accountTemplateZoneRecords, templateForNewAccount, type AccountTemplate } from '../acct-templates-workspace.ts'
 import { canonicalProvisioningIdentity, type AuthorizeProvisioning } from './account-provisioning-port.ts'
 import { FileProvisioningPreparationStore, type ProvisioningPreparationStore } from './provisioning-preparation.ts'
+
+export type { ProvisioningAuthorizationReference } from '@xpanel/core'
 
 export interface PreparedAccountState {
   readonly account: Omit<NewAccount, 'passwordHash' | 'expectedRevision' | 'fencingToken'>
@@ -14,6 +16,8 @@ export interface PreparedAccountState {
   readonly template: AccountTemplate | null
   readonly nameservers: readonly string[]
   readonly serial: number
+  /** Legacy portable preparations omit this; the production Agent requires it before any effect. */
+  readonly authorizationRef?: ProvisioningAuthorizationReference
 }
 export interface PreparedAccountRecord {
   readonly reference: string
@@ -33,6 +37,7 @@ export async function prepareAccountProvisioning(deps: {
   preparations: ProvisioningPreparationStore
   authorizeFresh: AuthorizeProvisioning
   readTemplates: () => Promise<unknown>
+  assertIdentityAvailable?: (account: PreparedAccountState['account']) => Promise<void>
 }, input: {
   actor: Principal
   idempotencyKey: string
@@ -41,6 +46,7 @@ export async function prepareAccountProvisioning(deps: {
   credentialIntent: string
   preparePasswordHash: () => Promise<string>
   verifyCredentialIntent: (intent: string, passwordHash: string) => Promise<boolean>
+  authorizationRef?: ProvisioningAuthorizationReference
 }): Promise<{ preparationReference: string; requestIdentity: string }> {
   const operationKey = provisioningRequestKey(input.actor, input.idempotencyKey)
   const allowed = new Set(['username', 'primaryDomain', 'planId', 'ownerId', 'contactEmail', 'ipv4', 'ipAssignment', 'ipv6', 'extraIps', 'shell', 'homeBase', 'php', 'forcePasswordChange'])
@@ -52,6 +58,7 @@ export async function prepareAccountProvisioning(deps: {
     verifyCredentialIntent: input.verifyCredentialIntent,
     prepareDesiredState: async () => {
       await deps.authorizeFresh({ actor: input.actor, accountId: null, ownerId: input.account.ownerId })
+      await deps.assertIdentityAvailable?.(input.account)
       const plan = await deps.store.getPlan(input.account.planId) ?? fail('NOT_FOUND', 'account plan is unavailable')
       if (plan.ownerId !== null && plan.ownerId !== input.account.ownerId) fail('FORBIDDEN', 'account plan belongs to another owner')
       const nameservers = (await deps.store.getServerSettings())?.nameservers ?? []
@@ -61,7 +68,8 @@ export async function prepareAccountProvisioning(deps: {
         fail('CONFLICT', 'account identity or DNS zone already exists before provisioning preparation', { stateChanged: false })
       }
       const now = new Date(), serial = Number(now.toISOString().slice(0, 10).replaceAll('-', '') + '01')
-      return { account: input.account, sourceRevision: await deps.store.getRevision(), operationKey: provisioningRequestKey(input.actor, input.idempotencyKey), planIdentity: canonicalProvisioningIdentity(plan), template, nameservers, serial }
+      return { account: input.account, sourceRevision: await deps.store.getRevision(), operationKey: provisioningRequestKey(input.actor, input.idempotencyKey), planIdentity: canonicalProvisioningIdentity(plan), template, nameservers, serial,
+        ...(input.authorizationRef && { authorizationRef: input.authorizationRef }) }
     },
   })
   await deps.authorizeFresh({ actor: input.actor, accountId: null, ownerId: input.account.ownerId })
@@ -70,7 +78,10 @@ export async function prepareAccountProvisioning(deps: {
 
 /** The credential directory is operator-configured and service-private, never a request field. */
 export function createProvisioningPreparationAuthority(input: { store: StateStore; directory: string }): ProvisioningPreparationStore {
-  return new FileProvisioningPreparationStore({ directory: input.directory, withLock: async work => {
+  return new FileProvisioningPreparationStore({ directory: input.directory,
+    ...(process.platform === 'linux' && process.getuid && process.getgid ? { trustedStateRoot: {
+      directory: input.store.rootDir, uid: process.getuid(), gid: process.getgid(),
+    } } : {}), withLock: async work => {
     const lease = await input.store.getWriterLock().acquire()
     try {
       await lease.assertFencingToken()

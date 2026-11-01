@@ -74,7 +74,11 @@ describe('styled status pages', () => {
       }
       return false
     }
-    const forms = nodes.flatMap((node, index) => node.tag === 'form' ? [{ node, index }] : [])
+    const prototypes = nodes.filter(node => node.tag === 'form' && node.template >= 0)
+    expect(prototypes.map(node => nodes[node.template]!.attrs.get('data-xp-template'))).toEqual(['prompt-dialog'])
+    expect(prototypes[0]!.attrs.get('method')).toBe('dialog')
+    expect(prototypes[0]!.attrs.has('action')).toBe(false)
+    const forms = nodes.flatMap((node, index) => node.tag === 'form' && node.template < 0 ? [{ node, index }] : [])
     expect(forms).toHaveLength(1)
     for (const { node, index } of forms) {
       expect(hasAncestor(index, 'data-status-page')).toBe(false)

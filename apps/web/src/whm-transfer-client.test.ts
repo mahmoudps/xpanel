@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmTransferWorkspace } from './board-port/whm-transfer-workspace.ts'
 import { WHM_TRANSFER_CLIENT_BINDING } from './whm-transfer-client.ts'
+import { ASCII_BYTES_BINDING, formatAsciiBytes } from './display-format.ts'
 
 const id = (value: number) => 'aaaaaaaa-aaaa-4aaa-8aaa-' + String(value).padStart(12, '0')
 const entry = (state = 'created', inventory: unknown = null, review: { accounts: { source: string; target: string; plan: string; domains: string[]; mailboxes: number }[] } | null = null, digest: string | null = null) => ({ session: { id: id(1), actor: 'synthetic-root', createdAt: '2026-10-26T12:00:00.000Z', updatedAt: '2026-10-26T12:00:00.000Z', state,
@@ -50,6 +51,20 @@ const model = (initial = entry(), execute = false) => {
 }
 
 describe('persisted transfer review browser contract', () => {
+  it.each([[0, '0 B'], [64, '64 B'], [1500, '1.50 KB'], [2_100_000_000, '2.10 GB']] as const)('ships the canonical standalone byte formatter for observed %s bytes', (bytes, expected) => {
+    document.documentElement.lang = 'ar'
+    const standalone = new Function('return ' + ASCII_BYTES_BINDING)() as (bytes: number) => string
+    expect(standalone(bytes)).toBe(expected); expect(standalone(bytes)).toBe(formatAsciiBytes(bytes))
+    expect(standalone(bytes)).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+  })
+
+  it.each(['transfer-host', 'transfer-archive', 'transfer-cpanel-port'])('refuses a mistyped %s native input before reading saved sessions', async name => {
+    field(name).type = name === 'transfer-host' ? 'checkbox' : 'text'
+    const m = model(); m.boot(); await tick()
+    expect(m.send).not.toHaveBeenCalled(); expect(status().dataset.state).toBe('unavailable')
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')].every(control => control.disabled)).toBe(true)
+  })
+
   it('constructs a self-contained binding and exposes actual available actions', () => {
     expect(() => new Function('return ' + WHM_TRANSFER_CLIENT_BINDING)()).not.toThrow()
     expect(WHM_TRANSFER_CLIENT_BINDING).not.toContain('innerHTML')

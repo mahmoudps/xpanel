@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { assertProvisioningReply, canonicalProvisioningIdentity, parseProvisioningReconcileRequest, type ProvisioningReconcileRequest, type ProvisioningReconcileReply } from './account-provisioning-contract.ts'
+import { assertProvisioningReply, canonicalProvisioningIdentity, createProvisioningCheckpointObservation, parseProvisioningCheckpointObservation, parseProvisioningReconcileRequest, type ProvisioningCheckpointObservation, type ProvisioningReconcileRequest, type ProvisioningReconcileReply } from './account-provisioning-contract.ts'
+import { redactSecrets } from './rules/audit.ts'
 
 const request = (): ProvisioningReconcileRequest => {
   const authority = {
@@ -16,6 +17,45 @@ const reply = (r: ProvisioningReconcileRequest) => ({
   execution: { accountId: r.authority.account.id, uid: 2001, gid: 2001, home: '/home/alice', revision: 4, generationId: 7, generationChecksum: 'd'.repeat(64), sourceChecksum: 'b'.repeat(64), cgroup: '/xpanel-2001.slice', services: ['nginx.service', 'php-fpm.service'], quota: { enforced: true, filesystem: 'ext4' }, dns: { zone: 'alice.example', serial: 2026103001, authoritative: true }, php: { status: 200, uid: 2001, cgroup: '/xpanel-2001.slice' } },
 })
 const assert = (r: ProvisioningReconcileRequest, value: unknown) => assertProvisioningReply(r, value as ProvisioningReconcileReply)
+
+describe('nonsecret durable provisioning receipt codec', { tags: ['unit'] }, () => {
+  it('round-trips the full receipt through repeated journal redaction without credentials or missing DNS/PHP/quota facts', () => {
+    const r = request(), execution = assert(r, reply(r))!
+    const observedContext = createProvisioningCheckpointObservation(r, execution)
+    // The previous field name caused real saveJobCheckpoint writes to discard the entire authority.
+    expect(redactSecrets({ observedAuthority: r.authority }).observedAuthority).toBe('[REDACTED]')
+    const persisted = redactSecrets(redactSecrets({ observedContext }))
+    expect(persisted.observedContext).toEqual(observedContext)
+    expect(parseProvisioningCheckpointObservation(persisted.observedContext)).toEqual({ request: r, execution })
+    expect(JSON.stringify(persisted)).not.toContain('[REDACTED]')
+    expect(observedContext.context.operation).not.toHaveProperty('fencingToken')
+    expect(observedContext.execution.dns.authoritative).toBe(true)
+    expect(observedContext.execution.php).toEqual(execution.php)
+    expect(observedContext.execution.quota).toEqual(execution.quota)
+  })
+
+  it.each([
+    ['missing context', () => undefined],
+    ['redacted legacy context', () => '[REDACTED]'],
+    ['raw legacy authority', () => request().authority],
+    ['unsupported version', (v: ProvisioningCheckpointObservation) => ({ ...v, version: 2 })],
+    ['unknown credential field', (v: ProvisioningCheckpointObservation) => ({ ...v, authorizationRef: { tokenHash: 'fixture-only' } })],
+    ['changed receipt digest', (v: ProvisioningCheckpointObservation) => ({ ...v, identity: '0'.repeat(64) })],
+    ['changed original request binding', (v: ProvisioningCheckpointObservation) => ({ ...v, binding: '0'.repeat(64) })],
+    ['changed original fence', (v: ProvisioningCheckpointObservation) => ({ ...v, context: { ...v.context, operation: { ...v.context.operation, fence: 2 } } })],
+    ['changed account observation', (v: ProvisioningCheckpointObservation) => ({ ...v, execution: { ...v.execution, uid: v.execution.uid + 1 } })],
+  ] as const)('rejects %s without reconstructing missing authority', (_label, mutate) => {
+    const r = request(), v = createProvisioningCheckpointObservation(r, assert(r, reply(r))!)
+    expect(() => parseProvisioningCheckpointObservation(mutate(v))).toThrow()
+  })
+
+  it('rejects invalid observation facts even when a new envelope digest matches those altered facts', () => {
+    const r = request(), v = createProvisioningCheckpointObservation(r, assert(r, reply(r))!)
+    const { identity: _identity, ...data } = { ...v, execution: { ...v.execution, dns: { ...v.execution.dns, authoritative: false } } }
+    expect(() => parseProvisioningCheckpointObservation({ ...data, identity: canonicalProvisioningIdentity(data) }))
+      .toThrow(expect.objectContaining({ code: 'PRECONDITION_FAILED' }))
+  })
+})
 
 describe('authenticated provisioning reply runtime schema', { tags: ['unit'] }, () => {
   it.each([

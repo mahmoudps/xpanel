@@ -192,7 +192,8 @@ async function verifySourceInventory(root, report) {
   return paths
 }
 
-const ABI_PROBE = `import {argon2} from 'node:crypto';import {promisify} from 'node:util';import {DatabaseSync} from 'node:sqlite';import {createRequire} from 'node:module';import {readFileSync} from 'node:fs';
+// @xterm/addon-fit reads the browser global while the module is evaluated.
+const ABI_PROBE = `globalThis.self=globalThis;import {argon2} from 'node:crypto';import {promisify} from 'node:util';import {DatabaseSync} from 'node:sqlite';import {createRequire} from 'node:module';import {readFileSync} from 'node:fs';
 const a=await promisify(argon2)('argon2id',{message:Buffer.from('install-abi-probe'),nonce:Buffer.alloc(16,7),parallelism:1,tagLength:32,memory:65536,passes:1});if(a.length!==32)process.exit(1);
 const d=new DatabaseSync(':memory:');if(d.prepare('SELECT 1 AS value').get().value!==1)process.exit(1);d.close();
 const sbom=JSON.parse(readFileSync('sbom-provenance.json','utf8'));const workspace=new Set(sbom.workspacePackages.map(x=>x.name));for(const p of sbom.workspacePackages){const require=createRequire(process.cwd()+'/'+p.path+'/package.json');for(const dep of p.dependencies)if(!workspace.has(dep.name))require(dep.name);}process.stdout.write('INSTALL_ABI_OK\\n');`
@@ -291,9 +292,8 @@ async function replaceBootstrap(value) {
     await rename(temporary, BOOTSTRAP_PATH); await syncDirectory(LIFECYCLE); await parent.verify()
   })
 }
-async function preparedBootstrap(runtime) {
-  const actual = await readTrustedFile(BOOTSTRAP_PATH, { exactMode: 0o600, maxBytes: 16 * 1024 }), value = parseJson(actual.bytes)
-  check(value?.schemaVersion === 1 && ['prepared', 'admission_ready', 'bootstrap_pending'].includes(value.status) && VERSION.test(value.version)
+async function verifyPreparedBootstrapSource(runtime, value) {
+  check(value?.schemaVersion === 1 && VERSION.test(value.version)
     && value.releaseRoot === INSTALL_ROOT + '/releases/' + value.version && [value.archiveSha256, value.manifestSha256, value.dependencyReceiptSha256].every(item => typeof item === 'string' && SHA.test(item)), 'INSTALL_BOOTSTRAP_INVALID')
   check(await readlink(CURRENT) === value.releaseRoot && await realpath(CURRENT) === value.releaseRoot, 'INSTALL_CURRENT_CHANGED')
   check(await realpath(fileURLToPath(import.meta.url)) === join(value.releaseRoot, 'scripts/install-bootstrap.mjs'), 'INSTALL_HELPER_SOURCE_MISMATCH')
@@ -315,6 +315,38 @@ async function preparedBootstrap(runtime) {
   const tree = await observeSecureTree(value.releaseRoot)
   check(tree.treeSha256 === recorded.tree?.treeSha256, 'INSTALL_RELEASE_TREE_CHANGED')
   return value
+}
+
+async function preparedBootstrap(runtime) {
+  const actual = await readTrustedFile(BOOTSTRAP_PATH, { exactMode: 0o600, maxBytes: 16 * 1024 }), value = parseJson(actual.bytes)
+  check(['prepared', 'admission_ready', 'bootstrap_pending'].includes(value?.status), 'INSTALL_BOOTSTRAP_INVALID')
+  return verifyPreparedBootstrapSource(runtime, value)
+}
+
+/** Observe one exact prepared installation; this does not acquire native mutation authority. */
+export async function observePreparedInstallFinalization() {
+  const runtime = await nativeContext()
+  const actual = await readTrustedFile(BOOTSTRAP_PATH, { exactMode: 0o600, maxBytes: 16 * 1024 })
+  let bootstrap = parseJson(actual.bytes)
+  check(bootstrap?.status === 'bootstrap_pending' || bootstrap?.status === 'active', 'INSTALL_FINALIZATION_PREPARATION_REQUIRED')
+  const recoveryPins = []
+  if (bootstrap.status === 'active' || Object.hasOwn(bootstrap, 'finalization')) {
+    const receipt = await readTrustedFile(LIFECYCLE + '/installation.json', { exactMode: 0o600, maxBytes: 64 * 1024 })
+    const head = await readTrustedFile(LIFECYCLE + '/HEAD', { exactMode: 0o600, maxBytes: 16 * 1024 })
+    const { inspectInstallFinalizationRecovery } = await import('./install-finalization.mjs')
+    bootstrap = inspectInstallFinalizationRecovery({ bootstrapBytes: actual.bytes.toString('utf8'), receiptBytes: receipt.bytes.toString('utf8'), headBytes: head.bytes.toString('utf8') }).bootstrap
+    recoveryPins.push([LIFECYCLE + '/installation.json', receipt.sha256, 64 * 1024], [LIFECYCLE + '/HEAD', head.sha256, 16 * 1024])
+  }
+  await verifyPreparedBootstrapSource(runtime, bootstrap)
+  for (const [path, sha256, maxBytes] of recoveryPins) await readTrustedFile(path, { exactMode: 0o600, maxBytes, sha256 })
+  await readTrustedFile(BOOTSTRAP_PATH, { exactMode: 0o600, maxBytes: 16 * 1024, sha256: actual.sha256 })
+  return freeze({ bootstrap, runtime })
+}
+
+/** One fixed native entry; request data never chooses a module, path, provider or authority. */
+export async function finalizePreparedInstallation(request) {
+  const { runNativeInstallFinalization } = await import('./install-finalization-native.mjs')
+  return runNativeInstallFinalization(request)
 }
 
 /** Publish managed-writer admission only from the actual initialized strict database origin. */

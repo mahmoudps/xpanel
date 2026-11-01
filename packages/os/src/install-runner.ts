@@ -344,7 +344,7 @@ export const verifyInstallPreflight = (
     if (st.isSymbolicLink || !st.isDirectory) {
       fail('PRECONDITION_FAILED', `Protected path must be a non-symlink directory: ${parentPath}`, { path: parentPath })
     }
-    const isVarLibDataDir = parentPath === '/var/lib/xpanel' && st.owner === 'xpanel' && st.group === 'xpanel' && (st.mode & 0o7777) === 0o2770
+    const isVarLibDataDir = parentPath === '/var/lib/xpanel' && st.owner === 'xpanel' && st.group === 'xpanel' && [0o2750, 0o2770].includes(st.mode & 0o7777)
     if (!isVarLibDataDir) {
       if (st.uid !== 0) {
         fail('PRECONDITION_FAILED', `Protected parent directory is not root-owned: ${parentPath}`, {
@@ -818,7 +818,8 @@ export const runUnifiedInstaller = (
       shell: '/usr/sbin/nologin',
     })
     host.ensureDir('/home', { mode: 0o711, owner: 'root', group: 'root' })
-    host.ensureDir('/var/lib/xpanel', { mode: 0o2770, owner: 'xpanel', group: 'xpanel' })
+    // Pinned preparation and authorization readers require a non-group-writable ancestor.
+    host.ensureDir('/var/lib/xpanel', { mode: 0o2750, owner: 'xpanel', group: 'xpanel' })
     host.ensureDir('/var/lib/xpanel/state', { mode: 0o2750, owner: 'xpanel', group: 'xpanel' })
     host.ensureDir('/var/lib/xpanel/generations', { mode: 0o2750, owner: 'xpanel', group: 'xpanel' })
     host.ensureDir('/var/log/xpanel', { mode: 0o2750, owner: 'xpanel', group: 'xpanel' })

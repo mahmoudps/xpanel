@@ -1,4 +1,5 @@
-import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates
 const whmClientNode = canonicalWhmClientNode
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
@@ -87,7 +88,27 @@ function bindWhmSupport(): void {
     const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     if (!status || !bundleStatus || !refresh || !confirm || !download || !contactBox) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.supportCanRead === 'true' && !root.closest(denied) && typeof request === 'function'
+    let templateContractIntact = true
+    const templateContracts = [
+      ['whm-support-note', 'p', { 'content': 'p' }],
+    ] as const
+    const verifyWhmTemplates = (): void => {
+      if (!templateContractIntact) throw new Error('client_template_contract_unavailable')
+      try { assertWhmClientTemplates(root, templateContracts) } catch (error) {
+        templateContractIntact = false
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+        status.dataset.state = 'unavailable'; status.textContent = t('Unavailable')
+        throw error
+      }
+    }
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.supportCanRead === 'true' && !root.closest(denied) && typeof request === 'function')
+    if (admitted()) { try { verifyWhmTemplates() } catch { return } }
+    const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
+      verifyWhmTemplates()
+      const reply = await request!(...args)
+      verifyWhmTemplates()
+      return reply
+    }
     let view: SupportView | null = null, busy = false
     const notRead = t('Not read')
     const note = (target: HTMLElement, state: string, message: string): void => { target.dataset.state = state; target.textContent = message; target.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
@@ -161,7 +182,7 @@ function bindWhmSupport(): void {
       busy = true; confirm.checked = false; lock()
       note(status, 'reading', t('Reading the support summary…'))
       try {
-        view = readSupportView(await request('GET', '/api/server/support'))
+        view = readSupportView(await checkedRequest('GET', '/api/server/support'))
         paintSummary(view.summary); paintManifest(view.manifest); paintContact(view.contact)
         note(status, view.summary ? 'read' : 'unavailable', !view.summary ? t('The host agent is not connected. Host facts and the bundle are unavailable; the manifest and contact are shown.')
           : view.summary.host === 'read' ? t('Support summary read from this server.') : t('The agent has no native host access; host facts are not verified.'))
@@ -186,7 +207,7 @@ function bindWhmSupport(): void {
       busy = true; lock()
       note(bundleStatus, 'reading', t('Generating the support bundle…'))
       try {
-        const bundle = await request('GET', '/api/server/support/bundle?manifest=' + id) as Record<string, unknown> | null
+        const bundle = await checkedRequest('GET', '/api/server/support/bundle?manifest=' + id) as Record<string, unknown> | null
         const manifest = bundle && typeof bundle === 'object' && !Array.isArray(bundle) ? bundle.manifest as Record<string, unknown> | null : null
         if (!manifest || manifest.id !== id || typeof bundle!.generatedAt !== 'string') throw new Error('invalid_bundle')
         const stamp = (bundle!.generatedAt as string).replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')

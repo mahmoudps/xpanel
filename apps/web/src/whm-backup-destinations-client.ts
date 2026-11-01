@@ -7,6 +7,35 @@ const viewAction = canonicalViewAction
 const DESTINATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const DESTINATION_HEX = /^[0-9a-f]{64}$/
 const DESTINATION_FIELDS = ['name', 'kind', 'endpoint', 'bucket', 'region', 'pathPrefix', 'username', 'retentionDays', 'credentialRef'] as const
+/** Editable address components project the one saved endpoint; credentials and remote prefix stay separate. */
+export function readBackupSftpAddress(endpoint: string): { host: string; port: string } {
+  const url = new URL(endpoint)
+  if (url.protocol !== 'sftp:' || !url.hostname || url.username || url.password || url.search || url.hash) throw new Error('invalid_sftp_host')
+  const port = url.port || '22'
+  if (!Number.isSafeInteger(Number(port)) || Number(port) < 1 || Number(port) > 65535) throw new Error('invalid_sftp_port')
+  return { host: url.hostname, port }
+}
+export function writeBackupSftpAddress(host: string, port: string, previousEndpoint: string): string {
+  const rawPort = port.trim(), number = Number(rawPort)
+  if (!/^[0-9]+$/.test(rawPort) || !Number.isSafeInteger(number) || number < 1 || number > 65535) throw new Error('invalid_sftp_port')
+  const value = host.trim()
+  if (!value || /\s/.test(value)) throw new Error('invalid_sftp_host')
+  const authority = value.includes(':') && !value.startsWith('[') ? '[' + value + ']' : value
+  let address: URL
+  try { address = new URL('sftp://' + authority) } catch { throw new Error('invalid_sftp_host') }
+  if (!address.hostname || address.port || address.username || address.password || address.pathname || address.search || address.hash) throw new Error('invalid_sftp_host')
+  let result = address
+  try {
+    const previous = readBackupSftpAddress(previousEndpoint)
+    if (previous.host === address.hostname && Number(previous.port) === number) return previousEndpoint
+    result = new URL(previousEndpoint)
+  } catch { /* A newly selected SFTP kind starts with an address, without an unrelated protocol's path. */ }
+  result.hostname = address.hostname
+  result.port = String(number)
+  const endpoint = result.toString()
+  if (endpoint.length > 1024) throw new Error('invalid_sftp_host')
+  return endpoint
+}
 export interface BackupDestinationsClientView {
   revision: string
   destinations: { id: string; name: string; kind: string; endpoint: string; bucket: string | null; region: string | null; pathPrefix: string; username: string | null; retentionDays: number; enabled: boolean; credentialRef: string | null; state: 'unavailable' | 'unverified' | 'verified' | 'active'; effectiveActive: boolean; verification: Record<string, string> | null }[]
@@ -40,6 +69,20 @@ export function bindWhmBackupDestinations(ask: ((options: Record<string,unknown>
   const send = (window as Window & { xpanelSessionRequest?: (method:string,path:string,body?:unknown)=>Promise<unknown> }).xpanelSessionRequest
   document.querySelectorAll<HTMLElement>('[data-whm-backup-destinations]').forEach(root => {
     if (root.dataset.bound === 'true') return; root.dataset.bound = 'true'
+    const inlineOwner = root.closest<HTMLElement>('[data-approved-whm-backups]')
+    const inline = root.hasAttribute('data-backup-inline-manager') || inlineOwner?.dataset.backupDestinationEditor === 'manager'
+    const inlineAdmitted = (): boolean => {
+      if (!inline) return !root.hasAttribute('data-backup-inline-manager') && !root.closest('[data-approved-whm-backups][data-backup-destination-editor="manager"]')
+      const managers = inlineOwner?.querySelectorAll<HTMLElement>('[data-whm-backup-destinations][data-backup-inline-manager]')
+      const admitted = !!inlineOwner && inlineOwner.isConnected && root.isConnected && root.closest('[data-approved-whm-backups]') === inlineOwner &&
+        inlineOwner.dataset.backupDestinationEditor === 'manager' && inlineOwner.dataset.backupManage === 'true' &&
+        root.hasAttribute('data-backup-inline-manager') && managers?.length === 1 && managers[0] === root
+      if (!admitted && inlineOwner) {
+        inlineOwner.dataset.backupManage = 'false'
+        inlineOwner.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      }
+      return admitted
+    }
     const readNode=root.querySelector<HTMLButtonElement>('[data-destination-read]'),newNode=root.querySelector<HTMLButtonElement>('[data-destination-new]'),saveNode=root.querySelector<HTMLButtonElement>('[data-destination-save]'),statusNode=root.querySelector<HTMLElement>('[data-destination-status]'),rowsNode=root.querySelector<HTMLElement>('[data-destination-rows]'),formNode=root.querySelector<HTMLFormElement>('[data-destination-form]')
     if(!readNode||!newNode||!saveNode||!statusNode||!rowsNode||!formNode)return
     const read=readNode,newButton=newNode,save=saveNode,status=statusNode,rows=rowsNode,form=formNode
@@ -47,23 +90,78 @@ export function bindWhmBackupDestinations(ask: ((options: Record<string,unknown>
     if([...controls.values()].some(node=>!node))return
     const field=(name:typeof DESTINATION_FIELDS[number]):HTMLInputElement|HTMLSelectElement=>controls.get(name)!
     const t=(message: string, values?: MessageValues) => xpT(message, values)
+    const addressGroups = root.querySelectorAll<HTMLElement>('[data-destination-sftp-address]')
+    const addressHosts = root.querySelectorAll('[data-destination-sftp-host]'), addressPorts = root.querySelectorAll('[data-destination-sftp-port]')
+    const addressGroup = addressGroups[0], addressHost = addressHosts[0], addressPort = addressPorts[0]
+    const hasAddress = root.hasAttribute('data-destination-sftp-projection') || addressGroups.length + addressHosts.length + addressPorts.length > 0
+    let addressDenied = false
+    const addressAdmitted = (): boolean => {
+      if (addressDenied) return false
+      const groups = root.querySelectorAll('[data-destination-sftp-address]'), hosts = root.querySelectorAll('[data-destination-sftp-host]'), ports = root.querySelectorAll('[data-destination-sftp-port]')
+      const valid = !hasAddress
+        ? !root.hasAttribute('data-destination-sftp-projection') && groups.length + hosts.length + ports.length === 0
+        : root.hasAttribute('data-destination-sftp-projection') && root.isConnected && !!addressGroup &&
+          groups.length === 1 && groups[0] === addressGroup && hosts.length === 1 && hosts[0] === addressHost && ports.length === 1 && ports[0] === addressPort &&
+          addressHost instanceof HTMLInputElement && addressHost.type === 'text' && addressPort instanceof HTMLInputElement && addressPort.type === 'number' &&
+          addressGroup.isConnected && addressHost.isConnected && addressPort.isConnected && root.contains(addressGroup) && addressGroup.contains(addressHost) && addressGroup.contains(addressPort) &&
+          addressGroup.closest('[data-whm-backup-destinations]') === root && addressHost.closest('[data-whm-backup-destinations]') === root && addressPort.closest('[data-whm-backup-destinations]') === root &&
+          addressHost.closest('[data-destination-sftp-address]') === addressGroup && addressPort.closest('[data-destination-sftp-address]') === addressGroup
+      if (!valid) {
+        addressDenied = true
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      }
+      return valid
+    }
+    if (!addressAdmitted()) return
+    let addressEndpoint = field('endpoint').value
+    const addressMode = (): boolean => {
+      if (!addressGroup || !(addressHost instanceof HTMLInputElement) || !(addressPort instanceof HTMLInputElement)) return false
+      const active = field('kind').value === 'sftp'
+      addressGroup.hidden = !active
+      return active
+    }
+    const fillAddress = (endpoint = field('endpoint').value): void => {
+      if (!addressGroup || !(addressHost instanceof HTMLInputElement) || !(addressPort instanceof HTMLInputElement)) return
+      let host = '', port = '22'
+      try { ({ host, port } = readBackupSftpAddress(endpoint)) } catch { /* The original endpoint stays visible until the address is corrected. */ }
+      field('endpoint').value = endpoint; addressEndpoint = endpoint
+      addressHost.value = host; addressPort.value = port
+      for (const input of [addressHost, addressPort]) { input.setCustomValidity(''); input.removeAttribute('aria-invalid') }
+      addressGroup.dataset.state = host ? 'ready' : 'draft'; addressMode()
+    }
+    const syncAddress = (): boolean => {
+      if (!addressGroup || !addressMode() || !(addressHost instanceof HTMLInputElement) || !(addressPort instanceof HTMLInputElement)) return true
+      if (field('endpoint').value !== addressEndpoint) fillAddress()
+      for (const input of [addressHost, addressPort]) { input.setCustomValidity(''); input.removeAttribute('aria-invalid') }
+      try { field('endpoint').value = writeBackupSftpAddress(addressHost.value, addressPort.value, field('endpoint').value.trim()); addressEndpoint = field('endpoint').value; addressGroup.dataset.state = 'draft'; return true }
+      catch (error) {
+        const portError = error instanceof Error && error.message === 'invalid_sftp_port', input = portError ? addressPort : addressHost
+        input.setCustomValidity(portError ? t('Enter a port from 1 to 65535.') : t('Enter a valid SFTP host.')); input.setAttribute('aria-invalid', 'true')
+        addressGroup.dataset.state = 'invalid'; return false
+      }
+    }
     let view:BackupDestinationsClientView|null=null,selectedId:string|null=null,draftRevision='',busy=false,review=false
-    const eligible=()=>root.isConnected&&root.dataset.canManage==='true'&&!root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
+    const eligible=()=>inlineAdmitted()&&addressAdmitted()&&root.isConnected&&root.dataset.canManage==='true'&&!root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
     const note=(state:string,message:string)=>{status.dataset.state=state;status.textContent=message;status.setAttribute('role',['failed','review'].includes(state)?'alert':'status')}
-    const lock=()=>{const enabled=eligible()&&!!send&&!busy&&!review&&!!view;for(const node of controls.values())if(node)node.disabled=!enabled;newButton.disabled=!enabled;root.querySelectorAll<HTMLButtonElement>('[data-destination-create-key]').forEach(button=>{button.disabled=!enabled});save.disabled=!enabled;read.disabled=!eligible()||!send||busy;root.querySelectorAll<HTMLButtonElement>('[data-destination-action]').forEach(button=>{button.disabled=!enabled||button.dataset.allowed!=='true'});root.setAttribute('aria-busy',String(busy))}
-    const fill=(row:BackupDestinationsClientView['destinations'][number]|null)=>{selectedId=row?.id??null;draftRevision=view?.revision??'';for(const name of DESTINATION_FIELDS)field(name).value=String(row?.[name]??(name==='kind'?'sftp':name==='retentionDays'?30:''))}
+    const lock=()=>{const enabled=eligible()&&!!send&&!busy&&!review&&!!view;for(const node of controls.values())if(node)node.disabled=!enabled;const addressActive=addressMode();for(const node of [addressHost,addressPort])if(node instanceof HTMLInputElement)node.disabled=!enabled||!addressActive;newButton.disabled=!enabled;root.querySelectorAll<HTMLButtonElement>('[data-destination-create-key]').forEach(button=>{button.disabled=!enabled});save.disabled=!enabled;read.disabled=!eligible()||!send||busy;root.querySelectorAll<HTMLButtonElement>('[data-destination-action]').forEach(button=>{button.disabled=!enabled||button.dataset.allowed!=='true'});root.setAttribute('aria-busy',String(busy))}
+    const fill=(row:BackupDestinationsClientView['destinations'][number]|null)=>{selectedId=row?.id??null;draftRevision=view?.revision??'';for(const name of DESTINATION_FIELDS)field(name).value=String(row?.[name]??(name==='kind'?'sftp':name==='retentionDays'?30:''));fillAddress()}
     const paint=(next:BackupDestinationsClientView)=>{view=next;rows.replaceChildren();const credential=field('credentialRef');if(!(credential instanceof HTMLSelectElement))throw new Error('missing_credential_select');const prior=credential.value;credential.replaceChildren();for(const profile of [{ref:'',label:t('No credential reference')},...next.capabilities.profiles]){const option=document.createElement('option');option.value=profile.ref;option.textContent=profile.label;credential.append(option)}if([...credential.options].some(option=>option.value===prior))credential.value=prior
       for(const destination of next.destinations){const row=cloneViewRecord(root,'backup-destination-row','tr',{name:destination.name,kind:destination.kind,endpoint:destination.endpoint,prefix:destination.pathPrefix,state:destination.state==='active'?t('Verified and enabled'):destination.state==='verified'?t('Verified, inactive'):destination.state==='unavailable'?t('Transport unavailable; configuration only'):t('Not verified; inactive'),'edit-label':t('Edit'),'test-label':t('Test connection'),'activate-label':t('Activate'),'revoke-label':t(msgctxt('whm-backup-destinations-client','Revoke')),'delete-label':t('Delete')});for(const action of ['edit','test','activate','revoke','delete']){const button=viewAction(row,action);button.dataset.destinationAction=action;button.dataset.destinationId=destination.id;button.dataset.allowed=String(action==='test'?next.capabilities.canTest&&next.capabilities.profiles.some(profile=>profile.ref===destination.credentialRef&&profile.kinds.includes(destination.kind)):action==='activate'?destination.state==='verified':true)}rows.append(row)}
       if(!next.destinations.length)rows.append(cloneViewRecord(root,'backup-destination-empty','tr',{message:t('No destinations are saved.')}));if(!draftRevision)fill(null);note('read',t('Saved destination state was read. Scheduled backup execution is not verified here.'));lock()}
     async function load():Promise<void>{if(!eligible()||!send||busy)return;busy=true;lock();try{const next=readBackupDestinationsView(await send('GET','/api/backups/workspace/destination-lifecycle'));if(!eligible())return;review=false;paint(next)}catch{view=null;rows.replaceChildren();note('failed',t('Destinations could not be read. No changes were made.'))}finally{busy=false;lock()}}
     const confirm=async(title:string,body:string,danger=false):Promise<boolean>=>!!ask&&await ask({title,body,danger,confirm:t('Confirm')})===true
     async function mutate(action:string,id?:string):Promise<void>{if(!eligible()||!send||!view||busy||review)return;const before=view,target=id?before.destinations.find(row=>row.id===id):null;if(id&&!target)return;if(action!=='save'&&!await confirm(t('Review destination action'),(target?.name??'')+': '+(action==='test'?t('Write, read and delete one small remote test object. The destination remains inactive.'):t('Apply the selected action to this saved destination.')),action==='delete'||action==='revoke'))return
+      if(!eligible()||!send||busy||review){lock();return}
+      if(action==='save'&&!syncAddress()){note('failed',t('Check the SFTP host and port. No changes were made.'));form.reportValidity();lock();return}
       busy=true;lock();let expectedFields:Record<string,unknown>|null=null
-      try{let path='/api/backups/workspace/destinations',method='POST',body:Record<string,unknown>={expectedRevision:before.revision};if(action==='save'){expectedFields=Object.fromEntries(DESTINATION_FIELDS.map(name=>[name,name==='retentionDays'?Number(field(name).value):['bucket','region','username','credentialRef'].includes(name)?field(name).value.trim()||null:field(name).value.trim()]));body={...expectedFields,enabled:false,expectedRevision:draftRevision};if(selectedId){method='PATCH';path+='/'+selectedId}}else{path+='/'+id;if(action==='delete')method='DELETE';else path+='/'+action}const ack=await send(method,path,body);if(!ack||typeof ack!=='object'||typeof(ack as {revision?:unknown}).revision!=='string'||!DESTINATION_HEX.test((ack as {revision:string}).revision))throw new Error('unverified_ack');const next=readBackupDestinationsView(await send('GET','/api/backups/workspace/destination-lifecycle'));if(!eligible())return;if(action==='save'){const saved=(ack as {destination?:{id?:string}}).destination;const row=next.destinations.find(row=>row.id===saved?.id);if(!row||row.enabled||!expectedFields||DESTINATION_FIELDS.some(name=>row[name]!==expectedFields![name]))throw new Error('unverified_readback');selectedId=row.id;draftRevision=next.revision}else if(action==='delete'?next.destinations.some(row=>row.id===id):action==='activate'?!next.destinations.find(row=>row.id===id)?.effectiveActive:action==='test'?next.destinations.find(row=>row.id===id)?.state!=='verified':!!next.destinations.find(row=>row.id===id)?.effectiveActive)throw new Error('unverified_readback');review=false;paint(next);note('saved',t('The selected action was read back from saved destination state.'));if(action==='test'&&id){try{const reply=await send('GET','/api/backups/workspace/destinations/'+id+'/space') as {space?:{freeBytes?:unknown}|null};const free=reply?.space?.freeBytes;if(typeof free==='number'&&Number.isSafeInteger(free)&&free>=0){const units=['B','KiB','MiB','GiB','TiB'];let value=free,unit=0;while(value>=1024&&unit<units.length-1){value/=1024;unit++}note('saved',t('Connected. {free} free on the remote path.',{free:(unit?value.toFixed(1):String(value))+' '+units[unit]}))}}catch{/* free space is optional */}}}catch{review=true;note('review',t('The outcome requires review. The draft is retained; read again and select the current destination before another change.'))}finally{busy=false;lock()}}
+      try{let path='/api/backups/workspace/destinations',method='POST',body:Record<string,unknown>={expectedRevision:before.revision};if(action==='save'){expectedFields=Object.fromEntries(DESTINATION_FIELDS.map(name=>[name,name==='retentionDays'?Number(field(name).value):['bucket','region','username','credentialRef'].includes(name)?field(name).value.trim()||null:field(name).value.trim()]));body={...expectedFields,enabled:false,expectedRevision:draftRevision};if(selectedId){method='PATCH';path+='/'+selectedId}}else{path+='/'+id;if(action==='delete')method='DELETE';else path+='/'+action}const ack=await send(method,path,body);if(!ack||typeof ack!=='object'||typeof(ack as {revision?:unknown}).revision!=='string'||!DESTINATION_HEX.test((ack as {revision:string}).revision))throw new Error('unverified_ack');const next=readBackupDestinationsView(await send('GET','/api/backups/workspace/destination-lifecycle'));if(!eligible())return;if(action==='save'){const saved=(ack as {destination?:{id?:string}}).destination;const row=next.destinations.find(row=>row.id===saved?.id);if(!row||row.enabled||!expectedFields||DESTINATION_FIELDS.some(name=>row[name]!==expectedFields![name]))throw new Error('unverified_readback');selectedId=row.id;draftRevision=next.revision;fillAddress(row.endpoint)}else if(action==='delete'?next.destinations.some(row=>row.id===id):action==='activate'?!next.destinations.find(row=>row.id===id)?.effectiveActive:action==='test'?next.destinations.find(row=>row.id===id)?.state!=='verified':!!next.destinations.find(row=>row.id===id)?.effectiveActive)throw new Error('unverified_readback');review=false;paint(next);note('saved',t('The selected action was read back from saved destination state.'));if(action==='test'&&id){try{const reply=await send('GET','/api/backups/workspace/destinations/'+id+'/space') as {space?:{freeBytes?:unknown}|null};const free=reply?.space?.freeBytes;if(typeof free==='number'&&Number.isSafeInteger(free)&&free>=0){const units=['B','KiB','MiB','GiB','TiB'];let value=free,unit=0;while(value>=1024&&unit<units.length-1){value/=1024;unit++}note('saved',t('Connected. {free} free on the remote path.',{free:(unit?value.toFixed(1):String(value))+' '+units[unit]}))}}catch{/* free space is optional */}}}catch{review=true;note('review',t('The outcome requires review. The draft is retained; read again and select the current destination before another change.'))}finally{busy=false;lock()}}
+    field('endpoint').addEventListener('input',()=>{if(!busy&&!review&&eligible()&&addressMode()){fillAddress();lock()}})
+    field('kind').addEventListener('change',()=>{if(!busy&&!review&&eligible()){fillAddress();lock()}})
+    for(const node of [addressHost,addressPort])if(node instanceof HTMLInputElement)node.addEventListener('input',()=>{if(!busy&&!review&&eligible()){syncAddress();lock()}})
     form.addEventListener('submit',event=>{event.preventDefault();void mutate('save')});read.addEventListener('click',()=>{void load()});newButton.addEventListener('click',()=>{if(!newButton.disabled){fill(null);lock()}});const createKey=root.querySelector<HTMLButtonElement>('[data-destination-create-key]'),publicKey=root.querySelector<HTMLElement>('[data-destination-public-key]'),keyHelp=root.querySelector<HTMLElement>('[data-destination-key-help]')
     // A new ed25519 key pair for an SFTP destination: named from the destination, created on the server, only the public key comes back.
-    createKey?.addEventListener('click',()=>{void(async()=>{if(!createKey||createKey.disabled||!eligible()||!send||busy||review)return;const name=field('name').value.trim(),ref=('sftp-'+name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')).slice(0,64).replace(/-+$/,'');if(!name||ref==='sftp-'){note('failed',t('Enter the destination name first; the key pair is named after it.'));return}if(!await confirm(t('Create SFTP key pair'),t('Create the key pair {ref} on this server? Only its public key is shown.',{ref})))return;busy=true;lock();try{const reply=await send('POST','/api/backups/workspace/credentials',{ref,label:name}) as {profile?:{ref?:unknown;publicKey?:unknown}};const key=reply?.profile?.publicKey;if(reply?.profile?.ref!==ref||typeof key!=='string'||!/^ssh-ed25519 [A-Za-z0-9+/]{68}={0,2} [A-Za-z0-9._@-]{1,96}$/.test(key))throw new Error('unverified_key');busy=false;await load();field('credentialRef').value=ref;if(publicKey){publicKey.textContent=key;publicKey.hidden=false}if(keyHelp)keyHelp.hidden=false;note('saved',t('Key pair {ref} created. Install the public key on the remote host, then test the destination.',{ref}))}catch(error){const code=(error as {status?:unknown})?.status;note(code===409||code===422?'failed':'review',code===409?t('A key pair with this name exists. Select it in the credential list.'):code===422?t('The key pair name was refused. Nothing was created.'):t('The key pair outcome requires review. Read the destinations again before retrying.'))}finally{busy=false;lock()}})()})
+    createKey?.addEventListener('click',()=>{void(async()=>{if(!createKey||createKey.disabled||!eligible()||!send||busy||review)return;const name=field('name').value.trim(),ref=('sftp-'+name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')).slice(0,64).replace(/-+$/,'');if(!name||ref==='sftp-'){note('failed',t('Enter the destination name first; the key pair is named after it.'));return}if(!await confirm(t('Create SFTP key pair'),t('Create the key pair {ref} on this server? Only its public key is shown.',{ref})))return;if(!eligible()||!send||busy||review){lock();return};busy=true;lock();try{const reply=await send('POST','/api/backups/workspace/credentials',{ref,label:name}) as {profile?:{ref?:unknown;publicKey?:unknown}};const key=reply?.profile?.publicKey;if(reply?.profile?.ref!==ref||typeof key!=='string'||!/^ssh-ed25519 [A-Za-z0-9+/]{68}={0,2} [A-Za-z0-9._@-]{1,96}$/.test(key))throw new Error('unverified_key');busy=false;await load();field('credentialRef').value=ref;if(publicKey){publicKey.textContent=key;publicKey.hidden=false}if(keyHelp)keyHelp.hidden=false;note('saved',t('Key pair {ref} created. Install the public key on the remote host, then test the destination.',{ref}))}catch(error){const code=(error as {status?:unknown})?.status;note(code===409||code===422?'failed':'review',code===409?t('A key pair with this name exists. Select it in the credential list.'):code===422?t('The key pair name was refused. Nothing was created.'):t('The key pair outcome requires review. Read the destinations again before retrying.'))}finally{busy=false;lock()}})()})
     root.addEventListener('click',event=>{const button=(event.target as Element).closest<HTMLButtonElement>('[data-destination-action]');if(!button||button.disabled||!view)return;const row=view.destinations.find(row=>row.id===button.dataset.destinationId);if(!row)return;if(button.dataset.destinationAction==='edit'){fill(row);lock()}else void mutate(button.dataset.destinationAction!,row.id)});lock();if(eligible()&&send)void load();else note('unavailable',t('Destination management is unavailable here.'))
   })
 }
-export const WHM_BACKUP_DESTINATIONS_CLIENT_BINDING=`(()=>{${VIEW_RECORD_HELPERS}const DESTINATION_ID=${DESTINATION_ID.toString()};const DESTINATION_HEX=${DESTINATION_HEX.toString()};const DESTINATION_FIELDS=${JSON.stringify(DESTINATION_FIELDS)};const readBackupDestinationsView=${readBackupDestinationsView.toString()};return ${bindWhmBackupDestinations.toString()};})()`
+export const WHM_BACKUP_DESTINATIONS_CLIENT_BINDING=`(()=>{${VIEW_RECORD_HELPERS}const DESTINATION_ID=${DESTINATION_ID.toString()};const DESTINATION_HEX=${DESTINATION_HEX.toString()};const DESTINATION_FIELDS=${JSON.stringify(DESTINATION_FIELDS)};const readBackupSftpAddress=${readBackupSftpAddress.toString()};const writeBackupSftpAddress=${writeBackupSftpAddress.toString()};const readBackupDestinationsView=${readBackupDestinationsView.toString()};return ${bindWhmBackupDestinations.toString()};})()`

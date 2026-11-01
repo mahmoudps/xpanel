@@ -24,6 +24,8 @@ export const isToolAuthorized = (tool: CatalogTool, ctx: VisibilityContext): boo
       if (tool.rootOnly) return false
       return tool.resellerAcl === null || (ctx.reseller?.acl.includes(tool.resellerAcl) ?? false)
     case 'user':
+      // This new owner ID and its legacy featureKey must both retain explicit plan denials.
+      if (tool.id === 'domain-htaccess' && ctx.disabledFeatures?.has(tool.id)) return false
       if (ctx.allowedToolIds && !ctx.allowedToolIds.has(tool.id)) return false
       return tool.featureKey === null || (ctx.disabledFeatures !== undefined && !ctx.disabledFeatures.has(tool.featureKey))
   }

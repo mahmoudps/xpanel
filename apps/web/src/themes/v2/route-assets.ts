@@ -17,6 +17,8 @@ import { WHM_OVERVIEW_CSS } from './pages/xwhm/overview/index.ts'
 import { WHM_ACCOUNTS_CSS } from './pages/xwhm/accounts/list.ts'
 import { WHM_ACCOUNT_CREATE_CSS } from './pages/xwhm/accounts/create.ts'
 import { HOST_PAGES_CSS } from './pages/xwhm/host/common.ts'
+import { WHM_PHP_CSS } from './pages/xwhm/host/php.ts'
+import { WHM_SERVICES_CSS } from './pages/xwhm/host/services.ts'
 import { LIFECYCLE_PAGES_CSS } from './pages/xwhm/lifecycle/shared.ts'
 import { WHM_PLANS_CSS } from './pages/xwhm/plans/common.ts'
 import { WHM_RESELLERS_CSS } from './pages/xwhm/resellers/styles.ts'
@@ -25,6 +27,7 @@ import { WHM_MAIL_CSS } from './pages/xwhm/mail/common.ts'
 import { WHM_OBSERVATION_CSS } from './pages/xwhm/monitoring/common.ts'
 import { WHM_RECOVERY_TOOLS_CSS } from './pages/xwhm/recovery-tools/common.ts'
 import { WHM_DATA_COMMON_CSS } from './pages/xwhm/software/common.ts'
+import { WHM_WEB_SERVER_CSS } from './pages/xwhm/service-tools/web.ts'
 import { WHM_SERVER_CSS } from './pages/xwhm/server/styles.ts'
 import { WHM_PANEL_CSS } from './pages/xwhm/panel/styles.ts'
 import { WHM_DIAGNOSTIC_CLIENT_CSS } from './pages/xwhm/whm-diagnostic-client-templates.ts'
@@ -67,6 +70,8 @@ export const v2ViewStylesheets = Object.freeze({
 
 /** Shared dynamic fragments load only where the exact selected document owns those fragments. */
 export const v2SupplementalStylesheets: readonly Readonly<V2RouteStylesheet>[] = Object.freeze([
+  page('xwhm', 'whm-web-server', ['/whm/services/web'], WHM_WEB_SERVER_CSS),
+  page('xwhm', 'whm-services', ['/whm/services', '/whm/services/more'], WHM_SERVICES_CSS),
   page('xpanel', 'panel-virus-scan', ['/security/virus-scanner'], PANEL_UTILITY_CLIENT_CSS),
   page('xwhm', 'whm-diagnostics', [
     '/whm/monitoring/health', '/whm/monitoring/limits', '/whm/monitoring/alerts',
@@ -104,7 +109,7 @@ export const v2RouteStylesheets: readonly Readonly<V2RouteStylesheet>[] = Object
   page('xwhm', 'whm-overview', ['/whm'], WHM_OVERVIEW_CSS),
   page('xwhm', 'whm-accounts', ['/whm/accounts'], WHM_ACCOUNTS_CSS),
   page('xwhm', 'whm-account-create', ['/whm/accounts/new'], WHM_ACCOUNT_CREATE_CSS),
-  page('xwhm', 'whm-host', ['/whm/services', '/whm/services/more', '/whm/security/firewall', '/whm/software/php'], HOST_PAGES_CSS),
+  page('xwhm', 'whm-host', ['/whm/services', '/whm/services/more', '/whm/security/firewall', '/whm/software/php'], [HOST_PAGES_CSS, WHM_PHP_CSS]),
   page('xwhm', 'whm-lifecycle', [
     '/whm/backups', '/whm/backups/restore', '/whm/backups/destinations',
     '/whm/transfers', '/whm/transfers/server', '/whm/server/upgrade',

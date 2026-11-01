@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { renderWhmMailServerWorkspace } from './whm-mail-server-workspace.ts'
+import { parseMarkup } from '../themes/markup.ts'
+
+const liveElements = (html: string) => parseMarkup(html).filter(node => node.namespace === 'html' && node.template === -1)
+
 
 describe('WHM mail server workspace renderer', () => {
   it('renders the English server page with sources, settings and services tables and the drift workflow links', () => {
@@ -31,7 +35,10 @@ describe('WHM mail server workspace renderer', () => {
     const routing = renderWhmMailServerWorkspace({ locale: 'en', page: 'routing', canRead: true })
     expect(routing).toContain('<th scope="col">Routing</th>'); expect(routing).toContain('data-whm-mail-settings-preview-button disabled')
     expect(routing).not.toContain('data-mail-setting=')
-    expect(renderWhmMailServerWorkspace({ locale: 'en', page: 'routing', canRead: true, canManage: false })).not.toMatch(/<form|<select|Routing<\/th>/)
+    const readOnly = renderWhmMailServerWorkspace({ locale: 'en', page: 'routing', canRead: true, canManage: false })
+    expect(liveElements(readOnly).filter(node => ['form', 'select'].includes(node.tag))).toEqual([])
+    expect(readOnly).not.toMatch(/Routing<\/th>/)
+    expect(parseMarkup(readOnly).some(node => node.namespace === 'html' && node.tag === 'template')).toBe(true)
   })
   it('renders routing with a domain table and outbound with limits and submission services', () => {
     const routing = renderWhmMailServerWorkspace({ locale: 'en', page: 'routing', canRead: true })
@@ -60,6 +67,7 @@ describe('WHM mail server workspace renderer', () => {
     expect(html).toContain('data-mail-server-can-read="false"')
     expect(html).toContain('data-whm-mail-server-refresh disabled')
     expect(html).toContain('data-whm-mail-server-services')
-    expect(html).not.toMatch(/<form|<input|<select|<textarea/)
+    expect(liveElements(html).filter(node => ['form', 'input', 'select', 'textarea'].includes(node.tag))).toEqual([])
+    expect(parseMarkup(html).some(node => node.namespace === 'html' && node.tag === 'template')).toBe(true)
   })
 })

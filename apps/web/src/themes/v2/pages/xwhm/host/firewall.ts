@@ -24,7 +24,7 @@ export function renderV2WhmFirewall(props: HostPageProps): string {
   const select = (name: string, label: string, options: readonly (readonly [string, string])[], disabled = true): string =>
     formField({ id: `v2-firewall-${name}`, label: t(label), control: { kind: 'select', name, disabled, options: options.map(([value, label]) => ({ value, label: t(label) })) } })
   const headers: Record<FirewallRule['kind'] | 'banned', readonly string[]> = {
-    port: [msgid('Position'), msgid('Action'), msgid('Protocol'), msgid('Port'), msgid('Source'), msgid('Note')],
+    port: [msgid('Position'), msgid('Action'), msgid('Protocol'), msgid('Port'), msgid('Source'), msgctxt('theme:v2', 'Purpose'), msgctxt('theme:v2', 'Origin'), msgid('Note'), msgid('Manage')],
     ip: [msgid('Action'), msgid('Address or range'), msgid('Ports'), msgid('Note'), msgid('Added'), msgid('Expires')],
     forward: [msgid('Protocol'), msgid('Listen port'), msgid('Destination'), msgid('Allowed source'), msgid('Note')],
     icmp: [msgid('Action'), msgid('Source'), msgid('Type and family'), msgid('Rate limit'), msgid('Why')],
@@ -34,7 +34,7 @@ export function renderV2WhmFirewall(props: HostPageProps): string {
   const cells = (rule: FirewallRule): readonly string[] => {
     const source = rule.source === null ? escapeHtml(t(msgid('Any source'))) : technical(rule.source)
     switch (rule.kind) {
-      case 'port': return [String(rules!.indexOf(rule) + 1), action(rule), technical(rule.protocol), technical(rule.port), source, escapeHtml(rule.comment)]
+      case 'port': return [String(rules!.indexOf(rule) + 1), action(rule), technical(rule.protocol), technical(rule.port), source, escapeHtml(unread), escapeHtml(unread), escapeHtml(rule.comment), hostButton(t(msgid('Manage')), undefined, { disabled: true })]
       case 'ip': return [action(rule), source, technical(rule.port), escapeHtml(rule.comment), escapeHtml(unread), escapeHtml(unread)]
       case 'forward': return [technical(rule.protocol), technical(rule.port), technical(rule.forwardTo), source, escapeHtml(rule.comment)]
       case 'icmp': return [action(rule), source, escapeHtml(unread), escapeHtml(unread), escapeHtml(rule.comment)]

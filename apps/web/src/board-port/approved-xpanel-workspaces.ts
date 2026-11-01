@@ -1,4 +1,8 @@
 import type { PanelSurfaceProps } from '../surfaces/xpanel.ts';
+import { ACCOUNT_SELF_PASSWORD_MIN_LENGTH } from '@xpanel/core';
+import type { AuthPersonalView } from '../themes/contract.ts';
+import { accountApiTokenClientTemplates } from '../account-api-tokens-templates.ts';
+import { isToolAuthorized } from '@xpanel/catalog'
 import { type Locale, translator } from '../i18n.ts'
 import { escapeHtml, normalizeAsciiDigits } from '../tokens.ts';
 import { contextualizeNavigationHref } from '../document-routes.ts';
@@ -40,6 +44,7 @@ export interface ApprovedXpanelWorkspaceProps extends Omit<PanelSurfaceProps, 'l
     locale: Locale;
     readOnly: boolean;
     nativeHtml?: string;
+    authPersonal?: AuthPersonalView;
 }
 export const approvedXpanelWorkspaceRoutes: ReadonlySet<string> = new Set(['/domains/reverse-proxy', '/resources', '/email/accounts', '/files/manager', '/files/trash', '/files/directory-privacy', '/domains/site-settings', '/files/backup', '/databases/mariadb', '/domains', '/domains/zone-editor', '/metrics/traffic', '/metrics/web-stats', '/security/ssl', '/security/account', '/software/php', '/software/htaccess', '/advanced/cron', '/advanced/error-pages', '/advanced/indexes', '/advanced/mime-types', '/advanced/handlers', '/security/hotlink', '/security/ip-blocker', '/domains/redirects', '/security/ssh', '/metrics/logs', '/health', '/security/virus-scanner', '/advanced/network-tools', '/databases/insights', '/domains/dynamic-dns', '/domains/site-publisher', '/files/git', '/email/encryption', '/software/packages', '/databases/remote-access', '/email/calendars-contacts', '/advanced/api-shell', '/email/archive', '/domains/staging', '/preferences/team', '/databases/phpmyadmin', '/databases/postgresql', '/databases/phppgadmin', '/software/apps', '/software/containers', '/software/cache', '/software/optimize', '/security/waf', '/domains/cloudflare']);
 const copy = (p: ApprovedXpanelWorkspaceProps, x: Copy): string => escapeHtml(translator(p.locale)(x));
@@ -182,6 +187,8 @@ const renderClassicTrafficSelection = (p: ApprovedXpanelWorkspaceProps): { html:
 export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): string | undefined => {
     if (!approvedXpanelWorkspaceRoutes.has(p.route))
         return undefined;
+    if (p.route === '/security/account')
+        return renderClassicAccountSecurityWorkspace(p);
     if (p.route === '/domains/reverse-proxy') {
         const principal = p.visibility?.principal;
         const canManage = !p.readOnly && p.account?.status === 'active' && principal?.kind === 'user' && principal.accountId === p.account.id && p.catalog?.some(tool => tool.id === 'domains' && tool.status === 'verified') === true;
@@ -281,7 +288,7 @@ export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): 
         : undefined;
     if (p.route === '/software/htaccess' && !p.readOnly && p.account) {
         const canManage = p.account.status === 'active' && p.visibility?.principal.kind === 'user' && p.visibility.principal.accountId === p.account.id
-            && p.catalog?.some(tool => tool.id === 'aapanel-url-rewrite' && tool.status === 'verified') === true;
+            && p.catalog?.some(tool => tool.id === 'domain-htaccess' && tool.status === 'verified' && tool.delivery.status === 'verified' && isToolAuthorized(tool, p.visibility!)) === true;
         const selected = p.domains?.find(domain => domain.accountId === p.account!.id && domain.name === p.activeDomain);
         return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="/software/htaccess" data-workspace-mode="connected">${renderAccountHtaccessWorkspace({ locale: p.locale, accountId: p.account.id,
             domains: p.domains ?? [], ...(selected ? { selectedDomainId: selected.id } : {}), canManage })}</section>`;
@@ -303,3 +310,163 @@ export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): 
     return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="${escapeHtml(p.route)}" data-workspace-mode="${p.readOnly ? 'read-only' : 'connected'}">${heading}<div class="xp-panel-detail__layout"><div class="xp-panel-detail__main">${trafficSelection?.html ?? ''}${nativeHtml ? `<div class="xp-panel-detail__native">${nativeHtml}</div>` : ''}${php ?? ''}${dns ?? ''}${directoryPrivacy ?? ''}${ssl ?? ''}${sessions ?? ''}${accountBackup ?? ''}${sections.map(section => renderSection(p, section)).join('')}</div><aside class="xp-panel-detail__aside" aria-label="${copy(p, msgid('Workspace information'))}">${page.aside.map(section => renderSection(p, section, true)).join('')}</aside></div></section>`;
 };
 const pageFor = buildApprovedPanelPage;
+
+// Independent personal authentication controls; native site operations retain their unavailable fences.
+export const CLASSIC_ACCOUNT_SECURITY_FACTOR_HOST = '<div data-classic-account-security-factor-host></div>';
+
+const personalSecurityStyles = '<style id="classic-personal-security-styles">' + [
+    '.xp-personal-security-page{display:flex;flex-direction:column;gap:32px;min-inline-size:0}',
+    '.xp-personal-security-page .xp-personal-security-grid{display:grid;grid-template-columns:minmax(0,1.618fr) minmax(0,1fr);gap:24px;align-items:start}',
+    '.xp-personal-security-page .xp-personal-security-factor{min-inline-size:0}',
+    '.xp-personal-security-page #classic-sign-in-title{margin:0 0 24px;font-size:18px;font-weight:600}',
+    '.xp-personal-security-page [data-account-password] h3,.xp-personal-security-page [data-account-api-tokens] h3{font-size:16px;font-weight:600}',
+    '.xp-personal-security-page .xp-personal-security-nav{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}',
+    '.xp-personal-security-page .xp-personal-security-nav a{display:inline-flex;align-items:center;min-block-size:44px;padding:0 14px;border:1px solid var(--xp-border-strong,#D0D5DD);border-radius:999px;background:var(--xp-bg-surface,#FFFFFF);color:inherit;font-size:13px;font-weight:500;text-decoration:none}',
+    '.xp-personal-security-page [hidden]{display:none!important}',
+    ".xp-personal-security-page [data-account-api-tokens] :is([data-xp-slot=name],[data-xp-slot=scopes],[data-xp-slot=addresses],[data-xp-slot=created],[data-xp-slot=expires],[data-xp-slot=used]){font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}",
+    '.xp-personal-security-page .xp-personal-security-form,.xp-personal-security-page .xp-personal-security-field{display:flex;flex-direction:column;min-inline-size:0}',
+    '.xp-personal-security-page .xp-personal-security-form{gap:16px}',
+    '.xp-personal-security-page .xp-personal-security-field{gap:8px}',
+    '.xp-personal-security-page .xp-personal-security-row{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end}',
+    '.xp-personal-security-page .xp-personal-security-row>.xp-personal-security-field{flex:1 1 220px}',
+    '.xp-personal-security-page .xp-personal-security-form label,.xp-personal-security-page .xp-personal-security-form legend{font-size:13px;font-weight:600}',
+    '.xp-personal-security-page .xp-personal-security-form input:not([type="checkbox"]),.xp-personal-security-page .xp-personal-security-form select{inline-size:100%;min-inline-size:0;min-block-size:44px;padding:0 12px;border:1px solid var(--xp-border-strong,#D0D5DD);border-radius:8px;background:var(--xp-bg-surface,#FFFFFF);color:inherit;font:inherit}',
+    '.xp-personal-security-page .xp-personal-security-check{display:flex;align-items:center;gap:8px;min-block-size:44px;font-size:13px}',
+    '.xp-personal-security-page .xp-personal-security-check input{inline-size:18px;block-size:18px;flex:none}',
+    '.xp-personal-security-page .xp-personal-security-actions{display:flex;flex-wrap:wrap;align-items:center;gap:16px}',
+    '.xp-personal-security-page .xp-personal-security-help{margin:0;font-size:13px;line-height:1.6;color:var(--xp-text-secondary,#475467)}',
+    '.xp-personal-security-page .xp-personal-security-rules{display:grid;gap:8px;margin:0;padding-inline-start:20px;font-size:12px;color:var(--xp-text-secondary,#475467)}',
+    '.xp-personal-security-page .xp-personal-security-scopes{border:0;padding:0;margin:0;min-inline-size:0;display:grid;gap:16px}',
+    '.xp-personal-security-page .xp-personal-security-scope-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:16px}',
+    '.xp-personal-security-page .xp-personal-security-token-head{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:16px}',
+    '.xp-personal-security-page .xp-personal-security-token-head>div{display:grid;gap:8px;min-inline-size:0}',
+    '.xp-personal-security-page .xp-personal-security-token-table{overflow-x:auto;max-inline-size:100%;min-inline-size:0}',
+    '.xp-personal-security-page .xp-personal-security-token-table table{min-inline-size:980px}',
+    '.xp-personal-security-page .xp-personal-security-token-create{padding-block-start:24px;border-block-start:1px solid var(--xp-border,#E2E6EC)}',
+    '.xp-personal-security-page .xp-personal-security-reveal{display:grid;gap:16px;padding:16px;border:1px solid var(--xp-border-strong,#D0D5DD);border-radius:10px;background:var(--xp-bg-elevated,#F8F9FB)}',
+    '.xp-personal-security-page .xp-personal-security-secret{display:block;min-inline-size:0;overflow-wrap:anywhere;padding:12px;background:var(--xp-bg-surface,#FFFFFF);border:1px solid var(--xp-border,#E2E6EC);border-radius:8px}',
+    ".xp-personal-security-page .xp-personal-security-mono{font-family:'IBM Plex Mono',monospace}",
+    '.xp-personal-security-page .xp-personal-security-error{margin:0;font-size:12px;color:var(--xp-danger,#B42318)}',
+    '.xp-personal-security-page [data-classic-native-security]{min-inline-size:0}',
+    '.xp-personal-security-page [data-account-password],.xp-personal-security-page [data-account-api-tokens]{display:flex;flex-direction:column;gap:24px;padding:24px;min-inline-size:0}',
+    '.xp-personal-security-page [data-account-password] h3,.xp-personal-security-page [data-account-api-tokens] h2,.xp-personal-security-page [data-account-api-tokens] h3{margin:0}',
+    '@media(max-width:959px){.xp-personal-security-page .xp-personal-security-grid{grid-template-columns:minmax(0,1fr)}}',
+    '@media(max-width:640px){.xp-personal-security-page [data-account-password],.xp-personal-security-page [data-account-api-tokens]{padding:16px}}',
+].join('') + '</style>';
+
+const personalState = (auth: AuthPersonalView | undefined): 'ready' | 'denied' | 'unavailable' =>
+    auth?.state === 'ready' ? 'ready' : auth?.state === 'denied' ? 'denied' : 'unavailable';
+
+const renderClassicApiTokens = (p: ApprovedXpanelWorkspaceProps): string => {
+    const auth = p.authPersonal, state = personalState(auth), ready = state === 'ready';
+    const canRead = ready && auth?.canReadApiTokens === true, canManage = ready && auth?.canManageApiTokens === true;
+    const headers = [
+        msgid('Name'), msgid('Scopes'), msgid('Allowed from'),
+        msgctxt('approved-xpanel-pages', 'Created'), msgctxt('approved-xpanel-pages', 'Expires'),
+        msgid('Last used'), msgid('Action'),
+    ];
+    const scopes = ['files', 'databases', 'dns', 'mail', 'backups', 'cron'].flatMap(resource =>
+        ['read', 'write'].map(action => {
+            const scope = resource + ':' + action, id = 'classic-token-scope-' + resource + '-' + action;
+            return '<label class="xp-personal-security-check" for="' + id + '"><input id="' + id + '" type="checkbox" value="' + scope + '" data-account-tokens-scope disabled><bdi dir="ltr" class="xp-personal-security-mono">' + scope + '</bdi></label>';
+        })).join('');
+    return [
+        '<section id="classic-api-tokens" class="xp-panel-detail__card" data-account-api-tokens data-auth-personal-state="' + state + '" data-tokens-can-read="' + canRead + '" data-tokens-can-manage="' + canManage + '" data-workspace-section="api-tokens" aria-labelledby="classic-api-tokens-title">',
+        '<div class="xp-personal-security-token-head"><div><h2 id="classic-api-tokens-title">' + copy(p, msgid('API tokens')) + '</h2>',
+        '<p class="xp-personal-security-help">' + copy(p, msgid('For scripts and CI. Tokens are scoped, always expire and are stored only as hashes.')) + '</p>',
+        '<p class="xp-personal-security-help"><code class="xp-personal-security-mono" dir="ltr">Authorization: Bearer &lt;token&gt;</code></p></div>',
+        '<span class="xp-badge" data-account-tokens-count>' + copy(p, unread) + '</span></div>',
+        '<div class="xp-personal-security-actions"><button type="button" class="xp-btn" data-account-tokens-refresh disabled>' + copy(p, msgid('Refresh')) + '</button>',
+        '<button type="button" class="xp-btn" data-account-tokens-bulk-revoke disabled>' + copy(p, msgid('Revoke selected')) + '</button>',
+        '<span class="xp-personal-security-help">' + copy(p, msgid('Times in UTC')) + '</span></div>',
+        '<p class="xp-personal-security-help" data-account-tokens-status role="status" aria-live="polite">' + copy(p, canRead ? unread : msgid('Unavailable')) + '</p>',
+        '<p class="xp-personal-security-help" data-account-tokens-loading hidden>' + copy(p, msgid('Loading…')) + '</p>',
+        '<p class="xp-personal-security-help" data-account-tokens-empty hidden>' + copy(p, msgid('No API tokens yet')) + '</p>',
+        '<p class="xp-personal-security-help" data-account-tokens-mutation-status role="status" aria-live="polite" hidden></p>',
+        '<div class="xp-personal-security-reveal" data-account-tokens-reveal hidden><p class="xp-personal-security-help" data-account-tokens-reveal-text></p>',
+        '<code class="xp-personal-security-secret xp-personal-security-mono" dir="ltr" data-account-tokens-secret></code>',
+        '<div class="xp-personal-security-actions"><button type="button" class="xp-btn" data-account-tokens-copy disabled>' + copy(p, msgid('Copy token')) + '</button>',
+        '<button type="button" class="xp-btn" data-account-tokens-done disabled>' + copy(p, msgid('Done')) + '</button></div>',
+        '<p class="xp-personal-security-help" data-account-tokens-copy-status role="status" aria-live="polite"></p></div>',
+        '<div class="xp-personal-security-token-table xp-table-wrap" tabindex="0" role="region" aria-label="' + copy(p, msgid('API token list')) + '"><table class="xp-table" aria-labelledby="classic-api-tokens-title"><thead><tr>',
+        '<th scope="col"><label class="xp-personal-security-check"><input type="checkbox" data-account-tokens-select-all disabled aria-label="' + copy(p, msgid('Select up to 50 tokens')) + '"><span>' + copy(p, headers[0]!) + '</span></label></th>',
+        ...headers.slice(1).map(header => '<th scope="col">' + copy(p, header) + '</th>'),
+        '</tr></thead><tbody data-account-tokens-rows></tbody></table></div>',
+        '<form class="xp-personal-security-form xp-personal-security-token-create" method="post" action="/api/auth/api-tokens" data-account-tokens-create aria-labelledby="classic-token-create-title">',
+        '<h3 id="classic-token-create-title">' + copy(p, msgid('Create a token')) + '</h3><div class="xp-personal-security-row">',
+        '<div class="xp-personal-security-field"><label for="classic-token-name">' + copy(p, msgid('Name')) + '</label><input id="classic-token-name" name="name" type="text" required maxlength="50" autocomplete="off" spellcheck="false" dir="ltr" class="xp-personal-security-mono" data-account-tokens-name disabled aria-describedby="classic-token-name-help">',
+        '<p id="classic-token-name-help" class="xp-personal-security-help">' + copy(p, msgid('Letters, digits, dashes and underscores.')) + '</p></div>',
+        '<div class="xp-personal-security-field"><label for="classic-token-expiry">' + copy(p, msgid('Expires after')) + '</label><select id="classic-token-expiry" name="expiresInDays" data-account-tokens-expiry disabled aria-describedby="classic-token-expiry-help">',
+        '<option value="30">' + copy(p, msgid('30 days')) + '</option><option value="90" selected>' + copy(p, msgid('90 days')) + '</option><option value="180">' + copy(p, msgid('180 days')) + '</option><option value="365">' + copy(p, msgid('1 year')) + '</option></select>',
+        '<p id="classic-token-expiry-help" class="xp-personal-security-help">' + copy(p, msgid('Tokens always expire. The longest is one year.')) + '</p></div>',
+        '<div class="xp-personal-security-field"><label for="classic-token-ips">' + copy(p, msgid('Allowed addresses (optional)')) + '</label><input id="classic-token-ips" name="allowedIps" type="text" autocomplete="off" spellcheck="false" dir="ltr" class="xp-personal-security-mono" data-account-tokens-allowed-ips disabled aria-describedby="classic-token-ips-help" placeholder="198.51.100.24, 2001:db8::/32">',
+        '<p id="classic-token-ips-help" class="xp-personal-security-help">' + copy(p, msgid('IPv4 or IPv6 addresses or CIDR ranges, comma-separated. Empty allows any address.')) + '</p></div></div>',
+        '<label class="xp-personal-security-check" for="classic-token-read-only"><input id="classic-token-read-only" type="checkbox" checked data-account-tokens-read-only disabled><span>' + copy(p, msgid('Read only')) + '</span></label>',
+        '<fieldset class="xp-personal-security-scopes" aria-describedby="classic-token-scopes-help"><legend>' + copy(p, msgid('Scopes')) + '</legend>',
+        '<p id="classic-token-scopes-help" class="xp-personal-security-help">' + copy(p, msgid('Only the selected actions are allowed.')) + '</p><div class="xp-personal-security-scope-grid">' + scopes + '</div></fieldset>',
+        '<div class="xp-personal-security-actions"><button type="submit" class="xp-btn xp-btn--primary" data-account-tokens-submit disabled>' + copy(p, msgid('Create token')) + '</button>',
+        '<button type="button" class="xp-btn" data-account-tokens-clear disabled>' + copy(p, msgid('Clear')) + '</button></div></form>',
+        accountApiTokenClientTemplates({ buttonClass: 'xp-btn', badgeClass: 'xp-badge' }),
+        '</section>',
+    ].join('');
+};
+
+export const renderClassicAccountSecurityWorkspace = (p: ApprovedXpanelWorkspaceProps): string => {
+    const page = buildApprovedPanelPage(p);
+    const personalIds = new Set(['sign-in', 'account-password', 'api-tokens', 'token-one-time', 'token-list', 'token-revocation', 'token-scopes']);
+    const nativeSections = page.sections.filter(section => !personalIds.has(section.id));
+    const nativeCard = (html: string): string => '<div data-classic-native-security data-tool-availability="unverified" data-workspace-mode="read-only" aria-disabled="true">' + html + '</div>';
+    return [
+        styles, personalSecurityStyles,
+        '<section class="xp-approved-panel xp-personal-security-page" data-approved-xpanel-workspace="/security/account" data-workspace-section="workspace" data-security-page="true" data-auth-personal-security data-surface="xpanel">',
+        '<header class="xp-panel-detail__heading"><h1 class="xp-page-title">' + copy(p, page.title) + '</h1><p>' + copy(p, page.description) + '</p></header>',
+        '<nav aria-label="' + copy(p, msgid('On this page')) + '"><ul class="xp-personal-security-nav">',
+        ...[
+            ['classic-two-factor', msgid('Two-factor sign-in')], ['classic-password', msgid('Password')], ['classic-api-tokens', msgid('API tokens')],
+            ['panel-detail-ssh-access', msgid('SSH access')], ['panel-detail-ip-blocker', msgid('IP blocker')],
+            ['panel-detail-hotlink-protection', msgid('Hotlink protection')], ['panel-detail-account-directory-privacy', msgctxt('approved-xpanel-pages', 'Directory privacy')],
+        ].map(([id, label]) => '<li><a href="#' + id + '">' + copy(p, label!) + '</a></li>'),
+        '</ul></nav>',
+        '<section aria-labelledby="classic-sign-in-title"><h2 id="classic-sign-in-title">' + copy(p, msgid('Sign-in')) + '</h2><div class="xp-personal-security-grid"><div id="classic-two-factor" class="xp-personal-security-factor">' + CLASSIC_ACCOUNT_SECURITY_FACTOR_HOST + '</div>',
+        renderClassicPasswordCard(p), '</div></section>',
+        renderConnectedPanelSessions(p) ?? '',
+        renderClassicApiTokens(p),
+        '<div class="xp-panel-detail__layout"><div class="xp-panel-detail__main">',
+        ...nativeSections.map(section => nativeCard(renderSection(p, section))),
+        '</div><aside class="xp-panel-detail__aside" aria-label="' + copy(p, msgid('Workspace information')) + '">',
+        ...page.aside.map(section => nativeCard(renderSection(p, section, true))),
+        '</aside></div>',
+        '</section>',
+    ].join('');
+};
+
+const renderClassicPasswordCard = (p: ApprovedXpanelWorkspaceProps): string => {
+    const state = personalState(p.authPersonal);
+    const canChange = state === 'ready' && p.authPersonal?.canChangePassword === true;
+    const minimum = String(ACCOUNT_SELF_PASSWORD_MIN_LENGTH);
+    const lengthRule = escapeHtml(translator(p.locale)(msgid('At least {minimum} characters'), { minimum }));
+    const formState = canChange ? 'ready' : 'unavailable';
+    return [
+        '<section id="classic-password" class="xp-panel-detail__card" data-account-password data-auth-personal-state="' + state + '" data-account-password-can-change="' + canChange + '" data-account-password-state="' + formState + '" aria-busy="false" data-workspace-section="account-password" aria-labelledby="classic-password-title">',
+        '<div class="xp-personal-security-token-head"><div><h3 id="classic-password-title">' + copy(p, msgid('Password')) + '</h3>',
+        '<p class="xp-personal-security-help">' + copy(p, msgid('Your xPanel sign-in.')) + ' <a href="/email/accounts">' + copy(p, msgid('Mailbox and FTP passwords are set in Email & users.')) + '</a></p></div></div>',
+        '<form class="xp-personal-security-form" method="post" action="/api/auth/change-password" data-account-password-form aria-labelledby="classic-password-title">',
+        '<div class="xp-personal-security-field"><label for="classic-password-current">' + copy(p, msgid('Current password')) + '</label>',
+        '<input id="classic-password-current" name="currentPassword" type="password" autocomplete="current-password" required disabled aria-describedby="classic-password-current-error">',
+        '<p id="classic-password-current-error" class="xp-personal-security-error" data-account-password-current-error hidden></p></div>',
+        '<div class="xp-personal-security-field"><label for="classic-password-new">' + copy(p, msgid('New password')) + '</label>',
+        '<input id="classic-password-new" name="newPassword" type="password" autocomplete="new-password" required minlength="' + minimum + '" maxlength="1024" disabled aria-describedby="classic-password-rules classic-password-new-error">',
+        '<ul id="classic-password-rules" class="xp-personal-security-rules"><li data-account-password-rule="length" data-state="unknown">' + lengthRule + '</li>',
+        '<li>' + copy(p, msgid('Account name check')) + ' · ' + copy(p, msgid('Unavailable')) + '</li>',
+        '<li>' + copy(p, msgid('Breach check')) + ' · ' + copy(p, msgid('Unavailable')) + '</li></ul>',
+        '<p id="classic-password-new-error" class="xp-personal-security-error" data-account-password-new-error hidden></p></div>',
+        '<div class="xp-personal-security-field"><label for="classic-password-confirm">' + copy(p, msgid('Repeat new password')) + '</label>',
+        '<input id="classic-password-confirm" name="confirmPassword" type="password" autocomplete="new-password" required minlength="' + minimum + '" maxlength="1024" disabled aria-describedby="classic-password-confirm-error">',
+        '<p id="classic-password-confirm-error" class="xp-personal-security-error" data-account-password-confirm-error hidden></p></div>',
+        '<label class="xp-personal-security-check" for="classic-password-show"><input id="classic-password-show" type="checkbox" data-account-password-show disabled><span>' + copy(p, msgid('Show passwords')) + '</span></label>',
+        '<p class="xp-personal-security-help">' + copy(p, msgid('Last changed')) + ': ' + copy(p, unread) + '. ' + copy(p, msgid('Sign in again after changing your password.')) + '</p>',
+        '<div class="xp-personal-security-actions"><button type="submit" class="xp-btn xp-btn--primary" data-account-password-submit disabled>' + copy(p, msgid('Change password')) + '</button></div>',
+        '<p class="xp-personal-security-help" data-account-password-status data-state="' + formState + '" role="status" aria-live="polite">' + copy(p, canChange ? msgid('Ready') : msgid('Unavailable')) + '</p>',
+        '</form></section>',
+    ].join('');
+};

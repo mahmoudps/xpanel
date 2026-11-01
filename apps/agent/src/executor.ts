@@ -13,7 +13,8 @@ import { isAccountRuntimeCommand } from './account-runtime.ts'
 import { isSwContainerCommand } from '../../../packages/os/src/sw-container-command.ts'
 import { isSwAddonServiceCommand } from '../../../packages/os/src/sw-addon-command.ts'
 import { isRpmInstalledIdentityCommand } from '../../../packages/os/src/ops-package-recovery-command.ts'
-import { applyObservedUserQuota } from './services/quota.ts'
+import { applyObservedUserQuota, validateQuotaFilesystem } from './services/quota.ts'
+import { assertHostEffectAuthority, authorizedHostEffect, hasHostEffectAuthority } from './host-effect-authority.ts'
 
 export interface ConfigTestResult {
   ok: boolean
@@ -64,6 +65,15 @@ export interface FakeQuotaEntry {
   blockSoftKb: number
   blockHardKb: number
   filesystem: string
+}
+
+const isReadonlyQuotaObservation = (argv: readonly string[]): boolean => {
+  const findMount = argv.length === 7 && argv[0] === '/usr/bin/findmnt' && argv[1] === '--noheadings'
+    && argv[2] === '--raw' && argv[3] === '--output' && ['TARGET', 'SOURCE', 'FSTYPE'].includes(argv[4] ?? '') && argv[5] === '--target'
+  const quotaState = argv.length === 5 && argv[0] === '/usr/sbin/quotaon' && argv[1] === '--print-state'
+    && argv[2] === '--verbose' && argv[3] === '--user'
+  if (!findMount && !quotaState) return false
+  try { validateQuotaFilesystem(argv[argv.length - 1]); return true } catch { return false }
 }
 
 const isReviewedServiceCommand = (argv: readonly string[]): boolean =>
@@ -384,6 +394,9 @@ const ACCOUNT_MANAGED_WRAPPER_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/(?:cgi-bin\
 export const createProductionHostTargetMatcher = (): ((path: string, operation: HostTargetOperation) => boolean) => {
   return (path: string, operation: HostTargetOperation): boolean => {
     if (HOST_MEASUREMENT_READS.has(path)) return operation === 'read'
+    if (path === '/etc/xpanel/account-probe' || path === '/etc/xpanel/account-probe/runtime'
+      || path === '/run/xpanel-account-probe' || /^\/run\/xpanel-account-probe\/(?:[1-9][0-9]{3}|[1-5][0-9]{4}|60000)$/.test(path)) return operation === 'ensure-directory'
+    if (path === '/etc/xpanel/account-probe/probe.php') return operation === 'read' || operation === 'write' || operation === 'remove'
     if (path === '/etc/xpanel/runtime.env' || path.startsWith('/etc/xpanel/runtime.env.bak.')) {
       return operation === 'read' || operation === 'write'
     }
@@ -531,6 +544,24 @@ export class LinuxHostExecutor implements AgentExecutor {
     }
   }
 
+  private authorizeCommand<T>(argv: string[], work: () => Promise<T>): Promise<T> {
+    const binary = argv[0], verb = argv[1]
+    const observation = binary === '/usr/bin/getent' && (verb === 'passwd' || verb === 'group') && argv.length === 3
+      || binary === '/usr/bin/id' && (verb === '-u' || verb === '-g') && (argv.length === 3 || argv.length === 4 && argv[2] === '--')
+      || binary === '/usr/bin/systemctl' && (verb === 'show' || verb === 'is-active' || verb === 'cat' || verb === 'list-units' || verb === 'list-unit-files')
+      || binary === '/usr/sbin/repquota' && verb === '-u' && argv.length === 3
+      || isReadonlyQuotaObservation(argv)
+    if (!observation) return authorizedHostEffect(this, work)
+    return (async () => { await assertHostEffectAuthority(this); const result = await work(); await assertHostEffectAuthority(this); return result })()
+  }
+
+  private executeArgv(argv: string[], options?: Parameters<typeof execArgv>[1]): Promise<ConfigTestResult> {
+    const command = [...argv]
+    Object.freeze(command)
+    const settings = options ? Object.freeze({ ...options }) : undefined
+    return this.authorizeCommand(command, () => execArgv(command, settings))
+  }
+
   private requireHostTarget(path: string, operation: HostTargetOperation): void {
     assertTrustedTargetPath(path)
     if (!this.trustedHostTargets.get(path)?.has(operation) && !this.trustedHostTargetMatcher?.(path, operation)) {
@@ -539,7 +570,11 @@ export class LinuxHostExecutor implements AgentExecutor {
   }
 
   async preflight(plan: HostExecutionPlan): Promise<void> {
+    await assertHostEffectAuthority(this)
     const actions = [...plan.preActions, ...plan.postActions]
+    if (hasHostEffectAuthority(this) && actions.some(action => action.kind === 'remove-path' && MAILDIR_BOX_RE.test(action.path))) {
+      return fail('PRECONDITION_FAILED', 'mailbox tree retirement requires a separate reviewed reconciliation', { stateChanged: false })
+    }
     if (actions.some((action) => !action || typeof action !== 'object' || !Object.hasOwn(HOST_ACTION_KINDS, action.kind))) {
       fail('VALIDATION', 'unknown host action in execution plan')
     }
@@ -598,7 +633,7 @@ export class LinuxHostExecutor implements AgentExecutor {
     this.requireHostTarget(dir, 'ensure-directory')
     await withPinnedHostTargetParent(dir, async target => {
       try {
-        await mkdir(target, { mode: 0o755 })
+        await authorizedHostEffect(this, () => mkdir(target, { mode: 0o755 }))
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
       }
@@ -622,15 +657,15 @@ export class LinuxHostExecutor implements AgentExecutor {
     const tmp = join(dirname(target), `.${randomUUID()}.tmp`)
     let published = false
     try {
-      await withOwnedHostFileHandle(await open(tmp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600), async fh => {
+      await authorizedHostEffect(this, async () => withOwnedHostFileHandle(await open(tmp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600), async fh => {
         const metadata = await fh.stat()
         if (!metadata.isFile() || metadata.nlink !== 1) fail('PRECONDITION_FAILED', 'managed temporary content must be a regular file without hard links')
         await fh.writeFile(file.content, 'utf8')
         if (ownership) await fh.chown(ownership.uid, ownership.gid)
         await fh.chmod(file.mode)
         await fh.sync()
-      })
-      await rename(tmp, target)
+      }))
+      await authorizedHostEffect(this, () => rename(tmp, target))
       published = true
     } catch (err) {
       if (isEnoent(err) && SYSTEMD_DROPIN_DIR_RE.test(dir)) {
@@ -652,6 +687,7 @@ export class LinuxHostExecutor implements AgentExecutor {
   }
 
   async writeFile(file: RenderedFile): Promise<void> {
+    await assertHostEffectAuthority(this)
     this.requireHostTarget(file.path, 'write')
     assertMode(file.mode)
     if (typeof file.content !== 'string') fail('VALIDATION', 'rendered host file content must be a string')
@@ -686,20 +722,22 @@ export class LinuxHostExecutor implements AgentExecutor {
   }
 
   async removePath(path: string): Promise<void> {
+    await assertHostEffectAuthority(this)
     this.requireHostTarget(path, 'remove')
     try {
       await withPinnedHostTargetParent(path, async target => {
         if (MAILDIR_BOX_RE.test(path)) {
+          if (hasHostEffectAuthority(this)) return fail('PRECONDITION_FAILED', 'mailbox tree retirement requires a separate reviewed reconciliation', { stateChanged: false })
           await removePinnedHostTree(target)
           return
         }
         try {
-          await unlink(target)
+          await authorizedHostEffect(this, () => unlink(target))
         } catch (error) {
           const code = (error as NodeJS.ErrnoException).code
           if (code === 'ENOENT') return
           if (code !== 'EISDIR' && code !== 'EPERM') throw error
-          await rmdir(target)
+          await authorizedHostEffect(this, () => rmdir(target))
         }
       })
     } catch (error) {
@@ -719,24 +757,25 @@ export class LinuxHostExecutor implements AgentExecutor {
   }
 
   runTest(test: ConfigTest): Promise<ConfigTestResult> {
-    return execArgv(test.argv, { timeoutMs: this.timeoutMs, maxBuffer: this.maxOutputBytes })
+    return this.executeArgv(test.argv, { timeoutMs: this.timeoutMs, maxBuffer: this.maxOutputBytes })
   }
 
   runCommand(argv: string[]): Promise<ConfigTestResult> {
-    return execArgv(argv, { timeoutMs: this.timeoutMs, maxBuffer: this.maxOutputBytes })
+    return this.executeArgv(argv, { timeoutMs: this.timeoutMs, maxBuffer: this.maxOutputBytes })
   }
 
   async runAction(action: HostAction): Promise<void> {
+    await assertHostEffectAuthority(this)
     switch (action.kind) {
       case 'ensure-group': {
-        const res = await execArgv(['/usr/sbin/groupadd', '-f', '-g', String(action.gid), action.name])
+        const res = await this.executeArgv(['/usr/sbin/groupadd', '-f', '-g', String(action.gid), action.name])
         if (!res.ok) fail('CONFIG_TEST_FAILED', `groupadd ${action.name} failed: ${res.stderr}`)
         return
       }
       case 'ensure-user': {
-        const check = await execArgv(['/usr/bin/id', '-u', action.name])
+        const check = await this.executeArgv(['/usr/bin/id', '-u', action.name])
         if (!check.ok) {
-          const add = await execArgv([
+          const add = await this.executeArgv([
             '/usr/sbin/useradd',
             '-u',
             String(action.uid),
@@ -751,13 +790,13 @@ export class LinuxHostExecutor implements AgentExecutor {
           ])
           if (!add.ok) fail('CONFIG_TEST_FAILED', `useradd ${action.name} failed: ${add.stderr}`)
         } else {
-          const mod = await execArgv(['/usr/sbin/usermod', '-s', action.shell, '-d', action.home, action.name])
+          const mod = await this.executeArgv(['/usr/sbin/usermod', '-s', action.shell, '-d', action.home, action.name])
           if (!mod.ok) fail('CONFIG_TEST_FAILED', `usermod ${action.name} failed: ${mod.stderr}`)
         }
         return
       }
       case 'delete-user': {
-        const res = await execArgv(['/usr/sbin/userdel', action.name])
+        const res = await this.executeArgv(['/usr/sbin/userdel', action.name])
         if (!res.ok && !res.stderr.includes('does not exist')) {
           fail('CONFIG_TEST_FAILED', `userdel ${action.name} failed: ${res.stderr}`)
         }
@@ -769,13 +808,13 @@ export class LinuxHostExecutor implements AgentExecutor {
         const ownership = await this.resolveOwnership(action.owner, action.group)
         await withPinnedHostTargetParent(action.path, async target => {
           try {
-            await mkdir(target, { mode: action.mode })
+            await authorizedHostEffect(this, () => mkdir(target, { mode: action.mode }))
           } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
           }
           await withOwnedHostFileHandle(await open(target, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW), async directory => {
-            if (ownership) await directory.chown(ownership.uid, ownership.gid)
-            await directory.chmod(action.mode)
+            if (ownership) await authorizedHostEffect(this, () => directory.chown(ownership.uid, ownership.gid))
+            await authorizedHostEffect(this, () => directory.chmod(action.mode))
           })
         })
         return
@@ -786,24 +825,26 @@ export class LinuxHostExecutor implements AgentExecutor {
       case 'set-quota': {
         await applyObservedUserQuota(argv => {
           assertValidCommandArgv(argv)
+          const command = [...argv]
+          Object.freeze(command)
           // quotaon --print-state deliberately exits 1 when user accounting is active.
           // Keep its real stderr separate from execFile's generic nonzero-exit message.
-          return new Promise<ConfigTestResult>(resolve => execFile('/usr/bin/env', ['LC_ALL=C', ...argv], {
+          return this.authorizeCommand(command, () => new Promise<ConfigTestResult>(resolve => execFile('/usr/bin/env', ['LC_ALL=C', ...command], {
             timeout: this.timeoutMs, maxBuffer: this.maxOutputBytes, windowsHide: true,
           }, (error, stdout, stderr) => {
             const code = error?.killed || error?.signal ? 124 : !error ? 0 : typeof error.code === 'number' ? error.code : 127
             resolve({ ok: code === 0, code, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') })
-          }))
+          })))
         }, action)
         return
       }
       case 'systemd-daemon-reload': {
-        const res = await execArgv(['/usr/bin/systemctl', 'daemon-reload'])
+        const res = await this.executeArgv(['/usr/bin/systemctl', 'daemon-reload'])
         if (!res.ok) fail('CONFIG_TEST_FAILED', `systemctl daemon-reload failed: ${res.stderr}`)
         return
       }
       case 'systemd': {
-        const res = await execArgv(['/usr/bin/systemctl', action.verb, action.unit])
+        const res = await this.executeArgv(['/usr/bin/systemctl', action.verb, action.unit])
         if (!res.ok && action.verb !== 'stop' && action.verb !== 'disable') {
           fail('CONFIG_TEST_FAILED', `systemctl ${action.verb} ${action.unit} failed: ${res.stderr}`)
         }
@@ -820,19 +861,19 @@ export class LinuxHostExecutor implements AgentExecutor {
           }
           return pair
         })
-        const res = await execArgv(['/usr/bin/systemctl', 'set-property', action.unit, ...pairs], { skipSafeArgv: true })
+        const res = await this.executeArgv(['/usr/bin/systemctl', 'set-property', action.unit, ...pairs], { skipSafeArgv: true })
         if (!res.ok) fail('CONFIG_TEST_FAILED', `systemctl set-property ${action.unit} failed: ${res.stderr}`)
         return
       }
       case 'exec': {
         const argv = action.runAsUser ? ['/usr/sbin/runuser', '-u', action.runAsUser, '--', ...action.argv] : action.argv
-        const res = await execArgv(argv)
+        const res = await this.executeArgv(argv)
         if (!res.ok) fail('CONFIG_TEST_FAILED', `exec ${action.argv[0]} failed: ${res.stderr}`)
         return
       }
       case 'sql': {
         if (!this.sqlRunner) return fail('PRECONDITION_FAILED', 'SQL execution requires a configured runner')
-        await this.sqlRunner(action.engine, [...action.statements])
+        await authorizedHostEffect(this, () => this.sqlRunner!(action.engine, [...action.statements]))
         return
       }
       default:

@@ -120,6 +120,11 @@ export interface MutationOptions {
   fencingToken?: number
 }
 
+/** Trusted checks run after writer admission/CAS and before the service-user source is removed. */
+export interface ServiceUserDeletionOptions extends MutationOptions {
+  authorize?: (account: Account, service: ServiceUser) => Promise<void>
+}
+
 /** Trusted generation checks; invoked under the writer lease before restore publication. */
 export interface RestoreGenerationMutationOptions extends MutationOptions {
   restoreGuard?: (current: StateSnapshot, target: StateSnapshot) => Promise<void>

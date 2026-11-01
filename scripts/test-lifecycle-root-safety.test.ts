@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
+import { captureCurrentLifecycleObservationScope } from './lifecycle-root-safety.mjs'
 import { admitSchemaTransition, createNativeUpgradeSafety, assertLifecycleRootSafetyHeld, getLifecycleRootSafetyInfo, NATIVE_RUNTIME_ABI_PROBE, parseCoordinatorCgroup, parseLifecycleHead } from './lifecycle-root-safety.mjs'
 
 describe('native lifecycle authority boundary', () => {
+  it('does not mint read-only observation authority outside an actual held native scope', async () => {
+    await expect(captureCurrentLifecycleObservationScope()).rejects.toThrow('LIFECYCLE_NATIVE_SCOPE_REQUIRED')
+  })
   it('executes the actual Node Argon2id and production SQLite ABI probe without an uninstalled npm addon', () => {
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', NATIVE_RUNTIME_ABI_PROBE], {
       env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' }, encoding: 'utf8', timeout: 10_000,

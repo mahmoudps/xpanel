@@ -18,6 +18,7 @@ import {
   type ResellerAcl,
   type SuspensionEffect,
 } from '@xpanel/core'
+import { createProvisioningCheckpointObservation, parseProvisioningCheckpointObservation, type ProvisioningCheckpointObservation } from '../../../../packages/core/src/account-provisioning-contract.ts'
 import {
   acquireJobLease,
   appendAudit,
@@ -42,7 +43,8 @@ import {
 import { services, system } from '@xpanel/render'
 import type { NewAccount, ResellerUsage, StateStore } from '@xpanel/state'
 import { ProvisioningLease } from './provisioning-lease.ts'
-import { assertProvisioningReply, canonicalProvisioningIdentity, type AccountExecutionObservation, type AuthorizeProvisioning, type LifecycleEffectsPort, type LifecycleReconcilePort, type ProvisioningReconcilePort, type ProvisioningReconcileRequest } from './account-provisioning-port.ts'
+import { activatePreparedProvisioningPrincipal, type AuthorizeProvisioningTransaction } from './provisioning-activation.ts'
+import { assertProvisioningReply, canonicalProvisioningIdentity, type AccountExecutionObservation, type AuthorizeProvisioning, type LifecycleEffectsPort, type LifecycleReconcilePort, type ProvisioningAuthority, type ProvisioningReconcilePort, type ProvisioningReconcileRequest } from './account-provisioning-port.ts'
 import { assertPreparedSources, preparedAccountZone, provisionActorKey, provisioningRequestKey, type PreparedAccountRecord, type PreparedAccountState } from './account-provisioning-prepared.ts'
 import type { ProvisioningPreparationStore } from './provisioning-preparation.ts'
 
@@ -62,6 +64,7 @@ export interface AccountLifecycleDeps {
   /** Trusted runtime construction only; request bodies cannot configure these authorities. */
   readonly provisioningPort?: ProvisioningReconcilePort
   readonly authorizeProvisioning?: AuthorizeProvisioning
+  readonly authorizeProvisioningInTransaction?: AuthorizeProvisioningTransaction
   readonly preparations?: ProvisioningPreparationStore
   readonly readAccountTemplates?: () => Promise<unknown>
 }
@@ -88,6 +91,8 @@ export interface ProvisionJobCheckpointState {
   readonly home?: string
   readonly hostAttempt?: number
   readonly hostNoEffectAttempt?: number | null
+  readonly observedContext?: ProvisioningCheckpointObservation
+  readonly principalActivated?: boolean
 }
 
 export interface ProvisionAccountInput extends NewAccount {
@@ -115,6 +120,11 @@ export interface ProvisionAccountResult {
   readonly reconciliation: ReconcileResult | null
   readonly resumedFromStep: number
   readonly execution?: AccountExecutionObservation
+  /** Independent read-only proof obtained while resuming finalization; no host application occurred. */
+  readonly reobservedExecution?: AccountExecutionObservation
+  /** A schema/binding-checked historical receipt, never a fresh observation or effect. */
+  readonly lastVerifiedExecution?: AccountExecutionObservation
+  readonly completedReplay?: true
 }
 
 /** A completed replay can carry a null reconciliation. That is not a host effect performed by this call. */
@@ -268,6 +278,7 @@ export class AccountLifecycleCoordinator {
   private readonly workerId: string
   private readonly provisioningPort: ProvisioningReconcilePort | undefined
   private readonly authorizeProvisioning: AuthorizeProvisioning | undefined
+  private readonly authorizeProvisioningInTransaction: AuthorizeProvisioningTransaction | undefined
   private readonly preparations: ProvisioningPreparationStore | undefined
   private readonly readAccountTemplates: (() => Promise<unknown>) | undefined
 
@@ -279,6 +290,7 @@ export class AccountLifecycleCoordinator {
     this.workerId = deps.workerId ?? `lifecycle-worker-${randomUUID().slice(0, 8)}`
     this.provisioningPort = deps.provisioningPort
     this.authorizeProvisioning = deps.authorizeProvisioning
+    this.authorizeProvisioningInTransaction = deps.authorizeProvisioningInTransaction
     this.preparations = deps.preparations
     this.readAccountTemplates = deps.readAccountTemplates
   }
@@ -364,7 +376,7 @@ export class AccountLifecycleCoordinator {
 
   /** Production API path: load the immutable credential/desired-state authority, never a supplied hash. */
   async provisionPreparedAccount(input: { actor: Principal; idempotencyKey: string; preparationReference: string }): Promise<ProvisionAccountResult> {
-    if (!this.preparations || !this.provisioningPort || !this.authorizeProvisioning || !this.readAccountTemplates) {
+    if (!this.preparations || !this.provisioningPort || !this.authorizeProvisioning || !this.authorizeProvisioningInTransaction || !this.readAccountTemplates) {
       return fail('SERVICE_UNAVAILABLE', 'durable account provisioning authorities are not connected', { stateChanged: false })
     }
     const prepared = await this.preparations.load<PreparedAccountState>(input.preparationReference, provisionActorKey(input.actor))
@@ -377,7 +389,7 @@ export class AccountLifecycleCoordinator {
     await this.authorizeProvisioning({ actor: input.actor, accountId: null, ownerId: prepared.desiredState.account.ownerId })
     return this.provisionAccountInternal({ ...prepared.desiredState.account, passwordHash: prepared.passwordHash,
       actor: input.actor, idempotencyKey: provisioningRequestKey(input.actor, input.idempotencyKey),
-      provisionDefaultZone: true, reconcile: true }, prepared)
+      provisionDefaultZone: true, nameservers: prepared.desiredState.nameservers, reconcile: true }, prepared)
   }
 
   private async provisionAccountInternal(input: ProvisionAccountInput, prepared?: PreparedAccountRecord): Promise<ProvisionAccountResult> {
@@ -458,13 +470,16 @@ export class AccountLifecycleCoordinator {
       if (acc && principal) {
         await this.authorizeResellerOrRoot(input.actor, 'create-account', acc.ownerId)
         this.assertProvisionCheckpointIdentity(acc, cp)
+        const lastVerifiedExecution = prepared ? this.recordedProvisioningExecution(prepared, enqueued, cp, acc, input.actor) : undefined
         return {
           account: acc,
           job: enqueued,
           principalId: principal.id,
           // Status-only replay. Null reconciliation is not a host effect from this call.
           reconciliation: null,
-          resumedFromStep: enqueued.completedSteps.length,
+          resumedFromStep: 4,
+          completedReplay: true,
+          ...(lastVerifiedExecution && { lastVerifiedExecution }),
         }
       }
     }
@@ -481,7 +496,12 @@ export class AccountLifecycleCoordinator {
 
     let leased: DurableJobRecord = initialLease
 
-    const resumedFromStep = leased.completedSteps.length
+    // Public progress counts the four user phases, never private intent/recovery journal markers.
+    let resumedFromStep = 0
+    for (const step of ['reserve_and_create_state', 'ensure_principal_and_zone', 'reconcile_host']) {
+      if (!isJobStepCompleted(leased, step)) break
+      resumedFromStep++
+    }
     let checkpointState: ProvisionJobCheckpointState | null =
       leased.checkpointData && typeof leased.checkpointData.accountId === 'string'
         ? (leased.checkpointData as unknown as ProvisionJobCheckpointState)
@@ -489,6 +509,8 @@ export class AccountLifecycleCoordinator {
     let unknownOutcome = false
     let uncheckpointedCreation = false
     let observedExecution: AccountExecutionObservation | undefined
+    let observedAuthority: ProvisioningAuthority | undefined
+    let reobservedExecution: AccountExecutionObservation | undefined
     const leaseAuthority = new ProvisioningLease(initialLease, () => renewJobLease(this.db, {
       jobId: initialLease.id, workerId: this.workerId, fencingToken: initialLease.fencingToken, leaseDurationMs: 60_000,
     }))
@@ -630,6 +652,7 @@ export class AccountLifecycleCoordinator {
             username: account.username,
             passwordHash: input.passwordHash,
             forcePasswordChange: input.forcePasswordChange ?? false,
+            ...(prepared && { disabled: true }),
           })
         }
 
@@ -708,6 +731,21 @@ export class AccountLifecycleCoordinator {
 
       // Step 3: Reconcile host surfaces (Linux user/group, 0750 home, quota, slice, PHP-FPM, vhost, DNS)
       let reconciliation: ReconcileResult | null = null
+      const resumeAfterHost = prepared !== undefined && isJobStepCompleted(leased, 'reconcile_host')
+      const provisioningRequest = async (): Promise<ProvisioningReconcileRequest> => {
+        if (!prepared) return fail('PRECONDITION_FAILED', 'private provisioning authority is unavailable')
+        const snapshot = await this.store.readSnapshot(), currentLease = leaseAuthority.current
+        const authority: ProvisioningAuthority = {
+          actor: { id: input.actor.id, kind: actorKind, username: input.actor.username },
+          account: { id: account.id, username: account.username, ownerId: account.ownerId, planId: account.planId,
+            uid: account.uid, gid: account.gid, home: account.home, primaryDomain: account.primaryDomain },
+          operation: { id: leased.id, workerId: this.workerId, fencingToken: leased.fencingToken,
+            leaseExpiresAt: currentLease.leaseExpiresAt!, requestFingerprint: leased.requestFingerprint },
+          desired: { revision: snapshot.revision ?? await this.store.getRevision(), checksum: snapshot.checksum,
+            preparationReference: prepared.reference, preparationIdentity: canonicalProvisioningIdentity(prepared.desiredState) },
+        }
+        return { authority, binding: canonicalProvisioningIdentity(authority) }
+      }
       if (!isJobStepCompleted(leased, 'reconcile_host')) {
         if ((prepared ? this.provisioningPort : this.reconciler) && input.reconcile !== false) {
           await assertAuthority()
@@ -718,19 +756,7 @@ export class AccountLifecycleCoordinator {
           unknownOutcome = true
           if (prepared) {
             await assertAuthority()
-            const snapshot = await this.store.readSnapshot()
-            const currentLease = leaseAuthority.current
-            const authority = {
-              actor: { id: input.actor.id, kind: actorKind, username: input.actor.username },
-              account: { id: account.id, username: account.username, ownerId: account.ownerId, planId: account.planId,
-                uid: account.uid, gid: account.gid, home: account.home, primaryDomain: account.primaryDomain },
-              operation: { id: leased.id, workerId: this.workerId, fencingToken: leased.fencingToken,
-                // Current renewed lease. The agent must not require equality with an earlier leaseExpiresAt.
-                leaseExpiresAt: currentLease.leaseExpiresAt!, requestFingerprint: leased.requestFingerprint },
-              desired: { revision: snapshot.revision ?? await this.store.getRevision(), checksum: snapshot.checksum,
-                preparationReference: prepared.reference, preparationIdentity: canonicalProvisioningIdentity(prepared.desiredState) },
-            }
-            const request: ProvisioningReconcileRequest = { authority, binding: canonicalProvisioningIdentity(authority) }
+            const request = await provisioningRequest()
             const reply = await this.provisioningPort!.reconcile(request, { signal: leaseAuthority.abort.signal, assertAuthority })
             await assertAuthority()
             if (reply.reconciliation == null) {
@@ -739,6 +765,7 @@ export class AccountLifecycleCoordinator {
               })
             }
             observedExecution = assertProvisioningReply(request, reply)
+            observedAuthority = request.authority
             reconciliation = reply.reconciliation
           } else {
             reconciliation = await this.reconciler!.reconcile({ actor: actorLabel(input.actor), force: true,
@@ -773,6 +800,8 @@ export class AccountLifecycleCoordinator {
         checkpointState = {
           ...checkpointState,
           generationId: reconciliation?.generation?.id ?? null,
+          ...(observedExecution && observedAuthority && { observedContext: createProvisioningCheckpointObservation(
+            { authority: observedAuthority, binding: canonicalProvisioningIdentity(observedAuthority) }, observedExecution) }),
         }
 
         await assertAuthority()
@@ -790,6 +819,54 @@ export class AccountLifecycleCoordinator {
         if (input.faultInjection?.crashAfterStep === 'reconcile_host') {
           throw new SimulatedProvisionCrashError('reconcile_host', leased.id)
         }
+      }
+
+      if (prepared && resumeAfterHost) {
+        unknownOutcome = true
+        await assertAuthority()
+        const saved = this.recordedProvisioningExecution(prepared, leased, checkpointState, account, input.actor)
+        const request = await provisioningRequest()
+        if (request.authority.desired.revision !== saved.revision || request.authority.desired.checksum !== saved.sourceChecksum) {
+          unknownOutcome = true
+          fail('PRECONDITION_FAILED', 'provisioning source changed after its saved host observation', { verificationRequired: true })
+        }
+        // The Agent derives observation-only admission from its persisted completed host checkpoint.
+        // A request cannot opt into this mode, and no host effect may be replayed here.
+        unknownOutcome = true
+        const reply = await this.provisioningPort!.reconcile(request, { signal: leaseAuthority.abort.signal, assertAuthority })
+        await assertAuthority()
+        const current = assertProvisioningReply(request, reply)
+        if (!current || reply.reconciliation.status !== 'noop' || current.generationId !== saved.generationId
+          || current.generationChecksum !== saved.generationChecksum) {
+          fail('PRECONDITION_FAILED', 'fresh provisioning observations do not match the saved generation', { verificationRequired: true })
+        }
+        reobservedExecution = current
+        unknownOutcome = false
+      }
+
+      if (prepared) {
+        const proof = observedExecution ?? reobservedExecution
+        if (proof === undefined) {
+          unknownOutcome = true
+          return fail('PRECONDITION_FAILED', 'a current host observation is required before enabling account sign-in', { verificationRequired: true })
+        }
+        await assertAuthority()
+        leased = await saveJobCheckpoint(this.db, { jobId: leased.id, workerId: this.workerId, fencingToken: leased.fencingToken,
+          step: 'principal_activation_intent', progress: 88, data: checkpointState as unknown as Record<string, unknown> })
+        await assertAuthority()
+        unknownOutcome = true
+        const recorded = parseProvisioningCheckpointObservation(checkpointState.observedContext)
+        await activatePreparedProvisioningPrincipal({ db: this.db, store: this.store, actor: input.actor, account, prepared,
+          jobId: leased.id, workerId: this.workerId, fencingToken: leased.fencingToken, requestFingerprint: leased.requestFingerprint,
+          expectedActor: leased.actor, principalId: principal.id, proof,
+          recordedExecution: recorded.execution, recordedAuthority: recorded.request.authority,
+          readTemplates: this.readAccountTemplates!, authorizeCredential: this.authorizeProvisioningInTransaction!,
+        })
+        await assertAuthority()
+        checkpointState = { ...checkpointState, principalActivated: true }
+        leased = await saveJobCheckpoint(this.db, { jobId: leased.id, workerId: this.workerId, fencingToken: leased.fencingToken,
+          step: 'principal_activated', progress: 90, data: checkpointState as unknown as Record<string, unknown> })
+        unknownOutcome = false
       }
 
       // Step 4: Update SQLite search index & write audit log, then complete durable job
@@ -838,6 +915,7 @@ export class AccountLifecycleCoordinator {
         reconciliation,
         resumedFromStep,
         ...(observedExecution && { execution: observedExecution }),
+        ...(reobservedExecution && { reobservedExecution }),
       }
     } catch (err) {
       await leaseAuthority.stop().catch(() => undefined)
@@ -865,6 +943,7 @@ export class AccountLifecycleCoordinator {
           ...(isXpanelError(err) ? err.detail : {}), stateChanged: true, verificationRequired: true,
         })
       }
+      if (checkpointState && isXpanelError(err)) return fail(err.code, err.message, { ...err.detail, stateChanged: true })
       throw err
     } finally {
       await leaseAuthority.stop().catch(() => undefined)
@@ -877,6 +956,27 @@ export class AccountLifecycleCoordinator {
       || (checkpoint.gid !== undefined && account.gid !== checkpoint.gid) || (checkpoint.home !== undefined && account.home !== checkpoint.home)) {
       fail('CONFLICT', 'provisioned account identity or ownership changed; the saved job cannot adopt it', { stateChanged: false })
     }
+  }
+
+  /** Validate the stored receipt's schema/bindings only. It never authorizes activation without fresh observation. */
+  private recordedProvisioningExecution(prepared: PreparedAccountRecord, job: DurableJobRecord,
+    checkpoint: ProvisionJobCheckpointState, account: Account, actor: Principal): AccountExecutionObservation {
+    const unavailable = (): never => fail('PRECONDITION_FAILED', 'the saved provisioning observation requires recovery review', { verificationRequired: true })
+    let receipt: ReturnType<typeof parseProvisioningCheckpointObservation>
+    try { receipt = parseProvisioningCheckpointObservation(checkpoint.observedContext) } catch { return unavailable() }
+    const { authority } = receipt.request, { execution } = receipt
+    if (authority.actor.id !== actor.id || authority.actor.kind !== actor.kind || authority.actor.username !== actor.username
+      || authority.operation.id !== job.id || authority.operation.requestFingerprint !== job.requestFingerprint
+      || authority.desired.preparationReference !== prepared.reference || authority.desired.preparationIdentity !== canonicalProvisioningIdentity(prepared.desiredState)
+      || checkpoint.generationId !== execution.generationId
+      || canonicalProvisioningIdentity(authority.account) !== canonicalProvisioningIdentity({ id: account.id, username: account.username,
+        ownerId: account.ownerId, planId: account.planId, uid: account.uid, gid: account.gid, home: account.home, primaryDomain: account.primaryDomain })) return unavailable()
+    try {
+      return assertProvisioningReply({ authority, binding: canonicalProvisioningIdentity(authority) }, {
+        binding: canonicalProvisioningIdentity(authority), outcome: 'known',
+        reconciliation: { status: 'noop', generation: { id: execution.generationId, checksum: execution.generationChecksum, status: 'active' }, stateChecksum: execution.sourceChecksum }, execution,
+      }) ?? unavailable()
+    } catch { return unavailable() }
   }
 
   /**

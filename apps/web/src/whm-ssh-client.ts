@@ -1,7 +1,9 @@
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate, WHM_CLIENT_TEMPLATE_BINDING } from './whm-client-templates.ts'
 const displayDateTime = formatDisplayDateTime
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates, clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
 
 function bindWhmSsh(askDialog: ((options: Record<string, unknown>) => Promise<unknown>) | undefined): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
@@ -36,28 +38,78 @@ function bindWhmSsh(askDialog: ((options: Record<string, unknown>) => Promise<un
     if (!rows || !publicKey || !status || !refresh || !add) return
     const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const range = root.querySelector<HTMLSelectElement>('[data-whm-ssh-window]')
-    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && !root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled')
+    const policy = root.querySelector<HTMLElement>('[data-whm-ssh-effective]')!, failures = root.querySelector<HTMLElement>('[data-whm-ssh-failure-rows]')!
+    const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled'
+    let templateContractIntact = true
+    const admitted = (): boolean => templateContractIntact && typeof transport === 'function' && root.isConnected && root.dataset.whmDetailRoute === '/whm/security/ssh' && !root.closest(denied) && !panel.closest(denied)
     const manageable = (): boolean => admitted() && panel.dataset.whmSshManage === 'true' && typeof askDialog === 'function'
     let keys: Keys | null = null, busy = false, review = false, confirming = false
     let selectedWindow: '24h' | '7d' = '24h', addAvailable = false, removeAvailable = false
     const note = (state: string, text: string): void => { status.dataset.state = state; status.textContent = text; status.setAttribute('role', ['failed', 'stale', 'uncertain'].includes(state) ? 'alert' : 'status') }
+    const unavailable = (): false => {
+      publicKey.disabled = true; publicKey.readOnly = true; add.disabled = true; refresh.disabled = true
+      if (range) range.disabled = true
+      panel.querySelectorAll<HTMLButtonElement>('[data-whm-ssh-remove]').forEach(button => { button.disabled = true })
+      note('unavailable', t('Unavailable')); return false
+    }
+    const verifyTemplates = (): boolean => {
+      if (!admitted()) return unavailable()
+      try {
+        for (const [selector, tag, expected] of [
+          ['[data-whm-ssh-keys]', 'DIV', panel], ['[data-whm-ssh-key-rows]', 'TBODY', rows],
+          ['[data-whm-ssh-public-key]', 'TEXTAREA', publicKey], ['[data-whm-ssh-status]', 'P', status],
+          ['[data-whm-ssh-refresh]', 'BUTTON', refresh], ['[data-whm-ssh-add]', 'BUTTON', add],
+          ['[data-whm-ssh-effective]', 'DL', policy], ['[data-whm-ssh-failure-rows]', 'TBODY', failures],
+          ['[data-whm-ssh-window]', 'SELECT', range],
+        ] as const) {
+          const nodes = [...root.querySelectorAll<HTMLElement>(selector)].filter(node => node.closest('[data-whm-detail-route]') === root)
+          if (nodes.length !== 1 || nodes[0] !== expected || expected?.tagName !== tag) throw new Error('invalid_ssh_workspace')
+        }
+        if (refresh.type !== 'button' || add.type !== 'button') throw new Error('invalid_ssh_workspace')
+        assertWhmClientTemplates(root, [
+          ['whm-ssh-remove', 'button', { label: 'span' }],
+          ['whm-ssh-fact-technical', 'div', { label: 'dt', value: 'bdi' }],
+          ['whm-ssh-fact-text', 'div', { label: 'dt', value: 'span' }],
+        ])
+        const removeTemplate = clientTemplate(root, 'whm-ssh-remove')
+        const remove = cloneClientTemplate(removeTemplate, 'button', ['label']) as HTMLButtonElement, removeLabel = clientTemplateSlot(remove, 'label', 'span')
+        if (removeTemplate.closest('[data-whm-detail-route]') !== root || remove.getAttribute('type') !== 'button' || !remove.disabled
+          || !remove.hasAttribute('data-whm-ssh-remove') || remove.getAttribute('data-whm-ssh-remove') !== ''
+          || remove.dataset.protected !== 'true' || remove.children.length !== 1 || remove.firstElementChild !== removeLabel || removeLabel.children.length) throw new Error('invalid_ssh_remove')
+        const prototypes: HTMLElement[] = [remove]
+        for (const [name, tag] of [['whm-ssh-fact-technical', 'bdi'], ['whm-ssh-fact-text', 'span']] as const) {
+          const template = clientTemplate(root, name), group = cloneClientTemplate(template, 'div', ['label', 'value'])
+          const label = clientTemplateSlot(group, 'label', 'dt'), value = clientTemplateSlot(group, 'value', tag), definition = value.parentElement
+          if (template.closest('[data-whm-detail-route]') !== root || group.children.length !== 2 || group.firstElementChild !== label || label.children.length
+            || definition?.tagName !== 'DD' || group.lastElementChild !== definition || definition.children.length !== 1 || value.children.length
+            || (tag === 'bdi' ? value.getAttribute('dir') !== 'ltr' : value.hasAttribute('dir'))) throw new Error('invalid_ssh_fact')
+          prototypes.push(group)
+        }
+        for (const prototype of prototypes) for (const node of [prototype, ...prototype.querySelectorAll<HTMLElement>('*')])
+          if ([...node.attributes].some(attr => /^on/i.test(attr.name) || ['id', 'api-url', 'data-api-url', 'data-action', 'data-xp-action', 'href', 'form', 'formaction', 'contenteditable'].includes(attr.name))) throw new Error('invalid_ssh_template')
+        return true
+      } catch { templateContractIntact = false; return unavailable() }
+    }
     const lock = (): void => {
       const blocked = busy || confirming || review || !manageable() || !keys || !['read', 'partial'].includes(keys.state)
       publicKey.disabled = !admitted() || !keys; publicKey.readOnly = blocked || !addAvailable || !!keys?.opaqueEntries
       add.disabled = blocked || !addAvailable || !!keys?.opaqueEntries || !publicKey.value.trim()
       refresh.disabled = busy || confirming || !admitted()
       if (range) range.disabled = busy || confirming || !admitted()
-      panel.querySelectorAll<HTMLButtonElement>('[data-whm-ssh-remove]').forEach(button => { button.disabled = blocked || !removeAvailable || button.dataset.protected === 'true' })
+      panel.querySelectorAll<HTMLButtonElement>('[data-whm-ssh-remove]').forEach(button => { button.disabled = blocked || !removeAvailable || button.dataset.protected === 'true' || !!button.closest(denied) })
       panel.setAttribute('aria-busy', String(busy || confirming))
     }
-    const request = (method: string, path: string, body?: unknown): Promise<unknown> => {
-      if (!transport || !admitted()) return Promise.reject({ details: { stateChanged: false } })
-      return body === undefined ? transport(method, path) : transport(method, path, body)
+    const request = async (method: string, path: string, body?: unknown): Promise<unknown> => {
+      if (!transport || !verifyTemplates()) throw new Error('ssh_workspace_unavailable')
+      const response = await (body === undefined ? transport(method, path) : transport(method, path, body))
+      if (!verifyTemplates()) throw new Error('ssh_workspace_unavailable')
+      return response
     }
     const confirm = async (title: string, body: string, danger = false): Promise<boolean> => {
+      if (!verifyTemplates()) return false
       if (!askDialog || confirming) { note('failed', t('Confirmation is unavailable; no key change was sent.')); return false }
       confirming = true; lock()
-      try { return await askDialog({ title, body, danger, confirm: t('Confirm') }) === true } catch { return false } finally { confirming = false; lock() }
+      try { const accepted = await askDialog({ title, body, danger, confirm: t('Confirm') }); return verifyTemplates() && accepted === true } catch { return false } finally { confirming = false; lock() }
     }
     const textCell = (row: HTMLTableRowElement, text: string, technical = false): void => { const cell = document.createElement('td'), content = document.createElement(technical ? 'bdi' : 'span'); if (technical) content.dir = 'ltr'; content.textContent = text; cell.append(content); row.append(cell) }
     const placeholder = (body: HTMLElement, text: string, columns: number): void => { body.textContent = ''; const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = columns; cell.textContent = text; row.append(cell); body.append(row) }
@@ -68,25 +120,27 @@ function bindWhmSsh(askDialog: ((options: Record<string, unknown>) => Promise<un
       if (!keys || keys.state === 'unavailable') { placeholder(rows, t('Authorized-key observations are unavailable.'), 6); return }
       for (const key of keys.items) {
         const row = document.createElement('tr'); textCell(row, key.fingerprint, true); textCell(row, key.keyType, true); textCell(row, key.comment || t('Not shown')); textCell(row, key.addedAt === null ? t('Not observed') : displayDateTime(key.addedAt), key.addedAt !== null); textCell(row, t('Not observed'))
-        const cell = document.createElement('td'), remove = document.createElement('button')
-        remove.type = 'button'; remove.className = 'xp-btn'; remove.dataset.whmSshRemove = key.fingerprint; remove.dataset.protected = String(key.protected || !key.managed)
-        remove.textContent = key.protected || !key.managed ? t('Protected key') : t('Remove managed key')
-        remove.addEventListener('click', () => { if (!remove.disabled) void mutate('DELETE', key.fingerprint) }); cell.append(remove); row.append(cell); rows.append(row)
+        const cell = document.createElement('td'), remove = cloneClientTemplate(clientTemplate(root, 'whm-ssh-remove'), 'button', ['label']) as HTMLButtonElement
+        remove.dataset.whmSshRemove = key.fingerprint; remove.dataset.protected = String(key.protected || !key.managed)
+        clientTemplateSlot(remove, 'label', 'span').textContent = key.protected || !key.managed ? t('Protected key') : t('Remove managed key')
+        remove.addEventListener('click', () => { if (!remove.disabled && remove.isConnected && remove.closest('[data-whm-detail-route]') === root && verifyTemplates()) void mutate('DELETE', key.fingerprint) }); cell.append(remove); row.append(cell); rows.append(row)
       }
       if (!keys.items.length) placeholder(rows, keys.opaqueEntries ? t('Unrecognized existing entries are preserved and protected.') : t('The authorized-key read returned no keys.'), 6)
       lock()
     }
     const paintDetails = (ssh: Record<string, unknown>): void => {
-      const policy = root.querySelector<HTMLElement>('[data-whm-ssh-effective]'), failures = root.querySelector<HTMLElement>('[data-whm-ssh-failure-rows]')
       if (policy) {
         if (!object(ssh.policy) || !['read', 'unavailable'].includes(String(ssh.policy.state)) || !object(ssh.policy.values) || !object(ssh.service)) throw new Error('invalid_ssh_policy')
-        const fields: [string, string][] = []
-        if (ssh.policy.state === 'read') for (const [key, value] of Object.entries(ssh.policy.values)) { if (!safe(key, 64) || !safe(value, 1024)) throw new Error('invalid_ssh_policy'); fields.push([key, value]) }
-        if (ssh.service.state === 'read') for (const key of ['unit', 'active', 'substate', 'enabled']) { const value = ssh.service[key]; if (!safe(value, 128)) throw new Error('invalid_ssh_service'); fields.push([key, value]) }
+        const fields: [string, string, boolean][] = []
+        if (ssh.policy.state === 'read') for (const [key, value] of Object.entries(ssh.policy.values)) { if (!safe(key, 64) || !safe(value, 1024)) throw new Error('invalid_ssh_policy'); fields.push([key, value, true]) }
+        if (ssh.service.state === 'read') for (const key of ['unit', 'active', 'substate', 'enabled']) { const value = ssh.service[key]; if (!safe(value, 128)) throw new Error('invalid_ssh_service'); fields.push([key, value, true]) }
         policy.textContent = ''
-        if (!fields.length) fields.push([t('Host observations'), t('Unavailable')])
-        if (safe(ssh.observedAt, 40) && Number.isFinite(Date.parse(ssh.observedAt))) fields.push([t('Read started (UTC)'), displayDateTime(ssh.observedAt)])
-        for (const [label, value] of fields) { const group = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'), isolated = document.createElement('bdi'); group.className = 'xp-security-observation__fact'; dt.textContent = label; isolated.dir = 'ltr'; isolated.textContent = value; dd.append(isolated); group.append(dt, dd); policy.append(group) }
+        if (!fields.length) fields.push([t('Host observations'), t('Unavailable'), false])
+        if (safe(ssh.observedAt, 40) && Number.isFinite(Date.parse(ssh.observedAt))) fields.push([t('Read started (UTC)'), displayDateTime(ssh.observedAt), true])
+        for (const [label, value, technical] of fields) {
+          const group = cloneClientTemplate(clientTemplate(root, technical ? 'whm-ssh-fact-technical' : 'whm-ssh-fact-text'), 'div', ['label', 'value'])
+          clientTemplateSlot(group, 'label', 'dt').textContent = label; clientTemplateSlot(group, 'value', technical ? 'bdi' : 'span').textContent = value; policy.append(group)
+        }
       }
       if (failures) {
         const value = ssh.failedLogins
@@ -106,60 +160,67 @@ function bindWhmSsh(askDialog: ((options: Record<string, unknown>) => Promise<un
       return { ssh: response.ssh, keys: keysFrom(response.ssh.keys), actions: { add: response.keyActions.add, remove: response.keyActions.remove } }
     }
     const refreshRead = async (targetWindow: '24h' | '7d' = selectedWindow): Promise<void> => {
-      if (busy || confirming || !admitted()) return
+      if (busy || confirming || !verifyTemplates()) return
       if ((review || publicKey.value.trim()) && !await confirm(t('Read saved SSH observations?'), t('Review the current keys before continuing. The public-key draft is retained and no previous mutation is retried.'))) return
-      if (busy || confirming || !admitted()) return
+      if (busy || confirming || !verifyTemplates()) return
       busy = true; lock(); note('reading', t('Reading SSH observations…'))
       try {
-        const observed = await read(targetWindow); paintDetails(observed.ssh); keys = observed.keys; selectedWindow = targetWindow
+        const observed = await read(targetWindow); if (!verifyTemplates()) return
+        paintDetails(observed.ssh); keys = observed.keys; selectedWindow = targetWindow
         if (range) range.value = selectedWindow
         addAvailable = observed.actions.add; removeAvailable = observed.actions.remove; review = keys.state === 'review-required'; paintKeys()
         note(review ? 'uncertain' : keys.state === 'unavailable' ? 'unavailable' : 'read', review ? t('A host key write requires operator review. Key changes remain locked.') : keys.state === 'unavailable' ? t('Authorized keys could not be observed. Other host observations are shown when available.') : !addAvailable && !removeAvailable ? t('SSH observations read. Key changes are unavailable on this host; connection-specific policy and authentication are unverified.') : t('SSH observations read. Connection-specific policy and key authentication are not verified here.'))
       }
-      catch { note('failed', t('SSH observations could not be read. Existing values and the draft are retained.')) }
+      catch { if (verifyTemplates()) note('failed', t('SSH observations could not be read. Existing values and the draft are retained.')) }
       finally { busy = false; lock() }
     }
     async function mutate(method: 'POST' | 'DELETE', target?: string): Promise<void> {
-      if (!keys || busy || confirming || review || !manageable() || !['read', 'partial'].includes(keys.state) || !(method === 'POST' ? addAvailable && keys.opaqueEntries === 0 : removeAvailable)) return
+      if (!keys || busy || confirming || review || !verifyTemplates() || !manageable() || !['read', 'partial'].includes(keys.state) || !(method === 'POST' ? addAvailable && keys.opaqueEntries === 0 : removeAvailable)) return
       const baseline = keys, source = publicKey.value.trim()
       let selectedFingerprint: string
       busy = true; lock()
-      try { selectedFingerprint = method === 'POST' ? await fingerprintFor(source) : target!; if (method === 'DELETE' && !baseline.items.some(key => key.fingerprint === target && key.managed && !key.protected)) return }
+      try { selectedFingerprint = method === 'POST' ? await fingerprintFor(source) : target!; if (!verifyTemplates()) return; if (method === 'DELETE' && !baseline.items.some(key => key.fingerprint === target && key.managed && !key.protected)) return }
       catch { note('failed', t('Enter a single valid public key. No change was sent.')); return }
       finally { busy = false; lock() }
       if (!await confirm(method === 'POST' ? t('Add root public key') : t('Remove managed root key'), selectedFingerprint + '\n' + t('This changes the root authorized-key file. Authentication with a new key must be checked separately.'), method === 'DELETE')) return
-      if (busy || !manageable()) return
+      if (busy || !verifyTemplates() || !manageable()) return
       busy = true; lock(); let sent = false
       try {
         const current = await read()
+        if (!verifyTemplates()) return
         addAvailable = current.actions.add; removeAvailable = current.actions.remove
         if (!(method === 'POST' ? addAvailable : removeAvailable)) throw { details: { stateChanged: false } }
         if (!['read', 'partial'].includes(current.keys.state) || !sameKeys(current.keys, baseline)) { review = true; note('stale', t('The authorized keys changed. Read and review them before retrying; the draft is retained.')); return }
         sent = true
         const response = await request(method, '/api/security/ssh/keys', method === 'POST' ? { publicKey: source, expectedRevision: baseline.revision } : { fingerprint: selectedFingerprint, expectedRevision: baseline.revision })
+        if (!verifyTemplates()) throw new Error('ssh_workspace_unavailable')
         const responseDetails = object(response) && object(response.details) ? response.details : {}
         if (!object(response) || response.applied !== true || [response, responseDetails].some(value => value.unknownOutcome === true || value.verificationRequired === true || value.needsAttention === true)) throw new Error('invalid_ssh_ack')
         const acknowledged = keysFrom(response.keys), others = baseline.items.filter(key => key.fingerprint !== selectedFingerprint)
         if (!['read', 'partial'].includes(acknowledged.state) || acknowledged.revision === baseline.revision || JSON.stringify(acknowledged.items.filter(key => key.fingerprint !== selectedFingerprint)) !== JSON.stringify(others) || acknowledged.opaqueEntries !== baseline.opaqueEntries) throw new Error('wrong_ssh_key_ack')
         if (method === 'POST' ? !acknowledged.items.some(key => key.fingerprint === selectedFingerprint && key.managed) : acknowledged.items.some(key => key.fingerprint === selectedFingerprint)) throw new Error('wrong_ssh_key_target')
         const observed = await read()
+        if (!verifyTemplates()) throw new Error('ssh_workspace_unavailable')
         if (!['read', 'partial'].includes(observed.keys.state) || !sameKeys(observed.keys, acknowledged)) throw new Error('ssh_key_readback_mismatch')
         keys = observed.keys; addAvailable = observed.actions.add; removeAvailable = observed.actions.remove; paintDetails(observed.ssh); paintKeys(); review = false
         if (method === 'POST') publicKey.value = ''
         note('saved', t('The authorized-key change was applied and read back. Key authentication and connection-specific policy are not verified here.'))
       } catch (error) {
+        const contractValid = verifyTemplates()
         const details = object(error) && object(error.details) ? error.details : {}
         const refused = object(error) && (error.stateChanged === false || details.stateChanged === false) && details.unknownOutcome !== true && details.verificationRequired !== true
         review = sent && !refused || object(error) && error.status === 409
+        if (!contractValid && !sent) return
         note(review ? 'uncertain' : 'failed', review ? t('The key-change outcome requires review. No retry was sent; read the current keys before continuing.') : t('The key change was refused or the current state could not be read. The draft is retained.'))
       } finally { busy = false; lock() }
     }
     if (!transport || !admitted()) { lock(); note('unavailable', t('SSH observations are unavailable here. No key change was sent.')); return }
-    publicKey.addEventListener('input', lock); refresh.addEventListener('click', () => { void refreshRead() }); add.addEventListener('click', () => { void mutate('POST') })
+    if (!verifyTemplates()) return
+    publicKey.addEventListener('input', () => { if (verifyTemplates()) lock() }); refresh.addEventListener('click', () => { void refreshRead() }); add.addEventListener('click', () => { void mutate('POST') })
     range?.addEventListener('change', () => { const target = range.value === '7d' ? '7d' : '24h'; range.value = selectedWindow; void refreshRead(target) })
     window.addEventListener('beforeunload', event => { if (review || publicKey.value.trim()) { event.preventDefault(); event.returnValue = '' } })
     void refreshRead()
   })
 }
 
-export const WHM_SSH_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};return ${bindWhmSsh.toString()};})()`
+export const WHM_SSH_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};${WHM_CLIENT_TEMPLATE_BINDING}return ${bindWhmSsh.toString()};})()`

@@ -2,13 +2,14 @@
 // It emits the classic shell hooks (data-* attributes, data-action values and element ids) so
 // ws-client.js works unchanged; layout and styling are v2's own.
 
-import { canonicalNavigationRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
+import { canonicalNavigationRoute, visibleNavigation, visibleRegisteredNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { catalogText, localeInfo, type Locale, type Translate } from '../../../i18n.ts'
 import { brandingProductName } from '../../../branding.ts'
 import type { ThemeViewProps } from '../../contract.ts'
 import { attr, escapeHtml, hookAttrs, type HookAttributes, type Tone } from '../html.ts'
 import { catalogIcon, icon } from '../icons.ts'
 import { toastRegion } from '../components/toast-region.ts'
+import { activityControl } from './activity-control.ts'
 import { activityDrawer, commandPalette, reconcileBanner, type ActivityDrawerProps, type CommandPaletteProps, type ReconcileBannerProps, type V2Surface } from './overlays.ts'
 
 const PRODUCT: Readonly<Record<V2Surface, string>> = { xpanel: 'xPanel', xwhm: 'xWHM', xmail: 'xMail' }
@@ -81,7 +82,11 @@ const SEARCH_LABELS: Readonly<Record<V2Surface, string>> = {
 function sidebarNavigation(t: Translate, props: V2ShellProps): string {
   const locale = t.locale
   const current = canonicalNavigationRoute(props.activeRoute)
-  const nav = visibleNavigation(props.visibility, props.catalog).find(item => item.surface === props.surface)
+  // Account documents remain reachable while their native tools are unqualified.
+  const navigation = props.surface === 'xpanel'
+    ? visibleRegisteredNavigation(props.visibility)
+    : visibleNavigation(props.visibility, props.catalog)
+  const nav = navigation.find(item => item.surface === props.surface)
   const sections = (nav?.sections ?? []).map(section => {
     const name = catalogText(locale, `nav.section.${props.surface}.${section.id}.name`, section.name)
     const open = section.pages.some(page => page.route === current)
@@ -148,9 +153,7 @@ function topbar(t: Translate, props: V2ShellProps): string {
   const next = props.scheme.current === 'dark' ? 'light' : 'dark'
   const schemeLabel = next === 'dark' ? t('Dark theme') : t('Light theme')
   const scheme = `<a class="v2-btn v2-btn--icon" href="${escapeHtml(props.scheme.toggleHref)}" data-theme-toggle="${next}" aria-label="${escapeHtml(schemeLabel)}" title="${escapeHtml(schemeLabel)}">${icon(next === 'dark' ? 'moon' : 'sun')}</a>`
-  const unread = props.unread ?? 0
-  const bell = props.activity
-    ? `<button type="button" class="v2-btn v2-btn--icon v2-top__bell" data-action="open-activity-drawer" aria-controls="xp-activity-drawer" aria-label="${escapeHtml(t(msgctxt('theme:v2', '{count, plural, =0 {Notifications, none unread} one {Notifications, # unread} other {Notifications, # unread}}'), { count: unread }))}">${icon('bell')}${unread > 0 ? `<span class="v2-top__badge v2-num" aria-hidden="true">${unread > 99 ? '99+' : unread}</span>` : ''}</button>` : ''
+  const bell = activityControl(t, { available: false })
   return `<header class="v2-top" role="banner">
 <button type="button" class="v2-btn v2-btn--icon v2-top__menu" data-action="toggle-mobile-nav" aria-controls="xp-sidebar" aria-expanded="false" aria-label="${escapeHtml(t('Menu'))}">${icon('menu')}</button>
 <a class="v2-top__brand" href="${escapeHtml(props.homeHref)}">${escapeHtml(brandingProductName(props.branding, PRODUCT[props.surface]))}</a>
@@ -164,7 +167,7 @@ ${props.searchHtml ?? `<button type="button" class="v2-search" data-action="open
 /** The complete v2 shell for one surface; `contentHtml` is the page body (page header, cards, tables).
  *  Like every kit function with built-in text, it takes the page translator first. */
 export function renderV2Shell(t: Translate, props: V2ShellProps): string {
-  return `<div class="v2-shell" data-surface="${props.surface}"${hookAttrs(props.hooks)}>
+  return `<div class="v2-shell" data-xp-activity-shell data-surface="${props.surface}"${hookAttrs(props.hooks)}>
 <a class="v2-skip" href="#main-content">${escapeHtml(t('Skip to content'))}</a>
 ${sidebar(t, props)}
 <button type="button" class="v2-backdrop" data-action="close-mobile-nav" data-xp-nav-backdrop hidden tabindex="-1" aria-label="${escapeHtml(t(msgctxt('shell', 'Close navigation')))}"></button>
@@ -277,5 +280,5 @@ ${SIDE}__close{display:inline-flex}
 .v2-tools__content{inline-size:100%;padding-top:12px}
 .v2-search{max-width:none}
 }
-@media(max-width:640px){.v2-ui-theme{padding:var(--space-2)}}
+@media(max-width:640px){.v2-ui-theme{padding:var(--space-2)}.v2-tools__content{position:relative}.v2-account{position:static}.v2-account__panel{inset-inline:0;min-inline-size:0;max-inline-size:100%}}
 `

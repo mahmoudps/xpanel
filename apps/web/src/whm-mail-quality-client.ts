@@ -1,4 +1,5 @@
-import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates
 const whmClientNode = canonicalWhmClientNode
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
@@ -80,7 +81,27 @@ function bindWhmMailQuality(): void {
     const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
     if (!status || !refresh || !run || !rows || !banner || !selectAll || !selectedLabel) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.mailQualityCanRead === 'true' && !root.closest(denied) && !!request
+    let templateContractIntact = true
+    const templateContracts = [
+      ['whm-mail-quality-check', 'div', { 'content': 'div' }],
+    ] as const
+    const verifyWhmTemplates = (): void => {
+      if (!templateContractIntact) throw new Error('client_template_contract_unavailable')
+      try { assertWhmClientTemplates(root, templateContracts) } catch (error) {
+        templateContractIntact = false
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+        status.dataset.state = 'unavailable'; status.textContent = t('Unavailable')
+        throw error
+      }
+    }
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.mailQualityCanRead === 'true' && !root.closest(denied) && !!request)
+    if (admitted()) { try { verifyWhmTemplates() } catch { return } }
+    const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
+      verifyWhmTemplates()
+      const reply = await request!(...args)
+      verifyWhmTemplates()
+      return reply
+    }
     const stateLabels: Record<string, string> = { ok: t('OK'), problem: t('Problem'), unavailable: t('Unavailable') }
     const okText: Record<string, string> = { mx: t('Points to this server.'), spf: t('Authorizes the sending addresses.'), dkim: t('Matches the signing key.'), ptr: t('Forward-confirmed for the HELO host.') }
     const causes: Record<string, string> = {
@@ -175,7 +196,7 @@ function bindWhmMailQuality(): void {
       if (busy || !admitted()) return
       busy = true; controls(); note('reading', t('Reading hosted mail domains…'))
       try {
-        const next = readMailQualityList(await request!('GET', '/api/server/mail-quality'))
+        const next = readMailQualityList(await checkedRequest('GET', '/api/server/mail-quality'))
         if (!admitted()) return
         list = next
         for (const domain of [...selected]) if (!next.domains.some(item => item.domain === domain)) selected.delete(domain)
@@ -191,7 +212,7 @@ function bindWhmMailQuality(): void {
       if (domains.length > list.maxCheck) { show('refused', t('Select at most 50 domains for one check. Nothing was looked up.')); return }
       busy = true; controls(); show('reading', t('Checking live DNS…'))
       try {
-        const next = readMailQualityResults(await request!('POST', '/api/server/mail-quality/check', { domains }), domains)
+        const next = readMailQualityResults(await checkedRequest('POST', '/api/server/mail-quality/check', { domains }), domains)
         if (!admitted()) return
         for (const item of next.results) results[item.domain] = { ...item, checkedAt: next.checkedAt }
         const problems = next.results.filter(item => checks.some(key => item[key].state === 'problem')).length, unavailable = next.results.filter(item => checks.some(key => item[key].state === 'unavailable')).length

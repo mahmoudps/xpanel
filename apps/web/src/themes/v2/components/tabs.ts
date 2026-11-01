@@ -27,11 +27,13 @@ export interface TabPanelProps {
   tabId: string
   bodyHtml: string
   hidden?: boolean
+  /** Page sections keep the approved 32px hierarchy instead of compact component spacing. */
+  sectionSpacing?: boolean
   hooks?: HookAttributes
 }
 
 export const tabPanel = (props: TabPanelProps): string =>
-  `<div class="v2-tabpanel" role="tabpanel" id="${escapeHtml(props.id)}" aria-labelledby="${escapeHtml(props.tabId)}" tabindex="0"${props.hidden ? ' hidden' : ''}${hookAttrs(props.hooks)}>${props.bodyHtml}</div>`
+  `<div class="v2-tabpanel${props.sectionSpacing ? ' v2-tabpanel--sections' : ''}" role="tabpanel" id="${escapeHtml(props.id)}" aria-labelledby="${escapeHtml(props.tabId)}" tabindex="0"${props.hidden ? ' hidden' : ''}${hookAttrs(props.hooks)}>${props.bodyHtml}</div>`
 
 export const TABS_CSS = `.v2-tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--line)}
 .v2-tabs>[role=tab]{display:inline-flex;align-items:center;gap:var(--space-1);min-height:var(--target);padding:0 14px;margin-bottom:-1px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted);font-size:14px;font-weight:500;cursor:pointer}
@@ -39,4 +41,6 @@ export const TABS_CSS = `.v2-tabs{display:flex;flex-wrap:wrap;gap:4px;border-bot
 .v2-tabs>[role=tab][aria-selected="true"]{border-bottom-color:var(--accent-fill);color:var(--text);font-weight:600}
 .v2-tabs .v2-count{background:var(--sunken)}
 .v2-tabpanel{display:flex;flex-direction:column;gap:var(--space-2);padding-top:var(--space-2)}
+.v2-tabpanel--sections{gap:var(--space-4);padding-top:0}
+.v2-tabpanel--sections[hidden]{display:none}
 `

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { tools, type VisibilityContext } from '@xpanel/catalog'
 import { defaultPlan, type Account, type DatabaseUser, type Domain, type Principal, type Reseller, type WebsiteAnalyticsSnapshot } from '@xpanel/core'
-import type { PanelSurfaceProps, WhmSurfaceProps } from '../themes/contract.ts'
+import type { AuthPersonalSource, PanelSurfaceProps, WhmSurfaceProps } from '../themes/contract.ts'
 import { MONITORING_LOG_DEFAULT_LINES, MONITORING_LOG_MAX_LINES, MONITORING_LOG_UNITS } from '../../../../packages/os/src/monitoring-command.ts'
-import { projectPanelSurface, projectWhmSurface, projectReadOnlyPanelSurface, projectReadOnlyWhmSurface, projectReadOnlyMailSurface } from './theme-surface.ts'
+import { projectAuthPersonal, projectPanelSurface, projectWhmSurface, projectReadOnlyPanelSurface, projectReadOnlyWhmSurface, projectReadOnlyMailSurface } from './theme-surface.ts'
 
 const catalog = tools.map(tool => ({ ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } }))
 const account: Account = { id: 'account-a', username: 'alice', uid: 20001, gid: 20001, home: '/home/alice', primaryDomain: 'alice.test', planId: 'plan-a', ownerId: null, status: 'active', suspendReason: null, contactEmail: 'alice@example.test', ipv4: '192.0.2.10', shell: 'jailed', createdAt: '2026-10-29T00:00:00Z' }
@@ -180,5 +180,51 @@ describe('read-only surface provider boundaries', () => {
     expect(mailboxView.props.quotaUsedMb).toBeUndefined()
     expect(mailboxView.authority.canReadFacts).toBe(false)
     blocked(mailboxView.authority)
+  })
+})
+
+
+describe('core self-auth projection provenance and identity', { tags: ['unit'] }, () => {
+  const context = (): Parameters<typeof projectAuthPersonal>[1] => ({ surface: 'xpanel', route: '/security/account', visibility: user, hasTrustedFactors: true, workspace: true })
+  const source = (): AuthPersonalSource => ({ schemaVersion: 1, provenance: 'interactive-owner', surface: 'xpanel', route: '/security/account',
+    principalId: 'user-a', accountId: account.id, username: account.username, state: 'ready',
+    canChangePassword: true, canReadSessions: true, canRevokeSessions: true, canReadApiTokens: true, canManageApiTokens: false })
+  const closed = { canChangePassword: false, canReadSessions: false, canRevokeSessions: false, canReadApiTokens: false, canManageApiTokens: false }
+
+  it('projects only five self flags and strips every identity without promoting native access', () => {
+    const view = projectAuthPersonal(source(), context())
+    expect(view).toEqual({ state: 'ready', canChangePassword: true, canReadSessions: true, canRevokeSessions: true, canReadApiTokens: true, canManageApiTokens: false })
+    expect(Object.keys(view ?? {}).sort()).toEqual(['canChangePassword', 'canManageApiTokens', 'canReadApiTokens', 'canReadSessions', 'canRevokeSessions', 'state'].sort())
+    for (const field of ['principalId', 'accountId', 'username', 'canManage', 'canRead', 'qualified']) expect(view).not.toHaveProperty(field)
+  })
+
+  it.each(['principalId', 'accountId', 'username'])('denies a different %s even when every supplied action flag is true', field => {
+    expect(projectAuthPersonal({ ...source(), [field]: 'foreign-identity' }, context())).toEqual({ state: 'denied', ...closed })
+  })
+
+  const malformed: unknown[] = [undefined, null, { ...source(), schemaVersion: 2 }, { ...source(), provenance: 'query' },
+    { ...source(), surface: 'xmail' }, { ...source(), route: '/home' }, { ...source(), canReadSessions: 'true' }, { ...source(), untrustedExtra: 'not-emitted' }]
+  it.each(malformed)('keeps unavailable or malformed source closed: %j', value => {
+    expect(projectAuthPersonal(value, context())).toEqual({ state: 'unavailable', ...closed })
+  })
+
+  it.each(['denied', 'unavailable'])('keeps known %s source flags false', state => {
+    expect(projectAuthPersonal({ ...source(), state }, context())).toEqual({ state, ...closed })
+  })
+  it('requires the already trusted factor state independently of supplied action flags', () => {
+    expect(projectAuthPersonal(source(), { ...context(), hasTrustedFactors: false })).toEqual({ state: 'unavailable', ...closed })
+  })
+  it.each(['/home', '/resources'])('does not expose a self-auth view outside the Security document: %s', route => {
+    expect(projectAuthPersonal(source(), { ...context(), route })).toBeUndefined()
+  })
+  it('never adds interactive auth controls to a status document', () => {
+    expect(projectAuthPersonal(source(), { ...context(), workspace: false })).toBeUndefined()
+  })
+  it.each(['login', 'xwhm', 'xmail'])('does not project owner action flags into the %s realm', surface => {
+    expect(projectAuthPersonal(source(), { ...context(), surface })).toBeUndefined()
+  })
+  const deniedContexts: (VisibilityContext | undefined)[] = [undefined, { principal: root }]
+  it.each(deniedContexts)('does not invent an authenticated owner from missing or operator identity', visibility => {
+    expect(projectAuthPersonal(source(), { ...context(), visibility })).toEqual({ state: 'denied', ...closed })
   })
 })

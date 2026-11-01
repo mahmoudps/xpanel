@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fail } from '@xpanel/core'
-import { createApiToken, createRootPrincipal, createTestDb, findActiveApiTokenByHash, listApiTokensForPrincipal } from '@xpanel/db'
+import { randomBytes } from 'node:crypto'
+import { assertPrivilegedSessionAuthorization, captureMfaRuntimePolicy, fail } from '@xpanel/core'
+import { createApiToken, createRootPrincipal, createSession, createTestDb, findActiveApiTokenByHash, findActiveSessionByTokenHash, getPrincipal, listApiTokensForPrincipal, setTotpSecret } from '@xpanel/db'
+import type { Db, PrincipalRecord } from '@xpanel/db'
 import type { AuthenticatedCaller } from './auth.ts'
-import { sha256Hex } from './auth.ts'
+import { authenticateRequest, deriveCsrfToken, sha256Hex } from './auth.ts'
+import { sessionCookieName, sessionTokenHash } from './entry-points.ts'
 import { policyForRequest } from './authorization.ts'
 import { API_TOKEN_MAX_ACTIVE, API_TOKEN_SCOPE_RESOURCES, handlePanelTokensWorkspaceRoute, parseApiTokenCreate } from './panel-tokens-workspace.ts'
 import type { PanelTokensWorkspaceHelpers } from './panel-tokens-workspace.ts'
@@ -13,6 +16,26 @@ const BASE = '/api/server/panel/api-tokens'
 const OTHER_ID = '00000000-0000-4000-8000-000000000000'
 let database: Awaited<ReturnType<typeof createTestDb>>
 let root: AuthenticatedCaller
+let mfaPolicy: ReturnType<typeof captureMfaRuntimePolicy>
+const SERVER_SECRET = 'token-manager-synthetic-server-secret-32-bytes'
+
+const callerForPrincipal = async (principal: PrincipalRecord): Promise<AuthenticatedCaller> => {
+  const sessionToken = randomBytes(32).toString('hex')
+  const session = await createSession(database.db, { principalId: principal.id, tokenHash: sessionTokenHash(sessionToken, 'xwhm'),
+    expiresAt: new Date(Date.now() + 3600_000).toISOString(), mfaVerified: true })
+  return { principal: { kind: 'root', id: principal.id, username: principal.username }, principalRecord: principal,
+    sessionId: session.id, sessionToken, apiTokenId: null, scopes: ['*'], csrfValid: true, mfaVerified: true }
+}
+
+const authorizeIssuance: PanelTokensWorkspaceHelpers['authorizeIssuance'] = async (tx, caller) => {
+  if (!caller.sessionId || !caller.sessionToken || caller.apiTokenId !== null) return fail('FORBIDDEN', 'the original session is required', { stateChanged: false })
+  await assertPrivilegedSessionAuthorization({
+    reference: { kind: 'session', principalId: caller.principal.id, sessionId: caller.sessionId,
+      tokenHash: sessionTokenHash(caller.sessionToken, 'xwhm'), entryPoint: 'xwhm' },
+    actor: caller.principal, policy: mfaPolicy,
+    ports: { principal: id => getPrincipal(tx, id), session: tokenHash => findActiveSessionByTokenHash(tx, tokenHash) },
+  })
+}
 
 const helpers = (overrides: Partial<PanelTokensWorkspaceHelpers> = {}) => {
   const audits: Record<string, unknown>[] = []
@@ -20,6 +43,7 @@ const helpers = (overrides: Partial<PanelTokensWorkspaceHelpers> = {}) => {
     db: database.db,
     requireCaller: vi.fn(async () => root),
     assertRoot: vi.fn(async (caller: AuthenticatedCaller) => { if (caller.principal.kind !== 'root') fail('FORBIDDEN', 'root role is required for this operation') }),
+    authorizeIssuance,
     emitAudit: vi.fn(async (entry: Record<string, unknown>) => { audits.push(entry) }),
     ...overrides,
   }
@@ -27,17 +51,103 @@ const helpers = (overrides: Partial<PanelTokensWorkspaceHelpers> = {}) => {
 }
 const call = (path: string, method: string, h: PanelTokensWorkspaceHelpers, body?: unknown, type = 'application/json') => {
   const url = new URL('http://localhost' + path)
-  return handlePanelTokensWorkspaceRoute(new Request(url, { method, ...(body === undefined ? {} : { body: typeof body === 'string' ? body : JSON.stringify(body), headers: { 'content-type': type } }) }), url, method, h)
+  const headers = new Headers({ cookie: sessionCookieName('xwhm', true) + '=' + root.sessionToken,
+    'x-csrf-token': deriveCsrfToken(root.sessionToken!, SERVER_SECRET, 'xwhm') })
+  if (body !== undefined) headers.set('content-type', type)
+  return handlePanelTokensWorkspaceRoute(new Request(url, { method, headers, ...(body === undefined ? {} : { body: typeof body === 'string' ? body : JSON.stringify(body) }) }), url, method, h)
 }
 const create = (h: PanelTokensWorkspaceHelpers, overrides: Record<string, unknown> = {}) => call(BASE, 'POST', h, { name: 'stock-sync', scopes: ['accounts:read'], expiresInDays: 30, ...overrides })
 const rows = () => database.db.query<Record<string, unknown>>('SELECT * FROM api_tokens')
 
 beforeEach(async () => {
   database = await createTestDb()
+  vi.stubEnv('NODE_ENV', 'production')
+  mfaPolicy = captureMfaRuntimePolicy()
   const principal = await createRootPrincipal(database.db, { username: 'root', passwordHash: hash, forcePasswordChange: false })
-  root = { principal: { kind: 'root', id: principal.id, username: 'root' }, sessionId: 'session-1', apiTokenId: null, scopes: ['*'] } as unknown as AuthenticatedCaller
+  root = await callerForPrincipal(principal)
 })
-afterEach(async () => { await database.close() })
+afterEach(async () => { vi.useRealTimers(); vi.unstubAllEnvs(); await database.close() })
+
+const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
+
+/** The wrapper schedules only: every query and BEGIN IMMEDIATE is executed by the real SqlRunner. */
+const queueTokenMutation = (db: Db, mutation: (tx: Db) => Promise<void>) => {
+  const entered = deferred(), enqueued = deferred(), release = deferred()
+  let writer: Promise<void> | undefined
+  const enqueue = async <T>(operation: () => Promise<T>): Promise<T> => {
+    if (writer) throw new Error('the token mutation was admitted more than once')
+    writer = db.transaction(async tx => { entered.resolve(); await release.promise; await mutation(tx) })
+    await Promise.race([entered.promise, writer.then(() => { throw new Error('the held writer exited before admission') })])
+    const pending = operation()
+    enqueued.resolve()
+    return pending
+  }
+  const runner: Db = {
+    // Retaining the old INSERT seam lets this regression expose the previous nontransactional route too.
+    query: ((sql: string, params: Parameters<Db['query']>[1]) => sql.includes('INSERT INTO api_tokens')
+      ? enqueue(() => db.query(sql, params)) : db.query(sql, params)) as Db['query'],
+    exec: sql => db.exec(sql),
+    transaction: <T>(work: (tx: Db) => Promise<T>) => enqueue(() => db.transaction(work)),
+  }
+  return { db: runner, enqueued: enqueued.promise, release: release.resolve, writer: () => writer }
+}
+
+describe('API token admitted credential authority', { tags: ['feature'] }, () => {
+  it.each(['revoked', 'expired', 'mfa-cleared'] as const)('does not mint from an original session %s by the queued writer', async change => {
+    if (change === 'mfa-cleared') {
+      await setTotpSecret(database.db, root.principal.id, new Uint8Array(32))
+      root = await callerForPrincipal((await getPrincipal(database.db, root.principal.id))!)
+    }
+    const bridge = queueTokenMutation(database.db, async tx => {
+      if (change === 'expired') {
+        const [session] = await tx.query<{ expires_at: string }>('SELECT expires_at FROM sessions WHERE id = $1', [root.sessionId])
+        if (!session) throw new Error('the original queued session is missing')
+        // Keep the real persisted interval valid; advance only the admitted authentication clock.
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(Date.parse(session.expires_at) + 1)
+        return
+      }
+      const column = change === 'revoked' ? 'revoked_at' : 'mfa_verified'
+      const value = change === 'mfa-cleared' ? 0 : new Date().toISOString()
+      await tx.query(`UPDATE sessions SET ${column} = $1 WHERE id = $2`, [value, root.sessionId])
+    })
+    const { helpers: h, audits } = helpers({ db: bridge.db, requireCaller: async request => {
+      const caller = await authenticateRequest(database.db, request, { serverSecret: SERVER_SECRET, entryPoint: 'xwhm',
+        touchSession: false, mfaRuntimePolicy: mfaPolicy })
+      if (!caller || !caller.mfaVerified || !caller.csrfValid) return fail('FORBIDDEN', 'the original fixture session is not authenticated')
+      return caller
+    } })
+    // A bad old implementation may return a raw token: inspect only status/code and row count, never its body.
+    const outcome = create(h).then(response => ({ accepted: true as const, status: response?.status }), error => ({ accepted: false as const, code: error?.code }))
+    try {
+      expect(await Promise.race([bridge.enqueued.then(() => true), outcome.then(() => false)])).toBe(true)
+      bridge.release()
+      await bridge.writer()
+      expect(await outcome).toEqual({ accepted: false, code: 'FORBIDDEN' })
+      expect((await database.db.query<{ count: number }>('SELECT COUNT(*) AS count FROM api_tokens'))[0]!.count).toBe(0)
+      expect(audits).toHaveLength(0)
+    } finally {
+      bridge.release()
+      await bridge.writer()?.catch(() => undefined)
+      await outcome
+    }
+  })
+
+  it('keeps optional MFA opt-in and accepts a current enrolled session', async () => {
+    await setTotpSecret(database.db, root.principal.id, new Uint8Array(32))
+    root = await callerForPrincipal((await getPrincipal(database.db, root.principal.id))!)
+    expect((await create(helpers().helpers))!.status).toBe(201)
+  })
+
+  it('preserves captured development-disabled MFA without requiring a verified factor', async () => {
+    vi.stubEnv('NODE_ENV', 'development')
+    mfaPolicy = captureMfaRuntimePolicy()
+    await setTotpSecret(database.db, root.principal.id, new Uint8Array(32))
+    root = await callerForPrincipal((await getPrincipal(database.db, root.principal.id))!)
+    await database.db.query('UPDATE sessions SET mfa_verified = 0 WHERE id = $1', [root.sessionId])
+    expect((await create(helpers().helpers))!.status).toBe(201)
+  })
+})
 
 describe('API token scope vocabulary', () => {
   it('is exactly the resources the route policy assigns, and the web labels cover the same list', () => {

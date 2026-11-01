@@ -69,7 +69,7 @@ function bindMailSearch(_askDialog: unknown): void {
     const submit = root.querySelector<HTMLButtonElement>('[data-mail-search-submit]')!, clear = root.querySelector<HTMLButtonElement>('[data-mail-search-clear]')!, next = root.querySelector<HTMLButtonElement>('[data-mail-search-next]')!
     const field = (key: string): HTMLElement | null => root.querySelector<HTMLElement>('[data-mail-search-' + key + ']')
     if (!form || !query || !folder || !results || !status || !article || !submit || !clear || !next || ['subject', 'from', 'to', 'date', 'body', 'truncated'].some(key => !field(key))) return
-    try { mailRequireTemplates(root, [['mail-search-row', 'li', ['open', 'subject', 'sender', 'date', 'preview']]]) }
+    try { mailRequireTemplates(root, [['mail-search-row', 'li', ['open', 'subject', 'sender', 'date', 'preview'], [['open', 'button', { type: 'button' }], ['subject', 'strong'], ['sender', 'bdi'], ['date', 'bdi']]]]) }
     catch { form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Search is unavailable for this mailbox session. No message is shown.'); return }
     const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'

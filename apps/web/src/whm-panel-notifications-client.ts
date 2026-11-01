@@ -1,4 +1,5 @@
-import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates
 const whmClientNode = canonicalWhmClientNode
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
@@ -66,7 +67,27 @@ function bindWhmPanelNotifications(): void {
     const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     if (!status || !form || !recipients || !save || !reload || !saveStatus || !test || !testStatus || !hookOn || !hookUrl || !keyButton || !keyStatus || !boxes.length) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.notificationsCanManage === 'true' && !root.closest(denied) && form.tagName === 'FORM' && typeof request === 'function'
+    let templateContractIntact = true
+    const templateContracts = [
+      ['whm-notifications-secret', 'code', { 'content': 'code' }],
+    ] as const
+    const verifyWhmTemplates = (): void => {
+      if (!templateContractIntact) throw new Error('client_template_contract_unavailable')
+      try { assertWhmClientTemplates(root, templateContracts) } catch (error) {
+        templateContractIntact = false
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+        status.dataset.state = 'unavailable'; status.textContent = t('Unavailable')
+        throw error
+      }
+    }
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.notificationsCanManage === 'true' && !root.closest(denied) && form.tagName === 'FORM' && typeof request === 'function')
+    if (admitted()) { try { verifyWhmTemplates() } catch { return } }
+    const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
+      verifyWhmTemplates()
+      const reply = await request!(...args)
+      verifyWhmTemplates()
+      return reply
+    }
     let view: PanelNotificationsView | null = null, busy = false
     const note = (target: HTMLElement, state: string, message: string | (string | Node)[]): void => { target.hidden = false; target.dataset.state = state; target.replaceChildren(...(typeof message === 'string' ? [message] : message)); target.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const technical = (content: string, tag = 'bdi'): HTMLElement => { const node = document.createElement(tag); node.dir = 'ltr'; node.textContent = content; return node }
@@ -116,7 +137,7 @@ function bindWhmPanelNotifications(): void {
     }
     const load = async (): Promise<void> => {
       if (loading) loading.hidden = false
-      await run(status, t('Reading notification settings…'), async () => { view = null; paint(readPanelNotificationsView(await request!('GET', '/api/server/panel/notifications'))) },
+      await run(status, t('Reading notification settings…'), async () => { view = null; paint(readPanelNotificationsView(await checkedRequest('GET', '/api/server/panel/notifications'))) },
         t('Notification settings could not be read or verified. Nothing was changed.'))
       if (loading) loading.hidden = true
     }
@@ -129,7 +150,7 @@ function bindWhmPanelNotifications(): void {
     keyButton.addEventListener('click', () => {
       if (view?.signingKey && !window.confirm(t('Replace the signing key? Receivers that check the signature must be given the new key.'))) return
       void run(keyStatus, t('Creating a signing key…'), async () => {
-        const next = readPanelNotificationsView(await request!('POST', '/api/server/panel/notifications/webhook-key'))
+        const next = readPanelNotificationsView(await checkedRequest('POST', '/api/server/panel/notifications/webhook-key'))
         if (!next.createdSigningKey) throw Object.assign(new Error('unverified'), { details: { verificationRequired: true } })
         paint(next)
         const revealed = whmClientNode(root, 'whm-notifications-secret', 'code', next.createdSigningKey); revealed.dir = 'ltr'
@@ -138,7 +159,7 @@ function bindWhmPanelNotifications(): void {
     })
     test.addEventListener('click', () => {
       void run(testStatus, t('Sending a test message…'), async () => {
-        const next = readPanelNotificationsView(await request!('POST', '/api/server/panel/notifications/test'))
+        const next = readPanelNotificationsView(await checkedRequest('POST', '/api/server/panel/notifications/test'))
         paint(next)
         const results = next.test?.results ?? []
         note(testStatus, results.every(item => !item.error) ? 'read' : 'failed', results.map(item => (item.channel === 'email' ? t('Email: {result}.', { result: errorText(item.error, item.status) }) : t('Webhook: {result}.', { result: errorText(item.error, item.status) }))).join(' '))
@@ -157,7 +178,7 @@ function bindWhmPanelNotifications(): void {
       if (hookOn.checked && !current.signingKey) { note(saveStatus, 'failed', t('Create a signing key before enabling the webhook.')); keyButton.focus(); return }
       if (events.length && !list.length && !hookOn.checked) { recipients.setAttribute('aria-invalid', 'true'); note(saveStatus, 'failed', t('Add at least one recipient or enable the webhook for the selected events.')); recipients.focus(); return }
       void run(saveStatus, t('Saving notification settings…'), async () => {
-        const next = readPanelNotificationsView(await request!('PUT', '/api/server/panel/notifications', { recipients: list, events, webhook: address ? { url: address, enabled: hookOn.checked } : null, expectedRevision: current.revision }))
+        const next = readPanelNotificationsView(await checkedRequest('PUT', '/api/server/panel/notifications', { recipients: list, events, webhook: address ? { url: address, enabled: hookOn.checked } : null, expectedRevision: current.revision }))
         if (next.state !== 'saved') throw Object.assign(new Error('unverified'), { details: { verificationRequired: true } })
         paint(next)
         note(saveStatus, 'read', next.settings!.events.includes('monitoring.alert') && channelCount(next) ? t('Settings saved. Monitoring alerts are sent to the saved channels from the next evaluation.') : t('Settings saved. No monitoring alert is sent with these settings.'))

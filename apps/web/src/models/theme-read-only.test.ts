@@ -125,9 +125,12 @@ describe('trusted read-only theme composition', () => {
   it('derives installed metadata from the real registry shared with personal preferences', () => {
     const installed = installedThemePackages('ar')
     expect(installed.map(item => item.id)).toEqual(registeredUiThemeIds())
-    expect(installed).toEqual([{ id: 'classic', label: translator('ar')('Classic'), surfaces: ['xpanel', 'xwhm', 'xmail'], available: true }])
+    expect(installed).toEqual([
+      { id: 'classic', label: translator('ar')('Classic'), surfaces: ['xpanel', 'xwhm', 'xmail'], available: true },
+      { id: 'v2', label: 'V2', surfaces: ['xpanel', 'xwhm', 'xmail'], available: true },
+    ])
     expect(v2Theme.id).toBe('v2')
-    expect(registeredUiThemeIds()).not.toContain('v2')
+    expect(registeredUiThemeIds()).toEqual(['classic', 'v2'])
     expect(v2Theme.slots).toHaveProperty('accountSecurity')
   })
 })

@@ -173,6 +173,10 @@ esac
 
 PHP_COMPACT="${PHP_VERSION//./}"
 if [[ "$OS_FAMILY" == "debian" ]]; then
+  BOOTSTRAP_PACKAGES=(software-properties-common ca-certificates curl gnupg adduser acl)
+  REPOSITORY_SOURCES=(universe ppa:ondrej/php)
+  REPOSITORY_PACKAGES=()
+  PHP_JSON_PACKAGE="php7.4-json"
   PACKAGES=(
     nginx
     acl
@@ -189,10 +193,12 @@ if [[ "$OS_FAMILY" == "debian" ]]; then
     gcc
     libc6-dev
     "php${PHP_VERSION}-fpm"
+    "php${PHP_VERSION}-cgi"
     "php${PHP_VERSION}-cli"
     "php${PHP_VERSION}-common"
     "php${PHP_VERSION}-mysql"
     "php${PHP_VERSION}-pgsql"
+    "php${PHP_VERSION}-curl"
     "php${PHP_VERSION}-gd"
     "php${PHP_VERSION}-mbstring"
     "php${PHP_VERSION}-xml"
@@ -201,13 +207,25 @@ if [[ "$OS_FAMILY" == "debian" ]]; then
     "php${PHP_VERSION}-soap"
     "php${PHP_VERSION}-opcache"
     "php${PHP_VERSION}-zip"
+    "php${PHP_VERSION}-readline"
+    "php${PHP_VERSION}-sqlite3"
   )
   [[ "$WITH_MARIADB" -eq 1 ]] && PACKAGES+=(mariadb-server)
-  [[ "$WITH_MAIL" -eq 1 ]] && PACKAGES+=(postfix dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-sieve)
+  [[ "$WITH_MAIL" -eq 1 ]] && PACKAGES+=(postfix dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-sieve dovecot-managesieved)
   [[ "$WITH_DNS" -eq 1 ]] && PACKAGES+=(pdns-server pdns-backend-bind bind9-utils dnsutils)
   [[ "$WITH_FTP" -eq 1 ]] && PACKAGES+=(pure-ftpd)
   [[ "$WITH_MODSECURITY" -eq 1 ]] && PACKAGES+=(libapache2-mod-security2 modsecurity-crs)
 else
+  BOOTSTRAP_PACKAGES=(dnf-plugins-core acl)
+  REPOSITORY_SOURCES=(crb)
+  EPEL_PACKAGES=(epel-release)
+  if [[ "$OS_ID" == "centos" ]]; then
+    EPEL_PACKAGES=("https://dl.fedoraproject.org/pub/epel/epel-release-latest-${OS_MAJOR}.noarch.rpm")
+    [[ "$OS_MAJOR" -eq 9 ]] && EPEL_PACKAGES+=(https://dl.fedoraproject.org/pub/epel/epel-next-release-latest-9.noarch.rpm)
+  fi
+  REMI_RELEASE_PACKAGE="https://rpms.remirepo.net/enterprise/remi-release-${OS_MAJOR}.rpm"
+  REPOSITORY_PACKAGES=("${EPEL_PACKAGES[@]}" "$REMI_RELEASE_PACKAGE")
+  PHP_JSON_PACKAGE="php74-php-json"
   REDIS_PKG="redis"
   if [[ "$OS_MAJOR" -ge 10 ]]; then
     REDIS_PKG="valkey"
@@ -231,7 +249,9 @@ else
     "php${PHP_COMPACT}-php-bcmath"
     "php${PHP_COMPACT}-php-soap"
     "php${PHP_COMPACT}-php-opcache"
+    "php${PHP_COMPACT}-php-process"
     "php${PHP_COMPACT}-php-pecl-zip"
+    "php${PHP_COMPACT}-php-sodium"
     postgresql-server
     "$REDIS_PKG"
     openssh-server
@@ -248,6 +268,8 @@ else
   [[ "$WITH_FTP" -eq 1 ]] && PACKAGES+=(pure-ftpd)
   [[ "$WITH_MODSECURITY" -eq 1 ]] && PACKAGES+=(mod_security mod_security_crs)
 fi
+
+[[ "$PHP_VERSION" == "7.4" ]] && PACKAGES+=("$PHP_JSON_PACKAGE")
 
 if [[ "$OS_FAMILY" == "rhel" && "$APACHE_MPM" == "itk" ]]; then
   PACKAGES+=(httpd-itk)
@@ -831,6 +853,9 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "Production preflight rejects this engine/MPM plan; Apache itk is required."
   fi
   echo "PHP Version       : ${PHP_VERSION}"
+  echo "Bootstrap Packages: ${BOOTSTRAP_PACKAGES[*]}"
+  echo "Repository Sources: ${REPOSITORY_SOURCES[*]}"
+  echo "Repository Packages: ${REPOSITORY_PACKAGES[*]}"
   echo "Package List      : ${PACKAGES[*]}"
   echo ""
   echo "--- Directory Layout ---"
@@ -931,6 +956,7 @@ if [[ "$WITH_DNS" -eq 1 ]]; then
 fi
 prepared_release="$("$NODE_BIN" "$SCRIPT_DIR/install-bootstrap.mjs" prepare "${NEW_INSTALL_ARGS[@]}")"
 INSTALL_SOURCE_ROOT="$(printf '%s' "$prepared_release" | "$NODE_BIN" --input-type=module -e 'let s="";for await(const c of process.stdin)s+=c;const v=JSON.parse(s);if(v.status!=="prepared"||!/^\/opt\/xpanel\/releases\/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(v.releaseRoot))process.exit(1);process.stdout.write(v.releaseRoot)')"
+PROGRAM_ROOT="$INSTALL_SOURCE_ROOT"
 assert_pinned_runtime
 for directory in /home /var/lib/xpanel "${XPANEL_DIRS[@]}"; do
   [[ ! -L "$directory" ]] || die "Managed directory is symbolic: $directory"
@@ -982,20 +1008,19 @@ if [[ "$OS_FAMILY" == "debian" ]]; then
   export DEBIAN_FRONTEND=noninteractive
   export NEEDRESTART_MODE=l
   apt-get update -y
-  apt-get install -y --no-install-recommends software-properties-common ca-certificates curl gnupg
-  add-apt-repository -y -n universe
-  add-apt-repository -y -n ppa:ondrej/php
+  apt-get install -y --no-install-recommends "${BOOTSTRAP_PACKAGES[@]}"
+  for repository in "${REPOSITORY_SOURCES[@]}"; do
+    add-apt-repository -y -n "$repository"
+  done
   apt-get update -y
   apt-get install -y --no-install-recommends "${PACKAGES[@]}"
 else
-  dnf install -y --setopt=install_weak_deps=False dnf-plugins-core
-  dnf config-manager --set-enabled crb
-  if [[ "$OS_ID" == "centos" ]]; then
-    dnf install -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${OS_MAJOR}.noarch.rpm"
-  else
-    dnf install -y epel-release
-  fi
-  dnf install -y "https://rpms.remirepo.net/enterprise/remi-release-${OS_MAJOR}.rpm"
+  dnf install -y --setopt=install_weak_deps=False "${BOOTSTRAP_PACKAGES[@]}"
+  for repository in "${REPOSITORY_SOURCES[@]}"; do
+    dnf config-manager --set-enabled "$repository"
+  done
+  dnf install -y "${EPEL_PACKAGES[@]}"
+  dnf install -y "$REMI_RELEASE_PACKAGE"
   dnf install -y --setopt=install_weak_deps=False "${PACKAGES[@]}"
 fi
 

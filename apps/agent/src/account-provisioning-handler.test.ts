@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { Account, Plan } from '@xpanel/core'
+import { redactSecrets, type Account, type Plan } from '@xpanel/core'
 import {
   assertProvisioningReply,
   canonicalProvisioningIdentity,
+  createProvisioningCheckpointObservation,
   type ProvisioningAuthority,
   type ProvisioningReconcileReply,
 } from '../../../packages/core/src/account-provisioning-contract.ts'
@@ -121,6 +122,36 @@ const scene = () => {
 }
 
 describe('account provisioning admission', () => {
+  it('rechecks revoked principal authority between host primitives and refuses acknowledgement', async () => {
+    const s = scene()
+    let effects = 0
+    s.runtime.execute = async (_input, context) => {
+      await context.assertAuthority()
+      effects++
+      s.ports.getPrincipal.mockResolvedValue(null)
+      await context.assertAuthority()
+      effects++
+      return s.reply
+    }
+    await expect(s.call()).rejects.toMatchObject({ code: 'UNAUTHENTICATED', detail: { stateChanged: true, verificationRequired: true } })
+    expect(effects).toBe(1)
+  })
+
+  it('stops after a completed primitive when the current renewed lease expires', async () => {
+    const s = scene()
+    let effects = 0
+    s.runtime.execute = async (_input, context) => {
+      await context.assertAuthority()
+      effects++
+      const current = await s.ports.getDurableJob()
+      s.ports.getDurableJob.mockResolvedValue({ ...current, leaseExpiresAt: new Date(0).toISOString() })
+      await context.assertAuthority()
+      effects++
+      return s.reply
+    }
+    await expect(s.call()).rejects.toMatchObject({ code: 'CONFLICT', detail: { stateChanged: true, verificationRequired: true } })
+    expect(effects).toBe(1)
+  })
   it('refuses when the trusted principal id is omitted and does not read the body actor', async () => {
     const { readPreparation, execute, ports, call } = scene()
     await expect(call(undefined)).rejects.toMatchObject({ code: 'UNAUTHENTICATED', detail: { stateChanged: false } })
@@ -215,6 +246,47 @@ describe('account provisioning admission', () => {
     const { execute, ports, call } = scene()
     ports.getDurableJob.mockResolvedValue({ ...job(), completedSteps: [...job().completedSteps, 'reconcile_host'] })
     await expect(call()).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { freshExecution: false, stateChanged: false } })
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it('admits a digest-bound completed-host context after redaction under a newer current lease', async () => {
+    const { execute, ports, call, reply } = scene()
+    const original = authority()
+    const previous = { ...original, operation: { ...original.operation, workerId: 'previous-worker', fencingToken: 3 } }
+    const previousRequest = { authority: previous, binding: canonicalProvisioningIdentity(previous) }
+    if (!reply.execution) throw new Error('fixture requires execution evidence')
+    const persisted = JSON.parse(JSON.stringify(redactSecrets({
+      observedContext: createProvisioningCheckpointObservation(previousRequest, reply.execution),
+    }))) as Record<string, unknown>
+    ports.getDurableJob.mockResolvedValue({ ...job(), completedSteps: [...job().completedSteps, 'reconcile_host'],
+      checkpointData: { ...job().checkpointData, hostAttempt: 1, generationId: reply.execution.generationId, ...persisted } })
+    expect((await call()).status).toBe(200)
+    expect(execute).toHaveBeenCalledOnce()
+    // This synthetic runtime tests admission only; it does not observe or apply a native host.
+    expect(execute.mock.calls[0]?.[0].request).toMatchObject({ authority: { operation: { workerId: 'worker-7', fencingToken: 4 } } })
+  })
+
+  it.each(['raw', 'redacted'] as const)('refuses %s legacy proof before preparation or runtime dispatch', async mode => {
+    const { readPreparation, execute, ports, call, reply } = scene()
+    const legacy = { generationId: 3, observedAuthority: authority(), observedExecution: reply.execution }
+    const persisted = mode === 'redacted' ? JSON.parse(JSON.stringify(redactSecrets(legacy))) as Record<string, unknown> : legacy
+    ports.getDurableJob.mockResolvedValue({ ...job(), completedSteps: [...job().completedSteps, 'reconcile_host'],
+      checkpointData: { ...job().checkpointData, ...persisted } })
+    await expect(call()).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { freshExecution: false, stateChanged: false } })
+    expect(readPreparation).not.toHaveBeenCalled()
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it('rejects a valid saved context from another operation before preparation or runtime dispatch', async () => {
+    const { readPreparation, execute, ports, call, reply } = scene()
+    const original = authority()
+    const previous = { ...original, operation: { ...original.operation, id: otherPrincipalId } }
+    if (!reply.execution) throw new Error('fixture requires execution evidence')
+    const observedContext = createProvisioningCheckpointObservation({ authority: previous, binding: canonicalProvisioningIdentity(previous) }, reply.execution)
+    ports.getDurableJob.mockResolvedValue({ ...job(), completedSteps: [...job().completedSteps, 'reconcile_host'],
+      checkpointData: { ...job().checkpointData, generationId: reply.execution.generationId, observedContext } })
+    await expect(call()).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { freshExecution: false, stateChanged: false } })
+    expect(readPreparation).not.toHaveBeenCalled()
     expect(execute).not.toHaveBeenCalled()
   })
 

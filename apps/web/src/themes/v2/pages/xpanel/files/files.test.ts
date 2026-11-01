@@ -82,3 +82,16 @@ describe('v2 account files pages', () => {
     expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
   })
 })
+
+
+it.each(['en', 'ar'] as const)('restores the %s seven-column file layout and mounted closed-editor/details/uploads states', locale => {
+  const html = renderV2FilesPage(v2Messages.translator(locale), { surface: { account, files: [] }, canManage: true })
+  const headers = html.match(/<thead><tr>([\s\S]*?)<\/tr><\/thead>/)![1]!
+  expect([...headers.matchAll(/<th\b/g)]).toHaveLength(7)
+  expect(html).toContain('colspan="7"')
+  for (const hook of ['data-file-select-all', 'data-file-filter', 'data-file-selection-count', 'data-file-detail="owner"', 'data-file-editor-panel hidden', 'data-file-editor-closed', 'data-file-uploads', 'data-file-uploads-empty']) expect(html).toContain(hook)
+  expect(html).toContain('data-xp-slot="kind"')
+  expect(html).toContain('data-xp-slot="owner"')
+  expect(html).not.toContain('aria-valuenow')
+  expect(V2_FILES_CSS).toContain('[data-file-manager] .v2-file-view-details')
+})

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { tools, type VisibilityContext } from '@xpanel/catalog'
+import { canOpenRegisteredRoute, isToolAuthorized, tools, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import type { Locale } from '../../../i18n.ts'
 import { v2Messages } from '../messages.ts'
 import { renderV2Document } from '../document.ts'
@@ -79,7 +79,9 @@ describe('v2 shell', () => {
     expect(html).toMatch(/data-ws-indicator="disconnected" role="status"/)
     expect(shell('en', { realtimeEnabled: false })).toMatch(/data-ws-indicator="unavailable" role="status" aria-label="Live updates off"/)
     expect(html).toMatch(/data-action="open-cmdk" aria-keyshortcuts="Control\+K Meta\+K"/)
-    expect(html).toMatch(/data-action="open-activity-drawer" aria-controls="xp-activity-drawer" aria-label="Notifications, 3 unread"/)
+    expect(html).toMatch(/data-xp-activity-control="unavailable" disabled aria-disabled="true" title="Unavailable" aria-label="Activity &amp; Jobs"/)
+    expect(html).not.toContain('data-action="open-activity-drawer"')
+    expect(html).not.toContain('class="v2-top__badge')
     expect(html).toContain('data-generation-chip="142"')
     expect(html).toMatch(/<a class="v2-btn v2-top__lang" href="\/whm\/accounts\?lang=ar" lang="ar" hreflang="ar" data-lang-switch="ar">/)
     expect(html).toContain('data-theme-toggle="light" aria-label="Light theme"')
@@ -125,5 +127,74 @@ describe('v2 shell', () => {
     expect(html).toContain('class="v2-icon v2-nav__chev v2-flip"')
     const document = renderV2Document({ htmlAttributes: 'lang="ar" dir="rtl" data-theme="light"', htmlAttributeSuffix: ' data-ui-theme="v2"', faviconHref: '/favicon.svg', headHtml: '', title: 'x', bodyHtml: html })
     expect(document).toContain('<html lang="ar" dir="rtl" data-theme="light" data-ui-theme="v2">')
+  })
+
+  it.each(['en', 'ar'] satisfies readonly Locale[])('keeps approved account document navigation with no qualified tools in %s', locale => {
+    const unqualifiedCatalog = tools.map((tool): CatalogTool => ({ ...tool, delivery: { ...tool.delivery, status: 'researched' } }))
+    const before = JSON.stringify({ tools, unqualifiedCatalog })
+    const html = shell(locale, { surface: 'xpanel', activeRoute: '/home', homeHref: '/home', visibility: owner, catalog: unqualifiedCatalog })
+    const sections = [...html.matchAll(/<li data-nav-section="([^"]+)">/g)].map(match => match[1])
+    expect(sections).toEqual(['general', 'email', 'files', 'databases', 'domains', 'metrics', 'security', 'software', 'advanced', 'preferences'])
+    for (const route of ['/home', '/resources', '/email/accounts', '/files/manager', '/databases/mariadb', '/domains', '/metrics/traffic', '/security/account', '/software/php', '/advanced/cron', '/preferences']) {
+      expect(canOpenRegisteredRoute(route, owner), route).toBe(true)
+      expect(html, route).toContain(`data-nav-route="${route}"`)
+    }
+    expect(html).toContain('data-nav-route="/home" aria-current="page"')
+    expect(html).toContain('<li data-nav-section="general"><details open>')
+    expect(html).toContain('<li data-nav-section="files"><details>')
+    expect(html).not.toContain('data-navigation-empty="true"')
+    expect(html).not.toContain('data-nav-route="/whm')
+    expect(html).not.toContain('data-nav-route="/mail/')
+    expect(unqualifiedCatalog.every(tool => tool.delivery.status !== 'verified')).toBe(true)
+    expect(JSON.stringify({ tools, unqualifiedCatalog })).toBe(before)
+  })
+
+  it.each(['en', 'ar'] satisfies readonly Locale[])('keeps document navigation separate from feature and team execution denials in %s', locale => {
+    const unqualifiedCatalog = tools.map((tool): CatalogTool => ({ ...tool, delivery: { ...tool.delivery, status: 'researched' } }))
+    const disabledFeatures = new Set(unqualifiedCatalog.flatMap(tool => tool.featureKey === null ? [] : [tool.featureKey]))
+    const featureDenied: VisibilityContext = { ...owner, disabledFeatures }
+    const teamDenied: VisibilityContext = { ...owner, allowedToolIds: new Set<string>() }
+    const before = JSON.stringify(unqualifiedCatalog)
+    expect(unqualifiedCatalog.filter(tool => tool.featureKey !== null).every(tool => !isToolAuthorized(tool, featureDenied))).toBe(true)
+    expect(unqualifiedCatalog.every(tool => !isToolAuthorized(tool, teamDenied))).toBe(true)
+    for (const visibility of [featureDenied, teamDenied]) {
+      const html = shell(locale, { surface: 'xpanel', activeRoute: '/home', homeHref: '/home', visibility, catalog: unqualifiedCatalog })
+      for (const route of ['/files/manager', '/domains', '/advanced/terminal', '/security/account']) {
+        expect(canOpenRegisteredRoute(route, visibility), route).toBe(true)
+        expect(html, route).toContain(`data-nav-route="${route}"`)
+      }
+    }
+    expect(JSON.stringify(unqualifiedCatalog)).toBe(before)
+  })
+
+  it.each(['en', 'ar'] satisfies readonly Locale[])('retains registered-role and missing-caller navigation denials in %s', locale => {
+    const unqualifiedCatalog = tools.map((tool): CatalogTool => ({ ...tool, delivery: { ...tool.delivery, status: 'researched' } }))
+    const missing = shell(locale, { surface: 'xpanel', activeRoute: '/home', homeHref: '/home', visibility: undefined, catalog: unqualifiedCatalog })
+    expect(missing).toContain('data-navigation-empty="true"')
+    expect(missing).not.toContain('data-nav-route=')
+    const otherRole = shell(locale, { surface: 'xpanel', activeRoute: '/home', homeHref: '/home', visibility: root, catalog: unqualifiedCatalog })
+    for (const route of ['/home', '/files/manager', '/domains']) {
+      expect(canOpenRegisteredRoute(route, root), route).toBe(false)
+      expect(otherRole, route).not.toContain(`data-nav-route="${route}"`)
+    }
+    for (const match of otherRole.matchAll(/data-nav-route="([^"]+)"/g)) {
+      const route = match[1]
+      if (route === undefined) throw new Error('navigation_route_capture_missing')
+      expect(canOpenRegisteredRoute(route, root), route).toBe(true)
+    }
+  })
+
+  it.each(['en', 'ar'] satisfies readonly Locale[])('preserves WHM qualification and mailbox-owned navigation in %s', locale => {
+    const unqualifiedCatalog = tools.map((tool): CatalogTool => ({ ...tool, delivery: { ...tool.delivery, status: 'researched' } }))
+    const whm = shell(locale, { catalog: unqualifiedCatalog })
+    expect(whm).toContain('data-navigation-empty="true"')
+    expect(whm).not.toContain('data-nav-route="/whm/accounts"')
+    const folders = '<nav data-mail-folders>Folders</nav>'
+    const mail = shell(locale, { surface: 'xmail', activeRoute: '/mail/inbox', homeHref: '/mail/inbox', visibility: owner, catalog: unqualifiedCatalog, sidebarHtml: folders })
+    expect(mail).toContain(folders)
+    expect(mail).not.toContain('class="v2-nav"')
+    const fallbackMail = shell(locale, { surface: 'xmail', activeRoute: '/mail/inbox', homeHref: '/mail/inbox', visibility: owner, catalog: unqualifiedCatalog })
+    expect(fallbackMail).toContain('data-navigation-empty="true"')
+    expect(fallbackMail).not.toContain('data-nav-route="/mail/inbox"')
   })
 })

@@ -1,10 +1,10 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { atomicRemove, atomicWriteJson } from './atomic.ts'
 
-const fault = vi.hoisted(() => ({ directory: '', phase: '', code: '', renames: 0, closes: 0, fileSyncCode: '', closeCode: '', withoutCode: false, syscall: '', directoryKind: 'directory', stats: 0 }))
+const fault = vi.hoisted(() => ({ directory: '', phase: '', code: '', renames: 0, closes: 0, fileSyncCode: '', closeCode: '', withoutCode: false, syscall: '', directoryKind: 'directory', stats: 0, tempCollision: false, collisionPath: '' }))
 // Actual temporary files, file sync and rename/removal remain real. Only the
 // directory-descriptor boundary and OS policy are modeled; no power-loss proof.
 vi.mock('node:fs/promises', async importOriginal => {
@@ -21,6 +21,11 @@ vi.mock('node:fs/promises', async importOriginal => {
           close: async () => { fault.closes++; if (fault.closeCode) throw failure(fault.closeCode); if (fault.phase === 'close') throw failure(fault.code) },
         }
       }
+      if (fault.tempCollision && normalized(args[0]).endsWith('.tmp')) {
+        fault.tempCollision = false
+        fault.collisionPath = String(args[0])
+        await fs.writeFile(fault.collisionPath, 'pre-existing temporary bytes', { flag: 'wx', mode: 0o600 })
+      }
       const handle = await fs.open(...args)
       if (fault.fileSyncCode) handle.sync = async () => { throw failure(fault.fileSyncCode) }
       return handle
@@ -34,6 +39,7 @@ let root: string
 beforeEach(async () => {
   fault.directory = ''; fault.phase = ''; fault.code = ''; fault.renames = 0; fault.closes = 0; fault.fileSyncCode = ''; fault.closeCode = ''; fault.withoutCode = false
   fault.syscall = ''; fault.directoryKind = 'directory'; fault.stats = 0
+  fault.tempCollision = false; fault.collisionPath = ''
   root = await mkdtemp(join(tmpdir(), 'xpanel-atomic-durability-'))
   fault.directory = root
 })
@@ -91,6 +97,7 @@ describe('directory durability acknowledgement after a real publication', () => 
     await expect(atomicWriteJson(path, {})).rejects.toMatchObject({ code: 'EINVAL' })
     expect(fault.renames).toBe(0)
     await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readdir(root)).toEqual([])
   })
 
   it('rejects an unclassified Windows directory error without a code', async () => {
@@ -124,4 +131,32 @@ describe('directory durability acknowledgement after a real publication', () => 
     expect(fault.stats).toBe(syscall === 'fsync' ? 1 : 0)
     expect(fault.closes).toBe(1)
   })
+
+  it.skipIf(nativePlatform.value === 'win32')('enforces requested 0640 before publication under restrictive umask 077', async () => {
+    const previous = process.umask(0o077)
+    try {
+      const path = join(root, 'permissions.json')
+      await atomicWriteJson(path, { value: 'new' }, 0o640, async () => {
+        const temporary = (await readdir(root)).filter(name => name.endsWith('.tmp'))
+        expect(temporary).toHaveLength(1)
+        const name = temporary[0]
+        if (name === undefined) throw new Error('owned temporary file is missing before publication')
+        expect((await stat(join(root, name))).mode & 0o777).toBe(0o640)
+      })
+      expect((await stat(path)).mode & 0o777).toBe(0o640)
+      expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ value: 'new' })
+    } finally { process.umask(previous) }
+  })
+
+  it('refuses a real temporary collision without deleting it or publishing new bytes', async () => {
+    const path = join(root, 'collision.json')
+    await writeFile(path, '{"value":"old"}')
+    fault.tempCollision = true
+    await expect(atomicWriteJson(path, { value: 'new' })).rejects.toMatchObject({ code: 'EEXIST' })
+    expect(fault.collisionPath).not.toBe('')
+    expect(await readFile(fault.collisionPath, 'utf8')).toBe('pre-existing temporary bytes')
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ value: 'old' })
+    expect(fault.renames).toBe(0)
+  })
+
 })

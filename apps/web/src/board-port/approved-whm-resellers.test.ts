@@ -5,6 +5,20 @@ import { renderApprovedWhmResellers, resellerDetailAnchor } from './approved-whm
 import { renderWhmSurface } from '../surfaces/xwhm.ts'
 import type { WhmSurfaceProps } from '../surfaces/xwhm.ts'
 
+// Positive fixtures name only the capabilities exercised by these renderer cases.
+// This private input does not change the production acceptance catalog or host evidence.
+const qualifiedControlPlaneFixture = (ids: readonly string[]) => {
+  const accepted = new Set(ids)
+  const catalog = qualifyHostTools(tools.map(tool => accepted.has(tool.id)
+    ? { ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } }
+    : tool), { executor: 'linux', probes: { 'control-plane': 'passed' } }, true)
+  for (const id of accepted) {
+    expect(catalog.find(tool => tool.id === id)?.status).toBe('verified')
+    expect(catalog.find(tool => tool.id === id)?.delivery.status).toBe('verified')
+  }
+  return catalog
+}
+
 const reseller: Reseller = {
   id: '10000000-0000-4000-8000-000000000001', username: 'provider7',
   acl: ['list-accounts', 'create-account', 'manage-dns'], maxAccounts: 9,
@@ -26,7 +40,7 @@ const plan: Plan = {
   caps: { addonDomains: 1, aliasDomains: 1, subdomains: 1, mailboxes: 1, forwarders: 1, mailingLists: 1,
     ftpAccounts: 1, databases: 1, phpWorkers: 1 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100,
 }
-const catalog = qualifyHostTools(tools, { executor: 'linux', probes: { 'control-plane': 'passed' } })
+const catalog = qualifiedControlPlaneFixture(['reseller-center', 'modify-account', 'list-accounts'])
 const base = (): WhmSurfaceProps => ({
   locale: 'en', activeRoute: '/whm/resellers', catalog,
   visibility: { principal: { kind: 'root', id: 'root-private-marker', username: 'administrator7' } },

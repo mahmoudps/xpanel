@@ -580,6 +580,9 @@ const DEFAULT_DNS_TEMPLATES: DnsTemplateDefinition[] = [
 // Extended Features Store (backed by join(store.rootDir, 'extended'))
 // ---------------------------------------------------------------------------
 
+/** Internal held StateStore lease, never a JSON field or caller-selected bypass. */
+export interface AccountTemplateWriteFence { assertFencingToken(): Promise<unknown> }
+
 export class ExtendedFeaturesStore {
   readonly baseDir: string
 
@@ -596,8 +599,15 @@ export class ExtendedFeaturesStore {
     return existing ?? fallback
   }
 
-  async write<T>(relPath: string, value: T): Promise<T> {
-    await atomicWriteJson(this.filePath(relPath), value)
+  async write<T>(relPath: string, value: T, options?: { templateWriter?: AccountTemplateWriteFence }): Promise<T> {
+    const target = this.filePath(relPath), templates = this.filePath('accounts/templates.json')
+    const template = process.platform === 'win32' ? target.toLowerCase() === templates.toLowerCase() : target === templates
+    // This source is pinned by prepared account activation. Every writer must participate in
+    // its StateStore fence; an ordinary extended-file write cannot bypass that one-path rule.
+    if (template && !options?.templateWriter) return fail('PRECONDITION_FAILED', 'account template writes require the held StateStore writer', { stateChanged: false })
+    if (template) await options!.templateWriter!.assertFencingToken()
+    await atomicWriteJson(target, value)
+    if (template) await options!.templateWriter!.assertFencingToken()
     return value
   }
 }

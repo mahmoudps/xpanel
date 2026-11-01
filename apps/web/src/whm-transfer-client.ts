@@ -1,13 +1,15 @@
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
+import { ASCII_BYTES_BINDING, formatAsciiBytes as canonicalFormatAsciiBytes } from './display-format.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
-import { clientTemplateSlot as canonicalClientTemplateSlot } from './client-templates.ts'
-const clientTemplateSlot = canonicalClientTemplateSlot
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot
 import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
 const cloneViewRecord = canonicalCloneViewRecord
 const viewAction = canonicalViewAction
 const displayDateTime = formatDisplayDateTime
+const formatAsciiBytes = canonicalFormatAsciiBytes
 
 /** Self-contained browser binding over the persisted transfer workspace contract. */
 function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promise<unknown>) | undefined): void {
@@ -45,21 +47,104 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     const importSelect = root.querySelector<HTMLSelectElement>('[data-transfer-import]')!
     const importPlan = root.querySelector<HTMLSelectElement>('[data-transfer-import-plan]')!
     const keyBox = root.querySelector<HTMLElement>('[data-transfer-ssh-key-value]')!
-    if (!sessionSelect || !credential || !conflict || !resolution || !status || !accounts || !plans || !reviewBox || !archiveBox || !importSelect || !importPlan || !keyBox) return
+    if (!sessionSelect || !credential || !conflict || !resolution || !status || !accounts || !plans || !reviewBox || !archiveBox || !importSelect || !importPlan || !keyBox) {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      if (status) { status.dataset.state = 'unavailable'; status.textContent = t('Unavailable') }
+      return
+    }
     let entries: Entry[] = [], selected: Entry | null = null, loaded = false, busy = false, dirty = false, reviewRequired = false
     let capabilities = { discover: false, execute: false, cpanelImport: false, cpanelUploadMaxBytes: 0 }
     let imports: Record<string, unknown>[] = [], poller: ReturnType<typeof setTimeout> | null = null
     // Whole-server migration: every source account and plan is selected and the choice is not editable.
     const wholeServer = root.dataset.transferScope === 'server'
-    const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.transferManage === 'true' && !root.closest(denied)
+    const inventoryLayout = root.dataset.transferInventoryLayout, comparison = inventoryLayout === 'comparison'
+    const selectAll = root.querySelector<HTMLInputElement>('[data-transfer-select-all]')
+    let templateIntact = true
+    let inventoryRows: Array<{ row: HTMLElement; select: HTMLInputElement; resolve: HTMLButtonElement; conflicts: string[] }> = []
+    const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
+    const admitted = (): boolean => templateIntact && root.isConnected && root.dataset.transferManage === 'true' && !root.closest(denied) && typeof send === 'function'
     const selectionChanged = (): boolean => {
       const selection = object(selected?.session.selection) ? selected.session.selection : {}
       const names = (container: HTMLElement): string[] => [...container.querySelectorAll<HTMLInputElement>('input:checked')].map(input => input.value).sort()
       return JSON.stringify(names(accounts)) !== JSON.stringify(Array.isArray(selection.accounts) ? [...selection.accounts].sort() : []) || JSON.stringify(names(plans)) !== JSON.stringify(Array.isArray(selection.plans) ? [...selection.plans].sort() : [])
     }
     const announce = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'uncertain', 'stale'].includes(state) ? 'alert' : 'status') }
+    type RecordSpec = { tag: string; slots: Record<string, keyof HTMLElementTagNameMap>; actions?: Record<string, 'input' | 'button'>; columns?: number }
+    const recordRows: Record<string, readonly string[]> = {
+      'transfer-inventory': comparison ? ['username', 'domain', 'uid', 'plan', 'disk', 'databases', 'mailboxes', 'conflict', 'resolution'] : ['selected', 'username', 'domain', 'plan', 'disk', 'databases', 'mailboxes', 'conflict', 'resolution'],
+      'transfer-progress': ['account', 'home', 'databases', 'mail', 'dns', 'state'],
+      'transfer-plans': ['source', 'target', 'owner', 'conflict'],
+      'transfer-import-part': ['item', 'source', 'target', 'state'],
+      'transfer-import-warnings': ['state', 'detail', 'path'],
+      'transfer-review': ['source', 'target', 'plan', 'domains', 'mailboxes'],
+      'transfer-archive-summary': ['part', 'count'],
+      'transfer-archive-conflicts': ['kind', 'value'],
+      'transfer-archive-unmapped': ['state', 'detail', 'path'],
+    }
+    const records: Record<string, RecordSpec> = { 'transfer-choice': { tag: 'label', slots: { name: 'bdi' }, actions: { select: 'input' } } }
+    for (const [name, fields] of Object.entries(recordRows)) {
+      const columns = name === 'transfer-inventory' && comparison ? 8 : fields.length
+      const slots: Record<string, keyof HTMLElementTagNameMap> = Object.fromEntries(fields.map(field => [field, 'bdi' as const]))
+      if (name === 'transfer-inventory' && comparison) { slots.conflict = 'span'; slots.resolution = 'span' }
+      records[name + '-row'] = { tag: 'tr', slots, columns, ...(name === 'transfer-inventory' && comparison ? { actions: { select: 'input', resolve: 'button' } as const } : {}) }
+      records[name + '-empty'] = { tag: 'tr', slots: { message: 'td' }, columns }
+    }
+    for (const name of ['transfer-review', 'transfer-archive-summary', 'transfer-archive-conflicts', 'transfer-archive-unmapped']) records[name + '-table'] = { tag: 'div', slots: { rows: 'tbody' } }
+    const disableNative = (): void => { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }) }
+    const verifyTemplates = (): boolean => {
+      if (!admitted()) { disableNative(); if (!['uncertain', 'stale'].includes(status.dataset.state ?? '')) announce('unavailable', t('Unavailable')); return false }
+      try {
+        if (inventoryLayout !== undefined && inventoryLayout !== 'comparison' || root.dataset.transferInventoryLayout !== inventoryLayout) throw new Error('invalid_transfer_layout')
+        if (pageRoot.hasAttribute('data-whm-detail-route') && !['/whm/transfers', '/whm/transfers/server'].includes(pageRoot.dataset.whmDetailRoute ?? '')) throw new Error('invalid_transfer_owner')
+        const unique = (selector: string, expected: HTMLElement, tag?: string): void => {
+          const found = [...root.querySelectorAll<HTMLElement>(selector)].filter(node => node.closest('[data-transfer-workspace]') === root)
+          if (found.length !== 1 || found[0] !== expected || tag && expected.tagName !== tag) throw new Error('invalid_transfer_control')
+        }
+        for (const [name, expected] of [['session', sessionSelect], ['credential', credential], ['conflict', conflict], ['resolution', resolution], ['import', importSelect], ['import-plan', importPlan]] as const) unique('[data-transfer-' + name + ']', expected, 'SELECT')
+        for (const [name, expected] of [['status', status], ['accounts', accounts], ['plans', plans], ['review-results', reviewBox], ['archive-review', archiveBox], ['ssh-key-value', keyBox]] as const) unique('[data-transfer-' + name + ']', expected)
+        for (const name of ['refresh', 'discover', 'cancel', 'create', 'select', 'resolve', 'review', 'run', 'stop', 'inspect', 'ssh-key', 'fetch', 'import-discard', 'import-run']) { const control = button(name); unique('[data-transfer-' + name + ']', control, 'BUTTON'); if (control.type !== 'button') throw new Error('invalid_transfer_control') }
+        for (const name of ['transfer-host', 'transfer-port', 'transfer-user', 'transfer-fingerprint', 'transfer-resolution-target', 'transfer-archive', 'transfer-archive-target', 'transfer-cpanel-host', 'transfer-cpanel-port', 'transfer-cpanel-user', 'transfer-cpanel-fingerprint']) {
+          const control = field(name); unique('[data-transfer-field="' + name + '"]', control, 'INPUT')
+          if (control.type !== (name === 'transfer-archive' ? 'file' : name === 'transfer-port' || name === 'transfer-cpanel-port' ? 'number' : 'text')) throw new Error('invalid_transfer_field')
+        }
+        if (comparison) {
+          unique('[data-transfer-inventory-rows]', accounts, 'TBODY')
+          if (!selectAll) throw new Error('missing_transfer_selection')
+          unique('[data-transfer-select-all]', selectAll, 'INPUT')
+          const table = accounts.closest('table')
+          if (selectAll.type !== 'checkbox' || !table || selectAll.closest('thead') !== table.tHead || table.tHead?.rows.length !== 1 || table.tHead.rows[0]?.cells.length !== 8) throw new Error('invalid_transfer_selection')
+          for (const row of [...accounts.children]) {
+            const cells = [...row.children]
+            if (row.tagName !== 'TR' || cells.some(cell => cell.tagName !== 'TD') || !(cells.length === 8 || cells.length === 1 && (cells[0] as HTMLTableCellElement).colSpan === 8)) throw new Error('invalid_transfer_columns')
+          }
+        } else if (accounts.tagName !== 'DIV' || selectAll) throw new Error('invalid_transfer_selection')
+        for (const [name, spec] of Object.entries(records)) {
+          const template = clientTemplate(root, name)
+          if (template.closest('[data-transfer-workspace]') !== root) throw new Error('foreign_transfer_template')
+          const node = cloneViewRecord(root, name, spec.tag, Object.fromEntries(Object.keys(spec.slots).map(key => [key, ''])))
+          for (const [slot, tag] of Object.entries(spec.slots)) clientTemplateSlot(node, slot, tag)
+          if (node.querySelector('script,style,template,iframe,object,embed,form,textarea,select,a,img,audio,video,source,link,meta,base,[data-transfer-workspace]')) throw new Error('unsafe_transfer_template')
+          for (const part of [node, ...node.querySelectorAll<HTMLElement>('*')]) if ([...part.attributes].some(attr => /^on/i.test(attr.name) || attr.name.startsWith('data-transfer-') || ['id', 'style', 'name', 'form', 'api-url', 'data-api-url', 'data-action', 'href', 'src', 'srcset', 'formaction', 'contenteditable', 'data-whm-detail-route'].includes(attr.name))) throw new Error('unsafe_transfer_template')
+          const actions = spec.actions ?? {}, present = node.querySelectorAll('[data-xp-action]')
+          if (present.length !== Object.keys(actions).length || node.querySelectorAll('input,button').length !== Object.keys(actions).length) throw new Error('invalid_transfer_actions')
+          for (const [action, tag] of Object.entries(actions)) {
+            const control = viewAction<HTMLInputElement | HTMLButtonElement>(node, action, tag)
+            if (!control.disabled || control.type !== (tag === 'input' ? 'checkbox' : 'button')) throw new Error('invalid_transfer_action')
+          }
+          if (spec.tag === 'tr') {
+            const empty = name.endsWith('-empty')
+            if (node.children.length !== (empty ? 1 : spec.columns) || [...node.children].some(cell => cell.tagName !== 'TD') || empty && (node.firstElementChild as HTMLTableCellElement).colSpan !== spec.columns) throw new Error('invalid_transfer_columns')
+          }
+          if (spec.tag === 'div') {
+            const table = node.querySelector('table'), fields = recordRows[name.replace(/-table$/, '')]!
+            if (node.querySelectorAll('table').length !== 1 || table?.tHead?.rows.length !== 1 || table.tHead.rows[0]?.cells.length !== fields.length) throw new Error('invalid_transfer_columns')
+          }
+        }
+        return true
+      } catch { templateIntact = false; disableNative(); if (!['uncertain', 'stale'].includes(status.dataset.state ?? '')) announce('unavailable', t('Unavailable')); return false }
+    }
     const controls = (): void => {
+      if (!verifyTemplates()) return
       const locked = busy || reviewRequired || !loaded || !admitted(), state = String(selected?.session.state ?? '')
       root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = locked })
       button('refresh').disabled = busy || !admitted()
@@ -83,15 +168,27 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       button('import-discard').disabled = locked || !chosen || ['uploading', 'fetching', 'inspecting', 'importing'].includes(String(chosen.state))
       field('transfer-resolution-target').disabled = locked || !['rename', 'map-plan'].includes(resolution.value)
       if (wholeServer) [accounts, plans].forEach(container => container.querySelectorAll<HTMLInputElement>('input').forEach(input => { input.disabled = true }))
+      if (comparison) {
+        for (const item of inventoryRows) { item.select.disabled = locked || wholeServer; item.resolve.disabled = locked || selectionChanged() || !['selected', 'reviewed'].includes(state) || !item.conflicts.length }
+        if (selectAll) { selectAll.disabled = locked || wholeServer || !inventoryRows.length; const chosen = inventoryRows.filter(item => item.select.checked).length; selectAll.checked = inventoryRows.length > 0 && chosen === inventoryRows.length; selectAll.indeterminate = chosen > 0 && chosen < inventoryRows.length }
+      }
       root.setAttribute('aria-busy', String(busy))
     }
-    const request = (method: string, path: string, body?: unknown): Promise<unknown> => {
-      if (!send || !admitted()) return Promise.reject({ stateChanged: false })
-      return body === undefined ? send(method, path) : send(method, path, body)
+    const request = async (method: string, path: string, body?: unknown): Promise<unknown> => {
+      if (!verifyTemplates()) throw { stateChanged: false }
+      try {
+        const value = body === undefined ? await send!(method, path) : await send!(method, path, body)
+        if (!verifyTemplates()) throw { stateChanged: true, unknownOutcome: true }
+        return value
+      } catch (error) { verifyTemplates(); throw error }
     }
     const ask = async (title: string, body: string, danger = false): Promise<boolean> => {
+      if (!verifyTemplates()) return false
       if (!askDialog) { announce('failed', t('Confirmation is unavailable. Nothing was sent.')); return false }
-      return await askDialog({ title, body, danger, confirm: t('Confirm') }) === true
+      let confirmed = false
+      try { confirmed = await askDialog({ title, body, danger, confirm: t('Confirm') }) === true }
+      finally { if (!verifyTemplates()) confirmed = false }
+      return confirmed
     }
     const sourceLabel = (session: Record<string, unknown>): string => {
       const auth = object(session.auth) ? session.auth : {}
@@ -123,9 +220,27 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     type TransferRow = Record<string, unknown>
     const fillBody = (body: Element | null, name: string, values: TransferRow[], empty: string): void => {
       if (!body) return
+      if (name === 'transfer-inventory') inventoryRows = []
       body.replaceChildren()
       if (!values.length) { body.append(cloneViewRecord(root, name + '-empty', 'tr', { message: empty })); return }
-      for (const value of values) body.append(cloneViewRecord(root, name + '-row', 'tr', Object.fromEntries(Object.entries(value).map(([key, item]) => [key, display(item)]))))
+      for (const value of values) {
+        const projection = Object.fromEntries(recordRows[name]!.map(key => [key, display(value[key])]))
+        const row = cloneViewRecord(root, name + '-row', 'tr', projection)
+        if (name === 'transfer-inventory' && comparison) {
+          const choice = viewAction<HTMLInputElement>(row, 'select', 'input'), resolve = viewAction<HTMLButtonElement>(row, 'resolve')
+          const sessionId = selected?.session.id, revision = selected?.revision
+          choice.value = typeof value.username === 'string' ? value.username : ''; choice.checked = wholeServer || value.checked === true; choice.setAttribute('aria-label', display(value.username))
+          const ids = Array.isArray(value.conflicts) ? value.conflicts.filter((id): id is string => typeof id === 'string') : []
+          resolve.addEventListener('click', () => {
+            if (resolve.disabled || busy || reviewRequired || !row.isConnected || !root.contains(row) || !verifyTemplates() || selected?.session.id !== sessionId || selected?.revision !== revision || selectionChanged()) return
+            const id = ids.find(id => [...conflict.options].some(option => option.value === id))
+            if (!id) return
+            conflict.value = id; paintResolution(); if (!resolution.disabled) resolution.focus()
+          })
+          inventoryRows.push({ row, select: choice, resolve, conflicts: ids })
+        }
+        body.append(row)
+      }
     }
     const table = (container: HTMLElement, name: string, rows: TransferRow[], append = false): void => {
       if (!append) container.replaceChildren()
@@ -203,7 +318,8 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       root.querySelector<HTMLElement>('[data-transfer-state]')!.textContent = selected ? stateLabel(String(selected.session.state)) : t('No saved sessions')
       const inventory = object(selected?.session.inventory) ? selected.session.inventory : {}
       const selection = object(selected?.session.selection) ? selected.session.selection : {}
-      makeChoices(accounts, inventory.accounts, selection.accounts, 'username'); makeChoices(plans, inventory.plans, selection.plans, 'name')
+      if (!comparison) makeChoices(accounts, inventory.accounts, selection.accounts, 'username')
+      makeChoices(plans, inventory.plans, selection.plans, 'name')
       root.querySelector<HTMLElement>('[data-transfer-inventory-note]')!.textContent = object(selected?.session.inventory) ? t('Authenticated source inventory was returned by the server.') : t('No authenticated source inventory has been read.')
       conflict.textContent = ''
       const conflicts = Array.isArray(selected?.session.conflicts) ? selected.session.conflicts : []
@@ -228,7 +344,17 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       if (object(selected?.session.inventory)) {
         const selectedNames = new Set(Array.isArray(selection.accounts) ? selection.accounts : [])
         const sourceAccounts = Array.isArray(inventory.accounts) ? inventory.accounts.filter(object) : []
-        fillApproved('transfer-identities', sourceAccounts.map(account => ({ selected: selectedNames.has(account.username) ? t('Yes') : t('No'), username: account.username, domain: account.primaryDomain, uid: typeof account.uid === 'number' ? account.uid : t(msgctxt('whm-transfer-client', 'Not read')), plan: account.plan, disk: account.diskBytes, databases: Array.isArray(account.databases) ? account.databases.length : t(msgctxt('whm-transfer-client', 'Not read')), mailboxes: account.mailboxes, conflict: conflicts.filter(value => object(value) && value.subject === account.username).map(value => object(value) ? conflictLabels[String(value.kind)] ?? t(msgctxt('whm-transfer-client', 'Conflict')) : '').join(', '), resolution: t('Review selection') })))
+        fillApproved('transfer-identities', sourceAccounts.map(account => {
+          const notRead = t(msgctxt('whm-transfer-client', 'Not read'))
+          const matching = conflicts.filter(value => object(value) && (value.subject === account.username || comparison && typeof account.primaryDomain === 'string' && value.subject === account.primaryDomain)).filter(object)
+          const number = (value: unknown): string => Number.isSafeInteger(value) && (value as number) >= 0 ? display(value) : notRead
+          return { selected: selectedNames.has(account.username) ? t('Yes') : t('No'), checked: selectedNames.has(account.username), username: account.username, domain: account.primaryDomain,
+            uid: comparison ? number(account.uid) : account.uid, plan: comparison && (typeof account.plan !== 'string' || !account.plan) ? notRead : account.plan,
+            disk: comparison ? Number.isSafeInteger(account.diskBytes) && (account.diskBytes as number) >= 0 ? formatAsciiBytes(account.diskBytes as number) : notRead : account.diskBytes,
+            databases: Array.isArray(account.databases) ? account.databases.length : notRead, mailboxes: comparison ? number(account.mailboxes) : account.mailboxes,
+            conflict: matching.map(value => conflictLabels[String(value.kind)] ?? t(msgctxt('whm-transfer-client', 'Conflict'))).join(', ') || (comparison ? notRead : ''),
+            conflicts: matching.map(value => value.id), resolution: t('Review selection') }
+        }))
         fillApproved('transfer-plans', (Array.isArray(inventory.plans) ? inventory.plans.filter(object) : []).map(plan => {
           const mapped = reviewed.filter(object).find(account => sourceAccounts.some(source => source.username === account.source && source.plan === plan.name))
           return { source: plan.name, target: mapped?.plan ?? t(msgctxt('whm-transfer-client', 'Not read')), owner: t(msgctxt('whm-transfer-client', 'Not read')), conflict: conflicts.filter(value => object(value) && value.kind === 'plan' && value.subject === plan.name).map(() => t('Review selection')).join(', ') }
@@ -263,6 +389,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       const previous = credential.value
       let value: unknown = null
       try { value = await request('GET', '/api/transfers/credentials') } catch { value = null }
+      if (!verifyTemplates()) return
       const list = object(value) && Array.isArray(value.credentials) && value.credentials.every(item => object(item) && typeof item.id === 'string' && uuid.test(item.id) && item.kind === 'api-token'
         && typeof item.label === 'string' && item.label.length > 0 && item.label.length <= 80 && typeof item.fingerprint === 'string' && /^[0-9a-f]{16}$/.test(item.fingerprint)) ? value.credentials as Record<string, string>[] : null
       credential.textContent = ''
@@ -271,6 +398,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       if ([...credential.options].some(option => option.value === previous)) credential.value = previous
     }
     const read = async (target: string, preloaded?: unknown): Promise<Record<string, unknown>> => {
+      if (!verifyTemplates()) throw { stateChanged: false }
       const value = preloaded ?? await request('GET', '/api/transfers/sessions')
       if (!object(value) || !Array.isArray(value.sessions) || !object(value.capabilities) || !Number.isSafeInteger(value.capabilities.cpanelUploadMaxBytes) || (value.capabilities.cpanelUploadMaxBytes as number) < 0) throw new Error('invalid_transfer_workspace')
       entries = value.sessions.map(parseEntry)
@@ -278,13 +406,15 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       capabilities = { discover: value.capabilities.discover === true, execute: value.capabilities.execute === true, cpanelImport: value.capabilities.cpanelImport === true, cpanelUploadMaxBytes: value.capabilities.cpanelUploadMaxBytes as number }
       imports = Array.isArray(value.cpanelImports) ? value.cpanelImports.filter(object).filter(item => typeof item.id === 'string' && uuid.test(item.id)) : []
       await fillCredentials()
+      if (!verifyTemplates()) throw { stateChanged: true, unknownOutcome: true }
       loaded = true; reviewRequired = false; dirty = false; paint(target)
       if (capabilities.cpanelImport) await fillPlans()
+      if (!verifyTemplates()) throw { stateChanged: true, unknownOutcome: true }
       paintImports(); schedulePoll(); controls()
       return value
     }
     const refresh = async (target = String(selected?.session.id ?? '')): Promise<void> => {
-      if (busy || !admitted()) return
+      if (busy || !verifyTemplates()) return
       busy = true; controls()
       try {
         if ((dirty || reviewRequired) && !await ask(t('Read saved transfer state?'), t('This discards unsaved selection changes and re-reads the saved outcome. No previous mutation is retried.'), true)) return
@@ -293,7 +423,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       finally { busy = false; controls() }
     }
     const perform = async (action: string, body: Record<string, unknown>, create = false): Promise<void> => {
-      if (busy || reviewRequired || !loaded || !admitted()) return
+      if (busy || reviewRequired || !loaded || !verifyTemplates()) return
       const previous = selected, previousId = String(previous?.session.id ?? '')
       if (!create && !previous) return
       busy = true; controls(); let submitted = false
@@ -323,6 +453,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       if (importPlan.options.length) return
       let value: unknown = null
       try { value = await request('GET', '/api/plans') } catch { value = null }
+      if (!verifyTemplates()) return
       if (!object(value) || !Array.isArray(value.plans)) return
       for (const plan of value.plans) if (object(plan) && typeof plan.id === 'string' && uuid.test(plan.id) && typeof plan.name === 'string') { const option = document.createElement('option'); option.value = plan.id; option.textContent = plan.name; importPlan.append(option) }
     }
@@ -345,6 +476,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
         const id = created.cpanelImport.id, size = created.chunkBytes as number
         for (let offset = 0; offset < file.size; offset += size) {
           const bytes = new Uint8Array(await file.slice(offset, offset + size).arrayBuffer()); let binary = ''
+          if (!verifyTemplates()) throw { stateChanged: true, unknownOutcome: true }
           for (let index = 0; index < bytes.length; index += 16384) binary += String.fromCharCode(...bytes.subarray(index, index + 16384))
           announce('saving', t('Uploading: {percent}%', { percent: Math.floor(offset / file.size * 100) }))
           await request('PUT', '/api/transfers/cpanel-imports/' + id, { offset, data: btoa(binary) })
@@ -396,6 +528,12 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       finally { busy = false; controls() }
     }
     if (!send || !admitted()) { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); announce('unavailable', t('Transfer review is unavailable here. Nothing was read or changed.')); return }
+    if (!verifyTemplates()) return
+    selectAll?.addEventListener('input', () => {
+      if (selectAll.disabled || busy || reviewRequired || wholeServer || !verifyTemplates()) return
+      for (const item of inventoryRows) if (item.row.isConnected && root.contains(item.row) && !item.select.disabled) item.select.checked = selectAll.checked
+      dirty = true; controls()
+    })
     button('refresh').addEventListener('click', () => { void refresh() })
     sessionSelect.addEventListener('change', () => { const id = sessionSelect.value; sessionSelect.value = String(selected?.session.id ?? ''); void refresh(id) })
     button('create').addEventListener('click', () => {
@@ -427,4 +565,4 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
   })
 }
 
-export const WHM_TRANSFER_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const displayDateTime=${DISPLAY_DATETIME_BINDING};return ${bindWhmTransfer.toString()};})()`
+export const WHM_TRANSFER_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const displayDateTime=${DISPLAY_DATETIME_BINDING};const formatAsciiBytes=${ASCII_BYTES_BINDING};return ${bindWhmTransfer.toString()};})()`

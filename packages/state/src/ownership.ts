@@ -1,17 +1,34 @@
 // The agent runs as root. Desired-state files must still be owned by the unprivileged
 // xpanel user, or the API cannot update the tree it is responsible for.
-import { readFileSync } from 'node:fs'
-import { chown as chownPath, lstat } from 'node:fs/promises'
+import { constants, readFileSync } from 'node:fs'
+import { chown as chownPath, lstat, open } from 'node:fs/promises'
 
 export interface StateFileOwner {
   uid: number
   gid: number
 }
 
+interface StateDirectoryMetadata extends StateFileOwner {
+  dev: number
+  ino: number
+  mode: number
+  isDirectory(): boolean
+  isSymbolicLink(): boolean
+}
+
+interface StateDirectoryHandle {
+  stat(): Promise<StateDirectoryMetadata>
+  chmod(mode: number): Promise<void>
+  close(): Promise<void>
+}
+
 interface OwnershipDeps {
+  platform: () => NodeJS.Platform
   euid: () => number
   lookup: (name: string) => StateFileOwner | null
   chown: (path: string, uid: number, gid: number) => Promise<void>
+  inspectPath: (path: string) => Promise<StateDirectoryMetadata>
+  openInstalledParent: () => Promise<StateDirectoryHandle>
 }
 
 const parsePasswd = (text: string, name: string): StateFileOwner | null => {
@@ -27,7 +44,10 @@ const parsePasswd = (text: string, name: string): StateFileOwner | null => {
   return null
 }
 
+const INSTALLED_STATE_PARENT = '/var/lib/xpanel'
+
 const defaultDeps = (): OwnershipDeps => ({
+  platform: () => process.platform,
   euid: () => (typeof process.geteuid === 'function' ? process.geteuid() : -1),
   lookup: name => {
     try {
@@ -37,6 +57,15 @@ const defaultDeps = (): OwnershipDeps => ({
     }
   },
   chown: (path, uid, gid) => chownPath(path, uid, gid),
+  inspectPath: path => lstat(path),
+  openInstalledParent: async () => {
+    const handle = await open(INSTALLED_STATE_PARENT, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+    return {
+      stat: () => handle.stat(),
+      chmod: mode => handle.chmod(mode),
+      close: () => handle.close(),
+    }
+  },
 })
 
 let deps: OwnershipDeps = defaultDeps()
@@ -65,3 +94,57 @@ export const claimStateOwnership = async (target: string): Promise<void> => {
   if (current.uid === owner.uid && current.gid === owner.gid) return
   await deps.chown(target, owner.uid, owner.gid)
 }
+
+const directory = (node: StateDirectoryMetadata): boolean => node.isDirectory() && !node.isSymbolicLink()
+const sameNode = (left: StateDirectoryMetadata, right: StateDirectoryMetadata): boolean =>
+  left.dev === right.dev && left.ino === right.ino
+const installedParentFailure = (): never => {
+  throw new Error('the installed xpanel state parent requires an inspected ownership or permission repair')
+}
+
+/**
+ * Narrow the legacy installer-owned parent without broadening either protected reader.
+ * Trusted startup supplies its actual configured paths before opening writer resources.
+ * Custom stores return before any inspection; no operation target is derived from those strings.
+ */
+export const protectInstalledStateParent = async (configuration: { readonly dbPath: string; readonly stateDir: string }): Promise<void> => {
+  if (deps.platform() !== 'linux' || configuration.dbPath !== '/var/lib/xpanel/control.db'
+    || configuration.stateDir !== '/var/lib/xpanel/state') return
+  let named: StateDirectoryMetadata
+  try { named = await deps.inspectPath(INSTALLED_STATE_PARENT) }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
+  }
+  const owner = deps.lookup('xpanel')
+  if (!owner || !Number.isSafeInteger(owner.uid) || owner.uid <= 0 || !Number.isSafeInteger(owner.gid) || owner.gid <= 0
+    || (deps.euid() !== 0 && deps.euid() !== owner.uid)) return installedParentFailure()
+  const apiOwner = owner
+  const parents = ['/', '/var', '/var/lib'] as const
+  const assertParents = async (): Promise<void> => {
+    for (const path of parents) {
+      const node = await deps.inspectPath(path)
+      if (!directory(node) || node.uid !== 0 || (node.mode & 0o022) !== 0) installedParentFailure()
+    }
+  }
+  await assertParents()
+  const handle = await deps.openInstalledParent()
+  try {
+    const held = await handle.stat()
+    const initialMode = held.mode & 0o7777
+    const namedMode = named.mode & 0o7777
+    const consistentMode = namedMode === initialMode || (namedMode === 0o2770 && initialMode === 0o2750)
+    const valid = (node: StateDirectoryMetadata): boolean =>
+      directory(node) && node.uid === apiOwner.uid && node.gid === apiOwner.gid
+    if (!valid(held) || !valid(named) || !sameNode(held, named) || !consistentMode
+      || (initialMode !== 0o2770 && initialMode !== 0o2750)) installedParentFailure()
+    // Both API and root agent retain their existing writes; only group write is removed.
+    if (initialMode === 0o2770) await handle.chmod(0o2750)
+    await assertParents()
+    const current = await handle.stat()
+    named = await deps.inspectPath(INSTALLED_STATE_PARENT)
+    if (!valid(current) || !valid(named) || !sameNode(held, current) || !sameNode(held, named)
+      || (current.mode & 0o7777) !== 0o2750 || (named.mode & 0o7777) !== 0o2750) installedParentFailure()
+  } finally { await handle.close() }
+}
+

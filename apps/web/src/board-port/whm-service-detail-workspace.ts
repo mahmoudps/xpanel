@@ -56,6 +56,6 @@ export function renderWhmServiceDetailWorkspace({ kind, locale, canRead, canRest
       <dl class="xp-whm-service-detail__facts">${facts[kind].map(([key, label]) => fact(key, label)).join('')}</dl>
       ${kind === 'certificates' || canRead && canRestart ? '' : `<p class="xp-help">${t('Restarting this service requires root authorization.')}</p>`}
     </section>
-    ${detail}
+    ${detail}${kind === 'dns' ? `<template data-xp-template="whm-service-check-zone"><button type="button" class="xp-btn" data-xp-slot="content" disabled>${t('Check zone')}</button></template>` : ''}
   </section>`
 }

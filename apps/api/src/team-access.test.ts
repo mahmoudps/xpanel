@@ -16,7 +16,7 @@ describe('team role rule', () => {
     expect(teamRolesAllowTool(['web'], tool('file-manager'))).toBe(true)
     expect(teamRolesAllowTool(['administrator'], tool('ssh-access'))).toBe(true)
     const all: TeamRole[] = ['administrator', 'database', 'email', 'web']
-    for (const id of ['manage-team', 'team-audit-log', 'user-manager', 'account-preferences', 'password-security', 'api-tokens', 'two-factor-auth', 'change-language'])
+    for (const id of ['manage-team', 'team-audit-log', 'user-manager', 'account-preferences', 'password-security', 'api-tokens', 'two-factor-auth', 'change-language', 'domain-htaccess'])
       expect(teamRolesAllowTool(all, tool(id)), id).toBe(false)
     expect(teamRolesAllowTool(['administrator'], tool('calendars-contacts-management'))).toBe(false)
     expect(teamToolIds([])).toEqual([])
@@ -57,5 +57,18 @@ describe('team request gate', () => {
     expect(allowed(['administrator'], 'GET', '/api/account/cron')).toBe(true)
     expect(allowed(['web'], 'GET', '/api/account/cron')).toBe(false)
     expect(allowed([], 'GET', '/api/domains')).toBe(false)
+  })
+})
+
+
+describe('bounded rewrite preserves team denial', () => {
+  const roleSets: TeamRole[][] = [[], ['administrator'], ['database'], ['email'], ['web'], ['administrator', 'database', 'email', 'web']]
+  for (const roles of roleSets) it('keeps rewrite out of ' + (roles.join('+') || 'no-role') + ' navigation and requests', () => {
+    expect(teamToolIds(roles)).not.toContain('domain-htaccess')
+    expect(teamRolesAllowTool(roles, tool('domain-htaccess'))).toBe(false)
+    for (const method of ['GET', 'POST', 'PUT']) {
+      expect(() => assertTeamRequestAllowed(team(roles), '/api/domains/' + ID + '/htaccess', method)).toThrow(expect.objectContaining({ code: 'FORBIDDEN', detail: expect.objectContaining({ stateChanged: false, team: true }) }))
+    }
+    for (const verb of ['restore', 'migrate-php']) expect(allowed(roles, 'POST', '/api/domains/' + ID + '/htaccess/' + verb)).toBe(false)
   })
 })

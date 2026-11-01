@@ -6,6 +6,7 @@ import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { assertInt, assertLine, fail } from '@xpanel/core'
 import { atomicRemove, atomicWriteJson, fsyncDir, isStateDirectoryDurabilityError, readJsonIfExists } from './atomic.ts'
 import { acquireWriterMutex, WRITER_MUTEX_FILE, type WriterMutexGuard } from './writer-mutex.ts'
+import { claimStateOwnership } from './ownership.ts'
 import type { AllocatedReferenceRecord, ReferenceKind, StateAuthorityMetadata, WriterLockHolder } from './types.ts'
 import { formatShortReference, normalizeReferenceKind, validateStateAuthority, validateUidAllocator } from './validate-state.ts'
 
@@ -119,6 +120,10 @@ export class WriterLock {
   private async guard(timeoutMs = this.acquireTimeoutMs): Promise<WriterMutexGuard> {
     if (projectionReadScope.getStore()?.active) return fail('PRECONDITION_FAILED', 'a recovered projection read cannot reenter a state barrier or mutation')
     await mkdir(this.stateDir, { recursive: true, mode: 0o750 })
+    const existing = await lstat(this.mutexFilePath).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
+    // Settle a new state directory's owner before the permanent mutex inherits its group.
+    // Existing operational inodes remain untouched and must pass the normal strict checks.
+    if (!existing) await claimStateOwnership(this.stateDir)
     return acquireWriterMutex(this.mutexFilePath, timeoutMs, this.retryIntervalMs)
   }
   private async confinedPath(relPath: unknown): Promise<string> {

@@ -45,6 +45,7 @@ export function createV2MailSurface(project: V2MailProjector, unavailable: UiThe
       languages: alternateLocales(locale).map(info => ({ tag: info.tag, href: query({ lang: info.tag }) })),
       scheme: { current: scheme, toggleHref: query({ theme: scheme === 'dark' ? 'light' : 'dark' }) },
       account: { signedIn: true, username: view.mailbox, ...(view.securityHref ? { securityHref: view.securityHref } : {}) },
+      hooks: { 'data-mailbox': view.mailbox },
       contentHtml: breadcrumb + announcement + content,
     })
   }

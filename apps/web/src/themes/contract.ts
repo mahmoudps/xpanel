@@ -28,7 +28,30 @@ export { matchesHook, parseMarkup, type HookSelector, type MarkupNode }
 export type UiThemeId = 'classic' | 'v2'
 export type ThemeSurface = 'xpanel' | 'xwhm' | 'xmail'
 
+/** Core-owned self-auth presentation only; none of these flags grants a native provider operation. */
+export interface AuthPersonalView {
+  readonly state: 'ready' | 'denied' | 'unavailable'
+  readonly canChangePassword: boolean
+  readonly canReadSessions: boolean
+  readonly canRevokeSessions: boolean
+  readonly canReadApiTokens: boolean
+  readonly canManageApiTokens: boolean
+}
+
+/** Internal authenticated producer evidence. Core strips every identity field before a theme sees the view. */
+export interface AuthPersonalSource extends AuthPersonalView {
+  readonly schemaVersion: 1
+  readonly provenance: 'interactive-owner'
+  readonly surface: 'xpanel'
+  readonly route: '/security/account'
+  readonly principalId: string
+  readonly accountId: string
+  readonly username: string
+}
+
 export interface ThemeViewProps {
+  /** Identity-matched self-auth only, independently projected from native hosting qualification. */
+  readonly authPersonal?: AuthPersonalView
   readonly branding?: WebBranding
   /** Core derives installed presentation packages from the same registry used by personal preferences. */
   readonly themePackages?: readonly ThemePackageView[]
@@ -45,7 +68,7 @@ export interface ThemePackageView {
 
 /** Supplied only by core after role admission; provider reads and mutations remain independently qualified. */
 export type ReadOnlySurfaceFacts =
-  | { readonly surface: 'xpanel'; readonly panel: PanelSurfaceProps }
+  | { readonly surface: 'xpanel'; readonly panel: PanelSurfaceProps & Pick<ThemeViewProps, 'authPersonal'> }
   | { readonly surface: 'xwhm'; readonly whm: WhmSurfaceProps }
   | { readonly surface: 'xmail'; readonly mail: MailSurfaceProps }
 

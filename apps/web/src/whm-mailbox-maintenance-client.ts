@@ -1,4 +1,5 @@
-import { WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates
 const whmClientNode = canonicalWhmClientNode
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
@@ -71,7 +72,27 @@ function bindWhmMailboxMaintenance(askDialog: Ask | undefined): void {
     const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
     if (!status || !refresh) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.mailboxMaintenanceCanRead === 'true' && !root.closest(denied) && !!request
+    let templateContractIntact = true
+    const templateContracts = [
+      ['whm-mailbox-inspect', 'button', { 'content': 'button' }],
+    ] as const
+    const verifyWhmTemplates = (): void => {
+      if (!templateContractIntact) throw new Error('client_template_contract_unavailable')
+      try { assertWhmClientTemplates(root, templateContracts) } catch (error) {
+        templateContractIntact = false
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+        status.dataset.state = 'unavailable'; status.textContent = t('Unavailable')
+        throw error
+      }
+    }
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.mailboxMaintenanceCanRead === 'true' && !root.closest(denied) && !!request)
+    if (admitted()) { try { verifyWhmTemplates() } catch { return } }
+    const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
+      verifyWhmTemplates()
+      const reply = await request!(...args)
+      verifyWhmTemplates()
+      return reply
+    }
     const manageable = (): boolean => admitted() && root.dataset.mailboxMaintenanceCanManage === 'true'
     const kinds: Record<string, string> = { 'quota-recalc': 'mail.maintenance.quota-recalc', resync: 'mail.maintenance.resync', index: 'mail.maintenance.index' }
     const BULK_MAX = 32, SHOWN_MAX = 200
@@ -161,7 +182,7 @@ function bindWhmMailboxMaintenance(askDialog: Ask | undefined): void {
       if (busy || !admitted()) return
       busy = true; controls(); note('reading', t('Reading saved mailboxes…'))
       try {
-        const next = readMailboxMaintenanceView(await request!('GET', '/api/server/mail-maintenance'), null)
+        const next = readMailboxMaintenanceView(await checkedRequest('GET', '/api/server/mail-maintenance'), null)
         if (!admitted()) return
         accept(next)
         note('read', next.jobsAvailable ? t('Saved mailboxes read from the server.') : t('Mailboxes were read. Host jobs are unavailable, so maintenance cannot start.'))
@@ -173,7 +194,7 @@ function bindWhmMailboxMaintenance(askDialog: Ask | undefined): void {
       busy = true; controls()
       if (usage) usage.textContent = t('Reading mailbox usage…')
       try {
-        const next = readMailboxMaintenanceView(await request!('GET', '/api/server/mail-maintenance?mailbox=' + encodeURIComponent(login)), login)
+        const next = readMailboxMaintenanceView(await checkedRequest('GET', '/api/server/mail-maintenance?mailbox=' + encodeURIComponent(login)), login)
         if (!admitted()) return
         if (view) view = { ...view, observedAt: next.observedAt, fts: next.fts, jobsAvailable: next.jobsAvailable }
         report = next.report
@@ -188,7 +209,7 @@ function bindWhmMailboxMaintenance(askDialog: Ask | undefined): void {
       if (!await confirm({ title: titles[operation] + '?', body: mailboxes.join('\n') + '\n' + t('This runs as one host job with one step per mailbox.'), confirm: titles[operation] }) || !manageable()) return
       busy = true; controls()
       try {
-        const ack = readMaintenanceJobAck(await request!('POST', '/api/server/mail-maintenance/jobs', { operation, mailboxes }), kinds[operation]!)
+        const ack = readMaintenanceJobAck(await checkedRequest('POST', '/api/server/mail-maintenance/jobs', { operation, mailboxes }), kinds[operation]!)
         if (link) { link.href = '/whm/jobs?job=' + encodeURIComponent(ack.id); link.hidden = false }
         show('submitted', t('Host job submitted. Open the job to follow each mailbox and the final verification.'))
       } catch (error) { const kind = error instanceof Error && error.message === 'invalid_job_ack' ? 'unknown' : outcome(error); show(kind, failure(kind)) }

@@ -73,5 +73,6 @@ export function renderWhmWhmcsWorkspace(input: { locale: Locale; canManage: bool
     <div class="xp-whm-detail-actions"><button type="button" class="xp-btn" data-whm-whmcs-log-refresh${off}>${t('Refresh')}</button></div>
     <p class="xp-whm-detail-status" data-whm-whmcs-log-status role="status" hidden></p>
   </section>
+<template data-xp-template="whm-whmcs-remove"><button type="button" class="xp-btn" data-xp-slot="content" disabled>${t('Remove')}</button></template><template data-xp-template="whm-whmcs-result-ok"><span class="xp-badge xp-badge--ok" data-xp-slot="content"></span></template><template data-xp-template="whm-whmcs-result-refused"><span class="xp-badge xp-badge--warn" data-xp-slot="content"></span></template><template data-xp-template="whm-whmcs-result-failed"><span class="xp-badge xp-badge--critical" data-xp-slot="content"></span></template>
 </section>`
 }
