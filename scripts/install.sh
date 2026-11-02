@@ -744,6 +744,17 @@ configure_selinux() {
   semanage fcontext -a -t httpd_log_t '/var/log/xpanel(/.*)?' 2> /dev/null \
     || semanage fcontext -m -t httpd_log_t '/var/log/xpanel(/.*)?' || die "SELinux refused the xPanel log context."
   restorecon -R /var/log/xpanel
+  # Account provisioning holds a probe request on a socket the agent opens under /run/xpanel-account-probe, and
+  # nginx proxies to it. tmpfiles creates the directory at boot with the httpd_var_run_t type that the agent's
+  # per-account directories and sockets inherit (the rule is spelled /var/run: the policy equates /run with it);
+  # one reviewed rule lets nginx connect to the agent's socket.
+  semanage fcontext -a -t httpd_var_run_t '/var/run/xpanel-account-probe(/.*)?' 2> /dev/null \
+    || semanage fcontext -m -t httpd_var_run_t '/var/run/xpanel-account-probe(/.*)?' || die "SELinux refused the account probe context."
+  write_config /etc/tmpfiles.d/xpanel-account-probe.conf render_account_probe_tmpfiles 0644
+  systemd-tmpfiles --create /etc/tmpfiles.d/xpanel-account-probe.conf || die "The account probe runtime directory could not be created."
+  restorecon -R /run/xpanel-account-probe
+  write_config /etc/xpanel/xpanel_account_probe.cil render_account_probe_selinux_module 0644
+  semodule -i /etc/xpanel/xpanel_account_probe.cil || die "SELinux refused the account probe connection rule."
   if [[ "$WITH_DNS" -eq 1 ]]; then
     # xPanel keeps zones in Debian's /var/lib/powerdns; EL's policy types only /var/lib/pdns for the daemon.
     semanage fcontext -a -e /var/lib/pdns /var/lib/powerdns 2> /dev/null \
@@ -759,6 +770,16 @@ configure_selinux() {
     write_config /etc/xpanel/xpanel_opendkim.cil render_opendkim_selinux_module 0644
     semodule -i /etc/xpanel/xpanel_opendkim.cil || die "SELinux refused the OpenDKIM spool lookup rule."
   fi
+}
+
+render_account_probe_tmpfiles() {
+  printf '%s\n' '# Managed by xPanel: account provisioning probe sockets (the agent adds one directory per account).' \
+    'd /run/xpanel-account-probe 0711 root root -'
+}
+
+render_account_probe_selinux_module() {
+  printf '%s\n' '; Managed by xPanel: nginx forwards the held account probe request to the agent socket.' \
+    '(allow httpd_t unconfined_service_t (unix_stream_socket (connectto)))'
 }
 
 render_opendkim_selinux_module() {

@@ -131,6 +131,7 @@ describe('SELinux settings of the EL installer', () => {
       'semanage() { echo "semanage $*"; if [[ "$1 $2" == "port -a" && "$*" == *" 2083" ]]; then return 1; fi; if [[ "$1 $2" == "fcontext -a" ]]; then return 1; fi; }',
       'setsebool() { echo "setsebool $*"; }', 'install() { echo "install $*"; }', 'restorecon() { echo "restorecon $*"; }',
       'semodule() { echo "semodule $*"; }', 'write_config() { echo "write_config $1"; "$2" | sed "s/^/  /"; }',
+      'systemd-tmpfiles() { echo "systemd-tmpfiles $*"; }',
       'WITH_MAIL=1', 'WITH_DNS=1',
     ].join('\n')
     const run = spawnSync(bash, ['-euo', 'pipefail', '-c', `${stubs}\n${functions}\nconfigure_selinux\n`], { encoding: 'utf8', timeout: 10_000 })
@@ -142,6 +143,9 @@ describe('SELinux settings of the EL installer', () => {
     expect(calls).toContain("semanage fcontext -m -t httpd_log_t /var/log/xpanel(/.*)?")
     expect(calls).toContain('restorecon -R /var/log/xpanel')
     expect(calls).toContain('semanage fcontext -a -e /var/lib/pdns /var/lib/powerdns')
+    expect(calls).toContain('  d /run/xpanel-account-probe 0711 root root -')
+    expect(calls).toContain('  (allow httpd_t unconfined_service_t (unix_stream_socket (connectto)))')
+    expect(calls.indexOf('systemd-tmpfiles --create /etc/tmpfiles.d/xpanel-account-probe.conf')).toBeLessThan(calls.indexOf('restorecon -R /run/xpanel-account-probe'))
     expect(calls).toContain("semanage fcontext -m -t dkim_milter_data_t /var/spool/postfix/opendkim(/.*)?")
     expect(calls.indexOf('install -d -o opendkim -g postfix -m 0750 /var/spool/postfix/opendkim')).toBeLessThan(calls.indexOf('restorecon -R /var/spool/postfix/opendkim'))
     expect(calls).toContain('  (allow dkim_milter_t postfix_spool_t (dir (search getattr)))')
