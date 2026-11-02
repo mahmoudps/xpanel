@@ -83,6 +83,12 @@ export interface CompiledGeneration {
 const DNS_CATALOG_PATH = '/etc/powerdns/named.conf.xpanel-zones'
 const DEFAULT_DNS_ZONE_DIR = '/var/lib/powerdns/zones'
 
+/**
+ * The installer enables the web and mail daemons but leaves them stopped until the first generation that
+ * configures them: start is a no-op on a running unit, and the reload then applies the new configuration.
+ */
+const startAndReload = (unit: string): HostAction[] => [{ kind: 'systemd', verb: 'start', unit }, { kind: 'systemd', verb: 'reload', unit }]
+
 const isManagedDnsPath = (path: string, zoneDir: string): boolean =>
   path === DNS_CATALOG_PATH || (path.startsWith(`${zoneDir}/`) && path.endsWith('.zone'))
 
@@ -595,7 +601,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     files.push(services.renderDovecotSieveConf(os), ...sieve.files)
     preActions.push(...sieve.preActions)
     postActions.push(...sieve.postActions)
-    postActions.push({ kind: 'systemd', verb: 'reload', unit: os.services.dovecot })
+    postActions.push(...startAndReload(os.services.dovecot))
     localMail = true
   }
 
@@ -651,7 +657,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       preActions.push({ kind: 'ensure-dir', path: `${os.paths.postfixDir}/xpanel`, mode: 0o750, owner: 'root', group: 'postfix' })
     }
     if (!postActions.some(action => action.kind === 'systemd' && action.unit === os.services.postfix)) {
-      postActions.push({ kind: 'systemd', verb: 'reload', unit: os.services.postfix })
+      postActions.push(...startAndReload(os.services.postfix))
     }
   }
 
@@ -719,10 +725,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   if (snapshot.server) {
     const settings = snapshot.server.settings
     const backendUnit = settings.engine === 'apache' ? os.services.apache : os.services.openlitespeed
-    postActions.push(
-      { kind: 'systemd', verb: 'reload', unit: backendUnit },
-      { kind: 'systemd', verb: 'reload', unit: os.services.nginx },
-    )
+    postActions.push(...startAndReload(backendUnit), ...startAndReload(os.services.nginx))
   }
 
   if (sqlStatements.length > 0) {
@@ -1915,7 +1918,8 @@ export class HostReconciler {
           journalRecord.completedPostActions++
           if (
             action.kind === 'systemd' &&
-            (action.verb === 'reload' || action.verb === 'restart' || action.verb === 'start')
+            (action.verb === 'reload' || action.verb === 'restart' || action.verb === 'start') &&
+            !journalRecord.reloadedUnits.includes(action.unit)
           ) {
             journalRecord.reloadedUnits.push(action.unit)
           }
