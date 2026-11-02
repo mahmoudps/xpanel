@@ -96,9 +96,13 @@ export function mergeApiEnvironment(content, config) {
 }
 
 const listen = (config, port, ssl = false) => config.addresses.map(address => `    listen ${isIP(address) === 6 ? `[${address}]` : address}:${port}${ssl ? ' ssl' : ''};`).join('\n')
+// 80 and 443 are shared with the account edge. nginx chooses among the servers of the exact socket a request
+// arrives on, so an address-specific listen here would capture every account site on that address.
+const sharedListen = (config, port, ssl = false) => [`    listen ${port}${ssl ? ' ssl' : ''};`,
+  ...(config.addresses.some(address => isIP(address) === 6) ? [`    listen [::]:${port}${ssl ? ' ssl' : ''};`] : [])].join('\n')
 export function renderChallenge(config) {
   return MARKER + profiles(config).map(point => `server {
-${listen(config, 80)}
+${sharedListen(config, 80)}
     server_name ${point.host};
     if ($host != "${point.host}") { return 421; }
     location ~ "^/\\.well-known/acme-challenge/[A-Za-z0-9_-]{1,128}$" {
@@ -116,7 +120,7 @@ export function renderIngress(config, generation) {
   const certificate = `${PATHS.certs}/${generation}`
   const tls = `    ssl_certificate ${certificate}/fullchain.pem;\n    ssl_certificate_key ${certificate}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;`
   return MARKER + `map $http_upgrade $xpanel_management_connection_upgrade { default upgrade; '' close; }\n\n` + profiles(config).map(point => `server {
-${listen(config, 443, true)}
+${sharedListen(config, 443, true)}
     server_name ${point.host};
 ${tls}
     if ($host != "${point.host}") { return 421; }
@@ -437,7 +441,8 @@ async function preflightUnusedListeners(config) {
   const inventorySha256 = sha(inventory.stdout)
   // An exclusive real bind refuses Apache, legacy APIs and wildcard listeners.
   // No other service is stopped and no firewall/default vhost is rewritten.
-  for (const address of config.addresses) for (const port of [80, 443, 2083, 2087, 2096]) {
+  // 80 and 443 are shared with the account edge; only the management ports are bound exclusively.
+  for (const address of config.addresses) for (const port of [2083, 2087, 2096]) {
     await new Promise((resolveProbe, reject) => {
       const server = createServer(socket => socket.destroy())
       const timer = setTimeout(() => { server.close(); reject(Object.assign(new Error('INGRESS_BOOTSTRAP_BLOCKED_LISTENER'), { code: 'INGRESS_BOOTSTRAP_BLOCKED_LISTENER' })) }, 2_000)

@@ -234,7 +234,8 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
   })
   it('renders scoped HTTP-01 without redirecting challenge tokens or opening unrelated names', () => {
     const text = renderChallenge(config())
-    expect(text.match(/listen 192\.0\.2\.10:80;/g)).toHaveLength(3)
+    expect(text.match(/^ {4}listen 80;$/gm)).toHaveLength(3)
+    expect(text).not.toContain('192.0.2.10:80')
     expect(text.match(/server_name /g)).toHaveLength(3)
     expect(text).toContain('location ~ "^/\\.well-known/acme-challenge/[A-Za-z0-9_-]{1,128}$"')
     expect(text).toContain(`root ${PATHS.webroot};`)
@@ -247,7 +248,9 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
       expect(text).toContain(`listen 192.0.2.10:${port} ssl;`)
       expect(text).toContain(`proxy_pass http://127.0.0.1:${backend};`)
     }
-    expect(text.match(/listen 192\.0\.2\.10:443 ssl;/g)).toHaveLength(3)
+    // Shared with the account edge: an address-specific 443 would capture every account site on the address.
+    expect(text.match(/^ {4}listen 443 ssl;$/gm)).toHaveLength(3)
+    expect(text).not.toContain('192.0.2.10:443')
     expect(text.match(/include \/etc\/nginx\/xpanel-management\/ingress-secret.conf;/g)).toHaveLength(3)
     expect(text.match(/proxy_set_header Upgrade \$http_upgrade;/g)).toHaveLength(3)
     expect(text.match(/proxy_set_header Connection \$xpanel_management_connection_upgrade;/g)).toHaveLength(3)
@@ -260,7 +263,8 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
   })
   it('renders IPv6 exact binds and gives renewal the same reviewed lifecycle', () => {
     const value = validateConfig({ ...input(), addresses: ['192.0.2.10', '2001:db8::10'] })
-    expect(renderChallenge(value)).toContain('listen [2001:db8::10]:80;')
+    expect(renderChallenge(value)).toContain('listen [::]:80;')
+    expect(renderChallenge(config())).not.toContain('[::]')
     expect(renderIngress(value, 'b'.repeat(64))).toContain('listen [2001:db8::10]:2087 ssl;')
     const units = renderRenewalUnits('/opt/xpanel-runtime/bin/node')
     expect(units.service).toContain('ExecStart=/opt/xpanel-runtime/bin/node /opt/xpanel/scripts/management-tls.mjs renew')
