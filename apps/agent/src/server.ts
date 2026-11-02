@@ -274,6 +274,8 @@ const jsonResponse = (body: unknown, status = 200): Response =>
  * Non-`XpanelError` 500 internal errors NEVER expose `err.message` to callers.
  */
 const problemResponse = (err: unknown, instance: string): Response => {
+  // Callers get a generic 500; operators need the actual failure in the agent journal.
+  if (!isXpanelError(err)) console.error('xpanel-agent internal error at', instance + ':', err instanceof Error ? (err.stack ?? err.message).split('\n').slice(0, 6).join(' | ') : String(err))
   if (isXpanelError(err)) {
     const status = STATUS_BY_CODE[err.code] ?? 400
     return new Response(
