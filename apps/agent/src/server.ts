@@ -153,6 +153,7 @@ import {
   assertValidKernelPeerCredentials,
   bindVerifiedRequestPeer,
   DEFAULT_AGENT_SOCKET_BACKLOG,
+  AGENT_ROUTE_TIMEOUT_MS,
   DEFAULT_AGENT_SOCKET_IDLE_TIMEOUT_MS,
   getVerifiedRequestPeer,
   loadNativePeerIdentityAddon,
@@ -2175,8 +2176,12 @@ export const listenAgentSocket = async (
         if (!isEventsStream && inFlightRequests > maxInFlightRequests) {
           return fail('SERVICE_UNAVAILABLE', 'agent concurrent request limit exceeded')
         }
+        // A request-bound host effect may stay silent until it finishes; the idle timeout must not cut it mid-effect.
+        const routeBudget = AGENT_ROUTE_TIMEOUT_MS.get((req.url ?? '').split('?')[0]!)
         if (isEventsStream) {
           req.socket.setTimeout(0)
+        } else if (routeBudget !== undefined) {
+          req.socket.setTimeout(routeBudget)
         }
         const chunks: Buffer[] = []
         let length = 0

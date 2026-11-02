@@ -1,7 +1,6 @@
 import { fail, isUuid } from '@xpanel/core'
-import type { AgentApp } from '@xpanel/agent'
+import { AGENT_ROUTE_TIMEOUT_MS, type AgentApp } from '@xpanel/agent'
 import { assertProvisioningReply, canonicalProvisioningIdentity, type ProvisioningReconcilePort, type ProvisioningReconcileReply } from './account-provisioning-port.ts'
-import { AGENT_ROUTE_TIMEOUT_MS } from '../agent-client.ts'
 
 /**
  * Dedicated authenticated admission, not generic /reconcile.

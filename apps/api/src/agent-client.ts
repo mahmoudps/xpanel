@@ -3,7 +3,7 @@ import type { ClientRequest, IncomingMessage } from 'node:http'
 import { dirname, isAbsolute } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { lstat } from 'node:fs/promises'
-import { assertAgentCredential, assertRootOwnedAgentPath, MAX_AGENT_MESSAGE_BYTES } from '@xpanel/agent'
+import { AGENT_ROUTE_TIMEOUT_MS, assertAgentCredential, assertRootOwnedAgentPath, MAX_AGENT_MESSAGE_BYTES } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
 import { fail, isUuid, XpanelError } from '@xpanel/core'
 import type { LiveEvent } from '@xpanel/core'
@@ -15,13 +15,6 @@ export interface AgentClientOptions {
 }
 
 const unavailable = () => new XpanelError('SERVICE_UNAVAILABLE', 'privileged host agent is unavailable')
-
-/** Host effects bound to the caller's request; an idle cut at the default timeout would cancel them mid-effect. */
-export const AGENT_ROUTE_TIMEOUT_MS: ReadonlyMap<string, number> = new Map([
-  ['/host/account-provisioning', 180_000],
-  // The agent bounds the quota accounting scan at 240 s; this leaves room for remount and verification.
-  ['/host/quota/initialize', 300_000],
-])
 
 const boundedBody = async (body: ReadableStream<Uint8Array> | null): Promise<Buffer> => {
   const reader = body?.getReader()
